@@ -10,6 +10,7 @@ import struct
 import pytest
 
 from illustration_helpers import (
+    scene_split,
     SAMPLE_DIRECTION, SCENE, SCENE_ADVERSARIAL, SCENE_WITH_FRONTMATTER,
     make_jpeg, make_png, make_webp, make_webp_vp8, make_webp_vp8l, pandoc_html,
     plan_row, truncated_png, write_csv, write_direction_file,
@@ -409,6 +410,134 @@ def test_split_read_window_is_bounded_but_keeps_the_anchor():
     assert 'She set it on the sill' in split['read']
 
 
+def test_the_read_window_snaps_to_a_paragraph_boundary():
+    """The loop this pins could be deleted with the rest of the suite green.
+
+    Asserted structurally: the window must begin exactly where some paragraph
+    begins. An unsnapped window opens mid-sentence, which reads to a model as
+    prose it is invited to complete.
+    """
+    body = ('Opening paragraph, short.\n\n'
+            + ('Second paragraph filler that runs on. ' * 60).strip() + '\n\n'
+            + SCENE)
+    split = ill.split_at_position(body, plan_row())
+
+    starts = {s for s, _e in ill._paragraph_blocks(body)}
+    assert body.index(split['read']) in starts
+
+
+def test_a_long_paragraph_before_the_split_still_yields_read_prose():
+    """#308 restored by the code fixing #308.
+
+    Without a `start < offset` bound the snapping loop matched a paragraph AFTER
+    the split, sliced backwards to '', and left `state == 'normal'` — so the
+    request carried no scene prose at all and its only prose was the block the
+    model is told to avoid. Nothing warned.
+    """
+    long_para = 'She set it on the sill. ' + 'The cold pressed at the glass. ' * 90
+    body = long_para.strip() + '\n\nNothing came.\n\nBy morning she had decided.\n'
+    assert len(long_para) > ill.READ_CHARS
+
+    split = ill.split_at_position(body, plan_row())
+    assert split['state'] == 'normal'
+    assert split['read'] != ''
+    assert 'the cold pressed at the glass' in split['read'].lower()
+    assert split['unread'].startswith('Nothing came')
+
+
+def test_a_single_giant_paragraph_falls_back_to_the_raw_window():
+    """No paragraph starts inside the window at all — the loop finds nothing and
+    the mid-sentence slice is strictly better than no prose."""
+    body = 'She set it on the sill. ' + 'Filler that runs on. ' * 200
+    split = ill.split_at_position(body, plan_row(placement='before_anchor'))
+    assert split['read'] == '' or len(split['read']) <= ill.READ_CHARS
+
+
+def test_read_is_empty_only_at_the_start_of_a_scene():
+    """The invariant `offset` was added to make assertable."""
+    for placement in ('before_anchor', 'after_anchor', 'scene_open', 'scene_close'):
+        split = ill.split_at_position(SCENE, plan_row(placement=placement))
+        if split['read'] == '':
+            assert split['offset'] == 0, placement
+
+
+def test_the_unread_cap_cannot_manufacture_an_empty_unread_side():
+    """A gap to the next paragraph wider than UNREAD_CHARS made `end` fall before
+    the block started — a reversed slice reading as "nothing follows this"."""
+    body = (SCENE.rstrip() + '\n' + ('   \n' * 400)
+            + 'The last paragraph arrives late.\n')
+    split = ill.split_at_position(body, plan_row())
+    assert split['unread'] != ''
+
+
+def test_the_unread_side_is_capped_by_characters_too():
+    body = (SCENE.rstrip() + '\n\n'
+            + '\n\n'.join('Long unread paragraph. ' * 40 for _ in range(3)))
+    split = ill.split_at_position(body, plan_row())
+    assert len(split['unread']) <= ill.UNREAD_CHARS + 200
+
+
+@pytest.mark.parametrize('placement,state', [
+    ('after_anchor', 'normal'),
+    ('before_anchor', 'normal'),
+    ('scene_open', 'establishing'),
+    ('scene_close', 'at_scene_end'),
+])
+def test_the_split_state_is_named_not_derived(placement, state):
+    assert ill.split_at_position(
+        SCENE, plan_row(placement=placement))['state'] == state
+
+
+def test_an_unresolvable_anchor_is_the_unknown_state():
+    split = ill.split_at_position(SCENE, plan_row(anchor='not in this prose'))
+    assert split['state'] == 'unknown'
+    assert split['offset'] is None
+
+
+def test_only_the_normal_state_carries_a_next_sentence():
+    """Invariant 3, which nothing asserted while three consumers relied on it.
+
+    An opener's following prose is what it depicts, so a quoted "next sentence"
+    there would ask the author to reject a correct image.
+    """
+    for placement in ('before_anchor', 'after_anchor', 'scene_open',
+                      'scene_close'):
+        split = ill.split_at_position(SCENE, plan_row(placement=placement))
+        assert bool(split['next_sentence']) == (split['state'] == 'normal'), \
+            placement
+
+
+def test_reading_position_sets_exactly_one_of_offset_and_error():
+    """The one invariant `ReadingPosition` cannot state in its own types."""
+    rows = [plan_row(), plan_row(placement='scene_open'),
+            plan_row(placement='scene_close'), plan_row(placement='sideways'),
+            plan_row(anchor=''), plan_row(anchor='absent from the prose')]
+    for row in rows:
+        position = ill.reading_position(SCENE, row)
+        assert (position['offset'] is None) == bool(position['error']), row
+
+
+def test_the_split_strips_frontmatter_so_the_predicate_is_actually_shared():
+    """`--prompts` did not strip it while `--embed` and the spoiler check did, so
+    three consumers computed three offsets for one row and the author was shown
+    YAML quoted as "the next sentence the reader reads"."""
+    split = ill.split_at_position(SCENE_WITH_FRONTMATTER, plan_row())
+    assert '---' not in split['read']
+    assert 'title:' not in split['read'] and 'title:' not in split['unread']
+    assert 'title:' not in split['next_sentence']
+
+
+def test_first_sentence_keeps_a_closing_quote():
+    """Dialogue ending a sentence is ubiquitous; without the quote branch the
+    check quotes two sentences and points past the beat that matters."""
+    assert ill.first_sentence('She said, "Go now." He did not move. More.') == \
+        'She said, "Go now."'
+
+
+def test_first_sentence_without_a_terminator_returns_the_whole_text():
+    assert ill.first_sentence('no terminator here') == 'no terminator here'
+
+
 def test_first_sentence_collapses_whitespace():
     """The quote lands in a markdown bullet, where a newline ends the bullet."""
     assert ill.first_sentence('Dawn\ncame  slowly. Then more.') == \
@@ -437,7 +566,7 @@ def _write_prompt_body(project_dir, illus_id, body):
     path = os.path.join(project_dir, rel)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
-        f.write(pi.render_prompt_file(row=plan_row(id=illus_id), body=body,
+        f.write(pi.render_prompt_file(split=scene_split(), row=plan_row(id=illus_id), body=body,
                                       references=[]))
     return rel
 
@@ -484,42 +613,97 @@ def test_language_shared_with_the_read_side_is_not_a_spoiler(project_dir):
 
 
 def test_no_prompt_file_is_not_a_finding(project_dir):
-    """Unprompted is valid in-flight state."""
+    """Unprompted is valid in-flight state — the one genuinely empty path."""
     write_scene(project_dir, 'vigil', SCENE)
     assert ill.spoiler_findings(project_dir, plan_row(), SCENE) == []
 
 
-def test_a_prompt_file_that_is_not_on_disk_is_not_this_checks_finding(project_dir):
+def test_the_shingle_length_discriminates(project_dir):
+    """The threshold is a correctness boundary, not a tuning knob: the docstring
+    cites it to justify reporting a finding rather than a hint. Both 4 and 9 left
+    the whole suite green."""
+    scene = ('She set it on the sill.\n\n'
+             'The cold worked up through the floorboards of the house.\n')
+    write_scene(project_dir, 'vigil', scene)
+
+    five = _write_prompt_body(project_dir, 'lantern-vigil',
+                             '## Scene\n\nthe cold worked up through in a room.\n')
+    assert ill.spoiler_findings(
+        project_dir, plan_row(prompt_file=five), scene) == []
+
+    six = _write_prompt_body(project_dir, 'lantern-vigil',
+                            '## Scene\n\nthe cold worked up through the '
+                            'floorboards of a room.\n')
+    found = ill.spoiler_findings(project_dir, plan_row(prompt_file=six), scene)
+    assert [f['kind'] for f in found] == ['prompt_spoils_unread']
+
+
+def test_an_opener_is_never_a_spoiler(project_dir):
+    """`scene_open` had `read == ''`, which made the set difference vacuous — so
+    every correct full-page opener was flagged, and the remedy told the author to
+    re-render it. A permanent pending row in cleanup-report.csv on every book."""
     write_scene(project_dir, 'vigil', SCENE)
-    row = plan_row(prompt_file='reference/illustration-prompts/gone.md')
+    rel = _write_prompt_body(
+        project_dir, 'lantern-vigil',
+        '## Scene\n\nThe lantern guttered once and held on a cold sill.\n')
+    row = plan_row(prompt_file=rel, placement='scene_open', layout='full_page')
     assert ill.spoiler_findings(project_dir, row, SCENE) == []
 
 
-def test_an_unresolved_position_yields_no_spoiler_verdict(project_dir):
-    """An ambiguous anchor already has its own finding. Guessing a position here
-    would warn about prose that may not be after the image at all."""
+def test_a_phrase_read_early_in_a_long_scene_is_not_a_spoiler(project_dir):
+    """The subtrahend must be all the prose before the split, not the capped
+    read window — a refrain met early and met again after the anchor was flagged
+    because it had fallen outside READ_CHARS."""
+    refrain = 'the lamp would not answer her at all'
+    scene = ((refrain + '. ') * 3 + 'Filler prose that runs on and on. ' * 70
+             + '\n\nShe set it on the sill.\n\n' + refrain + '.\n')
+    write_scene(project_dir, 'vigil', scene)
+    rel = _write_prompt_body(project_dir, 'lantern-vigil',
+                             f'## Scene\n\nA room where {refrain}.\n')
+    row = plan_row(prompt_file=rel)
+
+    assert refrain not in ill.split_at_position(scene, row)['read']
+    assert ill.spoiler_findings(project_dir, row, scene) == []
+
+
+def test_a_prompt_file_that_is_not_on_disk_is_unchecked_not_clean(project_dir):
+    """`[]` put "could not check" and "checked and clean" in the same cell of
+    working/cleanup-report.csv, where the difference is invisible forever."""
+    write_scene(project_dir, 'vigil', SCENE)
+    row = plan_row(prompt_file='reference/illustration-prompts/gone.md')
+    found = ill.spoiler_findings(project_dir, row, SCENE)
+    assert [f['kind'] for f in found] == ['prompt_spoiler_unchecked']
+    assert 'not on disk' in found[0]['detail']
+
+
+def test_an_unresolved_position_is_unchecked_not_clean(project_dir):
+    """Guessing a position would warn about prose that may not be after the image.
+    Reporting nothing would say the row was checked. Neither is true."""
     write_scene(project_dir, 'vigil', SCENE)
     rel = _write_prompt_body(project_dir, 'lantern-vigil',
                              '## Scene\n\nNothing came. The cold worked up '
                              'through the floorboards here.\n')
     row = plan_row(prompt_file=rel, anchor='a phrase that is not in the prose')
-    assert ill.spoiler_findings(project_dir, row, SCENE) == []
+    found = ill.spoiler_findings(project_dir, row, SCENE)
+    assert [f['kind'] for f in found] == ['prompt_spoiler_unchecked']
+    assert 'anchor not found' in found[0]['detail']
 
 
-def test_an_empty_prompt_body_yields_no_verdict(project_dir):
+def test_an_unrecoverable_prompt_body_is_unchecked_not_clean(project_dir):
     write_scene(project_dir, 'vigil', SCENE)
     rel = ill.default_prompt_rel('lantern-vigil')
     path = os.path.join(project_dir, rel)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
         f.write('# Illustration prompt — lantern-vigil\n\nno prompt section\n')
-    assert ill.spoiler_findings(
-        project_dir, plan_row(prompt_file=rel), SCENE) == []
+    found = ill.spoiler_findings(project_dir, plan_row(prompt_file=rel), SCENE)
+    assert [f['kind'] for f in found] == ['prompt_spoiler_unchecked']
+    assert 'no_prompt_section' in found[0]['detail']
 
 
-def test_an_unreadable_prompt_file_warns_rather_than_raising(project_dir, capsys):
-    """`validate_plan` is the single finding collector; an OSError out of it
-    takes every other check down with it — the #298 regression shape."""
+def test_an_unreadable_prompt_file_reports_rather_than_raising(project_dir):
+    """`validate_plan` is the single finding collector; an error out of it takes
+    every other check down with it — the #298 regression shape."""
     write_scene(project_dir, 'vigil', SCENE)
     rel = _write_prompt_body(project_dir, 'lantern-vigil', '## Scene\n\nX.\n')
     path = os.path.join(project_dir, rel)
@@ -527,11 +711,28 @@ def test_an_unreadable_prompt_file_warns_rather_than_raising(project_dir, capsys
     try:
         if os.access(path, os.R_OK):        # running as root
             pytest.skip('cannot make a file unreadable as root')
-        assert ill.spoiler_findings(
-            project_dir, plan_row(prompt_file=rel), SCENE) == []
-        assert 'could not read' in capsys.readouterr().out
+        found = ill.spoiler_findings(
+            project_dir, plan_row(prompt_file=rel), SCENE)
+        assert [f['kind'] for f in found] == ['prompt_spoiler_unchecked']
+        assert 'could not read' in found[0]['detail']
     finally:
         os.chmod(path, 0o644)
+
+
+def test_an_undecodable_prompt_file_does_not_escape_validate_plan(project_dir):
+    """UnicodeDecodeError is a ValueError, not an OSError, so it walked straight
+    out of the single finding collector. A prompt body hand-edited and saved as
+    latin-1 does it, and hand-editing is the documented working fix."""
+    write_scene(project_dir, 'vigil', SCENE)
+    rel = ill.default_prompt_rel('lantern-vigil')
+    path = os.path.join(project_dir, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'wb') as f:
+        f.write(b'## Prompt\n\nA caf\xe9 at dusk \x97 warm light.\n')
+    ill.write_plan(project_dir, [plan_row(prompt_file=rel)])
+
+    kinds = {f['kind'] for f in ill.validate_plan(project_dir)}
+    assert 'prompt_spoiler_unchecked' in kinds
 
 
 def test_the_spoiler_finding_reaches_validate_plan(project_dir):

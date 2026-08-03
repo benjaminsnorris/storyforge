@@ -1385,7 +1385,7 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     # only), which keeps the reference and anchor warnings in plan order.
     jobs: list[_PromptJob] = []
     state_gaps: dict[str, list[str]] = {}
-    unpositioned: list[str] = []
+    unpositioned: dict[str, list[str]] = {}
     for row in rows:
         illus_id = row['id'].strip()
         # `include_anchor_gaps=False` because `_warn_unanchored_rows` above named
@@ -1404,8 +1404,12 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
         absent_cell = (row.get('absent') or '').strip()
         contrast = packet.contrast_for_row(row, context=state_ctx)
         split = _scene_split(project_dir, row)
-        if split['error']:
-            unpositioned.append(illus_id)
+        if split['state'] == 'unknown':
+            # Keyed on the reason, not collected into one list. The five causes
+            # are an invalid placement, an empty anchor cell, an anchor that no
+            # longer matches, an ambiguous anchor, and a missing scene file — and
+            # "re-anchor the plan row" is the right fix for only two of them.
+            unpositioned.setdefault(split['error'], []).append(illus_id)
         jobs.append({
             'id': illus_id,
             'row': row,
@@ -1419,9 +1423,7 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             'aspect': pi.aspect_for_row(row),
             'request': pi.build_art_direction_request(
                 row=row,
-                scene_excerpt=split['read'],
-                scene_unread=split['unread'],
-                position_error=split['error'],
+                split=split,
                 character_anchors=_relevant_anchors(anchors, row),
                 canon_context=canon_ctx, direction=direction,
                 style_note=style_note, anchor_labels=labels,
@@ -1434,14 +1436,15 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             f'{", ".join(sorted(ids))})')
     if unpositioned:
         # Before the fan-out, with the other free-fix warnings. A row whose
-        # anchor does not resolve gets no spoiler guard and no acceptance check —
-        # the prompt says so, but the moment to fix it is now, not after paying
+        # position does not resolve gets no spoiler guard and no acceptance check
+        # — the prompt says so, but the moment to fix it is now, not after paying
         # for the call (#308).
-        log(f'WARNING: {len(unpositioned)} of {len(jobs)} illustration(s) have '
-            f'no resolvable position in their scene, so the prose after them is '
-            f'unknown and their prompts carry no spoiler guard: '
-            f'{", ".join(unpositioned)}. Re-anchor the plan row(s) — '
-            f'`storyforge illustrate --diagnose` names the reason per row.')
+        total = sum(len(ids) for ids in unpositioned.values())
+        log(f'WARNING: {total} of {len(jobs)} illustration(s) have no resolvable '
+            f'position in their scene, so the prose after them is unknown and '
+            f'their prompts carry no spoiler guard.')
+        for reason, ids in unpositioned.items():
+            log(f'         {reason} ({len(ids)}): {", ".join(sorted(ids))}')
     unstated = [job['id'] for job in jobs if not job['state']]
     if unstated:
         log(f'{len(unstated)} of {len(jobs)} illustration(s) have no resolved '
@@ -1535,8 +1538,7 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             row=row, body=body, references=job['references'],
             aspect=job['aspect'], state=job['state'],
             absent=job['absent'], contrast=job['contrast'],
-            next_sentence=job['split']['next_sentence'],
-            position_error=job['split']['error'],
+            split=job['split'],
         )
         rel = ill.default_prompt_rel(illus_id)
         with open(os.path.join(project_dir, rel), 'w', encoding='utf-8') as f:
@@ -3330,11 +3332,22 @@ def _scene_split(project_dir: str, row: dict[str, str]) -> ill.SceneSplit:
     scene_id = (row.get('scene_id') or '').strip()
     path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
     if not os.path.isfile(path):
-        return {'read': '(scene file not found)', 'unread': '',
+        # No `read` placeholder: the sentinel `'(scene file not found)'` used to
+        # be printed to the model under a heading calling it the scene's prose.
+        # `state` and `error` already say what happened.
+        return {'state': 'unknown', 'offset': None, 'read': '', 'unread': '',
                 'next_sentence': '',
                 'error': f'scene file for {scene_id!r} is not in scenes/'}
-    with open(path, encoding='utf-8') as f:
-        text = ill.strip_markers(f.read())
+    try:
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        # Phase 1 builds every request, so a raise here aborts the whole run
+        # before a single prompt is written. An unreadable scene is an unresolved
+        # position like any other.
+        return {'state': 'unknown', 'offset': None, 'read': '', 'unread': '',
+                'next_sentence': '',
+                'error': f'could not read scenes/{scene_id}.md: {exc}'}
     return ill.split_at_position(text, row)
 
 

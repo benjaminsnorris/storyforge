@@ -411,7 +411,7 @@ def write_prompt_file(project_dir: str, illus_id: str, *,
     row.update({'scene_id': 'act1-sc01', 'placement': 'scene_open'})
     row.update(kwargs)
     text = pi.render_prompt_file(
-        row=row,
+        split=scene_split(), row=row,
         body=body or ('## Scene\n\nA low room.\n\n## Subject\n\nOne figure.\n\n'
                       '## Important details\n\n- A lamp.\n\n## Use case\n\n'
                       'Interior illustration for a novel.'),
@@ -422,3 +422,22 @@ def write_prompt_file(project_dir: str, illus_id: str, *,
     with open(path, 'w', encoding='utf-8') as f:
         f.write(text)
     return path
+
+
+def scene_split(**overrides) -> ill.SceneSplit:
+    """A `SceneSplit` for renderer tests that do not need a real scene.
+
+    Defaults to the `normal` state — prose on both sides of the illustration —
+    since that is the shape almost every prompt-file assertion is about. Pass
+    `state=` plus the fields that state carries to exercise the others.
+    """
+    split: ill.SceneSplit = {
+        'state': 'normal',
+        'offset': 40,
+        'read': 'She set it on the sill and waited.',
+        'unread': 'Nothing came. The cold worked up.',
+        'next_sentence': 'Nothing came.',
+        'error': '',
+    }
+    split.update(overrides)          # type: ignore[typeddict-item]
+    return split

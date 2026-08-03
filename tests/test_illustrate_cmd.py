@@ -15,6 +15,7 @@ from storyforge import cmd_illustrate
 from storyforge import illustrations as ill
 from storyforge import prompts_illustrate as pi
 from illustration_helpers import (
+    scene_split,
     SCENE, SCENE_ADVERSARIAL, make_jpeg, make_png, plan_row,
     truncated_png, write_csv, write_scene,
 )
@@ -632,9 +633,12 @@ def test_scene_split_handles_a_missing_scene(in_project):
     from the other direction.
     """
     split = cmd_illustrate._scene_split(in_project, plan_row(scene_id='nowhere'))
-    assert split['read'] == '(scene file not found)'
+    assert split['state'] == 'unknown'
     assert split['unread'] == ''
     assert 'nowhere' in split['error']
+    # No `(scene file not found)` placeholder: it was printed to the model under
+    # a heading calling it the prose the reader had read.
+    assert split['read'] == ''
 
 
 def test_scene_split_does_not_hand_the_model_the_next_page(in_project):
@@ -679,7 +683,7 @@ def test_orientation_clause_states_the_aspect(aspect, expected):
 
 def test_render_prompt_file_states_orientation_twice():
     content = pi.render_prompt_file(
-        row=plan_row(), body='### Scene\n\nA street.\n', references=[],
+        split=scene_split(), row=plan_row(), body='### Scene\n\nA street.\n', references=[],
         aspect='portrait',
     )
     assert content.count('PORTRAIT orientation') >= 1
@@ -710,7 +714,7 @@ def test_the_prompt_file_emits_only_the_blocks_it_has(kwargs, present, missing):
     rendered, because a state that did not resolve is stated rather than
     omitted — an omitted line left the block claiming a completeness it did not
     have."""
-    content = pi.render_prompt_file(row=plan_row(), body='### Scene\n\nX.\n',
+    content = pi.render_prompt_file(split=scene_split(), row=plan_row(), body='### Scene\n\nX.\n',
                                     references=[], **kwargs)
     assert '## Accept only if' in content
     for text in present:
@@ -724,7 +728,7 @@ def test_the_acceptance_block_is_marked_do_not_paste():
     via `contrast` it can name another illustration by id — which the request
     explicitly forbids reaching the model."""
     content = pi.render_prompt_file(
-        row=plan_row(), body='### Scene\n\nX.\n', references=[],
+        split=scene_split(), row=plan_row(), body='### Scene\n\nX.\n', references=[],
         contrast='Follows `lantern-vigil` and must not repeat its staging')
     assert '## Accept only if (not part of the prompt — do NOT paste)' in content
     paste_marker = 'Paste everything below into the image model.'
@@ -1810,7 +1814,7 @@ def test_layout_beats_a_conflicting_composition_note():
 
 def test_layout_appears_in_the_prompt_file():
     content = pi.render_prompt_file(
-        row=plan_row(layout='double_page'), body='### Scene\n\nA street.\n',
+        split=scene_split(), row=plan_row(layout='double_page'), body='### Scene\n\nA street.\n',
         references=[], aspect=pi.aspect_for_row(plan_row(layout='double_page')),
     )
     assert 'LANDSCAPE orientation' in content
@@ -1818,7 +1822,7 @@ def test_layout_appears_in_the_prompt_file():
 
 def test_layout_reaches_the_art_direction_prompt():
     prompt = pi.build_art_direction_request(
-        row=plan_row(layout='double_page'), scene_excerpt='x',
+        split=scene_split(), row=plan_row(layout='double_page'),
         character_anchors={}, canon_context='x',
     )
     assert 'double_page' in prompt
@@ -3183,8 +3187,7 @@ def test_canon_refs_still_match_on_the_canon_id(in_project, monkeypatch,
 
 def test_the_request_labels_the_read_side_and_forbids_the_unread_side():
     request = pi.build_art_direction_request(
-        row=plan_row(), scene_excerpt='She set it on the sill.',
-        scene_unread='Nothing came. The cold worked up.',
+        split=scene_split(), row=plan_row(),
         character_anchors={}, canon_context='c')
 
     assert 'read by the time the illustration appears' in request
@@ -3198,57 +3201,86 @@ def test_the_request_forbids_naming_the_unread_beat_even_to_exclude_it():
     framing. #263: a negated phrase in an image prompt puts the thing in the
     render, so "no hands raised against the light" is worse than silence."""
     request = pi.build_art_direction_request(
-        row=plan_row(), scene_excerpt='x', scene_unread='hands raised',
-        character_anchors={}, canon_context='c')
+        split=scene_split(unread='hands raised against the light'),
+        row=plan_row(), character_anchors={}, canon_context='c')
     assert 'silently' in request
     assert 'not even to exclude it' in request
 
 
 def test_the_request_states_an_unresolved_position_rather_than_implying_none():
     request = pi.build_art_direction_request(
-        row=plan_row(), scene_excerpt='x', scene_unread='',
-        position_error='anchor not found in scene',
-        character_anchors={}, canon_context='c')
-    assert '## Where this illustration sits' in request
-    assert '**Unknown**' in request
+        split=scene_split(state='unknown', offset=None, unread='',
+                          next_sentence='',
+                          error='anchor not found in scene'),
+        row=plan_row(), character_anchors={}, canon_context='c')
+    assert 'could not be resolved' in request
     assert 'anchor not found in scene' in request
 
 
-def test_a_resolved_split_carries_no_unknown_position_block():
+def test_the_unknown_state_does_not_also_claim_the_prose_was_read():
+    """The header was unconditional, so the request asserted "this is the prose
+    the reader has read… the illustration sits at the end of this text" and then
+    contradicted it twelve lines later. The false statement came first."""
     request = pi.build_art_direction_request(
-        row=plan_row(), scene_excerpt='x', scene_unread='the next beat',
+        split=scene_split(state='unknown', offset=None, unread='',
+                          next_sentence='', error='anchor is ambiguous'),
+        row=plan_row(), character_anchors={}, canon_context='c')
+    assert 'sits at the **end** of this text' not in request
+    assert 'read by the time the illustration appears' not in request
+
+
+def test_an_opener_is_asked_to_illustrate_the_prose_it_opens():
+    """`scene_open` had `read == ''`, so the request asserted "prose the reader
+    has read" over an empty section and put the scene's opening in the forbidden
+    block — telling the model to avoid the only description of the image it was
+    being asked to draw. `scene_open` + `full_page` is the documented opener."""
+    request = pi.build_art_direction_request(
+        split=scene_split(state='establishing', offset=0, read='',
+                          unread='The lantern guttered on the sill.',
+                          next_sentence=''),
+        row=plan_row(placement='scene_open', layout='full_page'),
         character_anchors={}, canon_context='c')
-    assert '## Where this illustration sits' not in request
+
+    assert '**opens** the scene' in request
+    assert 'The lantern guttered on the sill.' in request
+    assert '## What the reader has NOT read yet' not in request
+    assert 'sits at the **end** of this text' not in request
 
 
-def test_a_scene_close_request_carries_neither_block():
-    """Nothing after the image, and nothing unresolved — so nothing to say."""
+def test_a_scene_close_request_carries_no_forbidden_block():
+    """Nothing after the image — so nothing to forbid, and nothing unresolved."""
     request = pi.build_art_direction_request(
-        row=plan_row(placement='scene_close'), scene_excerpt='x',
+        split=scene_split(state='at_scene_end', unread='', next_sentence=''),
+        row=plan_row(placement='scene_close'),
         character_anchors={}, canon_context='c')
     assert '## What the reader has NOT read yet' not in request
-    assert '## Where this illustration sits' not in request
+    assert 'could not be resolved' not in request
 
 
 def test_the_acceptance_block_quotes_the_next_sentence():
-    lines = pi.prompt_acceptance_lines(state='a lit lamp',
-                                       next_sentence='Nothing came.')
-    joined = '\n'.join(lines)
+    joined = '\n'.join(pi.prompt_acceptance_lines(
+        split=scene_split(), state='a lit lamp'))
     assert 'Nothing from after the illustration appears in it' in joined
     assert '"Nothing came."' in joined
 
 
-def test_the_acceptance_block_omits_the_spoiler_check_when_it_is_vacuous():
-    """A scene_close image has nothing after it. Rendering the check anyway
-    teaches the author to tick a box that never had anything in it."""
-    joined = '\n'.join(pi.prompt_acceptance_lines(state='a lit lamp'))
+@pytest.mark.parametrize('state', ['at_scene_end', 'establishing'])
+def test_the_acceptance_block_omits_the_spoiler_check_when_it_is_vacuous(state):
+    """A scene-closing image has nothing after it; an opener is *supposed* to
+    depict what follows. Rendering the check teaches the author to tick an empty
+    box — and for an opener it told them to re-render a correct image."""
+    joined = '\n'.join(pi.prompt_acceptance_lines(
+        split=scene_split(state=state, unread='', next_sentence=''),
+        state='a lit lamp'))
     assert 'Nothing from after' not in joined
     assert 'Cannot be checked' not in joined
 
 
 def test_the_acceptance_block_says_when_the_spoiler_check_is_impossible():
     joined = '\n'.join(pi.prompt_acceptance_lines(
-        state='a lit lamp', position_error='anchor is ambiguous'))
+        split=scene_split(state='unknown', offset=None, unread='',
+                          next_sentence='', error='anchor is ambiguous'),
+        state='a lit lamp'))
     assert 'Cannot be checked for spoilers' in joined
     assert 'anchor is ambiguous' in joined
 
@@ -3307,7 +3339,7 @@ def test_the_request_does_not_ask_for_a_constraints_section():
     """The deterministic block owns that section. Asking for one too produced
     `## Constraints` with a nested, contradicting `### Constraints`."""
     request = pi.build_art_direction_request(
-        row=plan_row(), scene_excerpt='x', character_anchors={},
+        split=scene_split(), row=plan_row(), character_anchors={},
         canon_context='c')
     assert '**Constraints** — what must hold' not in request
     assert 'Do **not** write a Constraints section' in request

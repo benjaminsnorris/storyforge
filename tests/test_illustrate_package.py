@@ -17,7 +17,7 @@ from storyforge import canon, cmd_illustrate, packet
 from storyforge import illustrations as ill
 from storyforge import prompts_illustrate as pi
 from storyforge import prompts_packet as pp
-from illustration_helpers import seed_packet_project
+from illustration_helpers import scene_split, seed_packet_project
 
 
 @pytest.fixture(autouse=True)
@@ -1318,7 +1318,7 @@ def test_the_treatment_reaches_the_art_direction_request(in_project):
     row = ill.read_plan(in_project)[0]
     row['treatment'] = 'close, low, interior, night'
     prompt = pi.build_art_direction_request(
-        row=row, scene_excerpt='x', character_anchors={}, canon_context='y')
+        split=scene_split(), row=row, character_anchors={}, canon_context='y')
     assert 'close, low, interior, night' in prompt
     assert 'Staging assigned to this image' in prompt
 
@@ -1327,7 +1327,7 @@ def test_no_staging_section_when_there_is_no_treatment(in_project):
     from storyforge import prompts_illustrate as pi
     row = ill.read_plan(in_project)[0]
     prompt = pi.build_art_direction_request(
-        row=row, scene_excerpt='x', character_anchors={}, canon_context='y')
+        split=scene_split(), row=row, character_anchors={}, canon_context='y')
     assert 'Staging assigned to this image' not in prompt
 
 
@@ -2012,7 +2012,7 @@ def test_parse_prompt_file_round_trips_render_prompt_file():
     """The reader lives beside the writer so the two cannot drift over the
     strings that bound the body."""
     text = pi.render_prompt_file(
-        row={'id': 'x', 'scene_id': 's1', 'beat': 'a beat'},
+        split=scene_split(), row={'id': 'x', 'scene_id': 's1', 'beat': 'a beat'},
         body=_MODEL_BODY, references=[], state='a state', absent='a thing',
         contrast='different')
     parsed = pi.parse_prompt_file(text)
@@ -2024,7 +2024,7 @@ def test_parse_prompt_file_stops_before_the_constraints():
     """The constraints are regenerated from the plan, never inherited: a file
     written before a matrix edit still carries the old state, and an upload
     holding both would contradict itself."""
-    text = pi.render_prompt_file(row={'id': 'x', 'scene_id': 's1'},
+    text = pi.render_prompt_file(split=scene_split(), row={'id': 'x', 'scene_id': 's1'},
                                  body='## Scene\n\nA room.', references=[],
                                  state='a state')
     body = pi.parse_prompt_file(text)['body']
@@ -2054,7 +2054,7 @@ def test_parse_prompt_file_recovers_a_file_missing_the_sentinel():
 
 
 def test_parse_prompt_file_handles_crlf():
-    text = pi.render_prompt_file(row={'id': 'x', 'scene_id': 's1'},
+    text = pi.render_prompt_file(split=scene_split(), row={'id': 'x', 'scene_id': 's1'},
                                  body='## Scene\n\nA room.', references=[])
     assert pi.parse_prompt_file(text.replace('\n', '\r\n'))['body'] == \
         '## Scene\n\nA room.'
@@ -2063,7 +2063,7 @@ def test_parse_prompt_file_handles_crlf():
 def test_a_promoted_constraints_heading_does_not_leak_into_the_upload():
     """The likeliest hand edit — every heading around it is `##`. Cutting at the
     first match is the only reading that cannot self-contradict."""
-    text = pi.render_prompt_file(row={'id': 'x', 'scene_id': 's1'},
+    text = pi.render_prompt_file(split=scene_split(), row={'id': 'x', 'scene_id': 's1'},
                                  body='## Scene\n\nA room.', references=[],
                                  state='navy pajamas')
     parsed = pi.parse_prompt_file(
@@ -2077,7 +2077,7 @@ def test_a_model_authored_constraints_heading_is_reported_as_truncated():
     body = ('## Scene\n\nA hall.\n\n## Constraints\n\nNo lettering.\n\n'
             '## Use case\n\nFull-page.')
     parsed = pi.parse_prompt_file(pi.render_prompt_file(
-        row={'id': 'x', 'scene_id': 's1'}, body=body, references=[]))
+        split=scene_split(), row={'id': 'x', 'scene_id': 's1'}, body=body, references=[]))
     assert parsed['status'] == 'body_truncated'
     assert parsed['body'] == '## Scene\n\nA hall.'
 
