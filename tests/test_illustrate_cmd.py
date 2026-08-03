@@ -3177,6 +3177,132 @@ def test_canon_refs_still_match_on_the_canon_id(in_project, monkeypatch,
     assert 'matched no known anchor' not in capsys.readouterr().out
 
 
+# ============================================================================
+# The scene split in the request and the prompt file (#308)
+# ============================================================================
+
+def test_the_request_labels_the_read_side_and_forbids_the_unread_side():
+    request = pi.build_art_direction_request(
+        row=plan_row(), scene_excerpt='She set it on the sill.',
+        scene_unread='Nothing came. The cold worked up.',
+        character_anchors={}, canon_context='c')
+
+    assert 'read by the time the illustration appears' in request
+    assert 'sits at the **end** of this text' in request
+    assert '## What the reader has NOT read yet' in request
+    assert 'Nothing came. The cold worked up.' in request
+
+
+def test_the_request_forbids_naming_the_unread_beat_even_to_exclude_it():
+    """The forbidden block must not become a fifth exception to positive
+    framing. #263: a negated phrase in an image prompt puts the thing in the
+    render, so "no hands raised against the light" is worse than silence."""
+    request = pi.build_art_direction_request(
+        row=plan_row(), scene_excerpt='x', scene_unread='hands raised',
+        character_anchors={}, canon_context='c')
+    assert 'silently' in request
+    assert 'not even to exclude it' in request
+
+
+def test_the_request_states_an_unresolved_position_rather_than_implying_none():
+    request = pi.build_art_direction_request(
+        row=plan_row(), scene_excerpt='x', scene_unread='',
+        position_error='anchor not found in scene',
+        character_anchors={}, canon_context='c')
+    assert '## Where this illustration sits' in request
+    assert '**Unknown**' in request
+    assert 'anchor not found in scene' in request
+
+
+def test_a_resolved_split_carries_no_unknown_position_block():
+    request = pi.build_art_direction_request(
+        row=plan_row(), scene_excerpt='x', scene_unread='the next beat',
+        character_anchors={}, canon_context='c')
+    assert '## Where this illustration sits' not in request
+
+
+def test_a_scene_close_request_carries_neither_block():
+    """Nothing after the image, and nothing unresolved — so nothing to say."""
+    request = pi.build_art_direction_request(
+        row=plan_row(placement='scene_close'), scene_excerpt='x',
+        character_anchors={}, canon_context='c')
+    assert '## What the reader has NOT read yet' not in request
+    assert '## Where this illustration sits' not in request
+
+
+def test_the_acceptance_block_quotes_the_next_sentence():
+    lines = pi.prompt_acceptance_lines(state='a lit lamp',
+                                       next_sentence='Nothing came.')
+    joined = '\n'.join(lines)
+    assert 'Nothing from after the illustration appears in it' in joined
+    assert '"Nothing came."' in joined
+
+
+def test_the_acceptance_block_omits_the_spoiler_check_when_it_is_vacuous():
+    """A scene_close image has nothing after it. Rendering the check anyway
+    teaches the author to tick a box that never had anything in it."""
+    joined = '\n'.join(pi.prompt_acceptance_lines(state='a lit lamp'))
+    assert 'Nothing from after' not in joined
+    assert 'Cannot be checked' not in joined
+
+
+def test_the_acceptance_block_says_when_the_spoiler_check_is_impossible():
+    joined = '\n'.join(pi.prompt_acceptance_lines(
+        state='a lit lamp', position_error='anchor is ambiguous'))
+    assert 'Cannot be checked for spoilers' in joined
+    assert 'anchor is ambiguous' in joined
+
+
+def test_the_prompt_file_carries_the_spoiler_check_end_to_end(in_project,
+                                                             monkeypatch):
+    """The whole of item 2, through the real command."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: (
+        '### Scene\n\nA cold street.\n\n### Subject\n\nA woman.\n'))
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
+    with open(os.path.join(in_project,
+                           ill.default_prompt_rel('lantern-vigil'))) as f:
+        content = f.read()
+
+    assert '"Nothing came."' in content
+    # In the do-NOT-paste block, never in the pasted Constraints: the quote is
+    # prose the image model must not see.
+    accept = content.split('## Accept only if')[1]
+    assert 'Nothing from after the illustration' in accept
+    assert 'Nothing came' not in content.split('## Accept only if')[0]
+
+
+def test_the_request_sends_the_read_side_not_a_window_round_the_anchor(
+        in_project, monkeypatch):
+    """#308 end to end: the post-anchor beat must not reach the model as scene
+    prose. On LF-19 and LF-20 it did, and both prompts described it."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+    seen = _capture_request(in_project, monkeypatch)
+    cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+
+    scene_section = seen['prompt'].split('## The scene it accompanies')[1] \
+                                 .split('## What the reader has NOT read yet')[0]
+    assert 'She set it on the sill' in scene_section
+    assert 'By morning she had decided' not in scene_section
+
+
+def test_prompts_warn_when_a_row_has_no_resolvable_position(in_project,
+                                                            monkeypatch, capsys):
+    """The free-fix moment is before the call, not after paying for it."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(anchor='prose that is not there')])
+    _capture_request(in_project, monkeypatch)
+    cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+
+    out = capsys.readouterr().out
+    assert 'no resolvable position' in out
+    assert 'lantern-vigil' in out
+
+
 def test_the_request_does_not_ask_for_a_constraints_section():
     """The deterministic block owns that section. Asking for one too produced
     `## Constraints` with a nested, contradicting `### Constraints`."""

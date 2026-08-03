@@ -318,6 +318,75 @@ def test_clean_log_yields_no_findings(project_dir):
     assert vs.prepass(project_dir)['findings'] == []
 
 
+# ============================================================================
+# Check 5 — a scene_close image over a state that changes mid-scene (#308)
+# ============================================================================
+
+def _mid_scene_findings(project_dir):
+    return [f for f in vs.prepass(project_dir)['findings']
+            if f['kind'] == 'state_mid_scene_change']
+
+
+def test_a_scene_close_image_over_a_changing_entity_is_reported(project_dir):
+    """#308's LF-13. The Great Lamp goes out during the scene; the log holds
+    one value for the whole scene, which is the state going *in*, and the
+    illustration's whole subject was the state coming out."""
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_close',
+          canon_refs='dorren-clothing')
+
+    found = _mid_scene_findings(project_dir)
+    assert len(found) == 1
+    assert found[0]['id'] == 'lantern-vigil'
+    assert found[0]['scene_id'] == 'act2-sc01'
+    assert 'state_override' in found[0]['detail']
+    assert 'dorren-clothing' in found[0]['detail']
+
+
+def test_a_bare_canon_ref_matches_the_changing_aspect_track(project_dir):
+    """canon_refs says `dorren`; the transition is on `dorren-clothing`."""
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_close',
+          canon_refs='dorren')
+    assert len(_mid_scene_findings(project_dir)) == 1
+
+
+def test_a_state_override_answers_the_mid_scene_question(project_dir):
+    """The author has said what is true in this image, so there is nothing to
+    ask — the same suppression check 3 honours."""
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_close',
+          canon_refs='dorren-clothing',
+          state_override='dorren-clothing:travel coat, hood up')
+    assert _mid_scene_findings(project_dir) == []
+
+
+def test_only_scene_close_images_are_ambiguous_about_the_turn(project_dir):
+    """An anchored image has a position inside the scene, so the split tells it
+    which side of the turn it is on. Only scene_close cannot know."""
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_open',
+          canon_refs='dorren-clothing')
+    assert _mid_scene_findings(project_dir) == []
+
+
+def test_an_entity_that_does_not_change_in_that_scene_is_not_reported(project_dir):
+    """master-survey changes at act1-sc02, not act2-sc01. Resolving forward to a
+    state set in an earlier scene is exactly what the log is for."""
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_close',
+          canon_refs='master-survey')
+    assert _mid_scene_findings(project_dir) == []
+
+
+def test_the_mid_scene_finding_leaves_a_publishable_book():
+    """A warning, not a block. The art is fine to ship; it is the *next* render
+    that wants the answer."""
+    from storyforge import illustrations as ill
+    assert ill.severity_of('state_mid_scene_change') == 'warning'
+    assert 'state_mid_scene_change' not in ill.BLOCKING_FINDINGS
+
+
 def test_the_shipped_fixture_log_is_clean(fixture_dir):
     """The fixture's own visual-state.csv must not make every other suite that
     validates the plan report findings."""

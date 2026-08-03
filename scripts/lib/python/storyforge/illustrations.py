@@ -2180,6 +2180,7 @@ def spoiler_findings(project_dir: str, row: dict[str, str],
     after the image at all.
     """
     from storyforge import prompts_illustrate as pi
+    from storyforge.common import log
 
     rel = (row.get('prompt_file') or '').strip()
     if not rel:

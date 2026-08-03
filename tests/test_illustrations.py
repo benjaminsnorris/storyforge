@@ -427,6 +427,131 @@ def test_first_sentence_of_nothing_is_nothing():
 
 
 # ============================================================================
+# Art direction that already quotes the next page (#308 item 4)
+# ============================================================================
+
+def _write_prompt_body(project_dir, illus_id, body):
+    """Write a minimal prompt file whose body `parse_prompt_file` recovers."""
+    from storyforge import prompts_illustrate as pi
+    rel = ill.default_prompt_rel(illus_id)
+    path = os.path.join(project_dir, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(pi.render_prompt_file(row=plan_row(id=illus_id), body=body,
+                                      references=[]))
+    return rel
+
+
+def test_a_prompt_quoting_unread_prose_is_reported(project_dir):
+    """How all three of #308's rows were found by hand."""
+    write_scene(project_dir, 'vigil', SCENE)
+    rel = _write_prompt_body(
+        project_dir, 'lantern-vigil',
+        '## Scene\n\nNothing came. The cold worked up through the '
+        'floorboards, and she stood in it.\n')
+    row = plan_row(prompt_file=rel)
+
+    findings = ill.spoiler_findings(project_dir, row, SCENE)
+    assert len(findings) == 1
+    assert findings[0]['kind'] == 'prompt_spoils_unread'
+    assert findings[0]['id'] == 'lantern-vigil'
+    assert findings[0]['file'] == rel
+    assert '--prompts --ids lantern-vigil' in findings[0]['detail']
+
+
+def test_a_prompt_describing_only_read_prose_is_clean(project_dir):
+    write_scene(project_dir, 'vigil', SCENE)
+    rel = _write_prompt_body(
+        project_dir, 'lantern-vigil',
+        '## Scene\n\nShe set it on the sill and waited for the street to '
+        'answer, in a cold room.\n')
+    assert ill.spoiler_findings(
+        project_dir, plan_row(prompt_file=rel), SCENE) == []
+
+
+def test_language_shared_with_the_read_side_is_not_a_spoiler(project_dir):
+    """"Distinctive" is a set difference. A phrase the reader has already read is
+    what the body is *supposed* to describe, even if it recurs later."""
+    scene = ('She set it on the sill and waited.\n\n'
+             'The cold worked up through the floorboards.\n\n'
+             'She set it on the sill and waited.\n')
+    write_scene(project_dir, 'vigil', scene)
+    rel = _write_prompt_body(project_dir, 'lantern-vigil',
+                             '## Scene\n\nShe set it on the sill and waited.\n')
+    row = plan_row(prompt_file=rel, anchor='The cold worked up',
+                   placement='after_anchor')
+    assert ill.spoiler_findings(project_dir, row, scene) == []
+
+
+def test_no_prompt_file_is_not_a_finding(project_dir):
+    """Unprompted is valid in-flight state."""
+    write_scene(project_dir, 'vigil', SCENE)
+    assert ill.spoiler_findings(project_dir, plan_row(), SCENE) == []
+
+
+def test_a_prompt_file_that_is_not_on_disk_is_not_this_checks_finding(project_dir):
+    write_scene(project_dir, 'vigil', SCENE)
+    row = plan_row(prompt_file='reference/illustration-prompts/gone.md')
+    assert ill.spoiler_findings(project_dir, row, SCENE) == []
+
+
+def test_an_unresolved_position_yields_no_spoiler_verdict(project_dir):
+    """An ambiguous anchor already has its own finding. Guessing a position here
+    would warn about prose that may not be after the image at all."""
+    write_scene(project_dir, 'vigil', SCENE)
+    rel = _write_prompt_body(project_dir, 'lantern-vigil',
+                             '## Scene\n\nNothing came. The cold worked up '
+                             'through the floorboards here.\n')
+    row = plan_row(prompt_file=rel, anchor='a phrase that is not in the prose')
+    assert ill.spoiler_findings(project_dir, row, SCENE) == []
+
+
+def test_an_empty_prompt_body_yields_no_verdict(project_dir):
+    write_scene(project_dir, 'vigil', SCENE)
+    rel = ill.default_prompt_rel('lantern-vigil')
+    path = os.path.join(project_dir, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('# Illustration prompt — lantern-vigil\n\nno prompt section\n')
+    assert ill.spoiler_findings(
+        project_dir, plan_row(prompt_file=rel), SCENE) == []
+
+
+def test_an_unreadable_prompt_file_warns_rather_than_raising(project_dir, capsys):
+    """`validate_plan` is the single finding collector; an OSError out of it
+    takes every other check down with it — the #298 regression shape."""
+    write_scene(project_dir, 'vigil', SCENE)
+    rel = _write_prompt_body(project_dir, 'lantern-vigil', '## Scene\n\nX.\n')
+    path = os.path.join(project_dir, rel)
+    os.chmod(path, 0o000)
+    try:
+        if os.access(path, os.R_OK):        # running as root
+            pytest.skip('cannot make a file unreadable as root')
+        assert ill.spoiler_findings(
+            project_dir, plan_row(prompt_file=rel), SCENE) == []
+        assert 'could not read' in capsys.readouterr().out
+    finally:
+        os.chmod(path, 0o644)
+
+
+def test_the_spoiler_finding_reaches_validate_plan(project_dir):
+    write_scene(project_dir, 'vigil', SCENE)
+    rel = _write_prompt_body(
+        project_dir, 'lantern-vigil',
+        '## Scene\n\nNothing came. The cold worked up through the '
+        'floorboards.\n')
+    ill.write_plan(project_dir, [plan_row(prompt_file=rel)])
+
+    kinds = {f['kind'] for f in ill.validate_plan(project_dir)}
+    assert 'prompt_spoils_unread' in kinds
+
+
+def test_the_spoiler_finding_leaves_a_publishable_book():
+    assert ill.severity_of('prompt_spoils_unread') == 'warning'
+    assert 'prompt_spoils_unread' not in ill.BLOCKING_FINDINGS
+
+
+# ============================================================================
 # Resolution — epub / PDF
 # ============================================================================
 
