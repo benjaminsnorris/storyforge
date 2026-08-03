@@ -303,7 +303,7 @@ def _scene_haystack(text: str) -> str:
 def prepass(project_dir: str) -> PrepassResult:
     """Check the log deterministically, and narrow the prose the LLM reads.
 
-    Four checks, none of which needs a model:
+    Five checks, none of which needs a model:
 
     1. a `from_scene` that names no scene at all — `state_unknown_scene`, an
        error, because the transition never applies and every scene after it
@@ -320,7 +320,11 @@ def prepass(project_dir: str) -> PrepassResult:
        canon id (`nora-clothing` covers `nora`), and a `state_override` on the
        row satisfies it too: a one-off state that does not persist is still a
        stated state;
-    4. `candidate_scenes` — the scenes that mention a tracked entity at or after
+    4. a `scene_close` illustration whose `canon_refs` name an entity that
+       changes *during* that scene — `state_mid_scene_change`. The log holds one
+       value per scene and the image is read after the scene's turn, so the
+       resolved state is usually the one going in (#308);
+    5. `candidate_scenes` — the scenes that mention a tracked entity at or after
        that entity's first transition, which is where prose and log can
        disagree.
     """
@@ -414,8 +418,9 @@ def prepass(project_dir: str) -> PrepassResult:
 
         covered = {key.lower()
                    for key in _resolve(order, transitions, order[scene_id])}
-        covered |= {key.lower()
-                    for key in parse_state_override(row.get('state_override', ''))}
+        overridden = {key.lower()
+                      for key in parse_state_override(row.get('state_override', ''))}
+        covered |= overridden
         for ref in refs:
             needle = ref.lower()
             if any(key == needle or key.startswith(f'{needle}-')
@@ -431,6 +436,56 @@ def prepass(project_dir: str) -> PrepassResult:
                           f'visible state at that point. Add a row to '
                           f'{STATE_FILE}, or set state_override on the plan row '
                           f'if the state is true in this image only',
+            })
+
+        # --- Check 5: a scene_close image over a state that changes mid-scene --
+        #
+        # `state_at` resolves at scene granularity, so the log holds one value
+        # for an entity across a whole scene. A `scene_close` illustration is
+        # read *after* that scene's turn — so when the entity changes during the
+        # scene, the single value the log holds is very often the state going in,
+        # and the image is of the state coming out.
+        #
+        # That is #308's LF-13 exactly: the Great Lamp's transition at that scene
+        # read "flame shrinking" and the illustration's whole subject was the
+        # Lamp dead. Nothing was wrong with the log and nothing was wrong with
+        # the row; there was simply no way to say which side of the turn the
+        # image sits on, and the resolved state was silently the wrong one.
+        #
+        # Reported rather than re-resolved. Guessing "scene_close means the
+        # post-transition state" would be wrong for every scene whose change
+        # lands in its opening paragraph, and this pipeline reports an ambiguous
+        # anchor rather than placing art at a guessed offset for the same reason.
+        # A `state_override` on the row is the fix, and it suppresses this the
+        # way it suppresses check 3 — an author who has stated the one-off state
+        # has already answered the question.
+        if (row.get('placement') or '').strip() != 'scene_close':
+            continue
+        for ref in refs:
+            needle = ref.lower()
+            if any(key == needle or key.startswith(f'{needle}-')
+                   for key in overridden):
+                continue
+            changing = sorted(
+                t['entity'] for t in transitions
+                if t['from_scene'] == scene_id
+                and (t['entity'].lower() == needle
+                     or t['entity'].lower().startswith(f'{needle}-'))
+            )
+            if not changing:
+                continue
+            findings.append({
+                'kind': 'state_mid_scene_change',
+                'id': rid,
+                'scene_id': scene_id,
+                'file': STATE_FILE,
+                'detail': f'illustration {rid!r} sits at the close of '
+                          f'{scene_id}, and {_csv_safe(ref)} changes during that '
+                          f'scene ({_csv_safe(", ".join(changing))}). The '
+                          f'resolved state is the one the log holds for the whole '
+                          f'scene, which is usually the state going in — set '
+                          f'state_override on the plan row to say what is true '
+                          f'in this image, after the scene\'s turn',
             })
 
     candidates, undrafted, terms = _candidate_scenes(project_dir, order,

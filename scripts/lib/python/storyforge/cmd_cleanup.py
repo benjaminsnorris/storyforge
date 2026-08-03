@@ -1285,6 +1285,16 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
         'publish manifest while the epub, the PDF, and the web book kept '
         'shipping it, so the editions would disagree about a book you had '
         'not re-rendered yet',
+    'state_mid_scene_change':
+        'Set state_override on the plan row to the state true after the scene\'s '
+        'turn — the illustration sits at the close of a scene the entity changes '
+        'during, and the log holds one value for the whole scene, which is '
+        'usually the state going in',
+    'prompt_spoils_unread':
+        'Re-run storyforge illustrate --prompts --ids <id>, which sends the '
+        'scene split at the illustration\'s position. Then check the render: if '
+        'the art already shows the next page, it needs re-rendering, not just a '
+        'new prompt',
     'canon_staleness_unchecked':
         'Set canon_updated: YYYY-MM-DD in the canon files you have edited — '
         'until one carries a parseable date, no ingested illustration can be '

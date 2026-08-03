@@ -616,16 +616,41 @@ def test_references_are_capped(in_project):
     assert len(refs) == cmd_illustrate._MAX_REFERENCES
 
 
-def test_scene_excerpt_strips_markers(in_project):
+def test_scene_split_strips_markers(in_project):
     write_scene(in_project, 'vigil', ill.insert_marker(SCENE, plan_row())['text'])
-    excerpt = cmd_illustrate._scene_excerpt(in_project, plan_row())
-    assert '![[illus:' not in excerpt
-    assert 'She set it on the sill' in excerpt
+    split = cmd_illustrate._scene_split(in_project, plan_row())
+    assert '![[illus:' not in split['read']
+    assert '![[illus:' not in split['unread']
+    assert 'She set it on the sill' in split['read']
 
 
-def test_scene_excerpt_handles_a_missing_scene(in_project):
-    assert cmd_illustrate._scene_excerpt(
-        in_project, plan_row(scene_id='nowhere')) == '(scene file not found)'
+def test_scene_split_handles_a_missing_scene(in_project):
+    """A missing scene is an unresolved *position*, not an empty unread side.
+
+    Returning `unread: ''` with no error would tell the request there is nothing
+    after this illustration — the exact silence #308 was filed about, arrived at
+    from the other direction.
+    """
+    split = cmd_illustrate._scene_split(in_project, plan_row(scene_id='nowhere'))
+    assert split['read'] == '(scene file not found)'
+    assert split['unread'] == ''
+    assert 'nowhere' in split['error']
+
+
+def test_scene_split_does_not_hand_the_model_the_next_page(in_project):
+    """#308's regression, at the boundary the whole issue is about.
+
+    The old excerpt was a window centred on the anchor, so the beat *after* the
+    marker arrived as ordinary scene prose and came back as the illustration.
+    """
+    write_scene(in_project, 'vigil', SCENE)
+    split = cmd_illustrate._scene_split(in_project, plan_row())
+
+    assert 'She set it on the sill' in split['read']
+    assert 'Nothing came' not in split['read']
+    assert 'By morning she had decided' not in split['read']
+    assert 'Nothing came' in split['unread']
+    assert split['next_sentence'] == 'Nothing came.'
 
 
 # ============================================================================

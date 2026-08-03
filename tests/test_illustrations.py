@@ -286,6 +286,147 @@ def test_insert_defaults_to_after_anchor_when_placement_blank():
 
 
 # ============================================================================
+# Reading position and the scene split (#308)
+# ============================================================================
+
+def test_reading_position_lands_after_the_anchors_paragraph():
+    position = ill.reading_position(SCENE, plan_row())
+    assert position['error'] == ''
+    assert SCENE[:position['offset']].rstrip().endswith(
+        'waited for the street to answer.')
+
+
+def test_reading_position_puts_the_anchor_sentence_after_a_before_anchor_image():
+    """`before_anchor` means the reader has *not* read the anchor sentence yet.
+
+    Placement is relative to the whole paragraph, so the anchor's own paragraph
+    falls on the unread side — which is what makes an image placed before it
+    unable to show what it says.
+    """
+    position = ill.reading_position(SCENE, plan_row(placement='before_anchor'))
+    assert 'She set it on the sill' not in SCENE[:position['offset']]
+
+
+@pytest.mark.parametrize('placement,offset', [
+    ('scene_open', 0),
+    ('scene_close', len(SCENE)),
+])
+def test_reading_position_of_the_anchorless_placements(placement, offset):
+    assert ill.reading_position(
+        SCENE, plan_row(placement=placement))['offset'] == offset
+
+
+@pytest.mark.parametrize('row,expected', [
+    (plan_row(anchor='a phrase the prose does not contain'), 'anchor not found'),
+    (plan_row(anchor=''), 'requires an anchor'),
+    (plan_row(placement='sideways'), 'invalid placement'),
+])
+def test_reading_position_refuses_to_guess(row, expected):
+    """`None`, never a sentinel offset.
+
+    A `-1` would slice to `body[:-1]` — nearly the whole scene, which is exactly
+    the failure #308 describes. `None` raises out of the slice instead.
+    """
+    position = ill.reading_position(SCENE, row)
+    assert position['offset'] is None
+    assert expected in position['error']
+
+
+def test_reading_position_refuses_an_ambiguous_anchor():
+    doubled = SCENE + '\nShe set it on the sill again.\n'
+    position = ill.reading_position(
+        doubled, plan_row(anchor='She set it on the sill'))
+    assert position['offset'] is None
+    assert 'ambiguous' in position['error']
+
+
+def test_insert_marker_lands_exactly_at_the_reading_position():
+    """The shared predicate, asserted as shared.
+
+    `--prompts` splits the prose at `reading_position` and `--embed` places the
+    marker there. If those two ever disagree, the model is shown a different
+    scene than the reader reads, which is #308 with no way to detect it.
+    """
+    for placement in ('before_anchor', 'after_anchor', 'scene_open',
+                      'scene_close'):
+        row = plan_row(placement=placement)
+        offset = ill.reading_position(SCENE, row)['offset']
+        marked = ill.insert_marker(SCENE, row)['text']
+        before_marker = marked.split(ill.marker_for(row['id']))[0]
+        assert (' '.join(before_marker.split())
+                == ' '.join(SCENE[:offset].split())), placement
+
+
+def test_split_at_position_separates_read_from_unread():
+    split = ill.split_at_position(SCENE, plan_row())
+    assert 'She set it on the sill' in split['read']
+    assert 'Nothing came' not in split['read']
+    assert split['unread'].startswith('Nothing came')
+    assert split['error'] == ''
+
+
+def test_split_at_a_scene_close_has_no_unread_prose_and_no_error():
+    """The vacuous case, which consumers must not render as a check.
+
+    An image at the end of a scene has nothing after it to spoil. That is
+    different from a position nobody could resolve, and `SceneSplit` documents
+    the difference as `unread == '' and error == ''`.
+    """
+    split = ill.split_at_position(SCENE, plan_row(placement='scene_close'))
+    assert split['unread'] == ''
+    assert split['next_sentence'] == ''
+    assert split['error'] == ''
+    assert 'By morning she had decided' in split['read']
+
+
+def test_split_at_a_scene_open_has_read_nothing():
+    split = ill.split_at_position(SCENE, plan_row(placement='scene_open'))
+    assert split['read'] == ''
+    assert split['unread'].startswith('The lantern guttered')
+
+
+def test_split_reports_an_unresolved_position_instead_of_guessing():
+    split = ill.split_at_position(SCENE, plan_row(anchor='not in this prose'))
+    assert 'anchor not found' in split['error']
+    assert split['unread'] == ''
+    assert split['next_sentence'] == ''
+    # A leading window, so the request still has prose to work from.
+    assert split['read'].startswith('The lantern guttered')
+
+
+def test_split_caps_the_unread_side_at_a_few_paragraphs():
+    body = SCENE + ''.join(f'\nParagraph number {i} follows on.\n'
+                           for i in range(10))
+    split = ill.split_at_position(body, plan_row())
+    assert split['unread'].count('\n\n') < ill.UNREAD_BLOCKS
+    assert 'Paragraph number 9' not in split['unread']
+
+
+def test_split_read_window_is_bounded_but_keeps_the_anchor():
+    body = ('Filler sentence that goes on. ' * 400) + '\n\n' + SCENE
+    split = ill.split_at_position(body, plan_row())
+    assert len(split['read']) <= ill.READ_CHARS
+    assert 'She set it on the sill' in split['read']
+
+
+def test_first_sentence_collapses_whitespace():
+    """The quote lands in a markdown bullet, where a newline ends the bullet."""
+    assert ill.first_sentence('Dawn\ncame  slowly. Then more.') == \
+        'Dawn came slowly.'
+
+
+def test_first_sentence_caps_a_runaway_sentence():
+    sentence = ill.first_sentence('word ' * 200)
+    assert len(sentence) <= ill.NEXT_SENTENCE_CHARS + 1
+    assert sentence.endswith('…')
+
+
+def test_first_sentence_of_nothing_is_nothing():
+    assert ill.first_sentence('') == ''
+    assert ill.first_sentence('   \n  ') == ''
+
+
+# ============================================================================
 # Resolution — epub / PDF
 # ============================================================================
 

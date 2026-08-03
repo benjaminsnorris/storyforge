@@ -57,10 +57,6 @@ from storyforge import prompts_illustrate as pi
 from storyforge import prompts_packet as pp
 from storyforge import visual_state as vs
 
-# Excerpt handed to the art-direction prompt. Enough to establish the beat and
-# its immediate surroundings without paying to re-send the whole scene.
-_EXCERPT_CHARS = 2400
-
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(
@@ -1389,6 +1385,7 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     # only), which keeps the reference and anchor warnings in plan order.
     jobs: list[_PromptJob] = []
     state_gaps: dict[str, list[str]] = {}
+    unpositioned: list[str] = []
     for row in rows:
         illus_id = row['id'].strip()
         # `include_anchor_gaps=False` because `_warn_unanchored_rows` above named
@@ -1406,19 +1403,25 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             state_gaps.setdefault(gap, []).append(illus_id)
         absent_cell = (row.get('absent') or '').strip()
         contrast = packet.contrast_for_row(row, context=state_ctx)
+        split = _scene_split(project_dir, row)
+        if split['error']:
+            unpositioned.append(illus_id)
         jobs.append({
             'id': illus_id,
             'row': row,
             'state': state,
             'absent': absent_cell,
             'contrast': contrast,
+            'split': split,
             'references': _references_for(
                 project_dir, illus_id, plan=plan, canon_cutoff=cutoff,
                 no_prior_refs=no_prior_refs, style=style),
             'aspect': pi.aspect_for_row(row),
             'request': pi.build_art_direction_request(
                 row=row,
-                scene_excerpt=_scene_excerpt(project_dir, row),
+                scene_excerpt=split['read'],
+                scene_unread=split['unread'],
+                position_error=split['error'],
                 character_anchors=_relevant_anchors(anchors, row),
                 canon_context=canon_ctx, direction=direction,
                 style_note=style_note, anchor_labels=labels,
@@ -1429,6 +1432,16 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     for gap, ids in state_gaps.items():
         log(f'WARNING: {gap} ({len(ids)} illustration(s): '
             f'{", ".join(sorted(ids))})')
+    if unpositioned:
+        # Before the fan-out, with the other free-fix warnings. A row whose
+        # anchor does not resolve gets no spoiler guard and no acceptance check —
+        # the prompt says so, but the moment to fix it is now, not after paying
+        # for the call (#308).
+        log(f'WARNING: {len(unpositioned)} of {len(jobs)} illustration(s) have '
+            f'no resolvable position in their scene, so the prose after them is '
+            f'unknown and their prompts carry no spoiler guard: '
+            f'{", ".join(unpositioned)}. Re-anchor the plan row(s) — '
+            f'`storyforge illustrate --diagnose` names the reason per row.')
     unstated = [job['id'] for job in jobs if not job['state']]
     if unstated:
         log(f'{len(unstated)} of {len(jobs)} illustration(s) have no resolved '
@@ -1522,6 +1535,8 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             row=row, body=body, references=job['references'],
             aspect=job['aspect'], state=job['state'],
             absent=job['absent'], contrast=job['contrast'],
+            next_sentence=job['split']['next_sentence'],
+            position_error=job['split']['error'],
         )
         rel = ill.default_prompt_rel(illus_id)
         with open(os.path.join(project_dir, rel), 'w', encoding='utf-8') as f:
@@ -2128,6 +2143,13 @@ class _PromptJob(TypedDict):
     state: str
     absent: str
     contrast: str
+    #: The scene cut at this illustration's reading position. Carried for the
+    #: same reason the three above are: the request is built from `unread` and
+    #: the prompt file's acceptance block from `next_sentence`, and the two must
+    #: describe one split of one scene. Recomputing in the write phase would
+    #: re-read the file, so a scene edited mid-run would give the model one
+    #: split and the author's spoiler check another (#308).
+    split: ill.SceneSplit
 
 
 def _fetch_art_direction(project_dir: str,
@@ -3292,27 +3314,28 @@ def _style_note(project_dir: str) -> str:
     )
 
 
-def _scene_excerpt(project_dir: str, row: dict[str, str]) -> str:
-    """Return the prose around an illustration's anchor.
+def _scene_split(project_dir: str, row: dict[str, str]) -> ill.SceneSplit:
+    """Return the scene cut at the point this illustration appears.
 
     Markers are stripped first — the art-direction model should see the scene
     as a reader would, not the build artifacts in it.
+
+    The cut, rather than a window centred on the anchor, is #308's fix: the
+    model used to receive prose from both sides of the marker with nothing
+    saying which side was which, and reliably wrote the image of the beat just
+    after it. A missing scene file is a `position_error`, not an empty string,
+    so the request says the position is unknown instead of implying there is
+    nothing after the image.
     """
     scene_id = (row.get('scene_id') or '').strip()
     path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
     if not os.path.isfile(path):
-        return '(scene file not found)'
+        return {'read': '(scene file not found)', 'unread': '',
+                'next_sentence': '',
+                'error': f'scene file for {scene_id!r} is not in scenes/'}
     with open(path, encoding='utf-8') as f:
         text = ill.strip_markers(f.read())
-
-    anchor = (row.get('anchor') or '').strip()
-    match = ill.find_anchor(text, anchor) if anchor else None
-    if match is None:
-        return text[:_EXCERPT_CHARS]
-
-    half = _EXCERPT_CHARS // 2
-    start = max(0, match['start'] - half)
-    return text[start:match['end'] + half]
+    return ill.split_at_position(text, row)
 
 
 def _read_capped(path: str, limit: int) -> str:
