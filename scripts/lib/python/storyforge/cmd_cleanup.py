@@ -1286,10 +1286,10 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
         'shipping it, so the editions would disagree about a book you had '
         'not re-rendered yet',
     'state_mid_scene_change':
-        'Set state_override on the plan row to the state true after the scene\'s '
-        'turn — the illustration sits at the close of a scene the entity changes '
-        'during, and the log holds one value for the whole scene, which is '
-        'usually the state going in',
+        'Set state_override on the plan row to state what is true in this image. '
+        'It sits at the open or close of a scene the entity changes during, and '
+        'reference/visual-state.csv holds one value for the whole scene, so it '
+        'cannot say which side of that change the image is on',
     'prompt_spoils_unread':
         'Re-run storyforge illustrate --prompts --ids <id>, which sends the '
         'scene split at the illustration\'s position. Then check the render: if '

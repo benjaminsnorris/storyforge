@@ -745,11 +745,17 @@ class ReadingPosition(TypedDict):
     has been read when the image appears, everything after it has not.
     ``None`` when the position could not be resolved, and ``error`` says why.
 
-    Deliberately ``int | None`` rather than a ``-1`` sentinel. A caller that
-    forgets to check gets a ``TypeError`` out of the slice instead of
-    ``body[:-1]``, which is nearly the whole scene — the exact silence #308 was
-    filed about, where post-anchor prose reached the model as ordinary scene
-    text and came back as the illustration.
+    Deliberately ``int | None`` rather than a ``-1`` sentinel, which would slice
+    to ``body[:-1]`` — nearly the whole scene, and indistinguishable from a
+    resolved position.
+
+    ``None`` is not *itself* loud: ``body[:None]`` is the whole body, so a plain
+    slice would swallow it just as quietly. What it buys is that arithmetic on it
+    raises, which is what ``split_at_position`` does. So every consumer checks
+    explicitly, and ``insert_marker`` — whose slice is plain — returns on ``None``
+    before reaching it. (An earlier version of this docstring claimed the
+    ``TypeError`` came from "the slice"; it does not, and the one plain slice in
+    the pipeline is the one that would have been trusted.)
     """
     offset: int | None
     error: str
@@ -796,6 +802,9 @@ def reading_position(body: str, row: dict[str, str]) -> ReadingPosition:
                          f'lengthen it to a unique phrase'}
     block = _block_containing(body, match['start'])
     if block is None:
+        # Defensive, and inherited: `find_anchor` succeeded, so the offset is in
+        # the text and `_paragraph_blocks` should contain it. Kept because the two
+        # walk the text differently and refusing is cheaper than a wrong offset.
         return {'offset': None,
                 'error': 'could not resolve the paragraph containing the anchor'}
 
@@ -1009,6 +1018,14 @@ def insert_marker(scene_text: str, row: dict[str, str]) -> InsertResult:
     and ``error`` explains why — placing an illustration at a guessed offset
     is worse than not placing it, because the wrong beat reads as a mistake
     the author never made.
+
+    Since the placement branches collapsed onto `reading_position`, the
+    anchorless placements route through the same ``rstrip``/``lstrip`` as the
+    anchored ones. That normalizes leading and trailing blank lines and strips
+    indentation from the first paragraph at ``scene_open`` — which `before_anchor`
+    on a first paragraph already did, so it is consistent rather than novel, but
+    it does mean a deliberately indented opening block (a markdown code block)
+    loses its indent. Pinned by test rather than left to be rediscovered.
     """
     illus_id = (row.get('id') or '').strip()
     if not illus_id:

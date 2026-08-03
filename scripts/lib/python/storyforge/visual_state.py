@@ -320,10 +320,10 @@ def prepass(project_dir: str) -> PrepassResult:
        canon id (`nora-clothing` covers `nora`), and a `state_override` on the
        row satisfies it too: a one-off state that does not persist is still a
        stated state;
-    4. a `scene_close` illustration whose `canon_refs` name an entity that
-       changes *during* that scene — `state_mid_scene_change`. The log holds one
-       value per scene and the image is read after the scene's turn, so the
-       resolved state is usually the one going in (#308);
+    4. an illustration at a scene's *edge* (`scene_open` or `scene_close`) whose
+       `canon_refs` name an entity that changes during that scene —
+       `state_mid_scene_change`. The log holds one value per scene, so it cannot
+       say which side of the change the image is on (#308);
     5. `candidate_scenes` — the scenes that mention a tracked entity at or after
        that entity's first transition, which is where prose and log can
        disagree.
@@ -438,55 +438,65 @@ def prepass(project_dir: str) -> PrepassResult:
                           f'if the state is true in this image only',
             })
 
-        # --- Check 5: a scene_close image over a state that changes mid-scene --
+        # --- Check 4: an image at a scene's edge over a state that changes in it
         #
-        # `state_at` resolves at scene granularity, so the log holds one value
-        # for an entity across a whole scene. A `scene_close` illustration is
-        # read *after* that scene's turn — so when the entity changes during the
-        # scene, the single value the log holds is very often the state going in,
-        # and the image is of the state coming out.
+        # `state_at` resolves at scene granularity, so the log holds exactly one
+        # value for an entity across a whole scene. That value is the transition's
+        # declared state — the comparison is `<=`, so a transition takes effect AT
+        # its own scene, and `state_at`'s docstring says so. The problem is not
+        # which side of the comparison it falls on; it is that **one value cannot
+        # describe both sides of a change**, and the author's `evidence` may quote
+        # the change mid-flight.
         #
-        # That is #308's LF-13 exactly: the Great Lamp's transition at that scene
-        # read "flame shrinking" and the illustration's whole subject was the
-        # Lamp dead. Nothing was wrong with the log and nothing was wrong with
-        # the row; there was simply no way to say which side of the turn the
-        # image sits on, and the resolved state was silently the wrong one.
+        # That is #308's LF-13: the Great Lamp's transition at that scene read
+        # "the line of light pulled in to just the square, flame shrinking", and
+        # the illustration's whole subject was the Lamp dead. Nothing was wrong
+        # with the log and nothing was wrong with the row — there was simply no
+        # way to say which side of the turn the image sits on.
         #
-        # Reported rather than re-resolved. Guessing "scene_close means the
-        # post-transition state" would be wrong for every scene whose change
-        # lands in its opening paragraph, and this pipeline reports an ambiguous
-        # anchor rather than placing art at a guessed offset for the same reason.
-        # A `state_override` on the row is the fix, and it suppresses this the
-        # way it suppresses check 3 — an author who has stated the one-off state
-        # has already answered the question.
-        if (row.get('placement') or '').strip() != 'scene_close':
-            continue
-        for ref in refs:
-            needle = ref.lower()
-            if any(key == needle or key.startswith(f'{needle}-')
-                   for key in overridden):
-                continue
-            changing = sorted(
-                t['entity'] for t in transitions
-                if t['from_scene'] == scene_id
-                and (t['entity'].lower() == needle
-                     or t['entity'].lower().startswith(f'{needle}-'))
-            )
-            if not changing:
-                continue
-            findings.append({
-                'kind': 'state_mid_scene_change',
-                'id': rid,
-                'scene_id': scene_id,
-                'file': STATE_FILE,
-                'detail': f'illustration {rid!r} sits at the close of '
-                          f'{scene_id}, and {_csv_safe(ref)} changes during that '
-                          f'scene ({_csv_safe(", ".join(changing))}). The '
-                          f'resolved state is the one the log holds for the whole '
-                          f'scene, which is usually the state going in — set '
-                          f'state_override on the plan row to say what is true '
-                          f'in this image, after the scene\'s turn',
-            })
+        # Both edges are affected, symmetrically, and the earlier claim that only
+        # `scene_close` was ("every other placement now has a resolvable position
+        # inside the scene") was wrong twice over: a reading position is never fed
+        # into state resolution at all, and `scene_open` has the same gap with the
+        # sign flipped — it precedes the scene's prose entirely, so under `<=` it
+        # resolves to a changed state the reader has not reached yet. An anchored
+        # placement is excluded because it names a phrase, which is at least
+        # evidence about where in the scene it sits.
+        #
+        # Reported rather than re-resolved: guessing "scene_close means after the
+        # change" is wrong for a scene whose change lands in its first paragraph,
+        # and this pipeline reports an ambiguous anchor rather than placing art at
+        # a guessed offset for the same reason. A `state_override` is the fix and
+        # suppresses this exactly as it suppresses check 3.
+        placement = (row.get('placement') or '').strip()
+        if placement in ('scene_open', 'scene_close'):
+            edge = 'close' if placement == 'scene_close' else 'open'
+            for ref in refs:
+                needle = ref.lower()
+                if any(key == needle or key.startswith(f'{needle}-')
+                       for key in overridden):
+                    continue
+                changing = sorted(
+                    t['entity'] for t in transitions
+                    if t['from_scene'] == scene_id
+                    and (t['entity'].lower() == needle
+                         or t['entity'].lower().startswith(f'{needle}-'))
+                )
+                if not changing:
+                    continue
+                findings.append({
+                    'kind': 'state_mid_scene_change',
+                    'id': rid,
+                    'scene_id': scene_id,
+                    'file': STATE_FILE,
+                    'detail': f'illustration {rid!r} sits at the {edge} of '
+                              f'{scene_id}, and {_csv_safe(ref)} changes during '
+                              f'that scene ({_csv_safe(", ".join(changing))}). '
+                              f'The log holds one value for the whole scene, so '
+                              f'it cannot say which side of that change this '
+                              f'image is on — set state_override on the plan row '
+                              f'to state what is true in this image',
+                })
 
     candidates, undrafted, terms = _candidate_scenes(project_dir, order,
                                                      resolved)

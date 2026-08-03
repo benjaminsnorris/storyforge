@@ -358,6 +358,16 @@ def test_insert_marker_lands_exactly_at_the_reading_position():
                 == ' '.join(SCENE[:offset].split())), placement
 
 
+def test_scene_open_normalizes_the_first_paragraphs_indentation():
+    """A consequence of collapsing the placement branches onto one offset: the
+    anchorless placements now route through the same lstrip as the anchored ones.
+    Pinned so it is not rediscovered as a mystery."""
+    indented = '    Indented opening block.\n\nA second paragraph.\n'
+    text = ill.insert_marker(indented, plan_row(placement='scene_open'))['text']
+    assert text.startswith(ill.marker_for('lantern-vigil'))
+    assert '\n\nIndented opening block.' in text
+
+
 def test_split_at_position_separates_read_from_unread():
     split = ill.split_at_position(SCENE, plan_row())
     assert 'She set it on the sill' in split['read']
@@ -2244,6 +2254,13 @@ def test_strip_is_byte_identical_for_every_placement(placement, anchor):
     ('state_unspecified', 'warning'),
     ('prose_changed', 'warning'),
     ('audit_stale', 'warning'),
+    # #308. All four leave a publishable book: two are about art not yet
+    # rendered, one reports a gap in our own knowledge, and `missing_anchor`
+    # matches `anchor_drift` — the same row in the same in-flight condition.
+    ('state_mid_scene_change', 'warning'),
+    ('prompt_spoils_unread', 'warning'),
+    ('prompt_spoiler_unchecked', 'warning'),
+    ('missing_anchor', 'warning'),
 ])
 def test_new_finding_kinds_have_the_intended_severity(kind, expected):
     """A transition pointing at a scene that exists nowhere silently stops
