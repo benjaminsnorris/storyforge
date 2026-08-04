@@ -2829,6 +2829,32 @@ def test_the_cap_can_drop_a_batch_member_when_a_plan_id_repeats(in_project):
     assert 'prior-3.png' in dropped and 'later-state' in dropped
 
 
+def test_the_dropped_batch_note_bounds_a_list_a_bad_plan_can_lengthen(
+        in_project, monkeypatch):
+    """Ten rows sharing one batch id would otherwise print ten paths all labeled
+    `(establisher)`. The unreferenceable-slot note is bounded at four by its own
+    keying and is deliberately *not* truncated — see `_and_more_phrases`."""
+    monkeypatch.setattr(cmd_illustrate, '_MAX_PRIOR_REFERENCES', 1)
+    _style_ref(in_project)
+    rows = _priors(in_project, 1)
+    twins = []
+    for i in range(6):
+        twin = dict(rows[0])
+        twin['asset_file'] = ill.default_asset_rel(f'copy-{i}')
+        make_png(os.path.join(in_project, twin['asset_file']), 8, 8)
+        twins.append(twin)
+    ill.write_plan(in_project, rows + twins + [plan_row()])
+
+    notes = []
+    cmd_illustrate._references_for(
+        in_project, 'lantern-vigil', batch=_batch(establisher='prior-0'),
+        notes=notes)
+
+    dropped = next(n for n in notes if '**anchor batch**' in n)
+    assert 'and 3 more' in dropped
+    assert dropped.count('(establisher)') == packet._MAX_NAMED_IDS
+
+
 def test_no_prior_refs_is_unaffected_by_the_batch(in_project):
     """The rebuild switch is cover-only by design — promotion has nothing to
     promote."""

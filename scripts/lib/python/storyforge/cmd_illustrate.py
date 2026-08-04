@@ -2975,9 +2975,14 @@ def _references_for(project_dir: str, illus_id: str, *,
              f'illustrate --diagnose` gives the order), then re-run {rerun}.')
 
     if slot_unreferenceable and not no_prior_refs:
-        described = ', '.join(
-            f'{slot_of[cid]} — {why}'
-            for cid, why in slot_unreferenceable.items())
+        # Not bounded, unlike `dropped_batch` below. This dict is keyed by
+        # illustration id and every key is in `slot_of`, so it is at most four
+        # entries *whatever the plan does* — and each one is a distinct approved
+        # image the author has to go and fix. `_MAX_NAMED_IDS` is calibrated for
+        # seventeen paths sharing one cause; applied to four actionable ones it
+        # replaces the fourth with "and 1 more", which cannot be acted on.
+        described = '; '.join(f'{slot_of[cid]} — {why}'
+                              for cid, why in slot_unreferenceable.items())
         log(f'WARNING: {illus_id}: {len(slot_unreferenceable)} anchor-batch '
             f'image(s) exist but cannot be referenced ({described}).')
         note(f'{len(slot_unreferenceable)} image(s) from the **anchor batch** '
@@ -2986,8 +2991,8 @@ def _references_for(project_dir: str, illus_id: str, *,
              f'signed off on — fix those before the churn rather than '
              f'generating against the substitutes above.')
     if dropped_batch:
-        described = ', '.join(f'`{c.path}` ({slot_of[c.illus_id]})'
-                              for c in dropped_batch)
+        described = _and_more_phrases([f'`{c.path}` ({slot_of[c.illus_id]})'
+                                       for c in dropped_batch])
         log(f'  {illus_id}: {len(dropped_batch)} image(s) from the anchor batch '
             f'did not fit the reference list ({described}) — it stops at '
             f'{_MAX_PRIOR_REFERENCES} prior illustration(s).')
@@ -3082,6 +3087,22 @@ def _and_more_files(paths: list[str]) -> str:
     named = ', '.join(f'`{p}`' for p in paths[:packet._MAX_NAMED_IDS])
     rest = len(paths) - packet._MAX_NAMED_IDS
     return f'{named} and {rest} more' if rest > 0 else named
+
+
+def _and_more_phrases(phrases: list[str]) -> str:
+    """Bound an already-rendered list of clauses, as `_and_more_files` bounds paths.
+
+    Used for the dropped-batch note only. That note looks bounded at four by slot
+    count — but the one route into it is a duplicate plan `id`, which is also the
+    one way that bound breaks: ten rows sharing one batch id would print ten paths
+    all labeled `(establisher)`. So the bound must not depend on plan validity
+    here. The unreferenceable-slot note is keyed by id *within* `slot_of` and so is
+    at most four however malformed the plan is; it is deliberately unbounded, since
+    truncating four actionable items to three plus a count loses the fourth.
+    """
+    named = '; '.join(phrases[:packet._MAX_NAMED_IDS])
+    rest = len(phrases) - packet._MAX_NAMED_IDS
+    return f'{named}; and {rest} more' if rest > 0 else named
 
 
 def _relevant_anchors(anchors: dict[str, str],
