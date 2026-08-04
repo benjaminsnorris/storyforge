@@ -1344,15 +1344,23 @@ class AnchorBatch(TypedDict):
     #: darkest in the book is how an author discovers at image twenty that
     #: nothing is.
     fallback: list[str]
+    #: Which slots hold a guess rather than a choice — a subset of `darkest` and
+    #: `brightest`, the only two slots with a fallback. `fallback` says the same
+    #: thing in prose, and prose is unaskable: #311's reference labels have to
+    #: know, because a prompt file carries neither the batch table nor these
+    #: notes, so `anchor batch: brightest` there is a claim with nothing in the
+    #: document to check it against. An *empty* slot is not a guessed one.
+    guessed: list[str]
 
 
 def anchor_batch(project_dir: str) -> AnchorBatch:
     """The four-slot anchor batch, with every guess disclosed."""
     rows = rows_in_reading_order(project_dir)
     fallback: list[str] = []
+    guessed: list[str] = []
     if not rows:
         return {'establisher': '', 'darkest': '', 'brightest': '',
-                'later_state': '',
+                'later_state': '', 'guessed': [],
                 'fallback': ['the plan has no rows, so there is no anchor '
                              'batch to render. Run `storyforge illustrate '
                              '--plan`.']}
@@ -1375,6 +1383,10 @@ def anchor_batch(project_dir: str) -> AnchorBatch:
     for slot, guess, position in (('darkest', darkest, 'first'),
                                   ('brightest', brightest, 'last')):
         if slot not in by_register:
+            # Recorded in both channels on purpose: `fallback` is what README
+            # prints, `guessed` is what a consumer can branch on. They are set
+            # together so a slot cannot be disclosed in one and not the other.
+            guessed.append(slot)
             fallback.append(
                 f'no plan row is marked `register={slot}`, so the {slot} slot '
                 f'is a guess: `{guess}`, the {position} illustration in '
@@ -1394,7 +1406,7 @@ def anchor_batch(project_dir: str) -> AnchorBatch:
 
     return {'establisher': establisher, 'darkest': darkest,
             'brightest': brightest, 'later_state': later_state,
-            'fallback': fallback}
+            'fallback': fallback, 'guessed': guessed}
 
 
 def _no_establisher_note(rows: list[dict[str, str]]) -> str:

@@ -712,6 +712,31 @@ def test_the_fallback_is_reported_when_register_is_empty(packet_project):
     assert batch['brightest'] == 'the-blank-page'
 
 
+def test_a_guessed_slot_is_reported_structurally_not_only_in_prose(
+        packet_project):
+    """`fallback` is prose, so no consumer can ask "was this slot guessed?" —
+    and #311's reference labels have to, since a prompt file carries neither the
+    batch table nor the fallback notes (#311 review, CR-H1)."""
+    rows = ill.read_plan(packet_project)
+    rows[0]['register'] = ''            # was brightest
+    ill.write_plan(packet_project, rows)
+    batch = packet.anchor_batch(packet_project)
+    assert batch['guessed'] == ['brightest']
+
+
+def test_a_chosen_register_slot_is_not_reported_as_guessed(packet_project):
+    """The seeded plan marks both extremes by hand."""
+    assert packet.anchor_batch(packet_project)['guessed'] == []
+
+
+def test_an_unfilled_slot_is_not_a_guessed_one(packet_project):
+    """Empty and guessed are different answers: the seeded plan has no
+    later-state exemplar, and nothing was guessed in its place."""
+    batch = packet.anchor_batch(packet_project)
+    assert batch['later_state'] == ''
+    assert 'later_state' not in batch['guessed']
+
+
 def test_only_the_missing_register_slot_is_disclosed(packet_project):
     rows = ill.read_plan(packet_project)
     rows[0]['register'] = ''  # was brightest

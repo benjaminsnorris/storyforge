@@ -2490,7 +2490,7 @@ def _batch(**slots) -> packet.AnchorBatch:
     """
     batch: packet.AnchorBatch = {
         'establisher': '', 'darkest': '', 'brightest': '', 'later_state': '',
-        'fallback': [],
+        'fallback': [], 'guessed': [],
     }
     batch.update(slots)          # type: ignore[typeddict-item]
     return batch
@@ -2615,12 +2615,128 @@ def test_the_cap_note_names_a_dropped_anchor_batch_image(in_project,
                      brightest='prior-5', later_state='prior-4'),
         notes=notes)
 
-    dropped = next(n for n in notes if 'anchor batch' in n)
+    # Selected on the bolded phrase, not on `'anchor batch'`: the *anonymous*
+    # cap note also contains that substring, and this test passed only because
+    # this note happens to be appended first.
+    dropped = next(n for n in notes if '**anchor batch**' in n)
     assert 'brightest' in dropped and 'later-state' in dropped
     assert 'prior-5.png' in dropped and 'prior-4.png' in dropped
     # The two that fit are not reported as dropped.
     assert 'prior-7.png' not in dropped and 'prior-6.png' not in dropped
     assert 'anchor batch' in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# What the notes may claim about the batch (#311 review)
+#
+# The exclusion walk runs BEFORE the ranking, so promotion routinely has nothing
+# to promote: a partly re-rendered batch is the normal state during phase 1. The
+# first cut of #311 closed with "so what is listed is what was approved"
+# unconditionally, which on that state was an affirmative falsehood in the one
+# section whose job is saying the list is thinner than it looks.
+# ---------------------------------------------------------------------------
+
+def _partly_stale_batch(project_dir):
+    """4 approved-but-pre-canon rows, 5 current non-batch rows. Phase 1, midway.
+
+    Five, so the cap also bites and the capped note's claim about the batch is
+    exercised on the same fixture. Returns the batch naming the four stale rows.
+    """
+    _style_ref(project_dir)
+    stale = _priors(project_dir, 4, ingested_at='2026-07-01')
+    for row, name in zip(stale, ('b-est', 'b-dark', 'b-bright', 'b-later')):
+        row['id'] = name
+        rel = ill.default_asset_rel(name)
+        make_png(os.path.join(project_dir, rel), 8, 8)
+        row['asset_file'] = rel
+    current = _priors(project_dir, 5)
+    ill.write_plan(project_dir, stale + current + [plan_row()])
+    return _batch(establisher='b-est', darkest='b-dark',
+                  brightest='b-bright', later_state='b-later')
+
+
+def test_the_notes_never_claim_an_excluded_batch_is_in_the_list(in_project):
+    """Reproduced from the review: 0 of 4 approved images reached the list, and
+    the note said what is listed is what was approved."""
+    batch = _partly_stale_batch(in_project)
+
+    notes = []
+    refs = cmd_illustrate._references_for(
+        in_project, 'lantern-vigil', canon_cutoff='2026-07-20',
+        batch=batch, notes=notes)
+
+    assert not any('prior-' not in p and 'b-' in p for p, _ in refs), \
+        'a pre-canon batch member must not be referenced'
+    assert not any('what is listed is what was approved' in n for n in notes)
+    assert any('0 of 4 anchor-batch' in n for n in notes)
+
+
+def test_the_notes_do_claim_the_batch_when_the_batch_is_all_there(in_project):
+    """The reassurance is worth having — it just has to be checked."""
+    _style_ref(in_project)
+    ill.write_plan(in_project, _priors(in_project, 8) + [plan_row()])
+
+    notes = []
+    cmd_illustrate._references_for(
+        in_project, 'lantern-vigil',
+        batch=_batch(establisher='prior-7', darkest='prior-6',
+                     brightest='prior-5', later_state='prior-4'),
+        notes=notes)
+    assert any('what is listed is what was approved' in n for n in notes)
+
+
+def test_an_excluded_batch_member_is_named_with_its_slot(in_project, capsys):
+    """SKILL.md promises the author is told this. The exclusion note aggregates
+    by `StaleKind` and cannot say which paths were the approved ones."""
+    batch = _partly_stale_batch(in_project)
+
+    notes = []
+    cmd_illustrate._references_for(
+        in_project, 'lantern-vigil', canon_cutoff='2026-07-20',
+        batch=batch, notes=notes)
+
+    named = next(n for n in notes if 'b-est.png' in n and 'establisher' in n)
+    assert 'darkest' in named and 'brightest' in named and 'later-state' in named
+    assert 'anchor-batch' in capsys.readouterr().out
+
+
+def test_a_batch_member_whose_file_is_gone_is_not_dropped_silently(in_project,
+                                                                   capsys):
+    """The one exclusion that can silently lose an approved image: `ingested`,
+    current `ingested_at`, and the PNG moved or renamed without a plan edit —
+    realistic, since the author often works from another machine. `needs_render`
+    never consults `asset_file`, so the batch table still reads `Rendered: yes`.
+    """
+    _style_ref(in_project)
+    rows = _priors(in_project, 3)
+    os.remove(os.path.join(in_project, rows[2]['asset_file']))
+    ill.write_plan(in_project, rows + [plan_row()])
+
+    notes = []
+    refs = cmd_illustrate._references_for(
+        in_project, 'lantern-vigil',
+        batch=_batch(establisher='prior-2'), notes=notes)
+
+    assert 'prior-2' not in _stems(refs)
+    assert any('prior-2.png' in n for n in notes)
+    assert 'prior-2.png' in capsys.readouterr().out
+
+
+def test_a_guessed_register_slot_is_labeled_as_a_guess(in_project):
+    """CLAUDE.md: nothing populates `register` on most projects, so darkest and
+    brightest fall back to first and last in reading order. A prompt file
+    carries no batch table and no `fallback` notes, so an unqualified
+    `anchor batch: brightest` is a claim the author cannot check anywhere."""
+    _style_ref(in_project)
+    ill.write_plan(in_project, _priors(in_project, 3) + [plan_row()])
+
+    refs = cmd_illustrate._references_for(
+        in_project, 'lantern-vigil',
+        batch=_batch(darkest='prior-0', brightest='prior-2',
+                     guessed=['brightest']))
+    labels = dict(zip(_stems(refs), [label for _p, label in refs]))
+    assert 'guess' in labels['prior-2']
+    assert 'guess' not in labels['prior-0']
 
 
 def test_no_prior_refs_is_unaffected_by_the_batch(in_project):

@@ -2793,10 +2793,23 @@ def _references_for(project_dir: str, illus_id: str, *,
     for slot, _label in packet.BATCH_SLOTS:
         promoted = (batch.get(slot) or '').strip()  # type: ignore[literal-required]
         if promoted and promoted not in slot_of:
-            slot_of[promoted] = _slot_name(slot)
+            slot_of[promoted] = _slot_name(slot) + (
+                ', guessed' if slot in batch['guessed'] else '')
     slot_rank = {promoted: rank for rank, promoted in enumerate(slot_of)}
 
     skipped_stale = 0
+    # Filled slot -> why that approved image is not in the list, for the members
+    # whose art exists and still did not reach it. The claim "what is listed is
+    # what was approved" has to be *checked*, because the exclusion walk runs
+    # before the ranking and a partly re-rendered batch is the normal phase-1
+    # state: on one, promotion had nothing to promote and the note said the
+    # opposite (#311 review, SF-HIGH-1/HIGH-2).
+    #
+    # Deliberately not populated for a batch member that is merely not ingested
+    # yet: unrendered is valid in-flight state, `--diagnose` already counts those
+    # rungs, and a fresh book would get four notes saying nothing actionable. The
+    # count below still declines to claim the batch is present.
+    slot_unreferenceable: dict[str, str] = {}
     # (id, path) for every row that survived the exclusion checks, in plan order.
     # Collected rather than appended straight to `references` so the cap is
     # applied to *ranked* candidates: the exclusions and their disclosures stay a
@@ -2824,6 +2837,17 @@ def _references_for(project_dir: str, illus_id: str, *,
             continue
         rel = (row.get('asset_file') or '').strip()
         if not rel or not os.path.isfile(os.path.join(project_dir, rel)):
+            # The one exclusion that can lose an approved image with nothing
+            # said anywhere: `status=ingested`, a current `ingested_at`, and the
+            # file moved or renamed without a plan edit. `packet.needs_render`
+            # never consults `asset_file`, so the batch table still reads
+            # `Rendered: yes` for that slot while the chain silently lacks it.
+            # `validate_plan`'s `missing_file` is the gate; this is the artifact
+            # that made the claim (#311 review).
+            if row['id'].strip() in slot_of:
+                declared = f'`{rel}`' if rel else 'no `asset_file`'
+                slot_unreferenceable[row['id'].strip()] = (
+                    f'{declared}: declared by the plan, not on disk')
             continue
         if no_prior_refs:
             skipped_stale += 1
@@ -2846,6 +2870,13 @@ def _references_for(project_dir: str, illus_id: str, *,
             skipped_stale += 1
             excluded_stale.setdefault(
                 ill.stale_render_kind(row, canon_cutoff), []).append(rel)
+            # `excluded_stale` aggregates by `StaleKind` and so cannot say which
+            # of those paths were the four the author approved. That disclosure
+            # is what `skills/illustrate/SKILL.md` promises the author, and it
+            # was the half of #311's asymmetry that went unimplemented.
+            if row['id'].strip() in slot_of:
+                slot_unreferenceable[row['id'].strip()] = (
+                    f'`{rel}`: {stale_reason}')
             continue
         # The cap is applied after this loop, not inside it, so that a skipped
         # render is still disclosed: breaking out early would hide every stale
@@ -2870,7 +2901,17 @@ def _references_for(project_dir: str, illus_id: str, *,
     # #311 that made the bug hard to notice at all.
     dropped_batch = [(slot_of[cid], rel) for cid, rel in dropped
                      if cid in slot_of]
-    capped = len(dropped) - len(dropped_batch)
+    # Defined rather than derived by subtraction: `dropped_batch ⊆ dropped` is
+    # what keeps a difference non-negative, and `if capped:` on a negative would
+    # print "-1 further ingested illustration(s)".
+    capped = sum(1 for cid, _rel in dropped if cid not in slot_of)
+
+    # An illustration is never in its own chain, so its own slot is not a slot
+    # this list could have carried — counting it would tell every batch member's
+    # prompt that the batch is one short.
+    expected_slots = [cid for cid in slot_of if cid != illus_id]
+    listed_slots = [cid for cid, _rel in eligible[:_MAX_PRIOR_REFERENCES]
+                    if cid in slot_of and cid != illus_id]
 
     if excluded_no_prior:
         note(f'{len(excluded_no_prior)} ingested illustration(s) are not listed '
@@ -2885,6 +2926,17 @@ def _references_for(project_dir: str, illus_id: str, *,
              f'to remove. Re-render them from the current canon (`storyforge '
              f'illustrate --diagnose` gives the order), then re-run {rerun}.')
 
+    if slot_unreferenceable and not no_prior_refs:
+        described = ', '.join(
+            f'{slot_of[cid]} — {why}'
+            for cid, why in slot_unreferenceable.items())
+        log(f'WARNING: {illus_id}: {len(slot_unreferenceable)} anchor-batch '
+            f'image(s) exist but cannot be referenced ({described}).')
+        note(f'{len(slot_unreferenceable)} image(s) from the **anchor batch** '
+             f'have art that this list cannot use: {described}. Those are the '
+             f'renders phase 1 exists to approve, so the chain is not what you '
+             f'signed off on — fix those before the churn rather than '
+             f'generating against the substitutes above.')
     if dropped_batch:
         described = ', '.join(f'`{rel}` ({slot})' for slot, rel in dropped_batch)
         log(f'  {illus_id}: {len(dropped_batch)} image(s) from the anchor batch '
@@ -2900,11 +2952,28 @@ def _references_for(project_dir: str, illus_id: str, *,
         log(f'  {illus_id}: {capped} further ingested illustration(s) were not '
             f'listed — the reference list stops at {_MAX_PRIOR_REFERENCES} '
             f'prior illustration(s).')
+        # The closing clause is a claim about the batch, so it is *checked*
+        # rather than asserted. Unconditional, it was an affirmative falsehood on
+        # the ordinary partly-re-rendered batch — 0 of 4 approved images in the
+        # list, under a sentence saying the list was what was approved, in the
+        # one section whose job is telling the author it is thinner than it looks
+        # (#311 review). And when `dropped_batch` is non-empty it contradicted
+        # the note directly above it.
+        assured = (
+            'The anchor batch is ranked ahead of plan order, so what is listed '
+            'is what was approved.'
+            if expected_slots and len(listed_slots) == len(expected_slots)
+            and not dropped_batch
+            else f'{len(listed_slots)} of {len(expected_slots)} anchor-batch '
+                 f'image(s) are in this list; the batch is ranked ahead of plan '
+                 f'order, so the rest were excluded or not yet rendered rather '
+                 f'than crowded out.' if expected_slots
+            else 'No anchor-batch image is filled, so nothing was ranked ahead '
+                 'of plan order.')
         note(f'{capped} further ingested illustration(s) are eligible but not '
              f'listed: the list stops at {_MAX_PRIOR_REFERENCES} prior '
              f'illustration(s), because past that a model starts averaging them '
-             f'rather than matching them. The anchor batch is ranked ahead of '
-             f'plan order, so what is listed is what was approved.')
+             f'rather than matching them. {assured}')
 
     prior = [r for r in references if r[0] != cover]
     if not prior:
