@@ -2571,18 +2571,78 @@ def test_only_the_slots_that_resolved_are_promoted(in_project):
                             'prior-0', 'prior-1']
 
 
-def test_a_batch_reference_is_labeled_with_its_slot(in_project):
+def test_every_batch_slot_is_labeled_with_its_own_name(in_project):
     """The label is what README shows beside the path, and which of the four
-    approved images this is tells the author what it is there to hold."""
+    approved images this is tells the author what it is there to hold.
+
+    All four, not just one: with a single slot asserted, suppressing the label for
+    `later_state` alone passed the whole suite, and SKILL.md tells the author the
+    batch is labeled — so they could not tell which upload locks a changed state.
+    """
     _style_ref(in_project)
-    ill.write_plan(in_project, _priors(in_project, 2) + [plan_row()])
+    ill.write_plan(in_project, _priors(in_project, 5) + [plan_row()])
 
     refs = cmd_illustrate._references_for(
-        in_project, 'lantern-vigil', batch=_batch(darkest='prior-1'))
+        in_project, 'lantern-vigil',
+        batch=_batch(establisher='prior-0', darkest='prior-1',
+                     brightest='prior-2', later_state='prior-3'))
     labels = dict(zip(_stems(refs), [label for _p, label in refs]))
-    assert 'anchor batch' in labels['prior-1']
-    assert 'darkest' in labels['prior-1']
-    assert 'anchor batch' not in labels['prior-0']
+    assert labels['prior-0'] == 'prior illustration (anchor batch: establisher)'
+    assert labels['prior-1'] == 'prior illustration (anchor batch: darkest)'
+    assert labels['prior-2'] == 'prior illustration (anchor batch: brightest)'
+    assert labels['prior-3'] == 'prior illustration (anchor batch: later-state)'
+    # `prior-4` is in no slot, so a full batch caps it out entirely — which is the
+    # arithmetic that makes the cover's additiveness load-bearing.
+    assert 'prior-4' not in labels
+
+
+def test_one_row_filling_two_slots_takes_one_reference(in_project):
+    """The common configuration rather than an edge case: with no `register`
+    cells, darkest and brightest can resolve to the same illustration, which
+    `anchor_batch` discloses as "the batch brackets nothing"."""
+    _style_ref(in_project)
+    ill.write_plan(in_project, _priors(in_project, 3) + [plan_row()])
+
+    refs = cmd_illustrate._references_for(
+        in_project, 'lantern-vigil',
+        batch=_batch(darkest='prior-2', brightest='prior-2',
+                     later_state='prior-1'))
+    # One reference for the doubled row, named by the first slot it fills, and
+    # the later slot still ranked behind it rather than displaced.
+    assert _stems(refs) == ['cover-illustration', 'prior-2', 'prior-1',
+                            'prior-0']
+    labels = dict(zip(_stems(refs), [label for _p, label in refs]))
+    assert labels['prior-2'] == 'prior illustration (anchor batch: darkest)'
+
+
+def test_the_batch_ranks_ids_that_are_not_lowercase(in_project):
+    """`ill._ID_RE` accepts `LF-01`, `asset_key` exists to lowercase an id, and
+    the book #311 was filed about uses `LF-05`/`LF-13`/`LF-19`/`LF-20` — so a
+    stray `.lower()` on either side of the id comparison would reproduce the bug
+    on exactly that book while every lowercase-id test stayed green."""
+    _style_ref(in_project)
+    rows = []
+    for i in range(6):
+        illus_id = f'LF-0{i}'
+        rel = ill.default_asset_rel(illus_id)
+        make_png(os.path.join(in_project, rel), 8, 8)
+        rows.append(plan_row(id=illus_id, status='ingested', asset_file=rel,
+                             ingested_at='2026-07-28'))
+    ill.write_plan(in_project, rows + [plan_row()])
+
+    refs = cmd_illustrate._references_for(
+        in_project, 'lantern-vigil',
+        batch=_batch(establisher='LF-05', darkest='LF-04',
+                     brightest='LF-03', later_state='LF-02'))
+    assert _stems(refs) == ['cover-illustration', 'LF-05', 'LF-04',
+                            'LF-03', 'LF-02']
+
+
+def test_the_cap_leaves_room_for_every_anchor_batch_slot(in_project):
+    """The invariant the whole fix rests on, and the one nothing pinned: a fifth
+    slot (or a lowered cap) silently makes the fourth approved image droppable
+    again, and `_batch`'s hardcoded keys mean no unit test would notice."""
+    assert cmd_illustrate._MAX_PRIOR_REFERENCES >= len(packet.BATCH_SLOTS)
 
 
 def test_a_stale_batch_member_stays_excluded(in_project):
@@ -2743,6 +2803,30 @@ def test_a_guessed_register_slot_is_labeled_as_a_guess(in_project):
     labels = dict(zip(_stems(refs), [label for _p, label in refs]))
     assert 'guess' in labels['prior-2']
     assert 'guess' not in labels['prior-0']
+
+
+def test_the_cap_can_drop_a_batch_member_when_a_plan_id_repeats(in_project):
+    """The one production route into the dropped-batch note. `run_package`
+    deliberately skips `validate_plan`, so nothing gates a `duplicate_id` there —
+    two rows sharing a promoted id put five entries at a rank below the cap, and
+    the fifth is an approved image. Pinned so the branch has a test that does not
+    monkeypatch the constant."""
+    _style_ref(in_project)
+    rows = _priors(in_project, 4)
+    twin = dict(rows[0])
+    twin['asset_file'] = ill.default_asset_rel('prior-0-copy')
+    make_png(os.path.join(in_project, twin['asset_file']), 8, 8)
+    ill.write_plan(in_project, rows + [twin, plan_row()])
+
+    notes = []
+    cmd_illustrate._references_for(
+        in_project, 'lantern-vigil',
+        batch=_batch(establisher='prior-0', darkest='prior-1',
+                     brightest='prior-2', later_state='prior-3'),
+        notes=notes)
+
+    dropped = next(n for n in notes if '**anchor batch**' in n)
+    assert 'prior-3.png' in dropped and 'later-state' in dropped
 
 
 def test_no_prior_refs_is_unaffected_by_the_batch(in_project):

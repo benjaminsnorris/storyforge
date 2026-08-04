@@ -741,6 +741,23 @@ def test_the_upload_list_carries_the_anchor_batch(in_project):
         'prior illustration (anchor batch: darkest)'
 
 
+def test_the_anchor_batch_is_derived_once_per_package_run(in_project,
+                                                          monkeypatch):
+    """`--prompts` got this test and `--package` did not, though `--package` is
+    the command the threading was added for: `resolve`'s own `batch is None`
+    fallback keeps the *result* right, so dropping `batch=batch` at the call site
+    silently doubles the derivation. CLAUDE.md's canon-walk precedent — "the
+    parameters that prevent this existed and went unused"."""
+    _six_row_book(in_project)
+    calls = []
+    real = packet.anchor_batch
+    monkeypatch.setattr(packet, 'anchor_batch',
+                        lambda pd, **kw: (calls.append(pd), real(pd, **kw))[1])
+
+    assert cmd_illustrate.main(['--package']) == 0
+    assert len(calls) == 1, f'{len(calls)} anchor-batch derivations'
+
+
 def test_diagnose_reports_the_anchor_batch(in_project, capsys):
     cmd_illustrate.main(['--diagnose'])
     out = capsys.readouterr().out
