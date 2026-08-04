@@ -48,6 +48,17 @@ def _read_all(project_dir):
     return {name: _read(project_dir, name) for name in packet.PACKET_FILES}
 
 
+def _upload_list(readme):
+    """README's numbered reference-upload block, as `[(path, label)]`.
+
+    Bounded to the numbered list rather than sliced to the end of the file: the
+    exclusion notes right below it also name image paths, so counting `.png`
+    over the tail counts the files that were *not* uploaded too.
+    """
+    return [(m.group(1), m.group(2)) for m in
+            re.finditer(r'^\d+\. `([^`]+)` — (.+)$', readme, re.MULTILINE)]
+
+
 # ============================================================================
 # The six files
 # ============================================================================
@@ -435,8 +446,12 @@ def test_a_missing_cover_is_disclosed(in_project):
     assert 'no cover artwork' in body
 
 
-def test_the_four_image_cap_is_disclosed(in_project):
-    """L4: the list stops at four with a silent `break` today."""
+def test_the_prior_illustration_cap_is_disclosed(in_project):
+    """L4: the list stops at four with a silent `break` today.
+
+    Four *prior illustrations*, plus the cover: the cap is additive to the cover
+    since #311, so a full four-slot anchor batch is representable.
+    """
     from illustration_helpers import make_png
     make_png(os.path.join(in_project, 'manuscript', 'assets',
                           'cover-illustration.png'), 8, 12)
@@ -452,7 +467,8 @@ def test_the_four_image_cap_is_disclosed(in_project):
     ill.write_plan(in_project, rows)
     cmd_illustrate.main(['--package'])
     body = _read(in_project, 'README.md')
-    assert 'the list stops at 4 images' in body
+    assert 'the list stops at 4 prior illustration(s)' in body
+    assert len(_upload_list(body)) == 5, 'cover plus four priors'
 
 
 def test_an_excluded_render_past_the_cap_is_still_disclosed(in_project):
@@ -666,6 +682,56 @@ def test_the_disclosure_count_counts_notes_not_slots(in_project):
     assert 'brackets nothing' in body
     assert f'{len(batch["fallback"])} note(s) on how it was chosen' in body
     assert 'slot(s) are guessed' not in body
+
+
+def _six_row_book(project_dir, *, ingested_at='2026-07-28'):
+    """Six ingested illustrations whose anchor batch sits late in plan order.
+
+    The shape #311 was filed about: more than three post-canon renders, so the
+    cap bites, and the approved batch is not the first three the plan lists.
+    Reading order is (scene position, id), so `z-*` come last.
+    """
+    from illustration_helpers import make_png
+    rows = []
+    for illus_id, scene_id, cells in (
+            ('a1', 'act1-sc01', {'canon_refs': 'dorren-hayle;'
+                                               'cartography-office'}),
+            ('a2', 'act1-sc01', {}),
+            ('a3', 'act1-sc01', {}),
+            ('a4', 'act1-sc02', {}),
+            ('z-bright', 'act1-sc02', {'register': 'brightest'}),
+            ('z-dark', 'act1-sc02', {'register': 'darkest'})):
+        row = ill.blank_row(illus_id)
+        rel = ill.default_asset_rel(illus_id)
+        make_png(os.path.join(project_dir, rel), 8, 12)
+        row.update({
+            'scene_id': scene_id, 'placement': 'scene_open',
+            'layout': 'half_page', 'beat': f'Beat for {illus_id}',
+            'subject': f'Subject for {illus_id}',
+            'status': 'ingested', 'asset_file': rel,
+            'ingested_at': ingested_at,
+        })
+        row.update(cells)
+        rows.append(row)
+    ill.write_plan(project_dir, rows)
+    return rows
+
+
+def test_the_upload_list_carries_the_anchor_batch(in_project):
+    """#311: selection was a plan-order walk, so the four images phase 1 exists
+    to render and approve were exactly the ones the cap discarded."""
+    _six_row_book(in_project)
+    assert cmd_illustrate.main(['--package']) == 0
+
+    batch = packet.anchor_batch(in_project)
+    assert (batch['establisher'], batch['darkest'], batch['brightest']) == \
+        ('a1', 'z-dark', 'z-bright')
+
+    upload = _upload_list(_read(in_project, 'README.md'))
+    assert [os.path.basename(path) for path, _label in upload] == [
+        'a1.png', 'z-dark.png', 'z-bright.png', 'a2.png']
+    assert dict(upload)[ill.default_asset_rel('z-dark')] == \
+        'prior illustration (anchor batch: darkest)'
 
 
 def test_diagnose_reports_the_anchor_batch(in_project, capsys):

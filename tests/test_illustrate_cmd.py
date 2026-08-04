@@ -13,6 +13,7 @@ import pytest
 
 from storyforge import cmd_illustrate
 from storyforge import illustrations as ill
+from storyforge import packet
 from storyforge import prompts_illustrate as pi
 from illustration_helpers import (
     scene_split,
@@ -614,7 +615,7 @@ def test_references_are_capped(in_project):
     ill.write_plan(in_project, rows + [plan_row()])
 
     refs = cmd_illustrate._references_for(in_project, 'lantern-vigil')
-    assert len(refs) == cmd_illustrate._MAX_REFERENCES
+    assert len(refs) == cmd_illustrate._MAX_PRIOR_REFERENCES
 
 
 def test_scene_split_strips_markers(in_project):
@@ -2471,6 +2472,208 @@ def test_an_empty_reference_chain_is_logged(in_project, capsys):
 
 
 # ============================================================================
+# The reference chain vs. the anchor batch (#311)
+#
+# Observed on the same 20-illustration book: the four images the author
+# deliberately rendered and approved as the anchor batch were exactly the ones
+# the cap discarded, because selection was a plan-order walk that never asked
+# what the batch was. Phase 1 exists so phase 2 references four real images;
+# nothing connected the guarantee to the consumer.
+# ============================================================================
+
+def _batch(**slots) -> packet.AnchorBatch:
+    """An `AnchorBatch` with only the named slots filled.
+
+    Passed in rather than derived, so these tests pin the *selection* — the
+    derivation has its own tests in test_packet.py, and driving it from here
+    would make a selection failure look like a batch-derivation failure.
+    """
+    batch: packet.AnchorBatch = {
+        'establisher': '', 'darkest': '', 'brightest': '', 'later_state': '',
+        'fallback': [],
+    }
+    batch.update(slots)          # type: ignore[typeddict-item]
+    return batch
+
+
+def _priors(project_dir, count, *, ingested_at='2026-07-28'):
+    """`count` ingested rows with files on disk, named `prior-0`..., in order."""
+    rows = []
+    for i in range(count):
+        rel = ill.default_asset_rel(f'prior-{i}')
+        make_png(os.path.join(project_dir, rel), 8, 8)
+        rows.append(plan_row(id=f'prior-{i}', status='ingested',
+                             asset_file=rel, ingested_at=ingested_at))
+    return rows
+
+
+def _stems(refs):
+    return [os.path.splitext(os.path.basename(p))[0] for p, _label in refs]
+
+
+def test_a_full_anchor_batch_survives_the_reference_cap(in_project):
+    """The bug: the batch ids sit late in plan order, so the cap dropped all
+    four of the images phase 1 exists to produce."""
+    _style_ref(in_project)
+    ill.write_plan(in_project, _priors(in_project, 8) + [plan_row()])
+
+    refs = cmd_illustrate._references_for(
+        in_project, 'lantern-vigil',
+        batch=_batch(establisher='prior-7', darkest='prior-6',
+                     brightest='prior-5', later_state='prior-4'))
+
+    assert _stems(refs) == ['cover-illustration', 'prior-7', 'prior-6',
+                            'prior-5', 'prior-4']
+
+
+def test_the_cover_is_additive_to_the_prior_reference_cap(in_project):
+    """Cover + a full four-slot batch is five, and the cap counts priors only:
+    the cap's own justification is about like-for-like illustration references,
+    and the cover does a different job (house style, not likeness)."""
+    _style_ref(in_project)
+    ill.write_plan(in_project, _priors(in_project, 8) + [plan_row()])
+
+    refs = cmd_illustrate._references_for(in_project, 'lantern-vigil')
+    priors = [p for p, _ in refs if 'cover-illustration' not in p]
+    assert len(priors) == cmd_illustrate._MAX_PRIOR_REFERENCES
+    assert len(refs) == cmd_illustrate._MAX_PRIOR_REFERENCES + 1
+
+
+def test_non_batch_rows_keep_plan_order_behind_the_batch(in_project):
+    """The promotion is a stable sort, so everything else behaves as before."""
+    _style_ref(in_project)
+    ill.write_plan(in_project, _priors(in_project, 8) + [plan_row()])
+
+    refs = cmd_illustrate._references_for(
+        in_project, 'lantern-vigil', batch=_batch(establisher='prior-6'))
+
+    assert _stems(refs) == ['cover-illustration', 'prior-6', 'prior-0',
+                            'prior-1', 'prior-2']
+
+
+def test_only_the_slots_that_resolved_are_promoted(in_project):
+    """A partially-resolved batch is the normal state — `later_state` is empty
+    whenever no illustration shows an entity past its first transition."""
+    _style_ref(in_project)
+    ill.write_plan(in_project, _priors(in_project, 8) + [plan_row()])
+
+    refs = cmd_illustrate._references_for(
+        in_project, 'lantern-vigil',
+        batch=_batch(establisher='prior-7', darkest='prior-5'))
+
+    assert _stems(refs) == ['cover-illustration', 'prior-7', 'prior-5',
+                            'prior-0', 'prior-1']
+
+
+def test_a_batch_reference_is_labeled_with_its_slot(in_project):
+    """The label is what README shows beside the path, and which of the four
+    approved images this is tells the author what it is there to hold."""
+    _style_ref(in_project)
+    ill.write_plan(in_project, _priors(in_project, 2) + [plan_row()])
+
+    refs = cmd_illustrate._references_for(
+        in_project, 'lantern-vigil', batch=_batch(darkest='prior-1'))
+    labels = dict(zip(_stems(refs), [label for _p, label in refs]))
+    assert 'anchor batch' in labels['prior-1']
+    assert 'darkest' in labels['prior-1']
+    assert 'anchor batch' not in labels['prior-0']
+
+
+def test_a_stale_batch_member_stays_excluded(in_project):
+    """Exclusion outranks promotion: a pre-canon render was directed by canon
+    that has since been rewritten, and being in the batch does not change that.
+    """
+    _style_ref(in_project)
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    rows = _priors(in_project, 2)
+    rows[1]['ingested_at'] = '2026-07-01'
+    ill.write_plan(in_project, rows + [plan_row()])
+
+    notes = []
+    refs = cmd_illustrate._references_for(
+        in_project, 'lantern-vigil', canon_cutoff='2026-07-20',
+        batch=_batch(establisher='prior-1'), notes=notes)
+
+    assert _stems(refs) == ['cover-illustration', 'prior-0']
+    assert any('prior-1.png' in n for n in notes)
+
+
+def test_the_cap_note_names_a_dropped_anchor_batch_image(in_project,
+                                                         monkeypatch, capsys):
+    """Silent loss of the approved batch is the part that made #311 hard to
+    notice, so a batch image dropped by the cap is never reported as an
+    anonymous 'further ingested illustration'."""
+    monkeypatch.setattr(cmd_illustrate, '_MAX_PRIOR_REFERENCES', 2)
+    _style_ref(in_project)
+    ill.write_plan(in_project, _priors(in_project, 8) + [plan_row()])
+
+    notes = []
+    cmd_illustrate._references_for(
+        in_project, 'lantern-vigil',
+        batch=_batch(establisher='prior-7', darkest='prior-6',
+                     brightest='prior-5', later_state='prior-4'),
+        notes=notes)
+
+    dropped = next(n for n in notes if 'anchor batch' in n)
+    assert 'brightest' in dropped and 'later-state' in dropped
+    assert 'prior-5.png' in dropped and 'prior-4.png' in dropped
+    # The two that fit are not reported as dropped.
+    assert 'prior-7.png' not in dropped and 'prior-6.png' not in dropped
+    assert 'anchor batch' in capsys.readouterr().out
+
+
+def test_no_prior_refs_is_unaffected_by_the_batch(in_project):
+    """The rebuild switch is cover-only by design — promotion has nothing to
+    promote."""
+    _style_ref(in_project)
+    ill.write_plan(in_project, _priors(in_project, 4) + [plan_row()])
+
+    refs = cmd_illustrate._references_for(
+        in_project, 'lantern-vigil', no_prior_refs=True,
+        batch=_batch(establisher='prior-3', darkest='prior-2'))
+    assert _stems(refs) == ['cover-illustration']
+
+
+def test_an_illustration_never_references_itself_however_it_is_ranked(
+        in_project):
+    """Re-rendering an image with its own previous version in front of the model
+    is how a re-render reproduces what it was meant to replace — and the row
+    being the establisher is exactly when it is most tempting."""
+    _style_ref(in_project)
+    rows = _priors(in_project, 2)
+    self_row = plan_row(status='ingested', ingested_at='2026-07-28',
+                        asset_file=ill.default_asset_rel('lantern-vigil'))
+    make_png(os.path.join(in_project, self_row['asset_file']), 8, 8)
+    ill.write_plan(in_project, rows + [self_row])
+
+    refs = cmd_illustrate._references_for(
+        in_project, 'lantern-vigil', batch=_batch(establisher='lantern-vigil'))
+    assert 'lantern-vigil' not in _stems(refs)
+
+
+def test_the_anchor_batch_is_derived_once_per_prompts_run(in_project,
+                                                          monkeypatch):
+    """Threaded like the style reference and the canon cutoff: `_references_for`
+    is called per row, so a per-row derivation would re-read the plan, the
+    chapter map, and the transition log once per illustration."""
+    write_scene(in_project, 'vigil', SCENE)
+    _style_ref(in_project)
+    ill.write_plan(in_project, _priors(in_project, 2) + [plan_row()])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '### Scene\n\nX.\n')
+
+    calls = []
+    real = packet.anchor_batch
+    monkeypatch.setattr(packet, 'anchor_batch',
+                        lambda pd: (calls.append(pd), real(pd))[1])
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
+    assert len(calls) == 1, f'{len(calls)} anchor-batch derivations'
+
+
+# ============================================================================
 # The style reference (#299)
 # ============================================================================
 #
@@ -2844,10 +3047,11 @@ def test_the_extension_order_is_deterministic(in_project):
         os.path.join('manuscript', 'assets', 'cover-illustration.png')
 
 
-def test_a_resolved_jpeg_cover_consumes_a_cap_slot(in_project):
+def test_a_resolved_jpeg_cover_is_additive_to_the_cap(in_project):
     """The extension widening is not behaviour-neutral: a jpeg-only project
-    previously resolved no cover at all and got four priors. Documented on
-    _STYLE_REFERENCE_EXTENSIONS; pinned here."""
+    previously resolved no cover at all and got four priors. It now gets the
+    cover *and* those four — the cap counts prior illustrations only (#311).
+    Documented on _STYLE_REFERENCE_EXTENSIONS; pinned here."""
     make_jpeg(os.path.join(in_project, 'manuscript', 'assets',
                            'cover-illustration.jpg'), 8, 8)
     rows = []
@@ -2859,10 +3063,10 @@ def test_a_resolved_jpeg_cover_consumes_a_cap_slot(in_project):
     ill.write_plan(in_project, rows + [plan_row()])
 
     refs = cmd_illustrate._references_for(in_project, 'lantern-vigil')
-    assert len(refs) == cmd_illustrate._MAX_REFERENCES
+    assert len(refs) == cmd_illustrate._MAX_PRIOR_REFERENCES + 1
     assert refs[0][0].endswith('cover-illustration.jpg')
     priors = [p for p, _ in refs if 'cover-illustration' not in p]
-    assert len(priors) == cmd_illustrate._MAX_REFERENCES - 1
+    assert len(priors) == cmd_illustrate._MAX_PRIOR_REFERENCES
 
 
 def test_prompts_refuses_when_the_declaration_names_a_missing_file(

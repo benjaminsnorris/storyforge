@@ -476,7 +476,8 @@ def needs_render(project_dir: str, *,
 
 
 def resolve(project_dir: str, *,
-            canon_cutoff: str | None = None) -> PacketContents:
+            canon_cutoff: str | None = None,
+            batch: AnchorBatch | None = None) -> PacketContents:
     """Collect what the packet says, recording every gap rather than filtering.
 
     Reads the canon tier (phase 1), the visual-state matrix (phase 2), and the
@@ -487,6 +488,9 @@ def resolve(project_dir: str, *,
     style reference, so one `--package` walks the canon tree once. It was walked
     five times, which logged an unparseable `canon_updated` five times and read
     as five broken files.
+
+    `batch` is threaded for the same reason: `run_package` derives it for
+    README's batch table, and the reference list now ranks by it (#311).
     """
     gaps: list[str] = []
 
@@ -520,8 +524,11 @@ def resolve(project_dir: str, *,
     # Resolved *before* the row loop, not after it as the packet's six-file
     # version did: the upload list is book-level now, and a row needs to know
     # whether its own earlier render is in it (`_self_reference_note`).
+    if batch is None:
+        batch = anchor_batch(project_dir)
     references, reference_notes = _packet_references(
-        project_dir, rows, canon_cutoff=context['canon_cutoff'], style=style)
+        project_dir, rows, canon_cutoff=context['canon_cutoff'], style=style,
+        batch=batch)
     reference_stems = {
         os.path.splitext(os.path.basename(rel))[0]: position
         for position, (rel, _purpose) in enumerate(references, start=1)}
@@ -1251,6 +1258,7 @@ def _packet_references(
         project_dir: str, rows: list[dict[str, str]], *,
         canon_cutoff: str | None = None,
         style: "StyleReference | None" = None,
+        batch: AnchorBatch | None = None,
 ) -> tuple[list[tuple[str, str]], list[str]]:
     """The labeled reference-image list for the whole packet, and why it is short.
 
@@ -1266,6 +1274,12 @@ def _packet_references(
     The second element is the exclusion record. `--prompts` only logs those, and
     for a prompt file that is enough because the author is watching the run; the
     packet is read hours later, so the reasons have to be *in* it.
+
+    `batch` is threaded through for the same reason `canon_cutoff` and `style`
+    are — `run_package` has already derived it for README's batch table, and
+    `anchor_batch` re-reads the plan, the chapter map, and the transition log.
+    The upload list is where #311 was found: the four images phase 1 exists to
+    approve were the ones the cap dropped.
     """
     from storyforge import cmd_illustrate
     notes: list[str] = []
@@ -1273,7 +1287,7 @@ def _packet_references(
         canon_cutoff = canon.newest_canon_updated(project_dir)
     references = cmd_illustrate._references_for(
         project_dir, 'the packet', plan=rows,
-        canon_cutoff=canon_cutoff, style=style, notes=notes)
+        canon_cutoff=canon_cutoff, style=style, batch=batch, notes=notes)
     return references, notes
 
 
