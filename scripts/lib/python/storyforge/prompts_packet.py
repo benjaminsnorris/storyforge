@@ -666,6 +666,13 @@ def render_acceptance(*, aspects: Sequence[pi.Aspect]) -> str:
     longest string in it repeated verbatim. The check did not go away — check the
     render against the prompt's own Constraints bullets, which is what the
     pointers below say.
+
+    The page-turn check (#308) is stated here rather than per row for the same
+    reason: it is identical for every image. The per-row half — the actual next
+    sentence — stays in the source prompt file's `## Accept only if`, because
+    `resolve` reads no scene prose and giving it some to quote twenty sentences
+    would put scene text on the byte-identical regeneration path for a check the
+    author already has in front of them.
     """
     homes = _FIELD_HOMES
     orientation = '\n'.join(
@@ -698,8 +705,14 @@ enough to be read whole rather than summarized.
    different kind of thing.
 7. **Contrast.** The image does not repeat the staging of its neighbours — see
    {homes['contrast']} and the sequence rules below.
-8. **No lettering.** {pi._NO_TEXT_CONSTRAINT.capitalize()}
-9. **Orientation.** The image is in the orientation {homes['orientation']} names:
+8. **The page turn.** The image does not show anything from *after* the point
+   it sits at. An illustration that reveals what the next paragraph is about to
+   reveal has broken the scene, and it is the one failure that cannot be fixed
+   after printing. Each illustration's source prompt file in
+   `reference/illustration-prompts/` quotes the next sentence the reader reads
+   under `## Accept only if` — check the render against that sentence.
+9. **No lettering.** {pi._NO_TEXT_CONSTRAINT.capitalize()}
+10. **Orientation.** The image is in the orientation {homes['orientation']} names:
 
 {orientation}
 
@@ -708,10 +721,10 @@ enough to be read whole rather than summarized.
 Describe what *is* in the image, not what is missing — negated content keywords
 leak into the render. ("A bare sill", not "no clutter on the sill.")
 
-There are exactly three exceptions, and they are exceptions because positive
+There are exactly four exceptions, and they are exceptions because positive
 phrasing has been observed not to prevent them: the **Absent** line, a
-violation of the stated **colour logic**, and the **orientation** directive.
-Do not widen them into general prohibitions.
+violation of the stated **colour logic**, the **orientation** directive, and the
+**no-lettering** rule. Do not widen them into general prohibitions.
 
 ## Sequence rules
 

@@ -15,6 +15,7 @@ from storyforge import cmd_illustrate
 from storyforge import illustrations as ill
 from storyforge import prompts_illustrate as pi
 from illustration_helpers import (
+    scene_split,
     SCENE, SCENE_ADVERSARIAL, make_jpeg, make_png, plan_row,
     truncated_png, write_csv, write_scene,
 )
@@ -616,16 +617,44 @@ def test_references_are_capped(in_project):
     assert len(refs) == cmd_illustrate._MAX_REFERENCES
 
 
-def test_scene_excerpt_strips_markers(in_project):
+def test_scene_split_strips_markers(in_project):
     write_scene(in_project, 'vigil', ill.insert_marker(SCENE, plan_row())['text'])
-    excerpt = cmd_illustrate._scene_excerpt(in_project, plan_row())
-    assert '![[illus:' not in excerpt
-    assert 'She set it on the sill' in excerpt
+    split = cmd_illustrate._scene_split(in_project, plan_row())
+    assert '![[illus:' not in split['read']
+    assert '![[illus:' not in split['unread']
+    assert 'She set it on the sill' in split['read']
 
 
-def test_scene_excerpt_handles_a_missing_scene(in_project):
-    assert cmd_illustrate._scene_excerpt(
-        in_project, plan_row(scene_id='nowhere')) == '(scene file not found)'
+def test_scene_split_handles_a_missing_scene(in_project):
+    """A missing scene is an unresolved *position*, not an empty unread side.
+
+    Returning `unread: ''` with no error would tell the request there is nothing
+    after this illustration — the exact silence #308 was filed about, arrived at
+    from the other direction.
+    """
+    split = cmd_illustrate._scene_split(in_project, plan_row(scene_id='nowhere'))
+    assert split['state'] == 'unknown'
+    assert split['unread'] == ''
+    assert 'nowhere' in split['error']
+    # No `(scene file not found)` placeholder: it was printed to the model under
+    # a heading calling it the prose the reader had read.
+    assert split['read'] == ''
+
+
+def test_scene_split_does_not_hand_the_model_the_next_page(in_project):
+    """#308's regression, at the boundary the whole issue is about.
+
+    The old excerpt was a window centred on the anchor, so the beat *after* the
+    marker arrived as ordinary scene prose and came back as the illustration.
+    """
+    write_scene(in_project, 'vigil', SCENE)
+    split = cmd_illustrate._scene_split(in_project, plan_row())
+
+    assert 'She set it on the sill' in split['read']
+    assert 'Nothing came' not in split['read']
+    assert 'By morning she had decided' not in split['read']
+    assert 'Nothing came' in split['unread']
+    assert split['next_sentence'] == 'Nothing came.'
 
 
 # ============================================================================
@@ -654,7 +683,7 @@ def test_orientation_clause_states_the_aspect(aspect, expected):
 
 def test_render_prompt_file_states_orientation_twice():
     content = pi.render_prompt_file(
-        row=plan_row(), body='### Scene\n\nA street.\n', references=[],
+        split=scene_split(), row=plan_row(), body='### Scene\n\nA street.\n', references=[],
         aspect='portrait',
     )
     assert content.count('PORTRAIT orientation') >= 1
@@ -685,7 +714,7 @@ def test_the_prompt_file_emits_only_the_blocks_it_has(kwargs, present, missing):
     rendered, because a state that did not resolve is stated rather than
     omitted — an omitted line left the block claiming a completeness it did not
     have."""
-    content = pi.render_prompt_file(row=plan_row(), body='### Scene\n\nX.\n',
+    content = pi.render_prompt_file(split=scene_split(), row=plan_row(), body='### Scene\n\nX.\n',
                                     references=[], **kwargs)
     assert '## Accept only if' in content
     for text in present:
@@ -699,7 +728,7 @@ def test_the_acceptance_block_is_marked_do_not_paste():
     via `contrast` it can name another illustration by id — which the request
     explicitly forbids reaching the model."""
     content = pi.render_prompt_file(
-        row=plan_row(), body='### Scene\n\nX.\n', references=[],
+        split=scene_split(), row=plan_row(), body='### Scene\n\nX.\n', references=[],
         contrast='Follows `lantern-vigil` and must not repeat its staging')
     assert '## Accept only if (not part of the prompt — do NOT paste)' in content
     paste_marker = 'Paste everything below into the image model.'
@@ -1785,7 +1814,7 @@ def test_layout_beats_a_conflicting_composition_note():
 
 def test_layout_appears_in_the_prompt_file():
     content = pi.render_prompt_file(
-        row=plan_row(layout='double_page'), body='### Scene\n\nA street.\n',
+        split=scene_split(), row=plan_row(layout='double_page'), body='### Scene\n\nA street.\n',
         references=[], aspect=pi.aspect_for_row(plan_row(layout='double_page')),
     )
     assert 'LANDSCAPE orientation' in content
@@ -1793,7 +1822,7 @@ def test_layout_appears_in_the_prompt_file():
 
 def test_layout_reaches_the_art_direction_prompt():
     prompt = pi.build_art_direction_request(
-        row=plan_row(layout='double_page'), scene_excerpt='x',
+        split=scene_split(), row=plan_row(layout='double_page'),
         character_anchors={}, canon_context='x',
     )
     assert 'double_page' in prompt
@@ -3152,11 +3181,212 @@ def test_canon_refs_still_match_on_the_canon_id(in_project, monkeypatch,
     assert 'matched no known anchor' not in capsys.readouterr().out
 
 
+# ============================================================================
+# The scene split in the request and the prompt file (#308)
+# ============================================================================
+
+def test_the_request_labels_the_read_side_and_forbids_the_unread_side():
+    request = pi.build_art_direction_request(
+        split=scene_split(), row=plan_row(),
+        character_anchors={}, canon_context='c')
+
+    assert 'read by the time the illustration appears' in request
+    assert 'sits at the **end** of this text' in request
+    assert '## What the reader has NOT read yet' in request
+    assert 'Nothing came. The cold worked up.' in request
+
+
+def test_the_request_forbids_naming_the_unread_beat_even_to_exclude_it():
+    """The forbidden block must not become a fifth exception to positive
+    framing. #263: a negated phrase in an image prompt puts the thing in the
+    render, so "no hands raised against the light" is worse than silence."""
+    request = pi.build_art_direction_request(
+        split=scene_split(unread='hands raised against the light'),
+        row=plan_row(), character_anchors={}, canon_context='c')
+    assert 'silently' in request
+    assert 'not even to exclude it' in request
+
+
+def test_the_request_states_an_unresolved_position_rather_than_implying_none():
+    request = pi.build_art_direction_request(
+        split=scene_split(state='unknown', offset=None, unread='',
+                          next_sentence='',
+                          error='anchor not found in scene'),
+        row=plan_row(), character_anchors={}, canon_context='c')
+    assert 'could not be resolved' in request
+    assert 'anchor not found in scene' in request
+
+
+def test_the_unknown_state_does_not_also_claim_the_prose_was_read():
+    """The header was unconditional, so the request asserted "this is the prose
+    the reader has read… the illustration sits at the end of this text" and then
+    contradicted it twelve lines later. The false statement came first."""
+    request = pi.build_art_direction_request(
+        split=scene_split(state='unknown', offset=None, unread='',
+                          next_sentence='', error='anchor is ambiguous'),
+        row=plan_row(), character_anchors={}, canon_context='c')
+    assert 'sits at the **end** of this text' not in request
+    assert 'read by the time the illustration appears' not in request
+
+
+def test_an_opener_is_asked_to_illustrate_the_prose_it_opens():
+    """`scene_open` had `read == ''`, so the request asserted "prose the reader
+    has read" over an empty section and put the scene's opening in the forbidden
+    block — telling the model to avoid the only description of the image it was
+    being asked to draw. `scene_open` + `full_page` is the documented opener."""
+    request = pi.build_art_direction_request(
+        split=scene_split(state='establishing', offset=0, read='',
+                          unread='The lantern guttered on the sill.',
+                          next_sentence=''),
+        row=plan_row(placement='scene_open', layout='full_page'),
+        character_anchors={}, canon_context='c')
+
+    assert '**opens** the scene' in request
+    assert 'The lantern guttered on the sill.' in request
+    assert '## What the reader has NOT read yet' not in request
+    assert 'sits at the **end** of this text' not in request
+
+
+def test_a_scene_close_request_carries_no_forbidden_block():
+    """Nothing after the image — so nothing to forbid, and nothing unresolved."""
+    request = pi.build_art_direction_request(
+        split=scene_split(state='at_scene_end', unread='', next_sentence=''),
+        row=plan_row(placement='scene_close'),
+        character_anchors={}, canon_context='c')
+    assert '## What the reader has NOT read yet' not in request
+    assert 'could not be resolved' not in request
+
+
+def test_the_acceptance_block_quotes_the_next_sentence():
+    joined = '\n'.join(pi.prompt_acceptance_lines(
+        split=scene_split(), state='a lit lamp'))
+    assert 'Nothing from after the illustration appears in it' in joined
+    assert '"Nothing came."' in joined
+
+
+@pytest.mark.parametrize('state,because', [
+    ('at_scene_end', 'no prose\nin that scene follows it'),
+    ('establishing', 'opens its scene'),
+])
+def test_the_vacuous_states_state_their_absence_rather_than_a_check(state, because):
+    """No check to tick — rendering one told the author to re-render a correct
+    opener. But not silence either: `acceptance.md`'s page-turn item sends them
+    here for a sentence, so emitting nothing made that a dead-end referral on the
+    two states where no sentence exists."""
+    joined = '\n'.join(pi.prompt_acceptance_lines(
+        split=scene_split(state=state, unread='', next_sentence=''),
+        state='a lit lamp'))
+    assert 'Nothing from after' not in joined
+    assert 'Cannot be checked' not in joined
+    assert 'No page-turn check applies' in joined
+    assert because.split('\n')[0] in joined
+
+
+def test_an_image_at_the_very_start_is_not_told_the_reader_has_read_it():
+    """`normal` with nothing read is legitimate — `before_anchor` anchored in the
+    first paragraph — but it must not inherit the "here is what the reader has
+    read" heading over an empty block, and it cannot be told to depict the prose
+    below, which is what the author placed it in front of."""
+    request = pi.build_art_direction_request(
+        split=scene_split(offset=0, read='', unread='The lamp guttered.'),
+        row=plan_row(placement='before_anchor'),
+        character_anchors={}, canon_context='c')
+    assert 'read **nothing** yet' in request
+    assert 'sits at the **end** of this text' not in request
+    assert 'may not depict' in request
+
+
+def test_prompts_warn_about_an_image_anchored_in_the_first_paragraph(
+        in_project, monkeypatch, capsys):
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(
+        anchor='The lantern guttered', placement='before_anchor')])
+    _capture_request(in_project, monkeypatch)
+    cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+
+    out = capsys.readouterr().out
+    assert 'first paragraph' in out
+    assert 'placement=scene_open' in out
+
+
+def test_an_unreadable_scene_does_not_promise_prose_it_has_none_of():
+    """The `unknown` heading was written for the anchor-failure case, which
+    carries a leading window. The missing-scene, unreadable and undrafted causes
+    carry no excerpt, so it promised an opening that was not there."""
+    request = pi.build_art_direction_request(
+        split=scene_split(state='unknown', offset=None, cause='scene_missing',
+                          read='', unread='', next_sentence='',
+                          error="scene file for 'nowhere' is not in scenes/"),
+        row=plan_row(), character_anchors={}, canon_context='c')
+    assert 'The scene could not be read' in request
+    assert 'What follows is the *opening*' not in request
+    assert 'no prose below' in request
+
+
+def test_the_acceptance_block_says_when_the_spoiler_check_is_impossible():
+    joined = '\n'.join(pi.prompt_acceptance_lines(
+        split=scene_split(state='unknown', offset=None, unread='',
+                          next_sentence='', error='anchor is ambiguous'),
+        state='a lit lamp'))
+    assert 'Cannot be checked for spoilers' in joined
+    assert 'anchor is ambiguous' in joined
+
+
+def test_the_prompt_file_carries_the_spoiler_check_end_to_end(in_project,
+                                                             monkeypatch):
+    """The whole of item 2, through the real command."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: (
+        '### Scene\n\nA cold street.\n\n### Subject\n\nA woman.\n'))
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
+    with open(os.path.join(in_project,
+                           ill.default_prompt_rel('lantern-vigil'))) as f:
+        content = f.read()
+
+    assert '"Nothing came."' in content
+    # In the do-NOT-paste block, never in the pasted Constraints: the quote is
+    # prose the image model must not see.
+    accept = content.split('## Accept only if')[1]
+    assert 'Nothing from after the illustration' in accept
+    assert 'Nothing came' not in content.split('## Accept only if')[0]
+
+
+def test_the_request_sends_the_read_side_not_a_window_round_the_anchor(
+        in_project, monkeypatch):
+    """#308 end to end: the post-anchor beat must not reach the model as scene
+    prose. On LF-19 and LF-20 it did, and both prompts described it."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+    seen = _capture_request(in_project, monkeypatch)
+    cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+
+    scene_section = seen['prompt'].split('## The scene it accompanies')[1] \
+                                 .split('## What the reader has NOT read yet')[0]
+    assert 'She set it on the sill' in scene_section
+    assert 'By morning she had decided' not in scene_section
+
+
+def test_prompts_warn_when_a_row_has_no_resolvable_position(in_project,
+                                                            monkeypatch, capsys):
+    """The free-fix moment is before the call, not after paying for it."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(anchor='prose that is not there')])
+    _capture_request(in_project, monkeypatch)
+    cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+
+    out = capsys.readouterr().out
+    assert 'no resolvable position' in out
+    assert 'lantern-vigil' in out
+
+
 def test_the_request_does_not_ask_for_a_constraints_section():
     """The deterministic block owns that section. Asking for one too produced
     `## Constraints` with a nested, contradicting `### Constraints`."""
     request = pi.build_art_direction_request(
-        row=plan_row(), scene_excerpt='x', character_anchors={},
+        split=scene_split(), row=plan_row(), character_anchors={},
         canon_context='c')
     assert '**Constraints** — what must hold' not in request
     assert 'Do **not** write a Constraints section' in request

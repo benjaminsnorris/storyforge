@@ -8,6 +8,8 @@ checks the evidence against the prose.
 
 import os
 
+import pytest
+
 from storyforge import visual_state as vs
 
 ROWS = [
@@ -316,6 +318,146 @@ def test_an_unresolvable_illustration_scene_is_logged_not_double_reported(
 def test_clean_log_yields_no_findings(project_dir):
     _write_state(project_dir)
     assert vs.prepass(project_dir)['findings'] == []
+
+
+# ============================================================================
+# Check 5 — a scene_close image over a state that changes mid-scene (#308)
+# ============================================================================
+
+def _mid_scene_findings(project_dir):
+    return [f for f in vs.prepass(project_dir)['findings']
+            if f['kind'] == 'state_mid_scene_change']
+
+
+def test_a_scene_close_image_over_a_changing_entity_is_reported(project_dir):
+    """#308's LF-13. The Great Lamp goes out during the scene; the log holds
+    one value for the whole scene, which is the state going *in*, and the
+    illustration's whole subject was the state coming out."""
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_close',
+          canon_refs='dorren-clothing')
+
+    found = _mid_scene_findings(project_dir)
+    assert len(found) == 1
+    assert found[0]['id'] == 'lantern-vigil'
+    assert found[0]['scene_id'] == 'act2-sc01'
+    assert 'state_override' in found[0]['detail']
+    assert 'dorren-clothing' in found[0]['detail']
+
+
+def test_a_bare_canon_ref_matches_the_changing_aspect_track(project_dir):
+    """canon_refs says `dorren`; the transition is on `dorren-clothing`."""
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_close',
+          canon_refs='dorren')
+    assert len(_mid_scene_findings(project_dir)) == 1
+
+
+def test_a_state_override_answers_the_mid_scene_question(project_dir):
+    """The author has said what is true in this image, so there is nothing to
+    ask — the same suppression check 3 honours."""
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_close',
+          canon_refs='dorren-clothing',
+          state_override='dorren-clothing:travel coat, hood up')
+    assert _mid_scene_findings(project_dir) == []
+
+
+def test_a_scene_open_image_is_ambiguous_the_same_way(project_dir):
+    """The symmetric case, and the one the first cut wrongly excluded.
+
+    Under `<=` a transition takes effect at its own scene, so a `scene_open`
+    image — which precedes all of that scene's prose — resolves to a changed
+    state the reader has not reached yet. The original rationale ("every other
+    placement now has a resolvable position inside the scene") was wrong twice:
+    a reading position is never fed into state resolution at all.
+    """
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_open',
+          canon_refs='dorren-clothing')
+
+    found = _mid_scene_findings(project_dir)
+    assert len(found) == 1
+    assert 'at the open of' in found[0]['detail']
+
+
+@pytest.mark.parametrize('placement', ['before_anchor', 'after_anchor'])
+def test_an_anchored_image_is_not_reported(project_dir, placement):
+    """An anchor names a phrase, which is at least evidence about where in the
+    scene the image sits."""
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement=placement,
+          anchor='She checked her compass', canon_refs='dorren-clothing')
+    assert _mid_scene_findings(project_dir) == []
+
+
+def test_the_detail_does_not_claim_the_log_holds_the_pre_change_state(project_dir):
+    """`_resolve` uses `<=`, so the resolved value IS the transition's declared
+    state. Saying "usually the state going in" described a value the resolution
+    cannot return, and invited a maintainer to 'fix' a boundary that has a test
+    on it."""
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_close',
+          canon_refs='dorren-clothing')
+    detail = _mid_scene_findings(project_dir)[0]['detail']
+    assert 'going in' not in detail
+    assert 'which side of that change' in detail
+
+
+def test_an_entity_that_does_not_change_in_that_scene_is_not_reported(project_dir):
+    """master-survey changes at act1-sc02, not act2-sc01. Resolving forward to a
+    state set in an earlier scene is exactly what the log is for."""
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_close',
+          canon_refs='master-survey')
+    assert _mid_scene_findings(project_dir) == []
+
+
+def test_the_mid_scene_finding_reaches_validate_plan(project_dir):
+    """The kind is only worth declaring if the gates see it."""
+    from storyforge import illustrations as ill
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_close',
+          canon_refs='dorren-clothing')
+    kinds = {f['kind'] for f in ill.validate_plan(project_dir)}
+    assert 'state_mid_scene_change' in kinds
+
+
+def test_one_row_can_report_both_state_kinds_for_different_refs(project_dir):
+    """`dorren-clothing` changes in the scene; `murkwolves` is stated nowhere.
+    Two refs, two different problems, both worth saying."""
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_close',
+          canon_refs='dorren-clothing;murkwolves')
+    kinds = {f['kind'] for f in vs.prepass(project_dir)['findings']}
+    assert {'state_mid_scene_change', 'state_unspecified'} <= kinds
+
+
+def test_a_superseded_row_reports_neither(project_dir):
+    """Inherited from check 3's guard — retired art resolves no state to be
+    wrong about."""
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_close',
+          canon_refs='dorren-clothing', status='superseded')
+    assert _mid_scene_findings(project_dir) == []
+
+
+def test_a_bare_state_override_does_not_suppress_an_aspect_ref(project_dir):
+    """Documents an asymmetry that is pre-existing and shared with check 3: the
+    remedy says "set state_override", and an author who types the bare entity
+    name for an aspect-tracked ref gets the finding again."""
+    _write_state(project_dir, ROWS)
+    _plan(project_dir, scene_id='act2-sc01', placement='scene_close',
+          canon_refs='dorren-clothing', state_override='dorren:hood up')
+    assert len(_mid_scene_findings(project_dir)) == 1
+
+
+def test_the_mid_scene_finding_leaves_a_publishable_book():
+    """A warning, not a block. The art is fine to ship; it is the *next* render
+    that wants the answer."""
+    from storyforge import illustrations as ill
+    assert ill.severity_of('state_mid_scene_change') == 'warning'
+    assert 'state_mid_scene_change' not in ill.BLOCKING_FINDINGS
 
 
 def test_the_shipped_fixture_log_is_clean(fixture_dir):

@@ -1285,6 +1285,25 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
         'publish manifest while the epub, the PDF, and the web book kept '
         'shipping it, so the editions would disagree about a book you had '
         'not re-rendered yet',
+    'state_mid_scene_change':
+        'Set state_override on the plan row to state what is true in this image. '
+        'It sits at the open or close of a scene the entity changes during, and '
+        'reference/visual-state.csv holds one value for the whole scene, so it '
+        'cannot say which side of that change the image is on',
+    'prompt_spoils_unread':
+        'Re-run storyforge illustrate --prompts --ids <id>, which sends the '
+        'scene split at the illustration\'s position. Then check the render: if '
+        'the art already shows the next page, it needs re-rendering, not just a '
+        'new prompt',
+    'prompt_spoiler_unchecked':
+        'Fix the named cause, then re-run storyforge validate — the row is '
+        'unverified, not clean. The spoiler check is the only thing that catches '
+        'a render that shows the next page, so a row it could not read is a row '
+        'nothing has checked',
+    'missing_anchor':
+        'Quote a short verbatim phrase from the scene into the anchor cell, or '
+        'set placement to scene_open / scene_close. Without an anchor the marker '
+        'cannot be placed, so the illustration never appears in the book',
     'canon_staleness_unchecked':
         'Set canon_updated: YYYY-MM-DD in the canon files you have edited — '
         'until one carries a parseable date, no ingested illustration can be '

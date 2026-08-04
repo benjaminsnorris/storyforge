@@ -33,7 +33,8 @@ import re
 from datetime import date
 from typing import Final, Literal, TypedDict
 
-from storyforge.illustrations import PrepassFindings, RenderStep, VALID_PLACEMENTS
+from storyforge.illustrations import (PrepassFindings, RenderStep, SceneSplit,
+                                      VALID_PLACEMENTS)
 from storyforge.visual_state import STATE_FILE
 
 #: Aspect is derived from author-written prose (layout, then composition) and
@@ -496,7 +497,8 @@ def book_level_direction(project_dir: str) -> dict[str, str]:
     return direction
 
 
-def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
+def build_art_direction_request(*, row: dict[str, str],
+                                split: 'SceneSplit',
                                 character_anchors: dict[str, str],
                                 canon_context: str,
                                 direction: dict[str, str] | None = None,
@@ -529,6 +531,34 @@ def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
     So it is stated as a requirement that *outranks the anchors*, not as
     context. `absent` and `contrast` come from the same row and the same
     resolution the packet renders.
+
+    `split` is the scene cut at `illustrations.reading_position` — **not** a
+    window centred on the anchor. Handed the whole scene with nothing marking the
+    split, the model reached for the most vivid sentence available, which the
+    planning guidance ("a beat the reader is already leaning into") makes very
+    often the one right after the marker — so the image showed the next page and
+    the reader turned to read what they had already seen (#308).
+
+    Everything positional is driven by `split['state']`, and the whole `SceneSplit`
+    is taken rather than the three strings destructured from it. Optional
+    `str = ''` params made a forgotten argument indistinguishable from an
+    intentional absence — the very failure mode this function exists to fix, and
+    with the header asserting "this is the prose the reader has read", an omission
+    stopped being neutral and became a false claim to the model.
+
+    Per state: `normal` sends the read prose plus a forbidden block; `establishing`
+    sends the *following* prose as the thing to depict, because an opener's job is
+    to establish what the prose then describes and forbidding it told the model to
+    avoid the only description of the image it was drawing; `unknown` says the
+    position could not be resolved and that the prose is the scene's opening;
+    `at_scene_end` sends the read prose with no forbidden block, there being
+    nothing after it.
+
+    The forbidden block is **not** a fifth exception to positive framing. The four
+    (`absent`, the colour logic, orientation, no-text) are about what the *image*
+    prompt may negate; this is an instruction to the model writing that prompt,
+    and it says explicitly not to render the exclusion as negated prose — which
+    would leak the spoiled beat straight into the image (#263).
     """
     labels = anchor_labels or {}
     anchors_block = '\n'.join(
@@ -592,6 +622,75 @@ def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
         f'image model has never seen it.\n'
         if contrast.strip() else '')
 
+    # One switch on the resolved state, rather than four re-derivations from
+    # which fields happen to be empty. The header is part of it: asserting "this
+    # is the prose the reader has read" unconditionally made the request
+    # contradict itself in the `unknown` state and lie outright in
+    # `establishing`, where there is no such prose.
+    scene_state = split['state']
+    scene_prose = split['read'].strip()
+    unread = split['unread'].strip()
+
+    if scene_state == 'establishing':
+        scene_heading = (
+            'This illustration **opens** the scene — the reader reaches it '
+            'before reading any of what follows. Its job is to establish the '
+            'place and mood the prose below then describes, so illustrate that '
+            'opening.')
+        scene_prose = unread
+    elif scene_state == 'unknown' and not scene_prose:
+        # Branched on the prose, not only the state: the missing-scene, unreadable
+        # and undrafted causes carry no excerpt at all, and the heading written for
+        # the anchor-failure case promised an opening that was not there.
+        scene_heading = (
+            f'**The scene could not be read** — {split["error"].strip()}. There '
+            f'is no prose below. Work from the illustration\'s own fields above '
+            f'and stay inside them; do not invent surrounding events.')
+    elif scene_state == 'unknown':
+        scene_heading = (
+            f'**Where this illustration sits could not be resolved** — '
+            f'{split["error"].strip()}. What follows is the *opening* of the '
+            f'scene, not the prose leading up to this image. Stay with the beat '
+            f'the plan row names and do not reach for a later moment; nothing '
+            f'here can tell you which moments are later.')
+    elif not scene_prose:
+        # `normal` with nothing read is legitimate and reachable: a `before_anchor`
+        # image anchored in the scene's first paragraph sits before any prose. It
+        # must not inherit the "here is what the reader has read" heading over an
+        # empty block, and it cannot be told to depict the prose below either —
+        # that prose is exactly what the author placed the image in front of.
+        scene_heading = (
+            'The reader has read **nothing** yet when this illustration appears — '
+            'it sits at the very start of the scene. Work from the illustration\'s '
+            'own fields above. The prose below is what the reader turns to next, '
+            'so treat it as setting you may not depict.')
+    else:
+        scene_heading = (
+            'This is the prose the reader has read by the time the illustration '
+            'appears. The illustration sits at the **end** of this text.')
+
+    # Sent, not omitted. A model that cannot see the next page will still
+    # invent toward it, because the beat the anchor was placed in front of is
+    # the one the scene has been building to; naming it is what makes it
+    # avoidable. Worded so the avoidance never reaches the prompt body as a
+    # negation — "no hands raised against the light" puts raised hands in the
+    # render, which is #263's finding and the whole reason the exceptions to
+    # positive framing are enumerable.
+    #
+    # `normal` only. An opener's following prose is the thing it is being asked
+    # to depict, so forbidding it told the model to avoid the only description of
+    # the image it was drawing.
+    unread_block = (
+        f'\n## What the reader has NOT read yet\n\n{unread}\n\n'
+        f'The illustration sits **before** this. The reader turns the page to '
+        f'it, so an image containing any of it shows them the beat first and '
+        f'the prose then repeats it — which is the single most common way an '
+        f'otherwise good illustration is wrong.\n\n'
+        f'Steer away from it **silently**. Do not name it in the prompt body, '
+        f'not even to exclude it: a negated phrase in an image prompt puts the '
+        f'thing in the picture. Write about the beat above instead.\n'
+        if scene_state == 'normal' and unread else '')
+
     direction_text = render_direction_block(direction or {})
     house = (f'\n## Book-level art direction\n\nEvery illustration in this '
              f'book obeys this. It is not background — a prompt that departs '
@@ -608,8 +707,10 @@ def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
 {staging}
 ## The scene it accompanies
 
-{scene_excerpt}
+{scene_heading}
 
+{scene_prose}
+{unread_block}
 ## Canon the art must honor
 
 {canon_context}
@@ -647,7 +748,8 @@ Rules:
   negated keywords leak into the render. ("A bare sill" not "no clutter on the
   sill.")
 - Be concrete. A specific object in a specific light beats an adjective.
-- Do not describe anything the scene has not revealed by this point in the book.
+- Illustrate a moment from the scene above, and nothing from beyond it — nor
+  anything the book has not revealed by this point.
 
 Return the four sections as markdown. No preamble, no commentary.
 
@@ -825,8 +927,8 @@ def prompt_constraints(*, aspect: Aspect = DEFAULT_ASPECT, state: str = '',
     return constraints
 
 
-def prompt_acceptance_lines(*, state: str = '', absent: str = '',
-                            contrast: str = '') -> list[str]:
+def prompt_acceptance_lines(*, split: SceneSplit, state: str = '',
+                            absent: str = '', contrast: str = '') -> list[str]:
     """The per-image acceptance checks for the prompt file.
 
     Sole consumer since #306: the packet's upload file carries no acceptance
@@ -838,6 +940,24 @@ def prompt_acceptance_lines(*, state: str = '', absent: str = '',
     left an acceptance block announcing "checked against this illustration's row"
     while dropping the only check #297 was filed about, so the unresolved case
     gets the longer sentence rather than silence.
+
+    The spoiler line quotes the first sentence of the prose *after* the
+    illustration, so the check survives a generation that ignored the split
+    (#308's item 2). With `prompt_spoils_unread` it is one of the two fixes in that
+    issue that catch a bad render rather than preventing one — deliberately, since
+    the failure was invisible to every automated gate and was caught by reading
+    three rows by hand.
+
+    Driven by `split['state']`, not by which of two strings arrived non-empty.
+    `normal` quotes the next sentence; `unknown` says the check could not be made
+    and why; `establishing` and `at_scene_end` emit **no line**, because an opener
+    is supposed to depict the prose that follows it and a scene-closing image has
+    nothing after it at all. Rendering a vacuous case as a check would teach the
+    author to tick a box that never had anything in it — and for an opener it went
+    further, telling them to re-render a correct image.
+
+    `split` is required for the reason the request's is: as an optional string
+    pair, a forgotten argument was byte-identical to a legitimately absent check.
     """
     accept = [
         f'- The visual state matches: {state.strip()}' if state.strip() else
@@ -848,6 +968,30 @@ def prompt_acceptance_lines(*, state: str = '', absent: str = '',
         f'`state_override` on the plan row if the state is true in this image '
         f'only.'
     ]
+    if split['state'] == 'normal':
+        accept.append(
+            f'- **Nothing from after the illustration appears in it.** The next '
+            f'sentence the reader reads is: "{split["next_sentence"].strip()}" — '
+            f'if the image shows that, it spoils the page turn. Re-render.')
+    elif split['state'] == 'unknown':
+        accept.append(
+            f'- **Cannot be checked for spoilers**: {split["error"].strip()}, so '
+            f'the prose after this illustration is unknown. Re-anchor the plan '
+            f'row and re-run `--prompts` for it, then check by eye against the '
+            f'paragraph that follows the marker.')
+    else:
+        # A *stated absence*, not a check to tick. `acceptance.md`'s page-turn item
+        # sends the author here for a sentence, so emitting nothing made that a
+        # dead-end referral on the two states where no sentence exists — the
+        # documented `NOT_RECORDED` failure, an artifact implying a check it does
+        # not have. The argument against rendering a vacuous *check* does not
+        # extend to saying why there is nothing to check.
+        accept.append(
+            '- **No page-turn check applies.** '
+            + ('This illustration opens its scene, so the prose after it is what '
+               'it depicts.' if split['state'] == 'establishing' else
+               'This illustration sits at the close of its scene, so no prose '
+               'in that scene follows it.'))
     if absent.strip():
         accept.append(f'- Nothing in frame that must not be: {absent.strip()}')
     if contrast.strip():
@@ -859,6 +1003,7 @@ def render_prompt_file(*, row: dict[str, str], body: str,
                        references: list[str] | list[tuple[str, str]],
                        aspect: Aspect = DEFAULT_ASPECT,
                        model: str = DEFAULT_IMAGE_MODEL,
+                       split: SceneSplit,
                        state: str = '', absent: str = '',
                        contrast: str = '') -> str:
     """Assemble an illustration's prompt file.
@@ -889,7 +1034,10 @@ def render_prompt_file(*, row: dict[str, str], body: str,
     scene_id = (row.get('scene_id') or '').strip()
 
     constraints = prompt_constraints(aspect=aspect, state=state, absent=absent)
-    accept = prompt_acceptance_lines(state=state, absent=absent,
+    # The spoiler check lands here rather than in the Constraints block on
+    # purpose: it is a check on the *render*, and it quotes prose the image model
+    # must never see. Constraints are pasted; this block is marked do-NOT-paste.
+    accept = prompt_acceptance_lines(split=split, state=state, absent=absent,
                                      contrast=contrast)
     # Always rendered, because `accept` always has its state line. Marked
     # do-NOT-paste: it sits after "Paste everything below into the image model",

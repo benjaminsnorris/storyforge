@@ -735,6 +735,319 @@ def _block_containing(text: str, offset: int) -> tuple[int, int] | None:
 
 
 # ============================================================================
+# Reading position
+# ============================================================================
+
+#: Why a position could not be resolved. `''` means it was.
+#:
+#: A named cause rather than the `error` prose, because two consumers group by it
+#: — `--prompts`' pre-fan-out warning and `spoiler_findings`' decision about
+#: whether another finding already covers the row — and every `error` string here
+#: interpolates something row-specific (a match count, a placement value, a scene
+#: id, an exception). Grouping on the message therefore gave one group per row,
+#: which is `stale_render_reason`'s documented mistake rebuilt by the choice of
+#: key: "twenty renders across a working session became one near-identical note
+#: per day, the shape the aggregation removes".
+SplitCause = Literal['', 'invalid_placement', 'no_anchor', 'anchor_drift',
+                     'anchor_ambiguous', 'block_unresolved', 'scene_missing',
+                     'scene_unreadable', 'scene_empty']
+
+#: Causes that `validate_plan` already reports as their own finding, so a second
+#: "could not check for spoilers" finding on the same row adds only a row to
+#: `working/cleanup-report.csv`. `block_unresolved` is deliberately absent: it has
+#: no sibling, and neither do the file and body causes.
+CAUSES_WITH_SIBLING_FINDINGS: frozenset[SplitCause] = frozenset({
+    'invalid_placement', 'no_anchor', 'anchor_drift', 'anchor_ambiguous',
+    'scene_missing',
+})
+
+
+class ReadingPosition(TypedDict):
+    """Where in a scene's prose an illustration sits.
+
+    ``offset`` is a character index into the prose body: everything before it
+    has been read when the image appears, everything after it has not.
+    ``None`` when the position could not be resolved, and ``error`` says why.
+
+    Deliberately ``int | None`` rather than a ``-1`` sentinel, which would slice
+    to ``body[:-1]`` — nearly the whole scene, and indistinguishable from a
+    resolved position.
+
+    ``None`` is not *itself* loud: ``body[:None]`` is the whole body, so a plain
+    slice would swallow it just as quietly. What it buys is that arithmetic on it
+    raises, which is what ``split_at_position`` does. So every consumer checks
+    explicitly, and ``insert_marker`` — whose slice is plain — returns on ``None``
+    before reaching it. (An earlier version of this docstring claimed the
+    ``TypeError`` came from "the slice"; it does not, and the one plain slice in
+    the pipeline is the one that would have been trusted.)
+
+    ``cause`` names *why* in a form callers can group and branch on; ``error`` is
+    the sentence shown to a human.
+    """
+    offset: int | None
+    cause: SplitCause
+    error: str
+
+
+def reading_position(body: str, row: dict[str, str]) -> ReadingPosition:
+    """Resolve where a plan row's illustration sits in *body*.
+
+    The one predicate for "how much of this scene has the reader read?", shared
+    by `insert_marker` (which splits the prose there to place the marker) and by
+    `--prompts` (which must not show the model the prose after it). Those two
+    agreeing is the whole fix for #308: the request used to send a window
+    centred on the anchor with nothing marking the anchor's position in it, so
+    the most vivid sentence available was very often the one immediately after
+    the marker — which is the beat the anchor was placed in *front* of.
+
+    Placement is relative to the whole paragraph containing the anchor, never to
+    the anchor's own offset, because an illustration never splits a paragraph.
+    So `before_anchor` returns the paragraph's start — the anchor sentence itself
+    is unread at that point — and `after_anchor` returns its end.
+
+    *body* must be prose with any frontmatter already removed; markers may still
+    be present, since `find_anchor` blanks them offset-preservingly.
+    """
+    placement = (row.get('placement') or 'after_anchor').strip() or 'after_anchor'
+    if placement not in VALID_PLACEMENTS:
+        return {'offset': None, 'cause': 'invalid_placement',
+                'error': f'invalid placement {placement!r}'}
+    if placement == 'scene_open':
+        return {'offset': 0, 'cause': '', 'error': ''}
+    if placement == 'scene_close':
+        return {'offset': len(body), 'cause': '', 'error': ''}
+
+    anchor = (row.get('anchor') or '').strip()
+    if not anchor:
+        return {'offset': None, 'cause': 'no_anchor',
+                'error': f'placement {placement} requires an anchor'}
+    match = find_anchor(body, anchor)
+    if match is None:
+        return {'offset': None, 'cause': 'anchor_drift',
+                'error': 'anchor not found in scene — prose may have been revised'}
+    if match['count'] > 1:
+        return {'offset': None, 'cause': 'anchor_ambiguous',
+                'error': f'anchor is ambiguous — appears {match["count"]} times; '
+                         f'lengthen it to a unique phrase'}
+    block = _block_containing(body, match['start'])
+    if block is None:
+        # Defensive, and inherited: `find_anchor` succeeded, so the offset is in
+        # the text and `_paragraph_blocks` should contain it. Kept because the two
+        # walk the text differently and refusing is cheaper than a wrong offset.
+        return {'offset': None, 'cause': 'block_unresolved',
+                'error': 'could not resolve the paragraph containing the anchor'}
+
+    start, end = block
+    return {'offset': start if placement == 'before_anchor' else end,
+            'cause': '', 'error': ''}
+
+
+#: Paragraphs of not-yet-read prose to carry, and the character cap on them.
+#: "The following few paragraphs" from #308 — enough for the model to recognise
+#: what it is steering away from, not so much that the forbidden block starts
+#: competing with the scene for attention.
+UNREAD_BLOCKS = 3
+UNREAD_CHARS = 900
+
+#: The read-side window. The pre-#308 excerpt was 2400 characters straddling the
+#: anchor, so half of it was prose the reader had not reached; the read side gets
+#: 1800 of a 2700-character budget now, and `UNREAD_CHARS` is the rest.
+READ_CHARS = 1800
+
+#: Cap on the quoted next sentence. It lands in a prompt file's acceptance
+#: block, where a runaway paragraph would bury the check it exists to be.
+NEXT_SENTENCE_CHARS = 240
+
+#: Sentence terminator, plus a closing quote when the sentence ends inside
+#: dialogue. Matches the punctuation itself and *looks ahead* at the space, so
+#: the slice ends on the terminator rather than carrying the space with it.
+_SENTENCE_END_RE = re.compile(r'[.!?]["\'’”]?(?=\s)')
+
+
+#: Which positional situation a `SceneSplit` describes.
+#:
+#: Named rather than derived from which fields happen to be empty, following
+#: `prompts_packet._entry_state`: that Literal exists because "five hand-written
+#: copies of a discrimination is five chances to spell it wrong", and this one was
+#: originally spread across five call sites keyed on three *different* fields
+#: (`error`, `unread`, `next_sentence`) whose equivalence nothing asserted.
+#: `establishing` is the state that argument was right about — it was originally
+#: spelled `read == ''`, which is also exactly what a bug produced.
+SplitState = Literal['normal', 'establishing', 'at_scene_end', 'unknown']
+
+
+class SceneSplit(TypedDict):
+    """A scene cut at the point an illustration appears.
+
+    ``read`` is prose the reader has read when the image appears; ``unread`` is
+    the few paragraphs immediately after it, and ``next_sentence`` is the first
+    sentence of that. ``state`` is the authority on which situation this is, and
+    consumers switch on it rather than re-deriving it:
+
+    * ``normal`` — prose on both sides. The only state carrying a
+      ``next_sentence``, so ``bool(next_sentence) == (state == 'normal')``.
+    * ``establishing`` — ``offset`` is 0, so the reader has read *nothing* when
+      the image appears: a `scene_open` illustration, CLAUDE.md's "full-page
+      opener". The prose after it is the scene this image opens, **not** a
+      spoiler — an opener's whole job is to establish the setting the following
+      paragraphs describe. Consumers must not forbid it and must not emit a
+      spoiler check, which would tell the author to re-render a correct opener.
+    * ``at_scene_end`` — nothing follows **in that scene**, so there is nothing
+      for the check to compare against. The *next* scene's prose is still unread
+      and nothing checks it; that is a stated gap, not a claim of safety.
+    * ``unknown`` — the position could not be resolved; ``read`` is a leading
+      window and ``unread``/``next_sentence`` are empty. Say so. Do not present a
+      guess as a check.
+
+    ``offset`` is carried so an empty ``read`` is diagnosable: empty is correct
+    at ``offset == 0`` and a bug anywhere else, which is not assertable without
+    it — and a snapping bug that emptied it silently was in the first cut of this.
+    """
+    state: SplitState
+    offset: int | None
+    #: Set only when ``state`` is ``unknown``; ``''`` otherwise.
+    cause: SplitCause
+    read: str
+    unread: str
+    next_sentence: str
+    error: str
+
+
+def split_at_position(scene_text: str, row: dict[str, str]) -> SceneSplit:
+    """Cut a scene where a plan row's illustration sits.
+
+    Takes **raw scene text** and normalizes it here — markers out (they are not
+    prose, and the art-direction model should see the scene as a reader would)
+    and frontmatter out. Normalizing internally rather than requiring it of
+    callers is deliberate: the precondition was stated in a docstring and one of
+    the two production callers did not honour it, so `--embed`, `--prompts`, and
+    `spoiler_findings` computed three different offsets for one row on a legacy
+    frontmatter scene, and the author was shown YAML quoted as "the next sentence
+    the reader reads". A precondition two callers can disagree about is a
+    precondition that should not exist.
+
+    On a failed or ambiguous anchor the position is unknown, and this returns a
+    leading window with ``state='unknown'`` rather than a window centred on a
+    guess — `--audit`'s "Not assessed" rather than "None found", applied to the
+    one input whose silence produced #308.
+    """
+    _frontmatter, body = _split_frontmatter(strip_markers(scene_text))
+    # Leading blank lines come off, so the first paragraph starts at 0. Without
+    # this, `before_anchor` in a first paragraph preceded by a blank line returned
+    # a tiny non-zero offset whose `read` slice was whitespace — `state='normal'`
+    # with empty `read`, which is #308's shape and the exact invariant `offset`
+    # was added to make assertable ("empty is correct at 0 and a bug anywhere
+    # else"). It also aligns the two `_split_frontmatter` branches, since the
+    # frontmatter branch already lstrips.
+    body = body.lstrip('\n')
+
+    if not body.strip():
+        # Plan-before-draft is legitimate in-flight state, but there is nothing to
+        # split and nothing to direct art from. Reported as unresolved rather than
+        # `at_scene_end`, which was both silent and a false label — the reader has
+        # read nothing here, not everything.
+        return {'state': 'unknown', 'offset': None, 'cause': 'scene_empty',
+                'read': '', 'unread': '', 'next_sentence': '',
+                'error': 'the scene has no prose yet — draft it before '
+                         'directing its illustration'}
+
+    position = reading_position(body, row)
+    offset = position['offset']
+    if offset is None:
+        return {'state': 'unknown', 'offset': None,
+                'cause': position['cause'],
+                'read': body[:READ_CHARS].strip(), 'unread': '',
+                'next_sentence': '', 'error': position['error']}
+
+    read = body[max(0, offset - READ_CHARS):offset]
+    # Snap to a paragraph boundary so the window does not open mid-sentence,
+    # which reads to a model as prose it is allowed to complete.
+    #
+    # `start < offset` is load-bearing, not defensive. Without it, a paragraph
+    # longer than READ_CHARS means no paragraph *begins* inside the window, so
+    # the first match is a block starting AFTER the split and `body[start:offset]`
+    # slices backwards to ''. The request then carried no scene prose at all —
+    # its only prose being the block the model is told to avoid — with `error`
+    # empty, so nothing warned. That is #308 restored by the code fixing #308.
+    if offset > READ_CHARS:
+        for start, _end in _paragraph_blocks(body):
+            if start >= offset:
+                break
+            if start >= offset - READ_CHARS:
+                read = body[start:offset]
+                break
+
+    blocks = [(s, e) for s, e in _paragraph_blocks(body) if s >= offset]
+    unread = ''
+    if blocks:
+        # The cap is measured from where the unread prose *begins*, not from
+        # `offset`. Measuring from `offset` let the gap between them eat the
+        # budget, and could select a boundary before the block even started — a
+        # reversed slice reading as "nothing follows this image". An earlier fix
+        # clamped that with `max(blocks[0][1], …)`, which removed the reversed
+        # slice by lifting the cap without bound instead: a first unread paragraph
+        # of ordinary literary length (>900 chars) came back at 2519, nearly 3x,
+        # so the forbidden block outgrew the read window it must not compete with.
+        end = min(blocks[min(UNREAD_BLOCKS, len(blocks)) - 1][1],
+                  blocks[0][0] + UNREAD_CHARS)
+        unread = body[blocks[0][0]:end].strip()
+
+    # Keyed on the *declared* placement, not on `offset == 0`. The carve-out's
+    # justification — an opener establishes the prose that follows it — is a
+    # statement about a `scene_open` row, and it is not true of an anchored row
+    # that merely resolves to byte 0. `before_anchor` returns the containing
+    # paragraph's start, so an anchor in the first paragraph landed here and lost
+    # the spoiler guard entirely; worse, the classification flipped on whether the
+    # scene file happened to open with a heading. `offset == 0` was the same kind
+    # of proxy as the `read == ''` spelling this Literal exists to replace.
+    placement = (row.get('placement') or 'after_anchor').strip() or 'after_anchor'
+    if placement == 'scene_open' and unread:
+        state: SplitState = 'establishing'
+    elif not unread:
+        state = 'at_scene_end'
+    else:
+        state = 'normal'
+
+    return {
+        'state': state,
+        'offset': offset,
+        'cause': '',
+        'read': read.strip(),
+        'unread': unread,
+        # Only `normal` gets one: an opener's following prose is what it depicts,
+        # so quoting it as "nothing from after the illustration may appear" would
+        # ask the author to reject a correct image.
+        'next_sentence': first_sentence(unread) if state == 'normal' else '',
+        'error': '',
+    }
+
+
+def first_sentence(text: str) -> str:
+    """The first sentence of *text*, capped, for quoting in a check.
+
+    A **punctuation heuristic, not sentence segmentation** — the same honesty
+    `pages.detect_closeup_convergence` is documented with. An abbreviation, an
+    initial, or a decimal ends the sentence early: ``'Mr. Ives turned'`` yields
+    ``'Mr.'``. Acceptable because the quote is a *pointer* for a human comparing
+    an image against a page, not a parsed value anything branches on — a short
+    quote still locates the beat. With no terminator followed by whitespace the
+    whole collapsed text is returned, which is what makes a one-sentence
+    paragraph work.
+
+    Whitespace is collapsed: the quote goes into a markdown bullet, where a
+    paragraph break would end the bullet early and silently truncate the check.
+    """
+    collapsed = ' '.join(text.split())
+    if not collapsed:
+        return ''
+    match = _SENTENCE_END_RE.search(collapsed)
+    sentence = collapsed[:match.end()] if match else collapsed
+    if len(sentence) > NEXT_SENTENCE_CHARS:
+        sentence = sentence[:NEXT_SENTENCE_CHARS].rsplit(' ', 1)[0] + '…'
+    return sentence
+
+
+# ============================================================================
 # Marker insertion
 # ============================================================================
 
@@ -769,6 +1082,14 @@ def insert_marker(scene_text: str, row: dict[str, str]) -> InsertResult:
     and ``error`` explains why — placing an illustration at a guessed offset
     is worse than not placing it, because the wrong beat reads as a mistake
     the author never made.
+
+    Since the placement branches collapsed onto `reading_position`, the
+    anchorless placements route through the same ``rstrip``/``lstrip`` as the
+    anchored ones. That normalizes leading and trailing blank lines and strips
+    indentation from the first paragraph at ``scene_open`` — which `before_anchor`
+    on a first paragraph already did, so it is consistent rather than novel, but
+    it does mean a deliberately indented opening block (a markdown code block)
+    loses its indent. Pinned by test rather than left to be rediscovered.
     """
     illus_id = (row.get('id') or '').strip()
     if not illus_id:
@@ -779,48 +1100,21 @@ def insert_marker(scene_text: str, row: dict[str, str]) -> InsertResult:
     if has_marker(scene_text, illus_id):
         return {'text': scene_text, 'changed': False, 'error': ''}
 
-    placement = (row.get('placement') or 'after_anchor').strip() or 'after_anchor'
-    if placement not in VALID_PLACEMENTS:
-        return {'text': scene_text, 'changed': False,
-                'error': f'invalid placement {placement!r}'}
-
     # Legacy scene files can still carry YAML frontmatter. Inserting above it
     # would make the file no longer *start* with `---`, and every frontmatter
     # stripper in the pipeline tests exactly that — so the whole YAML block
     # would land in the epub and inflate word_count.
     frontmatter, body = _split_frontmatter(scene_text.rstrip('\n'))
 
-    if placement == 'scene_open':
-        return {'text': f'{frontmatter}{marker}\n\n{body}\n',
-                'changed': True, 'error': ''}
-    if placement == 'scene_close':
-        return {'text': f'{frontmatter}{body}\n\n{marker}\n',
-                'changed': True, 'error': ''}
-
-    anchor = (row.get('anchor') or '').strip()
-    if not anchor:
+    # The same offset `--prompts` splits the scene at, so the marker and the
+    # prose the model is shown cannot disagree about where the image sits (#308).
+    position = reading_position(body, row)
+    offset = position['offset']
+    if offset is None:
         return {'text': scene_text, 'changed': False,
-                'error': f'placement {placement} requires an anchor'}
+                'error': position['error']}
 
-    match = find_anchor(body, anchor)
-    if match is None:
-        return {'text': scene_text, 'changed': False,
-                'error': 'anchor not found in scene — prose may have been revised'}
-    if match['count'] > 1:
-        return {'text': scene_text, 'changed': False,
-                'error': f'anchor is ambiguous — appears {match["count"]} times; '
-                         f'lengthen it to a unique phrase'}
-
-    block = _block_containing(body, match['start'])
-    if block is None:
-        return {'text': scene_text, 'changed': False,
-                'error': 'could not resolve the paragraph containing the anchor'}
-
-    start, end = block
-    if placement == 'before_anchor':
-        head, tail = body[:start].rstrip(), body[start:].lstrip()
-    else:
-        head, tail = body[:end].rstrip(), body[end:].lstrip()
+    head, tail = body[:offset].rstrip(), body[offset:].lstrip()
 
     # A marker at the very start or very end of a scene has prose on one side
     # only; joining unconditionally would leave leading or trailing blanks.
@@ -1874,6 +2168,17 @@ IllustrationFindingKind = Literal[
     # `working/cleanup-report.csv` never mentioned that a book's whole set
     # needed re-rendering.
     'canon_stale_render', 'canon_staleness_unchecked',
+    # The illustration's position within its scene (#308). Both warnings: the
+    # book is publishable either way, and both are about art not yet rendered —
+    # which is the moment they are worth anything.
+    'state_mid_scene_change', 'prompt_spoils_unread',
+    # "Could not check the above" — the `canon_staleness_unchecked` precedent,
+    # because `[]` put an unverified row and a clean one in the same cell of the
+    # cleanup report. And an anchored placement whose `anchor` cell is empty,
+    # which nothing reported anywhere: the anchor checks below are gated on the
+    # cell being non-empty, so the row silently never embeds and the spoiler
+    # check silently never runs.
+    'prompt_spoiler_unchecked', 'missing_anchor',
 ]
 
 
@@ -1944,6 +2249,17 @@ WARNING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     # `--audit` renders "Not assessed": not knowing is not the same as being
     # broken, and it must not read as being fine either.
     'canon_stale_render', 'canon_staleness_unchecked',
+    # Position within the scene (#308). A `scene_close` row whose entity changes
+    # during that scene resolves to one of the two states the log holds for it,
+    # and a prompt body that already quotes unread prose is a render not yet
+    # paid for. Both leave a valid, publishable book — and both are exactly the
+    # information an author wants *before* spending on the art, not a reason to
+    # take a working book offline. `prompt_spoiler_unchecked` likewise reports a
+    # gap in *our* knowledge, never a broken book. `missing_anchor` is a genuine
+    # plan defect, but it matches `anchor_drift` — the same row in the same
+    # in-flight condition — and blocking would fail `validate` mid-planning.
+    'state_mid_scene_change', 'prompt_spoils_unread',
+    'prompt_spoiler_unchecked', 'missing_anchor',
 })
 
 Severity = Literal['error', 'warning']
@@ -1990,6 +2306,149 @@ def truncated_anchor_findings(project_dir: str) -> list[IllustrationFinding]:
     return findings
 
 
+#: Words per shingle for the spoiler check. Six is long enough that a
+#: coincidental match between an art-direction body and prose it never saw is
+#: vanishingly unlikely, which is what lets this be reported as a finding
+#: rather than a hint.
+_SPOILER_SHINGLE_WORDS = 6
+
+#: Example overlaps to quote. Two is enough to recognise the beat; the finding
+#: goes into an unquoted pipe-delimited CSV, so it stays short.
+_SPOILER_EXAMPLES = 2
+
+_WORD_RE = re.compile(r"[a-z0-9']+")
+
+
+def _shingles(text: str, n: int = _SPOILER_SHINGLE_WORDS) -> set[tuple[str, ...]]:
+    """Word n-grams of *text*, lowercased and punctuation-free."""
+    words = _WORD_RE.findall(text.lower())
+    return {tuple(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+
+def _unchecked(row: dict[str, str], rel: str,
+               reason: str) -> list[IllustrationFinding]:
+    """One `prompt_spoiler_unchecked` finding, naming why the check did not run.
+
+    The `canon_staleness_unchecked` precedent: not knowing is not the same as
+    being fine, and it must not read as being fine either. Returning `[]` from
+    these paths put "could not check" and "checked and clean" in the same cell of
+    `working/cleanup-report.csv` — the durable artifact `skills/forge/SKILL.md`
+    scans — where the difference is invisible forever.
+    """
+    rid = (row.get('id') or '').strip()
+    return [{
+        'kind': 'prompt_spoiler_unchecked',
+        'id': rid,
+        'file': rel,
+        'scene_id': (row.get('scene_id') or '').strip(),
+        'detail': f'could not check whether the art direction for {rid!r} '
+                  f'describes prose the reader has not read yet — '
+                  f'{_csv_safe(reason)}. The check is the one thing that catches '
+                  f'a spoiled page turn after generation, so this row is '
+                  f'unverified rather than clean',
+    }]
+
+
+def spoiler_findings(project_dir: str, row: dict[str, str],
+                     scene_text: str) -> list[IllustrationFinding]:
+    """Report a written prompt body that quotes prose the reader has not read.
+
+    #308's item 4, and the check that covers art already directed: `--prompts`
+    now splits the scene at the illustration's position, but every prompt written
+    before it did not, and on the book this was filed about 17 of 20 rows needed
+    re-rendering anyway. This is how those three were found by hand.
+
+    "Distinctive" is a set difference, not a frequency heuristic: a shingle that
+    also appears in the prose the reader *has* read is not evidence of anything,
+    because the body is supposed to describe that. What is left is language the
+    body shares with the unread prose alone. The subtrahend is **all** the prose
+    before the split, not `split['read']` — that is capped at `READ_CHARS`, so
+    subtracting it flagged a phrase the reader met early in a long scene and met
+    again after the anchor. The docstring cited this invariant to justify
+    reporting a finding rather than a hint, so it had to actually hold.
+
+    **Silence here means "checked and clean".** Every path that cannot check
+    emits `prompt_spoiler_unchecked` instead of `[]` — an unreadable or undecodable
+    file, a body that could not be recovered or was truncated, and a position that
+    would not resolve for a reason nothing else reports. Genuinely silent: a row
+    with no `prompt_file` (unprompted is valid in-flight state); a cause
+    `validate_plan` already reports (`CAUSES_WITH_SIBLING_FINDINGS`); and
+    `establishing` / `at_scene_end`, where an opener is supposed to depict the
+    prose after it and a scene-closing image has nothing after it *in that scene*
+    (the next scene's prose is unread and unchecked — a stated gap).
+
+    The comparison covers every word after the split, not the capped `unread`
+    window the model is sent — those two windows serve different purposes and only
+    one of them is a claim about coverage.
+    """
+    from storyforge import prompts_illustrate as pi
+
+    rel = (row.get('prompt_file') or '').strip()
+    if not rel:
+        return []
+    path = os.path.join(project_dir, rel)
+    if not os.path.isfile(path):
+        return _unchecked(row, rel, f'{rel} is not on disk')
+    try:
+        with open(path, encoding='utf-8') as f:
+            parsed = pi.parse_prompt_file(f.read())
+    # UnicodeDecodeError is a ValueError, not an OSError, so it walked straight
+    # out of `validate_plan` — the single finding collector — and took every
+    # other check down with it. A prompt body hand-edited and saved as latin-1
+    # does it, and CLAUDE.md documents hand-editing as the working fix on a real
+    # book. Same pairing `packet._body_for` uses to read this same file.
+    except (OSError, UnicodeDecodeError) as exc:
+        return _unchecked(row, rel, f'could not read {rel}: {exc}')
+    body = parsed['body'].strip()
+    if not body or parsed['status'] != 'ok':
+        # `body_truncated` lands here too: a partial body checked as though it
+        # were whole yields a clean result that means nothing.
+        return _unchecked(row, rel,
+                          f'no usable art direction recovered from {rel} '
+                          f'({parsed["status"]})')
+
+    split = split_at_position(scene_text, row)
+    if split['state'] == 'unknown':
+        if split['cause'] in CAUSES_WITH_SIBLING_FINDINGS:
+            # `validate_plan` already names this row's problem one finding above.
+            # A second row in the cleanup report whose only action is "fix the
+            # cause named above" doubles every positional finding and teaches the
+            # author to skim the section where the *unsiblinged* causes — an
+            # undecodable file, an unrecoverable body — actually live.
+            return []
+        return _unchecked(row, rel, split['error'])
+    if split['state'] != 'normal':
+        return []
+
+    # Compared against **all** the prose on each side, not the windows sent to the
+    # model. `unread`/`read` are capped for the prompt's sake; using them here made
+    # the check silently partial — a body quoting paragraph 29 while the image sat
+    # at paragraph 5 came back clean — while `prompt_spoiler_unchecked` was
+    # simultaneously establishing that silence is a verdict.
+    prose = _split_frontmatter(strip_markers(scene_text))[1].lstrip('\n')
+    offset = split['offset'] or 0
+    overlap = ((_shingles(body) & _shingles(prose[offset:]))
+               - _shingles(prose[:offset]))
+    if not overlap:
+        return []
+
+    examples = sorted(' '.join(s) for s in overlap)[:_SPOILER_EXAMPLES]
+    rid = (row.get('id') or '').strip()
+    return [{
+        'kind': 'prompt_spoils_unread',
+        'id': rid,
+        'file': rel,
+        'scene_id': (row.get('scene_id') or '').strip(),
+        'detail': f'the art direction for {rid!r} shares language with prose the '
+                  f'reader has not read when the image appears — '
+                  + '; '.join(f'"{_csv_safe(e)}"' for e in examples)
+                  + f' ({len(overlap)} phrase(s) in total). The image would show '
+                    f'the beat on the next page. Re-run `storyforge illustrate '
+                    f'--prompts --ids {rid}`, which now sends the scene split at '
+                    f'the illustration\'s position',
+    }]
+
+
 def validate_plan(project_dir: str, *,
                   canon_cutoff: str | None = None) -> list[IllustrationFinding]:
     """Check the plan, the markers, and the files against each other.
@@ -2002,8 +2461,9 @@ def validate_plan(project_dir: str, *,
 
     Also folds in `visual_state.prepass`, whose findings are about the
     transition log: a transition keyed to a scene that no longer exists, an
-    evidence quote the prose no longer contains, and an illustration naming an
-    entity whose visible state nobody stated at that point — plus
+    evidence quote the prose no longer contains, an illustration naming an
+    entity whose visible state nobody stated at that point, and a `scene_close`
+    image over an entity that changes during that scene — plus
     `visual_state.digest_drift`, for prose that moved after the audit read it or
     after an illustration was rendered from it.
 
@@ -2012,6 +2472,10 @@ def validate_plan(project_dir: str, *,
     packet that no longer matches its canon source. Both return [] when no
     packet has been built, so a project that never runs `--package` sees
     nothing new.
+
+    And, per row, `spoiler_findings`: art direction already on disk whose prose
+    shares distinctive language with the part of the scene the reader has not
+    read when the image appears (#308).
     """
     from storyforge import packet
     from storyforge import visual_state
@@ -2150,6 +2614,25 @@ def validate_plan(project_dir: str, *,
             })
 
         anchor = (row.get('anchor') or '').strip()
+        if placement not in ANCHORLESS_PLACEMENTS and not anchor:
+            # Reported because nothing else reports it. The checks below are gated
+            # on a non-empty cell, so this row produced no finding anywhere while
+            # `insert_marker` refused it every run — the illustration could never
+            # embed, and `spoiler_findings`' claim that "an ambiguous anchor
+            # already has its own finding" was false for exactly this class.
+            # `placement` goes through csv_safe: `invalid_placement` reports a bad
+            # value without `continue`, so an author-typed cell reaches this
+            # detail, and a `|` in the unquoted cleanup report shifts every later
+            # column and empties the trailing `status` cell forge scans.
+            shown = _csv_safe(placement) or 'after_anchor (the default)'
+            findings.append({
+                'kind': 'missing_anchor', 'id': rid, 'scene_id': scene_id,
+                'detail': f'placement is {shown} and the anchor cell is empty, so '
+                          f'the marker cannot be placed and the illustration will '
+                          f'not appear in the book. Quote a short phrase from '
+                          f'{_csv_safe(scene_id)}, or use scene_open / '
+                          f'scene_close',
+            })
         if placement not in ANCHORLESS_PLACEMENTS and anchor:
             match = find_anchor(scene_text, anchor)
             if match is None:
@@ -2160,6 +2643,12 @@ def validate_plan(project_dir: str, *,
                 findings.append({'kind': 'anchor_ambiguous', 'id': rid, 'scene_id': scene_id,
                                  'detail': f'anchor matches {match["count"]} places in '
                                            f'{scene_id}; lengthen it to a unique phrase'})
+
+        # Art direction that already quotes the next page (#308). Reads the
+        # row's own prompt file, so it covers prompts written before the scene
+        # was split at the illustration's position — which is every prompt on
+        # every project that predates this check.
+        findings.extend(spoiler_findings(project_dir, row, scene_text))
 
     # Markers with no plan row, and repeated markers within one scene.
     scenes_dir = os.path.join(project_dir, 'scenes')
