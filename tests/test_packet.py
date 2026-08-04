@@ -712,6 +712,35 @@ def test_the_fallback_is_reported_when_register_is_empty(packet_project):
     assert batch['brightest'] == 'the-blank-page'
 
 
+def test_every_batch_slot_is_declared():
+    """`BatchSlot` and `BATCH_SLOTS` are one vocabulary in two declarations, and
+    the whole point of the Literal is that nothing can add to one and not the
+    other. Same shape as the `SplitCause` / `StaleKind` totality tests."""
+    from typing import get_args
+    assert {slot for slot, _label in packet.BATCH_SLOTS} == \
+        set(get_args(packet.BatchSlot))
+
+
+def test_slots_by_id_promotes_in_slot_order():
+    filled: packet.AnchorBatch = {
+        'establisher': 'e', 'darkest': 'd', 'brightest': 'b',
+        'later_state': 'l', 'fallback': [], 'guessed': [],
+    }
+    assert list(packet.slots_by_id(filled)) == ['e', 'd', 'b', 'l']
+
+
+def test_slots_by_id_keeps_the_first_slot_when_one_row_fills_two():
+    """The common configuration, not an edge case: with no `register` cells on a
+    one-row plan, darkest and brightest resolve to the same illustration — which
+    `anchor_batch` discloses as "the batch brackets nothing". It must occupy one
+    reference and be named once."""
+    doubled: packet.AnchorBatch = {
+        'establisher': '', 'darkest': 'x', 'brightest': 'x',
+        'later_state': 'y', 'fallback': [], 'guessed': [],
+    }
+    assert packet.slots_by_id(doubled) == {'x': 'darkest', 'y': 'later_state'}
+
+
 def test_a_guessed_slot_is_reported_structurally_not_only_in_prose(
         packet_project):
     """`fallback` is prose, so no consumer can ask "was this slot guessed?" —

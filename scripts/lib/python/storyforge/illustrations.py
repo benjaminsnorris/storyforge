@@ -1888,7 +1888,9 @@ class RenderStep(TypedDict):
     status: PlanStatus
 
 
-def render_order(project_dir: str) -> list[RenderStep]:
+def render_order(project_dir: str, *,
+                 plan: list[dict[str, str]] | None = None,
+                 order: dict[str, int] | None = None) -> list[RenderStep]:
     """Return the recommended render order, visual key first.
 
     Two rules, both from how illustrated books are actually produced:
@@ -1902,13 +1904,18 @@ def render_order(project_dir: str) -> list[RenderStep]:
 
     `locks` names the anchors an illustration is the first to show, so the
     author knows which renders they cannot afford to get wrong.
+
+    `plan` and `order` let a caller that has already read them pass them in, as
+    `packet.rows_in_reading_order` does — one derivation of the anchor batch then
+    reads the plan and the chapter map once instead of three times.
     """
-    rows = [r for r in read_plan(project_dir)
+    rows = [r for r in (plan if plan is not None else read_plan(project_dir))
             if (r.get('status') or '').strip() != 'superseded']
     if not rows:
         return []
 
-    order = _scene_order(project_dir)
+    if order is None:
+        order = _scene_order(project_dir)
 
     def position(row: dict[str, str]) -> int:
         return order.get((row.get('scene_id') or '').strip(),

@@ -2783,10 +2783,65 @@ def test_the_anchor_batch_is_derived_once_per_prompts_run(in_project,
     calls = []
     real = packet.anchor_batch
     monkeypatch.setattr(packet, 'anchor_batch',
-                        lambda pd: (calls.append(pd), real(pd))[1])
+                        lambda pd, **kw: (calls.append(pd), real(pd, **kw))[1])
 
     assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
     assert len(calls) == 1, f'{len(calls)} anchor-batch derivations'
+
+
+def test_the_transition_log_is_read_once_per_prompts_run(in_project,
+                                                         monkeypatch):
+    """Deriving the batch beside `state_context` read the log twice, so every
+    malformed row logged its WARNING twice — "N walks read as N broken files",
+    the defect CLAUDE.md holds a canon-tree test on (#311 review, SF-I1)."""
+    from storyforge import visual_state as vs_mod
+    write_scene(in_project, 'vigil', SCENE)
+    _style_ref(in_project)
+    ill.write_plan(in_project, _priors(in_project, 2) + [plan_row()])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '### Scene\n\nX.\n')
+
+    reads = []
+    real = vs_mod.read_transitions
+    monkeypatch.setattr(vs_mod, 'read_transitions',
+                        lambda pd: (reads.append(pd), real(pd))[1])
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
+    assert len(reads) == 1, f'{len(reads)} transition-log reads'
+
+
+def test_the_fallback_derivation_uses_the_plan_it_was_given(in_project):
+    """`anchor_batch` reads the plan from disk, so a caller passing an in-memory
+    `plan` with no `batch` would rank memory candidates against disk slots — a
+    precondition two callers can disagree about."""
+    _style_ref(in_project)
+    on_disk = _priors(in_project, 5)
+    ill.write_plan(in_project, on_disk + [plan_row()])
+    # Derived from the plan on disk, the brightest slot is `prior-4` — a row this
+    # call is not considering, so promotion silently does nothing. Derived from
+    # the rows actually passed, it is `prior-3`, which is promoted.
+    in_memory = on_disk[1:4] + [plan_row()]
+
+    refs = cmd_illustrate._references_for(in_project, 'lantern-vigil',
+                                          plan=in_memory)
+    assert _stems(refs) == ['cover-illustration', 'prior-3',
+                            'prior-1', 'prior-2']
+
+
+def test_a_batch_missing_a_slot_key_raises_rather_than_promoting_nothing(
+        in_project):
+    """`.get` was the only one of four `BATCH_SLOTS` consumers that degraded
+    silently: add a slot without its `AnchorBatch` key and the other three raise,
+    while this one promoted nothing and reverted #311 without a sound."""
+    _style_ref(in_project)
+    ill.write_plan(in_project, _priors(in_project, 2) + [plan_row()])
+    malformed = _batch(establisher='prior-1')
+    del malformed['later_state']            # type: ignore[misc]
+
+    with pytest.raises(KeyError):
+        cmd_illustrate._references_for(in_project, 'lantern-vigil',
+                                       batch=malformed)
 
 
 # ============================================================================
