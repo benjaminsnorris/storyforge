@@ -638,6 +638,14 @@ def build_art_direction_request(*, row: dict[str, str],
             'place and mood the prose below then describes, so illustrate that '
             'opening.')
         scene_prose = unread
+    elif scene_state == 'unknown' and not scene_prose:
+        # Branched on the prose, not only the state: the missing-scene, unreadable
+        # and undrafted causes carry no excerpt at all, and the heading written for
+        # the anchor-failure case promised an opening that was not there.
+        scene_heading = (
+            f'**The scene could not be read** — {split["error"].strip()}. There '
+            f'is no prose below. Work from the illustration\'s own fields above '
+            f'and stay inside them; do not invent surrounding events.')
     elif scene_state == 'unknown':
         scene_heading = (
             f'**Where this illustration sits could not be resolved** — '
@@ -645,6 +653,17 @@ def build_art_direction_request(*, row: dict[str, str],
             f'scene, not the prose leading up to this image. Stay with the beat '
             f'the plan row names and do not reach for a later moment; nothing '
             f'here can tell you which moments are later.')
+    elif not scene_prose:
+        # `normal` with nothing read is legitimate and reachable: a `before_anchor`
+        # image anchored in the scene's first paragraph sits before any prose. It
+        # must not inherit the "here is what the reader has read" heading over an
+        # empty block, and it cannot be told to depict the prose below either —
+        # that prose is exactly what the author placed the image in front of.
+        scene_heading = (
+            'The reader has read **nothing** yet when this illustration appears — '
+            'it sits at the very start of the scene. Work from the illustration\'s '
+            'own fields above. The prose below is what the reader turns to next, '
+            'so treat it as setting you may not depict.')
     else:
         scene_heading = (
             'This is the prose the reader has read by the time the illustration '
@@ -960,6 +979,19 @@ def prompt_acceptance_lines(*, split: SceneSplit, state: str = '',
             f'the prose after this illustration is unknown. Re-anchor the plan '
             f'row and re-run `--prompts` for it, then check by eye against the '
             f'paragraph that follows the marker.')
+    else:
+        # A *stated absence*, not a check to tick. `acceptance.md`'s page-turn item
+        # sends the author here for a sentence, so emitting nothing made that a
+        # dead-end referral on the two states where no sentence exists — the
+        # documented `NOT_RECORDED` failure, an artifact implying a check it does
+        # not have. The argument against rendering a vacuous *check* does not
+        # extend to saying why there is nothing to check.
+        accept.append(
+            '- **No page-turn check applies.** '
+            + ('This illustration opens its scene, so the prose after it is what '
+               'it depicts.' if split['state'] == 'establishing' else
+               'This illustration sits at the close of its scene, so no prose '
+               'in that scene follows it.'))
     if absent.strip():
         accept.append(f'- Nothing in frame that must not be: {absent.strip()}')
     if contrast.strip():

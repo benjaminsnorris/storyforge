@@ -3264,16 +3264,63 @@ def test_the_acceptance_block_quotes_the_next_sentence():
     assert '"Nothing came."' in joined
 
 
-@pytest.mark.parametrize('state', ['at_scene_end', 'establishing'])
-def test_the_acceptance_block_omits_the_spoiler_check_when_it_is_vacuous(state):
-    """A scene-closing image has nothing after it; an opener is *supposed* to
-    depict what follows. Rendering the check teaches the author to tick an empty
-    box — and for an opener it told them to re-render a correct image."""
+@pytest.mark.parametrize('state,because', [
+    ('at_scene_end', 'no prose\nin that scene follows it'),
+    ('establishing', 'opens its scene'),
+])
+def test_the_vacuous_states_state_their_absence_rather_than_a_check(state, because):
+    """No check to tick — rendering one told the author to re-render a correct
+    opener. But not silence either: `acceptance.md`'s page-turn item sends them
+    here for a sentence, so emitting nothing made that a dead-end referral on the
+    two states where no sentence exists."""
     joined = '\n'.join(pi.prompt_acceptance_lines(
         split=scene_split(state=state, unread='', next_sentence=''),
         state='a lit lamp'))
     assert 'Nothing from after' not in joined
     assert 'Cannot be checked' not in joined
+    assert 'No page-turn check applies' in joined
+    assert because.split('\n')[0] in joined
+
+
+def test_an_image_at_the_very_start_is_not_told_the_reader_has_read_it():
+    """`normal` with nothing read is legitimate — `before_anchor` anchored in the
+    first paragraph — but it must not inherit the "here is what the reader has
+    read" heading over an empty block, and it cannot be told to depict the prose
+    below, which is what the author placed it in front of."""
+    request = pi.build_art_direction_request(
+        split=scene_split(offset=0, read='', unread='The lamp guttered.'),
+        row=plan_row(placement='before_anchor'),
+        character_anchors={}, canon_context='c')
+    assert 'read **nothing** yet' in request
+    assert 'sits at the **end** of this text' not in request
+    assert 'may not depict' in request
+
+
+def test_prompts_warn_about_an_image_anchored_in_the_first_paragraph(
+        in_project, monkeypatch, capsys):
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(
+        anchor='The lantern guttered', placement='before_anchor')])
+    _capture_request(in_project, monkeypatch)
+    cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+
+    out = capsys.readouterr().out
+    assert 'first paragraph' in out
+    assert 'placement=scene_open' in out
+
+
+def test_an_unreadable_scene_does_not_promise_prose_it_has_none_of():
+    """The `unknown` heading was written for the anchor-failure case, which
+    carries a leading window. The missing-scene, unreadable and undrafted causes
+    carry no excerpt, so it promised an opening that was not there."""
+    request = pi.build_art_direction_request(
+        split=scene_split(state='unknown', offset=None, cause='scene_missing',
+                          read='', unread='', next_sentence='',
+                          error="scene file for 'nowhere' is not in scenes/"),
+        row=plan_row(), character_anchors={}, canon_context='c')
+    assert 'The scene could not be read' in request
+    assert 'What follows is the *opening*' not in request
+    assert 'no prose below' in request
 
 
 def test_the_acceptance_block_says_when_the_spoiler_check_is_impossible():

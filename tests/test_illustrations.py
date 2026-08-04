@@ -457,18 +457,87 @@ def test_a_long_paragraph_before_the_split_still_yields_read_prose():
 
 def test_a_single_giant_paragraph_falls_back_to_the_raw_window():
     """No paragraph starts inside the window at all — the loop finds nothing and
-    the mid-sentence slice is strictly better than no prose."""
-    body = 'She set it on the sill. ' + 'Filler that runs on. ' * 200
-    split = ill.split_at_position(body, plan_row(placement='before_anchor'))
-    assert split['read'] == '' or len(split['read']) <= ill.READ_CHARS
+    the mid-sentence slice is strictly better than no prose.
+
+    The anchor must sit at the END of the giant block and the placement must be
+    `after_anchor`: with the anchor first, `before_anchor` resolves to offset 0,
+    the loop is never entered, and the test passed through a disjunct that made it
+    unable to fail.
+    """
+    body = ('Filler that runs on. ' * 200) + 'She set it on the sill.'
+    split = ill.split_at_position(body, plan_row())
+    assert split['read'] != ''
+    assert len(split['read']) <= ill.READ_CHARS
 
 
-def test_read_is_empty_only_at_the_start_of_a_scene():
+@pytest.mark.parametrize('body', [
+    SCENE,
+    # A leading blank line: `before_anchor` in the first paragraph returned a
+    # tiny non-zero offset whose read slice was whitespace, so `state` was
+    # `normal` with an empty `read` — #308's shape, silent. The original test ran
+    # only against SCENE, so this input was outside its space entirely.
+    '\n\n' + SCENE,
+    '\n' + SCENE,
+])
+def test_read_is_empty_only_at_the_start_of_a_scene(body):
     """The invariant `offset` was added to make assertable."""
     for placement in ('before_anchor', 'after_anchor', 'scene_open', 'scene_close'):
-        split = ill.split_at_position(SCENE, plan_row(placement=placement))
+        split = ill.split_at_position(body, plan_row(placement=placement))
         if split['read'] == '':
             assert split['offset'] == 0, placement
+        # `normal` with an empty `read` is legitimate at offset 0 only — a
+        # `before_anchor` image anchored in the first paragraph. Anywhere else it
+        # is the #308 shape, and `--prompts` reports the legitimate case rather
+        # than letting it look like a normal request.
+        if split['state'] == 'normal' and split['read'] == '':
+            assert split['offset'] == 0, placement
+
+
+def test_an_anchored_row_in_the_first_paragraph_keeps_its_spoiler_guard():
+    """`establishing` is keyed on the declared placement, not on `offset == 0`.
+
+    `before_anchor` returns the containing paragraph's start, so an anchor in the
+    first paragraph resolved to 0 and was classified an opener — losing the
+    forbidden block, the acceptance check, and `prompt_spoils_unread` entirely.
+    The classification also flipped on whether the scene file happened to begin
+    with a heading, which is not a property of authorial intent.
+    """
+    body = ('First paragraph, the cold room and the shut door.\n\n'
+            + '\n\n'.join(f'Paragraph {i} continues.' for i in range(2, 30)))
+    row = plan_row(anchor='the cold room', placement='before_anchor')
+
+    split = ill.split_at_position(body, row)
+    assert split['state'] == 'normal'
+    assert split['offset'] == 0
+    assert split['next_sentence'] != ''
+    # ...and identical intent with a leading heading resolves the same way.
+    assert ill.split_at_position('## Chapter one\n\n' + body, row)['state'] == \
+        'normal'
+
+
+def test_an_undrafted_scene_is_unresolved_not_at_its_end():
+    """`at_scene_end` was both silent and a false label: the reader has read
+    nothing here, not everything. The paid call went out regardless."""
+    for body in ('', '\n\n', '   \n  \n'):
+        split = ill.split_at_position(body, plan_row(placement='scene_open'))
+        assert split['state'] == 'unknown', repr(body)
+        assert split['cause'] == 'scene_empty'
+        assert 'no prose yet' in split['error']
+
+
+def test_every_unresolved_position_names_a_cause():
+    """The cause is what two consumers group and branch on; the error string
+    interpolates row-specific values and cannot be a key."""
+    from typing import get_args
+    rows = [plan_row(placement='sideways'), plan_row(anchor=''),
+            plan_row(anchor='absent from the prose'),
+            plan_row(anchor='She set it on the sill')]
+    doubled = SCENE + '\nShe set it on the sill again.\n'
+    for row in rows:
+        split = ill.split_at_position(doubled, row)
+        if split['state'] == 'unknown':
+            assert split['cause'] != '', row
+            assert split['cause'] in get_args(ill.SplitCause), split['cause']
 
 
 def test_the_unread_cap_cannot_manufacture_an_empty_unread_side():
@@ -481,10 +550,21 @@ def test_the_unread_cap_cannot_manufacture_an_empty_unread_side():
 
 
 def test_the_unread_side_is_capped_by_characters_too():
+    """No slack in the assertion. A `max()` clamp added to stop the cap selecting
+    a boundary before its block instead lifted the cap without bound — an ordinary
+    900+ character first paragraph came back at 2519 — and a test with 200
+    characters of slack could not fail for it."""
     body = (SCENE.rstrip() + '\n\n'
             + '\n\n'.join('Long unread paragraph. ' * 40 for _ in range(3)))
     split = ill.split_at_position(body, plan_row())
-    assert len(split['unread']) <= ill.UNREAD_CHARS + 200
+    assert len(split['unread']) <= ill.UNREAD_CHARS
+
+
+def test_one_huge_following_paragraph_does_not_lift_the_cap():
+    body = ('She set it on the sill.\n\n'
+            + ('A long following paragraph. ' * 90).strip() + '\n\nAfter.\n')
+    split = ill.split_at_position(body, plan_row())
+    assert len(split['unread']) <= ill.UNREAD_CHARS
 
 
 @pytest.mark.parametrize('placement,state', [
@@ -686,17 +766,52 @@ def test_a_prompt_file_that_is_not_on_disk_is_unchecked_not_clean(project_dir):
     assert 'not on disk' in found[0]['detail']
 
 
-def test_an_unresolved_position_is_unchecked_not_clean(project_dir):
-    """Guessing a position would warn about prose that may not be after the image.
-    Reporting nothing would say the row was checked. Neither is true."""
+def test_a_cause_with_its_own_finding_is_not_reported_twice(project_dir):
+    """A drifted anchor is already `anchor_drift`. A second row in the cleanup
+    report whose only action is "fix the cause named above" doubles every
+    positional finding, which teaches the author to skim the section where the
+    causes with no sibling actually live."""
     write_scene(project_dir, 'vigil', SCENE)
     rel = _write_prompt_body(project_dir, 'lantern-vigil',
                              '## Scene\n\nNothing came. The cold worked up '
                              'through the floorboards here.\n')
     row = plan_row(prompt_file=rel, anchor='a phrase that is not in the prose')
-    found = ill.spoiler_findings(project_dir, row, SCENE)
+    ill.write_plan(project_dir, [row])
+
+    assert ill.spoiler_findings(project_dir, row, SCENE) == []
+    # ...and the row is still reported, once, by its own kind.
+    kinds = [f['kind'] for f in ill.validate_plan(project_dir)]
+    assert 'anchor_drift' in kinds
+    assert 'prompt_spoiler_unchecked' not in kinds
+
+
+def test_an_undrafted_scene_is_unchecked_not_clean(project_dir):
+    """A cause with no sibling finding: nothing else reports that the scene the
+    illustration sits in has no prose yet."""
+    write_scene(project_dir, 'vigil', '\n')
+    rel = _write_prompt_body(project_dir, 'lantern-vigil', '## Scene\n\nX.\n')
+    found = ill.spoiler_findings(project_dir, plan_row(prompt_file=rel), '\n')
     assert [f['kind'] for f in found] == ['prompt_spoiler_unchecked']
-    assert 'anchor not found' in found[0]['detail']
+    assert 'no prose yet' in found[0]['detail']
+
+
+def test_the_spoiler_check_covers_the_whole_scene_not_the_sent_window(project_dir):
+    """`unread` is capped for the prompt's sake. Comparing against the cap made
+    the check silently partial — a body quoting the scene's climax while the image
+    sits in paragraph five came back clean — at the same time as
+    `prompt_spoiler_unchecked` was establishing that silence is a verdict."""
+    late = 'The great lamp went dark above the drowned square at last.'
+    scene = ('She set it on the sill.\n\n'
+             + '\n\n'.join(f'Paragraph {i} continues.' for i in range(2, 30))
+             + f'\n\n{late}\n')
+    write_scene(project_dir, 'vigil', scene)
+    rel = _write_prompt_body(project_dir, 'lantern-vigil',
+                             f'## Scene\n\n{late}\n')
+    row = plan_row(prompt_file=rel)
+
+    assert late not in ill.split_at_position(scene, row)['unread']
+    found = ill.spoiler_findings(project_dir, row, scene)
+    assert [f['kind'] for f in found] == ['prompt_spoils_unread']
 
 
 def test_an_unrecoverable_prompt_body_is_unchecked_not_clean(project_dir):

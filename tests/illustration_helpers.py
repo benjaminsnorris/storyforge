@@ -434,6 +434,7 @@ def scene_split(**overrides) -> ill.SceneSplit:
     split: ill.SceneSplit = {
         'state': 'normal',
         'offset': 40,
+        'cause': '',
         'read': 'She set it on the sill and waited.',
         'unread': 'Nothing came. The cold worked up.',
         'next_sentence': 'Nothing came.',
