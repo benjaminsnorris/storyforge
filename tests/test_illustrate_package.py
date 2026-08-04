@@ -49,11 +49,15 @@ def _read_all(project_dir):
 
 
 def _upload_list(readme):
-    """README's numbered reference-upload block, as `[(path, label)]`.
+    r"""README's numbered reference-upload block, as `[(path, label)]`.
 
-    Bounded to the numbered list rather than sliced to the end of the file: the
-    exclusion notes right below it also name image paths, so counting `.png`
-    over the tail counts the files that were *not* uploaded too.
+    Matched by *shape* — `N. \`path\` — label`, which only
+    `pi.render_references_block` emits — rather than by slicing to the end of the
+    file: the exclusion notes right below the list also name image paths, so
+    counting `.png` over the tail counts the files that were *not* uploaded too.
+    Shape-scoped, not block-scoped: anything else in README that renders a
+    numbered path-and-label list would be picked up too, and the anchor batch is
+    four paths with slot labels (a table today).
     """
     return [(m.group(1), m.group(2)) for m in
             re.finditer(r'^\d+\. `([^`]+)` — (.+)$', readme, re.MULTILINE)]
@@ -447,10 +451,13 @@ def test_a_missing_cover_is_disclosed(in_project):
 
 
 def test_the_prior_illustration_cap_is_disclosed(in_project):
-    """L4: the list stops at four with a silent `break` today.
+    """Four *prior illustrations*, plus the cover: the cap is additive to the
+    cover since #311, so a full four-slot anchor batch is representable.
 
-    Four *prior illustrations*, plus the cover: the cap is additive to the cover
-    since #311, so a full four-slot anchor batch is representable.
+    The original L4 wording said "with a silent `break` today" — false since
+    #306, which replaced the break with a counted `continue` precisely so a stale
+    render past the cap was still disclosed, and doubly false now that the cap is
+    a slice applied after the walk.
     """
     from illustration_helpers import make_png
     make_png(os.path.join(in_project, 'manuscript', 'assets',

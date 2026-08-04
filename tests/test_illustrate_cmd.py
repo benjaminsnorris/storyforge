@@ -605,7 +605,12 @@ def test_references_accept_bare_paths():
 
 
 def test_references_are_capped(in_project):
-    """More than a handful and the model starts averaging them."""
+    """More than a handful and the model starts averaging them.
+
+    Asserted over the priors, not over `len(refs)`: this project resolves no
+    cover, so a total count would equal the prior count by coincidence and stop
+    distinguishing the two quantities #311 separated.
+    """
     rows = []
     for i in range(8):
         make_png(os.path.join(in_project, ill.ILLUSTRATIONS_SUBDIR,
@@ -615,7 +620,8 @@ def test_references_are_capped(in_project):
     ill.write_plan(in_project, rows + [plan_row()])
 
     refs = cmd_illustrate._references_for(in_project, 'lantern-vigil')
-    assert len(refs) == cmd_illustrate._MAX_PRIOR_REFERENCES
+    priors = [p for p, _ in refs if 'cover-illustration' not in p]
+    assert len(priors) == cmd_illustrate._MAX_PRIOR_REFERENCES
 
 
 def test_scene_split_strips_markers(in_project):

@@ -213,9 +213,10 @@ class PacketContents(TypedDict):
     anchors: dict[str, str]
     entries: list[ImagePrompt]
     references: list[tuple[str, str]]
-    #: Why the reference list is shorter than the ingested art suggests —
-    #: canon-excluded renders, `--no-prior-refs`, the four-image cap, and a
-    #: cover-only or empty chain. Rendered beneath the list in
+    #: Why the reference list is shorter than the ingested art suggests, or is
+    #: not what the author approved — canon-excluded renders, `--no-prior-refs`,
+    #: the prior-illustration cap, an anchor-batch member whose art exists and
+    #: cannot be used, and a cover-only or empty chain. Rendered beneath the list in
     #: README's upload step, because a list that silently shrank to the cover
     #: reads as "nothing is ingested yet" and the author then uploads the cover
     #: alone.
