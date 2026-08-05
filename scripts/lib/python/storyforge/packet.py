@@ -213,9 +213,10 @@ class PacketContents(TypedDict):
     anchors: dict[str, str]
     entries: list[ImagePrompt]
     references: list[tuple[str, str]]
-    #: Why the reference list is shorter than the ingested art suggests —
-    #: canon-excluded renders, `--no-prior-refs`, the four-image cap, and a
-    #: cover-only or empty chain. Rendered beneath the list in
+    #: Why the reference list is shorter than the ingested art suggests, or is
+    #: not what the author approved — canon-excluded renders, `--no-prior-refs`,
+    #: the prior-illustration cap, an anchor-batch member whose art exists and
+    #: cannot be used, and a cover-only or empty chain. Rendered beneath the list in
     #: README's upload step, because a list that silently shrank to the cover
     #: reads as "nothing is ingested yet" and the author then uploads the cover
     #: alone.
@@ -476,7 +477,8 @@ def needs_render(project_dir: str, *,
 
 
 def resolve(project_dir: str, *,
-            canon_cutoff: str | None = None) -> PacketContents:
+            canon_cutoff: str | None = None,
+            batch: AnchorBatch | None = None) -> PacketContents:
     """Collect what the packet says, recording every gap rather than filtering.
 
     Reads the canon tier (phase 1), the visual-state matrix (phase 2), and the
@@ -487,6 +489,9 @@ def resolve(project_dir: str, *,
     style reference, so one `--package` walks the canon tree once. It was walked
     five times, which logged an unparseable `canon_updated` five times and read
     as five broken files.
+
+    `batch` is threaded for the same reason: `run_package` derives it for
+    README's batch table, and the reference list now ranks by it (#311).
     """
     gaps: list[str] = []
 
@@ -520,8 +525,11 @@ def resolve(project_dir: str, *,
     # Resolved *before* the row loop, not after it as the packet's six-file
     # version did: the upload list is book-level now, and a row needs to know
     # whether its own earlier render is in it (`_self_reference_note`).
+    if batch is None:
+        batch = anchor_batch(project_dir)
     references, reference_notes = _packet_references(
-        project_dir, rows, canon_cutoff=context['canon_cutoff'], style=style)
+        project_dir, rows, canon_cutoff=context['canon_cutoff'], style=style,
+        batch=batch)
     reference_stems = {
         os.path.splitext(os.path.basename(rel))[0]: position
         for position, (rel, _purpose) in enumerate(references, start=1)}
@@ -1251,6 +1259,7 @@ def _packet_references(
         project_dir: str, rows: list[dict[str, str]], *,
         canon_cutoff: str | None = None,
         style: "StyleReference | None" = None,
+        batch: AnchorBatch | None = None,
 ) -> tuple[list[tuple[str, str]], list[str]]:
     """The labeled reference-image list for the whole packet, and why it is short.
 
@@ -1266,6 +1275,12 @@ def _packet_references(
     The second element is the exclusion record. `--prompts` only logs those, and
     for a prompt file that is enough because the author is watching the run; the
     packet is read hours later, so the reasons have to be *in* it.
+
+    `batch` is threaded through for the same reason `canon_cutoff` and `style`
+    are — `run_package` has already derived it for README's batch table, and
+    `anchor_batch` re-reads the plan, the chapter map, and the transition log.
+    The upload list is where #311 was found: the four images phase 1 exists to
+    approve were the ones the cap dropped.
     """
     from storyforge import cmd_illustrate
     notes: list[str] = []
@@ -1273,7 +1288,7 @@ def _packet_references(
         canon_cutoff = canon.newest_canon_updated(project_dir)
     references = cmd_illustrate._references_for(
         project_dir, 'the packet', plan=rows,
-        canon_cutoff=canon_cutoff, style=style, notes=notes)
+        canon_cutoff=canon_cutoff, style=style, batch=batch, notes=notes)
     return references, notes
 
 
@@ -1300,8 +1315,16 @@ def state_grid(project_dir: str) -> StateGrid:
 # The anchor batch
 # ============================================================================
 
+#: The four slots, as a type. `BATCH_SLOTS` and `AnchorBatch` are one vocabulary
+#: in two declarations, and every consumer indexes the second with a key from the
+#: first — which is why six `# type: ignore[literal-required]` comments
+#: accumulated, each asserting something nothing in this repo could verify.
+#: Naming the slots narrows the subscript instead, and a `get_args` totality test
+#: catches an addition to one declaration and not the other.
+BatchSlot = Literal['establisher', 'darkest', 'brightest', 'later_state']
+
 #: Slot order, and the label each slot carries wherever the batch is reported.
-BATCH_SLOTS: tuple[tuple[str, str], ...] = (
+BATCH_SLOTS: tuple[tuple[BatchSlot, str], ...] = (
     ('establisher', 'establisher — the most shared vocabulary, earliest'),
     ('darkest', 'darkest register'),
     ('brightest', 'brightest register'),
@@ -1330,22 +1353,72 @@ class AnchorBatch(TypedDict):
     #: darkest in the book is how an author discovers at image twenty that
     #: nothing is.
     fallback: list[str]
+    #: Which slots hold a guess rather than a choice — a subset of `darkest` and
+    #: `brightest`, the only two slots with a fallback. `fallback` says the same
+    #: thing in prose, and prose is unaskable: #311's reference labels have to
+    #: know, because a prompt file carries neither the batch table nor these
+    #: notes, so `anchor batch: brightest` there is a claim with nothing in the
+    #: document to check it against. An *empty* slot is not a guessed one.
+    guessed: list[BatchSlot]
 
 
-def anchor_batch(project_dir: str) -> AnchorBatch:
-    """The four-slot anchor batch, with every guess disclosed."""
-    rows = rows_in_reading_order(project_dir)
+def slots_by_id(batch: AnchorBatch) -> dict[str, BatchSlot]:
+    """Each filled illustration id -> the first slot it fills, in promotion order.
+
+    Keyed by id, not by slot, because darkest and brightest can resolve to one
+    illustration — which `anchor_batch` discloses as "the batch brackets nothing"
+    and which is the *common* configuration, since nothing populates `register`
+    on most projects. That row must occupy one reference and be named once.
+
+    Extracted because this is the fourth walk over `BATCH_SLOTS` and three of
+    them wanted exactly this intermediate. `render_state`'s reasoning applies:
+    a discrimination hand-written at N sites is N chances to write the one
+    spelling whose failure mode is the bug the discrimination exists to prevent.
+    """
+    filled: dict[str, BatchSlot] = {}
+    for slot, _label in BATCH_SLOTS:
+        # `batch[slot]`, never `.get`: `AnchorBatch` is total and `anchor_batch`
+        # fills every key, so a missing one is a structural mismatch between the
+        # two declarations of the slot vocabulary. Three of the four consumers
+        # raise on it; the fourth used `.get` and quietly promoted nothing, which
+        # reverts #311 with no sound at all.
+        illus_id = batch[slot].strip()
+        if illus_id and illus_id not in filled:
+            filled[illus_id] = slot
+    return filled
+
+
+def anchor_batch(project_dir: str, *,
+                 plan: list[dict[str, str]] | None = None,
+                 order: dict[str, int] | None = None,
+                 transitions: list[vs.Transition] | None = None,
+                 ) -> AnchorBatch:
+    """The four-slot anchor batch, with every guess disclosed.
+
+    `plan`, `order` and `transitions` let a caller that has already read them
+    pass them in, as `rows_in_reading_order` does. Not an optimization: this
+    reads the transition log, and `read_transitions` logs a WARNING per
+    malformed row *per read*, so deriving the batch beside a `state_context`
+    that had already read it made one broken row report itself twice — the
+    "N walks read as N broken files" defect CLAUDE.md holds a canon-tree test
+    on. Threading `plan` also removes a precondition two callers could disagree
+    about: a caller ranking an in-memory plan would otherwise get slots derived
+    from disk.
+    """
+    rows = rows_in_reading_order(project_dir, plan=plan, order=order)
     fallback: list[str] = []
+    guessed: list[BatchSlot] = []
     if not rows:
         return {'establisher': '', 'darkest': '', 'brightest': '',
-                'later_state': '',
+                'later_state': '', 'guessed': [],
                 'fallback': ['the plan has no rows, so there is no anchor '
                              'batch to render. Run `storyforge illustrate '
                              '--plan`.']}
 
     ids = [row['id'].strip() for row in rows]
 
-    establisher = next((step['id'] for step in ill.render_order(project_dir)
+    establisher = next((step['id'] for step in
+                        ill.render_order(project_dir, plan=plan, order=order)
                         if step['is_visual_key']), '')
     if not establisher:
         fallback.append(_no_establisher_note(rows))
@@ -1358,9 +1431,14 @@ def anchor_batch(project_dir: str) -> AnchorBatch:
 
     darkest = by_register.get('darkest') or ids[0]
     brightest = by_register.get('brightest') or ids[-1]
-    for slot, guess, position in (('darkest', darkest, 'first'),
-                                  ('brightest', brightest, 'last')):
+    register_slots: tuple[tuple[BatchSlot, str, str], ...] = (
+        ('darkest', darkest, 'first'), ('brightest', brightest, 'last'))
+    for slot, guess, position in register_slots:
         if slot not in by_register:
+            # Recorded in both channels on purpose: `fallback` is what README
+            # prints, `guessed` is what a consumer can branch on. They are set
+            # together so a slot cannot be disclosed in one and not the other.
+            guessed.append(slot)
             fallback.append(
                 f'no plan row is marked `register={slot}`, so the {slot} slot '
                 f'is a guess: `{guess}`, the {position} illustration in '
@@ -1374,13 +1452,14 @@ def anchor_batch(project_dir: str) -> AnchorBatch:
             f'the darkest and brightest slots resolved to the same '
             f'illustration (`{darkest}`), so the batch brackets nothing.')
 
-    later_state, later_state_note = _later_state_exemplar(project_dir, rows)
+    later_state, later_state_note = _later_state_exemplar(
+        project_dir, rows, order=order, transitions=transitions)
     if later_state_note:
         fallback.append(later_state_note)
 
     return {'establisher': establisher, 'darkest': darkest,
             'brightest': brightest, 'later_state': later_state,
-            'fallback': fallback}
+            'fallback': fallback, 'guessed': guessed}
 
 
 def _no_establisher_note(rows: list[dict[str, str]]) -> str:
@@ -1436,7 +1515,10 @@ def _and_more(ids: list[str]) -> str:
 
 
 def _later_state_exemplar(project_dir: str,
-                          rows: list[dict[str, str]]) -> tuple[str, str]:
+                          rows: list[dict[str, str]], *,
+                          order: dict[str, int] | None = None,
+                          transitions: list[vs.Transition] | None = None,
+                          ) -> tuple[str, str]:
     """The illustration furthest from opening conditions, and any disclosure.
 
     "Furthest" is counted as the entities it *shows* — the ones its `canon_refs`
@@ -1446,9 +1528,15 @@ def _later_state_exemplar(project_dir: str,
 
     Ties break to the earliest position, because the batch exists to lock
     designs for everything after it.
+
+    `order` and `transitions` are threaded from the caller when it has them:
+    `read_transitions` logs per malformed row per read, so a second read reports
+    one broken row twice.
     """
-    order = ill._scene_order(project_dir)
-    transitions = vs.read_transitions(project_dir)
+    if order is None:
+        order = ill._scene_order(project_dir)
+    if transitions is None:
+        transitions = vs.read_transitions(project_dir)
 
     first_position: dict[str, int] = {}
     for transition in transitions:

@@ -41,7 +41,7 @@ import re
 import sys
 import time
 from datetime import date
-from typing import Literal, TypedDict
+from typing import Literal, NamedTuple, TypedDict
 
 from storyforge.api import (
     calculate_cost_from_usage, extract_text, extract_usage, invoke,
@@ -469,9 +469,7 @@ def _report_packet_rung(project_dir: str,
     # reference list (#300). Both messages can print — the mid-flight batch (some
     # rendered, then a canon edit) is the normal state, not an either/or.
     batch = packet.anchor_batch(project_dir)
-    batch_ids = [batch[slot]  # type: ignore[literal-required]
-                 for slot, _label in packet.BATCH_SLOTS
-                 if batch[slot]]  # type: ignore[literal-required]
+    batch_ids = list(packet.slots_by_id(batch))
     pending = sorted(packet.ids_in_state(needs_render, 'pending', batch_ids))
     stale = sorted(packet.ids_in_state(needs_render, 'stale', batch_ids))
     if pending:
@@ -1400,6 +1398,17 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     # Read once; resolved per row through the same function `--package` uses
     # (#297). The whole plan, never the --ids subset — see `state_context`.
     state_ctx = packet.state_context(project_dir, plan=plan)
+    # Derived once and threaded into every row's reference list, for the reason
+    # `style` and `cutoff` are: `_references_for` runs per row, and this reads the
+    # plan, the chapter map, and the transition log (#311). Derived, never stored,
+    # so the batch a prompt references is the batch `--diagnose` reports.
+    #
+    # Handed `state_ctx`'s own reads rather than repeating them: `read_transitions`
+    # logs a WARNING per malformed row per read, so deriving the batch beside a
+    # context that had already read the log reported one broken row twice.
+    batch = packet.anchor_batch(project_dir, plan=plan,
+                                order=state_ctx['order'],
+                                transitions=state_ctx['transitions'])
 
     # Phase 1 — assemble every request. Sequential and cheap (file reads
     # only), which keeps the reference and anchor warnings in plan order.
@@ -1449,7 +1458,7 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             'split': split,
             'references': _references_for(
                 project_dir, illus_id, plan=plan, canon_cutoff=cutoff,
-                no_prior_refs=no_prior_refs, style=style),
+                no_prior_refs=no_prior_refs, style=style, batch=batch),
             'aspect': pi.aspect_for_row(row),
             'request': pi.build_art_direction_request(
                 row=row,
@@ -1826,9 +1835,20 @@ def run_package(project_dir: str, dry_run: bool, *,
             f'reference/{ill.PLAN_FILENAME}; nothing has been written.')
         return 1
 
-    contents = packet.resolve(project_dir, canon_cutoff=canon_cutoff)
-    grid = packet.state_grid(project_dir)
+    # Derived before `resolve`, which ranks the upload list by it (#311), and
+    # threaded rather than derived again inside it: `anchor_batch` re-reads the
+    # plan, the chapter map, and the transition log for a value this run already
+    # has, and `read_transitions` logs per malformed row per read.
+    #
+    # Not a correctness guarantee, and an earlier version of this comment claimed
+    # one: `anchor_batch` is a pure read and nothing between here and the write
+    # mutates its three inputs, so deriving it twice would return the same value.
+    # Threading is what makes README's batch table and its upload list read the
+    # same four ids *cheaply*; they could not have disagreed either way.
     batch = packet.anchor_batch(project_dir)
+    contents = packet.resolve(project_dir, canon_cutoff=canon_cutoff,
+                              batch=batch)
+    grid = packet.state_grid(project_dir)
     needs = packet.needs_render(project_dir, canon_cutoff=canon_cutoff)
     title = read_yaml_field('project.title', project_dir) or '(untitled)'
 
@@ -1908,8 +1928,9 @@ def _remove_retired_files(project_dir: str) -> None:
     A leftover `reference-images.md` is not clutter — it is a second, stale
     answer to "what do I upload", sitting beside the current one in a bundle
     whose whole contract is being a render. An author upgrading mid-book would
-    otherwise keep reading the pre-#306 file, which still lists the same four
-    images but omits every disclosure the aggregation added.
+    otherwise keep reading the pre-#306 file, which lists whichever images that
+    version selected and omits every disclosure added since — including the
+    anchor-batch ranking, which changes *which* images belong in the list (#311).
 
     Enumerated rather than "anything not in PACKET_FILES": the packet directory
     is the author's to put a note in, and a wholesale sweep is the destructive
@@ -2016,7 +2037,7 @@ def _report_anchor_batch(batch: packet.AnchorBatch,
         'pending': '',
     }
     for slot, label in packet.BATCH_SLOTS:
-        illus_id = batch[slot]  # type: ignore[literal-required]
+        illus_id = batch[slot]
         if not illus_id:
             log(f'  {label}: (unfilled)')
             continue
@@ -2024,8 +2045,7 @@ def _report_anchor_batch(batch: packet.AnchorBatch,
             f'{marks[packet.render_state(needs_render, illus_id)]}')
     stale = packet.ids_in_state(
         needs_render, 'stale',
-        among=[batch[slot]  # type: ignore[literal-required]
-               for slot, _label in packet.BATCH_SLOTS if batch[slot]])  # type: ignore[literal-required]
+        among=list(packet.slots_by_id(batch)))
     if stale:
         # One aggregated warning, not one per slot: the reason is the same
         # sentence for every row sharing a cause, and the advice is identical for
@@ -2307,9 +2327,17 @@ def _strict_prompt_scaffold(row: dict[str, str]) -> str:
     ])
 
 
-#: Reference images sent per prompt. Enough to anchor style and likeness; more
-#: than this and the model starts averaging them.
-_MAX_REFERENCES = 4
+#: Prior *illustrations* referenced per prompt. Enough to anchor style and
+#: likeness; more than this and the model starts averaging them.
+#:
+#: The cover is **additive**, not one of these four (#311). The cap's own
+#: justification is a claim about like-for-like illustration references, and the
+#: cover art does a different job — house style, not likeness — so counting it
+#: made a full four-slot anchor batch unrepresentable: cover + batch is five, and
+#: the fourth approved image was dropped by an arithmetic accident rather than a
+#: judgement. Renamed from `_MAX_REFERENCES` so nothing keeps reading it as a
+#: total.
+_MAX_PRIOR_REFERENCES = 4
 
 #: Where the style reference lives when nothing declares it. The *artwork*, not
 #: the typeset cover — `production/cover.*` (or `manuscript/assets/cover.*`) is
@@ -2324,10 +2352,11 @@ _STYLE_REFERENCE_STEM = os.path.join('manuscript', 'assets', 'cover-illustration
 #:
 #: **This is not behaviour-neutral for a non-PNG project**, and the order is not
 #: cosmetic. A book holding only `cover-illustration.jpg` previously resolved *no*
-#: cover at all and got four prior illustrations; it now gets the cover plus
-#: three, because `_references_for` counts the cap after appending the cover. That
-#: is the better chain — the cover is the strongest style anchor a book has — but
-#: it is a change, so it is stated rather than described as "unchanged".
+#: cover at all and got four prior illustrations; it now gets the cover *plus*
+#: those four, since `_MAX_PRIOR_REFERENCES` counts prior illustrations only and
+#: the cover is additive (#311). That is the better chain — the cover is the
+#: strongest style anchor a book has — but it is a change, so it is stated rather
+#: than described as "unchanged".
 _STYLE_REFERENCE_EXTENSIONS = ('png', 'jpg', 'jpeg', 'webp')
 
 #: The YAML key a project uses to say which of several cover variations is the
@@ -2650,20 +2679,77 @@ def style_reference_warnings(reference: StyleReference) -> list[str]:
     return warnings
 
 
+class _Candidate(NamedTuple):
+    """One prior illustration that survived the exclusion checks.
+
+    A `NamedTuple` rather than a bare `(str, str)` because `references` is also a
+    list of two strings with the elements the other way round — `(path, label)`,
+    the convention `pi.render_references_block` destructures — so one function
+    held two same-typed pairs in opposite orders. `.illus_id` at the sort key is
+    the one place a swap would otherwise be near-silent: a path looked up in an
+    id-keyed dict simply promotes nothing.
+    """
+    illus_id: str
+    path: str
+
+
+def _slot_name(slot: packet.BatchSlot) -> str:
+    """Render one anchor-batch slot key for a reference label.
+
+    Substitutes `-` for `_`, so `later_state` reads `later-state`. That is the
+    whole body, and it is load-bearing: the label reaches README's upload list and
+    a prompt file, where the author reads it.
+
+    The slot *key*, not `packet.BATCH_SLOTS`' label. Promotion order and slot
+    identity both come from that tuple — a second list of the four slots here is
+    exactly the divergence one derived batch exists to prevent — but its
+    establisher label is a sentence ("the most shared vocabulary, earliest"),
+    written for README's batch table where the author is choosing what to render.
+    Spliced into a one-line reference label it reads as two clauses fighting:
+    `path — prior illustration (anchor batch: establisher — the most shared
+    vocabulary, earliest)`. The table explains the slots; the label only has to
+    say which one this is.
+    """
+    return slot.replace('_', '-')
+
+
 def _references_for(project_dir: str, illus_id: str, *,
                     plan: list[dict[str, str]] | None = None,
                     canon_cutoff: str = '',
                     no_prior_refs: bool = False,
                     style: StyleReference | None = None,
+                    batch: packet.AnchorBatch | None = None,
                     notes: list[str] | None = None,
                     rerun: str = '--package') -> list[tuple[str, str]]:
     """Build the labeled reference list for an illustration.
 
     Prior ingested illustrations plus the cover are what hold a book's art
     together visually — a prompt with no style reference produces an image that
-    belongs to no book in particular. Walked in plan order, which is usually but
-    not necessarily render order — the chain only needs *some* prior art to
-    anchor style, not a specific one.
+    belongs to no book in particular.
+
+    **Candidates are ranked by anchor-batch slot, then by the caller's row
+    order** (#311). Phase 1 of the handoff exists so that the long run which
+    follows references four *real* images instead of four descriptions, and
+    `--diagnose` will not call a packet ready to hand over until every batch slot
+    is ingested from current canon — but selection was a plan-order walk with a
+    cap that never asked what the batch was, so once enough post-canon renders
+    existed to fill the cap, the images the author deliberately rendered and
+    approved were exactly the ones it discarded. The guarantee phase 1 makes was
+    not the guarantee phase 2 consumed. CLAUDE.md carries the case this was found
+    on.
+
+    The rank is applied as a *stable* sort, so a row in no slot keeps the order
+    the caller gave — plan order under `--prompts`, **reading order** under
+    `--package`, which passes `rows_in_reading_order`. Either is fine outside the
+    batch: the chain needs *some* prior art to anchor style, not a specific one.
+
+    `batch` is the run's already-derived `packet.anchor_batch`, threaded in for
+    the reason `style` and `canon_cutoff` are: this is called once per row, so
+    deriving it here would re-read the plan, the chapter map, and the transition
+    log once per illustration. It is derived rather than stored, so a promoted
+    reference cannot disagree with the batch `--diagnose` and README report. The
+    `None` fallback exists for a one-off caller and a test, and derives from this
+    call's own rows so the two cannot disagree — both production callers thread it.
 
     The cover reference is the *artwork*, not the typeset cover — using the art
     as a style reference is right, and the two files are deliberately different.
@@ -2729,8 +2815,39 @@ def _references_for(project_dir: str, illus_id: str, *,
         note(warning)
 
     rows = plan if plan is not None else ill.read_plan(project_dir)
+    if batch is None:
+        # `plan=rows`, not a bare disk read: ranking the caller's rows against
+        # slots derived from disk is a precondition two callers could disagree
+        # about, and this fallback is the only place they could.
+        batch = packet.anchor_batch(project_dir, plan=rows)
+    # illustration id -> its slot label, in promotion order, from the one function
+    # that owns that discrimination. `slot_rank` is a projection of the same
+    # dict's order rather than a second walk — 0-based, so the `len(slot_rank)`
+    # default below sorts every unranked row strictly after every promoted one.
+    promotions = packet.slots_by_id(batch)
+    slot_of = {illus_id: _slot_name(slot) + (
+                   ', guessed' if slot in batch['guessed'] else '')
+               for illus_id, slot in promotions.items()}
+    slot_rank = {illus_id: rank for rank, illus_id in enumerate(promotions)}
+
     skipped_stale = 0
-    capped = 0
+    # Filled slot -> why that approved image is not in the list, for the members
+    # whose art exists and still did not reach it. The claim "what is listed is
+    # what was approved" has to be *checked*, because the exclusion walk runs
+    # before the ranking and a partly re-rendered batch is the normal phase-1
+    # state: on one, promotion had nothing to promote and the note said the
+    # opposite (#311 review, SF-HIGH-1/HIGH-2).
+    #
+    # Deliberately not populated for a batch member that is merely not ingested
+    # yet: unrendered is valid in-flight state, `--diagnose` already counts those
+    # rungs, and a fresh book would get four notes saying nothing actionable. The
+    # count below still declines to claim the batch is present.
+    slot_unreferenceable: dict[str, str] = {}
+    # (id, path) for every row that survived the exclusion checks, in plan order.
+    # Collected rather than appended straight to `references` so the cap is
+    # applied to *ranked* candidates: the exclusions and their disclosures stay a
+    # plan-order walk, and only the ordering of what survives changed (#311).
+    eligible: list[_Candidate] = []
     # Excluded files accumulated by *reason*, emitted as one note per reason
     # after the loop. Appended per row, this produced seventeen near-identical
     # paragraphs on a twenty-illustration book — 9.5 KB of a 13.9 KB file — in
@@ -2753,6 +2870,17 @@ def _references_for(project_dir: str, illus_id: str, *,
             continue
         rel = (row.get('asset_file') or '').strip()
         if not rel or not os.path.isfile(os.path.join(project_dir, rel)):
+            # The one exclusion that can lose an approved image with nothing
+            # said anywhere: `status=ingested`, a current `ingested_at`, and the
+            # file moved or renamed without a plan edit. `packet.needs_render`
+            # never consults `asset_file`, so the batch table still reads
+            # `Rendered: yes` for that slot while the chain silently lacks it.
+            # `validate_plan`'s `missing_file` is the gate; this is the artifact
+            # that made the claim (#311 review).
+            if row['id'].strip() in slot_of:
+                declared = f'`{rel}`' if rel else 'no `asset_file`'
+                slot_unreferenceable[row['id'].strip()] = (
+                    f'{declared}: declared by the plan, not on disk')
             continue
         if no_prior_refs:
             skipped_stale += 1
@@ -2775,15 +2903,63 @@ def _references_for(project_dir: str, illus_id: str, *,
             skipped_stale += 1
             excluded_stale.setdefault(
                 ill.stale_render_kind(row, canon_cutoff), []).append(rel)
+            # `excluded_stale` aggregates by `StaleKind` and so cannot say which
+            # of those paths were the four the author approved. That disclosure
+            # is what `skills/illustrate/SKILL.md` promises the author, and it
+            # was the half of #311's asymmetry that went unimplemented.
+            if row['id'].strip() in slot_of:
+                slot_unreferenceable[row['id'].strip()] = (
+                    f'`{rel}`: {stale_reason}')
             continue
-        # The cap is checked *after* the exclusion checks so that a skipped
-        # render is still disclosed: breaking out of the loop early would hide
-        # every stale render past the fourth reference behind a cap that is not
-        # why they were dropped.
-        if len(references) >= _MAX_REFERENCES:
-            capped += 1
-            continue
-        references.append((rel, 'prior illustration (style continuity)'))
+        # An excluded row never becomes a candidate — every branch above
+        # `continue`s before this line — so **exclusion outranks batch
+        # promotion**: a pre-canon batch member stays excluded rather than being
+        # promoted past the reason it was dropped, which is the whole point of
+        # the check. That is structural, not a consequence of where the cap is
+        # applied; an earlier comment said "therefore", which made a guarantee
+        # look like an incidental property of pass ordering.
+        #
+        # The cap is applied after this loop for two reasons, and the primary one
+        # is now the second: you cannot rank candidates you have not collected.
+        # Breaking out early would also hide every stale render past the fourth
+        # prior illustration behind a cap that is not why they were dropped.
+        eligible.append(_Candidate(row['id'].strip(), rel))
+
+    # Stable, so a row in no slot keeps its plan-order position and the change is
+    # confined to promoting the approved batch ahead of them.
+    eligible.sort(key=lambda c: slot_rank.get(c.illus_id, len(slot_rank)))
+    for candidate in eligible[:_MAX_PRIOR_REFERENCES]:
+        slot = slot_of.get(candidate.illus_id)
+        references.append((
+            candidate.path, f'prior illustration (anchor batch: {slot})'
+            if slot else 'prior illustration (style continuity)'))
+    dropped = eligible[_MAX_PRIOR_REFERENCES:]
+    # Split, because the cap note has to say when the thing it dropped was an
+    # image the author personally approved. Reported as an anonymous "further
+    # ingested illustration", silent loss of the approved batch is the part of
+    # #311 that made the bug hard to notice at all.
+    #
+    # **Unreachable while `_MAX_PRIOR_REFERENCES >= len(packet.BATCH_SLOTS)`**,
+    # which a test pins: at most four ids are promoted, each to a rank below four,
+    # so no promoted row reaches `dropped`. It survives on one production route —
+    # two plan rows sharing a batch member's `id`, which `validate_plan` reports
+    # as `duplicate_id` and `run_package` does not gate — and as the tripwire for
+    # lowering the cap or adding a fifth slot. Kept for `report_batch`'s reason
+    # (#290): a guard whose absence is silent is worth the lines even when today's
+    # arithmetic makes it moot. The case that fires *constantly* is
+    # `slot_unreferenceable` above, not this one.
+    dropped_batch = [c for c in dropped if c.illus_id in slot_of]
+    # Defined rather than derived by subtracting one length from another:
+    # `dropped_batch ⊆ dropped` is what would keep a difference non-negative, and
+    # `if capped:` on a negative would print "-1 further ingested illustration(s)".
+    capped = sum(1 for c in dropped if c.illus_id not in slot_of)
+
+    # An illustration is never in its own chain, so its own slot is not a slot
+    # this list could have carried — counting it would tell every batch member's
+    # prompt that the batch is one short.
+    expected_slots = [cid for cid in slot_of if cid != illus_id]
+    listed_slots = [c.illus_id for c in eligible[:_MAX_PRIOR_REFERENCES]
+                    if c.illus_id in slot_of and c.illus_id != illus_id]
 
     if excluded_no_prior:
         note(f'{len(excluded_no_prior)} ingested illustration(s) are not listed '
@@ -2798,12 +2974,60 @@ def _references_for(project_dir: str, illus_id: str, *,
              f'to remove. Re-render them from the current canon (`storyforge '
              f'illustrate --diagnose` gives the order), then re-run {rerun}.')
 
+    if slot_unreferenceable and not no_prior_refs:
+        # Not bounded, unlike `dropped_batch` below. This dict is keyed by
+        # illustration id and every key is in `slot_of`, so it is at most four
+        # entries *whatever the plan does* — and each one is a distinct approved
+        # image the author has to go and fix. `_MAX_NAMED_IDS` is calibrated for
+        # seventeen paths sharing one cause; applied to four actionable ones it
+        # replaces the fourth with "and 1 more", which cannot be acted on.
+        described = '; '.join(f'{slot_of[cid]} — {why}'
+                              for cid, why in slot_unreferenceable.items())
+        log(f'WARNING: {illus_id}: {len(slot_unreferenceable)} anchor-batch '
+            f'image(s) exist but cannot be referenced ({described}).')
+        note(f'{len(slot_unreferenceable)} image(s) from the **anchor batch** '
+             f'have art that this list cannot use: {described}. Those are the '
+             f'renders phase 1 exists to approve, so the chain is not what you '
+             f'signed off on — fix those before the churn rather than '
+             f'generating against the substitutes above.')
+    if dropped_batch:
+        described = _and_more_phrases([f'`{c.path}` ({slot_of[c.illus_id]})'
+                                       for c in dropped_batch])
+        log(f'  {illus_id}: {len(dropped_batch)} image(s) from the anchor batch '
+            f'did not fit the reference list ({described}) — it stops at '
+            f'{_MAX_PRIOR_REFERENCES} prior illustration(s).')
+        note(f'{len(dropped_batch)} image(s) from the **anchor batch** are '
+             f'eligible but not listed, because the list stops at '
+             f'{_MAX_PRIOR_REFERENCES} prior illustration(s): {described}. '
+             f'Those are the renders phase 1 exists to approve, so a chain '
+             f'missing them references a description where it could reference '
+             f'the real thing.')
     if capped:
         log(f'  {illus_id}: {capped} further ingested illustration(s) were not '
-            f'listed — the reference list stops at {_MAX_REFERENCES}.')
+            f'listed — the reference list stops at {_MAX_PRIOR_REFERENCES} '
+            f'prior illustration(s).')
+        # The closing clause is a claim about the batch, so it is *checked*
+        # rather than asserted. Unconditional, it was an affirmative falsehood on
+        # the ordinary partly-re-rendered batch — 0 of 4 approved images in the
+        # list, under a sentence saying the list was what was approved, in the
+        # one section whose job is telling the author it is thinner than it looks
+        # (#311 review). And when `dropped_batch` is non-empty it contradicted
+        # the note directly above it.
+        assured = (
+            'The anchor batch is ranked ahead of plan order, so what is listed '
+            'is what was approved.'
+            if expected_slots and len(listed_slots) == len(expected_slots)
+            and not dropped_batch
+            else f'{len(listed_slots)} of {len(expected_slots)} anchor-batch '
+                 f'image(s) are in this list; the batch is ranked ahead of plan '
+                 f'order, so the rest were excluded or not yet rendered rather '
+                 f'than crowded out.' if expected_slots
+            else 'No anchor-batch image is filled, so nothing was ranked ahead '
+                 'of plan order.')
         note(f'{capped} further ingested illustration(s) are eligible but not '
-             f'listed: the list stops at {_MAX_REFERENCES} images, because past '
-             f'that a model starts averaging them rather than matching them.')
+             f'listed: the list stops at {_MAX_PRIOR_REFERENCES} prior '
+             f'illustration(s), because past that a model starts averaging them '
+             f'rather than matching them. {assured}')
 
     prior = [r for r in references if r[0] != cover]
     if not prior:
@@ -2863,6 +3087,22 @@ def _and_more_files(paths: list[str]) -> str:
     named = ', '.join(f'`{p}`' for p in paths[:packet._MAX_NAMED_IDS])
     rest = len(paths) - packet._MAX_NAMED_IDS
     return f'{named} and {rest} more' if rest > 0 else named
+
+
+def _and_more_phrases(phrases: list[str]) -> str:
+    """Bound an already-rendered list of clauses, as `_and_more_files` bounds paths.
+
+    Used for the dropped-batch note only. That note looks bounded at four by slot
+    count — but the one route into it is a duplicate plan `id`, which is also the
+    one way that bound breaks: ten rows sharing one batch id would print ten paths
+    all labeled `(establisher)`. So the bound must not depend on plan validity
+    here. The unreferenceable-slot note is keyed by id *within* `slot_of` and so is
+    at most four however malformed the plan is; it is deliberately unbounded, since
+    truncating four actionable items to three plus a count loses the fourth.
+    """
+    named = '; '.join(phrases[:packet._MAX_NAMED_IDS])
+    rest = len(phrases) - packet._MAX_NAMED_IDS
+    return f'{named}; and {rest} more' if rest > 0 else named
 
 
 def _relevant_anchors(anchors: dict[str, str],

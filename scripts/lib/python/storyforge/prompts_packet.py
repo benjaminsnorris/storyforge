@@ -89,7 +89,7 @@ def _render_batch(batch: AnchorBatch, needs_render: RenderNeeds) -> str:
     lines = ['| Slot | Illustration | Rendered |', '|---|---|---|']
     filled: list[str] = []
     for slot, label in BATCH_SLOTS:
-        illus_id = batch[slot]  # type: ignore[literal-required]
+        illus_id = batch[slot]
         if not illus_id:
             lines.append(f'| {label} | _unfilled — see below_ | — |')
             continue
