@@ -400,8 +400,18 @@ def migrate_storyforge_yaml(project_dir: str,
     but never `manuscript/`, so `exists:` resolved differently there than in the
     real run. Harmless while every run rewrote the file, and an under-report once
     the write became conditional — dry-run said nothing while the real run
-    changed the file. Pointing the disk checks at the real project makes the
-    preview faithful and means the sandbox needs nothing copied into it.
+    changed the file.
+
+    **This closes one of two causes, not the whole problem.** Pointing the disk
+    checks at the real project fixes the sandbox's missing files, and the sandbox
+    now needs nothing copied into it. It cannot fix the other cause: `--dry-run`
+    previews each step against the state at *entry*, while the real run's steps
+    compose. Step 2 creates `manuscript/press-kit` (`EXPECTED_DIRS`), so in the
+    real run step 3 sees `manuscript/` exist and flips its `exists:` — and no
+    arrangement of the sandbox reproduces that, because dry-run deliberately did
+    not create the directory. `tests/commands/test_cmd_cleanup_dry_run.py`
+    demonstrates the surviving gap as a strict xfail. The fix is a planner both
+    modes consume rather than a re-run against a copy (#317).
 
     **Writes only when something changed, and leaves line endings alone** (#314).
 
