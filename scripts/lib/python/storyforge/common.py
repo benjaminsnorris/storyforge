@@ -13,6 +13,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Callable
 from typing import Final, Literal, NamedTuple
 
 
@@ -92,8 +93,19 @@ def read_yaml_field(field: str, project_dir: str | None = None) -> str:
     if not os.path.isfile(yaml_file):
         return ''
 
-    with open(yaml_file) as f:
-        lines = f.readlines()
+    # Unreadable is treated as absent, matching the `isfile` guard above and
+    # `visualize._read_yaml_field`'s existing precedent. Not silence in the sense
+    # this codebase objects to: `cmd_cleanup`'s `_check_crlf` and
+    # `_check_yaml_scalars` both report the file as unreadable, so the condition
+    # is stated where an author will read it. Raising here is what must not
+    # happen — this is called several times per command by nearly every command,
+    # including from inside `build_cleanup_report`, where one exception discards
+    # every other finding *and* the report file (#298).
+    try:
+        with open(yaml_file, encoding='utf-8') as f:
+            lines = f.readlines()
+    except (OSError, UnicodeDecodeError):
+        return ''
 
     if '.' in field:
         parent, child = field.split('.', 1)
@@ -216,6 +228,86 @@ def _strip_inline_comment(val: str) -> str:
     return val[:m.start()].strip() if m else val
 
 
+def detect_newline(text: str) -> Literal['\n', '\r\n']:
+    """The line terminator to use when writing a line into `text`.
+
+    The one such predicate, for the reason `parse_yaml_scalar` is: three writers
+    of `storyforge.yaml` each deciding this for themselves is three chances to
+    disagree, and they did. `update_artifact_entry` tested the *first* line while
+    `migrate_storyforge_yaml` tested whether the file contained CRLF *anywhere*,
+    so on a file whose first line is LF and whose later lines are CRLF the two
+    inserted different terminators — while a docstring claimed they shared one
+    policy.
+
+    Keys on the first terminator rather than a majority vote. It is deterministic,
+    cheap, and on the only file this is used for the first line is `project:`,
+    written by the template. A genuinely mixed file is **reported** by
+    `cmd_cleanup._check_crlf` rather than repaired here; guessing which style such
+    a file "meant" is exactly the re-resolution this codebase declines to do
+    elsewhere.
+    """
+    i = text.find('\n')
+    if i == -1:
+        return '\n'
+    return '\r\n' if i and text[i - 1] == '\r' else '\n'
+
+
+def rewrite_preserving_newlines(path: str,
+                                transform: 'Callable[[str], str]') -> bool:
+    """Apply `transform` to `path`'s text without changing its line endings.
+
+    Returns True if the file was rewritten. `transform` receives **LF-normalized**
+    text and returns the new text; the endings are restored after.
+
+    That normalization is the point. `.` matches `\\r`, so a caller's
+    `^(\\s*phase:).*` silently eats the CR off the line it edits and leaves the
+    file mixed — and every future pattern carries the same trap. Normalizing once
+    here means no caller has to know about `\\r`.
+
+    The three shallow `storyforge.yaml` editors share this: `cmd_write`'s and
+    `cmd_elaborate`'s phase advances and `cmd_migrate_medium`'s medium swap. All
+    three were text-mode read/write, so each converted the whole file's endings as
+    a side effect of changing one word — #314 in three more commands, and between
+    them they falsified the claim that nothing converts this file (twice, because
+    the first fix found only one of them).
+
+    **Not** for `cmd_cleanup.migrate_storyforge_yaml` or
+    `common.update_artifact_entry`: both compare verbatim bytes to decide whether
+    to write at all, and both insert whole lines, so they need the raw text and
+    `detect_newline` rather than a normalize-and-restore round trip.
+
+    A genuinely mixed file comes out uniform, at its first line's style. That is
+    the one case this does not strictly preserve, and it is deliberate: any choice
+    changes something, uniform is more useful than mixed, and
+    `cmd_cleanup._check_crlf` reports the file either way.
+    """
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path, encoding='utf-8', newline='') as f:
+            content = f.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        log(f'WARNING: could not read {path} to edit it '
+            f'({type(exc).__name__}: {exc}). Left unchanged.')
+        return False
+
+    nl = detect_newline(content)
+    updated = transform(content.replace('\r\n', '\n'))
+    if nl == '\r\n':
+        updated = updated.replace('\n', '\r\n')
+    if updated == content:
+        return False
+
+    try:
+        with open(path, 'w', encoding='utf-8', newline='') as f:
+            f.write(updated)
+    except OSError as exc:
+        log(f'WARNING: could not write {path} '
+            f'({type(exc).__name__}: {exc}). Left unchanged.')
+        return False
+    return True
+
+
 #: What `yaml_scalar_issue` can find wrong with one scalar. A Literal rather than
 #: bare strings because `cmd_cleanup` maps each to its own finding kind, detail
 #: and remedy, and the three remedies genuinely differ — the reason
@@ -227,9 +319,10 @@ YamlScalarIssue = Literal['unterminated_quote', 'trailing_after_quote',
 #: (`Book #2`, `#ff8800`) than the start of a comment, which is conventionally
 #: written `# like this`. A heuristic, not a rule: `Book # 2` reads as a comment
 #: and is not reported. Deliberately conservative in that direction, because the
-#: shipped template puts a real trailing comment on nearly every key
-#: (`genre_preset: fantasy  # default, literary-fiction, ...`) and reporting
-#: those would bury the finding in noise on every project.
+#: shipped template uses real trailing comments (6 of its 90 key lines, e.g.
+#: `genre_preset:              # default, literary-fiction, …`) and reporting
+#: those would put a finding on every project on every run. Tests assert zero
+#: findings across both the template and the fixture.
 _LIKELY_VALUE_HASH = re.compile(r'#\S')
 
 
@@ -269,11 +362,16 @@ def yaml_scalar_issue(raw: str) -> YamlScalarIssue | None:
             return 'trailing_after_quote'
         return None
 
-    # A comment-only value is the *intended* case — an unset key carrying its
-    # template comment — so it is not a truncation. Only a value that had real
-    # text on both sides of the `#` lost something.
+    # `stripped` is deliberately *not* required to be non-empty. A value that is
+    # entirely a `#`-word — `palette: #2b1a0f` — reads as the empty string, which
+    # loses the whole value rather than a suffix, and is the worse case of the two.
+    # Guarding on `stripped` short-circuited before the heuristic and made
+    # `#ff8800`, the example named in `_LIKELY_VALUE_HASH`'s own comment,
+    # structurally unreachable. The comment-only case a template ships
+    # (`series_name:  # Optional: …`) is excluded by the heuristic itself, not by
+    # this guard, because it has a space after the `#`.
     stripped = _strip_inline_comment(val)
-    if stripped and stripped != val:
+    if stripped != val:
         removed = val[len(stripped):].lstrip()
         if _LIKELY_VALUE_HASH.match(removed):
             return 'comment_truncated'
@@ -421,8 +519,8 @@ def update_artifact_entry(project_dir: str, artifact: str, *,
     # normalizing the *whole* file as a side effect of editing two values.
     # Note this is deliberately the opposite policy from `write_plan`, which
     # *forces* LF for CSVs: this function edits a file the author wrote, so it
-    # preserves what it finds, and `cleanup`'s `crlf_line_endings` check does not
-    # look at storyforge.yaml at all.
+    # preserves what it finds, and `cleanup`'s `crlf_line_endings` check reports
+    # storyforge.yaml (since #314) rather than anything converting it.
     with open(yaml_file, newline='') as f:
         lines = f.readlines()
 
@@ -440,8 +538,10 @@ def update_artifact_entry(project_dir: str, artifact: str, *,
 
     start, end, child_indent = span
     # An inserted line has to match the file it lands in, or a CRLF project
-    # gains one stray LF line and `cleanup` reports mixed endings.
-    newline = '\r\n' if lines[0].endswith('\r\n') else '\n'
+    # gains one stray LF line and `cleanup` reports mixed endings. Shared with
+    # the other two writers of this file so they cannot disagree — see
+    # `detect_newline`.
+    newline = detect_newline(''.join(lines))
     # One ordered list of (key, value), in the order the template lists them.
     # This was a `Final` tuple of key names plus a dict literal plus the keyword
     # parameters — three places to keep in sync, guarding nothing a caller could
