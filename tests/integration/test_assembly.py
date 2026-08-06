@@ -12,6 +12,7 @@ import textwrap
 from unittest.mock import patch
 
 import pytest
+from yaml_probe import parse_emitted_yaml_metadata
 
 from storyforge.assembly import (
     _chapter_map_path,
@@ -491,19 +492,34 @@ class TestReadMatterFile:
 # Epub metadata
 # ---------------------------------------------------------------------------
 
+#: `tests/yaml_probe.py` — one shared reader, independent of
+#: `common.parse_yaml_scalar` so a change cannot agree with itself. It replaced a
+#: private copy here whose `startswith`/`endswith` check could not see an
+#: unescaped apostrophe, which is #277's actual crash.
+_parsed = parse_emitted_yaml_metadata
+
+
 class TestGenerateEpubMetadata:
 
     def test_contains_title(self, project_dir):
+        """The title survives as a *value*, apostrophe and all (#277).
+
+        Asserted through a YAML parse rather than as a substring. The fixture
+        title is `The Cartographer's Silence`, so the raw text now reads
+        `'The Cartographer''s Silence'` — the doubled apostrophe is how YAML
+        spells one inside a single-quoted scalar, and it is exactly what this
+        metadata block was missing when pandoc exited 64 on it.
+        """
         result = generate_epub_metadata(project_dir)
-        assert "The Cartographer's Silence" in result
+        assert _parsed(result)['title'] == "The Cartographer's Silence"
 
     def test_contains_author(self, project_dir):
         result = generate_epub_metadata(project_dir)
-        assert 'Test Author' in result
+        assert _parsed(result)['author'] == 'Test Author'
 
     def test_contains_language(self, project_dir):
         result = generate_epub_metadata(project_dir)
-        assert 'lang: en' in result
+        assert _parsed(result)['lang'] == 'en'
 
     def test_contains_genre_as_subject(self, project_dir):
         result = generate_epub_metadata(project_dir)

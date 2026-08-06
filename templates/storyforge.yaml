@@ -181,9 +181,12 @@ phase: spine
 #   # the book holds several cover variations and only one is the selected art.
 #   # Defaults to manuscript/assets/cover-illustration.{png,jpg,jpeg,webp}.
 #   #
-#   # The prose is on its own lines, not trailing this key: the YAML reader does
-#   # not strip trailing comments, so an uncommented key with a trailing comment
-#   # and no value reads the comment text as the value.
+#   # The prose is on its own lines rather than trailing this key, which is now
+#   # style rather than necessity: the readers strip trailing comments since
+#   # #277, so an empty key carrying one reads as empty. Keep the habit anyway —
+#   # a long trailing comment is harder to read, and the two commands that
+#   # bypass the shared reader (see prompts.read_yaml_field vs
+#   # common.read_yaml_field) are worth not testing.
 #   cover_artwork:
 #   genre_preset:              # default, literary-fiction, thriller, romance, fantasy, science-fiction
 #   cover:

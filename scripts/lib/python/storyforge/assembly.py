@@ -11,6 +11,7 @@ import re
 import sys
 from datetime import datetime
 
+from .common import parse_yaml_scalar, yaml_single_quote
 from .prompts import read_yaml_field, _read_csv_header_and_rows, read_csv_field
 
 
@@ -70,10 +71,12 @@ def _read_production_nested_from_lines(lines: list[str],
 
 
 def _strip_yaml_quotes(raw: str) -> str:
-    val = raw.strip()
-    if len(val) >= 2 and val[0] in ('"', "'") and val[-1] == val[0]:
-        val = val[1:-1]
-    return val
+    """Parse a YAML scalar. Delegates so there is one such function (#277).
+
+    The `production:` readers used this copy, which is why an inline comment on
+    `author:` or `language:` reached the epub metadata as part of the value.
+    """
+    return parse_yaml_scalar(raw)
 
 
 def _count_yaml_list_items(lines: list[str], list_key: str,
@@ -503,7 +506,22 @@ def _unquote(s: str) -> str:
 
 
 def generate_epub_metadata(project_dir: str) -> str:
-    """Generate pandoc metadata YAML for epub production."""
+    """Generate pandoc metadata YAML for epub production.
+
+    **Every value is escaped on the way out** (#277). These lines were built by
+    wrapping raw values in single quotes with no escaping, so one apostrophe \u2014
+    `Children's chapter book`, an author named `O'Brien` \u2014 closed the YAML
+    string early and pandoc exited 64 on a perfectly valid project. Single-quoted
+    style is kept and `common.yaml_single_quote` doubles the apostrophes, which
+    is how YAML spells one.
+
+    `_unquote` stays in front of it, and is **not** dead code. On well-formed
+    input it is a no-op, because the readers already strip quotes — but
+    `parse_yaml_scalar`'s malformed-quoting fallback deliberately returns a value
+    that is *still quoted* (`""Unicorn Tail""` → `"Unicorn Tail"`), so removing
+    this would ship an epub title with visible quotation marks in it. That
+    fallback path is the reason it is here.
+    """
     title = _yaml_field(project_dir, 'project.title', 'title') or 'Untitled'
     author = read_production_field(project_dir, 'author') or 'Anonymous'
     language = read_production_field(project_dir, 'language') or 'en'
@@ -513,32 +531,47 @@ def generate_epub_metadata(project_dir: str) -> str:
                       or str(datetime.now().year))
     cover_image = read_production_field(project_dir, 'cover_image')
 
+    def _quoted(value: str) -> str:
+        return yaml_single_quote(_unquote(value))
+
     lines = [
         '---',
-        f"title: '{_unquote(title)}'",
-        f"author: '{_unquote(author)}'",
-        f'lang: {language}',
-        f'date: {copyright_year}',
+        f'title: {_quoted(title)}',
+        f'author: {_quoted(author)}',
+        f'lang: {_quoted(language)}',
+        f'date: {_quoted(copyright_year)}',
     ]
 
     if genre:
-        lines.append(f"subject: '{_unquote(genre)}'")
+        lines.append(f'subject: {_quoted(genre)}')
     if isbn:
-        lines.append(f"identifier: '{_unquote(isbn)}'")
+        lines.append(f'identifier: {_quoted(isbn)}')
     if cover_image:
         full_path = os.path.join(project_dir, cover_image)
         if os.path.isfile(full_path):
-            lines.append(f"cover-image: '{full_path}'")
+            lines.append(f'cover-image: {_quoted(full_path)}')
+        else:
+            # A declared-but-missing cover was dropped in silence, and this was
+            # the one cover consumer in the repo that stayed quiet about it —
+            # `_resolve_cover_path` warns, and `require_cover_asset` refuses
+            # outright, because Bookshelf nulls a live book's cover from a
+            # manifest that omits one. An epub built without the cover the author
+            # declared is a wrong artifact that looks like a right one.
+            from storyforge.common import log as _log
+            _log(f'WARNING: production.cover_image names {cover_image!r}, '
+                 f'which does not exist at {full_path} — the epub will be '
+                 f'built with no cover image. Fix the path or remove the key.')
 
     # Series metadata
     series_name = _yaml_field(project_dir, 'project.series_name')
     series_position = _yaml_field(project_dir, 'project.series_position')
     if series_name:
-        lines.append(f"belongs-to-collection: '{_unquote(series_name)}'")
+        lines.append(f'belongs-to-collection: {_quoted(series_name)}')
         if series_position:
-            lines.append(f"group-position: '{_unquote(series_position)}'")
+            lines.append(f'group-position: {_quoted(series_position)}')
 
-    lines.append(f"rights: 'Copyright \u00a9 {copyright_year} {_unquote(author)}'")
+    rights = f'Copyright \u00a9 {copyright_year} {_unquote(author)}'
+    lines.append(f'rights: {yaml_single_quote(rights)}')
     lines.append('---')
 
     return '\n'.join(lines)
