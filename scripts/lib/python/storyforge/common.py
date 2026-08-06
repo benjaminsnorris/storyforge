@@ -308,12 +308,17 @@ def update_artifact_entry(project_dir: str, artifact: str, *,
     (`manuscript`, `phase`, `parts`, the entire `production` section) and
     `assemble` then committed the truncated file. Data loss on every run (#276).
 
-    That bug had a second, quieter half worth keeping in mind here: because the
-    first artifact's rewrite had already deleted the second one, the loop's next
-    iteration silently matched nothing and the update it existed to perform never
-    happened. So a caller gets a bool — "I found the block and wrote it" is a
-    fact worth being able to check, and its absence is what let the original go
-    unnoticed.
+    That bug had a second, quieter half: because the first artifact's rewrite had
+    already deleted the second one, the loop's next iteration silently matched
+    nothing and the update it existed to perform never happened.
+
+    The bool does **not** distinguish that case — False means either "already
+    current" or "no such entry", and widening it buys nothing while the only
+    caller cannot act on either. What it buys is that a no-op does not dirty the
+    file, and that tests can assert one. The *missing-entry* case is reported by
+    the WARNING below, which is where that distinction belongs, and `cmd_assemble`
+    logs which artifacts it recorded so a silent omission is visible in the run
+    output.
 
     Blank lines, key order, and **inline comments** survive. Comments matter more
     than they look: #277 is a bug caused by reading them as values, and stripping
@@ -502,6 +507,14 @@ def _set_block_value(lines: list[str], start: int, end: int, key: str,
 
     Anchored to `child_indent` rather than `\\s*`, so a key of the same name
     nested deeper inside the block cannot be matched ahead of the direct child.
+
+    **This treats a bare `#` in the old value as a comment, where
+    `parse_yaml_scalar` deliberately does not.** The two are not inconsistent by
+    accident: the reader must not truncate a value legitimately containing one,
+    while this only has to decide what trailing text to carry over, and it
+    replaces the value regardless. The asymmetry is safe because the two keys it
+    writes hold a bool and an ISO date, neither of which contains a `#`; a
+    writable key whose values could would need the reader's rule.
 
     The trailing-newline group keeps CRLF intact — though what actually preserves
     line endings end to end is `update_artifact_entry` opening the file with

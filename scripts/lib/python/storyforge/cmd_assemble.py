@@ -433,9 +433,33 @@ def main(argv=None):
     # matched to end of file and deleted every block after the first `updated:`
     # it found — `phase`, `parts`, and the entire `production` section — and the
     # commit below then staged the truncated file (#276).
+    #
+    # Guarded, and guarded *here* rather than inside the helper. This runs at the
+    # end of a long, expensive session and immediately before `commit_and_push`,
+    # so an unreadable or read-only storyforge.yaml would otherwise propagate out
+    # through `__main__._dispatch`, which has no handler, and lose the assembled
+    # manuscript along with it. A stale artifact stamp is worth strictly less
+    # than the assembly. `UnicodeDecodeError` is a `ValueError`, not an
+    # `OSError`, which is the `ill.sha256_of` regression (#298) — both are named.
+    stamped = []
     for artifact in ('chapter_map', 'manuscript'):
-        update_artifact_entry(project_dir, artifact,
-                              exists=True, updated=today)
+        try:
+            update_artifact_entry(project_dir, artifact,
+                                  exists=True, updated=today)
+        except (OSError, ValueError) as exc:
+            log(f'WARNING: could not stamp `{artifact}` in storyforge.yaml '
+                f'({type(exc).__name__}: {exc}). The manuscript is assembled '
+                f'and will still be committed; the artifact record is stale.')
+            continue
+        stamped.append(artifact)
+    # Name what got through. #276's quiet half was that the second artifact
+    # silently never got updated, and one line naming both would have shown it.
+    # This deliberately does not branch on the return value: False means either
+    # "already current" or "no such entry", and only the second is a problem —
+    # `update_artifact_entry` warns for it directly, which is where that
+    # distinction lives.
+    log(f'storyforge.yaml: recorded {", ".join(stamped) or "nothing"} '
+        f'as of {today}')
 
     update_pr_task('Generate formats', project_dir, pr_number)
 

@@ -770,3 +770,60 @@ class TestMainUpdatesStoryforgeYaml:
                    if c and c[0] == 'commit_and_push']
         assert commits, 'assemble must commit'
         assert any('storyforge.yaml' in (c[2] or []) for c in commits)
+
+    def test_a_full_run_names_the_artifacts_it_recorded(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch,
+            capsys):
+        """#276's quiet half was invisible in the run output.
+
+        One line naming both artifacts is what would have shown that only the
+        first was ever stamped.
+        """
+        self._run_markdown_assembly(project_dir, monkeypatch)
+
+        out = capsys.readouterr().out
+        assert 'recorded chapter_map, manuscript' in out
+
+    def test_a_failed_stamp_warns_and_still_commits_the_manuscript(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch,
+            capsys):
+        """An unwritable storyforge.yaml must not lose the assembly.
+
+        This runs at the end of a long, expensive session and immediately before
+        the commit, and `__main__._dispatch` has no handler — so an unguarded
+        raise here discards the assembled manuscript to keep an artifact stamp
+        accurate, which is exactly the wrong trade.
+        """
+        def boom(*args, **kwargs):
+            raise PermissionError(13, 'Permission denied')
+
+        monkeypatch.setattr('storyforge.cmd_assemble.update_artifact_entry',
+                            boom)
+        self._run_markdown_assembly(project_dir, monkeypatch)
+
+        out = capsys.readouterr().out
+        assert 'could not stamp `chapter_map`' in out
+        assert 'PermissionError' in out
+        assert 'recorded nothing' in out
+        commits = [c for c in mock_git.calls
+                   if c and c[0] == 'commit_and_push']
+        assert commits, 'the manuscript must still be committed'
+
+    def test_a_decode_error_is_caught_too(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch,
+            capsys):
+        """`UnicodeDecodeError` is a `ValueError`, not an `OSError`.
+
+        That distinction is the `ill.sha256_of` regression (#298), so both are
+        named in the guard rather than only the obvious one.
+        """
+        def boom(*args, **kwargs):
+            raise UnicodeDecodeError('utf-8', b'\xff', 0, 1, 'invalid')
+
+        monkeypatch.setattr('storyforge.cmd_assemble.update_artifact_entry',
+                            boom)
+        self._run_markdown_assembly(project_dir, monkeypatch)
+
+        out = capsys.readouterr().out
+        assert 'could not stamp `chapter_map`' in out
+        assert 'UnicodeDecodeError' in out
