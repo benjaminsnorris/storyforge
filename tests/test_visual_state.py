@@ -752,3 +752,41 @@ class TestMalformedStateOverrideIsReported:
 
         for finding in vs.prepass(project_dir)['findings']:
             assert '|' not in finding['detail']
+
+    def test_a_row_with_no_canon_refs_is_still_checked(self, project_dir):
+        """The case that produced zero findings, and the worst one to miss.
+
+        The checks were emitted below `prepass`'s `canon_refs` and `scene_id`
+        guards, so a row with empty `canon_refs` reported nothing while
+        `state_for_row` still applied the override and shipped the fabricated
+        state to the image model. And a row without `canon_refs` is *exactly* the
+        documented-legitimate case for an override, so "one placement buys
+        validate, cleanup and --diagnose" held only where `canon_refs` happened to
+        be populated.
+        """
+        from storyforge import illustrations as ill
+        from storyforge import visual_state as vs
+        rows = ill.read_plan(project_dir)
+        rows[0]['canon_refs'] = ''
+        rows[0]['state_override'] = 'no-colon-here;a-sentence with four words:x'
+        ill.write_plan(project_dir, rows)
+
+        kinds = {f['kind'] for f in vs.prepass(project_dir)['findings']}
+
+        assert 'state_override_unparsed' in kinds
+        assert 'state_override_prose_key' in kinds
+
+    def test_a_collapsed_duplicate_entity_is_reported(self, project_dir):
+        """`clause_count` used to be derived from `len(applied) + len(skipped)`,
+        so two clauses naming one entity collapsed to a count of one — losing a
+        clause in the very number whose job is saying how many were lost."""
+        from storyforge import illustrations as ill
+        from storyforge import visual_state as vs
+        rows = ill.read_plan(project_dir)
+        rows[0]['state_override'] = 'nora-clothing:coat;nora-clothing:hood'
+        ill.write_plan(project_dir, rows)
+
+        details = [f['detail'] for f in vs.prepass(project_dir)['findings']
+                   if f['kind'] == 'state_override_unparsed']
+
+        assert any('overwrote an earlier one' in d for d in details), details

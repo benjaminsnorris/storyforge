@@ -1438,7 +1438,7 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             state_gaps.setdefault(gap, []).append(illus_id)
         absent_cell = (row.get('absent') or '').strip()
         override = vs.parse_state_override(row.get('state_override', ''))
-        if override.skipped:
+        if override.lost:
             # One line, with a count, before any money is spent. This is the
             # signal that would have caught #309 on the spot: the author saw a
             # regenerated prompt that "looked fine" and only found the loss by
@@ -1509,9 +1509,10 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
         # "1 of 3 clauses applied" would have caught #309 immediately; two
         # per-clause WARNINGs in a stream of reference warnings did not.
         log(f'WARNING: illustration `{illus_id}`: state_override — '
-            f'{applied} of {total} clauses applied, {total - applied} skipped. '
-            f'A skipped clause is a state you believe is in the prompt and is '
-            f'not; write each override as entity:state.')
+            f'{applied} of {total} clauses applied, {total - applied} lost. '
+            f'A lost clause is a state you believe is in the prompt and is not — '
+            f'either it had no colon, or a later clause named the same entity '
+            f'and overwrote it.')
     if override_dead:
         log(f'ERROR: {len(override_dead)} illustration(s) have a state_override '
             f'that did not land as written: {", ".join(sorted(override_dead))}. '

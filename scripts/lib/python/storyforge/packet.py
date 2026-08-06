@@ -1079,11 +1079,31 @@ def state_for_row(row: dict[str, str], *, context: RowContext,
     order = context['order']
     known = context['known']
     refs = ill._split_array(row.get('canon_refs', ''))
-    # `.applied` only — the skipped and prose-key halves are reported by
-    # `visual_state.prepass` as findings, on the gate authors read (#309).
-    overrides = vs.parse_state_override(
-        row.get('state_override', '')).applied
+    override = vs.parse_state_override(row.get('state_override', ''))
+    overrides = override.applied
     gaps: list[str] = []
+
+    # The override's own health, as **gaps** rather than only as `prepass`
+    # findings. Routing it to `prepass` alone was a regression on the path that
+    # matters most: `run_package` deliberately skips `validate_plan`, which is
+    # the only thing that runs `prepass`, so `--package` went from two WARNING
+    # lines (pre-#309) to complete silence while still shipping the fabricated
+    # state to the image model. Removing a warning and pointing at a gate that
+    # cannot see the path is worse than the warning it replaced. `gaps` reaches
+    # the run log *and* README, which is where an author reads it an hour later.
+    if override.lost:
+        gaps.append(
+            f'illustration `{illus_id}`: state_override — '
+            f'{len(override.applied)} of {override.clause_count} clauses '
+            f'applied, {override.lost} lost. A lost clause is a state you '
+            f'believe is in the prompt and is not; write one entity:state per '
+            f'clause.')
+    for key in override.prose_keys:
+        gaps.append(
+            f'illustration `{illus_id}`: state_override entity '
+            f'`{ill._csv_safe(key)}` reads as a sentence rather than an entity '
+            f'id, and is being sent to the image model as an authoritative '
+            f'state line under that label.')
 
     anchor_keys = {key.lower() for key in anchors}
     unanchored = {ref for ref in refs if ref.lower() not in anchor_keys}

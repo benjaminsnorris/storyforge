@@ -4616,7 +4616,7 @@ def test_prompts_refuses_a_prose_state_override(in_project, capsys):
     assert 'did not land as written' in out
     # Two clauses: the colon-bearing fragment applied under a sentence key, and
     # `EXACTLY FIVE alive` was dropped for having no colon.
-    assert '1 of 2 clauses applied, 1 skipped' in out
+    assert '1 of 2 clauses applied, 1 lost' in out
 
 
 def test_prompts_reports_the_clause_count(in_project, capsys):
@@ -4629,7 +4629,7 @@ def test_prompts_reports_the_clause_count(in_project, capsys):
 
     cmd_illustrate.main(['--prompts', '--coaching', 'strict'])
 
-    assert '1 of 2 clauses applied, 1 skipped' in capsys.readouterr().out
+    assert '1 of 2 clauses applied, 1 lost' in capsys.readouterr().out
 
 
 def test_prompts_accepts_an_override_for_an_untracked_entity(in_project,

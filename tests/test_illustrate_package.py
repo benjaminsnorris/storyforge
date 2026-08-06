@@ -1863,7 +1863,13 @@ def test_a_revived_superseded_row_is_not_treated_as_the_books_first(in_project,
     context = packet.state_context(in_project, plan=ill.read_plan(in_project))
     assert rows[1]['id'] not in context['predecessors']
     contrast = packet.contrast_for_row(rows[1], context=context)
-    assert 'follows' not in contrast
+    # Both fields, and by substring on each. `contrast_for_row` returns a
+    # NamedTuple since #305, so `'follows' not in contrast` became value-equality
+    # across three fields — it passed even when both strings contained "follows",
+    # silently disarming this regression test. The wording split too, so checking
+    # only one field would still be vacuous.
+    assert 'follows' not in contrast.for_author
+    assert 'immediately before it' not in contrast.for_model
     assert 'not in the book' in capsys.readouterr().out
 
 
@@ -2542,3 +2548,25 @@ def test_a_body_naming_its_own_illustration_is_fine(in_project):
 
     assert not any('predates #305' in g
                    for g in packet.resolve(in_project)['gaps'])
+
+
+def test_a_malformed_state_override_is_reported_by_package(in_project):
+    """`--package` must not be the quiet path (#309 regression).
+
+    Routing the report to `prepass` alone was a regression on the path that
+    matters most: `run_package` deliberately skips `validate_plan`, the only thing
+    that runs `prepass`, so `--package` went from two WARNING lines to complete
+    silence while still shipping the fabricated state to the image model.
+    Removing a warning and pointing at a gate that cannot see the path is worse
+    than the warning it replaced.
+    """
+    rows = ill.read_plan(in_project)
+    rows[1]['state_override'] = (
+        'The instant AFTER extinction which a10 omits: the Lamp dark; '
+        'EXACTLY FIVE lanterns still alive')
+    ill.write_plan(in_project, rows)
+
+    gaps = packet.resolve(in_project)['gaps']
+
+    assert any('state_override' in g and 'lost' in g for g in gaps), gaps
+    assert any('reads as a sentence' in g for g in gaps), gaps
