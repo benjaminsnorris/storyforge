@@ -58,11 +58,13 @@ def read_yaml_field(yaml_file: str, field: str) -> str:
 
 
 def _strip_yaml_value(raw: str) -> str:
-    """Strip surrounding quotes and trailing whitespace from a YAML value."""
-    val = raw.strip()
-    if len(val) >= 2 and val[0] in ('"', "'") and val[-1] == val[0]:
-        val = val[1:-1]
-    return val
+    """Parse a YAML scalar. Delegates so there is one such function (#277).
+
+    This was a third quote-stripping copy that also returned inline comments as
+    part of the value; `common.parse_yaml_scalar` records what that cost.
+    """
+    from .common import parse_yaml_scalar
+    return parse_yaml_scalar(raw)
 
 
 # ============================================================================

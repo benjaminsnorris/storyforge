@@ -491,19 +491,51 @@ class TestReadMatterFile:
 # Epub metadata
 # ---------------------------------------------------------------------------
 
+def _parsed(metadata: str) -> dict[str, str]:
+    """Parse the generated metadata block into `{key: value}`.
+
+    Deliberately **independent** of `common.parse_yaml_scalar`: this is what
+    verifies that function's output, and using it here would let a change agree
+    with itself. Written against the YAML spec's single-quoted style instead —
+    strip the outer quotes, unescape a doubled apostrophe — which is the whole
+    of what `yaml_single_quote` emits.
+
+    Not pyyaml: it is installed on no declared dependency list, and the repo's
+    YAML handling is deliberately dependency-free.
+    """
+    out: dict[str, str] = {}
+    for line in metadata.split('\n'):
+        if line.strip() in ('---', ''):
+            continue
+        key, _, raw = line.partition(': ')
+        raw = raw.strip()
+        assert raw.startswith("'") and raw.endswith("'"), (
+            f'every value must be quoted, got {line!r}')
+        out[key.strip()] = raw[1:-1].replace("''", "'")
+    return out
+
+
 class TestGenerateEpubMetadata:
 
     def test_contains_title(self, project_dir):
+        """The title survives as a *value*, apostrophe and all (#277).
+
+        Asserted through a YAML parse rather than as a substring. The fixture
+        title is `The Cartographer's Silence`, so the raw text now reads
+        `'The Cartographer''s Silence'` — the doubled apostrophe is how YAML
+        spells one inside a single-quoted scalar, and it is exactly what this
+        metadata block was missing when pandoc exited 64 on it.
+        """
         result = generate_epub_metadata(project_dir)
-        assert "The Cartographer's Silence" in result
+        assert _parsed(result)['title'] == "The Cartographer's Silence"
 
     def test_contains_author(self, project_dir):
         result = generate_epub_metadata(project_dir)
-        assert 'Test Author' in result
+        assert _parsed(result)['author'] == 'Test Author'
 
     def test_contains_language(self, project_dir):
         result = generate_epub_metadata(project_dir)
-        assert 'lang: en' in result
+        assert _parsed(result)['lang'] == 'en'
 
     def test_contains_genre_as_subject(self, project_dir):
         result = generate_epub_metadata(project_dir)
