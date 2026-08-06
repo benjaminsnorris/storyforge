@@ -73,6 +73,17 @@ These are CSV edits you can make in this session:
 | `rename_column` | Read the CSV file, rename the column in the header, write it back |
 | `missing_column` | Read the CSV file, add the column to the header and empty values to all rows |
 | `empty_csv` | Copy the header from the plugin's `templates/` directory |
+| `yaml_unterminated_quote` | Read the line named in `detail`, close the quote (or remove it) |
+| `yaml_trailing_after_quote` | Remove the text after the closing quote, or quote the whole value |
+| `yaml_value_truncated_by_comment` | Wrap the value in double quotes so the `#` is kept — YAML reads ` #` as a comment, so the value is currently being cut short (or lost entirely) |
+
+Each `yaml_*` finding's `detail` names the line, the key, and what the value is currently read as. **Confirm with the author before editing** if the value looks deliberate — a `#` mid-value is unusual enough that the finding may be flagging a real comment they meant.
+
+### Actions With No Automatic Fix
+
+| Type | What to Do |
+|------|-----------|
+| `yaml_unreadable`, `unreadable_file` | Report to the author: the file could not be read, so its contents were **not checked**. Everything else in this report is still valid, but this file was skipped. Usually a permissions problem or a non-UTF-8 encoding. |
 
 After each fix, update the `status` field in `working/cleanup-report.csv` from `pending` to `done`, then commit:
 
@@ -87,8 +98,10 @@ These require running a Storyforge command. Present the command to the author us
 | Type | Command |
 |------|---------|
 | `scene_artifacts` | `storyforge cleanup --scenes` |
-| `crlf_line_endings` | `find reference working -name '*.csv' -exec sed -i '' $'s/\r$//' {} +` |
+| `crlf_line_endings` | `find reference working -name '*.csv' -exec sed -i '' $'s/\r$//' {} + && sed -i '' $'s/\r$//' storyforge.yaml` |
 | `seq_needs_renumber` | `storyforge scenes-setup --renumber` |
+
+The `crlf_line_endings` command must cover `storyforge.yaml` as well as the CSVs. Since #314 nothing in Storyforge converts that file — all five writers preserve whatever endings they find — so this command is the only path to LF, and a CSV-only remedy leaves the finding unclearable forever.
 
 After the command runs, update status to `done` and commit.
 
