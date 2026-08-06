@@ -1513,14 +1513,6 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             f'A lost clause is a state you believe is in the prompt and is not — '
             f'either it had no colon, or a later clause named the same entity '
             f'and overwrote it.')
-    if override_dead:
-        log(f'ERROR: {len(override_dead)} illustration(s) have a state_override '
-            f'that did not land as written: {", ".join(sorted(override_dead))}. '
-            f'Either nothing parsed, or a whole sentence became the entity name — '
-            f'so the cell is prose rather than entity:state, and the prompt would '
-            f'be generated against the state you meant to replace. Fix the cell '
-            f'and re-run; nothing was spent.')
-        return 1
     if unpositioned:
         # Before the fan-out, with the other free-fix warnings. A row whose
         # position does not resolve gets no spoiler guard and no acceptance check
@@ -1547,6 +1539,20 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             f'inference rather than a read of reference/visual-state.csv: '
             f'{", ".join(unstated)}. The prompt files say so too.')
 
+    # Placed after every other pre-fan-out warning, not before them. Returning
+    # first meant `--prompts --dry-run` lost the #308 position warnings and the
+    # unstated-state count entirely — a refusal that suppresses the report the
+    # author needs to fix *everything* is the guard-before-the-thing-it-should-
+    # follow shape this repo keeps finding. Nothing is spent either way: this
+    # whole span is file reads and string assembly.
+    if override_dead:
+        log(f'ERROR: {len(override_dead)} illustration(s) have a state_override '
+            f'that did not land as written: {", ".join(sorted(override_dead))}. '
+            f'Either nothing parsed, or a whole sentence became the entity name — '
+            f'so the cell is prose rather than entity:state, and the prompt would '
+            f'be generated against the state you meant to replace. Fix the cell '
+            f'and re-run; nothing was spent.')
+        return 1
     if dry_run:
         for job in jobs:
             log(f'[dry-run] would write '

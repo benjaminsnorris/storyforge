@@ -61,10 +61,10 @@ class StateOverride(NamedTuple):
     did not.
 
     The dropped halves are *returned* rather than logged (#309). Two WARNING
-    lines competing with seventeen reference-exclusion warnings on the same run
+    lines competing with a stream of reference-exclusion warnings on the same run
     are invisible in practice — the author of the book this was filed about was
-    filtering the run output with `grep -v` to make it readable, which is how
-    they lost them. More importantly the warnings were on the wrong gate:
+    filtering the run output with `grep -v` to make it readable, which is how they
+    lost them. More importantly the warnings were on the wrong gate:
     `--diagnose` and `validate` are the gates, and neither reported this, so a
     malformed override survived both clean.
 

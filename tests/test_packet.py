@@ -258,8 +258,14 @@ def test_contrast_names_the_register_and_the_preceding_illustration(
     assert 'darkest' in blank['contrast']
     assert 'the-finest-cartographer' not in blank['contrast']
     assert 'immediately before it' in blank['contrast']
-    # The author-facing form names the file to go and open.
-    assert 'the-finest-cartographer' in blank['contrast_for_author']
+    # The author-facing form names the file to go and open. Read from the
+    # derivation, not from `Entry` — the packet does not carry it, because its
+    # one consumer is the source prompt file's `## Accept only if`.
+    context = packet.state_context(packet_project)
+    row = next(r for r in ill.read_plan(packet_project)
+               if r['id'].strip() == 'the-blank-page')
+    assert 'the-finest-cartographer' in packet.contrast_for_row(
+        row, context=context).for_author
 
 
 def test_an_author_absent_column_is_carried_into_the_entry(packet_project):
@@ -1224,3 +1230,207 @@ def test_cleanup_has_remediation_for_the_new_kinds():
     for kind in ('packet_stale', 'anchor_copy_drift'):
         assert kind in _ILLUSTRATION_ACTIONS
         assert 'packet' in _ILLUSTRATION_ACTIONS[kind]
+
+
+# ============================================================================
+# #305 — closing the contrast mutants the first round left alive
+# ============================================================================
+#
+# Every test below was written against a surviving mutant: the id-splitting and
+# the two-audience derivation were unit-tested, but the *branches* were not, and
+# a mutation campaign found seven ways to reintroduce #305 with the whole suite
+# green. Each test names the mutation it kills, because that is the only durable
+# record of why the assertion is shaped the way it is.
+
+
+def test_contrast_with_no_register_capitalizes_the_neighbour_clause(
+        packet_project):
+    """The follows-only arm of `_assemble` — the arm nearly every real row takes.
+
+    `register` is populated on neither of the fixture's two rows and, per
+    CLAUDE.md, on almost no real project either, so this is the production path.
+    It was also the *only* one of the three arms with no test: replacing its
+    whole return with a constant left the suite green. That arm is where the
+    `_assemble` refactor was riskiest, because it is the one doing the
+    capitalization — `follows_model` starts lowercase precisely so the register
+    variant can splice it mid-sentence as "it must not repeat…".
+    """
+    rows = ill.read_plan(packet_project)
+    for row in rows:
+        row['register'] = ''
+    ill.write_plan(packet_project, rows)
+
+    context = packet.state_context(packet_project)
+    row = {r['id'].strip(): r for r in ill.read_plan(packet_project)}[
+        'the-blank-page']
+    contrast = packet.contrast_for_row(row, context=context)
+
+    assert contrast.for_model.startswith('Must not repeat the staging'), \
+        contrast.for_model
+    assert 'the-finest-cartographer' not in contrast.for_model
+    # The author-facing form takes the same arm and must still name the file.
+    assert contrast.for_author.startswith('Follows `the-finest-cartographer`'), \
+        contrast.for_author
+
+
+def test_a_contrast_naming_a_superseded_illustration_is_withheld(
+        packet_project):
+    """`plan_ids` is not `set(predecessors)`, and this is why.
+
+    `RowContext.plan_ids`' docstring states the distinction outright, and
+    substituting one for the other survived the whole suite. `predecessors` comes
+    from `rows_in_reading_order`, which drops `superseded` rows — so a contrast
+    written against retired art would have sailed into the upload. Retiring an
+    illustration is the documented flow (`status=superseded` then `--embed`), not
+    an edge case.
+    """
+    rows = ill.read_plan(packet_project)
+    retired = ill.blank_row('the-retired-sketch')
+    retired.update({
+        'scene_id': 'act1-sc01', 'anchor': 'held her breath',
+        'placement': 'after_anchor', 'layout': 'half_page',
+        'beat': 'An earlier attempt at the same moment',
+        'status': 'superseded',
+    })
+    rows[1]['contrast'] = 'Warmer than the-retired-sketch. Keep it close.'
+    ill.write_plan(packet_project, rows + [retired])
+
+    entries = {e['id']: e for e in packet.resolve(packet_project)['entries']}
+    blank = entries['the-blank-page']
+
+    assert 'the-retired-sketch' not in blank['contrast']
+    assert 'the-retired-sketch' in blank['contrast_withheld']
+    assert 'Keep it close.' in blank['contrast'], \
+        'the safe half must still reach the model'
+
+
+def test_an_id_in_a_different_case_is_still_withheld(packet_project):
+    """`re.IGNORECASE` removed survived the suite, and real books need it.
+
+    *The Lantern Folk*'s ids are `LF-04`; an author typing prose writes `lf-04`.
+    A case-sensitive match would have leaked exactly the book #305 was filed
+    against.
+    """
+    rows = ill.read_plan(packet_project)
+    upper = ill.blank_row('LF-04')
+    upper.update({'scene_id': 'act1-sc01', 'anchor': 'held her breath',
+                  'placement': 'after_anchor', 'layout': 'half_page',
+                  'beat': 'The lantern on the sill'})
+    rows[1]['contrast'] = 'Darker than lf-04. Keep the horizon low.'
+    ill.write_plan(packet_project, rows + [upper])
+
+    entries = {e['id']: e for e in packet.resolve(packet_project)['entries']}
+    blank = entries['the-blank-page']
+
+    assert 'lf-04' not in blank['contrast']
+    assert 'lf-04' in blank['contrast_withheld']
+    assert 'Keep the horizon low.' in blank['contrast']
+
+
+def test_the_author_facing_form_keeps_the_authors_own_words(packet_project):
+    """`for_author` dropping the author's half survived: the append test only
+    ever checked `for_model`. An id is exactly right for a human checking a
+    render, and so is the sentence the author wrote around it.
+
+    Asserted on `contrast_for_row` rather than on an entry field, because
+    `Entry` deliberately no longer carries the author form — its only consumer is
+    the source prompt file, which is never uploaded.
+    """
+    rows = ill.read_plan(packet_project)
+    rows[1]['contrast'] = 'Much wider than the one before it.'
+    ill.write_plan(packet_project, rows)
+
+    context = packet.state_context(packet_project)
+    row = {r['id'].strip(): r for r in ill.read_plan(packet_project)}[
+        'the-blank-page']
+
+    assert 'Much wider than the one before it.' in \
+        packet.contrast_for_row(row, context=context).for_author
+
+
+# ---------------------------------------------------------------------------
+# The id matcher's two deliberate asymmetries
+# ---------------------------------------------------------------------------
+#
+# `_id_pattern` chose a lookbehind and *no* lookahead on purpose, and dropped a
+# backticked-token fallback. All three are judgements with a stated rationale and
+# no test, which is how a later "tidy-up" reverts one without noticing.
+
+def test_a_suffix_of_a_longer_token_is_not_an_id_match(packet_project):
+    """The lookbehind's job: `XLF-07` is a different token, not a reference.
+
+    Without it the matcher fires inside any word ending in a plan id, which
+    withholds legitimate direction and tells the author it named another
+    illustration.
+    """
+    rows = ill.read_plan(packet_project)
+    other = ill.blank_row('LF-07')
+    other.update({'scene_id': 'act1-sc01', 'anchor': 'held her breath',
+                  'placement': 'after_anchor', 'layout': 'half_page',
+                  'beat': 'A lantern'})
+    rows[1]['contrast'] = 'Use the XLF-07 stock instead.'
+    ill.write_plan(packet_project, rows + [other])
+
+    entries = {e['id']: e for e in packet.resolve(packet_project)['entries']}
+    assert 'Use the XLF-07 stock instead.' in entries['the-blank-page'][
+        'contrast']
+    assert entries['the-blank-page']['contrast_withheld'] == ''
+
+
+def test_the_matcher_over_withholds_rather_than_missing_an_id(packet_project):
+    """There is deliberately no lookahead, and the asymmetry is the point.
+
+    `LF-071` matching a check for `LF-07` over-withholds — disclosed to the
+    author under **Check against its neighbours** — where a miss puts an id in
+    front of the image model. Pinned because it looks like a bug to a reader who
+    does not know it was chosen: the obvious "fix" is to add a lookahead, which
+    reintroduces the `LF-07s` and `_LF-07_` leaks.
+    """
+    rows = ill.read_plan(packet_project)
+    other = ill.blank_row('LF-07')
+    other.update({'scene_id': 'act1-sc01', 'anchor': 'held her breath',
+                  'placement': 'after_anchor', 'layout': 'half_page',
+                  'beat': 'A lantern'})
+    rows[1]['contrast'] = 'Read against LF-071 for scale.'
+    ill.write_plan(packet_project, rows + [other])
+
+    entries = {e['id']: e for e in packet.resolve(packet_project)['entries']}
+    blank = entries['the-blank-page']
+    assert blank['contrast_withheld'] == 'Read against LF-071 for scale.'
+    assert 'LF-071' not in blank['contrast']
+
+
+def test_a_backticked_field_name_is_not_treated_as_an_illustration(
+        packet_project):
+    """The backticked-token fallback was removed on purpose, and this pins why.
+
+    It withheld `Keep the `half_page` gutter clear.` from the model's copy and
+    told the author it named another illustration. A backticked non-id is far
+    more often a field name than an illustration, so the plan's own ids are the
+    only signal.
+    """
+    rows = ill.read_plan(packet_project)
+    rows[1]['contrast'] = 'Keep the `half_page` gutter clear.'
+    ill.write_plan(packet_project, rows)
+
+    entries = {e['id']: e for e in packet.resolve(packet_project)['entries']}
+    blank = entries['the-blank-page']
+    assert 'Keep the `half_page` gutter clear.' in blank['contrast']
+    assert blank['contrast_withheld'] == ''
+
+
+def test_an_id_absent_from_the_plan_is_no_longer_withheld(packet_project):
+    """The cost of dropping the backtick fallback, stated as a test.
+
+    An author's contrast against a **cut** row — `Colder than `LF-04`.` where
+    `LF-04` is no longer in the plan — now reaches the image model. That is the
+    accepted trade for not withholding field names, and it is the one residual
+    #305 leak path. Recorded so the trade-off is a decision rather than a
+    discovery, and so that restoring a narrower fallback has a test to change.
+    """
+    rows = ill.read_plan(packet_project)
+    rows[1]['contrast'] = 'Colder than `LF-04`. Keep the horizon low.'
+    ill.write_plan(packet_project, rows)
+
+    entries = {e['id']: e for e in packet.resolve(packet_project)['entries']}
+    assert 'LF-04' in entries['the-blank-page']['contrast']

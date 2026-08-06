@@ -156,9 +156,6 @@ class Entry(TypedDict):
     #: plainly because it is what `prompt_constraints` renders into the upload,
     #: and the id-bearing form is the one that needs qualifying.
     contrast: str
-    #: The same direction with ids intact, for the author-facing acceptance block
-    #: and `illustrations.md`.
-    contrast_for_author: str
     #: The author's own sentences held back from `contrast` because they name
     #: another illustration. Disclosed rather than dropped.
     contrast_withheld: str
@@ -762,7 +759,6 @@ def entry_for(row: dict[str, str], *,
         # images have nothing that must be absent.
         'absent': (row.get('absent') or '').strip(),
         'contrast': contrast.for_model,
-        'contrast_for_author': contrast.for_author,
         'contrast_withheld': contrast.withheld,
         'notes': (row.get('composition') or '').strip(),
         'treatment': treatment,
@@ -1336,8 +1332,12 @@ class RowContrast(NamedTuple):
     hand it. `render_image_prompt`'s own docstring states the rule the ids broke.
 
     `for_author` keeps them, because an id is exactly right for a human checking a
-    render — it names the file to open. It goes to the source prompt file's
-    `## Accept only if` and to `illustrations.md`'s notes.
+    render — it names the file to open. Its one consumer is the **source prompt
+    file's** `## Accept only if`, via `cmd_illustrate.run_prompts` — that file is
+    author-facing and never uploaded. It is deliberately *not* carried on `Entry`:
+    a field the packet populates and nothing renders is dead weight, and the
+    author-facing half the packet does need is `withheld`, which
+    `illustrations.md` shows.
 
     `withheld` is the author's own sentences that named an id, so
     `illustrations.md` can show them rather than silently dropping them. There is
@@ -1374,29 +1374,48 @@ def _split_author_contrast(author: str,
     """
     if not author:
         return '', ''
-    ids = sorted((i for i in plan_ids if i), key=len, reverse=True)
-    # Word-boundary search per id, **not** tokenize-and-strip-punctuation. The
-    # first cut stripped a fixed set of characters off each word and compared
-    # sets, which missed the possessive: a real book's cell read "deliberately
-    # unlike LF-07's hard outdoor light boundary", and `LF-07's` does not strip to
-    # `LF-07` because `s` is not punctuation. `\b` holds after the `7` regardless
-    # of what follows, which is what makes this robust against every attachment —
-    # possessives, hyphens, parentheses — instead of an enumerated list of them.
-    pattern = (re.compile(r'\b(?:%s)\b' % '|'.join(re.escape(i) for i in ids),
-                          re.IGNORECASE) if ids else None)
+    # Via `_id_pattern`, not tokenize-and-strip-punctuation. The first cut
+    # stripped a fixed character set off each word and compared sets, which missed
+    # the possessive: a real book's cell read "deliberately unlike LF-07's hard
+    # outdoor light boundary", and `LF-07's` does not strip to `LF-07` because `s`
+    # is not punctuation.
+    pattern = _id_pattern(plan_ids)
     kept: list[str] = []
     dropped: list[str] = []
     for sentence in _sentences(author):
-        names_id = bool(pattern and pattern.search(sentence)) or bool(
-            _BACKTICKED_ID_RE.search(sentence))
+        names_id = bool(pattern and pattern.search(sentence))
         (dropped if names_id else kept).append(sentence)
     return ' '.join(kept).strip(), ' '.join(dropped).strip()
 
 
-#: A backticked token shaped like a plan id — the belt to `plan_ids`' braces, for
-#: an author who wrote a contrast against art that is not in the plan (a cut row,
-#: or a typo). Requires the backticks, so ordinary prose cannot trip it.
-_BACKTICKED_ID_RE = re.compile(r'`[A-Za-z0-9][A-Za-z0-9_-]*`')
+def _id_pattern(ids: Iterable[str]) -> 're.Pattern[str] | None':
+    """A matcher for "does this text name one of these illustration ids?".
+
+    One function, shared by `_split_author_contrast` and `_foreign_ids`, because
+    two ways of asking that question is two chances to disagree — and the one that
+    disagreed would be the one guarding the file that gets uploaded.
+
+    **A word boundary is the wrong boundary for these ids.** `\\bLF-07\\b` misses
+    `LF-07s` and `_LF-07_` — both continue with word characters — and `\\bLF-\\b`
+    misses a trailing-hyphen id entirely. All three leaked. The lookbehind excludes
+    alphanumerics and the hyphen so a *suffix* of a longer id is not matched
+    (`XLF-07` is a different token), and there is deliberately **no** lookahead:
+    `LF-071` matching a check for `LF-07` over-withholds, which is disclosed to the
+    author, where a miss puts an id in front of the image model. The asymmetry is
+    the whole point.
+
+    Replaces a backticked-token fallback that withheld legitimate direction and
+    told the author it named another illustration — `Keep the `half_page` gutter
+    clear.` was dropped from the model's copy under that explanation. The plan's
+    own ids are the sound signal; a backticked non-id is far more often a field
+    name than an illustration.
+    """
+    real = sorted({i for i in ids if i})
+    if not real:
+        return None
+    return re.compile(
+        r'(?<![A-Za-z0-9-])(?:%s)' % '|'.join(re.escape(i) for i in real),
+        re.IGNORECASE)
 
 
 def _foreign_ids(text: str, own_id: str, plan_ids: set[str]) -> list[str]:
@@ -1407,11 +1426,9 @@ def _foreign_ids(text: str, own_id: str, plan_ids: set[str]) -> list[str]:
     this name another illustration?" is two chances to disagree, and the one that
     disagreed would be the one guarding the file that gets uploaded.
     """
-    others = sorted(i for i in plan_ids if i and i != own_id)
-    if not others or not text:
+    pattern = _id_pattern(i for i in plan_ids if i != own_id)
+    if pattern is None or not text:
         return []
-    pattern = re.compile(
-        r'\b(?:%s)\b' % '|'.join(re.escape(i) for i in others), re.IGNORECASE)
     return sorted({m.group(0) for m in pattern.finditer(text)})
 
 

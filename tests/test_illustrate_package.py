@@ -377,7 +377,9 @@ def test_contrast_is_one_derived_sentence(in_project):
     assert 'darkest' in derived
     # The id is in the author-facing form only (#305).
     assert 'the-finest-cartographer' not in derived
-    assert 'the-finest-cartographer' in entry['contrast_for_author']
+    context = packet.state_context(in_project)
+    assert 'the-finest-cartographer' in packet.contrast_for_row(
+        rows[1], context=context).for_author
 
 
 def test_no_illustration_id_reaches_any_uploaded_prompt(in_project):
@@ -1882,7 +1884,7 @@ def test_state_context_and_the_packet_share_one_resolution(in_project):
         assert state == entries[illus_id]['state']
         contrast = packet.contrast_for_row(row, context=context)
         assert contrast.for_model == entries[illus_id]['contrast']
-        assert contrast.for_author == entries[illus_id]['contrast_for_author']
+        assert contrast.withheld == entries[illus_id]['contrast_withheld']
 
 
 # ============================================================================
@@ -2466,6 +2468,57 @@ def test_the_model_reaches_the_upload(in_project):
     cmd_illustrate.main(['--package'])
     assert pi.DEFAULT_IMAGE_MODEL in \
         _read_prompt(in_project, 'the-finest-cartographer')
+
+
+@pytest.mark.parametrize('cell,ident', [
+    ("Unlike LF-07's hard light.", 'LF-07'),      # possessive — found on the real book
+    ('Unlike LF-07s hard light.', 'LF-07'),       # plural: `\b` misses this
+    ('Unlike _LF-07_ hard light.', 'LF-07'),      # underscore is a word char
+    ('Unlike LF- hard light.', 'LF-'),            # trailing-hyphen id
+    ('Unlike (LF-07) hard light.', 'LF-07'),
+    ('Unlike LF-07, colder.', 'LF-07'),
+])
+def test_no_attachment_lets_an_id_through(in_project, cell, ident):
+    """`\\b` is the wrong boundary for these ids, and three of these proved it.
+
+    A word boundary needs a word/non-word transition, so `LF-07s` and `_LF-07_`
+    both continue with word characters and were missed, and `\\bLF-\\b` misses a
+    trailing-hyphen id entirely. `_id_pattern` uses a lookbehind and no lookahead
+    instead, erring toward withholding — which is disclosed — over a miss, which
+    reaches the image model.
+    """
+    kept, withheld = packet._split_author_contrast(cell, {ident})
+
+    assert ident.lower() not in kept.lower()
+    assert ident in withheld
+
+
+def test_a_backticked_field_name_is_not_mistaken_for_an_illustration(in_project):
+    """The retired fallback withheld this and said it named another illustration.
+
+    Withholding is disclosed, so it was not dangerous — but the stated reason was
+    false, and a disclosure channel that explains a drop wrongly is worse than the
+    drop. The plan's own ids are the sound signal.
+    """
+    kept, withheld = packet._split_author_contrast(
+        'Keep the `half_page` gutter clear.', {'LF-01'})
+
+    assert kept == 'Keep the `half_page` gutter clear.'
+    assert withheld == ''
+
+
+def test_both_matchers_agree_on_the_same_text(in_project):
+    """`_split_author_contrast` and `_foreign_ids` share `_id_pattern` because two
+    ways of asking "does this name another illustration?" is two chances to
+    disagree — and the one that disagreed would guard the uploaded file."""
+    text = "Unlike LF-07s and _LF-05_."
+    ids = {'LF-05', 'LF-07', 'LF-10'}
+
+    kept, _ = packet._split_author_contrast(text, ids)
+    found = packet._foreign_ids(text, 'LF-10', ids)
+
+    assert found == ['LF-05', 'LF-07']
+    assert kept == ''
 
 
 def test_a_prefix_body_naming_another_illustration_is_reported(in_project):
