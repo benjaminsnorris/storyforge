@@ -1416,6 +1416,11 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     state_gaps: dict[str, list[str]] = {}
     unpositioned: dict[ill.SplitCause, list[tuple[str, str]]] = {}
     at_scene_start: list[str] = []
+    #: (id, applied, total) per row whose `state_override` lost clauses (#309).
+    override_partial: list[tuple[str, int, int]] = []
+    #: Rows whose `state_override` did not land as written — nothing parsed, or
+    #: a whole sentence became the entity name.
+    override_dead: list[str] = []
     for row in rows:
         illus_id = row['id'].strip()
         # `include_anchor_gaps=False` because `_warn_unanchored_rows` above named
@@ -1432,6 +1437,31 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             # free-fix moment is preserved.
             state_gaps.setdefault(gap, []).append(illus_id)
         absent_cell = (row.get('absent') or '').strip()
+        override = vs.parse_state_override(row.get('state_override', ''))
+        if override.lost:
+            # One line, with a count, before any money is spent. This is the
+            # signal that would have caught #309 on the spot: the author saw a
+            # regenerated prompt that "looked fine" and only found the loss by
+            # grepping the output for a string they expected and getting nothing.
+            override_partial.append(
+                (illus_id, len(override.applied), override.clause_count))
+        if override.prose_keys or (override.clause_count
+                                   and not override.applied):
+            # The cell is prose rather than an override, so proceeding generates
+            # against the state the author believes they replaced. A refusal
+            # rather than a warning, for the reason `resolve_style_reference`
+            # refuses a declared-but-missing file: warning, spending, and exiting
+            # 0 is what the skill commits on.
+            #
+            # Keyed on a *sentence as the entity key*, not on "no key matches a
+            # tracked entity", which is what the issue proposed. Those differ on
+            # the case that matters: `state_for_row` deliberately applies an
+            # override for an entity the matrix does not track, so refusing on an
+            # unmatched key would break the legitimate one-off entity. A sentence
+            # as a key is never legitimate. On the real cell this was filed about,
+            # one clause did "apply" — under a nonsense key — so a
+            # nothing-applied test alone would have let it through.
+            override_dead.append(illus_id)
         contrast = packet.contrast_for_row(row, context=state_ctx)
         split = _scene_split(project_dir, row)
         if split['state'] == 'normal' and not split['read'].strip():
@@ -1466,13 +1496,23 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
                 character_anchors=_relevant_anchors(anchors, row),
                 canon_context=canon_ctx, direction=direction,
                 style_note=style_note, anchor_labels=labels,
-                state=state, absent=absent_cell, contrast=contrast,
+                state=state, absent=absent_cell,
+                contrast=contrast.for_model,
             ) if needs_api else '',
         })
 
     for gap, ids in state_gaps.items():
         log(f'WARNING: {gap} ({len(ids)} illustration(s): '
             f'{", ".join(sorted(ids))})')
+    for illus_id, applied, total in override_partial:
+        # A count, because that is what makes a partial parse visible at a glance.
+        # "1 of 3 clauses applied" would have caught #309 immediately; two
+        # per-clause WARNINGs in a stream of reference warnings did not.
+        log(f'WARNING: illustration `{illus_id}`: state_override — '
+            f'{applied} of {total} clauses applied, {total - applied} lost. '
+            f'A lost clause is a state you believe is in the prompt and is not — '
+            f'either it had no colon, or a later clause named the same entity '
+            f'and overwrote it.')
     if unpositioned:
         # Before the fan-out, with the other free-fix warnings. A row whose
         # position does not resolve gets no spoiler guard and no acceptance check
@@ -1499,6 +1539,20 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             f'inference rather than a read of reference/visual-state.csv: '
             f'{", ".join(unstated)}. The prompt files say so too.')
 
+    # Placed after every other pre-fan-out warning, not before them. Returning
+    # first meant `--prompts --dry-run` lost the #308 position warnings and the
+    # unstated-state count entirely — a refusal that suppresses the report the
+    # author needs to fix *everything* is the guard-before-the-thing-it-should-
+    # follow shape this repo keeps finding. Nothing is spent either way: this
+    # whole span is file reads and string assembly.
+    if override_dead:
+        log(f'ERROR: {len(override_dead)} illustration(s) have a state_override '
+            f'that did not land as written: {", ".join(sorted(override_dead))}. '
+            f'Either nothing parsed, or a whole sentence became the entity name — '
+            f'so the cell is prose rather than entity:state, and the prompt would '
+            f'be generated against the state you meant to replace. Fix the cell '
+            f'and re-run; nothing was spent.')
+        return 1
     if dry_run:
         for job in jobs:
             log(f'[dry-run] would write '
@@ -1584,7 +1638,7 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
         content = pi.render_prompt_file(
             row=row, body=body, references=job['references'],
             aspect=job['aspect'], state=job['state'],
-            absent=job['absent'], contrast=job['contrast'],
+            absent=job['absent'], contrast=job['contrast'].for_author,
             split=job['split'],
         )
         rel = ill.default_prompt_rel(illus_id)
@@ -2202,7 +2256,13 @@ class _PromptJob(TypedDict):
     #: the whole point of #297 is that two renderings of one row drift apart.
     state: str
     absent: str
-    contrast: str
+    #: Both forms, because they go to different audiences (#305). `for_model`
+    #: reaches `build_art_direction_request` — the model *writing* the prompt
+    #: must not be shown an illustration id either, or it echoes one into the
+    #: body, and the body is uploaded verbatim. `for_author` goes to the prompt
+    #: file's `## Accept only if`, which is never uploaded and where an id is
+    #: exactly what a human checking a render wants.
+    contrast: 'packet.RowContrast'
     #: The scene cut at this illustration's reading position. Carried for the
     #: same reason the three above are: the request is built from `unread` and
     #: the prompt file's acceptance block from `next_sentence`, and the two must

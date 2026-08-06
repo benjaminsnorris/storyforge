@@ -114,23 +114,62 @@ def test_write_transitions_round_trips(project_dir):
 def test_parse_state_override_splits_on_the_first_colon_only():
     from storyforge.visual_state import parse_state_override
     got = parse_state_override('nora-face:tear-streaked;leo-hands:muddy, gripping')
-    assert got == {'nora-face': 'tear-streaked', 'leo-hands': 'muddy, gripping'}
+    assert got.applied == {'nora-face': 'tear-streaked',
+                           'leo-hands': 'muddy, gripping'}
     # a state containing a colon survives
-    assert parse_state_override('x:a:b') == {'x': 'a:b'}
-    assert parse_state_override('') == {}
-    assert parse_state_override('malformed') == {}
+    assert parse_state_override('x:a:b').applied == {'x': 'a:b'}
+    assert parse_state_override('').applied == {}
+    assert parse_state_override('malformed').applied == {}
 
 
-def test_parse_state_override_reports_what_it_skipped(capsys):
+def test_parse_state_override_returns_what_it_skipped(capsys):
+    """Returned, not logged (#309).
+
+    Two WARNING lines competing with seventeen reference-exclusion warnings on
+    the same run were invisible in practice — and they were on the wrong gate,
+    since `--diagnose` and `validate` reported nothing. `prepass` turns these
+    into findings instead.
+    """
     from storyforge.visual_state import parse_state_override
-    assert parse_state_override('no-colon-here;x:ok') == {'x': 'ok'}
-    assert 'no-colon-here' in capsys.readouterr().out
+    got = parse_state_override('no-colon-here;x:ok')
+
+    assert got.applied == {'x': 'ok'}
+    assert got.skipped == ['no-colon-here']
+    assert capsys.readouterr().out == '', 'the parser must not log'
 
 
-def test_parse_state_override_skips_an_empty_half(capsys):
+def test_parse_state_override_skips_an_empty_half():
     from storyforge.visual_state import parse_state_override
-    assert parse_state_override('x:;:y') == {}
-    assert 'empty entity or' in capsys.readouterr().out
+    got = parse_state_override('x:;:y')
+    assert got.applied == {}
+    assert got.skipped == ['x:', ':y']
+
+
+def test_parse_state_override_flags_a_sentence_as_the_entity_key():
+    """The clause that survives a prose cell keeps a sentence as its key, and
+    `state_for_row` then hands it to the image model as an authoritative state
+    line under that label."""
+    from storyforge.visual_state import parse_state_override
+    got = parse_state_override(
+        'The instant AFTER extinction, which a10 does not describe: '
+        'the Great Lamp dark and cold; the line of light gone entirely; '
+        'EXACTLY FIVE Folk lanterns still dimly alive')
+
+    # The reported shape of the real failure: 3 clauses, 1 applied, 2 dropped.
+    assert len(got.applied) == 1
+    assert len(got.skipped) == 2
+    assert got.clause_count == 3
+    assert got.prose_keys == list(got.applied)
+    # And the facts that mattered are gone from what reaches the prompt.
+    assert 'EXACTLY FIVE' not in ' '.join(got.applied.values())
+
+
+def test_a_short_entity_like_key_is_not_called_prose():
+    """`Great Lamp` means an entity; it should get the untracked-entity finding
+    rather than a prose complaint."""
+    from storyforge.visual_state import parse_state_override
+    assert parse_state_override('Great Lamp:dark').prose_keys == []
+    assert parse_state_override('nora-clothing:coat').prose_keys == []
 
 
 def test_new_plan_columns_are_optional():
@@ -624,3 +663,246 @@ def test_the_canon_display_name_is_a_search_term(project_dir):
         'dorren-hayle-clothing', vs._display_names(project_dir))
     assert 'dorren hayle' in terms
     assert 'act1-sc02' in vs.prepass(project_dir)['candidate_scenes']
+
+
+# ============================================================================
+# #309 — a malformed state_override reaches the gates authors read
+# ============================================================================
+
+class TestMalformedStateOverrideIsReported:
+    """Before #309 the only signal was two WARNING lines, and they were on the
+    wrong gate: `--diagnose` and `validate` reported nothing at all, so a
+    malformed override survived both clean."""
+
+    @pytest.fixture(autouse=True)
+    def _seeded(self, project_dir):
+        from illustration_helpers import seed_packet_project
+        seed_packet_project(project_dir)
+        _write_state(project_dir)
+
+    def _plan_with_override(self, project_dir, cell):
+        from storyforge import illustrations as ill
+        rows = ill.read_plan(project_dir)
+        rows[0]['state_override'] = cell
+        ill.write_plan(project_dir, rows)
+        return rows[0]['id'].strip()
+
+    def test_a_dropped_clause_is_a_finding(self, project_dir):
+        from storyforge import visual_state as vs
+        rid = self._plan_with_override(project_dir,
+                                       'no-colon-here;nora-face:tear-streaked')
+
+        kinds = {f['kind'] for f in vs.prepass(project_dir)['findings']}
+
+        assert 'state_override_unparsed' in kinds
+
+    def test_a_sentence_key_is_a_different_finding(self, project_dir):
+        """The fixes differ: a dropped clause needs a colon, a prose key means
+        the whole cell was written as a sentence."""
+        from storyforge import visual_state as vs
+        self._plan_with_override(
+            project_dir,
+            'The instant AFTER extinction which a10 omits: the Lamp dark')
+
+        findings = vs.prepass(project_dir)['findings']
+        kinds = {f['kind'] for f in findings}
+
+        assert 'state_override_prose_key' in kinds
+        assert 'state_override_unparsed' not in kinds
+
+    def test_a_typo_entity_is_reported(self, project_dir):
+        """Legitimate for a one-off entity, a typo otherwise — and a typo is
+        applied silently, so the author has to be told which it might be."""
+        from storyforge import visual_state as vs
+        self._plan_with_override(project_dir, 'nora-fce:tear-streaked')
+
+        kinds = {f['kind'] for f in vs.prepass(project_dir)['findings']}
+
+        assert 'state_override_unmatched_entity' in kinds
+
+    def test_a_well_formed_override_is_silent(self, project_dir):
+        from storyforge import visual_state as vs
+        from storyforge import illustrations as ill
+        rows = ill.read_plan(project_dir)
+        refs = ill._split_array(rows[0].get('canon_refs', ''))
+        assert refs, 'fixture row needs canon_refs for this to be meaningful'
+        rows[0]['state_override'] = f'{refs[0]}:lit from below'
+        ill.write_plan(project_dir, rows)
+
+        kinds = {f['kind'] for f in vs.prepass(project_dir)['findings']}
+
+        assert not any(k.startswith('state_override_') for k in kinds)
+
+    def test_the_findings_carry_the_plan_as_their_file(self,
+                                                      project_dir):
+        """The fix is an edit to the plan row, not to the transition log."""
+        from storyforge import visual_state as vs
+        self._plan_with_override(project_dir, 'no-colon-here')
+
+        for finding in vs.prepass(project_dir)['findings']:
+            if finding['kind'].startswith('state_override_'):
+                assert 'illustration-plan' in finding['file']
+
+    def test_the_detail_is_csv_safe(self, project_dir):
+        """The findings interpolate author prose into the unquoted pipe-delimited
+        cleanup report, where a `|` shifts every later column."""
+        from storyforge import visual_state as vs
+        self._plan_with_override(project_dir,
+                                 'a | b with a pipe;x:ok')
+
+        for finding in vs.prepass(project_dir)['findings']:
+            assert '|' not in finding['detail']
+
+    def test_a_row_with_no_canon_refs_is_still_checked(self, project_dir):
+        """The case that produced zero findings, and the worst one to miss.
+
+        The checks were emitted below `prepass`'s `canon_refs` and `scene_id`
+        guards, so a row with empty `canon_refs` reported nothing while
+        `state_for_row` still applied the override and shipped the fabricated
+        state to the image model. And a row without `canon_refs` is *exactly* the
+        documented-legitimate case for an override, so "one placement buys
+        validate, cleanup and --diagnose" held only where `canon_refs` happened to
+        be populated.
+        """
+        from storyforge import illustrations as ill
+        from storyforge import visual_state as vs
+        rows = ill.read_plan(project_dir)
+        rows[0]['canon_refs'] = ''
+        rows[0]['state_override'] = 'no-colon-here;a-sentence with four words:x'
+        ill.write_plan(project_dir, rows)
+
+        kinds = {f['kind'] for f in vs.prepass(project_dir)['findings']}
+
+        assert 'state_override_unparsed' in kinds
+        assert 'state_override_prose_key' in kinds
+
+    def test_a_collapsed_duplicate_entity_is_reported(self, project_dir):
+        """`clause_count` used to be derived from `len(applied) + len(skipped)`,
+        so two clauses naming one entity collapsed to a count of one — losing a
+        clause in the very number whose job is saying how many were lost."""
+        from storyforge import illustrations as ill
+        from storyforge import visual_state as vs
+        rows = ill.read_plan(project_dir)
+        rows[0]['state_override'] = 'nora-clothing:coat;nora-clothing:hood'
+        ill.write_plan(project_dir, rows)
+
+        details = [f['detail'] for f in vs.prepass(project_dir)['findings']
+                   if f['kind'] == 'state_override_unparsed']
+
+        assert any('overwrote an earlier one' in d for d in details), details
+
+    def test_a_malformed_override_does_not_suppress_state_unspecified(
+            self, project_dir):
+        """The sharpest half of #309, and the half nothing held.
+
+        `covered |= overridden` folds the override's keys into the set that
+        silences `state_unspecified`. A malformed cell contributes garbage keys,
+        and if any of them ever matched a `canon_refs` entry the row would go
+        quiet — the author would be told nothing at all about a state the prompt
+        never received. Current behaviour is correct; this pins it, because
+        widening `overridden` to include the unparsed halves is a one-line change
+        that looks like a generosity and is a silencing.
+        """
+        from storyforge import illustrations as ill
+        from storyforge import visual_state as vs
+        rows = ill.read_plan(project_dir)
+        refs = ill._split_array(rows[0].get('canon_refs', ''))
+        assert refs, 'fixture row needs canon_refs for this to be meaningful'
+        rows[0]['state_override'] = 'no-colon-here;a sentence of four words:dark'
+        ill.write_plan(project_dir, rows)
+
+        findings = vs.prepass(project_dir)['findings']
+        rid = rows[0]['id'].strip()
+        kinds = {f['kind'] for f in findings if f.get('id') == rid}
+
+        assert 'state_override_unparsed' in kinds
+        assert 'state_unspecified' in kinds, (
+            'a malformed override must not silence the finding that sends the '
+            'author to the cell in the first place')
+
+    def test_a_malformed_override_does_not_suppress_mid_scene_change(
+            self, project_dir):
+        """The same suppression, on the other finding that `overridden` gates.
+
+        A real `state_override` is the documented fix for
+        `state_mid_scene_change`, so it suppresses it by design. A *malformed*
+        one must not — otherwise the cell that fails to state which side of a
+        change the image is on also hides the question.
+        """
+        from storyforge import illustrations as ill
+        from storyforge import visual_state as vs
+        transitions = vs.read_transitions(project_dir)
+        assert transitions, 'fixture needs a transition for this to be meaningful'
+        changing = transitions[0]
+
+        rows = ill.read_plan(project_dir)
+        rows[0].update({
+            'scene_id': changing['from_scene'],
+            'placement': 'scene_close',
+            'canon_refs': changing['entity'].rsplit('-', 1)[0],
+            'state_override': 'this cell is prose and has no colon',
+        })
+        ill.write_plan(project_dir, rows)
+
+        findings = vs.prepass(project_dir)['findings']
+        rid = rows[0]['id'].strip()
+        kinds = {f['kind'] for f in findings if f.get('id') == rid}
+
+        assert 'state_override_unparsed' in kinds
+        assert 'state_mid_scene_change' in kinds, (
+            'a malformed override must not suppress the finding it was written '
+            'to answer')
+
+    def test_an_override_on_a_tracked_entity_outside_canon_refs_is_silent(
+            self, project_dir):
+        """The `tracked` exemption, which nothing exercised.
+
+        An override may legitimately name an entity the transition log tracks but
+        the row's `canon_refs` do not — the log is the authority on what is
+        tracked. Dropping that exemption fires `state_override_unmatched_entity`
+        on correct data, and the finding's own remedy ("check the spelling")
+        would send the author to fix a cell that is right.
+        """
+        from storyforge import illustrations as ill
+        from storyforge import visual_state as vs
+        transitions = vs.read_transitions(project_dir)
+        assert transitions, 'fixture needs a transition'
+        tracked = transitions[0]['entity']
+
+        rows = ill.read_plan(project_dir)
+        refs = ill._split_array(rows[0].get('canon_refs', ''))
+        assert not any(tracked.lower() == r.lower()
+                       or tracked.lower().startswith(f'{r.lower()}-')
+                       for r in refs), 'the entity must be outside canon_refs'
+        rows[0]['state_override'] = f'{tracked}:lit from below'
+        ill.write_plan(project_dir, rows)
+
+        rid = rows[0]['id'].strip()
+        kinds = {f['kind'] for f in vs.prepass(project_dir)['findings']
+                 if f.get('id') == rid}
+
+        assert 'state_override_unmatched_entity' not in kinds
+
+    def test_a_pipe_in_a_finding_detail_is_neutralized(self, project_dir):
+        """Asserted where a pipe can actually reach the detail.
+
+        `test_the_detail_is_csv_safe` cannot fail: `write_plan` routes every cell
+        through `csv_safe` on the way out, so `'a | b'` is already `'a / b'`
+        before `prepass` ever reads it back, and all three `_csv_safe` calls in
+        the finding builders can be deleted with that test green. The builder is
+        called directly here so the guard is on the code it claims to guard —
+        the report is unquoted pipe-delimited, and a stray `|` empties the
+        trailing `status` cell that `skills/forge/SKILL.md` scans for.
+        """
+        from storyforge import visual_state as vs
+        # The prose-key finding needs an entity of >= _PROSE_KEY_WORDS words, or
+        # that interpolation is never reached and its `_csv_safe` can be deleted
+        # with this test green — the same vacuity as the test above.
+        row = {'state_override': 'a | b with a pipe;'
+                                 'a long | piped sentence as the key:x | y'}
+
+        findings = vs._override_findings(row, 'lantern-vigil', {}, [])
+
+        assert findings, 'the malformed cell must produce findings'
+        for finding in findings:
+            assert '|' not in finding['detail'], finding['detail']

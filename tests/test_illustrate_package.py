@@ -365,11 +365,97 @@ def test_contrast_is_one_derived_sentence(in_project):
     rows[1]['contrast'] = 'Much wider than the one before it.'
     ill.write_plan(in_project, rows)
     entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
-    contrast = entries['the-blank-page']['contrast']
-    derived = contrast.replace('Much wider than the one before it.', '').strip()
+    entry = entries['the-blank-page']
+
+    # Author prose naming no illustration id is safe for the model and kept.
+    assert 'Much wider than the one before it.' in entry['contrast']
+    assert entry['contrast_withheld'] == ''
+
+    derived = entry['contrast'].replace(
+        'Much wider than the one before it.', '').strip()
     assert derived.count('.') == 1, derived
-    assert 'darkest' in derived and 'the-finest-cartographer' in derived
-    assert 'Much wider than the one before it.' in contrast
+    assert 'darkest' in derived
+    # The id is in the author-facing form only (#305).
+    assert 'the-finest-cartographer' not in derived
+    context = packet.state_context(in_project)
+    assert 'the-finest-cartographer' in packet.contrast_for_row(
+        rows[1], context=context).for_author
+
+
+def test_no_illustration_id_reaches_any_uploaded_prompt(in_project):
+    """The invariant #305 is about, asserted over the whole written bundle.
+
+    `render_image_prompt`'s docstring states the rule — the author uploads the
+    file rather than pasting a region out of it, so everything in it reaches the
+    image model — and `contrast` broke it on 19 of 20 rows of a real book by
+    interpolating the predecessor's id. Asserted against the *files*, not the
+    derivation, because that is what gets uploaded.
+    """
+    rows = ill.read_plan(in_project)
+    # An author's own comparative note, which is the harder half: there is no
+    # rewrite that keeps its meaning, so it must be withheld entirely.
+    rows[1]['contrast'] = (
+        'Must read colder and markedly darker than `the-finest-cartographer`. '
+        'Keep the horizon low.')
+    ill.write_plan(in_project, rows)
+
+    cmd_illustrate.main(['--package'])
+
+    ids = [r['id'].strip() for r in rows]
+    prompt_dir = os.path.join(in_project, 'manuscript',
+                              'illustration-packet', 'image-prompts')
+    for name in sorted(os.listdir(prompt_dir)):
+        with open(os.path.join(prompt_dir, name), encoding='utf-8') as f:
+            text = f.read()
+        own = os.path.splitext(name)[0]
+        for other in ids:
+            if other == own:
+                continue  # the file's own heading names it, which is fine
+            assert other not in text, (
+                f'{name} names another illustration ({other}) — the image model '
+                f'cannot see it, and this file is uploaded whole')
+
+
+def test_a_possessive_illustration_id_is_still_caught(in_project):
+    """The form a real book actually used, and the one a tokenizing check missed.
+
+    *The Lantern Folk*'s `LF-10` cell read "deliberately unlike LF-07's hard
+    outdoor light boundary". `LF-07's` does not strip to `LF-07` — `s` is not
+    punctuation — so a strip-and-compare check passed it straight into the
+    upload. Word-boundary matching holds after the `7` whatever follows it, which
+    is why it is a regex per id rather than an enumerated list of attachments.
+    """
+    rows = ill.read_plan(in_project)
+    rows[1]['contrast'] = (
+        "Unlike the-finest-cartographer's hard outdoor light. Keep it close.")
+    ill.write_plan(in_project, rows)
+
+    entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
+    entry = entries['the-blank-page']
+
+    assert 'the-finest-cartographer' not in entry['contrast']
+    assert "the-finest-cartographer's" in entry['contrast_withheld']
+    assert 'Keep it close.' in entry['contrast']
+
+
+def test_a_withheld_contrast_sentence_is_disclosed_not_dropped(in_project):
+    """Silently losing the author's comparison would be the other failure."""
+    rows = ill.read_plan(in_project)
+    rows[1]['contrast'] = (
+        'Must read colder than `the-finest-cartographer`. Keep the horizon low.')
+    ill.write_plan(in_project, rows)
+
+    cmd_illustrate.main(['--package'])
+
+    index = os.path.join(in_project, 'manuscript', 'illustration-packet',
+                         'illustrations.md')
+    with open(index, encoding='utf-8') as f:
+        text = f.read()
+    assert 'Check against its neighbours' in text
+    assert 'Must read colder than `the-finest-cartographer`.' in text
+    # The safe half still reached the model.
+    entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
+    assert 'Keep the horizon low.' in entries['the-blank-page']['contrast']
 
 
 def test_state_reaches_the_image_prompt_as_a_constraint(in_project):
@@ -1779,7 +1865,13 @@ def test_a_revived_superseded_row_is_not_treated_as_the_books_first(in_project,
     context = packet.state_context(in_project, plan=ill.read_plan(in_project))
     assert rows[1]['id'] not in context['predecessors']
     contrast = packet.contrast_for_row(rows[1], context=context)
-    assert 'follows' not in contrast
+    # Both fields, and by substring on each. `contrast_for_row` returns a
+    # NamedTuple since #305, so `'follows' not in contrast` became value-equality
+    # across three fields — it passed even when both strings contained "follows",
+    # silently disarming this regression test. The wording split too, so checking
+    # only one field would still be vacuous.
+    assert 'follows' not in contrast.for_author
+    assert 'immediately before it' not in contrast.for_model
     assert 'not in the book' in capsys.readouterr().out
 
 
@@ -1790,8 +1882,9 @@ def test_state_context_and_the_packet_share_one_resolution(in_project):
     for illus_id, row in rows.items():
         state, _gaps = packet.state_for_row(row, context=context)
         assert state == entries[illus_id]['state']
-        assert packet.contrast_for_row(row, context=context) == \
-            entries[illus_id]['contrast']
+        contrast = packet.contrast_for_row(row, context=context)
+        assert contrast.for_model == entries[illus_id]['contrast']
+        assert contrast.withheld == entries[illus_id]['contrast_withheld']
 
 
 # ============================================================================
@@ -2375,3 +2468,279 @@ def test_the_model_reaches_the_upload(in_project):
     cmd_illustrate.main(['--package'])
     assert pi.DEFAULT_IMAGE_MODEL in \
         _read_prompt(in_project, 'the-finest-cartographer')
+
+
+@pytest.mark.parametrize('cell,ident', [
+    ("Unlike LF-07's hard light.", 'LF-07'),      # possessive — found on the real book
+    ('Unlike LF-07s hard light.', 'LF-07'),       # plural: `\b` misses this
+    ('Unlike _LF-07_ hard light.', 'LF-07'),      # underscore is a word char
+    ('Unlike LF- hard light.', 'LF-'),            # trailing-hyphen id
+    ('Unlike (LF-07) hard light.', 'LF-07'),
+    ('Unlike LF-07, colder.', 'LF-07'),
+])
+def test_no_attachment_lets_an_id_through(in_project, cell, ident):
+    """`\\b` is the wrong boundary for these ids, and three of these proved it.
+
+    A word boundary needs a word/non-word transition, so `LF-07s` and `_LF-07_`
+    both continue with word characters and were missed, and `\\bLF-\\b` misses a
+    trailing-hyphen id entirely. `_id_pattern` uses a lookbehind and no lookahead
+    instead, erring toward withholding — which is disclosed — over a miss, which
+    reaches the image model.
+    """
+    kept, withheld = packet._split_author_contrast(cell, {ident})
+
+    assert ident.lower() not in kept.lower()
+    assert ident in withheld
+
+
+def test_a_backticked_field_name_is_not_mistaken_for_an_illustration(in_project):
+    """The retired fallback withheld this and said it named another illustration.
+
+    Withholding is disclosed, so it was not dangerous — but the stated reason was
+    false, and a disclosure channel that explains a drop wrongly is worse than the
+    drop. The plan's own ids are the sound signal.
+    """
+    kept, withheld = packet._split_author_contrast(
+        'Keep the `half_page` gutter clear.', {'LF-01'})
+
+    assert kept == 'Keep the `half_page` gutter clear.'
+    assert withheld == ''
+
+
+def test_both_matchers_agree_on_the_same_text(in_project):
+    """`_split_author_contrast` and `_foreign_ids` share `_id_pattern` because two
+    ways of asking "does this name another illustration?" is two chances to
+    disagree — and the one that disagreed would guard the uploaded file."""
+    text = "Unlike LF-07s and _LF-05_."
+    ids = {'LF-05', 'LF-07', 'LF-10'}
+
+    kept, _ = packet._split_author_contrast(text, ids)
+    found = packet._foreign_ids(text, 'LF-10', ids)
+
+    assert found == ['LF-05', 'LF-07']
+    assert kept == ''
+
+
+def test_a_prefix_body_naming_another_illustration_is_reported(in_project):
+    """A stored body is a *pre-#305* artifact and can carry an id itself.
+
+    Before this fix `--prompts` was handed contrast **with** ids, so a body
+    written then can echo one into its prose — and `--package` inlines that body,
+    putting the id in front of the image model exactly as the Constraints bullet
+    used to. Sanitizing the bullet does nothing about prose already on disk.
+
+    Reported rather than rewritten: there is no edit that preserves the meaning of
+    "deliberately unlike `LF-07`'s hard light", and a machine paraphrase of art
+    direction is worse than the problem. The fix is a `--prompts` re-run.
+
+    *The Lantern Folk* happened to come out clean, so this is a case only a
+    constructed one catches — which is why it is constructed.
+    """
+    cmd_illustrate.main(['--prompts', '--coaching', 'strict'])
+    rows = ill.read_plan(in_project)
+    target, other = rows[1]['id'].strip(), rows[0]['id'].strip()
+    path = os.path.join(in_project, rows[1]['prompt_file'].strip())
+    with open(path) as f:
+        body = f.read()
+    with open(path, 'w') as f:
+        f.write(body.replace('## Subject',
+                             f'## Subject\n\nDeliberately unlike {other}.', 1))
+
+    gaps = packet.resolve(in_project)['gaps']
+
+    assert any(target in g and other in g and 'predates #305' in g
+               for g in gaps), gaps
+
+
+def test_a_plan_cell_naming_another_illustration_is_reported(in_project):
+    """`composition` and a `state_override`'s state text reach the upload too.
+
+    Found by the review's probe: checking only the recovered body was the same
+    mistake in miniature as sanitizing only the Constraints bullet. `composition`
+    arrives through `_derived_body` and the override's state text through the
+    visual-state bullet, so an id in either shipped while the guard read clean.
+    """
+    rows = ill.read_plan(in_project)
+    target, other = rows[1]['id'].strip(), rows[0]['id'].strip()
+    rows[1]['composition'] = f'Mirror of {other}, reversed'
+    ill.write_plan(in_project, rows)
+
+    gaps = packet.resolve(in_project)['gaps']
+
+    assert any(target in g and other in g and 'names it by hand' in g
+               for g in gaps), gaps
+
+
+def test_a_state_override_naming_another_illustration_is_reported(in_project):
+    rows = ill.read_plan(in_project)
+    target, other = rows[1]['id'].strip(), rows[0]['id'].strip()
+    rows[1]['state_override'] = f'lantern:as in {other} but colder'
+    ill.write_plan(in_project, rows)
+
+    gaps = packet.resolve(in_project)['gaps']
+
+    assert any(target in g and other in g for g in gaps), gaps
+
+
+def test_a_clean_body_is_not_reported(in_project):
+    cmd_illustrate.main(['--prompts', '--coaching', 'strict'])
+    gaps = packet.resolve(in_project)['gaps']
+    assert not any('predates #305' in g for g in gaps)
+
+
+def test_a_body_naming_its_own_illustration_is_fine(in_project):
+    """The file's own heading names it; that is not a foreign reference."""
+    cmd_illustrate.main(['--prompts', '--coaching', 'strict'])
+    rows = ill.read_plan(in_project)
+    target = rows[1]['id'].strip()
+    path = os.path.join(in_project, rows[1]['prompt_file'].strip())
+    with open(path) as f:
+        body = f.read()
+    with open(path, 'w') as f:
+        f.write(body.replace('## Subject', f'## Subject\n\nFor {target}.', 1))
+
+    assert not any('predates #305' in g
+                   for g in packet.resolve(in_project)['gaps'])
+
+
+def test_a_malformed_state_override_is_reported_by_package(in_project):
+    """`--package` must not be the quiet path (#309 regression).
+
+    Routing the report to `prepass` alone was a regression on the path that
+    matters most: `run_package` deliberately skips `validate_plan`, the only thing
+    that runs `prepass`, so `--package` went from two WARNING lines to complete
+    silence while still shipping the fabricated state to the image model.
+    Removing a warning and pointing at a gate that cannot see the path is worse
+    than the warning it replaced.
+    """
+    rows = ill.read_plan(in_project)
+    rows[1]['state_override'] = (
+        'The instant AFTER extinction which a10 omits: the Lamp dark; '
+        'EXACTLY FIVE lanterns still alive')
+    ill.write_plan(in_project, rows)
+
+    gaps = packet.resolve(in_project)['gaps']
+
+    assert any('state_override' in g and 'lost' in g for g in gaps), gaps
+    assert any('reads as a sentence' in g for g in gaps), gaps
+
+
+def test_the_upload_guard_does_not_cover_a_recovered_body(in_project):
+    """The scope of `test_no_illustration_id_reaches_any_uploaded_prompt`.
+
+    That guard walks the written `image-prompts/*.md` and asserts no *other* id
+    appears, and its docstring calls that "the invariant #305 is about, asserted
+    over the whole written bundle". It is not: both fixture rows resolve
+    `body_source == 'plan_row'`, because the fixture has no
+    `reference/illustration-prompts/` at all — so the guard exercises the
+    deterministic Constraints bullet and never the `parse_prompt_file` recovery
+    path, which inlines a stored body **verbatim**.
+
+    A body written before #305 was generated from a request that carried the
+    predecessor's id, so that whole pre-existing corpus is the population at
+    risk, and `--package` alone does not fix it — only a `--prompts` re-run does.
+    The id therefore still reaches the upload; what #305's follow-up added is a
+    *gap* saying so. Pinned as a characterization test so nobody reads the
+    flagship guard as a universal invariant, and so eliding-instead-of-reporting
+    becomes a deliberate change with a test to update.
+    """
+    rows = ill.read_plan(in_project)
+    target, other = rows[1]['id'].strip(), rows[0]['id'].strip()
+    rel = ill.default_prompt_rel(target)
+    path = os.path.join(in_project, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(f'# {target}\n\n## Prompt\n\n## Scene\n\nA low reading lamp.\n\n'
+                f'## Subject\n\nDeliberately unlike {other}, colder and '
+                f'flatter.\n')
+
+    cmd_illustrate.main(['--package'])
+
+    upload = os.path.join(in_project, 'manuscript', 'illustration-packet',
+                          'image-prompts', f'{target}.md')
+    with open(upload, encoding='utf-8') as f:
+        text = f.read()
+
+    assert other in text, (
+        'the recovered body is inlined verbatim, so the id still reaches the '
+        'image model — the guard above does not cover this path')
+    assert any(target in g and other in g and 'predates #305' in g
+               for g in packet.resolve(in_project)['gaps']), \
+        'and the leak must at least be disclosed'
+
+
+def test_an_id_in_a_plan_cell_reaches_the_upload_and_is_reported(in_project):
+    """The widening beyond the body, on the cell an author is most likely to use.
+
+    `composition` reaches the upload through `_derived_body`, so checking only
+    the recovered body would have been the same mistake in miniature as
+    sanitizing only the Constraints bullet. This is the plan-row path, where no
+    prompt file exists at all.
+    """
+    rows = ill.read_plan(in_project)
+    target, other = rows[1]['id'].strip(), rows[0]['id'].strip()
+    rows[1]['composition'] = f'Overhead, and flatter than {other}.'
+    ill.write_plan(in_project, rows)
+
+    cmd_illustrate.main(['--package'])
+
+    upload = os.path.join(in_project, 'manuscript', 'illustration-packet',
+                          'image-prompts', f'{target}.md')
+    with open(upload, encoding='utf-8') as f:
+        assert other in f.read()
+    assert any(target in g and other in g and 'predates #305' in g
+               for g in packet.resolve(in_project)['gaps'])
+
+
+def test_the_withheld_contrast_is_carried_by_one_resolution(in_project):
+    """`contrast_for_row` and the entry must agree on all three forms.
+
+    `test_state_context_and_the_packet_share_one_resolution` compares
+    `for_model` and `for_author` but not `withheld` — the field the whole #305
+    disclosure hangs on, and the one whose drift would silently drop the
+    author's comparison from `illustrations.md`.
+    """
+    rows = ill.read_plan(in_project)
+    rows[1]['contrast'] = (
+        f'Must read colder than `{rows[0]["id"].strip()}`. Keep the horizon low.')
+    ill.write_plan(in_project, rows)
+
+    context = packet.state_context(in_project)
+    entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
+    for row in ill.read_plan(in_project):
+        rid = row['id'].strip()
+        if rid not in entries:
+            continue
+        contrast = packet.contrast_for_row(row, context=context)
+        assert contrast.withheld == entries[rid]['contrast_withheld']
+    assert entries['the-blank-page']['contrast_withheld'], \
+        'the fixture must actually withhold something here'
+
+
+def test_an_id_in_a_state_override_reaches_the_upload_and_is_reported(
+        in_project):
+    """The half of the widening that `composition` does not cover.
+
+    `_foreign_ids` is scoped to **every** model-facing string, not just the body,
+    and only some of those flow through it. `composition` reaches the upload via
+    `_derived_body`, so a body-only check still catches it — but a
+    `state_override`'s *state text* reaches the upload through the visual-state
+    Constraints bullet, which never touches the body at all. Restricting the check
+    back to `body['text']` survives a test that only uses `composition`.
+    """
+    rows = ill.read_plan(in_project)
+    target, other = rows[1]['id'].strip(), rows[0]['id'].strip()
+    rows[1]['state_override'] = f'maps:curled back, unlike {other}'
+    ill.write_plan(in_project, rows)
+
+    cmd_illustrate.main(['--package'])
+
+    upload = os.path.join(in_project, 'manuscript', 'illustration-packet',
+                          'image-prompts', f'{target}.md')
+    with open(upload, encoding='utf-8') as f:
+        text = f.read()
+    assert other in text, 'the state bullet carries it to the model'
+    assert other not in packet._body_for(in_project, rows[1])['text'], \
+        'and it does not reach the body, which is what makes this a distinct path'
+    assert any(target in g and other in g and 'predates #305' in g
+               for g in packet.resolve(in_project)['gaps'])

@@ -1402,6 +1402,18 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
         'It sits at the open or close of a scene the entity changes during, and '
         'reference/visual-state.csv holds one value for the whole scene, so it '
         'cannot say which side of that change the image is on',
+    'state_override_unparsed':
+        'Rewrite the state_override cell as entity:state, separated by '
+        'semicolons. The dropped clause is a state you believe is in the prompt '
+        'and is not — prose in this cell splits on its own punctuation',
+    'state_override_prose_key':
+        'Replace the sentence with an entity id (nora-clothing, village-lights). '
+        'As written it reaches the image model as an authoritative state line '
+        'labelled with your sentence',
+    'state_override_unmatched_entity':
+        'Check the spelling against reference/visual-state.csv and the row\'s '
+        'canon_refs. Intentional for a one-off entity the matrix does not '
+        'track — but a typo is applied silently, so confirm which it is',
     'prompt_spoils_unread':
         'Re-run storyforge illustrate --prompts --ids <id>, which sends the '
         'scene split at the illustration\'s position. Then check the render: if '

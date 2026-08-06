@@ -33,7 +33,7 @@ docs/superpowers/specs/2026-07-28-illustration-state-matrix-and-packet-design.md
 import csv
 import os
 import re
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Final, NamedTuple, TypedDict
 
 from storyforge.common import log
 
@@ -56,7 +56,58 @@ class Transition(TypedDict):
     evidence: str
 
 
-def parse_state_override(value: str) -> dict[str, str]:
+class StateOverride(NamedTuple):
+    """The result of parsing one `state_override` cell — what applied, and what
+    did not.
+
+    The dropped halves are *returned* rather than logged (#309). Two WARNING
+    lines competing with a stream of reference-exclusion warnings on the same run
+    are invisible in practice — the author of the book this was filed about was
+    filtering the run output with `grep -v` to make it readable, which is how they
+    lost them. More importantly the warnings were on the wrong gate:
+    `--diagnose` and `validate` are the gates, and neither reported this, so a
+    malformed override survived both clean.
+
+    So this stays a pure function and `prepass` turns the leftovers into
+    findings, matching how `illustrations.py` never logs and routes everything
+    through `working/cleanup-report.csv`.
+    """
+    #: `entity -> state`, for the clauses that parsed.
+    applied: dict[str, str]
+    #: Clauses with no `entity:state` colon. Dropped data, always a problem.
+    skipped: list[str]
+    #: Keys that parsed but read as prose rather than an entity id. Reported
+    #: separately because the fix differs: a skipped clause needs a colon, a
+    #: prose key means the whole cell was written as a sentence.
+    prose_keys: list[str]
+    #: How many clauses the cell contained, parsed or not. **Counted, not
+    #: derived** from `len(applied) + len(skipped)`: `applied` is a dict, so two
+    #: clauses naming one entity collapse, and the derived version reported
+    #: `nora-clothing:coat;nora-clothing:hood` as one clause — losing a clause the
+    #: author wrote, in the count whose whole job is saying how many were lost.
+    #: #309's own shape, inside #309's fix.
+    clause_count: int
+
+    @property
+    def lost(self) -> int:
+        """Clauses that did not reach the prompt, however they were lost.
+
+        Not `len(skipped)`: a clause overwritten by a later one naming the same
+        entity is gone too, and gating the author-facing warning on `skipped`
+        alone printed nothing for it.
+        """
+        return self.clause_count - len(self.applied)
+
+
+#: A key with this many space-separated words is a sentence, not an entity id.
+#: Entity ids are `{canon_id}-{aspect}` slugs — `nora-clothing`, `village-lights`
+#: — so they contain no spaces at all; the threshold is deliberately loose rather
+#: than "any space", because an author writing `Great Lamp` means an entity and
+#: should get the untracked-entity finding, not a prose complaint.
+_PROSE_KEY_WORDS: Final[int] = 4
+
+
+def parse_state_override(value: str) -> StateOverride:
     """Parse a plan row's `state_override` cell — `entity:state;entity:state`.
 
     An override is visual state true in *this image only*, which the transition
@@ -66,24 +117,119 @@ def parse_state_override(value: str) -> dict[str, str]:
 
     Splits on the FIRST colon so a state may itself contain one. An entry with
     no colon names no entity and is skipped rather than guessed at.
+
+    **Prose in this cell fails in three ways at once**, which is why the result
+    is structured (#309). Ordinary writing contains semicolons, so a sentence
+    fragments into clauses on its own punctuation; the fragments without a colon
+    are dropped; and the one fragment that happens to contain a colon survives
+    with a sentence as its entity key, which `packet.state_for_row` then presents
+    to the image model as an authoritative state line under a nonsense label.
+    On the book this was filed about, three clauses became one applied override,
+    the two facts that mattered were dropped, and the prompt file gave no
+    indication.
     """
-    out: dict[str, str] = {}
+    applied: dict[str, str] = {}
+    skipped: list[str] = []
+    prose_keys: list[str] = []
+    clauses = 0
     for part in (value or '').split(';'):
         part = part.strip()
         if not part:
             continue
+        clauses += 1
         if ':' not in part:
-            log(f'WARNING: state_override entry {part!r} has no "entity:state" '
-                f'colon — skipped')
+            skipped.append(part)
             continue
         entity, _, state = part.partition(':')
         entity, state = entity.strip(), state.strip()
         if entity and state:
-            out[entity] = state
+            applied[entity] = state
+            if len(entity.split()) >= _PROSE_KEY_WORDS:
+                prose_keys.append(entity)
         else:
-            log(f'WARNING: state_override entry {part!r} has an empty entity or '
-                f'state — skipped')
-    return out
+            skipped.append(part)
+    return StateOverride(applied=applied, skipped=skipped,
+                         prose_keys=prose_keys, clause_count=clauses)
+
+
+def _override_findings(row: dict[str, str], rid: str,
+                       resolved: dict[str, set[int]],
+                       refs: list[str]) -> list['IllustrationFinding']:
+    """A `state_override` cell's own health, independent of the row's refs (#309).
+
+    A separate function because it must run *above* `prepass`'s `canon_refs` and
+    `scene_id` guards. Inline below them, a row with empty `canon_refs` produced
+    zero findings while `state_for_row` still applied the override and shipped the
+    fabricated state to the image model — and a row without `canon_refs` is
+    exactly the documented-legitimate case for an override, so "one placement buys
+    validate, cleanup and --diagnose" held only where `canon_refs` was populated.
+
+    Its `scene_id` is not needed and not consulted: the cell is malformed or it is
+    not, regardless of where the illustration sits.
+    """
+    # Function-local, as everywhere in this module: `illustrations` imports
+    # `visual_state`, so a module-level import would be circular.
+    from storyforge import illustrations as ill
+
+    override = parse_state_override(row.get('state_override', ''))
+    plan_file = os.path.join('reference', ill.PLAN_FILENAME)
+    findings: list['IllustrationFinding'] = []
+
+    if override.lost > len(override.skipped):
+        findings.append({
+            'kind': 'state_override_unparsed',
+            'id': rid,
+            'file': plan_file,
+            'detail': f'illustration {rid!r}: state_override has '
+                      f'{override.clause_count} clauses but only '
+                      f'{len(override.applied)} distinct entities, so a later '
+                      f'clause overwrote an earlier one naming the same entity. '
+                      f'One clause per entity',
+        })
+    for clause in override.skipped:
+        findings.append({
+            'kind': 'state_override_unparsed',
+            'id': rid,
+            'file': plan_file,
+            'detail': f'illustration {rid!r}: state_override clause '
+                      f'{_csv_safe(clause)!r} has no "entity:state" colon, so it '
+                      f'was dropped — the state it describes never reached the '
+                      f'prompt. Ordinary prose splits on its own semicolons; '
+                      f'write each override as entity:state',
+        })
+    for key in override.prose_keys:
+        findings.append({
+            'kind': 'state_override_prose_key',
+            'id': rid,
+            'file': plan_file,
+            'detail': f'illustration {rid!r}: state_override entity '
+                      f'{_csv_safe(key)!r} reads as a sentence rather than an '
+                      f'entity id, and is being sent to the image model as an '
+                      f'authoritative state line under that label. Entity ids '
+                      f'look like nora-clothing or village-lights',
+        })
+
+    tracked = {e.lower() for e in resolved}
+    for key in override.applied:
+        if key.lower() in tracked:
+            continue
+        if any(key.lower() == r.lower() or key.lower().startswith(f'{r.lower()}-')
+               for r in refs if r):
+            continue
+        # A deliberately-untracked entity is legitimate — `state_for_row` applies
+        # an override the row does not name on purpose — so this distinguishes it
+        # from the accident rather than refusing.
+        findings.append({
+            'kind': 'state_override_unmatched_entity',
+            'id': rid,
+            'file': plan_file,
+            'detail': f'illustration {rid!r}: state_override names '
+                      f'{_csv_safe(key)!r}, which is neither a tracked entity in '
+                      f'{STATE_FILE} nor one of the row\'s canon_refs. '
+                      f'Intentional for a one-off entity; a typo otherwise, and a '
+                      f'typo is applied silently',
+        })
+    return findings
 
 
 def state_path(project_dir: str) -> str:
@@ -404,10 +550,21 @@ def prepass(project_dir: str) -> PrepassResult:
     for row in ill.read_plan(project_dir):
         if (row.get('status') or '').strip() == 'superseded':
             continue
+        rid = (row.get('id') or '').strip()
         refs = ill._split_array(row.get('canon_refs', ''))
+
+        # The override's own health is checked FIRST, above the `refs` and
+        # `scene_id` guards below (#309). Emitted after them, a row with empty
+        # `canon_refs` produced zero findings while `state_for_row` still applied
+        # the override and shipped the fabricated state to the image model — and
+        # a row without `canon_refs` is *exactly* the documented-legitimate case
+        # for an override, so the claim of covering validate/cleanup/--diagnose
+        # held only where `canon_refs` happened to be populated.
+        findings.extend(_override_findings(row, rid, resolved, refs))
+
+        refs = [r for r in refs if r]
         if not refs:
             continue
-        rid = (row.get('id') or '').strip()
         scene_id = (row.get('scene_id') or '').strip()
         if scene_id not in order:
             # validate_plan already reports a missing or unknown scene_id;
@@ -418,9 +575,10 @@ def prepass(project_dir: str) -> PrepassResult:
 
         covered = {key.lower()
                    for key in _resolve(order, transitions, order[scene_id])}
-        overridden = {key.lower()
-                      for key in parse_state_override(row.get('state_override', ''))}
+        override = parse_state_override(row.get('state_override', ''))
+        overridden = {key.lower() for key in override.applied}
         covered |= overridden
+
         for ref in refs:
             needle = ref.lower()
             if any(key == needle or key.startswith(f'{needle}-')
