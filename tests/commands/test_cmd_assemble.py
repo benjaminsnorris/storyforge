@@ -650,3 +650,123 @@ class TestMainAllFormats:
         assert 'HTML' in captured.out
         assert 'Web book' in captured.out
         assert 'PDF' in captured.out
+
+
+# ============================================================================
+# main() -- storyforge.yaml is updated, not truncated (#276)
+# ============================================================================
+
+class TestMainUpdatesStoryforgeYaml:
+    """#276: `assemble` truncated `storyforge.yaml` and committed the result.
+
+    These are the only tests that execute the artifact-stamping block at all.
+    Every other `main()` test uses `--dry-run` or `--draft`, both of which return
+    before it — so the whole-file `re.sub` under `re.DOTALL` that caused #276
+    could be reinstated verbatim at its original call site with the entire suite
+    green. The bug was in the *call site*, so a unit-tested helper wired up wrong
+    reproduces it exactly; that is what these cover.
+
+    `--format markdown` is what gets past the `--draft` return without needing
+    pandoc: `needs_pandoc` is False for markdown alone, and generating it is a
+    log line.
+    """
+
+    def _run_markdown_assembly(self, project_dir, monkeypatch):
+        monkeypatch.setattr('storyforge.cmd_assemble.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_assemble.get_plugin_dir',
+                            lambda: os.path.dirname(os.path.dirname(
+                                os.path.dirname(os.path.dirname(
+                                    os.path.dirname(__file__))))))
+
+        _ensure_scene_files(project_dir)
+
+        def mock_assembly_cmd(*args):
+            args_str = ' '.join(str(a) for a in args)
+            if 'count-chapters' in args_str:
+                return '1'
+            if 'chapter-scenes' in args_str:
+                return 'act1-sc01'
+            if 'read-chapter-field' in args_str:
+                return 'Chapter One'
+            if args_str.startswith('assemble'):
+                return '1000'
+            return ''
+
+        monkeypatch.setattr('storyforge.cmd_assemble._run_assembly_cmd',
+                            mock_assembly_cmd)
+
+        def mock_subprocess_run(cmd, **kwargs):
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout='Chapter content.', stderr='')
+
+        monkeypatch.setattr('subprocess.run', mock_subprocess_run)
+
+        main(['--format', 'markdown', '--no-pr'])
+
+    def _yaml(self, project_dir):
+        with open(os.path.join(project_dir, 'storyforge.yaml')) as f:
+            return f.read()
+
+    def test_a_full_run_does_not_truncate_storyforge_yaml(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """Everything after the `artifacts:` block survives.
+
+        The old regex's trailing unanchored `.*` matched to end of file, so
+        stamping `chapter_map.updated` deleted `manuscript`, `phase`, `parts`,
+        and the entire `production` section.
+        """
+        before = self._yaml(project_dir)
+        self._run_markdown_assembly(project_dir, monkeypatch)
+        after = self._yaml(project_dir)
+
+        assert 'phase: drafting' in after
+        assert 'parts:' in after
+        assert 'The Expedition' in after
+        assert 'production:' in after
+        assert 'author: "Test Author"' in after
+        assert 'genre_preset: fantasy' in after
+        assert 'back_matter:' in after
+        # Nothing was dropped: the edit changes values, never the line count.
+        assert len(after.splitlines()) == len(before.splitlines())
+
+    def test_a_full_run_preserves_every_other_artifact(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """The nine artifacts `assemble` does not stamp are untouched."""
+        self._run_markdown_assembly(project_dir, monkeypatch)
+        after = self._yaml(project_dir)
+
+        for artifact in ('world_bible', 'character_bible', 'systems_bible',
+                         'story_architecture', 'voice_guide', 'timeline',
+                         'scene_index', 'key_decisions'):
+            assert f'  {artifact}:' in after, artifact
+        assert 'updated: "2026-02-15"' in after
+        assert 'path: reference/world-bible.md' in after
+
+    def test_a_full_run_stamps_both_artifacts(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """#276's quiet half: because the first artifact's rewrite had already
+        deleted the second, the loop's next iteration matched nothing and
+        `manuscript` never got `exists: true`."""
+        from datetime import date
+        self._run_markdown_assembly(project_dir, monkeypatch)
+        after = self._yaml(project_dir)
+
+        today = date.today().isoformat()
+        chapter_map, _, manuscript = after.partition('  manuscript:')
+        chapter_map = chapter_map.split('  chapter_map:')[1]
+        for block, name in ((chapter_map, 'chapter_map'),
+                            (manuscript, 'manuscript')):
+            assert 'exists: true' in block, name
+            assert f'updated: "{today}"' in block, name
+
+    def test_a_full_run_stages_storyforge_yaml(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """The commit is what made #276 data loss rather than a scratch edit, so
+        the file must still be in the committed paths."""
+        self._run_markdown_assembly(project_dir, monkeypatch)
+
+        commits = [c for c in mock_git.calls
+                   if c and c[0] == 'commit_and_push']
+        assert commits, 'assemble must commit'
+        assert any('storyforge.yaml' in (c[2] or []) for c in commits)

@@ -15,14 +15,17 @@ Two bugs, both silent, both in `storyforge.yaml` handling:
 import os
 
 import pytest
+from yaml_probe import parse_emitted_yaml_metadata
 
 from storyforge.assembly import (
     _strip_yaml_quotes,
     generate_epub_metadata,
+    read_production_field,
 )
 from storyforge.common import (
     _strip_yaml_value,
     parse_yaml_scalar,
+    read_yaml_field,
     update_artifact_entry,
     yaml_single_quote,
 )
@@ -71,25 +74,12 @@ def read_yaml(project_dir):
         return f.read()
 
 
-def parse_flat_metadata(metadata: str) -> dict[str, str]:
-    """Parse the epub metadata block, independently of the code under test.
-
-    Not `parse_yaml_scalar` — that is what these tests verify, and using it here
-    would let a regression agree with itself. Not pyyaml either: it is on no
-    declared dependency list and the repo's YAML handling is dependency-free.
-    Single-quoted YAML is small enough to read directly: strip the outer quotes,
-    unescape a doubled apostrophe.
-    """
-    out: dict[str, str] = {}
-    for line in metadata.split('\n'):
-        if line.strip() in ('---', ''):
-            continue
-        key, _, raw = line.partition(': ')
-        raw = raw.strip()
-        assert raw.startswith("'") and raw.endswith("'"), (
-            f'every emitted value must be quoted, got {line!r}')
-        out[key.strip()] = raw[1:-1].replace("''", "'")
-    return out
+#: `tests/yaml_probe.py` — one shared reader, independent of the code under test
+#: so a regression cannot agree with itself. It replaced a private copy here
+#: whose `startswith`/`endswith` check was blind to an unescaped apostrophe: with
+#: `yaml_single_quote` removed from `assembly._quoted`, every test in this file
+#: still passed while pandoc exited 64 on the output.
+parse_flat_metadata = parse_emitted_yaml_metadata
 
 
 # ===========================================================================
@@ -208,6 +198,41 @@ class TestUpdateArtifactEntryReturnValue:
         assert update_artifact_entry(
             str(tmp_path), 'chapter_map', exists=True) is False
 
+    def test_an_already_correct_entry_does_not_touch_the_file(
+            self, yaml_project):
+        """`False` must mean "I did not write", not merely "same bytes".
+
+        Asserted on mtime rather than content, because content equality holds
+        either way — so a rewrite-every-time regression is invisible to a
+        content check. The `if changed:` guard is what keeps an assemble run
+        from dirtying `storyforge.yaml` for git when nothing moved.
+        """
+        path = os.path.join(yaml_project, 'storyforge.yaml')
+        update_artifact_entry(yaml_project, 'chapter_map', exists=True,
+                              updated='2026-08-06')
+        os.utime(path, (0, 0))
+        before = os.stat(path).st_mtime_ns
+
+        assert update_artifact_entry(yaml_project, 'chapter_map', exists=True,
+                                     updated='2026-08-06') is False
+        assert os.stat(path).st_mtime_ns == before
+
+    def test_a_missing_artifact_logs_a_warning(self, yaml_project, capsys):
+        """`False` is the only other signal, and #276's quiet half is what
+        happens when a no-op is not announced. The log must name the artifact."""
+        update_artifact_entry(yaml_project, 'no_such_artifact', exists=True)
+
+        out = capsys.readouterr().out
+        assert 'WARNING' in out
+        assert 'no_such_artifact' in out
+
+    def test_a_missing_yaml_logs_a_warning(self, tmp_path, capsys):
+        update_artifact_entry(str(tmp_path), 'chapter_map', exists=True)
+
+        out = capsys.readouterr().out
+        assert 'WARNING' in out
+        assert 'chapter_map' in out
+
 
 class TestUpdateArtifactEntryEdgeCases:
 
@@ -293,6 +318,90 @@ class TestUpdateArtifactEntryEdgeCases:
             yaml_project, 'chapter_map', exists=False) is True
         assert 'exists: false' in read_yaml(yaml_project)
 
+    def test_an_artifact_name_outside_the_artifacts_block_is_not_matched(
+            self, tmp_path):
+        """The search stops at the end of `artifacts:`, and must.
+
+        Without that bound the scan runs on into the rest of the file and the
+        first same-named key anywhere wins — here a `manuscript:` under
+        `production:`, which then gets `exists: true` and a date written into it.
+        That is #276's failure mode (an unbounded match corrupting a block it
+        was never meant to touch) rebuilt inside the function that replaced it,
+        so it is pinned separately from the "artifact simply absent" case: both
+        return False, so a return-value assertion cannot tell them apart.
+        """
+        path = tmp_path / 'storyforge.yaml'
+        body = ('artifacts:\n'
+                '  world_bible:\n'
+                '    exists: false\n'
+                '    updated:\n'
+                'phase: drafting\n'
+                'production:\n'
+                '  manuscript:\n'
+                '    exists: false\n'
+                '    updated:\n')
+        path.write_text(body)
+
+        assert update_artifact_entry(
+            str(tmp_path), 'manuscript', exists=True,
+            updated='2026-08-06') is False
+        assert path.read_text() == body
+
+    def test_a_comment_line_inside_the_artifacts_block_is_tolerated(
+            self, tmp_path):
+        """The block-exit check exempts comment lines, so a commented-out
+        artifact must not truncate the search for a later real one."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'artifacts:\n'
+            '# chapter_map is generated by `storyforge assemble`\n'
+            '  chapter_map:\n'
+            '    exists: false\n'
+            '    updated:\n')
+        assert update_artifact_entry(
+            str(tmp_path), 'chapter_map', exists=True) is True
+        assert 'exists: true' in (tmp_path / 'storyforge.yaml').read_text()
+
+    def test_an_artifact_key_with_its_own_comment_is_matched(self, tmp_path):
+        """`key_re` explicitly allows a trailing comment on the artifact line,
+        and the comment survives untouched."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'artifacts:\n'
+            '  chapter_map:  # written by assemble\n'
+            '    exists: false\n'
+            '    updated:\n')
+        assert update_artifact_entry(
+            str(tmp_path), 'chapter_map', exists=True,
+            updated='2026-08-06') is True
+
+        content = (tmp_path / 'storyforge.yaml').read_text()
+        assert '  chapter_map:  # written by assemble\n' in content
+        assert 'updated: "2026-08-06"' in content
+
+    def test_both_missing_keys_are_inserted_in_order(self, tmp_path):
+        """Two inserts in one call — the only path that advances the insert
+        position between them. Getting that wrong reverses the pair or lands the
+        second outside the block."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'artifacts:\n'
+            '  chapter_map:\n'
+            '    path: reference/chapter-map.csv\n'
+            '\n'
+            '  manuscript:\n'
+            '    path: manuscript/\n')
+        assert update_artifact_entry(
+            str(tmp_path), 'chapter_map', exists=True,
+            updated='2026-08-06') is True
+
+        assert (tmp_path / 'storyforge.yaml').read_text() == (
+            'artifacts:\n'
+            '  chapter_map:\n'
+            '    path: reference/chapter-map.csv\n'
+            '    exists: true\n'
+            '    updated: "2026-08-06"\n'
+            '\n'
+            '  manuscript:\n'
+            '    path: manuscript/\n')
+
 
 # ===========================================================================
 # #277 — one scalar parser, and it knows what a comment is
@@ -372,6 +481,77 @@ class TestParseYamlScalar:
     def test_a_hash_inside_quotes_is_literal(self, parse):
         assert parse('"tagged #1 of 3"') == 'tagged #1 of 3'
 
+    @SCALAR_PARSERS
+    def test_escape_sequences_in_double_quotes_are_resolved(self, parse):
+        r"""`\n`, `\t` and `\r` are the three YAML spells out; everything else
+        drops the backslash and keeps the character.
+
+        Pinned separately from `test_escapes_in_double_quotes_are_resolved`,
+        which only covers `\"` — and `\"` takes the *default* branch of the
+        mapping, so it passes with the mapping deleted entirely.
+        """
+        assert parse(r'"a\nb"') == 'a\nb'
+        assert parse(r'"a\tb"') == 'a\tb'
+        assert parse(r'"a\rb"') == 'a\rb'
+        assert parse(r'"a\qb"') == 'aqb'
+
+    @SCALAR_PARSERS
+    def test_a_trailing_backslash_in_double_quotes_degrades(self, parse):
+        r"""`"a\` has no closing quote once the backslash consumes it, so it is
+        malformed and takes the lenient fallback rather than raising."""
+        assert parse('"a\\') == '"a\\'
+
+
+class TestTheDelegationReachesTheProductionReaders:
+    """The parametrized tests above call the three helpers directly.
+
+    These go through the *production* entry points that read a real file, which
+    is where #277 was actually observed: `assembly._strip_yaml_quotes`' docstring
+    claims "an inline comment on `author:` or `language:` reached the epub
+    metadata as part of the value", and nothing exercised that path end to end.
+    """
+
+    def _project(self, tmp_path, body):
+        (tmp_path / 'storyforge.yaml').write_text(body)
+        return str(tmp_path)
+
+    def test_a_comment_on_a_production_field_is_not_part_of_the_value(
+            self, tmp_path):
+        project = self._project(tmp_path, (
+            'production:\n'
+            '  author: Ben Norris  # the author\n'
+            '  language: en  # BCP-47 tag\n'))
+
+        assert read_production_field(project, 'author') == 'Ben Norris'
+        assert read_production_field(project, 'language') == 'en'
+
+    def test_a_commented_production_field_reaches_the_epub_clean(self,
+                                                                tmp_path):
+        project = self._project(tmp_path, (
+            'project:\n'
+            '  title: "A Book"\n'
+            'production:\n'
+            '  author: Ben Norris  # the author\n'
+            '  language: en  # BCP-47 tag\n'))
+
+        metadata = generate_epub_metadata(project)
+        parsed = parse_flat_metadata(metadata)
+        assert parsed['author'] == 'Ben Norris'
+        assert parsed['lang'] == 'en'
+        assert '#' not in metadata
+
+    def test_common_read_yaml_field_strips_an_inline_comment(self, tmp_path):
+        """Note the argument order — `common.read_yaml_field(field, dir)` is the
+        mirror of `prompts.read_yaml_field(file, field)`, the footgun CLAUDE.md
+        documents. Both delegate to the same scalar parser."""
+        project = self._project(tmp_path, (
+            'project:\n'
+            '  title: "The Lantern Folk"  # Working title\n'
+            'phase: drafting  # not final\n'))
+
+        assert read_yaml_field('project.title', project) == 'The Lantern Folk'
+        assert read_yaml_field('phase', project) == 'drafting'
+
 
 class TestYamlSingleQuote:
 
@@ -426,6 +606,29 @@ class TestEpubMetadataEscaping:
         parsed = parse_flat_metadata(generate_epub_metadata(project))
         assert parsed['subject'] == "Children's chapter book"
         assert parsed['title'] == 'The Lantern Folk'
+
+    def test_the_emitted_block_doubles_an_apostrophe(self, tmp_path):
+        """The escaping is asserted on the *bytes*, not through a parse.
+
+        A parse cannot see this: `'O'Brien'` and `'O''Brien'` reduce to the same
+        value under any reader lenient enough to accept the first, which is why
+        `generate_epub_metadata` passed every metadata test with
+        `yaml_single_quote` removed from it while pandoc exited 64 on the output.
+        `parse_flat_metadata` now rejects the undoubled form too; this test says
+        the same thing in the one form that cannot drift — the literal string.
+        """
+        project = self._write_project_yaml(tmp_path, (
+            'project:\n'
+            '  title: "It\'s Here"\n'
+            'production:\n'
+            "  author: O'Brien\n"
+            '  copyright:\n'
+            '    year: 2026\n'))
+
+        metadata = generate_epub_metadata(project)
+        assert "title: 'It''s Here'" in metadata
+        assert "author: 'O''Brien'" in metadata
+        assert "rights: 'Copyright © 2026 O''Brien'" in metadata
 
     def test_an_apostrophe_in_the_author_reaches_title_and_rights(self,
                                                                  tmp_path):

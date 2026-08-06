@@ -12,6 +12,7 @@ import textwrap
 from unittest.mock import patch
 
 import pytest
+from yaml_probe import parse_emitted_yaml_metadata
 
 from storyforge.assembly import (
     _chapter_map_path,
@@ -491,28 +492,11 @@ class TestReadMatterFile:
 # Epub metadata
 # ---------------------------------------------------------------------------
 
-def _parsed(metadata: str) -> dict[str, str]:
-    """Parse the generated metadata block into `{key: value}`.
-
-    Deliberately **independent** of `common.parse_yaml_scalar`: this is what
-    verifies that function's output, and using it here would let a change agree
-    with itself. Written against the YAML spec's single-quoted style instead —
-    strip the outer quotes, unescape a doubled apostrophe — which is the whole
-    of what `yaml_single_quote` emits.
-
-    Not pyyaml: it is installed on no declared dependency list, and the repo's
-    YAML handling is deliberately dependency-free.
-    """
-    out: dict[str, str] = {}
-    for line in metadata.split('\n'):
-        if line.strip() in ('---', ''):
-            continue
-        key, _, raw = line.partition(': ')
-        raw = raw.strip()
-        assert raw.startswith("'") and raw.endswith("'"), (
-            f'every value must be quoted, got {line!r}')
-        out[key.strip()] = raw[1:-1].replace("''", "'")
-    return out
+#: `tests/yaml_probe.py` — one shared reader, independent of
+#: `common.parse_yaml_scalar` so a change cannot agree with itself. It replaced a
+#: private copy here whose `startswith`/`endswith` check could not see an
+#: unescaped apostrophe, which is #277's actual crash.
+_parsed = parse_emitted_yaml_metadata
 
 
 class TestGenerateEpubMetadata:
