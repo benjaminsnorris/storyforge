@@ -789,6 +789,35 @@ def image_prompt_for(project_dir: str, row: dict[str, str], *,
     entry, gaps = entry_for(row, context=context)
     body = _body_for(project_dir, row)
 
+    # The body is a *stored* artifact from an earlier paid `--prompts` call, and
+    # before #305 that call was handed contrast **with** ids — so a body written
+    # then can echo one into its prose, and inlining it here puts an id in front
+    # of the image model exactly as the Constraints bullet used to. Sanitizing
+    # the deterministic bullet does nothing about prose already on disk.
+    #
+    # Reported rather than rewritten, for the reason an ambiguous anchor is
+    # reported rather than re-placed: there is no edit that preserves the
+    # meaning of "deliberately unlike `LF-07`'s hard light" and a machine
+    # paraphrase of art direction is worse than the problem. The fix is a
+    # re-run of `--prompts` for that row, which is now id-free.
+    # Scoped to **every** model-facing string, not just the body. Checking only
+    # the body was the same mistake in miniature as sanitizing only the Constraints
+    # bullet: `composition` reaches the upload through `_derived_body`, and a
+    # `state_override`'s *state text* reaches it through the visual-state bullet,
+    # so an id in either shipped while the guard reported clean.
+    model_facing = '\n'.join(filter(None, (
+        body['text'], entry['state'], entry['absent'], entry['contrast'],
+        entry['notes'], entry['beat'], entry['treatment'])))
+    stale_ids = _foreign_ids(model_facing, entry['id'], context['plan_ids'])
+    if stale_ids:
+        gaps.append(
+            f'illustration `{entry["id"]}`: its art direction names '
+            f'{", ".join(f"`{i}`" for i in stale_ids)}, which the image model '
+            f'cannot see. Either the body predates #305 (re-run `storyforge '
+            f'illustrate --prompts --ids {entry["id"]}`) or a plan cell — '
+            f'`composition`, `state_override`, `beat` — names it by hand; those '
+            f'reach the upload too, so edit the cell.')
+
     prompt: ImagePrompt = {
         **entry,
         'model': pi.DEFAULT_IMAGE_MODEL,
@@ -1309,10 +1338,15 @@ def _split_author_contrast(author: str,
 
     Sentence-level, on the same punctuation heuristic as
     `illustrations.first_sentence` and with the same caveat: it is not
-    segmentation, so `Mr. Ives` splits. That is tolerable here because the two
-    halves are recombined for the author verbatim — a mis-split can only move a
-    fragment into the withheld column, which is disclosed, never into the copy the
-    model reads.
+    segmentation, so `Mr. Ives` splits.
+
+    **What a mis-split cannot do is leak an id**, which is the property that
+    matters: the fragment carrying the id is the one withheld. What it *can* do is
+    leave a stranded fragment in the model copy — `Darker than LF-05 (cf. Mr.
+    Ives). Keep it close.` keeps `Mr. Ives). Keep it close.` — so the model may
+    read a few words of debris. Tolerable, and deliberately not worth a real
+    segmenter: the author's text is recombined verbatim for them either way, and a
+    stray `Ives).` costs a little prompt clarity where a missed id costs a render.
 
     Matching is against ids the plan actually declares, plus any backticked
     token that looks like one. A generic pattern alone would be far too eager: a
@@ -1343,6 +1377,22 @@ def _split_author_contrast(author: str,
 #: an author who wrote a contrast against art that is not in the plan (a cut row,
 #: or a typo). Requires the backticks, so ordinary prose cannot trip it.
 _BACKTICKED_ID_RE = re.compile(r'`[A-Za-z0-9][A-Za-z0-9_-]*`')
+
+
+def _foreign_ids(text: str, own_id: str, plan_ids: set[str]) -> list[str]:
+    """Plan ids in *text* other than `own_id`, in sorted order.
+
+    The same word-boundary matching `_split_author_contrast` uses, and shared
+    with it for the reason this repo keeps re-learning: two ways of asking "does
+    this name another illustration?" is two chances to disagree, and the one that
+    disagreed would be the one guarding the file that gets uploaded.
+    """
+    others = sorted(i for i in plan_ids if i and i != own_id)
+    if not others or not text:
+        return []
+    pattern = re.compile(
+        r'\b(?:%s)\b' % '|'.join(re.escape(i) for i in others), re.IGNORECASE)
+    return sorted({m.group(0) for m in pattern.finditer(text)})
 
 
 def _sentences(text: str) -> list[str]:

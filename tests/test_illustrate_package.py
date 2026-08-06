@@ -2460,3 +2460,85 @@ def test_the_model_reaches_the_upload(in_project):
     cmd_illustrate.main(['--package'])
     assert pi.DEFAULT_IMAGE_MODEL in \
         _read_prompt(in_project, 'the-finest-cartographer')
+
+
+def test_a_prefix_body_naming_another_illustration_is_reported(in_project):
+    """A stored body is a *pre-#305* artifact and can carry an id itself.
+
+    Before this fix `--prompts` was handed contrast **with** ids, so a body
+    written then can echo one into its prose — and `--package` inlines that body,
+    putting the id in front of the image model exactly as the Constraints bullet
+    used to. Sanitizing the bullet does nothing about prose already on disk.
+
+    Reported rather than rewritten: there is no edit that preserves the meaning of
+    "deliberately unlike `LF-07`'s hard light", and a machine paraphrase of art
+    direction is worse than the problem. The fix is a `--prompts` re-run.
+
+    *The Lantern Folk* happened to come out clean, so this is a case only a
+    constructed one catches — which is why it is constructed.
+    """
+    cmd_illustrate.main(['--prompts', '--coaching', 'strict'])
+    rows = ill.read_plan(in_project)
+    target, other = rows[1]['id'].strip(), rows[0]['id'].strip()
+    path = os.path.join(in_project, rows[1]['prompt_file'].strip())
+    with open(path) as f:
+        body = f.read()
+    with open(path, 'w') as f:
+        f.write(body.replace('## Subject',
+                             f'## Subject\n\nDeliberately unlike {other}.', 1))
+
+    gaps = packet.resolve(in_project)['gaps']
+
+    assert any(target in g and other in g and 'predates #305' in g
+               for g in gaps), gaps
+
+
+def test_a_plan_cell_naming_another_illustration_is_reported(in_project):
+    """`composition` and a `state_override`'s state text reach the upload too.
+
+    Found by the review's probe: checking only the recovered body was the same
+    mistake in miniature as sanitizing only the Constraints bullet. `composition`
+    arrives through `_derived_body` and the override's state text through the
+    visual-state bullet, so an id in either shipped while the guard read clean.
+    """
+    rows = ill.read_plan(in_project)
+    target, other = rows[1]['id'].strip(), rows[0]['id'].strip()
+    rows[1]['composition'] = f'Mirror of {other}, reversed'
+    ill.write_plan(in_project, rows)
+
+    gaps = packet.resolve(in_project)['gaps']
+
+    assert any(target in g and other in g and 'names it by hand' in g
+               for g in gaps), gaps
+
+
+def test_a_state_override_naming_another_illustration_is_reported(in_project):
+    rows = ill.read_plan(in_project)
+    target, other = rows[1]['id'].strip(), rows[0]['id'].strip()
+    rows[1]['state_override'] = f'lantern:as in {other} but colder'
+    ill.write_plan(in_project, rows)
+
+    gaps = packet.resolve(in_project)['gaps']
+
+    assert any(target in g and other in g for g in gaps), gaps
+
+
+def test_a_clean_body_is_not_reported(in_project):
+    cmd_illustrate.main(['--prompts', '--coaching', 'strict'])
+    gaps = packet.resolve(in_project)['gaps']
+    assert not any('predates #305' in g for g in gaps)
+
+
+def test_a_body_naming_its_own_illustration_is_fine(in_project):
+    """The file's own heading names it; that is not a foreign reference."""
+    cmd_illustrate.main(['--prompts', '--coaching', 'strict'])
+    rows = ill.read_plan(in_project)
+    target = rows[1]['id'].strip()
+    path = os.path.join(in_project, rows[1]['prompt_file'].strip())
+    with open(path) as f:
+        body = f.read()
+    with open(path, 'w') as f:
+        f.write(body.replace('## Subject', f'## Subject\n\nFor {target}.', 1))
+
+    assert not any('predates #305' in g
+                   for g in packet.resolve(in_project)['gaps'])
