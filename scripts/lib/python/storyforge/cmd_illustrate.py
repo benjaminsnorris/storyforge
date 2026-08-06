@@ -1416,6 +1416,10 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     state_gaps: dict[str, list[str]] = {}
     unpositioned: dict[ill.SplitCause, list[tuple[str, str]]] = {}
     at_scene_start: list[str] = []
+    #: (id, applied, total) per row whose `state_override` lost clauses (#309).
+    override_partial: list[tuple[str, int, int]] = []
+    #: Rows whose `state_override` is non-empty and applied nothing at all.
+    override_dead: list[str] = []
     for row in rows:
         illus_id = row['id'].strip()
         # `include_anchor_gaps=False` because `_warn_unanchored_rows` above named
@@ -1432,6 +1436,21 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             # free-fix moment is preserved.
             state_gaps.setdefault(gap, []).append(illus_id)
         absent_cell = (row.get('absent') or '').strip()
+        override = vs.parse_state_override(row.get('state_override', ''))
+        if override.skipped:
+            # One line, with a count, before any money is spent. This is the
+            # signal that would have caught #309 on the spot: the author saw a
+            # regenerated prompt that "looked fine" and only found the loss by
+            # grepping the output for a string they expected and getting nothing.
+            override_partial.append(
+                (illus_id, len(override.applied), override.clause_count))
+        if override.clause_count and not override.applied:
+            # Nothing landed, so the cell is prose rather than an override — and
+            # proceeding means generating against the state the author believes
+            # they replaced. A refusal rather than a warning, for the reason
+            # `resolve_style_reference` refuses a declared-but-missing file:
+            # warning, spending, and exiting 0 is what the skill commits on.
+            override_dead.append(illus_id)
         contrast = packet.contrast_for_row(row, context=state_ctx)
         split = _scene_split(project_dir, row)
         if split['state'] == 'normal' and not split['read'].strip():
@@ -1474,6 +1493,21 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     for gap, ids in state_gaps.items():
         log(f'WARNING: {gap} ({len(ids)} illustration(s): '
             f'{", ".join(sorted(ids))})')
+    for illus_id, applied, total in override_partial:
+        # A count, because that is what makes a partial parse visible at a glance.
+        # "1 of 3 clauses applied" would have caught #309 immediately; two
+        # per-clause WARNINGs in a stream of reference warnings did not.
+        log(f'WARNING: illustration `{illus_id}`: state_override — '
+            f'{applied} of {total} clauses applied, {total - applied} skipped. '
+            f'A skipped clause is a state you believe is in the prompt and is '
+            f'not; write each override as entity:state.')
+    if override_dead:
+        log(f'ERROR: {len(override_dead)} illustration(s) have a state_override '
+            f'that applied nothing at all: {", ".join(sorted(override_dead))}. '
+            f'The cell is prose rather than entity:state, so the prompt would be '
+            f'generated against the state you meant to replace. Fix the cell and '
+            f're-run; nothing was spent.')
+        return 1
     if unpositioned:
         # Before the fan-out, with the other free-fix warnings. A row whose
         # position does not resolve gets no spoiler guard and no acceptance check

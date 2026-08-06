@@ -219,7 +219,9 @@ If an entity the row names has no stated state at that scene, the command says s
 
 A row whose state does not resolve still gets a prompt — the file says so, in Constraints and in `## Accept only if`, rather than quietly omitting the line. Take that at face value: it means the costume and lighting in that prompt are the model's inference, not a read of the matrix.
 
-**`## Accept only if` is not part of the prompt.** It is marked so, and it sits below the pasted region — it is what you check the render against, and via `contrast` it can name another illustration by id, which must never reach the image model.
+**`## Accept only if` is not part of the prompt.** It is marked so, and it sits below the pasted region — it is what you check the render against, and via `contrast` it can name another illustration by id.
+
+**An illustration id must never reach the image model, and two places enforce that** (#305). The model cannot see your other images, so naming one is an instruction it can only guess at. The source prompt file keeps ids because it is author-facing and never uploaded; the packet's `image-prompts/<id>.md` is uploaded whole, so it carries an id-free phrasing instead — "the illustration immediately before it". A comparison *you* wrote that names an id (`darker than \`LF-05\``) cannot be rewritten without losing its meaning, so it is withheld from the upload entirely and listed in `illustrations.md` under **Check against its neighbours**: it is a check on the render, not a direction for it. If you find an id in a file you are about to upload, that is a bug — a test asserts no upload file names any illustration but its own.
 
 ### What the prompts encode
 

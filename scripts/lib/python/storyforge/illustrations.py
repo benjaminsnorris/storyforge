@@ -2186,6 +2186,14 @@ IllustrationFindingKind = Literal[
     # cell being non-empty, so the row silently never embeds and the spoiler
     # check silently never runs.
     'prompt_spoiler_unchecked', 'missing_anchor',
+    # A `state_override` cell written as prose (#309). Three failure modes in one
+    # cell — clauses fragmenting on the author's own semicolons, colon-less
+    # fragments dropped, and the survivor keeping a sentence as its entity key —
+    # and before this the only signal was two WARNING lines in a stream of
+    # reference-exclusion warnings. `--diagnose` and `validate` are the gates and
+    # neither reported it, so a malformed override survived both clean.
+    'state_override_unparsed', 'state_override_prose_key',
+    'state_override_unmatched_entity',
 ]
 
 
@@ -2267,6 +2275,15 @@ WARNING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     # in-flight condition — and blocking would fail `validate` mid-planning.
     'state_mid_scene_change', 'prompt_spoils_unread',
     'prompt_spoiler_unchecked', 'missing_anchor',
+    # A malformed `state_override` (#309) leaves a publishable book — the art is
+    # rendered from *some* state and reads fine; what is wrong is that it is not
+    # the state the author wrote. Warnings for the same reason the rest of this
+    # group is: the author acts on them before paying for art. Deliberately not
+    # blocking, because `state_override_unmatched_entity` has a legitimate case
+    # (a one-off entity the matrix does not track) and gating on it would push an
+    # author to delete a correct cell.
+    'state_override_unparsed', 'state_override_prose_key',
+    'state_override_unmatched_entity',
 })
 
 Severity = Literal['error', 'warning']

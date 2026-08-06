@@ -1050,7 +1050,10 @@ def state_for_row(row: dict[str, str], *, context: RowContext,
     order = context['order']
     known = context['known']
     refs = ill._split_array(row.get('canon_refs', ''))
-    overrides = vs.parse_state_override(row.get('state_override', ''))
+    # `.applied` only — the skipped and prose-key halves are reported by
+    # `visual_state.prepass` as findings, on the gate authors read (#309).
+    overrides = vs.parse_state_override(
+        row.get('state_override', '')).applied
     gaps: list[str] = []
 
     anchor_keys = {key.lower() for key in anchors}
