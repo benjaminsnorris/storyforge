@@ -13,7 +13,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Final, NamedTuple
+from typing import Final, Literal, NamedTuple
 
 
 # ============================================================================
@@ -163,16 +163,17 @@ def parse_yaml_scalar(raw: str) -> str:
     return _strip_inline_comment(val)
 
 
-def _parse_quoted_scalar(val: str) -> str | None:
-    """Read a quoted YAML scalar, or None if the quoting is malformed.
+def _closing_quote_index(val: str) -> int | None:
+    """Index of the quote that closes the scalar `val` opens with, or None.
 
-    Scans for the closing quote rather than testing `val[-1]`, which is what the
-    three copies of this did: comparing first and last character means a quoted
-    value followed by a comment (`"A"  # note`) fails the test and is returned
-    whole — quotes, comment, and all.
+    Extracted so `_parse_quoted_scalar` and `yaml_scalar_issue` scan the same
+    way. Two scanners would be the #277 shape again — the reader and the reporter
+    disagreeing about what is malformed, so `cleanup` says a value is fine while
+    the parser is falling back on it.
 
-    Malformed means either no closing quote, or trailing content after it that
-    is not a comment. Both return None so the caller can fall back.
+    Scans rather than testing `val[-1]`, which is what the four pre-#277 copies
+    did: comparing first and last character means a quoted value followed by a
+    comment (`"A"  # note`) fails the test and is treated as unquoted.
     """
     quote = val[0]
     i = 1
@@ -184,14 +185,27 @@ def _parse_quoted_scalar(val: str) -> str | None:
             if quote == "'" and val[i + 1:i + 2] == "'":
                 i += 2  # '' is an escaped apostrophe in YAML
                 continue
-            rest = val[i + 1:].strip()
-            if rest and not rest.startswith('#'):
-                return None
-            inner = val[1:i]
-            return (inner.replace("''", "'") if quote == "'"
-                    else _unescape_double_quoted(inner))
+            return i
         i += 1
     return None
+
+
+def _parse_quoted_scalar(val: str) -> str | None:
+    """Read a quoted YAML scalar, or None if the quoting is malformed.
+
+    Malformed means either no closing quote, or trailing content after it that
+    is not a comment. Both return None so the caller can fall back;
+    `yaml_scalar_issue` is what tells the two apart for reporting.
+    """
+    close = _closing_quote_index(val)
+    if close is None:
+        return None
+    rest = val[close + 1:].strip()
+    if rest and not rest.startswith('#'):
+        return None
+    inner = val[1:close]
+    return (inner.replace("''", "'") if val[0] == "'"
+            else _unescape_double_quoted(inner))
 
 
 def _strip_inline_comment(val: str) -> str:
@@ -200,6 +214,70 @@ def _strip_inline_comment(val: str) -> str:
         return ''
     m = re.search(r'\s#', val)
     return val[:m.start()].strip() if m else val
+
+
+#: What `yaml_scalar_issue` can find wrong with one scalar. A Literal rather than
+#: bare strings because `cmd_cleanup` maps each to its own finding kind, detail
+#: and remedy, and the three remedies genuinely differ — the reason
+#: `_artifact_span_failure` splits its causes too.
+YamlScalarIssue = Literal['unterminated_quote', 'trailing_after_quote',
+                          'comment_truncated']
+
+#: A `#` followed immediately by a non-space is far more likely part of a value
+#: (`Book #2`, `#ff8800`) than the start of a comment, which is conventionally
+#: written `# like this`. A heuristic, not a rule: `Book # 2` reads as a comment
+#: and is not reported. Deliberately conservative in that direction, because the
+#: shipped template puts a real trailing comment on nearly every key
+#: (`genre_preset: fantasy  # default, literary-fiction, ...`) and reporting
+#: those would bury the finding in noise on every project.
+_LIKELY_VALUE_HASH = re.compile(r'#\S')
+
+
+def yaml_scalar_issue(raw: str) -> YamlScalarIssue | None:
+    """Say whether a scalar was probably not read the way its author meant.
+
+    Reporting only — this **never** changes what `parse_yaml_scalar` returns, and
+    must not. Both behaviours it flags are deliberate:
+
+    - **Malformed quoting** falls back to a lenient strip rather than the strict
+      empty string, because a typo becoming a silently missing title is worse
+      than a visibly wrong one.
+    - **Comment stripping** is correct YAML: ` #` opens a comment in an unquoted
+      scalar. Loosening it would reintroduce #277, where an unset field carrying
+      a template comment read as a truthy value.
+
+    The gap this closes is that both are *silent* (#315). `Book #2` becoming
+    `Book` is spec-correct and still loses an author's text with no signal until
+    it shows up in a produced epub, and the fix — quoting the value — is one
+    character and not obvious.
+
+    Not a log call, deliberately: `parse_yaml_scalar` runs on every field read of
+    every command, so a WARNING there would fire repeatedly for one typo and land
+    in the wrong channel. `cleanup`'s report is the durable artifact, and this is
+    the predicate it asks.
+    """
+    val = raw.strip()
+    if not val:
+        return None
+
+    if val[0] in ('"', "'"):
+        close = _closing_quote_index(val)
+        if close is None:
+            return 'unterminated_quote'
+        rest = val[close + 1:].strip()
+        if rest and not rest.startswith('#'):
+            return 'trailing_after_quote'
+        return None
+
+    # A comment-only value is the *intended* case — an unset key carrying its
+    # template comment — so it is not a truncation. Only a value that had real
+    # text on both sides of the `#` lost something.
+    stripped = _strip_inline_comment(val)
+    if stripped and stripped != val:
+        removed = val[len(stripped):].lstrip()
+        if _LIKELY_VALUE_HASH.match(removed):
+            return 'comment_truncated'
+    return None
 
 
 #: The single-character escapes a double-quoted YAML scalar may carry.
@@ -685,8 +763,6 @@ def select_revision_model(pass_name: str, purpose: str = '') -> str:
 # ============================================================================
 # Coaching level
 # ============================================================================
-
-from typing import Literal
 
 CoachingLevel = Literal['full', 'coach', 'strict']
 
