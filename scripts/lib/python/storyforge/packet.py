@@ -1389,15 +1389,29 @@ def _split_author_contrast(author: str,
     return ' '.join(kept).strip(), ' '.join(dropped).strip()
 
 
-#: Values an author legitimately backticks in this domain — layouts, placements,
-#: registers, plan columns. Excluded from `_backticked_ids` because they share the
-#: plan-id shape: `half_page` is not an illustration, and the first version of that
-#: check withheld a sentence about it *and misexplained why*.
+#: Every vocabulary an author legitimately backticks in this domain. Excluded from
+#: `_backticked_ids` because these share the plan-id shape: `half_page` is not an
+#: illustration, and the first version of that check withheld a sentence about it
+#: *and misexplained why*.
+#:
+#: **The values are derived, but this list of sources was not** — and it drifted
+#: immediately: `VALID_PLAN_STATUSES` was missing, so `ingested`, `planned` and
+#: `superseded` were withheld from the model's copy under the false claim that they
+#: named another illustration. `test_every_illustration_vocabulary_is_excluded`
+#: introspects `illustrations` for every `VALID_*` / `*_COLUMNS` name and fails when
+#: one is not covered here, so adding a vocabulary cannot silently reintroduce it.
+_VOCABULARY_SOURCES: Final[tuple[str, ...]] = (
+    'VALID_LAYOUTS', 'VALID_PLACEMENTS', 'VALID_REGISTERS',
+    'VALID_PLAN_STATUSES', 'VALID_IMAGE_EXTENSIONS',
+    'PLAN_COLUMNS', 'OPTIONAL_PLAN_COLUMNS',
+)
+
+
 def _schema_vocabulary() -> set[str]:
-    return ({v.lower() for v in ill.VALID_LAYOUTS}
-            | {v.lower() for v in ill.VALID_PLACEMENTS}
-            | {v.lower() for v in ill.VALID_REGISTERS}
-            | {c.lower() for c in ill.PLAN_COLUMNS})
+    out: set[str] = set()
+    for name in _VOCABULARY_SOURCES:
+        out |= {str(v).lower().lstrip('.') for v in getattr(ill, name)}
+    return out
 
 
 #: A backticked token shaped like a plan id.

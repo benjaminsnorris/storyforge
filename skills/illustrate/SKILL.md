@@ -239,6 +239,15 @@ These come from lived iteration (benjaminsnorris/ashes PR #9, tracked as #260 an
 
 The whole book-level direction — the three root canon files — goes into every prompt too, which is why the command warns before it spends anything when the reference tier is incomplete: a canon file that's simply absent tells you to run `--direction`, one that exists but is still a TODO placeholder tells you to edit it directly (re-running `--direction` is a no-op once the file exists). Either way, without it the prompts carry no house style, and the images won't look like they belong to one book.
 
+**`--prompts` also refuses on a `state_override` that did not land as written** (#309). It is one of five ways the command exits 1. Four cost nothing — this one, a `production.cover_artwork` path that does not exist, a missing `ANTHROPIC_API_KEY` where the coaching level needs one, and `--ids` matching no promptable row. The fifth is after the calls, when some rows produced no art direction, and that one *has* spent. So treat a non-zero exit as "read the last ERROR line" rather than as one known condition, and check whether it fired before or after the fan-out before assuming a re-run is free. The cell is `entity:state`, separated by semicolons — and prose in it fails three ways at once: ordinary writing contains semicolons, so a sentence fragments into clauses; the fragments with no colon are dropped; and the one fragment that happens to contain a colon survives with a *sentence* as its entity name, which then reaches the image model as an authoritative state line under that label. On the book this was filed about, three clauses became one applied override and the prompt file looked fine.
+
+So the run stops before the fan-out — nothing is spent — and reports:
+
+- a per-row count for any row that lost a clause: `state_override — 1 of 3 clauses applied, 2 lost`. A lost clause is a state you believe is in the prompt and is not, either because it had no colon or because a later clause named the same entity and overwrote it.
+- an **ERROR** naming the rows whose cell did not land as written: nothing parsed, or a whole sentence became the entity name.
+
+Fix the cell and re-run. Tell the author what the count says rather than only that the command failed — the count is the thing that identifies which clause they lost. **A row whose override is merely for an entity the transition log does not track is not this case and does not refuse**: that is legitimate for a one-off entity, reports as `state_override_unmatched_entity`, and is worth confirming with the author only because a typo looks the same.
+
 Plus: no text, no letters, no words, no typography. Image models render text unreliably, and an illustration doesn't need any.
 
 ### The reference chain

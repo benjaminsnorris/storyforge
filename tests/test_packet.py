@@ -1456,3 +1456,42 @@ def test_this_domains_own_vocabulary_is_not_mistaken_for_an_illustration(
 
     assert kept == f'Keep the `{token}` treatment.'
     assert withheld == ''
+
+
+def test_every_illustration_vocabulary_is_excluded():
+    """A new vocabulary in `illustrations` cannot silently be withheld as an id.
+
+    `_schema_vocabulary`'s *values* are derived, but its list of **sources** was
+    hand-written — and it drifted immediately: `VALID_PLAN_STATUSES` was missing,
+    so `ingested`, `planned` and `superseded` were withheld from the model's copy
+    under the false claim that they named another illustration.
+
+    Introspection rather than a second hand-written list, which would drift the
+    same way. Anything in `illustrations` named `VALID_*` or `*_COLUMNS` is a
+    vocabulary an author may reasonably backtick, so it belongs in the exclusion
+    set; adding one without adding it there fails here.
+    """
+    vocab = packet._schema_vocabulary()
+    sources = [n for n in dir(ill)
+               if n.startswith('VALID_') or n.endswith('_COLUMNS')]
+
+    assert sources, 'introspection found nothing — has the naming changed?'
+    missing = {
+        name: sorted(str(v).lower().lstrip('.') for v in getattr(ill, name)
+                     if str(v).lower().lstrip('.') not in vocab)
+        for name in sources
+    }
+    assert not any(missing.values()), (
+        f'not excluded from _backticked_ids: '
+        f'{ {k: v for k, v in missing.items() if v} }')
+
+
+@pytest.mark.parametrize('token', ['ingested', 'planned', 'superseded'])
+def test_a_plan_status_is_not_mistaken_for_an_illustration(packet_project,
+                                                           token):
+    """The drift this caught, pinned by value as well as by introspection."""
+    kept, withheld = packet._split_author_contrast(
+        f'Match the `{token}` rows.', {'the-finest-cartographer'})
+
+    assert kept == f'Match the `{token}` rows.'
+    assert withheld == ''
