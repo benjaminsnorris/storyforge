@@ -1466,7 +1466,8 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
                 character_anchors=_relevant_anchors(anchors, row),
                 canon_context=canon_ctx, direction=direction,
                 style_note=style_note, anchor_labels=labels,
-                state=state, absent=absent_cell, contrast=contrast,
+                state=state, absent=absent_cell,
+                contrast=contrast.for_model,
             ) if needs_api else '',
         })
 
@@ -1584,7 +1585,7 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
         content = pi.render_prompt_file(
             row=row, body=body, references=job['references'],
             aspect=job['aspect'], state=job['state'],
-            absent=job['absent'], contrast=job['contrast'],
+            absent=job['absent'], contrast=job['contrast'].for_author,
             split=job['split'],
         )
         rel = ill.default_prompt_rel(illus_id)
@@ -2202,7 +2203,13 @@ class _PromptJob(TypedDict):
     #: the whole point of #297 is that two renderings of one row drift apart.
     state: str
     absent: str
-    contrast: str
+    #: Both forms, because they go to different audiences (#305). `for_model`
+    #: reaches `build_art_direction_request` — the model *writing* the prompt
+    #: must not be shown an illustration id either, or it echoes one into the
+    #: body, and the body is uploaded verbatim. `for_author` goes to the prompt
+    #: file's `## Accept only if`, which is never uploaded and where an id is
+    #: exactly what a human checking a render wants.
+    contrast: 'packet.RowContrast'
     #: The scene cut at this illustration's reading position. Carried for the
     #: same reason the three above are: the request is built from `unread` and
     #: the prompt file's acceptance block from `next_sentence`, and the two must

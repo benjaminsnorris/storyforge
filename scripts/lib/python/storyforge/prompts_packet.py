@@ -466,6 +466,16 @@ def _row_notes(entry: ImagePrompt) -> list[str]:
         notes.append(
             f'**Art direction.** From `{entry["prompt_source"]}`, which the '
             f'plan\'s `prompt_file` cell declares — not the default path.')
+    if entry['contrast_withheld']:
+        # Held back from the upload because it names another illustration, and
+        # shown here rather than dropped. There is no rewrite that keeps the
+        # meaning — "darker than `LF-05`" cannot survive without `LF-05` — so it
+        # becomes a check on the render instead of a direction for it (#305).
+        notes.append(
+            f'**Check against its neighbours.** {entry["contrast_withheld"]} '
+            f'This is not in the uploaded prompt: it names another illustration '
+            f'by id, which the image model cannot see. Check it yourself once '
+            f'the render is back.')
     if entry['self_reference']:
         notes.append(f'**Uploaded references.** {entry["self_reference"]}')
     if not entry['state']:
@@ -648,7 +658,12 @@ _FIELD_HOMES: Final[dict[str, str]] = {
     'in_frame': "the prompt's **Subject** section",
     'absent': "the prompt's `Not in this image:` constraint",
     'state': "the prompt's visual-state constraint",
-    'contrast': "the prompt's `Set this image apart` constraint",
+    # Two homes, because the direction has two forms (#305). The upload's bullet
+    # carries the id-free half; a comparison naming another illustration cannot
+    # go to the model at all and is listed in `illustrations.md` for the author.
+    'contrast': ("the prompt's `Set this image apart` constraint, plus any "
+                 "**Check against its neighbours** note for this row in "
+                 "`illustrations.md`"),
     'orientation': 'its prompt',
 }
 

@@ -244,10 +244,22 @@ def test_aspect_comes_from_the_layout_then_the_composition(packet_project):
 
 def test_contrast_names_the_register_and_the_preceding_illustration(
         packet_project):
+    """The register reaches both forms; the predecessor's **id** only the
+    author's (#305).
+
+    The model-facing half says "the illustration immediately before it" — it
+    cannot name `the-finest-cartographer`, because the upload has no paste
+    boundary and the model cannot see that image.
+    """
     entries = {e['id']: e for e in packet.resolve(packet_project)['entries']}
     assert 'brightest' in entries['the-finest-cartographer']['contrast']
-    assert 'darkest' in entries['the-blank-page']['contrast']
-    assert 'the-finest-cartographer' in entries['the-blank-page']['contrast']
+
+    blank = entries['the-blank-page']
+    assert 'darkest' in blank['contrast']
+    assert 'the-finest-cartographer' not in blank['contrast']
+    assert 'immediately before it' in blank['contrast']
+    # The author-facing form names the file to go and open.
+    assert 'the-finest-cartographer' in blank['contrast_for_author']
 
 
 def test_an_author_absent_column_is_carried_into_the_entry(packet_project):

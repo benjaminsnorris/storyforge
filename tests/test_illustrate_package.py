@@ -365,11 +365,73 @@ def test_contrast_is_one_derived_sentence(in_project):
     rows[1]['contrast'] = 'Much wider than the one before it.'
     ill.write_plan(in_project, rows)
     entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
-    contrast = entries['the-blank-page']['contrast']
-    derived = contrast.replace('Much wider than the one before it.', '').strip()
+    entry = entries['the-blank-page']
+
+    # Author prose naming no illustration id is safe for the model and kept.
+    assert 'Much wider than the one before it.' in entry['contrast']
+    assert entry['contrast_withheld'] == ''
+
+    derived = entry['contrast'].replace(
+        'Much wider than the one before it.', '').strip()
     assert derived.count('.') == 1, derived
-    assert 'darkest' in derived and 'the-finest-cartographer' in derived
-    assert 'Much wider than the one before it.' in contrast
+    assert 'darkest' in derived
+    # The id is in the author-facing form only (#305).
+    assert 'the-finest-cartographer' not in derived
+    assert 'the-finest-cartographer' in entry['contrast_for_author']
+
+
+def test_no_illustration_id_reaches_any_uploaded_prompt(in_project):
+    """The invariant #305 is about, asserted over the whole written bundle.
+
+    `render_image_prompt`'s docstring states the rule — the author uploads the
+    file rather than pasting a region out of it, so everything in it reaches the
+    image model — and `contrast` broke it on 19 of 20 rows of a real book by
+    interpolating the predecessor's id. Asserted against the *files*, not the
+    derivation, because that is what gets uploaded.
+    """
+    rows = ill.read_plan(in_project)
+    # An author's own comparative note, which is the harder half: there is no
+    # rewrite that keeps its meaning, so it must be withheld entirely.
+    rows[1]['contrast'] = (
+        'Must read colder and markedly darker than `the-finest-cartographer`. '
+        'Keep the horizon low.')
+    ill.write_plan(in_project, rows)
+
+    cmd_illustrate.main(['--package'])
+
+    ids = [r['id'].strip() for r in rows]
+    prompt_dir = os.path.join(in_project, 'manuscript',
+                              'illustration-packet', 'image-prompts')
+    for name in sorted(os.listdir(prompt_dir)):
+        with open(os.path.join(prompt_dir, name), encoding='utf-8') as f:
+            text = f.read()
+        own = os.path.splitext(name)[0]
+        for other in ids:
+            if other == own:
+                continue  # the file's own heading names it, which is fine
+            assert other not in text, (
+                f'{name} names another illustration ({other}) — the image model '
+                f'cannot see it, and this file is uploaded whole')
+
+
+def test_a_withheld_contrast_sentence_is_disclosed_not_dropped(in_project):
+    """Silently losing the author's comparison would be the other failure."""
+    rows = ill.read_plan(in_project)
+    rows[1]['contrast'] = (
+        'Must read colder than `the-finest-cartographer`. Keep the horizon low.')
+    ill.write_plan(in_project, rows)
+
+    cmd_illustrate.main(['--package'])
+
+    index = os.path.join(in_project, 'manuscript', 'illustration-packet',
+                         'illustrations.md')
+    with open(index, encoding='utf-8') as f:
+        text = f.read()
+    assert 'Check against its neighbours' in text
+    assert 'Must read colder than `the-finest-cartographer`.' in text
+    # The safe half still reached the model.
+    entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
+    assert 'Keep the horizon low.' in entries['the-blank-page']['contrast']
 
 
 def test_state_reaches_the_image_prompt_as_a_constraint(in_project):
@@ -1790,8 +1852,9 @@ def test_state_context_and_the_packet_share_one_resolution(in_project):
     for illus_id, row in rows.items():
         state, _gaps = packet.state_for_row(row, context=context)
         assert state == entries[illus_id]['state']
-        assert packet.contrast_for_row(row, context=context) == \
-            entries[illus_id]['contrast']
+        contrast = packet.contrast_for_row(row, context=context)
+        assert contrast.for_model == entries[illus_id]['contrast']
+        assert contrast.for_author == entries[illus_id]['contrast_for_author']
 
 
 # ============================================================================

@@ -34,8 +34,10 @@ docs/superpowers/specs/2026-07-28-illustration-state-matrix-and-packet-design.md
 """
 
 import os
+import re
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Final, Literal, TypedDict, cast
+from typing import (TYPE_CHECKING, Final, Literal, NamedTuple,
+                    TypedDict, cast)
 
 from storyforge import canon
 from storyforge import illustrations as ill
@@ -150,7 +152,16 @@ class Entry(TypedDict):
     beat: str
     state: str
     absent: str
+    #: **Model-facing, and free of illustration ids** — see `RowContrast`. Named
+    #: plainly because it is what `prompt_constraints` renders into the upload,
+    #: and the id-bearing form is the one that needs qualifying.
     contrast: str
+    #: The same direction with ids intact, for the author-facing acceptance block
+    #: and `illustrations.md`.
+    contrast_for_author: str
+    #: The author's own sentences held back from `contrast` because they name
+    #: another illustration. Disclosed rather than dropped.
+    contrast_withheld: str
     notes: str
     #: This image's place in the sequence's staging — camera distance and
     #: height, time of day, how much of the frame the subject occupies,
@@ -251,6 +262,13 @@ class RowContext(TypedDict):
     #: order rather than render order. A row **absent** from this map is not the
     #: first illustration — see `contrast_for_row`.
     predecessors: dict[str, str]
+    #: Every id the plan declares, **including `superseded` rows** — so this is
+    #: not `set(predecessors)`, which is reading order and excludes them.
+    #: `contrast_for_row` matches author prose against it to decide which
+    #: sentences name another illustration and must not reach the image model
+    #: (#305). Matching known ids rather than a generic pattern is what keeps
+    #: ordinary words out of it: a plan id may be as plain as `a10`.
+    plan_ids: set[str]
     #: Newest `canon_updated` across reference/canon/, read once so the canon
     #: tree is not walked per row (and its unparseable-date WARNING not logged
     #: per row). '' when no canon file carries a parseable date, which means
@@ -279,9 +297,14 @@ def state_context(project_dir: str, *,
     `contrast_for_row` is what keeps those two apart.
     """
     order = ill._scene_order(project_dir)
+    # Read once and hand the same list to `rows_in_reading_order`: `read_plan`
+    # logs per malformed row, so a second read would report one broken row twice
+    # — the defect the canon walk-count test exists for.
+    rows = ill.read_plan(project_dir) if plan is None else plan
+    plan_ids = {r.get('id', '').strip() for r in rows if r.get('id', '').strip()}
     predecessors: dict[str, str] = {}
     previous = ''
-    for row in rows_in_reading_order(project_dir, plan=plan, order=order):
+    for row in rows_in_reading_order(project_dir, plan=rows, order=order):
         illus_id = row['id'].strip()
         # setdefault, not assignment: two rows sharing an id would otherwise
         # leave only the later one's predecessor, where the old in-loop
@@ -296,6 +319,7 @@ def state_context(project_dir: str, *,
         'known': vs.known_scene_ids(project_dir),
         'transitions': vs.read_transitions(project_dir),
         'predecessors': predecessors,
+        'plan_ids': plan_ids,
         'canon_cutoff': (canon.newest_canon_updated(project_dir)
                          if canon_cutoff is None else canon_cutoff),
     }
@@ -708,6 +732,7 @@ def entry_for(row: dict[str, str], *,
 
     state, state_gaps = state_for_row(row, context=context)
     gaps.extend(state_gaps)
+    contrast = contrast_for_row(row, context=context)
 
     status = cast(ill.PlanStatus,
                   (row.get('status') or '').strip() or 'planned')
@@ -736,7 +761,9 @@ def entry_for(row: dict[str, str], *,
         # mistake `embeds_as` already made. Empty is the normal case — most
         # images have nothing that must be absent.
         'absent': (row.get('absent') or '').strip(),
-        'contrast': contrast_for_row(row, context=context),
+        'contrast': contrast.for_model,
+        'contrast_for_author': contrast.for_author,
+        'contrast_withheld': contrast.withheld,
         'notes': (row.get('composition') or '').strip(),
         'treatment': treatment,
         'stale_reason': ill.stale_render_reason(row, context['canon_cutoff']),
@@ -1172,7 +1199,8 @@ def _entity_label(entity: str, labels: dict[str, canon.AnchorLabel]) -> str:
     return canon.humanize_canon_id(entity)
 
 
-def contrast_for_row(row: dict[str, str], *, context: RowContext) -> str:
+def contrast_for_row(row: dict[str, str], *,
+                     context: RowContext) -> 'RowContrast':
     """What must make this image different from its neighbours.
 
     Derived from facts on the plan — the reading-order predecessor and the
@@ -1216,20 +1244,101 @@ def contrast_for_row(row: dict[str, str], *, context: RowContext) -> str:
     register = (row.get('register') or '').strip().lower()
     extreme = (f'The {register} image in the book'
                if register in ill.VALID_REGISTERS else '')
-    follows = (f'follows `{previous_id}` and must not repeat its staging'
-               if previous_id else '')
 
-    if extreme and follows:
-        derived = f'{extreme}; it {follows}.'
-    elif extreme:
-        derived = f'{extreme}.'
-    elif follows:
-        derived = f'{follows[0].upper()}{follows[1:]}.'
-    else:
-        derived = ''
+    # Two phrasings of one fact, built from parts rather than by rewriting one
+    # into the other. A substitution on the assembled string produces "it Do not
+    # repeat…" for the register variant, where the clause is mid-sentence.
+    follows_author = (f'follows `{previous_id}` and must not repeat its staging'
+                      if previous_id else '')
+    follows_model = ('must not repeat the staging of the illustration '
+                     'immediately before it' if previous_id else '')
+
+    def _assemble(follows: str) -> str:
+        if extreme and follows:
+            return f'{extreme}; it {follows}.'
+        if extreme:
+            return f'{extreme}.'
+        if follows:
+            return f'{follows[0].upper()}{follows[1:]}.'
+        return ''
 
     author = (row.get('contrast') or '').strip()
-    return ' '.join(part for part in (derived, author) if part)
+    kept, withheld = _split_author_contrast(author, context['plan_ids'])
+
+    return RowContrast(
+        for_model=' '.join(p for p in (_assemble(follows_model), kept) if p),
+        for_author=' '.join(p for p in (_assemble(follows_author), author) if p),
+        withheld=withheld,
+    )
+
+
+class RowContrast(NamedTuple):
+    """One row's contrast direction, in the two forms its two audiences need.
+
+    **`for_model` carries no illustration ids, and that is the whole point**
+    (#305). `prompt_constraints` renders contrast into the upload file, and since
+    #306 that file has no paste boundary — the author uploads it whole, so every
+    word reaches the image model. Nineteen of twenty prompts on a real book
+    therefore instructed the model to compare this image against `LF-04`, an image
+    it cannot see, in the one artifact designed for a model that has only what you
+    hand it. `render_image_prompt`'s own docstring states the rule the ids broke.
+
+    `for_author` keeps them, because an id is exactly right for a human checking a
+    render — it names the file to open. It goes to the source prompt file's
+    `## Accept only if` and to `illustrations.md`'s notes.
+
+    `withheld` is the author's own sentences that named an id, so
+    `illustrations.md` can show them rather than silently dropping them. There is
+    no rewrite that preserves their meaning: "colder and markedly darker than
+    `LF-05`" cannot survive without `LF-05`, so the comparison becomes a *review*
+    criterion rather than something a generation call can act on. Dropping it
+    without saying so would be the silent-omission failure this pipeline keeps
+    being bitten by.
+    """
+    for_model: str
+    for_author: str
+    withheld: str
+
+
+def _split_author_contrast(author: str,
+                           plan_ids: set[str]) -> tuple[str, str]:
+    """Split author contrast into (safe for the model, withheld because of ids).
+
+    Sentence-level, on the same punctuation heuristic as
+    `illustrations.first_sentence` and with the same caveat: it is not
+    segmentation, so `Mr. Ives` splits. That is tolerable here because the two
+    halves are recombined for the author verbatim — a mis-split can only move a
+    fragment into the withheld column, which is disclosed, never into the copy the
+    model reads.
+
+    Matching is against ids the plan actually declares, plus any backticked
+    token that looks like one. A generic pattern alone would be far too eager: a
+    plan id may be as plain as `a10`, and `absent`/`contrast` are author prose.
+    """
+    if not author:
+        return '', ''
+    lowered = {i.lower() for i in plan_ids if i}
+    kept: list[str] = []
+    dropped: list[str] = []
+    for sentence in _sentences(author):
+        words = {w.strip('`*_"\'.,;:()[]').lower()
+                 for w in sentence.split()}
+        names_id = bool(words & lowered) or bool(
+            _BACKTICKED_ID_RE.search(sentence))
+        (dropped if names_id else kept).append(sentence)
+    return ' '.join(kept).strip(), ' '.join(dropped).strip()
+
+
+#: A backticked token shaped like a plan id — the belt to `plan_ids`' braces, for
+#: an author who wrote a contrast against art that is not in the plan (a cut row,
+#: or a typo). Requires the backticks, so ordinary prose cannot trip it.
+_BACKTICKED_ID_RE = re.compile(r'`[A-Za-z0-9][A-Za-z0-9_-]*`')
+
+
+def _sentences(text: str) -> list[str]:
+    """Split on sentence-ending punctuation, keeping the punctuation."""
+    parts = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [p for p in parts if p.strip()]
 
 
 def audit_gaps(project_dir: str, *, bundle: str = 'packet') -> list[str]:
