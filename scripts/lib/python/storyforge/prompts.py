@@ -10,6 +10,8 @@ import os
 import re
 import sys
 
+from .common import parse_yaml_scalar
+
 
 # ============================================================================
 # YAML reading (no PyYAML — mirrors the grep/sed approach in common.sh)
@@ -63,7 +65,6 @@ def _strip_yaml_value(raw: str) -> str:
     This was a third quote-stripping copy that also returned inline comments as
     part of the value; `common.parse_yaml_scalar` records what that cost.
     """
-    from .common import parse_yaml_scalar
     return parse_yaml_scalar(raw)
 
 

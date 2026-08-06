@@ -304,6 +304,81 @@ class TestUpdateArtifactEntryEdgeCases:
                        b'    exists: false\r\n'
                        b'    updated: "2026-08-06"\r\n')
 
+    def test_an_insert_terminates_an_unterminated_preceding_line(
+            self, tmp_path):
+        """The insert must not append itself to the previous line.
+
+        Without terminating it first, a block whose last line lacks a newline
+        gets `path: reference/chapter-map.csv    updated: "..."` on one line —
+        the `path` value destroyed, the YAML invalid, and `assemble` commits it.
+        #276's own consequence class, produced by #276's fix; the earlier test
+        covered only the *rewrite* path, where the regex supplies the newline.
+        """
+        (tmp_path / 'storyforge.yaml').write_text(
+            'artifacts:\n  chapter_map:\n'
+            '    exists: false\n    path: reference/chapter-map.csv')
+        assert update_artifact_entry(
+            str(tmp_path), 'chapter_map', updated='2026-08-06') is True
+
+        assert (tmp_path / 'storyforge.yaml').read_text() == (
+            'artifacts:\n  chapter_map:\n'
+            '    exists: false\n    path: reference/chapter-map.csv\n'
+            '    updated: "2026-08-06"\n')
+
+    def test_an_inserted_key_matches_a_four_space_project(self, tmp_path):
+        """The child indent is read off the file, never assumed to be two.
+
+        Guessing `key_indent + '  '` emitted the key at indent 6 among siblings
+        at 8 — invalid YAML, and invisible to every Storyforge reader because
+        they match `^\\s+key:` at any indent.
+        """
+        (tmp_path / 'storyforge.yaml').write_text(
+            'artifacts:\n    chapter_map:\n        exists: false\n')
+        update_artifact_entry(str(tmp_path), 'chapter_map',
+                              updated='2026-08-06')
+
+        assert (tmp_path / 'storyforge.yaml').read_text() == (
+            'artifacts:\n    chapter_map:\n'
+            '        exists: false\n        updated: "2026-08-06"\n')
+
+    def test_a_nested_key_of_the_same_name_is_not_matched(self, tmp_path):
+        """`updated:` nested deeper must not be taken for the direct child."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'artifacts:\n  chapter_map:\n'
+            '    meta:\n      updated: "2020-01-01"\n'
+            '    updated: "2021-01-01"\n')
+        update_artifact_entry(str(tmp_path), 'chapter_map',
+                              updated='2026-08-06')
+
+        assert (tmp_path / 'storyforge.yaml').read_text() == (
+            'artifacts:\n  chapter_map:\n'
+            '    meta:\n      updated: "2020-01-01"\n'
+            '    updated: "2026-08-06"\n')
+
+    def test_a_value_cannot_inject_yaml(self, tmp_path):
+        """A value is escaped, not interpolated raw.
+
+        `updated` reaching the file unescaped let a crafted value close the
+        scalar and open new top-level keys — #277's write-side half, in the
+        module fixing #277's read side. The only caller passes an ISO date, so
+        this was never reachable in production; it is pinned because the raw
+        interpolation sat 80 lines from the escaper written to prevent it.
+        """
+        (tmp_path / 'storyforge.yaml').write_text(
+            'artifacts:\n  chapter_map:\n    exists: false\n    updated:\n'
+            '\nphase: drafting\n')
+        update_artifact_entry(str(tmp_path), 'chapter_map',
+                              updated='2026-08-06"\nphase: PWNED\nx: "')
+
+        content = (tmp_path / 'storyforge.yaml').read_text()
+        # The payload survives as *text inside the scalar* — that is the point.
+        # What must not happen is it becoming structure, so the assertion is
+        # about top-level keys rather than about the substring appearing at all.
+        top_level = [line for line in content.split('\n')
+                     if line[:1].strip() and ':' in line]
+        assert top_level == ['artifacts:', 'phase: drafting']
+        assert content.count('\nphase:') == 1
+
     def test_a_file_without_a_trailing_newline_is_handled(self, tmp_path):
         (tmp_path / 'storyforge.yaml').write_text(
             'artifacts:\n  chapter_map:\n    exists: false')
@@ -483,17 +558,57 @@ class TestParseYamlScalar:
 
     @SCALAR_PARSERS
     def test_escape_sequences_in_double_quotes_are_resolved(self, parse):
-        r"""`\n`, `\t` and `\r` are the three YAML spells out; everything else
-        drops the backslash and keeps the character.
+        r"""The escapes YAML defines are resolved; an unknown one is kept whole.
 
         Pinned separately from `test_escapes_in_double_quotes_are_resolved`,
-        which only covers `\"` — and `\"` takes the *default* branch of the
-        mapping, so it passes with the mapping deleted entirely.
+        which only covers `\"` — and `\"` takes a branch that passes with the
+        whole mapping deleted.
         """
         assert parse(r'"a\nb"') == 'a\nb'
         assert parse(r'"a\tb"') == 'a\tb'
         assert parse(r'"a\rb"') == 'a\rb'
-        assert parse(r'"a\qb"') == 'aqb'
+        assert parse(r'"a\\b"') == 'a\\b'
+
+    @SCALAR_PARSERS
+    def test_numeric_escapes_are_resolved_not_left_as_prose(self, parse):
+        r"""`\xNN` / `\uNNNN` / `\UNNNNNNNN` are real YAML escapes.
+
+        The naive `\\(.)` rule consumed only the `x` or `u` and left the hex
+        digits as literal text, so `"\x41"` came back as the string `x41` — an
+        escape silently turned into nearby-looking prose, which is the class of
+        failure this module exists to remove.
+        """
+        assert parse(r'"\x41"') == 'A'
+        assert parse(r'"caf\xe9"') == 'café'
+        assert parse(r'"\u00e9"') == 'é'
+        assert parse(r'"\U0001F600"') == '\U0001f600'
+        # Not hex, so not an escape — kept verbatim rather than half-eaten.
+        assert parse(r'"\xZZ"') == r'\xZZ'
+
+    @SCALAR_PARSERS
+    def test_an_unknown_escape_keeps_its_backslash(self, parse):
+        r"""YAML rejects `"a\qb"` outright, so neither reading is *correct*.
+
+        Keeping the text shows the author what they typed; dropping the
+        backslash — the previous behaviour — returned a plausible-looking value
+        with no sign anything had happened.
+        """
+        assert parse(r'"a\qb"') == r'a\qb'
+        assert parse(r'"prod\cover.png"') == r'prod\cover.png'
+
+    @SCALAR_PARSERS
+    def test_a_defined_escape_still_wins_over_a_windows_path(self, parse):
+        r"""`"C:\temp"` resolving to `C:` + tab is *correct*, not a bug.
+
+        `\t` is a defined YAML escape, so a double-quoted Windows path is
+        genuinely ambiguous in YAML and this reading is the right one. Pinned so
+        the unknown-escape change above is not mistaken for licence to stop
+        resolving the defined ones. A literal backslash needs `\\`, or single
+        quotes, where backslashes are literal.
+        """
+        assert parse(r'"C:\temp"') == 'C:\temp'
+        assert parse(r'"C:\\temp"') == r'C:\temp'
+        assert parse(r"'C:\temp'") == r'C:\temp'
 
     @SCALAR_PARSERS
     def test_a_trailing_backslash_in_double_quotes_degrades(self, parse):
@@ -569,8 +684,22 @@ class TestYamlSingleQuote:
     def test_a_backslash_is_literal_in_this_style(self):
         assert yaml_single_quote(r'C:\path') == r"'C:\path'"
 
-    def test_newlines_are_collapsed(self):
+    def test_line_breaks_are_folded(self):
         assert yaml_single_quote('two\nlines') == "'two lines'"
+        assert yaml_single_quote('two\r\nlines') == "'two lines'"
+
+    def test_other_whitespace_is_left_exactly_as_the_author_wrote_it(self):
+        """Folding every `\\s+` run corrupted a validated file path.
+
+        `generate_epub_metadata` checks a cover path with `os.path.isfile` and
+        then emits it through here, so `production/my  cover.png` was verified
+        as real and written altered — pandoc then failed on a valid project,
+        which is #277's failure mode restored by #277's fix. Tabs and
+        non-breaking spaces in a title are the author's too.
+        """
+        assert yaml_single_quote('my  cover.png') == "'my  cover.png'"
+        assert yaml_single_quote('a\tb') == "'a\tb'"
+        assert yaml_single_quote('The\xa0Lantern Folk') == "'The\xa0Lantern Folk'"
 
     def test_it_round_trips_through_an_independent_parser(self):
         for value in ["Children's book", "O'Brien", 'plain',

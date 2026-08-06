@@ -13,6 +13,8 @@ import os
 import sys
 from datetime import datetime
 
+from .common import parse_yaml_scalar
+
 
 def csv_to_records(csv_file: str) -> list[dict]:
     """Read a pipe-delimited CSV file into a list of dicts.
@@ -58,6 +60,12 @@ def _read_yaml_field(project_dir: str, field: str) -> str:
 
     Parses simple key: value lines. For dotted keys (e.g., project.title),
     looks for 'title' indented under 'project:'.
+
+    The *scalar* is parsed by `common.parse_yaml_scalar`, not here. This was the
+    fourth copy of a quote-stripping value reader and the one #277's fix missed,
+    so a dashboard kept rendering `"The Lantern Folk"  # Working title` as a
+    title and a commented-out `genre:` as a truthy value. Only the key-location
+    walk is local, because this reader tolerates shapes the others do not.
     """
     yaml_path = os.path.join(project_dir, 'storyforge.yaml')
     if not os.path.isfile(yaml_path):
@@ -76,11 +84,7 @@ def _read_yaml_field(project_dir: str, field: str) -> str:
         for line in lines:
             stripped = line.strip()
             if stripped.startswith(f'{parts[0]}:'):
-                val = stripped[len(parts[0]) + 1:].strip()
-                # Remove surrounding quotes
-                if len(val) >= 2 and val[0] in ('"', "'") and val[-1] == val[0]:
-                    val = val[1:-1]
-                return val
+                return parse_yaml_scalar(stripped[len(parts[0]) + 1:])
         return ''
 
     # Dotted key: find parent section, then child
@@ -106,10 +110,7 @@ def _read_yaml_field(project_dir: str, field: str) -> str:
                 in_section = False
                 continue
             if stripped.startswith(f'{child}:'):
-                val = stripped[len(child) + 1:].strip()
-                if len(val) >= 2 and val[0] in ('"', "'") and val[-1] == val[0]:
-                    val = val[1:-1]
-                return val
+                return parse_yaml_scalar(stripped[len(child) + 1:])
 
     return ''
 
