@@ -790,3 +790,119 @@ class TestMalformedStateOverrideIsReported:
                    if f['kind'] == 'state_override_unparsed']
 
         assert any('overwrote an earlier one' in d for d in details), details
+
+    def test_a_malformed_override_does_not_suppress_state_unspecified(
+            self, project_dir):
+        """The sharpest half of #309, and the half nothing held.
+
+        `covered |= overridden` folds the override's keys into the set that
+        silences `state_unspecified`. A malformed cell contributes garbage keys,
+        and if any of them ever matched a `canon_refs` entry the row would go
+        quiet — the author would be told nothing at all about a state the prompt
+        never received. Current behaviour is correct; this pins it, because
+        widening `overridden` to include the unparsed halves is a one-line change
+        that looks like a generosity and is a silencing.
+        """
+        from storyforge import illustrations as ill
+        from storyforge import visual_state as vs
+        rows = ill.read_plan(project_dir)
+        refs = ill._split_array(rows[0].get('canon_refs', ''))
+        assert refs, 'fixture row needs canon_refs for this to be meaningful'
+        rows[0]['state_override'] = 'no-colon-here;a sentence of four words:dark'
+        ill.write_plan(project_dir, rows)
+
+        findings = vs.prepass(project_dir)['findings']
+        rid = rows[0]['id'].strip()
+        kinds = {f['kind'] for f in findings if f.get('id') == rid}
+
+        assert 'state_override_unparsed' in kinds
+        assert 'state_unspecified' in kinds, (
+            'a malformed override must not silence the finding that sends the '
+            'author to the cell in the first place')
+
+    def test_a_malformed_override_does_not_suppress_mid_scene_change(
+            self, project_dir):
+        """The same suppression, on the other finding that `overridden` gates.
+
+        A real `state_override` is the documented fix for
+        `state_mid_scene_change`, so it suppresses it by design. A *malformed*
+        one must not — otherwise the cell that fails to state which side of a
+        change the image is on also hides the question.
+        """
+        from storyforge import illustrations as ill
+        from storyforge import visual_state as vs
+        transitions = vs.read_transitions(project_dir)
+        assert transitions, 'fixture needs a transition for this to be meaningful'
+        changing = transitions[0]
+
+        rows = ill.read_plan(project_dir)
+        rows[0].update({
+            'scene_id': changing['from_scene'],
+            'placement': 'scene_close',
+            'canon_refs': changing['entity'].rsplit('-', 1)[0],
+            'state_override': 'this cell is prose and has no colon',
+        })
+        ill.write_plan(project_dir, rows)
+
+        findings = vs.prepass(project_dir)['findings']
+        rid = rows[0]['id'].strip()
+        kinds = {f['kind'] for f in findings if f.get('id') == rid}
+
+        assert 'state_override_unparsed' in kinds
+        assert 'state_mid_scene_change' in kinds, (
+            'a malformed override must not suppress the finding it was written '
+            'to answer')
+
+    def test_an_override_on_a_tracked_entity_outside_canon_refs_is_silent(
+            self, project_dir):
+        """The `tracked` exemption, which nothing exercised.
+
+        An override may legitimately name an entity the transition log tracks but
+        the row's `canon_refs` do not — the log is the authority on what is
+        tracked. Dropping that exemption fires `state_override_unmatched_entity`
+        on correct data, and the finding's own remedy ("check the spelling")
+        would send the author to fix a cell that is right.
+        """
+        from storyforge import illustrations as ill
+        from storyforge import visual_state as vs
+        transitions = vs.read_transitions(project_dir)
+        assert transitions, 'fixture needs a transition'
+        tracked = transitions[0]['entity']
+
+        rows = ill.read_plan(project_dir)
+        refs = ill._split_array(rows[0].get('canon_refs', ''))
+        assert not any(tracked.lower() == r.lower()
+                       or tracked.lower().startswith(f'{r.lower()}-')
+                       for r in refs), 'the entity must be outside canon_refs'
+        rows[0]['state_override'] = f'{tracked}:lit from below'
+        ill.write_plan(project_dir, rows)
+
+        rid = rows[0]['id'].strip()
+        kinds = {f['kind'] for f in vs.prepass(project_dir)['findings']
+                 if f.get('id') == rid}
+
+        assert 'state_override_unmatched_entity' not in kinds
+
+    def test_a_pipe_in_a_finding_detail_is_neutralized(self, project_dir):
+        """Asserted where a pipe can actually reach the detail.
+
+        `test_the_detail_is_csv_safe` cannot fail: `write_plan` routes every cell
+        through `csv_safe` on the way out, so `'a | b'` is already `'a / b'`
+        before `prepass` ever reads it back, and all three `_csv_safe` calls in
+        the finding builders can be deleted with that test green. The builder is
+        called directly here so the guard is on the code it claims to guard —
+        the report is unquoted pipe-delimited, and a stray `|` empties the
+        trailing `status` cell that `skills/forge/SKILL.md` scans for.
+        """
+        from storyforge import visual_state as vs
+        # The prose-key finding needs an entity of >= _PROSE_KEY_WORDS words, or
+        # that interpolation is never reached and its `_csv_safe` can be deleted
+        # with this test green — the same vacuity as the test above.
+        row = {'state_override': 'a | b with a pipe;'
+                                 'a long | piped sentence as the key:x | y'}
+
+        findings = vs._override_findings(row, 'lantern-vigil', {}, [])
+
+        assert findings, 'the malformed cell must produce findings'
+        for finding in findings:
+            assert '|' not in finding['detail'], finding['detail']

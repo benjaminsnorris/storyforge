@@ -2623,3 +2623,124 @@ def test_a_malformed_state_override_is_reported_by_package(in_project):
 
     assert any('state_override' in g and 'lost' in g for g in gaps), gaps
     assert any('reads as a sentence' in g for g in gaps), gaps
+
+
+def test_the_upload_guard_does_not_cover_a_recovered_body(in_project):
+    """The scope of `test_no_illustration_id_reaches_any_uploaded_prompt`.
+
+    That guard walks the written `image-prompts/*.md` and asserts no *other* id
+    appears, and its docstring calls that "the invariant #305 is about, asserted
+    over the whole written bundle". It is not: both fixture rows resolve
+    `body_source == 'plan_row'`, because the fixture has no
+    `reference/illustration-prompts/` at all — so the guard exercises the
+    deterministic Constraints bullet and never the `parse_prompt_file` recovery
+    path, which inlines a stored body **verbatim**.
+
+    A body written before #305 was generated from a request that carried the
+    predecessor's id, so that whole pre-existing corpus is the population at
+    risk, and `--package` alone does not fix it — only a `--prompts` re-run does.
+    The id therefore still reaches the upload; what #305's follow-up added is a
+    *gap* saying so. Pinned as a characterization test so nobody reads the
+    flagship guard as a universal invariant, and so eliding-instead-of-reporting
+    becomes a deliberate change with a test to update.
+    """
+    rows = ill.read_plan(in_project)
+    target, other = rows[1]['id'].strip(), rows[0]['id'].strip()
+    rel = ill.default_prompt_rel(target)
+    path = os.path.join(in_project, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(f'# {target}\n\n## Prompt\n\n## Scene\n\nA low reading lamp.\n\n'
+                f'## Subject\n\nDeliberately unlike {other}, colder and '
+                f'flatter.\n')
+
+    cmd_illustrate.main(['--package'])
+
+    upload = os.path.join(in_project, 'manuscript', 'illustration-packet',
+                          'image-prompts', f'{target}.md')
+    with open(upload, encoding='utf-8') as f:
+        text = f.read()
+
+    assert other in text, (
+        'the recovered body is inlined verbatim, so the id still reaches the '
+        'image model — the guard above does not cover this path')
+    assert any(target in g and other in g and 'predates #305' in g
+               for g in packet.resolve(in_project)['gaps']), \
+        'and the leak must at least be disclosed'
+
+
+def test_an_id_in_a_plan_cell_reaches_the_upload_and_is_reported(in_project):
+    """The widening beyond the body, on the cell an author is most likely to use.
+
+    `composition` reaches the upload through `_derived_body`, so checking only
+    the recovered body would have been the same mistake in miniature as
+    sanitizing only the Constraints bullet. This is the plan-row path, where no
+    prompt file exists at all.
+    """
+    rows = ill.read_plan(in_project)
+    target, other = rows[1]['id'].strip(), rows[0]['id'].strip()
+    rows[1]['composition'] = f'Overhead, and flatter than {other}.'
+    ill.write_plan(in_project, rows)
+
+    cmd_illustrate.main(['--package'])
+
+    upload = os.path.join(in_project, 'manuscript', 'illustration-packet',
+                          'image-prompts', f'{target}.md')
+    with open(upload, encoding='utf-8') as f:
+        assert other in f.read()
+    assert any(target in g and other in g and 'predates #305' in g
+               for g in packet.resolve(in_project)['gaps'])
+
+
+def test_the_withheld_contrast_is_carried_by_one_resolution(in_project):
+    """`contrast_for_row` and the entry must agree on all three forms.
+
+    `test_state_context_and_the_packet_share_one_resolution` compares
+    `for_model` and `for_author` but not `withheld` — the field the whole #305
+    disclosure hangs on, and the one whose drift would silently drop the
+    author's comparison from `illustrations.md`.
+    """
+    rows = ill.read_plan(in_project)
+    rows[1]['contrast'] = (
+        f'Must read colder than `{rows[0]["id"].strip()}`. Keep the horizon low.')
+    ill.write_plan(in_project, rows)
+
+    context = packet.state_context(in_project)
+    entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
+    for row in ill.read_plan(in_project):
+        rid = row['id'].strip()
+        if rid not in entries:
+            continue
+        contrast = packet.contrast_for_row(row, context=context)
+        assert contrast.withheld == entries[rid]['contrast_withheld']
+    assert entries['the-blank-page']['contrast_withheld'], \
+        'the fixture must actually withhold something here'
+
+
+def test_an_id_in_a_state_override_reaches_the_upload_and_is_reported(
+        in_project):
+    """The half of the widening that `composition` does not cover.
+
+    `_foreign_ids` is scoped to **every** model-facing string, not just the body,
+    and only some of those flow through it. `composition` reaches the upload via
+    `_derived_body`, so a body-only check still catches it — but a
+    `state_override`'s *state text* reaches the upload through the visual-state
+    Constraints bullet, which never touches the body at all. Restricting the check
+    back to `body['text']` survives a test that only uses `composition`.
+    """
+    rows = ill.read_plan(in_project)
+    target, other = rows[1]['id'].strip(), rows[0]['id'].strip()
+    rows[1]['state_override'] = f'maps:curled back, unlike {other}'
+    ill.write_plan(in_project, rows)
+
+    cmd_illustrate.main(['--package'])
+
+    upload = os.path.join(in_project, 'manuscript', 'illustration-packet',
+                          'image-prompts', f'{target}.md')
+    with open(upload, encoding='utf-8') as f:
+        text = f.read()
+    assert other in text, 'the state bullet carries it to the model'
+    assert other not in packet._body_for(in_project, rows[1])['text'], \
+        'and it does not reach the body, which is what makes this a distinct path'
+    assert any(target in g and other in g and 'predates #305' in g
+               for g in packet.resolve(in_project)['gaps'])

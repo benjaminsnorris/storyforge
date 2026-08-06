@@ -1383,9 +1383,37 @@ def _split_author_contrast(author: str,
     kept: list[str] = []
     dropped: list[str] = []
     for sentence in _sentences(author):
-        names_id = bool(pattern and pattern.search(sentence))
+        names_id = bool(pattern and pattern.search(sentence)) or bool(
+            _backticked_ids(sentence))
         (dropped if names_id else kept).append(sentence)
     return ' '.join(kept).strip(), ' '.join(dropped).strip()
+
+
+#: Values an author legitimately backticks in this domain — layouts, placements,
+#: registers, plan columns. Excluded from `_backticked_ids` because they share the
+#: plan-id shape: `half_page` is not an illustration, and the first version of that
+#: check withheld a sentence about it *and misexplained why*.
+def _schema_vocabulary() -> set[str]:
+    return ({v.lower() for v in ill.VALID_LAYOUTS}
+            | {v.lower() for v in ill.VALID_PLACEMENTS}
+            | {v.lower() for v in ill.VALID_REGISTERS}
+            | {c.lower() for c in ill.PLAN_COLUMNS})
+
+
+#: A backticked token shaped like a plan id.
+_BACKTICKED_ID_RE = re.compile(r'`([A-Za-z0-9][A-Za-z0-9_-]*)`')
+
+
+def _backticked_ids(text: str) -> list[str]:
+    """Backticked tokens that look like an illustration id and are not vocabulary.
+
+    Catches a contrast naming a row since **cut** from the plan — still a
+    reference to an illustration the model cannot see, and `plan_ids` cannot know
+    about it by definition.
+    """
+    vocab = _schema_vocabulary()
+    return [m.group(1) for m in _BACKTICKED_ID_RE.finditer(text)
+            if m.group(1).lower() not in vocab]
 
 
 def _id_pattern(ids: Iterable[str]) -> 're.Pattern[str] | None':
@@ -1404,11 +1432,13 @@ def _id_pattern(ids: Iterable[str]) -> 're.Pattern[str] | None':
     author, where a miss puts an id in front of the image model. The asymmetry is
     the whole point.
 
-    Replaces a backticked-token fallback that withheld legitimate direction and
-    told the author it named another illustration — `Keep the `half_page` gutter
-    clear.` was dropped from the model's copy under that explanation. The plan's
-    own ids are the sound signal; a backticked non-id is far more often a field
-    name than an illustration.
+    Ids the plan declares are the sound signal, but not the only one: a contrast
+    naming a **cut** row still names an illustration, and dropping the check for
+    those let one reach the model. `_backticked_ids` covers them — restricted to
+    plan-id *shape* and excluding this domain's own vocabulary, which is what the
+    first fallback got wrong: matching any backticked token withheld `Keep the
+    `half_page` gutter clear.` and told the author it named another illustration.
+    A wrong explanation for a drop is worse than the drop.
     """
     real = sorted({i for i in ids if i})
     if not real:

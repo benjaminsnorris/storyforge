@@ -1419,18 +1419,40 @@ def test_a_backticked_field_name_is_not_treated_as_an_illustration(
     assert blank['contrast_withheld'] == ''
 
 
-def test_an_id_absent_from_the_plan_is_no_longer_withheld(packet_project):
-    """The cost of dropping the backtick fallback, stated as a test.
+def test_an_id_absent_from_the_plan_is_still_withheld(packet_project):
+    """A contrast against a **cut** row still names an illustration.
 
-    An author's contrast against a **cut** row — `Colder than `LF-04`.` where
-    `LF-04` is no longer in the plan — now reaches the image model. That is the
-    accepted trade for not withholding field names, and it is the one residual
-    #305 leak path. Recorded so the trade-off is a decision rather than a
-    discovery, and so that restoring a narrower fallback has a test to change.
+    This was the one residual #305 leak after the backtick fallback was dropped:
+    `Colder than `LF-04`.` where `LF-04` has since left the plan reached the image
+    model, because `plan_ids` cannot know about a cut row by definition.
+    `_backticked_ids` covers it — restricted to plan-id shape and excluding this
+    domain's own vocabulary, which is what the first fallback got wrong.
     """
     rows = ill.read_plan(packet_project)
     rows[1]['contrast'] = 'Colder than `LF-04`. Keep the horizon low.'
     ill.write_plan(packet_project, rows)
 
     entries = {e['id']: e for e in packet.resolve(packet_project)['entries']}
-    assert 'LF-04' in entries['the-blank-page']['contrast']
+    entry = entries['the-blank-page']
+
+    assert 'LF-04' not in entry['contrast']
+    assert 'LF-04' in entry['contrast_withheld']
+    assert 'Keep the horizon low.' in entry['contrast']
+
+
+@pytest.mark.parametrize('token', [
+    'half_page', 'full_page', 'scene_open', 'after_anchor', 'darkest', 'palette',
+])
+def test_this_domains_own_vocabulary_is_not_mistaken_for_an_illustration(
+        packet_project, token):
+    """The reason the first fallback was wrong: these share the plan-id shape.
+
+    Withholding is disclosed and so was never dangerous, but it was explained as
+    "it names another illustration", which is false — and a disclosure channel that
+    explains a drop wrongly is worse than the drop.
+    """
+    kept, withheld = packet._split_author_contrast(
+        f'Keep the `{token}` treatment.', {'the-finest-cartographer'})
+
+    assert kept == f'Keep the `{token}` treatment.'
+    assert withheld == ''

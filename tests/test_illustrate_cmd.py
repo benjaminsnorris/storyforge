@@ -4648,3 +4648,150 @@ def test_prompts_accepts_an_override_for_an_untracked_entity(in_project,
 
     assert rc == 0
     assert 'did not land as written' not in capsys.readouterr().out
+
+
+def test_prompts_refuses_when_no_clause_parsed(in_project, capsys):
+    """The nothing-parsed arm of the refusal, which had no test.
+
+    `if override.prose_keys or (clause_count and not applied)`. Dropping the
+    prose-key arm is caught; dropping *this* arm left the suite green, so the
+    plainest malformed cell of all — a colon-less line — had no refusal test.
+    """
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(
+        state_override='the lamp is dark and the lanterns are out')])
+
+    rc = cmd_illustrate.main(['--prompts', '--coaching', 'strict'])
+
+    assert rc == 1
+    assert 'did not land as written' in capsys.readouterr().out
+
+
+def test_the_refusal_spends_nothing(in_project, monkeypatch, capsys):
+    """The claim the refusal exists to make, asserted for the first time.
+
+    The existing refusal test runs `--coaching strict`, where
+    `needs_api = coaching in ('full', 'coach')` is False — so there was no API
+    call to prevent and the test could not have caught a refusal placed after the
+    fan-out. This one runs the path that *would* spend, and asserts the call was
+    never made rather than inferring it from the exit code.
+    """
+    calls = []
+    monkeypatch.setattr(cmd_illustrate, '_fetch_art_direction',
+                        lambda *a, **k: calls.append(a) or {})
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'sk-not-a-real-key')
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(
+        state_override='a whole sentence used as the entity key: dark')])
+
+    rc = cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+
+    assert rc == 1
+    assert calls == [], 'the refusal must precede the fan-out, not follow it'
+    assert 'nothing was spent' in capsys.readouterr().out
+
+
+def test_the_refusal_reaches_dry_run(in_project, capsys):
+    """`--dry-run` must not route around it.
+
+    The refusal sits above the `if dry_run` early return; gating it on
+    `not dry_run` survived the whole suite. A dry run that reports the plan as
+    fine and then refuses on the real run is the inconsistency #317 was about.
+    """
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(
+        state_override='a whole sentence used as the entity key: dark')])
+
+    rc = cmd_illustrate.main(['--prompts', '--dry-run', '--coaching', 'full'])
+
+    assert rc == 1
+    assert 'did not land as written' in capsys.readouterr().out
+
+
+def test_the_refusal_writes_nothing(in_project):
+    """Nothing on disk moves, which is what "nothing was spent" means to an
+    author who has to decide whether to re-run."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(
+        state_override='a whole sentence used as the entity key: dark')])
+
+    def snapshot():
+        out = {}
+        for root, _dirs, files in os.walk(in_project):
+            for name in files:
+                path = os.path.join(root, name)
+                out[path] = os.stat(path).st_mtime_ns
+        return out
+
+    before = snapshot()
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'strict']) == 1
+    assert snapshot() == before
+
+
+def test_the_art_direction_request_carries_no_illustration_id(
+        in_project, monkeypatch):
+    """#305's second audience, asserted at the call site rather than the helper.
+
+    The PR's own argument is that sanitizing the deterministic Constraints bullet
+    is not enough: the model *writing* the prompt must not see an id either, or it
+    echoes one into the body — and the body is uploaded verbatim, which is exactly
+    how a pre-#305 body still leaks today. Pointing this call site back at
+    `for_author` left the whole suite green.
+
+    Asserted over the request `run_prompts` actually builds, **not** by calling
+    `build_art_direction_request` directly with `for_model` — that only proves the
+    helper does what it is handed, which is the same helper-tested-wiring-untested
+    gap that let #313's two bugs be reintroduced with a green suite. The first
+    draft of this test made precisely that mistake and the mutant survived it.
+    """
+    requests = []
+    real = pi.build_art_direction_request
+
+    def spy(**kwargs):
+        text = real(**kwargs)
+        requests.append((kwargs.get('row', {}).get('id', ''), text))
+        return text
+
+    monkeypatch.setattr(cmd_illustrate.pi, 'build_art_direction_request', spy)
+    monkeypatch.setattr(cmd_illustrate, '_fetch_art_direction',
+                        lambda project_dir, jobs: {})
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'sk-not-a-real-key')
+
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [
+        plan_row(),
+        plan_row(id='second-vigil', register='darkest',
+                 contrast='Colder than the one before.'),
+    ])
+
+    cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+
+    assert requests, 'the run must have built at least one request'
+    second = [text for rid, text in requests if rid == 'second-vigil']
+    assert second, 'the successor row must have been requested'
+    for text in second:
+        assert 'lantern-vigil' not in text, (
+            'the model writing the prompt must not be shown a predecessor id — '
+            'it echoes one into the body, and the body is uploaded verbatim')
+
+
+def test_the_prompt_file_keeps_the_id_for_the_author(in_project):
+    """The mirror image, and the reason two forms exist at all.
+
+    The source prompt file is never uploaded, and an id there is exactly what a
+    human checking a render wants — it names the file to open. Handing this call
+    site `for_model` instead survived the suite, which would have quietly
+    downgraded the author-facing artifact to the model's phrasing.
+    """
+    rows = [plan_row(), plan_row(id='second-vigil',
+                                 contrast='Colder than the one before.')]
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, rows)
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'strict']) == 0
+
+    path = os.path.join(in_project, ill.default_prompt_rel('second-vigil'))
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    assert 'lantern-vigil' in text, \
+        'the author-facing prompt file must name the illustration to compare'
