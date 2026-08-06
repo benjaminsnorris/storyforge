@@ -19,6 +19,7 @@ pins the behaviour it changed as a consequence.
 
 import hashlib
 import os
+import re
 
 import pytest
 
@@ -244,18 +245,21 @@ class TestTheChapterMapRelocation:
         assert 'reference\\chapter-map.csv' in open(path, newline='').read(), (
             'the backslash path was mangled or lost')
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason='BUG: with no `artifacts:` block the removal still runs and the '
-               'insert has nothing to anchor to, so the chapter_map values are '
-               'destroyed and the loss is written to disk. Pre-existing, and '
-               'invisible because nothing executed this block. Needs a '
-               'production fix (skip the removal when there is no anchor, or '
-               'append an `artifacts:` block) which is out of scope for a '
-               'tests-only change.')
     @pytest.mark.parametrize('crlf', [False, True], ids=['lf', 'crlf'])
     def test_a_chapter_map_is_never_dropped_when_there_is_nowhere_to_put_it(
             self, tmp_path, crlf):
+        """Silent data loss, found as a strict xfail and now fixed.
+
+        With no `artifacts:` block the removal ran and the re-insert had no
+        anchor, so the entry — path, dates and all — was destroyed and written to
+        disk. `cleanup` deleting data out of `storyforge.yaml` is #276's exact
+        shape, in the one branch nothing in the suite reached.
+
+        The relocation is now all-or-nothing: `re.subn` reports whether the insert
+        landed, and a miss abandons the whole move and warns. Leaving a misplaced
+        top-level entry is harmless because nothing reads it; deleting it loses
+        the only record of the path.
+        """
         text = WITH_TOP_LEVEL_CHAPTER_MAP.replace(
             'artifacts:\n  world_bible:\n    exists: false\n'
             '    path: reference/world-bible.md\n    updated:\n', '')
@@ -263,7 +267,23 @@ class TestTheChapterMapRelocation:
 
         migrate_storyforge_yaml(str(tmp_path))
 
-        assert 'reference/chapter-map.csv' in open(path, newline='').read()
+        content = open(path, newline='').read()
+        assert 'reference/chapter-map.csv' in content
+        # Left where it was, rather than half-moved.
+        assert re.search(r'^chapter_map:', content, re.MULTILINE)
+
+    @pytest.mark.parametrize('crlf', [False, True], ids=['lf', 'crlf'])
+    def test_a_failed_relocation_warns(self, tmp_path, crlf, capsys):
+        """Silence would leave a misplaced entry looking migrated."""
+        text = WITH_TOP_LEVEL_CHAPTER_MAP.replace(
+            'artifacts:\n  world_bible:\n    exists: false\n'
+            '    path: reference/world-bible.md\n    updated:\n', '')
+        write_yaml(tmp_path, text, crlf=crlf)
+
+        migrate_storyforge_yaml(str(tmp_path))
+
+        out = capsys.readouterr().out
+        assert 'WARNING' in out and 'no `artifacts:` block' in out
 
 
 # ===========================================================================
