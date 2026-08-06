@@ -4591,3 +4591,60 @@ def test_parse_state_response_logs_every_dropped_row(capsys):
     out = capsys.readouterr().out
     assert 'row 2 is missing state, evidence' in out
     assert 'row 3 is not an object (int)' in out
+
+
+# ============================================================================
+# #309 — --prompts and a state_override that did not land as written
+# ============================================================================
+
+def test_prompts_refuses_a_prose_state_override(in_project, capsys):
+    """Keyed on a sentence-as-entity-key, not on "nothing applied".
+
+    On the real cell this was filed about, one clause *did* apply — under a
+    nonsense key — so a nothing-applied test alone would have let it through and
+    generated against the state the author meant to replace.
+    """
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(
+        state_override=('The instant AFTER extinction, which a10 does not '
+                        'describe: the Great Lamp dark; EXACTLY FIVE alive'))])
+
+    rc = cmd_illustrate.main(['--prompts', '--coaching', 'strict'])
+
+    out = capsys.readouterr().out
+    assert rc == 1, 'a prose override must refuse before anything is spent'
+    assert 'did not land as written' in out
+    # Two clauses: the colon-bearing fragment applied under a sentence key, and
+    # `EXACTLY FIVE alive` was dropped for having no colon.
+    assert '1 of 2 clauses applied, 1 skipped' in out
+
+
+def test_prompts_reports_the_clause_count(in_project, capsys):
+    """One line with a count — the signal the issue's author said would alone
+    have caught this. Two per-clause warnings in a stream of reference-exclusion
+    warnings did not."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(
+        state_override='no-colon-here;lantern:lit from below')])
+
+    cmd_illustrate.main(['--prompts', '--coaching', 'strict'])
+
+    assert '1 of 2 clauses applied, 1 skipped' in capsys.readouterr().out
+
+
+def test_prompts_accepts_an_override_for_an_untracked_entity(in_project,
+                                                            capsys):
+    """The legitimate case the refusal must not break.
+
+    `state_for_row` deliberately applies an override for an entity the matrix
+    does not track, which is why the refusal keys on a prose key rather than on
+    "no key matches a tracked entity" as the issue proposed.
+    """
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(
+        state_override='one-off-prop:cracked down one side')])
+
+    rc = cmd_illustrate.main(['--prompts', '--coaching', 'strict'])
+
+    assert rc == 0
+    assert 'did not land as written' not in capsys.readouterr().out

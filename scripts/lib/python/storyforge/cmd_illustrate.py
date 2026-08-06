@@ -1418,7 +1418,8 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     at_scene_start: list[str] = []
     #: (id, applied, total) per row whose `state_override` lost clauses (#309).
     override_partial: list[tuple[str, int, int]] = []
-    #: Rows whose `state_override` is non-empty and applied nothing at all.
+    #: Rows whose `state_override` did not land as written — nothing parsed, or
+    #: a whole sentence became the entity name.
     override_dead: list[str] = []
     for row in rows:
         illus_id = row['id'].strip()
@@ -1444,12 +1445,22 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             # grepping the output for a string they expected and getting nothing.
             override_partial.append(
                 (illus_id, len(override.applied), override.clause_count))
-        if override.clause_count and not override.applied:
-            # Nothing landed, so the cell is prose rather than an override — and
-            # proceeding means generating against the state the author believes
-            # they replaced. A refusal rather than a warning, for the reason
-            # `resolve_style_reference` refuses a declared-but-missing file:
-            # warning, spending, and exiting 0 is what the skill commits on.
+        if override.prose_keys or (override.clause_count
+                                   and not override.applied):
+            # The cell is prose rather than an override, so proceeding generates
+            # against the state the author believes they replaced. A refusal
+            # rather than a warning, for the reason `resolve_style_reference`
+            # refuses a declared-but-missing file: warning, spending, and exiting
+            # 0 is what the skill commits on.
+            #
+            # Keyed on a *sentence as the entity key*, not on "no key matches a
+            # tracked entity", which is what the issue proposed. Those differ on
+            # the case that matters: `state_for_row` deliberately applies an
+            # override for an entity the matrix does not track, so refusing on an
+            # unmatched key would break the legitimate one-off entity. A sentence
+            # as a key is never legitimate. On the real cell this was filed about,
+            # one clause did "apply" — under a nonsense key — so a
+            # nothing-applied test alone would have let it through.
             override_dead.append(illus_id)
         contrast = packet.contrast_for_row(row, context=state_ctx)
         split = _scene_split(project_dir, row)
@@ -1503,10 +1514,11 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             f'not; write each override as entity:state.')
     if override_dead:
         log(f'ERROR: {len(override_dead)} illustration(s) have a state_override '
-            f'that applied nothing at all: {", ".join(sorted(override_dead))}. '
-            f'The cell is prose rather than entity:state, so the prompt would be '
-            f'generated against the state you meant to replace. Fix the cell and '
-            f're-run; nothing was spent.')
+            f'that did not land as written: {", ".join(sorted(override_dead))}. '
+            f'Either nothing parsed, or a whole sentence became the entity name — '
+            f'so the cell is prose rather than entity:state, and the prompt would '
+            f'be generated against the state you meant to replace. Fix the cell '
+            f'and re-run; nothing was spent.')
         return 1
     if unpositioned:
         # Before the fan-out, with the other free-fix warnings. A row whose
