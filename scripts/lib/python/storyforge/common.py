@@ -13,6 +13,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Final
 
 
 # ============================================================================
@@ -117,12 +118,262 @@ def read_yaml_field(field: str, project_dir: str | None = None) -> str:
     return ''
 
 
-def _strip_yaml_value(val: str) -> str:
-    """Strip quotes and trailing whitespace from a YAML value."""
-    val = val.strip()
+def parse_yaml_scalar(raw: str) -> str:
+    """Parse the text after a `key:` into the scalar the author meant.
+
+    The one such function in the repo. There were three — `_strip_yaml_value`
+    here, the same name in `prompts.py`, and `_strip_yaml_quotes` in
+    `assembly.py` — all quote-stripping only, so **every** one of them returned
+    a value with its inline comment glued on. Both other copies now delegate,
+    for the reason `common.csv_safe` lives here rather than in `illustrations`:
+    one behaviour, one place to correct it.
+
+    Two things beyond stripping quotes, and #277 is what happens without them:
+
+    **An inline comment is not part of the value.** `genre: "Children's book"
+    # Primary genre` yielded the comment too, and — worse — an *empty* field
+    carrying a template comment (`series_name:  # Optional: series title`)
+    yielded that comment as a **truthy** value, which is how a project with no
+    series emitted a `belongs-to-collection:` line into its epub.
+
+    **A `#` is only a comment where YAML says it is.** Inside quotes it is
+    literal, and unquoted it opens a comment only at the start or after
+    whitespace — so `path: a#b` is the value `a#b`, not `a`. Stripping on a bare
+    `#` would silently truncate any value legitimately containing one (a URL
+    fragment, a CSS colour), which is the failure this function exists to stop,
+    pointed the other way.
+    """
+    val = raw.strip()
+    if not val:
+        return ''
+
+    if val[0] in ('"', "'"):
+        parsed = _parse_quoted_scalar(val)
+        if parsed is not None:
+            return parsed
+        # Malformed quoting falls through to the lenient pre-#277 strip below.
+        # Returning the strict read instead would be worse than the bug being
+        # fixed: `title: ""Unicorn Tail""` is not valid YAML, but its strict
+        # reading is the empty string, which turns a typo into a silently
+        # missing title rather than a visible one. A malformed value degrades to
+        # the result it has always had.
+
     if len(val) >= 2 and val[0] in ('"', "'") and val[-1] == val[0]:
-        val = val[1:-1]
-    return val
+        return val[1:-1]
+    return _strip_inline_comment(val)
+
+
+def _parse_quoted_scalar(val: str) -> str | None:
+    """Read a quoted YAML scalar, or None if the quoting is malformed.
+
+    Scans for the closing quote rather than testing `val[-1]`, which is what the
+    three copies of this did: comparing first and last character means a quoted
+    value followed by a comment (`"A"  # note`) fails the test and is returned
+    whole — quotes, comment, and all.
+
+    Malformed means either no closing quote, or trailing content after it that
+    is not a comment. Both return None so the caller can fall back.
+    """
+    quote = val[0]
+    i = 1
+    while i < len(val):
+        if val[i] == '\\' and quote == '"':
+            i += 2  # escaped char in a double-quoted scalar
+            continue
+        if val[i] == quote:
+            if quote == "'" and val[i + 1:i + 2] == "'":
+                i += 2  # '' is an escaped apostrophe in YAML
+                continue
+            rest = val[i + 1:].strip()
+            if rest and not rest.startswith('#'):
+                return None
+            inner = val[1:i]
+            return (inner.replace("''", "'") if quote == "'"
+                    else _unescape_double_quoted(inner))
+        i += 1
+    return None
+
+
+def _strip_inline_comment(val: str) -> str:
+    """Drop a trailing `# comment` from an unquoted scalar."""
+    if val.startswith('#'):
+        return ''
+    m = re.search(r'\s#', val)
+    return val[:m.start()].strip() if m else val
+
+
+def _unescape_double_quoted(inner: str) -> str:
+    """Resolve the escape sequences a double-quoted YAML scalar may carry."""
+    return re.sub(r'\\(.)', lambda m: {'n': '\n', 't': '\t', 'r': '\r'}.get(
+        m.group(1), m.group(1)), inner)
+
+
+def yaml_single_quote(value: str) -> str:
+    """Quote a value for emission into a YAML file we generate.
+
+    Single-quoted style, because that is what `generate_epub_metadata` has
+    always emitted and two tests pin it. Escaping is what was missing: in a
+    single-quoted YAML scalar an apostrophe is written by **doubling** it, and
+    nothing did, so `Children's` closed the string early and pandoc exited 64 on
+    a valid project (#277). Nothing else needs escaping in this style —
+    backslashes are literal and there are no escape sequences — which is a good
+    reason to keep it rather than move to double quotes.
+
+    Newlines are collapsed: a value read from one YAML line cannot contain one
+    today, and a multi-line scalar would break the metadata block rather than
+    the value.
+    """
+    collapsed = re.sub(r'\s+', ' ', str(value)).strip()
+    return "'" + collapsed.replace("'", "''") + "'"
+
+
+def _strip_yaml_value(val: str) -> str:
+    """Back-compat alias for `parse_yaml_scalar`."""
+    return parse_yaml_scalar(val)
+
+
+#: Keys `update_artifact_entry` will write, in the order the template lists them
+#: under an artifact. Enumerated positively so a caller cannot name an arbitrary
+#: key and have this function invent a line for it.
+_ARTIFACT_WRITABLE_KEYS: Final[tuple[str, ...]] = ('exists', 'updated')
+
+
+def update_artifact_entry(project_dir: str, artifact: str, *,
+                          exists: bool | None = None,
+                          updated: str | None = None) -> bool:
+    """Set `exists` / `updated` on one `artifacts:` entry, in place.
+
+    Returns True if the file changed.
+
+    **Line-scoped on purpose.** This replaces a whole-file `re.sub` under
+    `re.DOTALL` whose pattern ended in an unanchored `.*`, which matched to end
+    of file — so updating `chapter_map.updated` deleted every block after it
+    (`manuscript`, `phase`, `parts`, the entire `production` section) and
+    `assemble` then committed the truncated file. Data loss on every run (#276).
+
+    That bug had a second, quieter half worth keeping in mind here: because the
+    first artifact's rewrite had already deleted the second one, the loop's next
+    iteration silently matched nothing and the update it existed to perform never
+    happened. So a caller gets a bool — "I found the block and wrote it" is a
+    fact worth being able to check, and its absence is what let the original go
+    unnoticed.
+
+    Everything outside the two value tokens is preserved byte for byte,
+    including blank lines, key order, and **inline comments** on the lines it
+    rewrites. Comments matter more than they look: #277 is a bug caused by
+    reading them as values, and stripping them on write would quietly discard
+    author annotations while fixing that.
+    """
+    yaml_file = os.path.join(project_dir, 'storyforge.yaml')
+    if not os.path.isfile(yaml_file):
+        log(f'WARNING: cannot update artifact {artifact!r} — no '
+            f'storyforge.yaml at {yaml_file}')
+        return False
+
+    # `newline=''` on both ends: the default universal-newline translation would
+    # read CRLF as LF and write LF back, normalizing the *whole* file as a side
+    # effect of editing two values — which `cleanup` then reports as
+    # `crlf_line_endings`. Preserving them verbatim is the same discipline
+    # `write_plan`'s explicit `lineterminator` enforces for CSVs.
+    with open(yaml_file, newline='') as f:
+        lines = f.readlines()
+
+    span = _artifact_block_span(lines, artifact)
+    if span is None:
+        log(f'WARNING: no `{artifact}:` entry under `artifacts:` in '
+            f'storyforge.yaml — nothing updated. Run `storyforge cleanup` to '
+            f'add missing artifact entries.')
+        return False
+
+    start, end, indent = span
+    # An inserted line has to match the file it lands in, or a CRLF project
+    # gains one stray LF line and `cleanup` reports mixed endings.
+    newline = '\r\n' if lines[0].endswith('\r\n') else '\n'
+    values = {'exists': None if exists is None else str(exists).lower(),
+              'updated': None if updated is None else f'"{updated}"'}
+    changed = False
+    for key in _ARTIFACT_WRITABLE_KEYS:
+        if values[key] is None:
+            continue
+        result = _set_block_value(lines, start, end, key, values[key])
+        if result is None:
+            # The key is absent from an otherwise valid block. Insert rather
+            # than skip: the caller asked for the value to be recorded, and a
+            # silent no-op here is exactly the shape of the bug above.
+            lines.insert(end, f'{indent}  {key}: {values[key]}{newline}')
+            end += 1
+            changed = True
+        elif result:
+            changed = True
+
+    if changed:
+        with open(yaml_file, 'w', newline='') as f:
+            f.writelines(lines)
+    return changed
+
+
+def _artifact_block_span(lines: list[str],
+                         artifact: str) -> tuple[int, int, str] | None:
+    """Locate one artifact's block as `(first_child, end, key_indent)`.
+
+    `end` is exclusive and is the last child line + 1, ignoring trailing blanks
+    so an inserted key lands inside the block rather than after the blank line
+    that separates it from its sibling.
+    """
+    top = next((i for i, line in enumerate(lines)
+                if re.match(r'^artifacts:', line)), None)
+    if top is None:
+        return None
+
+    key_re = re.compile(rf'^(\s+){re.escape(artifact)}:\s*(?:#.*)?$')
+    for i in range(top + 1, len(lines)):
+        line = lines[i]
+        # A non-indented, non-blank, non-comment line ends the artifacts block.
+        if line.strip() and not line[0].isspace() and not line.startswith('#'):
+            return None
+        m = key_re.match(line)
+        if not m:
+            continue
+        indent = m.group(1)
+        end = i + 1
+        last_content = i + 1
+        for j in range(i + 1, len(lines)):
+            if not lines[j].strip():
+                end = j + 1
+                continue
+            if len(lines[j]) - len(lines[j].lstrip()) <= len(indent):
+                break
+            end = last_content = j + 1
+        return i + 1, last_content, indent
+    return None
+
+
+def _set_block_value(lines: list[str], start: int, end: int,
+                     key: str, value: str) -> bool | None:
+    """Rewrite `key`'s value within `lines[start:end]`, keeping any comment.
+
+    Returns True if the line changed, False if it was already correct, and None
+    if the key is not in the block — three outcomes the caller must tell apart,
+    since "not there" means insert and "already correct" must not dirty the file.
+
+    The trailing-newline group keeps CRLF intact. A rewrite that normalized line
+    endings would show up as `crlf_line_endings` from `cleanup` on a project that
+    legitimately uses them, which is the failure `write_plan`'s explicit
+    `lineterminator` exists to avoid at the CSV layer.
+    """
+    pattern = re.compile(rf'^(\s*{re.escape(key)}:)([^#\n\r]*)(#.*?)?(\r?\n?)$')
+    for i in range(start, min(end, len(lines))):
+        m = pattern.match(lines[i])
+        if not m:
+            continue
+        comment = f'  {m.group(3)}' if m.group(3) else ''
+        newline = m.group(4) or '\n'
+        rewritten = f'{m.group(1)} {value}{comment}{newline}'
+        if rewritten == lines[i]:
+            return False
+        lines[i] = rewritten
+        return True
+    return None
 
 
 # ============================================================================

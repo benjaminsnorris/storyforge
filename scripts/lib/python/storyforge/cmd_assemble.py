@@ -24,7 +24,7 @@ import time
 
 from storyforge.common import (
     detect_project_root, log, read_yaml_field, check_file_exists,
-    get_plugin_dir, install_signal_handlers,
+    get_plugin_dir, install_signal_handlers, update_artifact_entry,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
@@ -428,18 +428,14 @@ def main(argv=None):
     # ========================================================================
     from datetime import date
     today = date.today().isoformat()
-    yaml_path = os.path.join(project_dir, 'storyforge.yaml')
-    if os.path.isfile(yaml_path):
-        with open(yaml_path) as f:
-            content = f.read()
-        # Update chapter_map and manuscript artifacts
-        for artifact in ('chapter_map', 'manuscript'):
-            pattern = rf'({artifact}:.*?)(exists: false)'
-            content = re.sub(pattern, r'\1exists: true', content, flags=re.DOTALL)
-            pattern = rf'({artifact}:.*?updated:).*'
-            content = re.sub(pattern, rf'\1 "{today}"', content, flags=re.DOTALL)
-        with open(yaml_path, 'w') as f:
-            f.write(content)
+    # One bounded, line-scoped edit per artifact. The whole-file `re.sub` this
+    # replaces ran under `re.DOTALL` with a trailing unanchored `.*`, so it
+    # matched to end of file and deleted every block after the first `updated:`
+    # it found — `phase`, `parts`, and the entire `production` section — and the
+    # commit below then staged the truncated file (#276).
+    for artifact in ('chapter_map', 'manuscript'):
+        update_artifact_entry(project_dir, artifact,
+                              exists=True, updated=today)
 
     update_pr_task('Generate formats', project_dir, pr_number)
 
