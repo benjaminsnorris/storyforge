@@ -515,9 +515,12 @@ def generate_epub_metadata(project_dir: str) -> str:
     style is kept and `common.yaml_single_quote` doubles the apostrophes, which
     is how YAML spells one.
 
-    `_unquote` stays in front of it as a defensive strip. The readers already
-    remove quotes, so it is a no-op on well-formed input; what it still buys is
-    that a value which somehow arrives quoted is not re-quoted into the output.
+    `_unquote` stays in front of it, and is **not** dead code. On well-formed
+    input it is a no-op, because the readers already strip quotes — but
+    `parse_yaml_scalar`'s malformed-quoting fallback deliberately returns a value
+    that is *still quoted* (`""Unicorn Tail""` → `"Unicorn Tail"`), so removing
+    this would ship an epub title with visible quotation marks in it. That
+    fallback path is the reason it is here.
     """
     title = _yaml_field(project_dir, 'project.title', 'title') or 'Untitled'
     author = read_production_field(project_dir, 'author') or 'Anonymous'
@@ -547,6 +550,17 @@ def generate_epub_metadata(project_dir: str) -> str:
         full_path = os.path.join(project_dir, cover_image)
         if os.path.isfile(full_path):
             lines.append(f'cover-image: {_quoted(full_path)}')
+        else:
+            # A declared-but-missing cover was dropped in silence, and this was
+            # the one cover consumer in the repo that stayed quiet about it —
+            # `_resolve_cover_path` warns, and `require_cover_asset` refuses
+            # outright, because Bookshelf nulls a live book's cover from a
+            # manifest that omits one. An epub built without the cover the author
+            # declared is a wrong artifact that looks like a right one.
+            from storyforge.common import log as _log
+            _log(f'WARNING: production.cover_image names {cover_image!r}, '
+                 f'which does not exist at {full_path} — the epub will be '
+                 f'built with no cover image. Fix the path or remove the key.')
 
     # Series metadata
     series_name = _yaml_field(project_dir, 'project.series_name')

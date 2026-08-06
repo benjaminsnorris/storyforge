@@ -701,6 +701,35 @@ class TestYamlSingleQuote:
         assert yaml_single_quote('a\tb') == "'a\tb'"
         assert yaml_single_quote('The\xa0Lantern Folk') == "'The\xa0Lantern Folk'"
 
+    def test_the_reader_and_the_writer_agree(self):
+        """The invariant the four-way parser parametrization does not cover.
+
+        `parse_yaml_scalar` and `yaml_single_quote` are a reader/writer pair over
+        one wire format, and #277 *was* those two halves disagreeing — the PR
+        established "one reader" rigorously and asserted nothing about
+        reader-matches-writer. Every value here is one that could plausibly break
+        the round trip: a leading `#`, an embedded `#`, a colon, a list marker, a
+        YAML keyword, nothing but apostrophes.
+        """
+        for value in ['#ff8800', 'a#b', 'a: b', '- item', 'null', 'true', '42',
+                      "'''", "O'Brien", 'has "double" quotes', 'my  cover.png',
+                      '', ' leading', 'trailing ']:
+            emitted = yaml_single_quote(value)
+            assert parse_yaml_scalar(emitted) == value.strip(), (
+                f'{value!r} did not survive {emitted!r}')
+
+    def test_double_quoting_is_deliberately_not_idempotent(self):
+        """Applying the writer twice yields *valid* YAML with a wrong value.
+
+        Pinned because that is the dangerous shape: nothing raises, nothing looks
+        malformed, and the value has gained quotes. A `NewType` would not catch
+        it — a NewType stays assignable to `str` — so the guard is this test.
+        """
+        once = yaml_single_quote("O'Brien")
+        twice = yaml_single_quote(once)
+        assert parse_yaml_scalar(twice) == once
+        assert parse_yaml_scalar(twice) != "O'Brien"
+
     def test_it_round_trips_through_an_independent_parser(self):
         for value in ["Children's book", "O'Brien", 'plain',
                       "a'b''c", 'has "double" quotes', '#ff8800']:
@@ -798,6 +827,54 @@ class TestEpubMetadataEscaping:
         parsed = parse_flat_metadata(generate_epub_metadata(project))
         assert parsed['belongs-to-collection'] == 'The Mapmaker Trilogy'
         assert parsed['group-position'] == '2'
+
+    def test_a_declared_but_missing_cover_warns(self, tmp_path, capsys):
+        """It was dropped in silence — the one quiet cover consumer in the repo.
+
+        `_resolve_cover_path` warns and `require_cover_asset` refuses, because an
+        epub built without the cover the author declared is a wrong artifact that
+        looks like a right one.
+        """
+        project = self._write_project_yaml(tmp_path, (
+            'project:\n'
+            '  title: "A Book"\n'
+            'production:\n'
+            '  author: Ben Norris\n'
+            '  cover_image: production/nope.png\n'))
+
+        metadata = generate_epub_metadata(project)
+        assert 'cover-image' not in metadata
+        out = capsys.readouterr().out
+        assert 'WARNING' in out and 'production/nope.png' in out
+
+    def test_a_cover_that_exists_is_emitted_without_a_warning(self, tmp_path):
+        (tmp_path / 'production').mkdir()
+        (tmp_path / 'production' / 'cover.png').write_bytes(b'x')
+        project = self._write_project_yaml(tmp_path, (
+            'project:\n'
+            '  title: "A Book"\n'
+            'production:\n'
+            '  author: Ben Norris\n'
+            '  cover_image: production/cover.png\n'))
+
+        parsed = parse_flat_metadata(generate_epub_metadata(project))
+        assert parsed['cover-image'].endswith('production/cover.png')
+
+    def test_a_cover_path_with_a_double_space_is_not_altered(self, tmp_path):
+        """The path is validated with `os.path.isfile` and then emitted, so
+        folding whitespace verified a real file and wrote a different one."""
+        (tmp_path / 'production').mkdir()
+        (tmp_path / 'production' / 'my  cover.png').write_bytes(b'x')
+        project = self._write_project_yaml(tmp_path, (
+            'project:\n'
+            '  title: "A Book"\n'
+            'production:\n'
+            '  author: Ben Norris\n'
+            '  cover_image: "production/my  cover.png"\n'))
+
+        parsed = parse_flat_metadata(generate_epub_metadata(project))
+        assert parsed['cover-image'].endswith('production/my  cover.png')
+        assert os.path.isfile(parsed['cover-image'])
 
     def test_a_commented_title_does_not_carry_its_comment(self, tmp_path):
         """The earlier symptom #277 mentions: the project title carried its
