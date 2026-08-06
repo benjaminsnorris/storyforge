@@ -1320,13 +1320,20 @@ def _split_author_contrast(author: str,
     """
     if not author:
         return '', ''
-    lowered = {i.lower() for i in plan_ids if i}
+    ids = sorted((i for i in plan_ids if i), key=len, reverse=True)
+    # Word-boundary search per id, **not** tokenize-and-strip-punctuation. The
+    # first cut stripped a fixed set of characters off each word and compared
+    # sets, which missed the possessive: a real book's cell read "deliberately
+    # unlike LF-07's hard outdoor light boundary", and `LF-07's` does not strip to
+    # `LF-07` because `s` is not punctuation. `\b` holds after the `7` regardless
+    # of what follows, which is what makes this robust against every attachment —
+    # possessives, hyphens, parentheses — instead of an enumerated list of them.
+    pattern = (re.compile(r'\b(?:%s)\b' % '|'.join(re.escape(i) for i in ids),
+                          re.IGNORECASE) if ids else None)
     kept: list[str] = []
     dropped: list[str] = []
     for sentence in _sentences(author):
-        words = {w.strip('`*_"\'.,;:()[]').lower()
-                 for w in sentence.split()}
-        names_id = bool(words & lowered) or bool(
+        names_id = bool(pattern and pattern.search(sentence)) or bool(
             _BACKTICKED_ID_RE.search(sentence))
         (dropped if names_id else kept).append(sentence)
     return ' '.join(kept).strip(), ' '.join(dropped).strip()

@@ -414,6 +414,28 @@ def test_no_illustration_id_reaches_any_uploaded_prompt(in_project):
                 f'cannot see it, and this file is uploaded whole')
 
 
+def test_a_possessive_illustration_id_is_still_caught(in_project):
+    """The form a real book actually used, and the one a tokenizing check missed.
+
+    *The Lantern Folk*'s `LF-10` cell read "deliberately unlike LF-07's hard
+    outdoor light boundary". `LF-07's` does not strip to `LF-07` — `s` is not
+    punctuation — so a strip-and-compare check passed it straight into the
+    upload. Word-boundary matching holds after the `7` whatever follows it, which
+    is why it is a regex per id rather than an enumerated list of attachments.
+    """
+    rows = ill.read_plan(in_project)
+    rows[1]['contrast'] = (
+        "Unlike the-finest-cartographer's hard outdoor light. Keep it close.")
+    ill.write_plan(in_project, rows)
+
+    entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
+    entry = entries['the-blank-page']
+
+    assert 'the-finest-cartographer' not in entry['contrast']
+    assert "the-finest-cartographer's" in entry['contrast_withheld']
+    assert 'Keep it close.' in entry['contrast']
+
+
 def test_a_withheld_contrast_sentence_is_disclosed_not_dropped(in_project):
     """Silently losing the author's comparison would be the other failure."""
     rows = ill.read_plan(in_project)
