@@ -19,8 +19,9 @@ import sys
 import time
 
 from storyforge.common import (
-    detect_project_root, log, set_log_file, read_yaml_field, select_model,
-    get_coaching_level, install_signal_handlers,
+    detect_project_root, log, set_log_file, read_yaml_field,
+    rewrite_preserving_newlines, select_model, get_coaching_level,
+    install_signal_handlers,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr, commit_and_push,
@@ -660,16 +661,25 @@ def _log_api_usage(log_file: str, operation: str, target: str, model: str,
 
 
 def _replace_in_file(filepath: str, pattern: str, replacement: str) -> None:
-    """Regex-replace in a file (like sed -i)."""
+    """Regex-replace in a file (like sed -i), leaving line endings alone.
+
+    `newline=''` on both ends because the only caller edits `storyforge.yaml`
+    (advancing `phase`), and this was the **third** writer of that file — the
+    other two preserve endings deliberately (#276, #314), so a text-mode
+    read/write here normalized CRLF to LF for the whole file as a side effect of
+    changing one word. That is #314 in a different command, and it silently
+    falsified the claim that nothing converts this file any more.
+
+    Delegates to `common.rewrite_preserving_newlines`, shared with the two other
+    shallow editors of this file (`cmd_elaborate`'s phase advance and
+    `cmd_migrate_medium`'s medium swap). All three were text-mode read/write, so
+    each converted the whole file as a side effect of changing one word; sharing
+    one implementation is what stops a fourth from getting it wrong again.
+    """
     import re
-    if not os.path.isfile(filepath):
-        return
-    with open(filepath) as f:
-        content = f.read()
-    new_content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
-    if new_content != content:
-        with open(filepath, 'w') as f:
-            f.write(new_content)
+    rewrite_preserving_newlines(
+        filepath,
+        lambda text: re.sub(pattern, replacement, text, flags=re.MULTILINE))
 
 
 def _safe_remove(path: str) -> None:
