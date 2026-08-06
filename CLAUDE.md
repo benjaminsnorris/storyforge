@@ -32,7 +32,10 @@ Before writing new code, check if a shared function already exists.
 **common.py:**
 - `detect_project_root()` — returns project directory path
 - `log(msg)` — timestamped logging to stdout + optional log file
-- `read_yaml_field(field, project_dir)` — read from storyforge.yaml
+- `read_yaml_field(field, project_dir)` — read from storyforge.yaml. **Note the argument order**: `prompts.read_yaml_field(yaml_file, field)` is a *different* function with the two swapped, and `assembly` uses that one.
+- `parse_yaml_scalar(raw)` — the one parser for the text after a `key:`. Strips the inline comment (YAML rules: a `#` only opens one at the start or after whitespace, and never inside quotes) and unescapes the quoting. `common._strip_yaml_value`, `prompts._strip_yaml_value` and `assembly._strip_yaml_quotes` all delegate to it — there were three quote-stripping copies, none of which removed a comment, so an inline comment reached the epub as part of the value and an *empty* field carrying a template comment read as truthy (#277). Malformed quoting deliberately degrades to the old lenient strip rather than to `''`, so a typo is a visible wrong title instead of a silently missing one.
+- `yaml_single_quote(value)` — escape a value for emission into YAML we generate, by doubling apostrophes. `generate_epub_metadata` wrapped values in single quotes with no escaping, so one apostrophe (`Children's`) closed the string early and pandoc exited 64 (#277).
+- `update_artifact_entry(project_dir, artifact, exists=, updated=)` — set those keys on one `artifacts:` entry **in place**, returning whether the file changed. Use this rather than a regex over the whole file: the code it replaced was a `re.sub` under `re.DOTALL` ending in an unanchored `.*`, which matched to end of file, so `assemble` deleted `phase`, `parts`, and the entire `production` block and then committed the truncation (#276). Preserves blank lines, key order, inline comments, and CRLF endings; inserts a missing key inside the block rather than skipping it.
 - `select_model(task_type)` — returns the right model (opus for creative, sonnet for analytical)
 - `select_revision_model(pass_name, purpose)` — model for revision passes
 - `get_coaching_level(project_dir)` — returns full/coach/strict
