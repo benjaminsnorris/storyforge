@@ -24,9 +24,9 @@ import time
 from typing import Final, Literal
 
 from storyforge.common import (
-    detect_project_root, log, read_yaml_field, select_model,
-    install_signal_handlers, get_plugin_dir, build_shared_context,
-    get_medium, get_coaching_level, CoachingLevel,
+    detect_project_root, log, read_yaml_field, rewrite_preserving_newlines,
+    select_model, install_signal_handlers, get_plugin_dir,
+    build_shared_context, get_medium, get_coaching_level, CoachingLevel,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
@@ -1898,12 +1898,14 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         current_phase = read_yaml_field('phase', project_dir)
         if current_phase in (stage, 'spine', 'development'):
             yaml_path = os.path.join(project_dir, 'storyforge.yaml')
-            if os.path.isfile(yaml_path):
-                with open(yaml_path) as f:
-                    content = f.read()
-                content = re.sub(r'^phase:.*', f'phase: {next_phase}', content, flags=re.MULTILINE)
-                with open(yaml_path, 'w') as f:
-                    f.write(content)
+            # `rewrite_preserving_newlines` rather than a text-mode read/write:
+            # this was one of the writers that converted the whole file's line
+            # endings as a side effect of changing one word — and it *commits*
+            # the result, which is what made it the worst of the three (#314).
+            if rewrite_preserving_newlines(
+                    yaml_path,
+                    lambda text: re.sub(r'^phase:.*', f'phase: {next_phase}',
+                                        text, flags=re.MULTILINE)):
                 commit_and_push(project_dir, f'Elaborate: advance phase to {next_phase}',
                                 ['storyforge.yaml'])
                 log(f'Phase advanced to: {next_phase}')

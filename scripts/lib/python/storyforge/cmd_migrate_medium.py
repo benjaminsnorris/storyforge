@@ -16,7 +16,10 @@ import shutil
 import sys
 from datetime import datetime
 
-from storyforge.common import detect_project_root, get_medium, get_plugin_dir, log
+from storyforge.common import (
+    detect_project_root, get_medium, get_plugin_dir, log,
+    rewrite_preserving_newlines,
+)
 from storyforge.git import commit_and_push, ensure_on_branch
 
 
@@ -153,32 +156,34 @@ def step3_snapshot_state(
 def step4_update_yaml(project_dir: str, target: str, dry_run: bool) -> None:
     """Update project.medium in storyforge.yaml to the target value."""
     yaml_path = os.path.join(project_dir, 'storyforge.yaml')
-    with open(yaml_path, encoding='utf-8') as f:
-        content = f.read()
 
     import re
-    # Replace existing medium field if present
-    if re.search(r'^\s+medium:\s*', content, re.MULTILINE):
-        new_content = re.sub(
-            r'^(\s+medium:\s*).*$',
-            rf'\g<1>{target}',
-            content,
-            flags=re.MULTILINE,
-        )
-    else:
+
+    def _set_medium(content: str) -> str:
+        # Replace existing medium field if present
+        if re.search(r'^\s+medium:\s*', content, re.MULTILINE):
+            return re.sub(
+                r'^(\s+medium:\s*).*$',
+                rf'\g<1>{target}',
+                content,
+                flags=re.MULTILINE,
+            )
         # Insert medium: under the `project:` block.
         # Match `project:` followed by anything up to and including the newline,
         # so projects with `project: # main config` style yaml still get the field
         # inserted under the project block.
-        pattern = re.compile(r'^(project:[^\n]*\n)', re.MULTILINE)
-        new_content = pattern.sub(
+        return re.sub(
+            r'^(project:[^\n]*\n)',
             rf'\g<1>  medium: {target}\n',
             content,
+            flags=re.MULTILINE,
         )
 
     if not dry_run:
-        with open(yaml_path, 'w', encoding='utf-8') as f:
-            f.write(new_content)
+        # Via the shared helper, which preserves line endings. This was one of
+        # the three shallow editors that converted the whole file as a side
+        # effect of changing one word (#314).
+        rewrite_preserving_newlines(yaml_path, _set_medium)
         # Post-write verification: confirm medium was actually written correctly
         actual = get_medium(project_dir)
         if actual != target:

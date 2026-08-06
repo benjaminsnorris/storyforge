@@ -13,7 +13,8 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Final, NamedTuple
+from collections.abc import Callable
+from typing import Final, Literal, NamedTuple
 
 
 # ============================================================================
@@ -92,8 +93,19 @@ def read_yaml_field(field: str, project_dir: str | None = None) -> str:
     if not os.path.isfile(yaml_file):
         return ''
 
-    with open(yaml_file) as f:
-        lines = f.readlines()
+    # Unreadable is treated as absent, matching the `isfile` guard above and
+    # `visualize._read_yaml_field`'s existing precedent. Not silence in the sense
+    # this codebase objects to: `cmd_cleanup`'s `_check_crlf` and
+    # `_check_yaml_scalars` both report the file as unreadable, so the condition
+    # is stated where an author will read it. Raising here is what must not
+    # happen — this is called several times per command by nearly every command,
+    # including from inside `build_cleanup_report`, where one exception discards
+    # every other finding *and* the report file (#298).
+    try:
+        with open(yaml_file, encoding='utf-8') as f:
+            lines = f.readlines()
+    except (OSError, UnicodeDecodeError):
+        return ''
 
     if '.' in field:
         parent, child = field.split('.', 1)
@@ -163,16 +175,17 @@ def parse_yaml_scalar(raw: str) -> str:
     return _strip_inline_comment(val)
 
 
-def _parse_quoted_scalar(val: str) -> str | None:
-    """Read a quoted YAML scalar, or None if the quoting is malformed.
+def _closing_quote_index(val: str) -> int | None:
+    """Index of the quote that closes the scalar `val` opens with, or None.
 
-    Scans for the closing quote rather than testing `val[-1]`, which is what the
-    three copies of this did: comparing first and last character means a quoted
-    value followed by a comment (`"A"  # note`) fails the test and is returned
-    whole — quotes, comment, and all.
+    Extracted so `_parse_quoted_scalar` and `yaml_scalar_issue` scan the same
+    way. Two scanners would be the #277 shape again — the reader and the reporter
+    disagreeing about what is malformed, so `cleanup` says a value is fine while
+    the parser is falling back on it.
 
-    Malformed means either no closing quote, or trailing content after it that
-    is not a comment. Both return None so the caller can fall back.
+    Scans rather than testing `val[-1]`, which is what the four pre-#277 copies
+    did: comparing first and last character means a quoted value followed by a
+    comment (`"A"  # note`) fails the test and is treated as unquoted.
     """
     quote = val[0]
     i = 1
@@ -184,14 +197,27 @@ def _parse_quoted_scalar(val: str) -> str | None:
             if quote == "'" and val[i + 1:i + 2] == "'":
                 i += 2  # '' is an escaped apostrophe in YAML
                 continue
-            rest = val[i + 1:].strip()
-            if rest and not rest.startswith('#'):
-                return None
-            inner = val[1:i]
-            return (inner.replace("''", "'") if quote == "'"
-                    else _unescape_double_quoted(inner))
+            return i
         i += 1
     return None
+
+
+def _parse_quoted_scalar(val: str) -> str | None:
+    """Read a quoted YAML scalar, or None if the quoting is malformed.
+
+    Malformed means either no closing quote, or trailing content after it that
+    is not a comment. Both return None so the caller can fall back;
+    `yaml_scalar_issue` is what tells the two apart for reporting.
+    """
+    close = _closing_quote_index(val)
+    if close is None:
+        return None
+    rest = val[close + 1:].strip()
+    if rest and not rest.startswith('#'):
+        return None
+    inner = val[1:close]
+    return (inner.replace("''", "'") if val[0] == "'"
+            else _unescape_double_quoted(inner))
 
 
 def _strip_inline_comment(val: str) -> str:
@@ -200,6 +226,156 @@ def _strip_inline_comment(val: str) -> str:
         return ''
     m = re.search(r'\s#', val)
     return val[:m.start()].strip() if m else val
+
+
+def detect_newline(text: str) -> Literal['\n', '\r\n']:
+    """The line terminator to use when writing a line into `text`.
+
+    The one such predicate, for the reason `parse_yaml_scalar` is: three writers
+    of `storyforge.yaml` each deciding this for themselves is three chances to
+    disagree, and they did. `update_artifact_entry` tested the *first* line while
+    `migrate_storyforge_yaml` tested whether the file contained CRLF *anywhere*,
+    so on a file whose first line is LF and whose later lines are CRLF the two
+    inserted different terminators — while a docstring claimed they shared one
+    policy.
+
+    Keys on the first terminator rather than a majority vote. It is deterministic,
+    cheap, and on the only file this is used for the first line is `project:`,
+    written by the template. A genuinely mixed file is **reported** by
+    `cmd_cleanup._check_crlf` rather than repaired here; guessing which style such
+    a file "meant" is exactly the re-resolution this codebase declines to do
+    elsewhere.
+    """
+    i = text.find('\n')
+    if i == -1:
+        return '\n'
+    return '\r\n' if i and text[i - 1] == '\r' else '\n'
+
+
+def rewrite_preserving_newlines(path: str,
+                                transform: 'Callable[[str], str]') -> bool:
+    """Apply `transform` to `path`'s text without changing its line endings.
+
+    Returns True if the file was rewritten. `transform` receives **LF-normalized**
+    text and returns the new text; the endings are restored after.
+
+    That normalization is the point. `.` matches `\\r`, so a caller's
+    `^(\\s*phase:).*` silently eats the CR off the line it edits and leaves the
+    file mixed — and every future pattern carries the same trap. Normalizing once
+    here means no caller has to know about `\\r`.
+
+    The three shallow `storyforge.yaml` editors share this: `cmd_write`'s and
+    `cmd_elaborate`'s phase advances and `cmd_migrate_medium`'s medium swap. All
+    three were text-mode read/write, so each converted the whole file's endings as
+    a side effect of changing one word — #314 in three more commands, and between
+    them they falsified the claim that nothing converts this file (twice, because
+    the first fix found only one of them).
+
+    **Not** for `cmd_cleanup.migrate_storyforge_yaml` or
+    `common.update_artifact_entry`: both compare verbatim bytes to decide whether
+    to write at all, and both insert whole lines, so they need the raw text and
+    `detect_newline` rather than a normalize-and-restore round trip.
+
+    A genuinely mixed file comes out uniform, at its first line's style. That is
+    the one case this does not strictly preserve, and it is deliberate: any choice
+    changes something, uniform is more useful than mixed, and
+    `cmd_cleanup._check_crlf` reports the file either way.
+    """
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path, encoding='utf-8', newline='') as f:
+            content = f.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        log(f'WARNING: could not read {path} to edit it '
+            f'({type(exc).__name__}: {exc}). Left unchanged.')
+        return False
+
+    nl = detect_newline(content)
+    updated = transform(content.replace('\r\n', '\n'))
+    if nl == '\r\n':
+        updated = updated.replace('\n', '\r\n')
+    if updated == content:
+        return False
+
+    try:
+        with open(path, 'w', encoding='utf-8', newline='') as f:
+            f.write(updated)
+    except OSError as exc:
+        log(f'WARNING: could not write {path} '
+            f'({type(exc).__name__}: {exc}). Left unchanged.')
+        return False
+    return True
+
+
+#: What `yaml_scalar_issue` can find wrong with one scalar. A Literal rather than
+#: bare strings because `cmd_cleanup` maps each to its own finding kind, detail
+#: and remedy, and the three remedies genuinely differ — the reason
+#: `_artifact_span_failure` splits its causes too.
+YamlScalarIssue = Literal['unterminated_quote', 'trailing_after_quote',
+                          'comment_truncated']
+
+#: A `#` followed immediately by a non-space is far more likely part of a value
+#: (`Book #2`, `#ff8800`) than the start of a comment, which is conventionally
+#: written `# like this`. A heuristic, not a rule: `Book # 2` reads as a comment
+#: and is not reported. Deliberately conservative in that direction, because the
+#: shipped template uses real trailing comments (6 of its 90 key lines, e.g.
+#: `genre_preset:              # default, literary-fiction, …`) and reporting
+#: those would put a finding on every project on every run. Tests assert zero
+#: findings across both the template and the fixture.
+_LIKELY_VALUE_HASH = re.compile(r'#\S')
+
+
+def yaml_scalar_issue(raw: str) -> YamlScalarIssue | None:
+    """Say whether a scalar was probably not read the way its author meant.
+
+    Reporting only — this **never** changes what `parse_yaml_scalar` returns, and
+    must not. Both behaviours it flags are deliberate:
+
+    - **Malformed quoting** falls back to a lenient strip rather than the strict
+      empty string, because a typo becoming a silently missing title is worse
+      than a visibly wrong one.
+    - **Comment stripping** is correct YAML: ` #` opens a comment in an unquoted
+      scalar. Loosening it would reintroduce #277, where an unset field carrying
+      a template comment read as a truthy value.
+
+    The gap this closes is that both are *silent* (#315). `Book #2` becoming
+    `Book` is spec-correct and still loses an author's text with no signal until
+    it shows up in a produced epub, and the fix — quoting the value — is one
+    character and not obvious.
+
+    Not a log call, deliberately: `parse_yaml_scalar` runs on every field read of
+    every command, so a WARNING there would fire repeatedly for one typo and land
+    in the wrong channel. `cleanup`'s report is the durable artifact, and this is
+    the predicate it asks.
+    """
+    val = raw.strip()
+    if not val:
+        return None
+
+    if val[0] in ('"', "'"):
+        close = _closing_quote_index(val)
+        if close is None:
+            return 'unterminated_quote'
+        rest = val[close + 1:].strip()
+        if rest and not rest.startswith('#'):
+            return 'trailing_after_quote'
+        return None
+
+    # `stripped` is deliberately *not* required to be non-empty. A value that is
+    # entirely a `#`-word — `palette: #2b1a0f` — reads as the empty string, which
+    # loses the whole value rather than a suffix, and is the worse case of the two.
+    # Guarding on `stripped` short-circuited before the heuristic and made
+    # `#ff8800`, the example named in `_LIKELY_VALUE_HASH`'s own comment,
+    # structurally unreachable. The comment-only case a template ships
+    # (`series_name:  # Optional: …`) is excluded by the heuristic itself, not by
+    # this guard, because it has a space after the `#`.
+    stripped = _strip_inline_comment(val)
+    if stripped != val:
+        removed = val[len(stripped):].lstrip()
+        if _LIKELY_VALUE_HASH.match(removed):
+            return 'comment_truncated'
+    return None
 
 
 #: The single-character escapes a double-quoted YAML scalar may carry.
@@ -343,8 +519,8 @@ def update_artifact_entry(project_dir: str, artifact: str, *,
     # normalizing the *whole* file as a side effect of editing two values.
     # Note this is deliberately the opposite policy from `write_plan`, which
     # *forces* LF for CSVs: this function edits a file the author wrote, so it
-    # preserves what it finds, and `cleanup`'s `crlf_line_endings` check does not
-    # look at storyforge.yaml at all.
+    # preserves what it finds, and `cleanup`'s `crlf_line_endings` check reports
+    # storyforge.yaml (since #314) rather than anything converting it.
     with open(yaml_file, newline='') as f:
         lines = f.readlines()
 
@@ -362,8 +538,10 @@ def update_artifact_entry(project_dir: str, artifact: str, *,
 
     start, end, child_indent = span
     # An inserted line has to match the file it lands in, or a CRLF project
-    # gains one stray LF line and `cleanup` reports mixed endings.
-    newline = '\r\n' if lines[0].endswith('\r\n') else '\n'
+    # gains one stray LF line and `cleanup` reports mixed endings. Shared with
+    # the other two writers of this file so they cannot disagree — see
+    # `detect_newline`.
+    newline = detect_newline(''.join(lines))
     # One ordered list of (key, value), in the order the template lists them.
     # This was a `Final` tuple of key names plus a dict literal plus the keyword
     # parameters — three places to keep in sync, guarding nothing a caller could
@@ -685,8 +863,6 @@ def select_revision_model(pass_name: str, purpose: str = '') -> str:
 # ============================================================================
 # Coaching level
 # ============================================================================
-
-from typing import Literal
 
 CoachingLevel = Literal['full', 'coach', 'strict']
 

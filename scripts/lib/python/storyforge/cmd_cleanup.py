@@ -25,7 +25,12 @@ from storyforge.canon import CANON_DIR, CanonFinding, validate_canon_directory
 from storyforge.illustrations import (
     OPTIONAL_PLAN_COLUMNS, PLAN_COLUMNS, IllustrationFindingKind,
 )
-from storyforge.common import detect_project_root, get_medium, log, read_yaml_field
+from typing import Final, NamedTuple, get_args
+
+from storyforge import common
+from storyforge.common import (
+    csv_safe, detect_project_root, get_medium, log, read_yaml_field,
+)
 from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge.parsing import clean_scene_content, extract_single_scene
 from storyforge.visual_state import STATE_COLUMNS
@@ -385,21 +390,84 @@ def dedup_pipeline_reviews(project_dir: str) -> None:
 # storyforge.yaml migration
 # ============================================================================
 
-def migrate_storyforge_yaml(project_dir: str) -> None:
+def migrate_storyforge_yaml(project_dir: str,
+                            disk_root: str | None = None) -> None:
+    """Add missing sections and correct artifact flags, in place.
+
+    `disk_root` is where artifact paths are resolved when deciding `exists:`,
+    defaulting to `project_dir`. It exists for `--dry-run`, which previews the
+    migration by copying the yaml into a sandbox: the sandbox held `reference/`
+    but never `manuscript/`, so `exists:` resolved differently there than in the
+    real run. Harmless while every run rewrote the file, and an under-report once
+    the write became conditional — dry-run said nothing while the real run
+    changed the file.
+
+    **This closes one of two causes, not the whole problem.** Pointing the disk
+    checks at the real project fixes the sandbox's missing files, and the sandbox
+    now needs nothing copied into it. It cannot fix the other cause: `--dry-run`
+    previews each step against the state at *entry*, while the real run's steps
+    compose. Step 2 creates `manuscript/press-kit` (`EXPECTED_DIRS`), so in the
+    real run step 3 sees `manuscript/` exist and flips its `exists:` — and no
+    arrangement of the sandbox reproduces that, because dry-run deliberately did
+    not create the directory. `tests/commands/test_cmd_cleanup_dry_run.py`
+    demonstrates the surviving gap as a strict xfail. The fix is a planner both
+    modes consume rather than a re-run against a copy (#317).
+
+    **Writes only when something changed, and leaves line endings alone** (#314).
+
+    Both halves used to be wrong together, and they compounded. `modified` was
+    set unconditionally after the `exists` pass, so every run rewrote the file;
+    and both ends were opened in text mode, so Python's universal-newline
+    translation read CRLF as LF and wrote LF back. The result was that any
+    `storyforge cleanup` — over a project with nothing to fix — silently
+    normalized the whole file's line endings and produced a git diff.
+
+    That also defeated `common.update_artifact_entry`, which goes to some trouble
+    to preserve endings on the same file. The policy is now the same in both:
+    **preserve what the author has, and report it instead** — `_check_crlf`
+    covers `storyforge.yaml`, so an author who wants LF is told rather than
+    converted behind their back. That is this codebase's standing posture for
+    author-owned content (an ambiguous anchor is reported, not re-placed; a
+    superseded export directory is reported, not deleted), and a config file the
+    author hand-edits is squarely in it.
+
+    Preserving means the patterns below must tolerate CRLF, since `^artifacts:\\n`
+    does not match `artifacts:\\r\\n` — before this, the text-mode read hid that by
+    normalizing first, so a CRLF project would otherwise have silently stopped
+    receiving migrations. Inserted blocks use the file's own newline for the same
+    reason: emitting LF into a CRLF file would leave it mixed, which is worse
+    than either policy applied consistently.
+    """
     yaml_path = os.path.join(project_dir, 'storyforge.yaml')
     if not os.path.isfile(yaml_path):
         return
+    if disk_root is None:
+        disk_root = project_dir
 
-    with open(yaml_path) as f:
-        content = f.read()
+    # Guarded, `encoding=` stated, and reported rather than raised. `main` calls
+    # this at step 3 of 13 with no handler above it and `__main__._dispatch` has
+    # none either, so a latin-1 or unreadable storyforge.yaml took down the whole
+    # command — including the read-only report, which is `cleanup`'s actual
+    # product. Migration is optional tidying; the report is not. That inverts
+    # #313's call for `cmd_assemble`, where the expensive work came first.
+    try:
+        with open(yaml_path, encoding='utf-8', newline='') as f:
+            content = f.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        log(f'WARNING: could not read storyforge.yaml to migrate it '
+            f'({type(exc).__name__}: {exc}). Skipping the migration; the rest '
+            f'of cleanup still runs, and `_check_yaml_scalars` reports the same '
+            f'file as unreadable.')
+        return
 
-    modified = False
+    original = content
+    nl = common.detect_newline(content)
 
     # Move misplaced chapter_map to under artifacts
     if re.search(r'^chapter_map:', content, re.MULTILINE):
         # Extract values
         block_match = re.search(
-            r'^chapter_map:\n((?:  .+\n)*)', content, re.MULTILINE
+            r'^chapter_map:\r?\n((?:  .+\r?\n)*)', content, re.MULTILINE
         )
         if block_match:
             block_text = block_match.group(1)
@@ -417,42 +485,63 @@ def migrate_storyforge_yaml(project_dir: str) -> None:
                 if m:
                     cm_updated = m.group(1).strip()
 
-            # Remove top-level chapter_map block
-            content = re.sub(r'^chapter_map:\n(?:  .+\n)*', '', content, flags=re.MULTILINE)
+            # The relocation is all-or-nothing, because the removal and the
+            # re-insert are two independent regexes and the second can fail.
+            # With a top-level `chapter_map:` and no `artifacts:` block, the
+            # removal ran, the insert found no anchor, and the entry — path,
+            # dates and all — was deleted and written to disk. Silent data loss
+            # in `cleanup`, on a file whose silent truncation was #276, in the
+            # one branch no test in the suite reached.
+            relocated = re.sub(r'^chapter_map:\r?\n(?:  .+\r?\n)*', '', content,
+                               flags=re.MULTILINE)
             # Remove consecutive blank lines
-            content = re.sub(r'\n{3,}', '\n\n', content)
+            relocated = re.sub(r'(?:\r?\n){3,}', nl * 2, relocated)
 
-            # Insert under artifacts
-            insert_block = (
-                f'  chapter_map:\n'
-                f'    exists: {cm_exists}\n'
-                f'    path: {cm_path}\n'
-                f'    updated: {cm_updated}\n'
-            )
-            content = re.sub(
-                r'(^artifacts:\n)',
-                r'\1' + insert_block,
-                content,
+            # `cm_path` is author text from the file, so it must not reach
+            # `re.sub` as part of a replacement *template*, where a backslash
+            # reads as a group reference and either raises or corrupts. A
+            # function replacement takes the string literally. (The sibling
+            # insert below builds its path from a hardcoded list and could not
+            # hit this; this is the site that can.)
+            insert_block = nl.join([
+                '  chapter_map:',
+                f'    exists: {cm_exists}',
+                f'    path: {cm_path}',
+                f'    updated: {cm_updated}',
+                '',
+            ])
+            relocated, inserted = re.subn(
+                r'(^artifacts:\r?\n)',
+                lambda m: m.group(1) + insert_block,
+                relocated,
                 flags=re.MULTILINE,
             )
-            modified = True
+            if inserted:
+                content = relocated
+            else:
+                # No anchor to move it under. Leaving a misplaced top-level
+                # entry in place is harmless — nothing reads it — whereas
+                # deleting it destroys the only record of the path. The author is
+                # told to add the block by `_artifact_span_failure`.
+                log('WARNING: storyforge.yaml has a top-level `chapter_map:` '
+                    'but no `artifacts:` block to move it under, so it was left '
+                    'where it is. Add an `artifacts:` block and re-run.')
 
     # Add missing sections
     if not re.search(r'^scene_extensions:', content, re.MULTILINE):
-        content += '\nscene_extensions: []\n'
-        modified = True
+        content += nl.join(['', 'scene_extensions: []', ''])
 
     if not re.search(r'^evaluation:', content, re.MULTILINE):
-        content += '\nevaluation:\n  custom_evaluators: []\n'
-        modified = True
+        content += nl.join(['', 'evaluation:', '  custom_evaluators: []', ''])
 
     if not re.search(r'^production:', content, re.MULTILINE) and not re.search(r'^# production:', content, re.MULTILINE):
-        content += '\n# production:\n#   author: ""\n#   language: en\n#   scene_break: ornamental\n#   default_heading: numbered-titled\n'
-        modified = True
+        content += nl.join(['', '# production:', '#   author: ""',
+                            '#   language: en', '#   scene_break: ornamental',
+                            '#   default_heading: numbered-titled', ''])
 
     if not re.search(r'^parts:', content, re.MULTILINE) and not re.search(r'^# parts:', content, re.MULTILINE):
-        content += '\n# parts:\n#   - number: 1\n#     title: "Part One"\n'
-        modified = True
+        content += nl.join(['', '# parts:', '#   - number: 1',
+                            '#     title: "Part One"', ''])
 
     # Add missing artifact entries for files on disk
     artifact_files = [
@@ -464,21 +553,24 @@ def migrate_storyforge_yaml(project_dir: str) -> None:
         ('title_development', 'reference/title-development.md'),
     ]
     for aid, apath in artifact_files:
-        if os.path.isfile(os.path.join(project_dir, apath)):
+        if os.path.isfile(os.path.join(disk_root, apath)):
             if f'  {aid}:' not in content:
-                insert = (
-                    f'  {aid}:\n'
-                    f'    exists: true\n'
-                    f'    path: {apath}\n'
-                    f'    updated:\n'
-                )
+                insert = nl.join([
+                    f'  {aid}:',
+                    '    exists: true',
+                    f'    path: {apath}',
+                    '    updated:',
+                    '',
+                ])
+                # A function replacement for consistency with the `cm_path` site
+                # above, which is the one that can actually carry a backslash;
+                # `apath` here comes from the hardcoded list.
                 content = re.sub(
-                    r'(^artifacts:\n)',
-                    r'\1' + insert,
+                    r'(^artifacts:\r?\n)',
+                    lambda m, ins=insert: m.group(1) + ins,
                     content,
                     flags=re.MULTILINE,
                 )
-                modified = True
 
     # Fix exists flags based on disk
     def _fix_exists(match):
@@ -487,7 +579,7 @@ def migrate_storyforge_yaml(project_dir: str) -> None:
         if not path_match:
             return block
         apath = path_match.group(1).strip().strip('"')
-        disk_exists = os.path.exists(os.path.join(project_dir, apath))
+        disk_exists = os.path.exists(os.path.join(disk_root, apath))
         if disk_exists:
             block = re.sub(r'exists: false', 'exists: true', block)
         else:
@@ -495,16 +587,36 @@ def migrate_storyforge_yaml(project_dir: str) -> None:
         return block
 
     content = re.sub(
-        r'^  [a-z_]+:\n(?:    (?:exists|path|updated):.*\n)+',
+        r'^  [a-z_]+:\r?\n(?:    (?:exists|path|updated):.*\r?\n)+',
         _fix_exists,
         content,
         flags=re.MULTILINE,
     )
-    modified = True
 
-    if modified:
-        with open(yaml_path, 'w') as f:
-            f.write(content)
+    # Compare, rather than tracking a flag. The flag was set unconditionally
+    # right here, which is what made every run a rewrite; a comparison cannot
+    # drift out of step with the branches above the way a flag did. Verbatim
+    # bytes on both sides — that is what makes `newline=''` on the read
+    # load-bearing rather than decorative.
+    if content != original:
+        # Temp file plus `os.replace`, matching `illustrations`' ingest: a plain
+        # `open(..., 'w')` truncates before it writes, so a `PermissionError` or a
+        # full disk mid-write leaves a half-written storyforge.yaml. Truncating
+        # this file is #276 exactly, and a partial write is the worse version of
+        # it because there is no previous content left to compare against.
+        tmp_path = yaml_path + '.tmp'
+        try:
+            with open(tmp_path, 'w', encoding='utf-8', newline='') as f:
+                f.write(content)
+            os.replace(tmp_path, yaml_path)
+        except OSError as exc:
+            log(f'WARNING: could not write storyforge.yaml '
+                f'({type(exc).__name__}: {exc}). The file is unchanged.')
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
 
 # ============================================================================
@@ -1340,26 +1452,208 @@ def _check_illustrations(project_dir: str) -> list[dict]:
 
 
 def _check_crlf(project_dir: str) -> list[dict]:
-    """Check CSV files for CRLF line endings."""
+    """Report CRLF line endings in the CSVs and in `storyforge.yaml`.
+
+    `storyforge.yaml` was added in #314. It matters because all **three** commands
+    that write that file now preserve whatever endings they find —
+    `common.update_artifact_entry` (#276), this module's
+    `migrate_storyforge_yaml`, and `cmd_write._replace_in_file`, which advances
+    `phase` and was the one this fix nearly missed. So nothing converts the file
+    any more, and an author who wants LF has to be told.
+
+    Before #314 `cleanup` normalized it on every run, which is why no finding was
+    needed then and why the fix has to add one: removing a silent conversion
+    without reporting what it used to hide just moves the silence.
+    """
     findings: list[dict] = []
     dirty_files: list[str] = []
-    for rel_path in EXPECTED_CSV_SCHEMAS:
-        csv_path = os.path.join(project_dir, rel_path)
-        if not os.path.isfile(csv_path):
+    unreadable: list[str] = []
+    for rel_path in list(EXPECTED_CSV_SCHEMAS) + ['storyforge.yaml']:
+        path = os.path.join(project_dir, rel_path)
+        if not os.path.isfile(path):
             continue
-        with open(csv_path, 'rb') as f:
-            if b'\r\n' in f.read():
-                dirty_files.append(rel_path)
+        # Guarded, and this is the guard that actually matters: this check runs
+        # *before* `_check_yaml_scalars` in `build_cleanup_report`, so an
+        # unreadable file here killed the whole collector and no
+        # `working/cleanup-report.csv` was written at all — leaving
+        # `skills/forge/SKILL.md`'s `status=pending` scan to read the project as
+        # clean. The guard 40 lines below was dead on its own input.
+        try:
+            with open(path, 'rb') as f:
+                data = f.read()
+        except OSError as exc:
+            unreadable.append(f'{rel_path} ({type(exc).__name__})')
+            continue
+        if b'\r\n' in data:
+            dirty_files.append(rel_path)
+
+    if unreadable:
+        findings.append({
+            'type': 'unreadable_file', 'file': '; '.join(
+                p.split(' (')[0] for p in unreadable),
+            'category': 'structure',
+            'detail': csv_safe(f'{len(unreadable)} file(s) could not be read, '
+                               f'so their line endings and contents were not '
+                               f'checked: {", ".join(unreadable[:5])}'
+                               f'{"..." if len(unreadable) > 5 else ""}'),
+            'action': 'Check file permissions',
+            'severity': 'warning',
+        })
 
     if dirty_files:
         findings.append({
             'type': 'crlf_line_endings', 'file': '; '.join(dirty_files),
             'category': 'structure',
-            'detail': f'{len(dirty_files)} CSV file(s) have CRLF line endings: '
+            'detail': f'{len(dirty_files)} file(s) have CRLF line endings: '
                       f'{", ".join(dirty_files[:5])}'
                       f'{"..." if len(dirty_files) > 5 else ""}',
             'action': 'Normalize line endings to LF',
-            'command': "find reference working -name '*.csv' -exec sed -i '' $'s/\\r$//' {} +",
+            'command': "find reference working -name '*.csv' -exec sed -i '' $'s/\\r$//' {} + "
+                       "&& sed -i '' $'s/\\r$//' storyforge.yaml",
+            'severity': 'warning',
+        })
+    return findings
+
+
+class YamlScalarFinding(NamedTuple):
+    """How one `common.YamlScalarIssue` is reported.
+
+    A NamedTuple rather than a 3-tuple: three same-typed strings whose meaning
+    lives only in a comment is the ordering mix-up `canon.BlockTruncation` and
+    `common.ArtifactBlock` both exist to prevent — and swapping `detail` with
+    `action` here would tell an author with an unterminated quote to "remove the
+    text after the closing quote", which is a mutation a reviewer demonstrated
+    surviving the whole suite.
+    """
+    kind: str
+    detail: str
+    action: str
+
+
+#: One entry per `common.YamlScalarIssue`. Separate messages rather than one
+#: shared, because the three fixes genuinely differ — add a quote, remove trailing
+#: text, quote the whole value — and a shared remedy that fits one is the
+#: inert-advice problem `_artifact_span_failure` was split to avoid.
+#:
+#: Keyed by the Literal, not `str`, and asserted total below: the subscript at the
+#: bottom of `_check_yaml_scalars` is unguarded, so a member added to
+#: `YamlScalarIssue` and not to this dict is a `KeyError` out of
+#: `build_cleanup_report` — the single finding collector, which #298 is the
+#: standing reminder must never raise.
+_YAML_SCALAR_FINDINGS: Final[dict[common.YamlScalarIssue,
+                                  YamlScalarFinding]] = {
+    'unterminated_quote': YamlScalarFinding(
+        'yaml_unterminated_quote',
+        'the opening quote is never closed, so the value is read as plain text '
+        'with the quote character included',
+        'Close the quote, or remove it',
+    ),
+    'trailing_after_quote': YamlScalarFinding(
+        'yaml_trailing_after_quote',
+        'text follows the closing quote, so the whole line is read as plain '
+        'text rather than as the quoted value',
+        'Remove the text after the closing quote, or quote the whole value',
+    ),
+    'comment_truncated': YamlScalarFinding(
+        'yaml_value_truncated_by_comment',
+        'YAML reads " #" as the start of a comment, so everything from the '
+        '"#" onward is dropped from the value',
+        'Wrap the value in double quotes to keep the "#"',
+    ),
+}
+
+#: Totality, asserted at import. The subscript that reads this dict is unguarded
+#: and lives inside the single finding collector, so a member added to one
+#: declaration and not the other must fail loudly and immediately rather than as a
+#: `KeyError` mid-report. Same convention as `packet.BATCH_SLOTS`' `get_args` test.
+assert set(_YAML_SCALAR_FINDINGS) == set(get_args(common.YamlScalarIssue)), (
+    'every common.YamlScalarIssue needs an entry in _YAML_SCALAR_FINDINGS: '
+    f'{set(get_args(common.YamlScalarIssue)) ^ set(_YAML_SCALAR_FINDINGS)}')
+
+
+def _check_yaml_scalars(project_dir: str) -> list[dict]:
+    """Report `storyforge.yaml` values that were probably misread (#315).
+
+    Both conditions are *correct* parser behaviour that is nonetheless silent:
+    malformed quoting degrades leniently, and ` #` opens a comment. Neither can
+    change without reintroducing #277, so the fix is to say so — the same posture
+    as `canon_staleness_unchecked` and `--audit`'s "Not assessed": a value we may
+    not have read the way the author meant must not render identically to one we
+    did.
+
+    Warnings, not errors, and deliberately not a `validate` gate: the project
+    builds, and the affected key may be one nothing reads.
+
+    **Scope, stated precisely because the first version of this docstring was
+    wrong in both directions.** A `key: value` line indented 0–4 spaces is
+    examined, which is up to *two* levels of the file's 2-space nesting, not one.
+    The `- key: value` line that opens a list item is skipped, but a list item's
+    *continuation* keys are indented like any other and are examined — which is
+    right, since `parts[].title` reaches the epub through `read_part_field`.
+
+    Block scalars (`key: |`, `key: >`) are skipped along with their bodies. A body
+    line is not a `key: value` pair, and scanning one produced a finding naming a
+    key the author never wrote — a false claim about their file, which is worse
+    than the silence this check exists to remove.
+    """
+    yaml_path = os.path.join(project_dir, 'storyforge.yaml')
+    if not os.path.isfile(yaml_path):
+        return []
+
+    try:
+        with open(yaml_path, encoding='utf-8') as f:
+            lines = f.readlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        # Reported rather than raised: this is one check inside the single
+        # finding collector, and an unreadable file must not take down every
+        # other check in the report. The `ill.sha256_of` regression (#298).
+        return [{
+            'type': 'yaml_unreadable', 'file': 'storyforge.yaml',
+            'category': 'structure',
+            'detail': csv_safe(f'could not read storyforge.yaml to check its '
+                               f'values ({type(exc).__name__}: {exc})'),
+            'action': 'Check the file is readable and valid UTF-8',
+            'severity': 'warning',
+        }]
+
+    findings: list[dict] = []
+    block_indent: int | None = None
+    for number, line in enumerate(lines, start=1):
+        text = line.rstrip('\r\n')
+
+        # Inside a block scalar, every line is content until the indentation
+        # returns to the owning key's level or shallower.
+        if block_indent is not None:
+            if not text.strip():
+                continue
+            if len(text) - len(text.lstrip()) > block_indent:
+                continue
+            block_indent = None
+
+        m = re.match(r'^(\s{0,4})([A-Za-z_][\w-]*):(?:[ \t]+(\S.*?))?\s*$', text)
+        if not m:
+            continue
+        raw = m.group(3)
+        if not raw:
+            continue
+        if re.match(r'^[|>][-+]?\d*\s*$', raw):
+            block_indent = len(m.group(1))
+            continue
+        issue = common.yaml_scalar_issue(raw)
+        if issue is None:
+            continue
+        kind, detail, action = _YAML_SCALAR_FINDINGS[issue]
+        key = m.group(2)
+        findings.append({
+            'type': kind, 'file': 'storyforge.yaml',
+            'category': 'structure',
+            # csv_safe on the interpolated author text: the report is unquoted
+            # pipe-delimited, and a `|` in a value would shift every later column
+            # and empty the trailing `status` cell that forge scans for.
+            'detail': csv_safe(f'line {number}, `{key}`: {detail} — '
+                               f'read as `{common.parse_yaml_scalar(raw)}` '
+                               f'from `{raw}`'),
+            'action': action,
             'severity': 'warning',
         })
     return findings
@@ -1418,6 +1712,9 @@ def build_cleanup_report(project_dir: str) -> dict:
 
     # CRLF check
     all_findings.extend(_check_crlf(project_dir))
+
+    # storyforge.yaml values that were probably misread (#315)
+    all_findings.extend(_check_yaml_scalars(project_dir))
 
     # Stale ledger from #205 (pre-fix score runs)
     all_findings.extend(_check_stale_ledger(project_dir))
@@ -1626,11 +1923,10 @@ def main(argv=None):
         yaml_src = os.path.join(project_dir, 'storyforge.yaml')
         if os.path.isfile(yaml_src):
             shutil.copy2(yaml_src, os.path.join(tmp_dir, 'storyforge.yaml'))
-            ref_src = os.path.join(project_dir, 'reference')
-            ref_dst = os.path.join(tmp_dir, 'reference')
-            if os.path.isdir(ref_src):
-                shutil.copytree(ref_src, ref_dst)
-            migrate_storyforge_yaml(tmp_dir)
+            # Disk checks against the real project, not the sandbox. Copying
+            # `reference/` and not `manuscript/` made the preview resolve
+            # `exists:` differently from the real run, so it under-reported.
+            migrate_storyforge_yaml(tmp_dir, disk_root=project_dir)
             import filecmp
             if not filecmp.cmp(yaml_src, os.path.join(tmp_dir, 'storyforge.yaml')):
                 log('  Would migrate storyforge.yaml (missing sections, artifact flags)')
