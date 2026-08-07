@@ -19,13 +19,12 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 
 from storyforge.canon import CANON_DIR, CanonFinding, validate_canon_directory
 from storyforge.illustrations import (
     OPTIONAL_PLAN_COLUMNS, PLAN_COLUMNS, IllustrationFindingKind,
 )
-from typing import Final, NamedTuple, get_args
+from typing import Callable, Final, NamedTuple, get_args
 
 from storyforge import common
 from storyforge.common import (
@@ -188,41 +187,234 @@ EXPECTED_WORKING_FILES = set(
 
 
 # ============================================================================
+# The planner
+# ============================================================================
+#
+# `--dry-run` and the real run consume ONE computation per step, rather than
+# the real run mutating and the preview re-running that mutator against a copy
+# of the project (#317).
+#
+# Simulate-by-copying is only correct if the sandbox reproduces every piece of
+# external state the mutator consults, and it failed that twice. The sandbox
+# copied `reference/` but never `manuscript/`, so `exists:` resolved
+# differently there (#316). And the steps *compose*: step 2 creates
+# `manuscript/press-kit`, so in the real run step 3 sees `manuscript/` exist
+# and flips a flag — which no arrangement of the sandbox reproduces, because
+# dry-run deliberately does not create the directory. The result was a preview
+# that said "nothing to do" and a run that edited the file, which is the wrong
+# direction for a preview to fail in: over-reporting is a nuisance, an
+# under-report tells an author their project is clean and then changes it.
+#
+# So each step is a `plan_*` function returning a `StepPlan`: the list of
+# changes it *would* make, plus the closure that makes them. `--dry-run` prints
+# `plan.changes`; the real run prints them and calls `plan.apply`. The two
+# modes cannot disagree structurally, rather than by discipline — the same
+# property `packet.resolve` / `prompts_packet` and `status.py` already give the
+# packet and the next-step verdict.
+#
+# **Adding a 14th step means adding a `plan_*` function, not an
+# `if args.dry_run:` branch.** If the step reads the filesystem, read it
+# through `DiskFacts` rather than `os.path`, or it will observe the project as
+# it is at entry instead of as the real run's earlier steps will leave it.
+
+class PlannedChange(NamedTuple):
+    """One change a step will make, phrased for both of cleanup's audiences.
+
+    Two strings rather than one because the modes address the author
+    differently — `--dry-run` says "Would create …" and a verbose real run says
+    "Created …" — and deriving the second from the first means a verb table
+    that is wrong for the first irregular verb. What matters is that both come
+    from one list built once: a change cannot be announced by one mode and
+    performed by the other, because there is nothing else to perform.
+    """
+    would: str
+    did: str
+
+
+class StepPlan(NamedTuple):
+    """What one cleanup step would do, and the closure that does it.
+
+    `changes` is empty exactly when the step has nothing to do — that
+    equivalence is the property `tests/commands/test_cmd_cleanup_dry_run.py`
+    asserts per step, so a planner must not list a change it will not make and
+    must not make one it did not list.
+
+    `summary` is rendered after `changes` in both modes and *whether or not*
+    there are any, for the one step that reports a clean result out loud
+    ("All scene files are clean."). Everything else stays silent when it has
+    nothing to say.
+    """
+    title: str
+    changes: tuple[PlannedChange, ...]
+    apply: Callable[[], None]
+    summary: PlannedChange | None = None
+
+
+def _no_op() -> None:
+    """The `apply` for a step that planned nothing, or could not plan at all."""
+
+
+class DiskFacts(NamedTuple):
+    """The filesystem as the real run's *later* steps will see it.
+
+    Gathered once, before any step runs, and deliberately including the effects
+    earlier steps will have — which is the half of #317 that no sandbox could
+    reproduce. Step 2 creates every missing `EXPECTED_DIRS` entry (each with a
+    `.gitkeep`), so by the time step 3 resolves an artifact's `exists:` flag,
+    `manuscript/` is there. A planner that asked `os.path` directly would
+    answer for the project at entry and under-report.
+
+    Both modes consult the same instance, so both get the real run's answer.
+    `--dry-run` then describes a `manuscript/` that is not there yet — correct,
+    because it is describing what the run would do, and it does not write.
+
+    Paths are project-relative and `/`-separated on both sides of every
+    comparison, so a pending entry matches however the caller spells it.
+    """
+    root: str
+    pending_dirs: tuple[str, ...] = ()
+    pending_files: tuple[str, ...] = ()
+
+    def exists(self, rel: str) -> bool:
+        """Does `rel` exist, or will an earlier step have created it?
+
+        A pending *descendant* makes its ancestors exist too: nothing plans
+        `manuscript/` itself, only `manuscript/press-kit` inside it.
+        """
+        if os.path.exists(os.path.join(self.root, rel)):
+            return True
+        norm = self._norm(rel)
+        if not norm:
+            return True
+        return any(p == norm or p.startswith(norm + '/')
+                   for p in self.pending_dirs + self.pending_files)
+
+    def isfile(self, rel: str) -> bool:
+        if os.path.isfile(os.path.join(self.root, rel)):
+            return True
+        return self._norm(rel) in self.pending_files
+
+    def list_files(self, reldir: str) -> list[str]:
+        """Project-relative paths of the files directly inside `reldir`."""
+        return self._files(reldir, recursive=False)
+
+    def walk_files(self, reldir: str) -> list[str]:
+        """Project-relative paths of every file under `reldir`, recursively."""
+        return self._files(reldir, recursive=True)
+
+    def abspath(self, rel: str) -> str:
+        return os.path.join(self.root, *self._norm(rel).split('/'))
+
+    @staticmethod
+    def _norm(rel: str) -> str:
+        return rel.replace(os.sep, '/').strip('/')
+
+    def _files(self, reldir: str, recursive: bool) -> list[str]:
+        norm = self._norm(reldir)
+        found: set[str] = set()
+        base = os.path.join(self.root, *norm.split('/'))
+        if os.path.isdir(base):
+            if recursive:
+                for root, _dirs, names in os.walk(base):
+                    for name in names:
+                        found.add(self._norm(
+                            os.path.relpath(os.path.join(root, name), self.root)))
+            else:
+                for name in os.listdir(base):
+                    if os.path.isfile(os.path.join(base, name)):
+                        found.add(f'{norm}/{name}')
+        prefix = norm + '/'
+        for pending in self.pending_files:
+            if not pending.startswith(prefix):
+                continue
+            if recursive or '/' not in pending[len(prefix):]:
+                found.add(pending)
+        return sorted(found)
+
+
+def gather_disk_facts(project_dir: str) -> tuple[DiskFacts, list[str]]:
+    """Snapshot the filesystem plus the directories step 2 will create.
+
+    Returns the facts and the missing-directory list, because the directory
+    step needs the same list it seeded the facts with — deriving it twice is
+    two chances to answer differently, which is the defect this whole module
+    is being restructured to remove.
+    """
+    missing = missing_expected_dirs(project_dir)
+    return DiskFacts(
+        root=project_dir,
+        pending_dirs=tuple(missing),
+        # `create_missing_dirs` drops a `.gitkeep` in each, and step 5 then
+        # deletes every file in `working/logs` — including that one. A planner
+        # blind to the `.gitkeep` reports "0 log files" for a run that removes
+        # a file it created a moment earlier.
+        pending_files=tuple(f'{d}/.gitkeep' for d in missing),
+    ), missing
+
+
+# ============================================================================
 # Gitignore
 # ============================================================================
 
-def update_gitignore(project_dir: str) -> None:
-    """Ensure .gitignore contains all required entries."""
-    gitignore = os.path.join(project_dir, '.gitignore')
+GITIGNORE_SEED: Final = (
+    '# Storyforge — Novel Project .gitignore\n\n# macOS\n.DS_Store\n\n'
+)
 
-    if not os.path.isfile(gitignore):
-        with open(gitignore, 'w') as f:
-            f.write('# Storyforge — Novel Project .gitignore\n\n# macOS\n.DS_Store\n\n')
 
-    with open(gitignore) as f:
-        content = f.read()
+def plan_gitignore(project_dir: str) -> StepPlan:
+    """Plan the `.gitignore` entries this project is missing."""
+    path = os.path.join(project_dir, '.gitignore')
+    title = 'Checking .gitignore...'
 
+    original = ''
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding='utf-8') as f:
+                original = f.read()
+        except (OSError, UnicodeDecodeError) as exc:
+            # Reported rather than raised, matching the yaml migration below:
+            # `cleanup`'s actual product is the read-only report, and an
+            # unreadable `.gitignore` must not take it down with it.
+            log(f'WARNING: could not read .gitignore '
+                f'({type(exc).__name__}: {exc}). Skipping the gitignore step; '
+                f'the rest of cleanup still runs.')
+            return StepPlan(title, (), _no_op)
+        content = original
+    else:
+        content = GITIGNORE_SEED
+
+    new_content = _gitignore_with_required(content)
+    if new_content == original:
+        return StepPlan(title, (), _no_op)
+
+    def apply() -> None:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+        _untrack_newly_ignored(project_dir)
+
+    return StepPlan(title, (PlannedChange(
+        'Would update .gitignore with missing entries',
+        'Updated .gitignore with missing entries',
+    ),), apply)
+
+
+def _gitignore_with_required(content: str) -> str:
+    """Return `content` with every `GITIGNORE_REQUIRED` entry present."""
     new_content = content
-    if not new_content.endswith('\n'):
+    if new_content and not new_content.endswith('\n'):
         new_content += '\n'
-
-    added = False
 
     if 'working/logs/' not in content:
         new_content += '\n# Logs (debugging output, value extracted at write time)\nworking/logs/\n'
-        added = True
 
     if 'working/scores/**/.batch-requests.jsonl' not in content:
         new_content += '\n# Batch API payloads (keep only latest for debugging)\nworking/scores/**/.batch-requests.jsonl\n'
-        added = True
 
     if 'working/evaluations/**/.status-*' not in content:
         new_content += '\n# Intermediate scoring/eval state\nworking/evaluations/**/.status-*\n'
-        added = True
 
     if 'working/scores/**/.markers-*' not in content:
         new_content += 'working/scores/**/.markers-*\n'
-        added = True
 
     if 'working/.interactive' not in content:
         if 'working/.autopilot' in new_content:
@@ -230,10 +422,55 @@ def update_gitignore(project_dir: str) -> None:
                                               'working/.autopilot\nworking/.interactive\n')
         else:
             new_content += '\n# Temporary flag files (cleaned up by scripts)\nworking/.autopilot\nworking/.interactive\n'
-        added = True
 
-    if added:
-        with open(gitignore, 'w') as f:
+    return new_content
+
+
+def _untrack_newly_ignored(project_dir: str) -> None:
+    """`git rm --cached` files the freshly-written .gitignore now excludes.
+
+    Deliberately **not** planned, and so not previewed. It is an effect on the
+    git index rather than on the project's files, and the count cannot be known
+    before the write: `git ls-files -i` answers against the `.gitignore` on
+    disk, so asking it beforehand reports against the old one. `--dry-run`
+    therefore says nothing about untracking, which is a stated gap rather than
+    a claim of no effect.
+    """
+    git_dir = os.path.join(project_dir, '.git')
+    if not (shutil.which('git') and os.path.isdir(git_dir)):
+        return
+    r = subprocess.run(
+        ['git', '-C', project_dir, 'ls-files', '-i', '--exclude-standard'],
+        capture_output=True, text=True,
+    )
+    tracked = r.stdout.strip()
+    if not tracked:
+        return
+    log(f'  Untracking {len(tracked.splitlines())} newly-gitignored files')
+    for f in tracked.splitlines():
+        subprocess.run(['git', '-C', project_dir, 'rm', '--cached', '-q', f],
+                       capture_output=True)
+
+
+def update_gitignore(project_dir: str) -> None:
+    """Ensure .gitignore contains all required entries.
+
+    The applier half of `plan_gitignore`, kept as its own entry point because
+    it is the unit under test and because nothing outside `main` wants the
+    git-index side effect.
+    """
+    path = os.path.join(project_dir, '.gitignore')
+
+    if not os.path.isfile(path):
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(GITIGNORE_SEED)
+
+    with open(path, encoding='utf-8') as f:
+        content = f.read()
+
+    new_content = _gitignore_with_required(content)
+    if new_content != content:
+        with open(path, 'w', encoding='utf-8') as f:
             f.write(new_content)
 
 
@@ -241,60 +478,118 @@ def update_gitignore(project_dir: str) -> None:
 # Missing directories
 # ============================================================================
 
+def missing_expected_dirs(project_dir: str) -> list[str]:
+    """The `EXPECTED_DIRS` entries this project does not have.
+
+    The one derivation of that list. `gather_disk_facts` seeds `DiskFacts` with
+    it and `plan_missing_dirs` creates exactly it, so no later step can observe
+    a directory the directory step will not create, or miss one it will.
+    """
+    return [d for d in EXPECTED_DIRS
+            if not os.path.isdir(os.path.join(project_dir, d))]
+
+
+def _make_dirs(project_dir: str, dirs: list[str]) -> None:
+    for d in dirs:
+        path = os.path.join(project_dir, d)
+        os.makedirs(path, exist_ok=True)
+        with open(os.path.join(path, '.gitkeep'), 'w'):
+            pass
+
+
+def plan_missing_dirs(project_dir: str, missing: list[str]) -> StepPlan:
+    """Plan the expected directories this project is missing.
+
+    Takes `missing` rather than computing it, so the plan and the `DiskFacts`
+    the later steps read cannot describe different sets.
+    """
+    return StepPlan(
+        'Checking directories...',
+        tuple(PlannedChange(f'Would create {d}/', f'Created {d}/')
+              for d in missing),
+        lambda: _make_dirs(project_dir, missing),
+    )
+
+
 def create_missing_dirs(project_dir: str) -> list[str]:
     """Create expected directories that are missing. Returns list of created dirs."""
-    created = []
-    for d in EXPECTED_DIRS:
-        path = os.path.join(project_dir, d)
-        if not os.path.isdir(path):
-            os.makedirs(path, exist_ok=True)
-            gitkeep = os.path.join(path, '.gitkeep')
-            with open(gitkeep, 'w') as f:
-                pass
-            created.append(d)
-    return created
+    missing = missing_expected_dirs(project_dir)
+    _make_dirs(project_dir, missing)
+    return missing
 
 
 # ============================================================================
 # Junk file cleanup
 # ============================================================================
 
+#: Working subdirectories removed when they are empty. Not `EXPECTED_DIRS` —
+#: those are created a step earlier and would be deleted again on the same run.
+PRUNABLE_WORKING_DIRS: Final = ('enrich', 'coaching', 'backups', 'scenes-setup')
+
+
+def plan_junk_files(project_dir: str, disk: DiskFacts) -> StepPlan:
+    """Plan the transient files and empty directories to remove.
+
+    Reads through `disk`, so `working/logs/.gitkeep` — which step 2 creates and
+    this step then deletes — is counted. Asking `os.listdir` at entry reported
+    "0 log files" for a run that removes one.
+    """
+    files: list[str] = []
+    changes: list[PlannedChange] = []
+
+    for reldir, pattern in (('working/evaluations', '.status-*'),
+                            ('working/scores', '.markers-*')):
+        matched = [f for f in disk.walk_files(reldir)
+                   if _matches_glob(os.path.basename(f), pattern)]
+        if matched:
+            files.extend(matched)
+            changes.append(PlannedChange(
+                f'Would remove {len(matched)} {pattern} files',
+                f'Removed {len(matched)} {pattern} files'))
+
+    # `'latest' in <absolute dir path>` is the pre-existing test, kept verbatim:
+    # narrowing it to the project-relative path would be more correct and would
+    # make a refactor delete files the previous release kept. Out of scope here.
+    batch = [f for f in disk.walk_files('working/scores')
+             if os.path.basename(f) == '.batch-requests.jsonl'
+             and 'latest' not in os.path.dirname(disk.abspath(f))]
+    if batch:
+        files.extend(batch)
+        changes.append(PlannedChange(
+            f'Would remove {len(batch)} .batch-requests.jsonl files',
+            f'Removed {len(batch)} .batch-requests.jsonl files'))
+
+    logs = disk.list_files('working/logs')
+    if logs:
+        files.extend(logs)
+        changes.append(PlannedChange(
+            f'Would remove {len(logs)} log files',
+            f'Removed {len(logs)} log files'))
+
+    # Previously invisible to `--dry-run`, which reported nothing at all about
+    # the directories the real run removed.
+    dirs = [f'working/{d}' for d in PRUNABLE_WORKING_DIRS
+            if os.path.isdir(os.path.join(project_dir, 'working', d))
+            and not os.listdir(os.path.join(project_dir, 'working', d))]
+    changes.extend(PlannedChange(f'Would remove empty {d}/',
+                                 f'Removed empty {d}/') for d in dirs)
+
+    def apply() -> None:
+        for rel in files:
+            path = disk.abspath(rel)
+            if os.path.isfile(path):
+                os.remove(path)
+        for rel in dirs:
+            path = disk.abspath(rel)
+            if os.path.isdir(path) and not os.listdir(path):
+                os.rmdir(path)
+
+    return StepPlan('Cleaning junk files...', tuple(changes), apply)
+
+
 def clean_junk_files(project_dir: str) -> None:
     """Remove transient files that should not be committed."""
-    patterns = [
-        (os.path.join(project_dir, 'working', 'evaluations'), '.status-*'),
-        (os.path.join(project_dir, 'working', 'scores'), '.markers-*'),
-    ]
-    for base, pattern in patterns:
-        if os.path.isdir(base):
-            for root, _dirs, files in os.walk(base):
-                for f in files:
-                    if _matches_glob(f, pattern):
-                        os.remove(os.path.join(root, f))
-
-    # Remove non-latest batch request files
-    scores_dir = os.path.join(project_dir, 'working', 'scores')
-    if os.path.isdir(scores_dir):
-        for root, _dirs, files in os.walk(scores_dir):
-            if 'latest' in root:
-                continue
-            for f in files:
-                if f == '.batch-requests.jsonl':
-                    os.remove(os.path.join(root, f))
-
-    # Remove log files
-    logs_dir = os.path.join(project_dir, 'working', 'logs')
-    if os.path.isdir(logs_dir):
-        for f in os.listdir(logs_dir):
-            fp = os.path.join(logs_dir, f)
-            if os.path.isfile(fp):
-                os.remove(fp)
-
-    # Remove empty dirs
-    for d in ('enrich', 'coaching', 'backups', 'scenes-setup'):
-        target = os.path.join(project_dir, 'working', d)
-        if os.path.isdir(target) and not os.listdir(target):
-            os.rmdir(target)
+    plan_junk_files(project_dir, DiskFacts(project_dir)).apply()
 
 
 def _matches_glob(filename: str, pattern: str) -> bool:
@@ -307,42 +602,117 @@ def _matches_glob(filename: str, pattern: str) -> bool:
 # Legacy files and reorganization
 # ============================================================================
 
+LEGACY_FILES: Final = ('working/pipeline.yaml', 'working/assemble.py')
+
+
+def plan_legacy_files(project_dir: str, disk: DiskFacts) -> StepPlan:
+    """Plan the retired files to delete."""
+    doomed = [f for f in LEGACY_FILES if disk.isfile(f)]
+
+    def apply() -> None:
+        for f in doomed:
+            path = os.path.join(project_dir, f)
+            if os.path.isfile(path):
+                os.remove(path)
+
+    return StepPlan(
+        'Checking legacy files...',
+        tuple(PlannedChange(f'Would delete {f}', f'Deleted {f}') for f in doomed),
+        apply,
+    )
+
+
 def delete_legacy_files(project_dir: str) -> None:
-    for f in ('working/pipeline.yaml', 'working/assemble.py'):
-        path = os.path.join(project_dir, f)
-        if os.path.isfile(path):
-            os.remove(path)
+    plan_legacy_files(project_dir, DiskFacts(project_dir)).apply()
+
+
+def plan_loose_files(project_dir: str) -> StepPlan:
+    """Plan the loose `working/recommendations*.md` files to file away.
+
+    The count is of files that will actually move. `--dry-run` used to report
+    every glob match, including the ones the real run skips because the
+    destination is already taken — an over-report, and the mirror of the
+    under-reports this restructuring is about.
+    """
+    recs_dir = os.path.join(project_dir, 'working', 'recommendations')
+    moves: list[tuple[str, str]] = []
+    for src in sorted(glob.glob(os.path.join(project_dir, 'working',
+                                             'recommendations*.md'))):
+        dest = os.path.join(recs_dir, os.path.basename(src))
+        if os.path.isfile(src) and not os.path.exists(dest):
+            moves.append((src, dest))
+
+    def apply() -> None:
+        if moves:
+            os.makedirs(recs_dir, exist_ok=True)
+        for src, dest in moves:
+            shutil.move(src, dest)
+
+    changes = ()
+    if moves:
+        changes = (PlannedChange(
+            f'Would move {len(moves)} recommendation files to '
+            f'working/recommendations/',
+            f'Moved {len(moves)} recommendation files to '
+            f'working/recommendations/'),)
+    return StepPlan('Reorganizing loose files...', changes, apply)
 
 
 def reorganize_loose_files(project_dir: str) -> None:
-    recs_dir = os.path.join(project_dir, 'working', 'recommendations')
-    os.makedirs(recs_dir, exist_ok=True)
-    pattern = os.path.join(project_dir, 'working', 'recommendations*.md')
-    for f in glob.glob(pattern):
-        if os.path.isfile(f):
-            dest = os.path.join(recs_dir, os.path.basename(f))
-            if not os.path.exists(dest):
-                shutil.move(f, dest)
+    plan_loose_files(project_dir).apply()
 
 
 # ============================================================================
 # Pipeline CSV migration
 # ============================================================================
 
-def migrate_pipeline_csv(project_dir: str) -> None:
+def plan_pipeline_csv(project_dir: str) -> StepPlan:
+    """Plan the `working/pipeline.csv` header migration.
+
+    One computation for both modes. `--dry-run` used to compare the header
+    itself while the real run rebuilt every row from it — the same predicate
+    written twice, which is how they drift.
+    """
+    title = 'Checking pipeline.csv...'
     csv_path = os.path.join(project_dir, 'working', 'pipeline.csv')
     if not os.path.isfile(csv_path):
-        return
+        return StepPlan(title, (), _no_op)
 
-    with open(csv_path) as f:
-        lines = f.readlines()
+    try:
+        with open(csv_path, encoding='utf-8') as f:
+            lines = f.readlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        log(f'WARNING: could not read working/pipeline.csv '
+            f'({type(exc).__name__}: {exc}). Skipping its migration; the rest '
+            f'of cleanup still runs.')
+        return StepPlan(title, (), _no_op)
 
+    new_lines = _migrated_pipeline_lines(lines)
+    if new_lines is None:
+        return StepPlan(title, (), _no_op)
+
+    def apply() -> None:
+        with open(csv_path, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+
+    return StepPlan(title, (PlannedChange(
+        'Would add missing columns to pipeline.csv',
+        'Added missing columns to pipeline.csv',
+    ),), apply)
+
+
+def migrate_pipeline_csv(project_dir: str) -> None:
+    plan_pipeline_csv(project_dir).apply()
+
+
+def _migrated_pipeline_lines(lines: list[str]) -> list[str] | None:
+    """The rewritten pipeline.csv, or None when the header is already correct."""
     if not lines:
-        return
+        return None
 
     header = lines[0].strip()
     if header == PIPELINE_EXPECTED:
-        return
+        return None
 
     old_cols = header.split('|')
     exp_cols = PIPELINE_EXPECTED.split('|')
@@ -359,108 +729,108 @@ def migrate_pipeline_csv(project_dir: str) -> None:
                 new_vals.append('')
         new_lines.append('|'.join(new_vals) + '\n')
 
-    with open(csv_path, 'w') as f:
-        f.writelines(new_lines)
+    return new_lines
 
 
 # ============================================================================
 # Pipeline review deduplication
 # ============================================================================
 
-def dedup_pipeline_reviews(project_dir: str) -> None:
-    reviews_dir = os.path.join(project_dir, 'working', 'reviews')
-    if not os.path.isdir(reviews_dir):
-        return
+def plan_pipeline_reviews(project_dir: str) -> StepPlan:
+    """Plan the same-day pipeline reviews to drop, keeping the latest per day.
 
-    files = sorted(glob.glob(os.path.join(reviews_dir, 'pipeline-review-*.md')), reverse=True)
-    prev_date = ''
-    for f in files:
-        basename = os.path.basename(f)
-        m = re.match(r'pipeline-review-(\d+)-', basename)
-        if not m:
-            continue
-        date = m.group(1)
-        if date == prev_date:
-            os.remove(f)
-        else:
-            prev_date = date
+    `--dry-run` used to announce "Would deduplicate pipeline reviews" on every
+    run, including on a project with no reviews at all — the over-reporting
+    direction, but still a claim nothing checked.
+    """
+    doomed: list[str] = []
+    reviews_dir = os.path.join(project_dir, 'working', 'reviews')
+    if os.path.isdir(reviews_dir):
+        files = sorted(glob.glob(os.path.join(reviews_dir,
+                                              'pipeline-review-*.md')),
+                       reverse=True)
+        prev_date = ''
+        for f in files:
+            m = re.match(r'pipeline-review-(\d+)-', os.path.basename(f))
+            if not m:
+                continue
+            if m.group(1) == prev_date:
+                doomed.append(f)
+            else:
+                prev_date = m.group(1)
+
+    def apply() -> None:
+        for f in doomed:
+            if os.path.isfile(f):
+                os.remove(f)
+
+    changes = ()
+    if doomed:
+        changes = (PlannedChange(
+            f'Would remove {len(doomed)} duplicate pipeline review(s), '
+            f'keeping the latest per day',
+            f'Removed {len(doomed)} duplicate pipeline review(s), '
+            f'keeping the latest per day'),)
+    return StepPlan('Deduplicating pipeline reviews...', changes, apply)
+
+
+def dedup_pipeline_reviews(project_dir: str) -> None:
+    plan_pipeline_reviews(project_dir).apply()
 
 
 # ============================================================================
 # storyforge.yaml migration
 # ============================================================================
 
-def migrate_storyforge_yaml(project_dir: str,
-                            disk_root: str | None = None) -> None:
-    """Add missing sections and correct artifact flags, in place.
+class YamlMigrationPlan(NamedTuple):
+    """What the storyforge.yaml migration would do to one file's bytes.
 
-    `disk_root` is where artifact paths are resolved when deciding `exists:`,
-    defaulting to `project_dir`. It exists for `--dry-run`, which previews the
-    migration by copying the yaml into a sandbox: the sandbox held `reference/`
-    but never `manuscript/`, so `exists:` resolved differently there than in the
-    real run. Harmless while every run rewrote the file, and an under-report once
-    the write became conditional — dry-run said nothing while the real run
-    changed the file.
+    `changed` is `new_content != original` rather than a flag the branches set,
+    for the reason #314 gave: a flag drifts out of step with the code above it,
+    and this one did — set unconditionally, so every run rewrote the file.
 
-    **This closes one of two causes, not the whole problem.** Pointing the disk
-    checks at the real project fixes the sandbox's missing files, and the sandbox
-    now needs nothing copied into it. It cannot fix the other cause: `--dry-run`
-    previews each step against the state at *entry*, while the real run's steps
-    compose. Step 2 creates `manuscript/press-kit` (`EXPECTED_DIRS`), so in the
-    real run step 3 sees `manuscript/` exist and flips its `exists:` — and no
-    arrangement of the sandbox reproduces that, because dry-run deliberately did
-    not create the directory. `tests/commands/test_cmd_cleanup_dry_run.py`
-    demonstrates the surviving gap as a strict xfail. The fix is a planner both
-    modes consume rather than a re-run against a copy (#317).
-
-    **Writes only when something changed, and leaves line endings alone** (#314).
-
-    Both halves used to be wrong together, and they compounded. `modified` was
-    set unconditionally after the `exists` pass, so every run rewrote the file;
-    and both ends were opened in text mode, so Python's universal-newline
-    translation read CRLF as LF and wrote LF back. The result was that any
-    `storyforge cleanup` — over a project with nothing to fix — silently
-    normalized the whole file's line endings and produced a git diff.
-
-    That also defeated `common.update_artifact_entry`, which goes to some trouble
-    to preserve endings on the same file. The policy is now the same in both:
-    **preserve what the author has, and report it instead** — `_check_crlf`
-    covers `storyforge.yaml`, so an author who wants LF is told rather than
-    converted behind their back. That is this codebase's standing posture for
-    author-owned content (an ambiguous anchor is reported, not re-placed; a
-    superseded export directory is reported, not deleted), and a config file the
-    author hand-edits is squarely in it.
-
-    Preserving means the patterns below must tolerate CRLF, since `^artifacts:\\n`
-    does not match `artifacts:\\r\\n` — before this, the text-mode read hid that by
-    normalizing first, so a CRLF project would otherwise have silently stopped
-    receiving migrations. Inserted blocks use the file's own newline for the same
-    reason: emitting LF into a CRLF file would leave it mixed, which is worse
-    than either policy applied consistently.
+    `reasons` is descriptive only. It enriches the `--dry-run` line and must
+    never decide anything, or it becomes that flag again under a new name.
     """
-    yaml_path = os.path.join(project_dir, 'storyforge.yaml')
-    if not os.path.isfile(yaml_path):
-        return
-    if disk_root is None:
-        disk_root = project_dir
+    original: str
+    new_content: str
+    reasons: tuple[str, ...]
 
-    # Guarded, `encoding=` stated, and reported rather than raised. `main` calls
-    # this at step 3 of 13 with no handler above it and `__main__._dispatch` has
-    # none either, so a latin-1 or unreadable storyforge.yaml took down the whole
-    # command — including the read-only report, which is `cleanup`'s actual
-    # product. Migration is optional tidying; the report is not. That inverts
-    # #313's call for `cmd_assemble`, where the expensive work came first.
-    try:
-        with open(yaml_path, encoding='utf-8', newline='') as f:
-            content = f.read()
-    except (OSError, UnicodeDecodeError) as exc:
-        log(f'WARNING: could not read storyforge.yaml to migrate it '
-            f'({type(exc).__name__}: {exc}). Skipping the migration; the rest '
-            f'of cleanup still runs, and `_check_yaml_scalars` reports the same '
-            f'file as unreadable.')
-        return
+    @property
+    def changed(self) -> bool:
+        return self.new_content != self.original
 
+
+def plan_yaml_migration(content: str, disk: DiskFacts) -> YamlMigrationPlan:
+    """Add missing sections and correct artifact flags. Pure.
+
+    Takes the file's bytes and a `DiskFacts`, touches neither, and returns the
+    new bytes plus what changed and why. Both modes consume this one
+    computation: `--dry-run` renders `plan.reasons`, the real run writes
+    `plan.new_content` (#317). They cannot disagree, where a preview that
+    re-ran this against a sandboxed copy of the project disagreed twice — once
+    because the sandbox lacked `manuscript/`, and once because it could not
+    reproduce the directory an earlier step creates.
+
+    `disk` answers the `exists:` questions, and answers them the way the real
+    run's *later* steps will see the filesystem. Pure in the sense that matters
+    here: no writes, and every read routed through one injected object, which
+    is what lets the tests exercise it with no filesystem at all.
+
+    **Writes only when something changed, and leaves line endings alone**
+    (#314) — both properties belong to the caller now, but they are why the
+    patterns below tolerate CRLF and why inserted blocks use the file's own
+    newline. `^artifacts:\\n` does not match `artifacts:\\r\\n`, and a text-mode
+    read used to hide that by normalizing first, so a CRLF project would have
+    silently stopped receiving migrations. Emitting LF into a CRLF file would
+    leave it mixed, which is worse than either policy applied consistently.
+
+    The standing posture is to preserve what the author has and report it
+    instead: `_check_crlf` covers `storyforge.yaml`, so an author who wants LF
+    is told rather than converted behind their back.
+    """
     original = content
+    reasons: list[str] = []
     nl = common.detect_newline(content)
 
     # Move misplaced chapter_map to under artifacts
@@ -518,6 +888,7 @@ def migrate_storyforge_yaml(project_dir: str,
             )
             if inserted:
                 content = relocated
+                reasons.append('move chapter_map under artifacts')
             else:
                 # No anchor to move it under. Leaving a misplaced top-level
                 # entry in place is harmless — nothing reads it — whereas
@@ -530,18 +901,22 @@ def migrate_storyforge_yaml(project_dir: str,
     # Add missing sections
     if not re.search(r'^scene_extensions:', content, re.MULTILINE):
         content += nl.join(['', 'scene_extensions: []', ''])
+        reasons.append('add scene_extensions')
 
     if not re.search(r'^evaluation:', content, re.MULTILINE):
         content += nl.join(['', 'evaluation:', '  custom_evaluators: []', ''])
+        reasons.append('add evaluation')
 
     if not re.search(r'^production:', content, re.MULTILINE) and not re.search(r'^# production:', content, re.MULTILINE):
         content += nl.join(['', '# production:', '#   author: ""',
                             '#   language: en', '#   scene_break: ornamental',
                             '#   default_heading: numbered-titled', ''])
+        reasons.append('add production')
 
     if not re.search(r'^parts:', content, re.MULTILINE) and not re.search(r'^# parts:', content, re.MULTILINE):
         content += nl.join(['', '# parts:', '#   - number: 1',
                             '#     title: "Part One"', ''])
+        reasons.append('add parts')
 
     # Add missing artifact entries for files on disk
     artifact_files = [
@@ -552,8 +927,9 @@ def migrate_storyforge_yaml(project_dir: str,
         ('scene_intent', 'reference/scene-intent.csv'),
         ('title_development', 'reference/title-development.md'),
     ]
+    added_artifacts: list[str] = []
     for aid, apath in artifact_files:
-        if os.path.isfile(os.path.join(disk_root, apath)):
+        if disk.isfile(apath):
             if f'  {aid}:' not in content:
                 insert = nl.join([
                     f'  {aid}:',
@@ -565,12 +941,16 @@ def migrate_storyforge_yaml(project_dir: str,
                 # A function replacement for consistency with the `cm_path` site
                 # above, which is the one that can actually carry a backslash;
                 # `apath` here comes from the hardcoded list.
-                content = re.sub(
+                content, inserted = re.subn(
                     r'(^artifacts:\r?\n)',
                     lambda m, ins=insert: m.group(1) + ins,
                     content,
                     flags=re.MULTILINE,
                 )
+                if inserted:
+                    added_artifacts.append(aid)
+    if added_artifacts:
+        reasons.append(f'add artifact entries for {", ".join(added_artifacts)}')
 
     # Fix exists flags based on disk
     def _fix_exists(match):
@@ -579,44 +959,103 @@ def migrate_storyforge_yaml(project_dir: str,
         if not path_match:
             return block
         apath = path_match.group(1).strip().strip('"')
-        disk_exists = os.path.exists(os.path.join(disk_root, apath))
-        if disk_exists:
+        if disk.exists(apath):
             block = re.sub(r'exists: false', 'exists: true', block)
         else:
             block = re.sub(r'exists: true', 'exists: false', block)
         return block
 
+    before_flags = content
     content = re.sub(
         r'^  [a-z_]+:\r?\n(?:    (?:exists|path|updated):.*\r?\n)+',
         _fix_exists,
         content,
         flags=re.MULTILINE,
     )
+    if content != before_flags:
+        reasons.append('correct artifact exists: flags')
 
-    # Compare, rather than tracking a flag. The flag was set unconditionally
-    # right here, which is what made every run a rewrite; a comparison cannot
-    # drift out of step with the branches above the way a flag did. Verbatim
-    # bytes on both sides — that is what makes `newline=''` on the read
-    # load-bearing rather than decorative.
-    if content != original:
-        # Temp file plus `os.replace`, matching `illustrations`' ingest: a plain
-        # `open(..., 'w')` truncates before it writes, so a `PermissionError` or a
-        # full disk mid-write leaves a half-written storyforge.yaml. Truncating
-        # this file is #276 exactly, and a partial write is the worse version of
-        # it because there is no previous content left to compare against.
-        tmp_path = yaml_path + '.tmp'
-        try:
-            with open(tmp_path, 'w', encoding='utf-8', newline='') as f:
-                f.write(content)
-            os.replace(tmp_path, yaml_path)
-        except OSError as exc:
-            log(f'WARNING: could not write storyforge.yaml '
-                f'({type(exc).__name__}: {exc}). The file is unchanged.')
-            if os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
+    return YamlMigrationPlan(original, content, tuple(reasons))
+
+
+def read_and_plan_yaml_migration(project_dir: str,
+                                 disk: DiskFacts) -> YamlMigrationPlan | None:
+    """Read `storyforge.yaml` and plan its migration, or None if it can't be.
+
+    Guarded, `encoding=` stated, and reported rather than raised. `main` calls
+    this at step 3 of 13 with no handler above it and `__main__._dispatch` has
+    none either, so a latin-1 or unreadable storyforge.yaml took down the whole
+    command — including the read-only report, which is `cleanup`'s actual
+    product. Migration is optional tidying; the report is not. That inverts
+    #313's call for `cmd_assemble`, where the expensive work came first.
+    """
+    yaml_path = os.path.join(project_dir, 'storyforge.yaml')
+    if not os.path.isfile(yaml_path):
+        return None
+
+    try:
+        with open(yaml_path, encoding='utf-8', newline='') as f:
+            content = f.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        log(f'WARNING: could not read storyforge.yaml to migrate it '
+            f'({type(exc).__name__}: {exc}). Skipping the migration; the rest '
+            f'of cleanup still runs, and `_check_yaml_scalars` reports the same '
+            f'file as unreadable.')
+        return None
+
+    return plan_yaml_migration(content, disk)
+
+
+def apply_yaml_migration(project_dir: str, plan: YamlMigrationPlan) -> None:
+    """Write `plan.new_content`, if it differs from what was read."""
+    if not plan.changed:
+        return
+    yaml_path = os.path.join(project_dir, 'storyforge.yaml')
+    # Temp file plus `os.replace`, matching `illustrations`' ingest: a plain
+    # `open(..., 'w')` truncates before it writes, so a `PermissionError` or a
+    # full disk mid-write leaves a half-written storyforge.yaml. Truncating
+    # this file is #276 exactly, and a partial write is the worse version of
+    # it because there is no previous content left to compare against.
+    tmp_path = yaml_path + '.tmp'
+    try:
+        with open(tmp_path, 'w', encoding='utf-8', newline='') as f:
+            f.write(plan.new_content)
+        os.replace(tmp_path, yaml_path)
+    except OSError as exc:
+        log(f'WARNING: could not write storyforge.yaml '
+            f'({type(exc).__name__}: {exc}). The file is unchanged.')
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
+def plan_storyforge_yaml(project_dir: str, disk: DiskFacts) -> StepPlan:
+    """The storyforge.yaml migration as a cleanup step."""
+    title = 'Checking storyforge.yaml...'
+    plan = read_and_plan_yaml_migration(project_dir, disk)
+    if plan is None or not plan.changed:
+        return StepPlan(title, (), _no_op)
+
+    detail = '; '.join(plan.reasons) if plan.reasons else 'rewrite the file'
+    return StepPlan(title, (PlannedChange(
+        f'Would migrate storyforge.yaml ({detail})',
+        f'Migrated storyforge.yaml ({detail})',
+    ),), lambda: apply_yaml_migration(project_dir, plan))
+
+
+def migrate_storyforge_yaml(project_dir: str) -> None:
+    """Add missing sections and correct artifact flags, in place.
+
+    The read-plan-write composition, kept as one entry point for callers that
+    just want the migration performed. `disk_root` is gone with the sandbox
+    that needed it: no production function should take a parameter that exists
+    only to let a caller misrepresent the filesystem (#317).
+    """
+    plan = read_and_plan_yaml_migration(project_dir, DiskFacts(project_dir))
+    if plan is not None:
+        apply_yaml_migration(project_dir, plan)
 
 
 # ============================================================================
@@ -819,44 +1258,79 @@ def report_unexpected_files(project_dir: str) -> list[str]:
 # Scene file cleanup
 # ============================================================================
 
+def _scene_files_to_clean(project_dir: str) -> list[tuple[str, str]]:
+    """(filename, cleaned text) for every scene file carrying artifacts.
+
+    Removes scene markers (=== SCENE: id ===), leading H1/H2 title headers,
+    and trailing Continuity Tracker Update blocks.
+    """
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    if not os.path.isdir(scenes_dir):
+        return []
+
+    dirty: list[tuple[str, str]] = []
+    for filename in sorted(os.listdir(scenes_dir)):
+        if not filename.endswith('.md'):
+            continue
+        with open(os.path.join(scenes_dir, filename), encoding='utf-8') as f:
+            original = f.read()
+
+        cleaned = original
+        extracted = extract_single_scene(cleaned)
+        if extracted is not None:
+            cleaned = extracted
+        cleaned = clean_scene_content(cleaned)
+
+        if cleaned != original:
+            dirty.append((filename, cleaned))
+    return dirty
+
+
+def plan_scene_files(project_dir: str) -> StepPlan:
+    """Plan the writing-agent artifacts to strip from scene files.
+
+    The one step that reports a clean result out loud, hence the `summary`:
+    it runs only under `--scenes`, so an author who asked for it is owed an
+    answer either way.
+    """
+    dirty = _scene_files_to_clean(project_dir)
+
+    def apply() -> None:
+        for filename, cleaned in dirty:
+            with open(os.path.join(project_dir, 'scenes', filename), 'w',
+                      encoding='utf-8') as f:
+                f.write(cleaned)
+
+    if dirty:
+        summary = PlannedChange(
+            f'Would clean {len(dirty)} scene file(s)',
+            f'Cleaned {len(dirty)} scene file(s)')
+    else:
+        summary = PlannedChange('All scene files are clean.',
+                                'All scene files are clean.')
+
+    return StepPlan(
+        'Cleaning scene files...',
+        tuple(PlannedChange(f'Would clean: {name}', f'Cleaned: {name}')
+              for name, _ in dirty),
+        apply,
+        summary,
+    )
+
+
 def clean_scene_files(project_dir: str, dry_run: bool = False,
                       verbose: bool = False) -> int:
     """Strip writing-agent artifacts from scene files.
 
-    Removes scene markers (=== SCENE: id ===), leading H1/H2 title headers,
-    and trailing Continuity Tracker Update blocks from all scene files.
-
     Returns the number of files that were (or would be) modified.
     """
-    scenes_dir = os.path.join(project_dir, 'scenes')
-    if not os.path.isdir(scenes_dir):
-        return 0
-
-    changed = 0
-    for filename in sorted(os.listdir(scenes_dir)):
-        if not filename.endswith('.md'):
-            continue
-        filepath = os.path.join(scenes_dir, filename)
-        with open(filepath, encoding='utf-8') as f:
-            original = f.read()
-
-        cleaned = original
-        # Strip === SCENE: id === / === END SCENE: id === markers
-        extracted = extract_single_scene(cleaned)
-        if extracted is not None:
-            cleaned = extracted
-        # Strip title headers and continuity tracker blocks
-        cleaned = clean_scene_content(cleaned)
-
-        if cleaned != original:
-            changed += 1
-            if verbose or dry_run:
-                log(f'  {"Would clean" if dry_run else "Cleaned"}: {filename}')
-            if not dry_run:
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write(cleaned)
-
-    return changed
+    plan = plan_scene_files(project_dir)
+    for change in plan.changes:
+        if verbose or dry_run:
+            log(f'  {change.would if dry_run else change.did}')
+    if not dry_run:
+        plan.apply()
+    return len(plan.changes)
 
 
 # ============================================================================
@@ -1862,6 +2336,35 @@ def _run_and_write_report(project_dir: str) -> None:
     log(f'Report written to {report_path}')
 
 
+def plan_cleanup(project_dir: str, scenes: bool = False) -> list[StepPlan]:
+    """Every mutating step, in the order the real run performs them.
+
+    The one place the step list lives, so `--dry-run` cannot preview a
+    different set of steps from the one that runs — and the seam the per-step
+    property test in `tests/commands/test_cmd_cleanup_dry_run.py` hangs off.
+
+    **Order is load-bearing.** `DiskFacts` is built from the directory step's
+    own list, so every step after it observes the directories it will create.
+    Moving the directory step later would make those facts a lie; a new step
+    that creates or deletes anything a later step reads has to be reflected in
+    `gather_disk_facts` the same way.
+    """
+    disk, missing_dirs = gather_disk_facts(project_dir)
+    plans = [
+        plan_gitignore(project_dir),
+        plan_missing_dirs(project_dir, missing_dirs),
+        plan_storyforge_yaml(project_dir, disk),
+        plan_pipeline_csv(project_dir),
+        plan_junk_files(project_dir, disk),
+        plan_legacy_files(project_dir, disk),
+        plan_loose_files(project_dir),
+        plan_pipeline_reviews(project_dir),
+    ]
+    if scenes:
+        plans.append(plan_scene_files(project_dir))
+    return plans
+
+
 def main(argv=None):
     args = parse_args(argv or [])
     project_dir = detect_project_root()
@@ -1883,148 +2386,17 @@ def main(argv=None):
     else:
         ensure_on_branch('cleanup', project_dir)
 
-    # Step 1: Gitignore
-    log('Checking .gitignore...')
-    if args.dry_run:
-        tmp_dir = tempfile.mkdtemp()
-        src = os.path.join(project_dir, '.gitignore')
-        dst = os.path.join(tmp_dir, '.gitignore')
-        if os.path.isfile(src):
-            shutil.copy2(src, dst)
+    for plan in plan_cleanup(project_dir, scenes=args.scenes):
+        log(plan.title)
+        if args.dry_run:
+            for change in plan.changes:
+                log(f'  {change.would}')
         else:
-            with open(dst, 'w') as f:
-                pass
-        update_gitignore(tmp_dir)
-        import filecmp
-        if not os.path.isfile(src) or not filecmp.cmp(src, dst):
-            log('  Would update .gitignore with missing entries')
-        shutil.rmtree(tmp_dir)
-    else:
-        update_gitignore(project_dir)
-        git_dir = os.path.join(project_dir, '.git')
-        if shutil.which('git') and os.path.isdir(git_dir):
-            r = subprocess.run(
-                ['git', '-C', project_dir, 'ls-files', '-i', '--exclude-standard'],
-                capture_output=True, text=True,
-            )
-            tracked = r.stdout.strip()
-            if tracked:
-                count = len(tracked.splitlines())
-                log(f'  Untracking {count} newly-gitignored files')
-                for f in tracked.splitlines():
-                    subprocess.run(
-                        ['git', '-C', project_dir, 'rm', '--cached', '-q', f],
-                        capture_output=True,
-                    )
-
-    # Step 2: Missing directories
-    log('Checking directories...')
-    if args.dry_run:
-        for d in EXPECTED_DIRS:
-            if not os.path.isdir(os.path.join(project_dir, d)):
-                log(f'  Would create {d}/')
-    else:
-        created = create_missing_dirs(project_dir)
-        for d in created:
-            vlog(f'  Created {d}/')
-
-    # Step 3: storyforge.yaml migration
-    log('Checking storyforge.yaml...')
-    if args.dry_run:
-        tmp_dir = tempfile.mkdtemp()
-        yaml_src = os.path.join(project_dir, 'storyforge.yaml')
-        if os.path.isfile(yaml_src):
-            shutil.copy2(yaml_src, os.path.join(tmp_dir, 'storyforge.yaml'))
-            # Disk checks against the real project, not the sandbox. Copying
-            # `reference/` and not `manuscript/` made the preview resolve
-            # `exists:` differently from the real run, so it under-reported.
-            migrate_storyforge_yaml(tmp_dir, disk_root=project_dir)
-            import filecmp
-            if not filecmp.cmp(yaml_src, os.path.join(tmp_dir, 'storyforge.yaml')):
-                log('  Would migrate storyforge.yaml (missing sections, artifact flags)')
-        shutil.rmtree(tmp_dir)
-    else:
-        migrate_storyforge_yaml(project_dir)
-
-    # Step 4: Pipeline CSV
-    log('Checking pipeline.csv...')
-    if args.dry_run:
-        csv_path = os.path.join(project_dir, 'working', 'pipeline.csv')
-        if os.path.isfile(csv_path):
-            with open(csv_path) as f:
-                header = f.readline().strip()
-            if header != PIPELINE_EXPECTED:
-                log('  Would add missing columns to pipeline.csv')
-    else:
-        migrate_pipeline_csv(project_dir)
-
-    # Step 5: Junk files
-    log('Cleaning junk files...')
-    if args.dry_run:
-        for base, pattern in [
-            ('working/evaluations', '.status-*'),
-            ('working/scores', '.markers-*'),
-        ]:
-            base_path = os.path.join(project_dir, base)
-            if os.path.isdir(base_path):
-                count = 0
-                for root, _dirs, files in os.walk(base_path):
-                    count += sum(1 for f in files if _matches_glob(f, pattern))
-                if count > 0:
-                    log(f'  Would remove {count} {pattern} files')
-
-        scores_dir = os.path.join(project_dir, 'working', 'scores')
-        if os.path.isdir(scores_dir):
-            count = 0
-            for root, _dirs, files in os.walk(scores_dir):
-                if 'latest' not in root:
-                    count += sum(1 for f in files if f == '.batch-requests.jsonl')
-            if count > 0:
-                log(f'  Would remove {count} .batch-requests.jsonl files')
-
-        logs_dir = os.path.join(project_dir, 'working', 'logs')
-        if os.path.isdir(logs_dir):
-            count = sum(1 for f in os.listdir(logs_dir) if os.path.isfile(os.path.join(logs_dir, f)))
-            if count > 0:
-                log(f'  Would remove {count} log files')
-    else:
-        clean_junk_files(project_dir)
-
-    # Step 6: Legacy files
-    log('Checking legacy files...')
-    if args.dry_run:
-        for f in ('working/pipeline.yaml', 'working/assemble.py'):
-            if os.path.isfile(os.path.join(project_dir, f)):
-                log(f'  Would delete {f}')
-    else:
-        delete_legacy_files(project_dir)
-
-    # Step 7: Reorganize loose files
-    log('Reorganizing loose files...')
-    if args.dry_run:
-        pattern = os.path.join(project_dir, 'working', 'recommendations*.md')
-        count = len(glob.glob(pattern))
-        if count > 0:
-            log(f'  Would move {count} recommendation files to working/recommendations/')
-    else:
-        reorganize_loose_files(project_dir)
-
-    # Step 8: Pipeline review dedup
-    log('Deduplicating pipeline reviews...')
-    if args.dry_run:
-        log('  Would deduplicate pipeline reviews (keep latest per day)')
-    else:
-        dedup_pipeline_reviews(project_dir)
-
-    # Step 9: Scene file cleanup (only with --scenes)
-    if args.scenes:
-        log('Cleaning scene files...')
-        cleaned = clean_scene_files(project_dir, dry_run=args.dry_run,
-                                    verbose=args.verbose)
-        if cleaned:
-            log(f'  {"Would clean" if args.dry_run else "Cleaned"} {cleaned} scene file(s)')
-        else:
-            log('  All scene files are clean.')
+            plan.apply()
+            for change in plan.changes:
+                vlog(f'  {change.did}')
+        if plan.summary is not None:
+            log(f'  {plan.summary.would if args.dry_run else plan.summary.did}')
 
     # Steps 10-12: Full report
     log('')
