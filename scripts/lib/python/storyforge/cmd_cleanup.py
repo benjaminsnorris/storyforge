@@ -198,32 +198,14 @@ EXPECTED_WORKING_FILES = set(
 # The planner
 # ============================================================================
 #
-# `--dry-run` and the real run consume ONE computation per step, rather than
-# the real run mutating and the preview re-running that mutator against a copy
-# of the project (#317).
-#
-# Simulate-by-copying is only correct if the sandbox reproduces every piece of
-# external state the mutator consults, and it failed that twice. The sandbox
-# copied `reference/` but never `manuscript/`, so `exists:` resolved
-# differently there (#316). And the steps *compose*: step 2 creates
-# `manuscript/press-kit`, so in the real run step 3 sees `manuscript/` exist
-# and flips a flag — which no arrangement of the sandbox reproduces, because
-# dry-run deliberately does not create the directory. The result was a preview
-# that said "nothing to do" and a run that edited the file, which is the wrong
-# direction for a preview to fail in: over-reporting is a nuisance, an
-# under-report tells an author their project is clean and then changes it.
-#
-# So each step is a `plan_*` function returning a `StepPlan`: the list of
-# changes it *would* make, plus the closure that makes them. `--dry-run` prints
-# `plan.changes`; the real run prints them and calls `plan.apply`. The two
-# modes cannot disagree structurally, rather than by discipline — the same
-# property `packet.resolve` / `prompts_packet` and `status.py` already give the
-# packet and the next-step verdict.
+# `--dry-run` and the real run consume ONE computation per step: each step is a
+# `plan_*` returning a `StepPlan`, and `main` renders `plan.changes` or calls
+# `plan.apply`. Neither mode has a branch of its own, so they cannot disagree
+# by drifting apart the way a preview and a mutator did (#317).
 #
 # **Adding a 14th step means adding a `plan_*` function, not an
-# `if args.dry_run:` branch.** If the step reads the filesystem, read it
-# through `DiskFacts` rather than `os.path`, or it will observe the project as
-# it is at entry instead of as the real run's earlier steps will leave it.
+# `if args.dry_run:` branch** — see CLAUDE.md's "Cleanup's planner", which owns
+# the rationale and the rules for what a new step has to do.
 
 class PlannedChange(NamedTuple):
     """One change a step will make, phrased for both of cleanup's audiences.
@@ -677,7 +659,7 @@ def plan_missing_dirs(project_dir: str, missing: list[str]) -> StepPlan:
 def create_missing_dirs(project_dir: str) -> list[str]:
     """Create expected directories that are missing. Returns list of created dirs."""
     missing = missing_expected_dirs(project_dir)
-    _make_dirs(project_dir, missing)
+    plan_missing_dirs(project_dir, missing).apply()
     return missing
 
 
@@ -1013,9 +995,12 @@ def plan_yaml_migration(content: str, disk: DiskFacts) -> YamlMigrationPlan:
     reproduce the directory an earlier step creates.
 
     `disk` answers the `exists:` questions, and answers them the way the real
-    run's *later* steps will see the filesystem. Pure in the sense that matters
-    here: no writes, and every read routed through one injected object, which
-    is what lets the tests exercise it with no filesystem at all.
+    run's *later* steps will see the filesystem. Pure with respect to the
+    filesystem — it opens nothing and writes nothing, and every disk question
+    goes through the injected object, which is what lets the tests exercise it
+    with no filesystem at all. Not pure in the absolute sense: the
+    `chapter_map`-with-no-`artifacts:`-anchor branch logs a WARNING, because
+    that is the branch that would otherwise delete an entry silently.
 
     **Writes only when something changed, and leaves line endings alone**
     (#314) — both properties belong to the caller now, but they are why the
@@ -1182,10 +1167,10 @@ def read_and_plan_yaml_migration(project_dir: str,
                                  disk: DiskFacts) -> YamlMigrationPlan | None:
     """Read `storyforge.yaml` and plan its migration, or None if it can't be.
 
-    Guarded, `encoding=` stated, and reported rather than raised. `main` calls
-    this at step 3 of 13 with no handler above it and `__main__._dispatch` has
-    none either, so a latin-1 or unreadable storyforge.yaml took down the whole
-    command — including the read-only report, which is `cleanup`'s actual
+    Guarded, `encoding=` stated, and reported rather than raised. Nothing above
+    it handles anything — not `plan_cleanup`, not `main`, and not
+    `__main__._dispatch` — so a latin-1 or unreadable storyforge.yaml took down
+    the whole command — including the read-only report, which is `cleanup`'s actual
     product. Migration is optional tidying; the report is not. That inverts
     #313's call for `cmd_assemble`, where the expensive work came first.
     """
@@ -2656,8 +2641,9 @@ def plan_cleanup(project_dir: str, scenes: bool = False) -> list[StepPlan]:
     """Every mutating step, in the order the real run performs them.
 
     The one place the step list lives, so `--dry-run` cannot preview a
-    different set of steps from the one that runs — and the seam the per-step
-    property test in `tests/commands/test_cmd_cleanup_dry_run.py` hangs off.
+    different set of steps from the one that runs, and the seam the per-step
+    property test hangs off. Every step here needs a row in that test's
+    `ARRANGEMENTS`; `test_every_step_has_an_arrangement` enforces it.
 
     **Order is load-bearing.** `DiskFacts` is built from the directory step's
     own list, so every step after it observes the directories it will create.
@@ -2722,11 +2708,12 @@ def main(argv=None):
     if not args.dry_run:
         _untrack_newly_ignored(project_dir)
 
-    # Steps 10-12: Full report
+    # The report — cleanup's actual product, and the reason every step above
+    # reports its failures rather than raising them.
     log('')
     _run_and_write_report(project_dir)
 
-    # Step 13: Commit (unless dry-run)
+    # Commit (unless dry-run)
     if not args.dry_run:
         git_dir = os.path.join(project_dir, '.git')
         if shutil.which('git') and os.path.isdir(git_dir):

@@ -648,12 +648,13 @@ class TestDryRunDoesNotUnderReportTheYamlMigration:
 
     def test_the_real_run_does_change_the_file_in_that_case(
             self, mock_api, mock_git, mock_costs, monkeypatch):
-        """Half of the xfail above, asserted positively.
+        """Half of the agreement above, asserted positively.
 
-        Pinned separately so the xfail cannot start passing for the wrong reason —
-        if the real run stopped flipping the flag, the two modes would agree by
-        both doing nothing, and a strict xfail would flip to a pass while the
-        actual capability had regressed.
+        Pinned separately because agreement alone is satisfiable by both modes
+        doing nothing: if the real run stopped flipping the flag, the test
+        above would pass while the capability had regressed. It guarded a
+        strict xfail before #317 landed and guards the same hole now that the
+        xfail is a passing test.
         """
         real = _project(ONLY_THE_COMPOSED_CHANGE)
         before = _digest(real)
@@ -681,9 +682,10 @@ class TestDryRunDoesNotUnderReportTheYamlMigration:
         """`working/cleanup-report.csv` is the one legitimate write — the report
         *is* the product, and `--dry-run` still produces it.
 
-        Everything else must be untouched. This also guards against `disk_root`
-        being wired to a writable sandbox path by mistake, which would put the
-        migration's output somewhere nothing looks.
+        Everything else must be untouched — a preview that writes is not a
+        preview. This was also the guard against the retired `disk_root` being
+        pointed at a writable sandbox, which would have put the migration's
+        output somewhere nothing looks.
         """
         dry = _project(ONLY_THE_COMPOSED_CHANGE)
 
