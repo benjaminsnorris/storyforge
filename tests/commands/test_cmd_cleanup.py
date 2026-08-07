@@ -928,7 +928,8 @@ class TestReorganizeLooseFiles:
         (working / 'recommendations-old.md').write_text('b')
         (working / 'recommendations-new.md').write_text('c')
 
-        plan = cmd_cleanup.plan_loose_files(str(tmp_path))
+        plan = cmd_cleanup.plan_loose_files(
+            str(tmp_path), cmd_cleanup.DiskFacts(str(tmp_path)))
 
         assert [c.would for c in plan.changes] == [
             'Would move 1 recommendation files to working/recommendations/']

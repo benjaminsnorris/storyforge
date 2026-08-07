@@ -15,6 +15,7 @@ Usage:
 import argparse
 import glob
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -24,6 +25,7 @@ from storyforge.canon import CANON_DIR, CanonFinding, validate_canon_directory
 from storyforge.illustrations import (
     OPTIONAL_PLAN_COLUMNS, PLAN_COLUMNS, IllustrationFindingKind,
 )
+from dataclasses import dataclass
 from typing import Callable, Final, NamedTuple, get_args
 
 from storyforge import common
@@ -243,18 +245,56 @@ class StepPlan(NamedTuple):
     there are any, for the one step that reports a clean result out loud
     ("All scene files are clean."). Everything else stays silent when it has
     nothing to say.
+
+    **`apply` returns the changes it actually made**, which is usually all of
+    them and must not be assumed to be. It returned `None` for one commit, and
+    `main` printed every `change.did` on the strength of having called it — so
+    a `PermissionError` on the yaml temp-write logged "could not write
+    storyforge.yaml … The file is unchanged." and then "Migrated
+    storyforge.yaml" directly underneath. `did` was a flag asserted beside the
+    branch it claimed to summarise, which is what `YamlMigrationPlan.changed`
+    was made a comparison to avoid; a `-> None` thunk cannot tell the runner
+    what it did.
     """
     title: str
     changes: tuple[PlannedChange, ...]
-    apply: Callable[[], None]
+    apply: Callable[[], tuple[PlannedChange, ...]]
     summary: PlannedChange | None = None
 
 
-def _no_op() -> None:
+def _no_op() -> tuple[PlannedChange, ...]:
     """The `apply` for a step that planned nothing, or could not plan at all."""
+    return ()
 
 
-class DiskFacts(NamedTuple):
+def _warn_vanished(what: str) -> None:
+    """A planned target was gone by the time `apply` reached it.
+
+    Every applier re-checks the filesystem before acting, because a plan built
+    up front describes a project something else may have touched since. That
+    guard used to make the drop *silent*, so `--verbose` printed the change
+    anyway; a change is now reported only if it happened, and the shortfall is
+    said out loud rather than inferred from a missing line.
+    """
+    log(f'WARNING: {what} was gone before cleanup reached it, so that part of '
+        f'the plan was skipped. Re-run to see the current state.')
+
+
+def _is_empty_dir(path: str) -> bool:
+    """Guarded: `os.listdir` on an unreadable directory raised out of the
+    planner, and `plan_cleanup` builds every plan before the first one runs —
+    so one `PermissionError` cost all nine steps *and* the report, which is
+    `cleanup`'s actual product. #298's shape at a new call site."""
+    try:
+        return os.path.isdir(path) and not os.listdir(path)
+    except OSError as exc:
+        log(f'WARNING: could not read {path} ({type(exc).__name__}), so it '
+            f'was left alone.')
+        return False
+
+
+@dataclass(frozen=True)
+class DiskFacts:
     """The filesystem as the real run's *later* steps will see it.
 
     Gathered once, before any step runs, and deliberately including the effects
@@ -269,11 +309,26 @@ class DiskFacts(NamedTuple):
     because it is describing what the run would do, and it does not write.
 
     Paths are project-relative and `/`-separated on both sides of every
-    comparison, so a pending entry matches however the caller spells it.
+    comparison — **stored entries as well as queries**, normalized in `__new__`.
+    Normalizing only the query is not a half-measure but a distinct bug: it let
+    `pending_files=('working/logs',)` answer True to `isfile('working/logs')`,
+    so a transposed keyword argument type-checked and misbehaved silently.
     """
     root: str
     pending_dirs: tuple[str, ...] = ()
     pending_files: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        # A frozen dataclass rather than the `NamedTuple` the rest of this
+        # module uses, for one reason: `typing.NamedTuple` forbids overriding
+        # `__new__`, so there is nowhere to normalize the stored entries. A
+        # factory function would leave direct construction — which every test
+        # uses — bypassing it, and "normalized only if you went through the
+        # right door" is the bug this is fixing, not a fix for it.
+        object.__setattr__(self, 'pending_dirs',
+                           tuple(self._as_pending(p) for p in self.pending_dirs))
+        object.__setattr__(self, 'pending_files',
+                           tuple(self._as_pending(p) for p in self.pending_files))
 
     def exists(self, rel: str) -> bool:
         """Does `rel` exist, or will an earlier step have created it?
@@ -283,6 +338,8 @@ class DiskFacts(NamedTuple):
         """
         if os.path.exists(os.path.join(self.root, rel)):
             return True
+        if os.path.isabs(rel):
+            return False
         norm = self._norm(rel)
         if not norm:
             return True
@@ -292,6 +349,8 @@ class DiskFacts(NamedTuple):
     def isfile(self, rel: str) -> bool:
         if os.path.isfile(os.path.join(self.root, rel)):
             return True
+        if os.path.isabs(rel):
+            return False
         return self._norm(rel) in self.pending_files
 
     def list_files(self, reldir: str) -> list[str]:
@@ -303,11 +362,44 @@ class DiskFacts(NamedTuple):
         return self._files(reldir, recursive=True)
 
     def abspath(self, rel: str) -> str:
-        return os.path.join(self.root, *self._norm(rel).split('/'))
+        if os.path.isabs(rel):
+            return rel
+        norm = self._norm(rel)
+        return os.path.join(self.root, *norm.split('/')) if norm else self.root
+
+    @staticmethod
+    def _as_pending(rel: str) -> str:
+        """One stored pending entry, in the spelling comparisons use.
+
+        Absolute is a programming error rather than bad author data — every
+        pending path is built by `gather_disk_facts` from `EXPECTED_DIRS` — so
+        it raises instead of being quietly reinterpreted, which is how the
+        query side went wrong.
+        """
+        if os.path.isabs(rel):
+            raise ValueError(f'pending paths are project-relative: {rel!r}')
+        norm = DiskFacts._norm(rel)
+        if not norm or norm.startswith('..'):
+            raise ValueError(f'not a path inside the project: {rel!r}')
+        return norm
 
     @staticmethod
     def _norm(rel: str) -> str:
-        return rel.replace(os.sep, '/').strip('/')
+        """`/`-separated, no `.` segments, no doubled or edge separators.
+
+        **Only ever applied to a path already known to be relative.** Its
+        `strip('/')` would turn `/manuscript` into `manuscript`, and the caller
+        one line above resolves the same string absolutely through
+        `os.path.join` — so an absolute artifact `path:` cell was checked
+        against the real filesystem *and* against the pending set as though it
+        were project-relative. On a nonexistent `/manuscript` that wrote
+        `exists: true`, then flipped it to `false` on the next run: two commits
+        to `storyforge.yaml`, the first recording a falsehood, where the code
+        this replaced was stable. `exists`/`isfile`/`abspath` each check
+        `os.path.isabs` before calling this.
+        """
+        norm = posixpath.normpath(rel.replace(os.sep, '/').strip('/'))
+        return '' if norm == '.' else norm
 
     def _files(self, reldir: str, recursive: bool) -> list[str]:
         norm = self._norm(reldir)
@@ -387,14 +479,15 @@ def plan_gitignore(project_dir: str) -> StepPlan:
     if new_content == original:
         return StepPlan(title, (), _no_op)
 
-    def apply() -> None:
+    change = PlannedChange('Would update .gitignore with missing entries',
+                           'Updated .gitignore with missing entries')
+
+    def apply() -> tuple[PlannedChange, ...]:
         with open(path, 'w', encoding='utf-8') as f:
             f.write(new_content)
+        return (change,)
 
-    return StepPlan(title, (PlannedChange(
-        'Would update .gitignore with missing entries',
-        'Updated .gitignore with missing entries',
-    ),), apply)
+    return StepPlan(title, (change,), apply)
 
 
 def _gitignore_with_required(content: str) -> str:
@@ -514,6 +607,10 @@ def _make_dirs(project_dir: str, dirs: list[str]) -> None:
     for d in dirs:
         path = os.path.join(project_dir, d)
         os.makedirs(path, exist_ok=True)
+        # The `.gitkeep` is why `gather_disk_facts` seeds `pending_files`:
+        # the junk step deletes every file in `working/logs`, including this
+        # one, and a planner blind to it reports one fewer removal than the
+        # run performs.
         with open(os.path.join(path, '.gitkeep'), 'w'):
             pass
 
@@ -524,12 +621,14 @@ def plan_missing_dirs(project_dir: str, missing: list[str]) -> StepPlan:
     Takes `missing` rather than computing it, so the plan and the `DiskFacts`
     the later steps read cannot describe different sets.
     """
-    return StepPlan(
-        'Checking directories...',
-        tuple(PlannedChange(f'Would create {d}/', f'Created {d}/')
-              for d in missing),
-        lambda: _make_dirs(project_dir, missing),
-    )
+    changes = tuple(PlannedChange(f'Would create {d}/', f'Created {d}/')
+                    for d in missing)
+
+    def apply() -> tuple[PlannedChange, ...]:
+        _make_dirs(project_dir, missing)
+        return changes
+
+    return StepPlan('Checking directories...', changes, apply)
 
 
 def create_missing_dirs(project_dir: str) -> list[str]:
@@ -555,18 +654,20 @@ def plan_junk_files(project_dir: str, disk: DiskFacts) -> StepPlan:
     this step then deletes — is counted. Asking `os.listdir` at entry reported
     "0 log files" for a run that removes one.
     """
-    files: list[str] = []
-    changes: list[PlannedChange] = []
+    # (change, the paths it covers) rather than two parallel lists, so `apply`
+    # can report per change what it actually removed. A change here stands for
+    # several files, and announcing "Removed 5 log files" after removing four
+    # is the same class of untruth as announcing a step that did not run.
+    groups: list[tuple[PlannedChange, list[str]]] = []
 
     for reldir, pattern in (('working/evaluations', '.status-*'),
                             ('working/scores', '.markers-*')):
         matched = [f for f in disk.walk_files(reldir)
                    if _matches_glob(os.path.basename(f), pattern)]
         if matched:
-            files.extend(matched)
-            changes.append(PlannedChange(
+            groups.append((PlannedChange(
                 f'Would remove {len(matched)} {pattern} files',
-                f'Removed {len(matched)} {pattern} files'))
+                f'Removed {len(matched)} {pattern} files'), matched))
 
     # `'latest' in <absolute dir path>` is the pre-existing test, kept verbatim:
     # narrowing it to the project-relative path would be more correct and would
@@ -575,37 +676,45 @@ def plan_junk_files(project_dir: str, disk: DiskFacts) -> StepPlan:
              if os.path.basename(f) == '.batch-requests.jsonl'
              and 'latest' not in os.path.dirname(disk.abspath(f))]
     if batch:
-        files.extend(batch)
-        changes.append(PlannedChange(
+        groups.append((PlannedChange(
             f'Would remove {len(batch)} .batch-requests.jsonl files',
-            f'Removed {len(batch)} .batch-requests.jsonl files'))
+            f'Removed {len(batch)} .batch-requests.jsonl files'), batch))
 
     logs = disk.list_files('working/logs')
     if logs:
-        files.extend(logs)
-        changes.append(PlannedChange(
+        groups.append((PlannedChange(
             f'Would remove {len(logs)} log files',
-            f'Removed {len(logs)} log files'))
+            f'Removed {len(logs)} log files'), logs))
 
     # Previously invisible to `--dry-run`, which reported nothing at all about
     # the directories the real run removed.
-    dirs = [f'working/{d}' for d in PRUNABLE_WORKING_DIRS
-            if os.path.isdir(os.path.join(project_dir, 'working', d))
-            and not os.listdir(os.path.join(project_dir, 'working', d))]
-    changes.extend(PlannedChange(f'Would remove empty {d}/',
-                                 f'Removed empty {d}/') for d in dirs)
+    for d in PRUNABLE_WORKING_DIRS:
+        rel = f'working/{d}'
+        if _is_empty_dir(os.path.join(project_dir, 'working', d)):
+            groups.append((PlannedChange(f'Would remove empty {rel}/',
+                                         f'Removed empty {rel}/'), [rel]))
 
-    def apply() -> None:
-        for rel in files:
-            path = disk.abspath(rel)
-            if os.path.isfile(path):
-                os.remove(path)
-        for rel in dirs:
-            path = disk.abspath(rel)
-            if os.path.isdir(path) and not os.listdir(path):
-                os.rmdir(path)
+    def apply() -> tuple[PlannedChange, ...]:
+        done: list[PlannedChange] = []
+        for change, targets in groups:
+            removed = 0
+            for rel in targets:
+                path = disk.abspath(rel)
+                if os.path.isfile(path):
+                    os.remove(path)
+                    removed += 1
+                elif os.path.isdir(path) and not os.listdir(path):
+                    os.rmdir(path)
+                    removed += 1
+            if removed:
+                done.append(change)
+            if removed != len(targets):
+                _warn_vanished(f'{len(targets) - removed} of '
+                               f'{len(targets)} targets of "{change.would}"')
+        return tuple(done)
 
-    return StepPlan('Cleaning junk files...', tuple(changes), apply)
+    return StepPlan('Cleaning junk files...',
+                    tuple(c for c, _ in groups), apply)
 
 
 def clean_junk_files(project_dir: str) -> None:
@@ -628,26 +737,29 @@ LEGACY_FILES: Final = ('working/pipeline.yaml', 'working/assemble.py')
 
 def plan_legacy_files(project_dir: str, disk: DiskFacts) -> StepPlan:
     """Plan the retired files to delete."""
-    doomed = [f for f in LEGACY_FILES if disk.isfile(f)]
+    doomed = [(f, PlannedChange(f'Would delete {f}', f'Deleted {f}'))
+              for f in LEGACY_FILES if disk.isfile(f)]
 
-    def apply() -> None:
-        for f in doomed:
+    def apply() -> tuple[PlannedChange, ...]:
+        done = []
+        for f, change in doomed:
             path = os.path.join(project_dir, f)
             if os.path.isfile(path):
                 os.remove(path)
+                done.append(change)
+            else:
+                _warn_vanished(f)
+        return tuple(done)
 
-    return StepPlan(
-        'Checking legacy files...',
-        tuple(PlannedChange(f'Would delete {f}', f'Deleted {f}') for f in doomed),
-        apply,
-    )
+    return StepPlan('Checking legacy files...',
+                    tuple(c for _, c in doomed), apply)
 
 
 def delete_legacy_files(project_dir: str) -> None:
     plan_legacy_files(project_dir, DiskFacts(project_dir)).apply()
 
 
-def plan_loose_files(project_dir: str) -> StepPlan:
+def plan_loose_files(project_dir: str, disk: DiskFacts) -> StepPlan:
     """Plan the loose `working/recommendations*.md` files to file away.
 
     The count is of files that will actually move. `--dry-run` used to report
@@ -663,24 +775,42 @@ def plan_loose_files(project_dir: str) -> StepPlan:
         if os.path.isfile(src) and not os.path.exists(dest):
             moves.append((src, dest))
 
-    def apply() -> None:
-        if moves:
-            os.makedirs(recs_dir, exist_ok=True)
-        for src, dest in moves:
-            shutil.move(src, dest)
-
-    changes = ()
+    changes: list[PlannedChange] = []
+    # `working/recommendations/` is an `EXPECTED_DIRS` entry, so in a full run
+    # step 2 has already planned it and `disk.exists` says so — no second
+    # announcement. Standalone (`reorganize_loose_files`, no pending entries)
+    # this step creates it, and an unannounced `makedirs` is an effect outside
+    # `changes`, which is the invariant `StepPlan` exists to hold.
+    creates_dest = bool(moves) and not disk.exists('working/recommendations')
+    if creates_dest:
+        changes.append(PlannedChange('Would create working/recommendations/',
+                                     'Created working/recommendations/'))
     if moves:
-        changes = (PlannedChange(
+        changes.append(PlannedChange(
             f'Would move {len(moves)} recommendation files to '
             f'working/recommendations/',
             f'Moved {len(moves)} recommendation files to '
-            f'working/recommendations/'),)
-    return StepPlan('Reorganizing loose files...', changes, apply)
+            f'working/recommendations/'))
+
+    def apply() -> tuple[PlannedChange, ...]:
+        if moves:
+            os.makedirs(recs_dir, exist_ok=True)
+        moved = 0
+        for src, dest in moves:
+            if os.path.isfile(src) and not os.path.exists(dest):
+                shutil.move(src, dest)
+                moved += 1
+            else:
+                _warn_vanished(os.path.relpath(src, project_dir))
+        if moved == len(moves):
+            return tuple(changes)
+        return tuple(changes[:1]) if creates_dest else ()
+
+    return StepPlan('Reorganizing loose files...', tuple(changes), apply)
 
 
 def reorganize_loose_files(project_dir: str) -> None:
-    plan_loose_files(project_dir).apply()
+    plan_loose_files(project_dir, DiskFacts(project_dir)).apply()
 
 
 # ============================================================================
@@ -712,14 +842,15 @@ def plan_pipeline_csv(project_dir: str) -> StepPlan:
     if new_lines is None:
         return StepPlan(title, (), _no_op)
 
-    def apply() -> None:
+    change = PlannedChange('Would add missing columns to pipeline.csv',
+                           'Added missing columns to pipeline.csv')
+
+    def apply() -> tuple[PlannedChange, ...]:
         with open(csv_path, 'w', encoding='utf-8') as f:
             f.writelines(new_lines)
+        return (change,)
 
-    return StepPlan(title, (PlannedChange(
-        'Would add missing columns to pipeline.csv',
-        'Added missing columns to pipeline.csv',
-    ),), apply)
+    return StepPlan(title, (change,), apply)
 
 
 def migrate_pipeline_csv(project_dir: str) -> None:
@@ -780,12 +911,17 @@ def plan_pipeline_reviews(project_dir: str) -> StepPlan:
             else:
                 prev_date = m.group(1)
 
-    def apply() -> None:
+    def apply() -> tuple[PlannedChange, ...]:
+        removed = 0
         for f in doomed:
             if os.path.isfile(f):
                 os.remove(f)
+                removed += 1
+        if removed != len(doomed):
+            _warn_vanished(f'{len(doomed) - removed} pipeline review(s)')
+        return changes if removed else ()
 
-    changes = ()
+    changes: tuple[PlannedChange, ...] = ()
     if doomed:
         changes = (PlannedChange(
             f'Would remove {len(doomed)} duplicate pipeline review(s), '
@@ -1027,10 +1163,17 @@ def read_and_plan_yaml_migration(project_dir: str,
     return plan_yaml_migration(content, disk)
 
 
-def apply_yaml_migration(project_dir: str, plan: YamlMigrationPlan) -> None:
-    """Write `plan.new_content`, if it differs from what was read."""
+def apply_yaml_migration(project_dir: str,
+                         plan: YamlMigrationPlan) -> bool:
+    """Write `plan.new_content` if it differs from what was read.
+
+    Returns whether the file was written. The `bool` is what stops `main` from
+    announcing "Migrated storyforge.yaml" underneath its own "could not write
+    storyforge.yaml" WARNING — the write failure is swallowed here by design
+    (the report matters more than the migration), so the caller has to be told.
+    """
     if not plan.changed:
-        return
+        return False
     yaml_path = os.path.join(project_dir, 'storyforge.yaml')
     # Temp file plus `os.replace`, matching `illustrations`' ingest: a plain
     # `open(..., 'w')` truncates before it writes, so a `PermissionError` or a
@@ -1042,6 +1185,7 @@ def apply_yaml_migration(project_dir: str, plan: YamlMigrationPlan) -> None:
         with open(tmp_path, 'w', encoding='utf-8', newline='') as f:
             f.write(plan.new_content)
         os.replace(tmp_path, yaml_path)
+        return True
     except OSError as exc:
         log(f'WARNING: could not write storyforge.yaml '
             f'({type(exc).__name__}: {exc}). The file is unchanged.')
@@ -1050,6 +1194,7 @@ def apply_yaml_migration(project_dir: str, plan: YamlMigrationPlan) -> None:
                 os.remove(tmp_path)
             except OSError:
                 pass
+        return False
 
 
 def plan_storyforge_yaml(project_dir: str, disk: DiskFacts) -> StepPlan:
@@ -1060,10 +1205,13 @@ def plan_storyforge_yaml(project_dir: str, disk: DiskFacts) -> StepPlan:
         return StepPlan(title, (), _no_op)
 
     detail = '; '.join(plan.reasons) if plan.reasons else 'rewrite the file'
-    return StepPlan(title, (PlannedChange(
-        f'Would migrate storyforge.yaml ({detail})',
-        f'Migrated storyforge.yaml ({detail})',
-    ),), lambda: apply_yaml_migration(project_dir, plan))
+    change = PlannedChange(f'Would migrate storyforge.yaml ({detail})',
+                           f'Migrated storyforge.yaml ({detail})')
+
+    def apply() -> tuple[PlannedChange, ...]:
+        return (change,) if apply_yaml_migration(project_dir, plan) else ()
+
+    return StepPlan(title, (change,), apply)
 
 
 def migrate_storyforge_yaml(project_dir: str) -> None:
@@ -1336,12 +1484,15 @@ def plan_scene_files(project_dir: str) -> StepPlan:
     answer either way.
     """
     dirty = _scene_files_to_clean(project_dir)
+    changes = tuple(PlannedChange(f'Would clean: {name}', f'Cleaned: {name}')
+                    for name, _ in dirty)
 
-    def apply() -> None:
+    def apply() -> tuple[PlannedChange, ...]:
         for filename, cleaned in dirty:
             with open(os.path.join(project_dir, 'scenes', filename), 'w',
                       encoding='utf-8') as f:
                 f.write(cleaned)
+        return changes
 
     if dirty:
         summary = PlannedChange(
@@ -1351,13 +1502,7 @@ def plan_scene_files(project_dir: str) -> StepPlan:
         summary = PlannedChange('All scene files are clean.',
                                 'All scene files are clean.')
 
-    return StepPlan(
-        'Cleaning scene files...',
-        tuple(PlannedChange(f'Would clean: {name}', f'Cleaned: {name}')
-              for name, _ in dirty),
-        apply,
-        summary,
-    )
+    return StepPlan('Cleaning scene files...', changes, apply, summary)
 
 
 def clean_scene_files(project_dir: str, dry_run: bool = False,
@@ -2451,7 +2596,7 @@ def plan_cleanup(project_dir: str, scenes: bool = False) -> list[StepPlan]:
         plan_pipeline_csv(project_dir),
         plan_junk_files(project_dir, disk),
         plan_legacy_files(project_dir, disk),
-        plan_loose_files(project_dir),
+        plan_loose_files(project_dir, disk),
         plan_pipeline_reviews(project_dir),
     ]
     if scenes:
@@ -2486,8 +2631,9 @@ def main(argv=None):
             for change in plan.changes:
                 log(f'  {change.would}')
         else:
-            plan.apply()
-            for change in plan.changes:
+            # `plan.apply()`'s return, not `plan.changes` — a step reports what
+            # it did, not what it meant to do.
+            for change in plan.apply():
                 vlog(f'  {change.did}')
         if plan.summary is not None:
             log(f'  {plan.summary.would if args.dry_run else plan.summary.did}')
