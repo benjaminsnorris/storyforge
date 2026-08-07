@@ -390,7 +390,6 @@ def plan_gitignore(project_dir: str) -> StepPlan:
     def apply() -> None:
         with open(path, 'w', encoding='utf-8') as f:
             f.write(new_content)
-        _untrack_newly_ignored(project_dir)
 
     return StepPlan(title, (PlannedChange(
         'Would update .gitignore with missing entries',
@@ -427,22 +426,44 @@ def _gitignore_with_required(content: str) -> str:
 
 
 def _untrack_newly_ignored(project_dir: str) -> None:
-    """`git rm --cached` files the freshly-written .gitignore now excludes.
+    """`git rm --cached` files the .gitignore now excludes.
 
-    Deliberately **not** planned, and so not previewed. It is an effect on the
-    git index rather than on the project's files, and the count cannot be known
-    before the write: `git ls-files -i` answers against the `.gitignore` on
-    disk, so asking it beforehand reports against the old one. `--dry-run`
-    therefore says nothing about untracking, which is a stated gap rather than
-    a claim of no effect.
+    Deliberately **not** a `StepPlan`, and called from `main` rather than from
+    inside one. It is an effect on the git index rather than on the project's
+    files, and the count cannot be known before the write: `git ls-files -i`
+    answers against the `.gitignore` on disk, so asking it beforehand reports
+    against the old one. `--dry-run` therefore says nothing about untracking,
+    which is a stated gap rather than a claim of no effect.
+
+    **It lived inside `plan_gitignore`'s `apply` for one commit, and that was
+    wrong twice over.** `apply` is `_no_op` when the file already has every
+    required entry, so the sweep stopped running from the second cleanup
+    onward — where it had always run on every real run. And it made that step
+    the one place `apply` did something `changes` did not describe, which is
+    precisely the invariant `StepPlan` exists to hold; the property test could
+    not catch it, because a test project has no `.git`. A git-index effect is
+    not a step, so it is not modelled as one.
     """
     git_dir = os.path.join(project_dir, '.git')
     if not (shutil.which('git') and os.path.isdir(git_dir)):
         return
+    # `-c` is required, not decorative: `git ls-files -i` has been fatal
+    # without either `-o` or `-c` since git 2.32, and the failure was silent
+    # in the worst way available — `capture_output` swallowed the
+    # `fatal: ls-files -i must be used with either -o or -c` and nothing
+    # checked `returncode`, so `stdout` was `''` and the empty result read as
+    # "nothing is ignored-but-tracked". The sweep did nothing, said nothing,
+    # and exited 0 on every machine with a current git.
     r = subprocess.run(
-        ['git', '-C', project_dir, 'ls-files', '-i', '--exclude-standard'],
+        ['git', '-C', project_dir, 'ls-files', '-i', '-c',
+         '--exclude-standard'],
         capture_output=True, text=True,
     )
+    if r.returncode != 0:
+        log(f'WARNING: could not list ignored-but-tracked files '
+            f'({r.stderr.strip()}). Nothing was untracked; the rest of '
+            f'cleanup still runs.')
+        return
     tracked = r.stdout.strip()
     if not tracked:
         return
@@ -1094,8 +1115,21 @@ def report_csv_schema(project_dir: str) -> list[str]:
             issues.append(f'MISSING_CSV:{rel_path}')
             continue
 
-        with open(csv_path) as f:
-            first_line = f.readline().strip()
+        # Guarded, `encoding=` stated. This read was unguarded and killed
+        # `build_cleanup_report` — the single finding collector — on a latin-1
+        # or unreadable CSV, so no `working/cleanup-report.csv` was written and
+        # `skills/forge/SKILL.md`'s `status=pending` scan read the project as
+        # clean. `plan_pipeline_csv`'s handler promised "the rest of cleanup
+        # still runs" over exactly that crash, because `working/pipeline.csv`
+        # is a registered schema and lands here two steps later. Same shape as
+        # the `ill.sha256_of` regression (#298): `UnicodeDecodeError` is a
+        # `ValueError`, not an `OSError`, so both are named.
+        try:
+            with open(csv_path, encoding='utf-8') as f:
+                first_line = f.readline().strip()
+        except (OSError, UnicodeDecodeError) as exc:
+            issues.append(f'UNREADABLE_CSV:{rel_path}:{type(exc).__name__}')
+            continue
 
         if not first_line:
             issues.append(f'EMPTY_CSV:{rel_path}')
@@ -1129,8 +1163,16 @@ def _read_csv_column(csv_path: str, column: str) -> list[str]:
     """
     if not os.path.isfile(csv_path):
         return []
-    with open(csv_path) as f:
-        lines = f.readlines()
+    # Guarded for the reason `report_csv_schema`'s read is, and silent for a
+    # reason that one is not: every file this is called on is a registered
+    # schema, so the unreadable finding is already emitted there. Returning []
+    # here keeps `report_csv_integrity` from crashing the collector without
+    # adding a second finding about one file.
+    try:
+        with open(csv_path, encoding='utf-8') as f:
+            lines = f.readlines()
+    except (OSError, UnicodeDecodeError):
+        return []
     if not lines:
         return []
     header = [h.strip() for h in lines[0].strip().split('|')]
@@ -1384,6 +1426,17 @@ def _classify_issue(issue: str, rename_pairs: dict[str, list[tuple[str, str]]]) 
             'action': f'Copy from templates/ or run storyforge elaborate',
             'command': f'cp templates/{path.removeprefix("reference/")} {path}',
             'severity': 'warning',
+        }
+
+    if issue.startswith('UNREADABLE_CSV:'):
+        _, path, exc_name = issue.split(':', 2)
+        return {
+            'type': 'unreadable_csv', 'file': path,
+            'detail': csv_safe(f'{path} could not be read ({exc_name}), so '
+                               f'its schema was not checked'),
+            'action': 'Check the file\'s permissions and encoding — Storyforge '
+                      'reads CSVs as UTF-8',
+            'severity': 'error',
         }
 
     if issue.startswith('EMPTY_CSV:'):
@@ -1937,6 +1990,44 @@ def _check_illustrations(project_dir: str) -> list[dict]:
     return findings
 
 
+def _check_unreadable_inputs(project_dir: str) -> list[dict]:
+    """Report files a cleanup step reads that no other check covers.
+
+    `.gitignore` is the whole list. When `plan_gitignore` cannot read it, it
+    logs a WARNING and plans nothing — and an empty `StepPlan` is
+    indistinguishable from "nothing to do", so without a finding the durable
+    artifact says the project is clean. `storyforge.yaml` is covered by
+    `_check_yaml_scalars`, every registered CSV by `report_csv_schema`'s
+    `UNREADABLE_CSV`; this closes the third.
+
+    Same doctrine as `illustrations.staleness_unchecked_finding` and `--audit`'s
+    "Not assessed": **could not check must never render as checked and clean.**
+    The log line is not the artifact — `working/cleanup-report.csv` is, and it
+    is what `skills/forge/SKILL.md` scans.
+    """
+    path = os.path.join(project_dir, '.gitignore')
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, encoding='utf-8') as f:
+            f.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        return [{
+            'type': 'unreadable_file', 'file': '.gitignore',
+            'category': 'structure',
+            # `csv_safe` because the exception message carries a path, and the
+            # report is unquoted pipe-delimited — a `|` shifts every later
+            # field and empties the `status` cell forge scans for.
+            'detail': csv_safe(f'.gitignore could not be read '
+                               f'({type(exc).__name__}: {exc}), so its '
+                               f'required entries were not checked or added'),
+            'action': 'Check the file\'s permissions and encoding — '
+                      'Storyforge reads it as UTF-8',
+            'severity': 'warning',
+        }]
+    return []
+
+
 def _check_crlf(project_dir: str) -> list[dict]:
     """Report CRLF line endings in the CSVs and in `storyforge.yaml`.
 
@@ -2196,6 +2287,9 @@ def build_cleanup_report(project_dir: str) -> dict:
             'severity': 'error',
         })
 
+    # Files a cleanup step needs but no other check reads
+    all_findings.extend(_check_unreadable_inputs(project_dir))
+
     # CRLF check
     all_findings.extend(_check_crlf(project_dir))
 
@@ -2397,6 +2491,13 @@ def main(argv=None):
                 vlog(f'  {change.did}')
         if plan.summary is not None:
             log(f'  {plan.summary.would if args.dry_run else plan.summary.did}')
+
+    # Outside the plan loop on purpose: an effect on the git index, not on the
+    # project's files, so it is neither planned nor previewed (see the
+    # docstring). Unconditional in a real run, which is what it was before the
+    # planner and what living inside step 1's `apply` silently took away.
+    if not args.dry_run:
+        _untrack_newly_ignored(project_dir)
 
     # Steps 10-12: Full report
     log('')

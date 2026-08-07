@@ -139,6 +139,14 @@ def _needs_scene_cleanup() -> str:
 
 #: One arrangement per mutating step: the builder, and the title of the step it
 #: is meant to give work to. Named so a failure says which step's preview lied.
+#:
+#: **Every step in `plan_cleanup` needs an entry**, and
+#: `test_every_step_has_an_arrangement` is what makes that true rather than
+#: hoped-for. The vacuity guard below catches an arrangement that lost its step;
+#: it cannot catch a *step* that never got an arrangement, because a guard
+#: cannot notice a subject it was never told about. A 14th step whose branch
+#: only fires on a project none of these builders produce is untested with the
+#: whole suite green — #313's and #316's shape, one level up.
 ARRANGEMENTS = {
     'gitignore': (_needs_gitignore, 'Checking .gitignore...'),
     'directories': (_bare, 'Checking directories...'),
@@ -150,6 +158,61 @@ ARRANGEMENTS = {
     'pipeline_reviews': (_needs_dedup, 'Deduplicating pipeline reviews...'),
     'scene_files': (_needs_scene_cleanup, 'Cleaning scene files...'),
 }
+
+
+#: What each arrangement's named step actually *says*, verbatim.
+#:
+#: The property below asserts that a step speaks exactly when it acts. Nothing
+#: asserted **what it says**, and the two are independent: a step can announce
+#: another step's change, invert its two phrasings, miscount, or fall silent
+#: about one of the several things it does, and `bool(plan.changes)` is
+#: unmoved. Three of those were live bugs #317 fixed — the unannounced empty
+#: directory in particular is in this table because it was reported nowhere at
+#: all, and a boolean cannot tell that apart from a step with one thing to say.
+TRANSCRIPTS = {
+    'directories': [
+        'Would create manuscript/press-kit/',
+        'Would create working/logs/',
+        'Would create working/evaluations/',
+        'Would create working/plans/',
+        'Would create working/recommendations/',
+    ],
+    'gitignore': ['Would update .gitignore with missing entries'],
+    'junk_files': [
+        'Would remove 1 .status-* files',
+        'Would remove 1 .markers-* files',
+        'Would remove 1 .batch-requests.jsonl files',
+        'Would remove 1 log files',
+        # Reported nowhere before #317. A count-only assertion would not have
+        # noticed its absence, which is why the whole list is pinned.
+        'Would remove empty working/enrich/',
+    ],
+    'legacy_files': ['Would delete working/pipeline.yaml'],
+    'loose_files': [
+        'Would move 1 recommendation files to working/recommendations/'],
+    'pipeline_csv': ['Would add missing columns to pipeline.csv'],
+    'pipeline_reviews': [
+        'Would remove 1 duplicate pipeline review(s), keeping the latest per '
+        'day'],
+    'scene_files': ['Would clean: one.md'],
+    'storyforge_yaml': [
+        'Would migrate storyforge.yaml (correct artifact exists: flags)'],
+}
+
+
+def test_every_step_has_an_arrangement():
+    """The direction the vacuity guard cannot cover.
+
+    That guard starts from an arrangement and asserts its step exists and has
+    work, so it catches a step that was renamed or removed. Adding a step is
+    the other direction: `plan_cleanup` grows a 14th entry, no builder produces
+    a project that gives it work, and it is untested with the suite green.
+    CLAUDE.md tells the next author to add a `plan_*` function; this is what
+    also makes them add a row to `ARRANGEMENTS`.
+    """
+    titles = {p.title for p in cc.plan_cleanup(_bare(), scenes=True)}
+
+    assert titles == {title for _builder, title in ARRANGEMENTS.values()}
 
 
 class TestEveryStepAnnouncesExactlyWhatItDoes:
@@ -195,6 +258,62 @@ class TestEveryStepAnnouncesExactlyWhatItDoes:
                 f'{"changed" if mutated else "changed nothing"}')
 
     @pytest.mark.parametrize('name', sorted(ARRANGEMENTS))
+    def test_planning_writes_nothing(self, name):
+        """`--dry-run` renders `plan.changes` and calls nothing else.
+
+        So a planner that touches the disk *while planning* is a dry run that
+        mutates the project — the whole failure this module exists to prevent,
+        arrived at from the one direction the property below cannot see.
+        `plan_cleanup` builds every plan before that test takes its first
+        snapshot, and a step whose effect has already happened still mutates at
+        `apply` time (it removes the `.gitkeep` step 2 created), so
+        `bool(changes) == mutated` holds and convergence holds.
+
+        `test_dry_run_creates_nothing_except_the_report` is the end-to-end
+        version and runs on one project with nothing for any step to do — so
+        every arrangement that gives a step work was exempt from it.
+        """
+        root = ARRANGEMENTS[name][0]()
+        before = _snapshot(root)
+
+        cc.plan_cleanup(root, scenes=True)
+
+        assert _snapshot(root) == before, (
+            f'{name!r}: planning mutated the project, so `--dry-run` would too')
+
+    @pytest.mark.parametrize('name', sorted(ARRANGEMENTS))
+    def test_the_step_says_exactly_what_it_will_do(self, name):
+        """The other half of the property: not *whether* it speaks, but what.
+
+        `bool(plan.changes)` is unmoved by a step that announces another step's
+        change, miscounts, or omits one of the several things it does — and
+        that last one was a shipped bug (`--dry-run` said nothing at all about
+        the empty `working/enrich/` the real run removed).
+        """
+        builder, title = ARRANGEMENTS[name][0], ARRANGEMENTS[name][1]
+        plans = {p.title: p for p in cc.plan_cleanup(builder(), scenes=True)}
+
+        assert [c.would for c in plans[title].changes] == TRANSCRIPTS[name]
+
+    @pytest.mark.parametrize('name', sorted(ARRANGEMENTS))
+    def test_the_real_run_reports_the_same_changes_in_the_past_tense(self, name):
+        """`PlannedChange` carries two strings so the modes can address the
+        author differently. Nothing checked that they describe one change.
+
+        Swapping them — `--dry-run` reporting completed work, a verbose real
+        run reporting intent — leaves both lists the same length and every
+        other assertion in this file satisfied.
+        """
+        builder, title = ARRANGEMENTS[name][0], ARRANGEMENTS[name][1]
+        plans = {p.title: p for p in cc.plan_cleanup(builder(), scenes=True)}
+        changes = plans[title].changes
+
+        assert all(c.would.startswith('Would ') for c in changes)
+        assert not any(c.did.startswith('Would ') for c in changes)
+        assert len({c.would for c in changes}) == len(changes) == len(
+            {c.did for c in changes})
+
+    @pytest.mark.parametrize('name', sorted(ARRANGEMENTS))
     def test_a_second_run_plans_nothing(self, name):
         """Cleanup converges, and the planner says so.
 
@@ -210,6 +329,156 @@ class TestEveryStepAnnouncesExactlyWhatItDoes:
                    for p in cc.plan_cleanup(root, scenes=True) if p.changes}
 
         assert residue == {}
+
+
+class TestTheSceneStepReportsACleanResultOutLoud:
+    """The one step with a `summary`, which renders whether or not there are
+    changes — so it is the one step whose message can be wrong while
+    `plan.changes` is right, in both directions."""
+
+    def test_it_counts_the_files_it_would_clean(self):
+        plan = cc.plan_scene_files(_needs_scene_cleanup())
+
+        assert plan.summary.would == 'Would clean 1 scene file(s)'
+        assert plan.summary.did == 'Cleaned 1 scene file(s)'
+
+    def test_it_says_so_when_there_is_nothing_to_do(self):
+        """An author who passed `--scenes` is owed an answer either way. A
+        summary hardcoded to this string would satisfy every other assertion
+        in this file, including the one above's sibling."""
+        plan = cc.plan_scene_files(_bare())
+
+        assert plan.changes == ()
+        assert plan.summary.would == 'All scene files are clean.'
+
+
+class TestTheGuardedReadsReportRatherThanRaise:
+    """`cleanup`'s actual product is the read-only report, so an unreadable
+    input file must not take the command down with it.
+
+    Each of these returns an empty `StepPlan` whose `apply` is `_no_op`, which
+    is indistinguishable from "nothing to do" in `plan.changes` alone — the
+    WARNING is the only place the difference is stated, so the WARNING is what
+    these assert.
+    """
+
+    def test_an_undecodable_gitignore_is_reported_and_skipped(self, tmp_path,
+                                                              capsys):
+        (tmp_path / '.gitignore').write_bytes(b'# caf\xe9\nworking/logs/\n')
+
+        plan = cc.plan_gitignore(str(tmp_path))
+
+        assert plan.changes == ()
+        assert 'WARNING: could not read .gitignore' in capsys.readouterr().out
+        plan.apply()  # `_no_op` — must not raise, and must not write
+        assert (tmp_path / '.gitignore').read_bytes() == (
+            b'# caf\xe9\nworking/logs/\n')
+
+    def test_an_undecodable_pipeline_csv_is_reported_and_skipped(self, tmp_path,
+                                                                 capsys):
+        _write(str(tmp_path), 'working/pipeline.csv', 'x')
+        (tmp_path / 'working' / 'pipeline.csv').write_bytes(b'cycle|caf\xe9\n')
+
+        plan = cc.plan_pipeline_csv(str(tmp_path))
+
+        assert plan.changes == ()
+        assert ('WARNING: could not read working/pipeline.csv'
+                in capsys.readouterr().out)
+        plan.apply()
+        assert (tmp_path / 'working' / 'pipeline.csv').read_bytes() == (
+            b'cycle|caf\xe9\n')
+
+    def test_an_empty_pipeline_csv_is_not_a_crash(self, tmp_path):
+        """`_migrated_pipeline_lines` indexes `lines[0]`. Unguarded, a 0-byte
+        `pipeline.csv` raises `IndexError` out of step 4 of 8 and takes the
+        report — the thing cleanup is actually for — with it."""
+        _write(str(tmp_path), 'working/pipeline.csv', '')
+
+        assert cc.plan_pipeline_csv(str(tmp_path)).changes == ()
+
+    def test_a_review_filename_without_a_date_is_left_alone(self, tmp_path):
+        """`pipeline-review-*.md` is the glob; `pipeline-review-(\\d+)-` is the
+        parse. A file matching the first and not the second must not be
+        counted as a duplicate of whatever precedes it."""
+        _write(str(tmp_path), 'working/reviews/pipeline-review-notes.md', 'a')
+        _write(str(tmp_path), 'working/reviews/pipeline-review-20260101-a.md',
+               'b')
+
+        plan = cc.plan_pipeline_reviews(str(tmp_path))
+        plan.apply()
+
+        assert plan.changes == ()
+        assert (tmp_path / 'working' / 'reviews'
+                / 'pipeline-review-notes.md').exists()
+
+
+class TestApplyYamlMigrationFailsSafe:
+    """#276 was a silent truncation of this file. A plain `open(..., 'w')`
+    truncates before it writes, so the temp-file-plus-`os.replace` is the guard
+    against a half-written `storyforge.yaml` — and nothing exercised it."""
+
+    def _plan(self, root):
+        with open(os.path.join(root, 'storyforge.yaml'), 'w') as f:
+            f.write('project:\n  title: X\n')
+        return cc.read_and_plan_yaml_migration(root, cc.DiskFacts(root))
+
+    def test_a_failed_write_leaves_the_original_intact(self, tmp_path,
+                                                       monkeypatch, capsys):
+        plan = self._plan(str(tmp_path))
+        assert plan.changed
+
+        def boom(_src, _dst):
+            raise OSError('no space left on device')
+
+        monkeypatch.setattr(cc.os, 'replace', boom)
+        cc.apply_yaml_migration(str(tmp_path), plan)
+
+        assert ('WARNING: could not write storyforge.yaml'
+                in capsys.readouterr().out)
+        assert (tmp_path / 'storyforge.yaml').read_text() == (
+            'project:\n  title: X\n')
+
+    def test_a_failed_write_leaves_no_temp_file_behind(self, tmp_path,
+                                                       monkeypatch):
+        """A stray `storyforge.yaml.tmp` is a file nothing reads and nothing
+        cleans up, sitting beside the one the author edits by hand."""
+        plan = self._plan(str(tmp_path))
+
+        monkeypatch.setattr(cc.os, 'replace',
+                            lambda _s, _d: (_ for _ in ()).throw(OSError('x')))
+        cc.apply_yaml_migration(str(tmp_path), plan)
+
+        assert not (tmp_path / 'storyforge.yaml.tmp').exists()
+
+    def test_a_failure_to_clean_up_the_temp_file_is_survivable(self, tmp_path,
+                                                               capsys):
+        """The inner `except OSError: pass`. Reached by making the temp path
+        undeletable — a directory — which also makes `open(tmp, 'w')` raise, so
+        this is the one arrangement that exercises both handlers at once."""
+        (tmp_path / 'storyforge.yaml.tmp').mkdir()
+        plan = self._plan(str(tmp_path))
+
+        cc.apply_yaml_migration(str(tmp_path), plan)
+
+        assert ('WARNING: could not write storyforge.yaml'
+                in capsys.readouterr().out)
+        assert (tmp_path / 'storyforge.yaml').read_text() == (
+            'project:\n  title: X\n')
+
+    def test_it_writes_through_a_temp_path_rather_than_over_the_file(
+            self, tmp_path, monkeypatch):
+        """The atomicity itself, not just its failure modes: dropping the
+        temp file for a direct write passes every other test in this suite."""
+        plan = self._plan(str(tmp_path))
+        replaced: list[tuple[str, str]] = []
+        real = cc.os.replace
+        monkeypatch.setattr(cc.os, 'replace',
+                            lambda s, d: (replaced.append((s, d)), real(s, d)))
+
+        cc.apply_yaml_migration(str(tmp_path), plan)
+
+        assert replaced == [(str(tmp_path / 'storyforge.yaml.tmp'),
+                             str(tmp_path / 'storyforge.yaml'))]
 
 
 class TestDiskFacts:
@@ -239,6 +508,17 @@ class TestDiskFacts:
 
         assert disk.exists('working/logs')
         assert not disk.isfile('working/logs')
+
+    def test_a_pending_file_is_a_file(self):
+        """The positive half of `isfile`'s pending branch. The negative half
+        has a test above; nothing asserted that a pending file answers True,
+        so `isfile` could have consulted `pending_dirs` — or nothing — and the
+        suite would not have said."""
+        disk = cc.DiskFacts('/nowhere',
+                            pending_files=('working/logs/.gitkeep',))
+
+        assert disk.isfile('working/logs/.gitkeep')
+        assert not disk.isfile('working/logs/absent')
 
     def test_a_pending_gitkeep_is_listed(self, tmp_path):
         """The junk step deletes `working/logs/.gitkeep` that the directory
@@ -290,6 +570,21 @@ class TestPlanYamlMigrationIsPure:
 
         assert not again.changed
         assert again.reasons == ()
+
+    def test_an_artifact_block_with_no_path_is_left_alone(self):
+        """`exists:` is decided by resolving `path:` against the disk, so a
+        block carrying no path has nothing to decide from. Flipping it either
+        way would be a guess written into the author's file."""
+        content = ('artifacts:\n  mystery:\n    exists: true\n'
+                   '    updated:\n'
+                   'scene_extensions: []\n\nevaluation:\n'
+                   '  custom_evaluators: []\n\nproduction:\n  author: Ben\n'
+                   '\nparts:\n  - number: 1\n')
+
+        plan = cc.plan_yaml_migration(content, cc.DiskFacts('/nowhere'))
+
+        assert not plan.changed
+        assert 'exists: true' in plan.new_content
 
     def test_changed_is_a_comparison_not_a_flag(self):
         """`reasons` is descriptive only. #314's bug was a flag set
