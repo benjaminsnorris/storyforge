@@ -371,6 +371,39 @@ class TestTheReportSurvivesAnUnreadableFile:
         assert '|' not in findings[0]['detail'], 'must go through csv_safe'
 
 
+class TestAnUnreadableSceneFileIsSurvivable:
+    """`plan_cleanup` builds every plan before the first one runs, so one
+    unreadable file costs all nine steps rather than the tail of them — and
+    the report with them. Before the planner, the run still created directories
+    and migrated the yaml before dying.
+    """
+
+    def _bad_scene(self, project_dir):
+        path = os.path.join(project_dir, 'scenes', 'bad.md')
+        with open(path, 'wb') as f:
+            f.write(b'# Malm\xf6\n\nThe prose.\n')
+
+    def test_the_other_eight_steps_still_run(self, project_dir):
+        self._bad_scene(project_dir)
+
+        plans = cmd_cleanup.plan_cleanup(project_dir, scenes=True)
+
+        assert len(plans) == 9
+        assert any(p.changes for p in plans)
+
+    def test_it_becomes_a_finding_rather_than_a_silent_skip(self, project_dir):
+        """A `continue` alone would report the scene as checked and clean."""
+        self._bad_scene(project_dir)
+
+        report = build_cleanup_report(project_dir)
+
+        findings = [f for f in report['findings']
+                    if f['type'] == 'unreadable_scene']
+        assert len(findings) == 1
+        assert 'bad.md' in findings[0]['detail']
+        assert '|' not in findings[0]['detail'], 'must go through csv_safe'
+
+
 class TestCreateMissingDirs:
     """Test directory creation for expected directories."""
 

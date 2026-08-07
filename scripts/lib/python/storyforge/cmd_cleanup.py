@@ -267,6 +267,21 @@ def _no_op() -> tuple[PlannedChange, ...]:
     return ()
 
 
+def _warn_unwalkable(exc: OSError) -> None:
+    """A directory a planner needed to read could not be read.
+
+    `os.walk`'s default `onerror=None` *swallows* the error and skips the
+    subtree, so a step reported fewer files than the run would touch and the
+    short list was indistinguishable from a clean one. That is a dry-run
+    under-report produced by the code that exists to end dry-run under-reports,
+    which is why the callback is passed explicitly rather than left at its
+    default.
+    """
+    log(f'WARNING: could not read {getattr(exc, "filename", "a directory")} '
+        f'({type(exc).__name__}), so anything inside it was not counted and '
+        f'will not be touched.')
+
+
 def _warn_vanished(what: str) -> None:
     """A planned target was gone by the time `apply` reached it.
 
@@ -407,12 +422,22 @@ class DiskFacts:
         base = os.path.join(self.root, *norm.split('/'))
         if os.path.isdir(base):
             if recursive:
-                for root, _dirs, names in os.walk(base):
+                # `onerror` stated. `os.walk`'s default is to swallow the error
+                # and skip the subtree, so an unreadable directory produced a
+                # short list that reads exactly like a clean one — a dry-run
+                # under-report out of the code written to end dry-run
+                # under-reports.
+                for root, _dirs, names in os.walk(base, onerror=_warn_unwalkable):
                     for name in names:
                         found.add(self._norm(
                             os.path.relpath(os.path.join(root, name), self.root)))
             else:
-                for name in os.listdir(base):
+                try:
+                    names = os.listdir(base)
+                except OSError as exc:
+                    _warn_unwalkable(exc)
+                    names = []
+                for name in names:
                     if os.path.isfile(os.path.join(base, name)):
                         found.add(f'{norm}/{name}')
         prefix = norm + '/'
@@ -1462,8 +1487,20 @@ def _scene_files_to_clean(project_dir: str) -> list[tuple[str, str]]:
     for filename in sorted(os.listdir(scenes_dir)):
         if not filename.endswith('.md'):
             continue
-        with open(os.path.join(scenes_dir, filename), encoding='utf-8') as f:
-            original = f.read()
+        # The one planner without this guard, while three siblings had it and
+        # cited #298. It matters more here than there: `plan_cleanup` builds
+        # every plan up front, so one latin-1 scene file under `--scenes` cost
+        # all nine steps and the report — where before the planner the run
+        # still created directories and migrated the yaml before dying.
+        try:
+            with open(os.path.join(scenes_dir, filename),
+                      encoding='utf-8') as f:
+                original = f.read()
+        except (OSError, UnicodeDecodeError) as exc:
+            log(f'WARNING: could not read scenes/{filename} '
+                f'({type(exc).__name__}: {exc}), so it was not checked for '
+                f'writing-agent artifacts.')
+            continue
 
         cleaned = original
         extracted = extract_single_scene(cleaned)
@@ -1753,13 +1790,22 @@ def _check_scene_artifacts(project_dir: str) -> list[dict]:
         return []
 
     findings: list[dict] = []
+    unreadable: list[str] = []
     dirty_count = 0
     for filename in sorted(os.listdir(scenes_dir)):
         if not filename.endswith('.md'):
             continue
         filepath = os.path.join(scenes_dir, filename)
-        with open(filepath, encoding='utf-8') as f:
-            original = f.read()
+        try:
+            with open(filepath, encoding='utf-8') as f:
+                original = f.read()
+        except (OSError, UnicodeDecodeError) as exc:
+            # Reported, not skipped: this runs inside `build_cleanup_report`,
+            # the single finding collector, so an unguarded read here took the
+            # whole report down — and a silent `continue` would say the scene
+            # was checked and clean.
+            unreadable.append(f'{filename} ({type(exc).__name__}: {exc})')
+            continue
 
         cleaned = original
         extracted = extract_single_scene(cleaned)
@@ -1778,6 +1824,19 @@ def _check_scene_artifacts(project_dir: str) -> list[dict]:
                       f'(title headers, continuity blocks, or scene markers)',
             'action': 'Strip artifacts from scene files',
             'command': 'storyforge cleanup --scenes',
+            'severity': 'warning',
+        })
+    if unreadable:
+        findings.append({
+            'type': 'unreadable_scene', 'file': 'scenes/',
+            'category': 'scenes',
+            'detail': csv_safe(
+                f'{len(unreadable)} scene file(s) could not be read, so they '
+                f'were not checked for writing-agent artifacts: '
+                f'{", ".join(unreadable[:5])}'
+                f'{"..." if len(unreadable) > 5 else ""}'),
+            'action': 'Check the files\' permissions and encoding — '
+                      'Storyforge reads scenes as UTF-8',
             'severity': 'warning',
         })
     return findings
