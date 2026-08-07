@@ -194,7 +194,7 @@ TRANSCRIPTS = {
     'pipeline_reviews': [
         'Would remove 1 duplicate pipeline review(s), keeping the latest per '
         'day'],
-    'scene_files': ['Would clean: one.md'],
+    'scene_files': ['Would clean one.md'],
     'storyforge_yaml': [
         'Would migrate storyforge.yaml (correct artifact exists: flags)'],
 }
@@ -479,6 +479,48 @@ class TestApplyYamlMigrationFailsSafe:
 
         assert replaced == [(str(tmp_path / 'storyforge.yaml.tmp'),
                              str(tmp_path / 'storyforge.yaml'))]
+
+
+class TestPlannedChangeIsBuiltNotWritten:
+    """`_change` is the only way a step should phrase itself.
+
+    Fourteen hand-written `would`/`did` pairs is fourteen chances to swap the
+    tenses or let one drift when the other is edited. The verb table makes that
+    unrepresentable rather than merely tested for.
+    """
+
+    def test_the_two_tenses_come_from_one_verb(self):
+        change = cc._change('remove', '3 log files')
+
+        assert change.would == 'Would remove 3 log files'
+        assert change.did == 'Removed 3 log files'
+
+    def test_an_unknown_verb_fails_at_planning_time(self):
+        """Loudly, and at the moment the step is built — not silently, and not
+        in front of the author halfway through a run."""
+        with pytest.raises(KeyError):
+            cc._change('frobnicate', 'the thing')
+
+    def test_every_verb_a_planner_uses_is_in_the_table(self):
+        """The table is only an improvement if nothing routes around it."""
+        arrangements = [b() for b, _ in ARRANGEMENTS.values()]
+        verbs = {
+            c.would.split()[1]
+            for root in arrangements
+            for plan in cc.plan_cleanup(root, scenes=True)
+            for c in plan.changes
+        }
+
+        assert verbs
+        assert verbs <= set(cc._PAST_TENSE), (
+            f'phrased outside `_change`: {sorted(verbs - set(cc._PAST_TENSE))}')
+
+    def test_a_note_reads_the_same_in_both_modes(self):
+        """`summary` carries one statement that is not a change, and `_change`
+        would put "Would" in front of it."""
+        note = cc._note('All scene files are clean.')
+
+        assert note.would == note.did == 'All scene files are clean.'
 
 
 class TestDiskFacts:

@@ -210,15 +210,43 @@ EXPECTED_WORKING_FILES = set(
 class PlannedChange(NamedTuple):
     """One change a step will make, phrased for both of cleanup's audiences.
 
-    Two strings rather than one because the modes address the author
-    differently — `--dry-run` says "Would create …" and a verbose real run says
-    "Created …" — and deriving the second from the first means a verb table
-    that is wrong for the first irregular verb. What matters is that both come
-    from one list built once: a change cannot be announced by one mode and
-    performed by the other, because there is nothing else to perform.
+    Two strings because the modes address the author differently — `--dry-run`
+    says "Would create …" and a verbose real run says "Created …". **Build them
+    with `_change`, not by hand.** Fourteen hand-written pairs is fourteen
+    chances to swap the tenses, describe two different things, or let one drift
+    when the other is edited, and the docstring here used to decline the verb
+    table on the grounds that English is irregular — while every verb the
+    module actually uses is regular, so the table existed anyway, written out
+    longhand.
     """
     would: str
     did: str
+
+
+#: Past tense for every verb a planner uses, so one change cannot be phrased
+#: two inconsistent ways. A missing verb is a `KeyError` at planning time,
+#: which is the right moment and the right volume.
+_PAST_TENSE: Final = {
+    'add': 'Added', 'clean': 'Cleaned', 'create': 'Created',
+    'delete': 'Deleted', 'migrate': 'Migrated', 'move': 'Moved',
+    'remove': 'Removed', 'update': 'Updated',
+}
+
+
+def _change(verb: str, subject: str) -> PlannedChange:
+    """One change, in both tenses, from one verb and one subject."""
+    return PlannedChange(f'Would {verb} {subject}',
+                         f'{_PAST_TENSE[verb]} {subject}')
+
+
+def _note(text: str) -> PlannedChange:
+    """A `StepPlan.summary` that reads the same in both modes.
+
+    Only for a statement that is not a change — "All scene files are clean."
+    is a report on the project, not something either mode is about to do, and
+    `_change` would put "Would" in front of it.
+    """
+    return PlannedChange(text, text)
 
 
 class StepPlan(NamedTuple):
@@ -492,8 +520,7 @@ def plan_gitignore(project_dir: str) -> StepPlan:
     if new_content == original:
         return StepPlan(title, (), _no_op)
 
-    change = PlannedChange('Would update .gitignore with missing entries',
-                           'Updated .gitignore with missing entries')
+    change = _change('update', '.gitignore with missing entries')
 
     def apply() -> tuple[PlannedChange, ...]:
         with open(path, 'w', encoding='utf-8') as f:
@@ -646,8 +673,7 @@ def plan_missing_dirs(project_dir: str, missing: list[str]) -> StepPlan:
     Takes `missing` rather than computing it, so the plan and the `DiskFacts`
     the later steps read cannot describe different sets.
     """
-    changes = tuple(PlannedChange(f'Would create {d}/', f'Created {d}/')
-                    for d in missing)
+    changes = tuple(_change('create', f'{d}/') for d in missing)
 
     def apply() -> tuple[PlannedChange, ...]:
         _make_dirs(project_dir, missing)
@@ -690,9 +716,8 @@ def plan_junk_files(project_dir: str, disk: DiskFacts) -> StepPlan:
         matched = [f for f in disk.walk_files(reldir)
                    if _matches_glob(os.path.basename(f), pattern)]
         if matched:
-            groups.append((PlannedChange(
-                f'Would remove {len(matched)} {pattern} files',
-                f'Removed {len(matched)} {pattern} files'), matched))
+            groups.append((_change(
+                'remove', f'{len(matched)} {pattern} files'), matched))
 
     # `'latest' in <absolute dir path>` is the pre-existing test, kept verbatim:
     # narrowing it to the project-relative path would be more correct and would
@@ -701,23 +726,19 @@ def plan_junk_files(project_dir: str, disk: DiskFacts) -> StepPlan:
              if os.path.basename(f) == '.batch-requests.jsonl'
              and 'latest' not in os.path.dirname(disk.abspath(f))]
     if batch:
-        groups.append((PlannedChange(
-            f'Would remove {len(batch)} .batch-requests.jsonl files',
-            f'Removed {len(batch)} .batch-requests.jsonl files'), batch))
+        groups.append((_change(
+            'remove', f'{len(batch)} .batch-requests.jsonl files'), batch))
 
     logs = disk.list_files('working/logs')
     if logs:
-        groups.append((PlannedChange(
-            f'Would remove {len(logs)} log files',
-            f'Removed {len(logs)} log files'), logs))
+        groups.append((_change('remove', f'{len(logs)} log files'), logs))
 
     # Previously invisible to `--dry-run`, which reported nothing at all about
     # the directories the real run removed.
     for d in PRUNABLE_WORKING_DIRS:
         rel = f'working/{d}'
         if _is_empty_dir(os.path.join(project_dir, 'working', d)):
-            groups.append((PlannedChange(f'Would remove empty {rel}/',
-                                         f'Removed empty {rel}/'), [rel]))
+            groups.append((_change('remove', f'empty {rel}/'), [rel]))
 
     def apply() -> tuple[PlannedChange, ...]:
         done: list[PlannedChange] = []
@@ -762,8 +783,8 @@ LEGACY_FILES: Final = ('working/pipeline.yaml', 'working/assemble.py')
 
 def plan_legacy_files(project_dir: str, disk: DiskFacts) -> StepPlan:
     """Plan the retired files to delete."""
-    doomed = [(f, PlannedChange(f'Would delete {f}', f'Deleted {f}'))
-              for f in LEGACY_FILES if disk.isfile(f)]
+    doomed = [(f, _change('delete', f)) for f in LEGACY_FILES
+              if disk.isfile(f)]
 
     def apply() -> tuple[PlannedChange, ...]:
         done = []
@@ -808,14 +829,11 @@ def plan_loose_files(project_dir: str, disk: DiskFacts) -> StepPlan:
     # `changes`, which is the invariant `StepPlan` exists to hold.
     creates_dest = bool(moves) and not disk.exists('working/recommendations')
     if creates_dest:
-        changes.append(PlannedChange('Would create working/recommendations/',
-                                     'Created working/recommendations/'))
+        changes.append(_change('create', 'working/recommendations/'))
     if moves:
-        changes.append(PlannedChange(
-            f'Would move {len(moves)} recommendation files to '
-            f'working/recommendations/',
-            f'Moved {len(moves)} recommendation files to '
-            f'working/recommendations/'))
+        changes.append(_change(
+            'move', f'{len(moves)} recommendation files to '
+                    f'working/recommendations/'))
 
     def apply() -> tuple[PlannedChange, ...]:
         if moves:
@@ -867,8 +885,7 @@ def plan_pipeline_csv(project_dir: str) -> StepPlan:
     if new_lines is None:
         return StepPlan(title, (), _no_op)
 
-    change = PlannedChange('Would add missing columns to pipeline.csv',
-                           'Added missing columns to pipeline.csv')
+    change = _change('add', 'missing columns to pipeline.csv')
 
     def apply() -> tuple[PlannedChange, ...]:
         with open(csv_path, 'w', encoding='utf-8') as f:
@@ -948,11 +965,9 @@ def plan_pipeline_reviews(project_dir: str) -> StepPlan:
 
     changes: tuple[PlannedChange, ...] = ()
     if doomed:
-        changes = (PlannedChange(
-            f'Would remove {len(doomed)} duplicate pipeline review(s), '
-            f'keeping the latest per day',
-            f'Removed {len(doomed)} duplicate pipeline review(s), '
-            f'keeping the latest per day'),)
+        changes = (_change(
+            'remove', f'{len(doomed)} duplicate pipeline review(s), keeping '
+                      f'the latest per day'),)
     return StepPlan('Deduplicating pipeline reviews...', changes, apply)
 
 
@@ -1233,8 +1248,7 @@ def plan_storyforge_yaml(project_dir: str, disk: DiskFacts) -> StepPlan:
         return StepPlan(title, (), _no_op)
 
     detail = '; '.join(plan.reasons) if plan.reasons else 'rewrite the file'
-    change = PlannedChange(f'Would migrate storyforge.yaml ({detail})',
-                           f'Migrated storyforge.yaml ({detail})')
+    change = _change('migrate', f'storyforge.yaml ({detail})')
 
     def apply() -> tuple[PlannedChange, ...]:
         return (change,) if apply_yaml_migration(project_dir, plan) else ()
@@ -1524,8 +1538,7 @@ def plan_scene_files(project_dir: str) -> StepPlan:
     answer either way.
     """
     dirty = _scene_files_to_clean(project_dir)
-    changes = tuple(PlannedChange(f'Would clean: {name}', f'Cleaned: {name}')
-                    for name, _ in dirty)
+    changes = tuple(_change('clean', name) for name, _ in dirty)
 
     def apply() -> tuple[PlannedChange, ...]:
         for filename, cleaned in dirty:
@@ -1535,12 +1548,9 @@ def plan_scene_files(project_dir: str) -> StepPlan:
         return changes
 
     if dirty:
-        summary = PlannedChange(
-            f'Would clean {len(dirty)} scene file(s)',
-            f'Cleaned {len(dirty)} scene file(s)')
+        summary = _change('clean', f'{len(dirty)} scene file(s)')
     else:
-        summary = PlannedChange('All scene files are clean.',
-                                'All scene files are clean.')
+        summary = _note('All scene files are clean.')
 
     return StepPlan('Cleaning scene files...', changes, apply, summary)
 
