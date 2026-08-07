@@ -1,3 +1,52 @@
+def _gitignore_with_required(content: str) -> str:
+    """Return `content` with every `GITIGNORE_REQUIRED` entry present.
+
+    Returns `content` **unchanged** when nothing is missing, which is load-
+    bearing rather than an optimization: the caller decides whether to write by
+    comparing, so a cosmetic edit here becomes a reported change. Appending the
+    trailing newline unconditionally did exactly that — a complete `.gitignore`
+    whose last line was unterminated got rewritten, under the message "missing
+    entries", every single run. #314's shape on a different file.
+    """
+    missing = [entry for entry in GITIGNORE_REQUIRED if entry not in content]
+    if not missing:
+        return content
+
+    blocks = {
+        '.DS_Store': '\n# macOS\n.DS_Store\n',
+        'working/logs/':
+            '\n# Logs (debugging output, value extracted at write time)\n'
+            'working/logs/\n',
+        'working/scores/**/.batch-requests.jsonl':
+            '\n# Batch API payloads (keep only latest for debugging)\n'
+            'working/scores/**/.batch-requests.jsonl\n',
+        'working/evaluations/**/.status-*':
+            '\n# Intermediate scoring/eval state\n'
+            'working/evaluations/**/.status-*\n',
+        'working/scores/**/.markers-*': 'working/scores/**/.markers-*\n',
+        'working/.autopilot':
+            '\n# Temporary flag files (cleaned up by scripts)\n'
+            'working/.autopilot\nworking/.interactive\n',
+    }
+
+    new_content = content
+    if new_content and not new_content.endswith('\n'):
+        new_content += '\n'
+
+    for entry in GITIGNORE_REQUIRED:
+        if entry in blocks and entry in missing:
+            new_content += blocks[entry]
+
+    # `working/.interactive` is the one entry with no block of its own: when
+    # `working/.autopilot` is already present it belongs on the line after it,
+    # not in a new stanza at the end of the file.
+    if 'working/.interactive' not in new_content:
+        new_content = new_content.replace(
+            'working/.autopilot\n', 'working/.autopilot\nworking/.interactive\n')
+
+    return new_content
+
+
 """storyforge cleanup — Project structure cleanup and migration.
 
 Fixes structural drift in Storyforge novel projects: updates gitignore,
@@ -41,12 +90,18 @@ from storyforge.visual_state import STATE_COLUMNS
 # Constants
 # ============================================================================
 
-GITIGNORE_REQUIRED = [
+#: Every entry a Storyforge project's `.gitignore` must contain, in the order
+#: they are appended. `_gitignore_with_required` is driven by this list, which
+#: it previously only *claimed* in a docstring — six of the seven entries were
+#: hardcoded in a chain of `if`s and `.DS_Store` appeared solely in the seed
+#: written for a *missing* file, so a project with a hand-written `.gitignore`
+#: never got it and the constant was dead outside the test suite.
+GITIGNORE_REQUIRED: Final = [
+    '.DS_Store',
     'working/logs/',
     'working/scores/**/.batch-requests.jsonl',
     'working/evaluations/**/.status-*',
     'working/scores/**/.markers-*',
-    '.DS_Store',
     'working/.autopilot',
     'working/.interactive',
 ]
@@ -594,23 +649,14 @@ def _untrack_newly_ignored(project_dir: str) -> None:
 def update_gitignore(project_dir: str) -> None:
     """Ensure .gitignore contains all required entries.
 
-    The applier half of `plan_gitignore`, kept as its own entry point because
-    it is the unit under test and because nothing outside `main` wants the
-    git-index side effect.
+    Delegates, where it used to be a second implementation of the same logic
+    sitting beside the planner and calling itself "the applier half". Two
+    implementations that agree today is the arrangement this whole module was
+    restructured to remove, and the fork's stated reason — keeping the
+    git-index side effect out of the unit under test — went away when
+    `_untrack_newly_ignored` moved to `main`.
     """
-    path = os.path.join(project_dir, '.gitignore')
-
-    if not os.path.isfile(path):
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(GITIGNORE_SEED)
-
-    with open(path, encoding='utf-8') as f:
-        content = f.read()
-
-    new_content = _gitignore_with_required(content)
-    if new_content != content:
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(new_content)
+    plan_gitignore(project_dir).apply()
 
 
 # ============================================================================

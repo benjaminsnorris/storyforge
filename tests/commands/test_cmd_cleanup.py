@@ -178,6 +178,32 @@ class TestUpdateGitignore:
                       'working/.interactive'):
             assert entry in content, f'{entry!r} missing'
 
+    def test_a_complete_gitignore_with_no_final_newline_is_left_alone(
+            self, tmp_path):
+        """The trailing newline was appended before anything checked whether
+        there was anything to append, so a complete `.gitignore` whose last
+        line was unterminated got rewritten every run — announced as "missing
+        entries", which it had none of. #314's shape on a different file."""
+        complete = '\n'.join(GITIGNORE_REQUIRED)  # no trailing newline
+        (tmp_path / '.gitignore').write_text(complete)
+
+        plan = cmd_cleanup.plan_gitignore(str(tmp_path))
+        update_gitignore(str(tmp_path))
+
+        assert plan.changes == ()
+        assert (tmp_path / '.gitignore').read_text() == complete
+
+    def test_ds_store_reaches_an_existing_gitignore(self, tmp_path):
+        """`.DS_Store` was in `GITIGNORE_REQUIRED` and in the seed written for
+        a *missing* file, and in no branch that touched an existing one — so a
+        project with a hand-written `.gitignore` never got it, and the constant
+        was decorative outside this suite."""
+        (tmp_path / '.gitignore').write_text('# Mine\nmy-thing/\n')
+
+        update_gitignore(str(tmp_path))
+
+        assert '.DS_Store' in (tmp_path / '.gitignore').read_text()
+
     def test_it_writes_what_the_planner_writes(self, tmp_path):
         """`update_gitignore` is the one applier that does not delegate to its
         planner — every other one is `plan_*(...).apply()`. So these tests
