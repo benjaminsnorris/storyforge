@@ -1,52 +1,3 @@
-def _gitignore_with_required(content: str) -> str:
-    """Return `content` with every `GITIGNORE_REQUIRED` entry present.
-
-    Returns `content` **unchanged** when nothing is missing, which is load-
-    bearing rather than an optimization: the caller decides whether to write by
-    comparing, so a cosmetic edit here becomes a reported change. Appending the
-    trailing newline unconditionally did exactly that — a complete `.gitignore`
-    whose last line was unterminated got rewritten, under the message "missing
-    entries", every single run. #314's shape on a different file.
-    """
-    missing = [entry for entry in GITIGNORE_REQUIRED if entry not in content]
-    if not missing:
-        return content
-
-    blocks = {
-        '.DS_Store': '\n# macOS\n.DS_Store\n',
-        'working/logs/':
-            '\n# Logs (debugging output, value extracted at write time)\n'
-            'working/logs/\n',
-        'working/scores/**/.batch-requests.jsonl':
-            '\n# Batch API payloads (keep only latest for debugging)\n'
-            'working/scores/**/.batch-requests.jsonl\n',
-        'working/evaluations/**/.status-*':
-            '\n# Intermediate scoring/eval state\n'
-            'working/evaluations/**/.status-*\n',
-        'working/scores/**/.markers-*': 'working/scores/**/.markers-*\n',
-        'working/.autopilot':
-            '\n# Temporary flag files (cleaned up by scripts)\n'
-            'working/.autopilot\nworking/.interactive\n',
-    }
-
-    new_content = content
-    if new_content and not new_content.endswith('\n'):
-        new_content += '\n'
-
-    for entry in GITIGNORE_REQUIRED:
-        if entry in blocks and entry in missing:
-            new_content += blocks[entry]
-
-    # `working/.interactive` is the one entry with no block of its own: when
-    # `working/.autopilot` is already present it belongs on the line after it,
-    # not in a new stanza at the end of the file.
-    if 'working/.interactive' not in new_content:
-        new_content = new_content.replace(
-            'working/.autopilot\n', 'working/.autopilot\nworking/.interactive\n')
-
-    return new_content
-
-
 """storyforge cleanup — Project structure cleanup and migration.
 
 Fixes structural drift in Storyforge novel projects: updates gitignore,
@@ -571,29 +522,50 @@ def plan_gitignore(project_dir: str) -> StepPlan:
 
 
 def _gitignore_with_required(content: str) -> str:
-    """Return `content` with every `GITIGNORE_REQUIRED` entry present."""
+    """Return `content` with every `GITIGNORE_REQUIRED` entry present.
+
+    Returns `content` **unchanged** when nothing is missing, which is load-
+    bearing rather than an optimization: the caller decides whether to write by
+    comparing, so a cosmetic edit here becomes a reported change. Appending the
+    trailing newline unconditionally did exactly that — a complete `.gitignore`
+    whose last line was unterminated got rewritten, under the message "missing
+    entries", every single run. #314's shape on a different file.
+    """
+    missing = [entry for entry in GITIGNORE_REQUIRED if entry not in content]
+    if not missing:
+        return content
+
+    blocks = {
+        '.DS_Store': '\n# macOS\n.DS_Store\n',
+        'working/logs/':
+            '\n# Logs (debugging output, value extracted at write time)\n'
+            'working/logs/\n',
+        'working/scores/**/.batch-requests.jsonl':
+            '\n# Batch API payloads (keep only latest for debugging)\n'
+            'working/scores/**/.batch-requests.jsonl\n',
+        'working/evaluations/**/.status-*':
+            '\n# Intermediate scoring/eval state\n'
+            'working/evaluations/**/.status-*\n',
+        'working/scores/**/.markers-*': 'working/scores/**/.markers-*\n',
+        'working/.autopilot':
+            '\n# Temporary flag files (cleaned up by scripts)\n'
+            'working/.autopilot\nworking/.interactive\n',
+    }
+
     new_content = content
     if new_content and not new_content.endswith('\n'):
         new_content += '\n'
 
-    if 'working/logs/' not in content:
-        new_content += '\n# Logs (debugging output, value extracted at write time)\nworking/logs/\n'
+    for entry in GITIGNORE_REQUIRED:
+        if entry in blocks and entry in missing:
+            new_content += blocks[entry]
 
-    if 'working/scores/**/.batch-requests.jsonl' not in content:
-        new_content += '\n# Batch API payloads (keep only latest for debugging)\nworking/scores/**/.batch-requests.jsonl\n'
-
-    if 'working/evaluations/**/.status-*' not in content:
-        new_content += '\n# Intermediate scoring/eval state\nworking/evaluations/**/.status-*\n'
-
-    if 'working/scores/**/.markers-*' not in content:
-        new_content += 'working/scores/**/.markers-*\n'
-
-    if 'working/.interactive' not in content:
-        if 'working/.autopilot' in new_content:
-            new_content = new_content.replace('working/.autopilot\n',
-                                              'working/.autopilot\nworking/.interactive\n')
-        else:
-            new_content += '\n# Temporary flag files (cleaned up by scripts)\nworking/.autopilot\nworking/.interactive\n'
+    # `working/.interactive` is the one entry with no block of its own: when
+    # `working/.autopilot` is already present it belongs on the line after it,
+    # not in a new stanza at the end of the file.
+    if 'working/.interactive' not in new_content:
+        new_content = new_content.replace(
+            'working/.autopilot\n', 'working/.autopilot\nworking/.interactive\n')
 
     return new_content
 
