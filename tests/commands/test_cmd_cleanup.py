@@ -12,6 +12,7 @@ import subprocess
 
 import pytest
 
+import storyforge.cmd_cleanup as cmd_cleanup
 from storyforge.cmd_cleanup import (
     parse_args,
     main,
@@ -148,10 +149,285 @@ class TestUpdateGitignore:
         content = gitignore.read_text()
         assert 'working/.interactive' in content
 
+    def test_a_file_with_no_trailing_newline_does_not_lose_its_last_line(
+            self, tmp_path):
+        """Appending to a file whose last line is unterminated would splice
+        the author's entry onto ours — `my-custom-ignore/` becomes
+        `my-custom-ignore/# Logs …` and both stop matching."""
+        (tmp_path / '.gitignore').write_text('my-custom-ignore/')
+
+        update_gitignore(str(tmp_path))
+        lines = (tmp_path / '.gitignore').read_text().splitlines()
+
+        assert 'my-custom-ignore/' in lines
+        assert 'working/logs/' in lines
+
+    def test_every_required_entry_is_written(self, tmp_path):
+        """Three of the six entries were asserted by the tests above, so
+        deleting one of the other three from `_gitignore_with_required` left
+        the whole suite green — on a function whose entire job is that list."""
+        update_gitignore(str(tmp_path))
+        content = (tmp_path / '.gitignore').read_text()
+
+        for entry in ('.DS_Store',
+                      'working/logs/',
+                      'working/scores/**/.batch-requests.jsonl',
+                      'working/evaluations/**/.status-*',
+                      'working/scores/**/.markers-*',
+                      'working/.autopilot',
+                      'working/.interactive'):
+            assert entry in content, f'{entry!r} missing'
+
+    def test_a_complete_gitignore_with_no_final_newline_is_left_alone(
+            self, tmp_path):
+        """The trailing newline was appended before anything checked whether
+        there was anything to append, so a complete `.gitignore` whose last
+        line was unterminated got rewritten every run — announced as "missing
+        entries", which it had none of. #314's shape on a different file."""
+        complete = '\n'.join(GITIGNORE_REQUIRED)  # no trailing newline
+        (tmp_path / '.gitignore').write_text(complete)
+
+        plan = cmd_cleanup.plan_gitignore(str(tmp_path))
+        update_gitignore(str(tmp_path))
+
+        assert plan.changes == ()
+        assert (tmp_path / '.gitignore').read_text() == complete
+
+    def test_ds_store_reaches_an_existing_gitignore(self, tmp_path):
+        """`.DS_Store` was in `GITIGNORE_REQUIRED` and in the seed written for
+        a *missing* file, and in no branch that touched an existing one — so a
+        project with a hand-written `.gitignore` never got it, and the constant
+        was decorative outside this suite."""
+        (tmp_path / '.gitignore').write_text('# Mine\nmy-thing/\n')
+
+        update_gitignore(str(tmp_path))
+
+        assert '.DS_Store' in (tmp_path / '.gitignore').read_text()
+
+    def test_it_writes_what_the_planner_writes(self, tmp_path):
+        """`update_gitignore` is the one applier that does not delegate to its
+        planner — every other one is `plan_*(...).apply()`. So these tests
+        exercise a code path `main` does not take, and the two implementations
+        can drift apart with nothing to say so. Pinned rather than merged
+        because the fork exists to skip `_untrack_newly_ignored`.
+        """
+        update_gitignore(str(tmp_path))
+        by_applier = (tmp_path / '.gitignore').read_text()
+        (tmp_path / '.gitignore').unlink()
+
+        cmd_cleanup.plan_gitignore(str(tmp_path)).apply()
+
+        assert (tmp_path / '.gitignore').read_text() == by_applier
+
+
+class TestUntrackNewlyIgnored:
+    """`git rm --cached` for files the freshly-written .gitignore now excludes.
+
+    Untested until now, and it had never worked: `git ls-files -i` is fatal
+    without `-o` or `-c` (git >= 2.32), `capture_output` swallowed the message,
+    and nothing checked `returncode` — so the empty stdout read as "nothing is
+    ignored-but-tracked" and the sweep silently did nothing.
+    """
+
+    def _repo(self, tmp_path):
+        root = str(tmp_path)
+        subprocess.run(['git', 'init', '-q', root], check=True)
+        for k, v in (('user.email', 'a@b.c'), ('user.name', 'Test')):
+            subprocess.run(['git', '-C', root, 'config', k, v], check=True)
+        os.makedirs(os.path.join(root, 'working', 'logs'))
+        with open(os.path.join(root, 'working', 'logs', 'run.log'), 'w') as f:
+            f.write('x')
+        with open(os.path.join(root, '.gitignore'), 'w') as f:
+            f.write('working/logs/\n')
+        subprocess.run(['git', '-C', root, 'add', '-Af'], check=True)
+        subprocess.run(['git', '-C', root, 'commit', '-qm', 'seed'], check=True)
+        return root
+
+    def _tracked(self, root):
+        r = subprocess.run(['git', '-C', root, 'ls-files'],
+                           capture_output=True, text=True, check=True)
+        return set(r.stdout.split())
+
+    def test_it_untracks_a_file_the_gitignore_now_excludes(self, tmp_path):
+        root = self._repo(tmp_path)
+        assert 'working/logs/run.log' in self._tracked(root)
+
+        cmd_cleanup._untrack_newly_ignored(root)
+
+        assert 'working/logs/run.log' not in self._tracked(root)
+        assert '.gitignore' in self._tracked(root), 'untracked too much'
+
+    def test_it_leaves_the_file_on_disk(self, tmp_path):
+        """`--cached` only. Cleanup removes `working/logs/*` at its junk step,
+        deliberately and under its own announcement; this step must not delete
+        anything on its own."""
+        root = self._repo(tmp_path)
+
+        cmd_cleanup._untrack_newly_ignored(root)
+
+        assert os.path.isfile(os.path.join(root, 'working', 'logs', 'run.log'))
+
+    def test_a_failing_git_is_reported_rather_than_read_as_nothing_to_do(
+            self, tmp_path, monkeypatch, capsys):
+        """The silent half of the bug, kept separate from the `-c` half: an
+        empty stdout from a *failed* command must not be indistinguishable
+        from an empty stdout from a successful one."""
+        root = self._repo(tmp_path)
+        real_run = subprocess.run
+
+        def fail(cmd, *a, **k):
+            if 'ls-files' in cmd:
+                return subprocess.CompletedProcess(cmd, 128, '', 'fatal: nope')
+            return real_run(cmd, *a, **k)
+
+        monkeypatch.setattr(cmd_cleanup.subprocess, 'run', fail)
+        cmd_cleanup._untrack_newly_ignored(root)
+
+        out = capsys.readouterr().out
+        assert 'WARNING: could not list ignored-but-tracked files' in out
+        assert 'fatal: nope' in out
+
+    def test_it_is_a_no_op_outside_a_git_repository(self, tmp_path):
+        cmd_cleanup._untrack_newly_ignored(str(tmp_path))
+
 
 # ============================================================================
 # create_missing_dirs
 # ============================================================================
+
+
+class TestUntrackRunsOnEveryRealRun:
+    """It is not a `StepPlan`, and it must not behave like one.
+
+    For one commit it lived inside `plan_gitignore`'s `apply`, which is
+    `_no_op` once the `.gitignore` has every required entry — so the sweep ran
+    on the first cleanup of a project and never again, where it had always run
+    on every real run. It was also the one place an `apply` did something its
+    `changes` did not describe, and the per-step property test could not see it
+    because a test project has no `.git`. Both halves are why it is called from
+    `main` instead.
+    """
+
+    def _calls(self, project_dir, argv, monkeypatch):
+        seen = []
+        monkeypatch.setattr('storyforge.cmd_cleanup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_cleanup._untrack_newly_ignored',
+                            lambda root: seen.append(root))
+        monkeypatch.setattr('storyforge.cmd_cleanup.subprocess.run',
+                            lambda *a, **kw: subprocess.CompletedProcess(
+                                a[0] if a else [], 0, stdout='', stderr=''))
+        main(argv)
+        return seen
+
+    def test_it_runs_again_when_the_gitignore_needs_no_update(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        first = self._calls(project_dir, [], monkeypatch)
+        assert first == [project_dir]
+
+        # The first run wrote every required entry, so step 1 now plans
+        # nothing. The sweep must still happen.
+        assert not cmd_cleanup.plan_gitignore(project_dir).changes, (
+            'precondition: the gitignore step should have nothing left to do')
+
+        assert self._calls(project_dir, [], monkeypatch) == [project_dir]
+
+    def test_dry_run_never_touches_the_index(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        assert self._calls(project_dir, ['--dry-run'], monkeypatch) == []
+
+
+class TestTheReportSurvivesAnUnreadableFile:
+    """`cleanup`'s product is the report, so nothing optional may take it down.
+
+    `plan_pipeline_csv` logs "the rest of cleanup still runs" when it cannot
+    read `working/pipeline.csv` — and that was false, because the file is a
+    registered schema and `report_csv_schema` opened it unguarded two steps
+    later. A handler asserting survival over a crash is worse than no handler.
+    `UnicodeDecodeError` is a `ValueError`, not an `OSError`; naming only the
+    latter is the `ill.sha256_of` regression (#298).
+    """
+
+    def _latin1(self, project_dir, rel):
+        path = os.path.join(project_dir, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'wb') as f:
+            f.write('cycle|started\nMalm\xf6|2026-01-01\n'.encode('latin-1'))
+
+    def test_a_registered_csv_that_is_not_utf8_becomes_a_finding(
+            self, project_dir):
+        self._latin1(project_dir, 'working/pipeline.csv')
+
+        report = build_cleanup_report(project_dir)
+
+        unreadable = [f for f in report['findings']
+                      if f['type'] == 'unreadable_csv']
+        assert [f['file'] for f in unreadable] == ['working/pipeline.csv']
+        assert unreadable[0]['severity'] == 'error'
+
+    def test_the_whole_report_still_gets_written(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        self._latin1(project_dir, 'working/pipeline.csv')
+        monkeypatch.setattr('storyforge.cmd_cleanup.detect_project_root',
+                            lambda: project_dir)
+
+        main(['--csv'])
+
+        report_path = os.path.join(project_dir, 'working',
+                                   'cleanup-report.csv')
+        assert os.path.isfile(report_path), (
+            'no report on disk — forge scans a stale one and reads the '
+            'project as clean')
+        with open(report_path) as f:
+            assert 'unreadable_csv' in f.read()
+
+    def test_an_unreadable_gitignore_is_a_finding_not_just_a_log_line(
+            self, project_dir):
+        """An empty `StepPlan` is indistinguishable from "nothing to do", so
+        the WARNING `plan_gitignore` logs cannot be the only record."""
+        with open(os.path.join(project_dir, '.gitignore'), 'wb') as f:
+            f.write(b'# Malm\xf6\nworking/logs/\n')
+
+        report = build_cleanup_report(project_dir)
+
+        findings = [f for f in report['findings']
+                    if f['type'] == 'unreadable_file'
+                    and f['file'] == '.gitignore']
+        assert len(findings) == 1
+        assert '|' not in findings[0]['detail'], 'must go through csv_safe'
+
+
+class TestAnUnreadableSceneFileIsSurvivable:
+    """`plan_cleanup` builds every plan before the first one runs, so one
+    unreadable file costs all nine steps rather than the tail of them — and
+    the report with them. Before the planner, the run still created directories
+    and migrated the yaml before dying.
+    """
+
+    def _bad_scene(self, project_dir):
+        path = os.path.join(project_dir, 'scenes', 'bad.md')
+        with open(path, 'wb') as f:
+            f.write(b'# Malm\xf6\n\nThe prose.\n')
+
+    def test_the_other_eight_steps_still_run(self, project_dir):
+        self._bad_scene(project_dir)
+
+        plans = cmd_cleanup.plan_cleanup(project_dir, scenes=True)
+
+        assert len(plans) == 9
+        assert any(p.changes for p in plans)
+
+    def test_it_becomes_a_finding_rather_than_a_silent_skip(self, project_dir):
+        """A `continue` alone would report the scene as checked and clean."""
+        self._bad_scene(project_dir)
+
+        report = build_cleanup_report(project_dir)
+
+        findings = [f for f in report['findings']
+                    if f['type'] == 'unreadable_scene']
+        assert len(findings) == 1
+        assert 'bad.md' in findings[0]['detail']
+        assert '|' not in findings[0]['detail'], 'must go through csv_safe'
 
 
 class TestCreateMissingDirs:
@@ -685,6 +961,37 @@ class TestReorganizeLooseFiles:
         reorganize_loose_files(str(tmp_path))
         # Original should be preserved
         assert (recs_dir / 'recommendations-old.md').read_text() == 'existing'
+
+    def test_it_creates_the_destination_only_when_something_moves(self,
+                                                                  tmp_path):
+        """Deliberate (#317): the count is of files that will actually move,
+        so a step with nothing to move reports nothing *and does nothing*. It
+        used to `makedirs` unconditionally, and restoring that is invisible to
+        the per-step property test — `working/recommendations` is in
+        `EXPECTED_DIRS`, so step 2 has already created it by the time this step
+        runs, and the extra effect leaves no trace in composition.
+        """
+        (tmp_path / 'working').mkdir()
+
+        reorganize_loose_files(str(tmp_path))
+
+        assert not (tmp_path / 'working' / 'recommendations').exists()
+
+    def test_it_skips_a_taken_destination_without_counting_it(self, tmp_path):
+        """The over-report #317 names: `--dry-run` counted every glob match,
+        including the ones the real run leaves alone. The count and the moves
+        are now one list, and this pins the count rather than the outcome."""
+        working = tmp_path / 'working'
+        (working / 'recommendations').mkdir(parents=True)
+        (working / 'recommendations' / 'recommendations-old.md').write_text('a')
+        (working / 'recommendations-old.md').write_text('b')
+        (working / 'recommendations-new.md').write_text('c')
+
+        plan = cmd_cleanup.plan_loose_files(
+            str(tmp_path), cmd_cleanup.DiskFacts(str(tmp_path)))
+
+        assert [c.would for c in plan.changes] == [
+            'Would move 1 recommendation files to working/recommendations/']
 
 
 # ============================================================================
