@@ -46,7 +46,7 @@ Varying values across sequences prevents fatigue. If five consecutive scenes all
 
 ---
 
-## 2. Scene Structure (Dwight Swain)
+## 2. Scene Structure (Dwight Swain, Jack Bickham)
 
 ### The Principle
 
@@ -55,7 +55,7 @@ Swain identified two fundamental scene types that alternate to create narrative 
 **Action scenes** have three components:
 1. **Goal** — the character wants something concrete and specific
 2. **Conflict** — something opposes the goal
-3. **Outcome** — the scene resolves in one of four ways: yes, no, yes-but, no-and
+3. **Outcome** — Swain calls it the *disaster*: the scene ends by answering the question its goal raised. Bickham (*Scene & Structure*, 1993) named the answers; see The Five Outcomes below.
 
 **Sequel scenes** have three components:
 1. **Reaction** — the character processes what just happened emotionally
@@ -70,16 +70,21 @@ Action and sequel alternate like breathing — action is the exhale (tension, pu
 - **Literary pacing:** Extended sequels with rich interiority. Action → long sequel → action. The reader lives inside the character's processing.
 - **Balanced pacing:** Roughly equal weight. Each action scene gets a sequel that earns the next action.
 
-### The Four Outcomes
+### The Five Outcomes
 
-The outcome determines forward momentum:
+The outcome determines forward momentum. The disaster answers the scene question; the labels for the first four come from Jack Bickham, building on Swain:
 
-- **Yes** — the character gets what they wanted. Tension drops. Use sparingly — too many "yes" outcomes and there's no conflict.
+- **Yes** — the character gets what they wanted. Tension drops. Use sparingly — too many "yes" outcomes and there's no conflict. (Swain and Bickham end every scene in a disaster; a clean yes is the exception that ends a line of action.)
 - **No** — the character fails. Creates frustration that needs a sequel to process.
-- **Yes, but** — the character succeeds, but a new complication arises. The most useful outcome for maintaining momentum. They got the information they needed, but now someone knows they have it.
-- **No, and furthermore** — the character fails, and things get worse. The most useful outcome for escalation. Not only did the judge dismiss the evidence, but now the judge knows they're investigating.
+- **Yes, but** — the character succeeds, but a new complication arises (Bickham). The most useful outcome for maintaining momentum. They got the information they needed, but now someone knows they have it.
+- **No, and** (Bickham's "no, and furthermore") — the character fails, and things get worse. The most useful outcome for escalation. Not only did the judge dismiss the evidence, but now the judge knows they're investigating.
+- **No, but** — the character fails at the goal, but something genuinely goes their way: an ally appears, a door opens, the loss is softened. This is the turn Mary Robinette Kowal teaches for try/fail cycles as the story starts going the character's way (alongside "yes, and"), borrowed from improv. It eases pressure, so it belongs where the tide is turning, typically late Act 2 into Act 3.
 
 Most scenes in a well-paced manuscript end in "yes-but" or "no-and." These are the outcomes that create the forward pressure readers describe as "I couldn't put it down."
+
+**Naming caution.** K.M. Weiland uses the same labels differently: her "no, and" is a failure that salvages something (a lesson, a clue), and her "no, but" is *false progress* — a failure that leaves the character holding something that seems helpful until it turns out not to be. Storyforge's `no-and` is Bickham's (worse) and its `no-but` is Kowal's (genuinely better). Don't import Weiland's definitions into the outcome field.
+
+**False progress is a pattern across scenes, not an outcome.** Weiland's warning still matters: a `no-but` whose gain a later scene cancels has created "the illusion of movement without true momentum." That can't be seen from inside one scene, so it is not an outcome label; look for it across the sequence — a `no-but` (or `yes-but`) whose gain is nullified within a few scenes with nothing learned. Used sparingly it's a reversal; used repeatedly it's a plot that's busy but going nowhere.
 
 ### What Bad Looks Like
 

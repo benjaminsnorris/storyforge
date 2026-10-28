@@ -388,6 +388,11 @@ def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
 
 # Fields that hold character references (semicolon-separated or single)
 _CHAR_FIELDS = ('pov', 'characters', 'on_stage')
+def _outcome_guide() -> str:
+    from .schema import OUTCOME_GUIDE   # schema imports this module
+    return OUTCOME_GUIDE
+
+
 # Fields that hold location references
 _LOCATION_FIELDS = ('location',)
 # Fields that hold motif references
@@ -883,8 +888,8 @@ def _field_instruction(field: str) -> str:
             'CONFLICT: <what specifically opposes the goal?>'
         ),
         'outcome': (
-            'OUTCOME: <how the scene ends for the POV character: '
-            'yes / no / yes-but / no-and>'
+            'OUTCOME: <how the scene ends for the POV character, one of: '
+            + _outcome_guide() + '>'
         ),
         'crisis': (
             'CRISIS: <the key dilemma — a best bad choice or irreconcilable '

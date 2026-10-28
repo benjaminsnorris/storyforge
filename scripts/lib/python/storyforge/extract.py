@@ -367,6 +367,7 @@ Emotional arc: {intent.get('emotional_arc', 'unknown')}"""
 
     registries_section = f'\n{registries_text}\n' if registries_text else ''
 
+    from .schema import OUTCOME_GUIDE
     return f"""Extract the drafting contract details from this scene — the specific actions, choices, and dialogue that make it work.
 
 ## Context
@@ -382,7 +383,7 @@ Output each field on its own labeled line. Use semicolons to separate list items
 
 GOAL: [the POV character's concrete objective entering this scene — what are they trying to do?]
 CONFLICT: [what specifically opposes the goal?]
-OUTCOME: [how does the scene end for the POV character? Use: yes / no / yes-but / no-and]
+OUTCOME: [how does the scene end for the POV character? One of: {OUTCOME_GUIDE}]
 CRISIS: [the key dilemma — a best bad choice or irreconcilable goods that the character faces]
 DECISION: [what the character actively chooses in response to the crisis]
 KEY_ACTIONS: [semicolon-separated concrete things that happen in this scene]

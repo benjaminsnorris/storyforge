@@ -26,7 +26,19 @@ VALID_TIMES = frozenset({
 
 VALID_ACTION_SEQUEL = frozenset({'action', 'sequel'})
 
-VALID_OUTCOMES = frozenset({'yes', 'no', 'yes-but', 'no-and'})
+VALID_OUTCOMES = frozenset({'yes', 'no', 'yes-but', 'no-and', 'no-but'})
+
+# How each scene outcome reads, used verbatim by every prompt that asks for
+# one. The disaster answers the scene's question (Swain's goal-conflict-
+# disaster; labels from Bickham, Scene & Structure, 1993). no-but is the
+# improv / Kowal try-fail turn, used as the story starts going the
+# character's way. Note no-and here is Bickham's "no, and furthermore"
+# (worse), not Weiland's "no, and" (fails but salvages something).
+OUTCOME_GUIDE = (
+    'yes (gets the goal) / no (fails) / yes-but (gets the goal, with a new '
+    'complication or cost) / no-and (fails, and things get worse) / no-but '
+    '(fails, but something genuinely goes their way)'
+)
 
 VALID_STATUSES = frozenset({
     'spine', 'architecture', 'mapped', 'briefed', 'drafted', 'polished',
@@ -229,7 +241,7 @@ COLUMN_SCHEMA = {
     'outcome': {
         'type': 'enum', 'values': VALID_OUTCOMES,
         'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'How the scene ends for the POV character (Weiland).',
+        'description': 'How the scene ends for the POV character: ' + OUTCOME_GUIDE + '.',
     },
     'crisis': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',

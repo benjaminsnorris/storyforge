@@ -44,7 +44,7 @@ id|element|score|evidence
 
 - **goal:** Does the POV character pursue the stated goal? Is it visible in their actions and thoughts?
 - **conflict:** Is the stated conflict present and felt? Does it create real opposition?
-- **outcome:** Does the scene end with the stated outcome (yes/no/yes-but/no-and)?
+- **outcome:** Does the scene end with the stated outcome (yes/no/yes-but/no-and/no-but)?
 - **crisis:** Does the character face the stated dilemma? Is it a genuine choice?
 - **decision:** Does the character make the stated decision? Is it active, not passive?
 - **key_actions:** Are the specified actions present in the prose? (Score based on proportion present)

@@ -333,3 +333,51 @@ class TestMultipleLocations:
         prompt = build_skeleton_prompt('s1', 'Scene prose.', {})
         assert 'in order, semicolon-separated' in prompt
         assert 'never "X to Y" as one place' in prompt
+
+
+class TestOutcomes:
+    """Five outcomes: Bickham's scene disasters (yes, no, yes-but, no-and)
+    plus no-but from Kowal's try/fail cycles. Hone produced no-but while the
+    schema rejected it; every place now agrees."""
+
+    def test_no_but_is_valid(self):
+        from storyforge.schema import _check_enum, VALID_OUTCOMES
+        assert _check_enum('no-but', VALID_OUTCOMES)
+
+    def test_story_power_set_matches_schema(self):
+        from storyforge.schema import VALID_OUTCOMES
+        from storyforge.scoring_story_power import VALID_BRIEF_OUTCOMES
+        assert set(VALID_BRIEF_OUTCOMES) == set(VALID_OUTCOMES)
+
+    def test_hone_normalizes_into_schema_set(self):
+        from storyforge.schema import VALID_OUTCOMES
+        from storyforge.hone import _OUTCOME_ENUM
+        assert set(_OUTCOME_ENUM) == set(VALID_OUTCOMES)
+
+    def test_scorer_weights_every_outcome(self):
+        from storyforge.schema import VALID_OUTCOMES
+        from storyforge.structural import _OUTCOME_TENSION
+        assert set(_OUTCOME_TENSION) == set(VALID_OUTCOMES)
+
+    def test_guide_defines_every_outcome(self):
+        from storyforge.schema import OUTCOME_GUIDE, VALID_OUTCOMES
+        for outcome in VALID_OUTCOMES:
+            assert f'{outcome} (' in OUTCOME_GUIDE
+
+    def test_extraction_prompt_uses_guide(self):
+        from storyforge.extract import build_brief_parallel_prompt
+        from storyforge.schema import OUTCOME_GUIDE
+        assert OUTCOME_GUIDE in build_brief_parallel_prompt('s1', 'Prose.', {}, {}, {})
+
+    def test_enrich_and_elaborate_prompts_use_guide(self, project_dir, plugin_dir):
+        from storyforge.enrich import _field_instruction
+        from storyforge.prompts_elaborate import build_briefs_prompt
+        from storyforge.schema import OUTCOME_GUIDE
+        assert OUTCOME_GUIDE in _field_instruction('outcome')
+        assert OUTCOME_GUIDE in build_briefs_prompt(project_dir, plugin_dir)
+
+    def test_no_but_skips_shift_mismatch(self):
+        from storyforge.hone import detect_value_shift_outcome_mismatch
+        intent = {'s1': {'value_shift': '+/-'}}
+        briefs = {'s1': {'outcome': 'no-but'}}
+        assert detect_value_shift_outcome_mismatch(intent, briefs) == []

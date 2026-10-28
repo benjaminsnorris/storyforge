@@ -100,7 +100,7 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to improve:** Strengthen conflict by making the opposition active and personal, not abstract.
 
 ### outcome — How It Ends
-**Why it matters:** The outcome determines what the next scene inherits. "Yes" means the story advances; "no" means it's blocked; "yes-but" introduces a new complication; "no-and" makes things worse. Most scenes should end in "yes-but" or "no-and" to maintain forward momentum.
+**Why it matters:** The outcome determines what the next scene inherits. "Yes" means the story advances; "no" means it's blocked; "yes-but" introduces a new complication; "no-and" makes things worse; "no-but" is a failure in which something genuinely goes the character's way (a turning tide). Most scenes should end in "yes-but" or "no-and" to maintain forward momentum; "no-but" belongs where the story starts turning in the character's favor.
 **How to check:** Does the prose actually deliver this outcome? A scene marked "no-and" that reads as a clean resolution has a fidelity problem.
 **How to improve:** If too many scenes end "yes," the story lacks tension. Look for ways to add complications.
 

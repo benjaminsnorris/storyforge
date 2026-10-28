@@ -101,7 +101,7 @@ print(dump_schema_markdown())
 | `id` | free_text | brief | Join key — matches scenes.csv. |
 | `goal` | free_text | brief | POV character's concrete objective entering the scene (Swain). |
 | `conflict` | free_text | brief | What specifically opposes the goal. |
-| `outcome` | enum: no, no-and, yes, yes-but | brief | How the scene ends for the POV character (Weiland). |
+| `outcome` | enum: yes, no, yes-but, no-and, no-but | brief | How the scene ends for the POV character: yes (gets the goal) / no (fails) / yes-but (gets the goal, with a new complication or cost) / no-and (fails, and things get worse) / no-but (fails, but something genuinely goes their way). Bickham's scene disasters plus Kowal's no-but; see structural-craft.md §2. |
 | `crisis` | free_text | brief | The dilemma: best bad choice or irreconcilable goods (Story Grid). |
 | `decision` | free_text | brief | What the character actively chooses in response to the crisis. |
 | `knowledge_in` | registry: knowledge.csv (array) | brief | Fact IDs the POV character knows entering. Normalized against reference/knowledge.csv. See knowledge-guidelines.md for fact selection criteria. |

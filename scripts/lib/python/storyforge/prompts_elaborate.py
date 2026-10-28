@@ -411,6 +411,7 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
     refs_section = f'\n## Reference Materials\n\n{refs}\n' if refs else ''
     craft_section = f'\n## Craft Principles\n\n{craft}\n' if craft else ''
 
+    from .schema import OUTCOME_GUIDE   # schema imports elaborate
     return f"""You are writing the drafting contracts for a novel — the scene-level briefs that define exactly what happens in each scene, in enough detail that scenes can be drafted independently and still cohere.
 
 {context}
@@ -439,7 +440,7 @@ For each scene that needs a brief, define the complete drafting contract:
 
 - **goal**: The POV character's concrete objective entering the scene (Swain)
 - **conflict**: What specifically opposes the goal
-- **outcome**: How the scene ends — yes / no / yes-but / no-and (Weiland)
+- **outcome**: How the scene ends — {OUTCOME_GUIDE} (Bickham's scene disasters, plus no-but from Kowal's try/fail cycles)
 - **crisis**: The dilemma — best bad choice or irreconcilable goods (Story Grid)
 - **decision**: What the character actively chooses
 - **knowledge_in**: Semicolon-separated STRUCTURALLY USEFUL facts the POV character knows entering. Use EXACT wording that matches prior scenes' knowledge_out. Only include facts that gate this scene's decisions — identity reveals, motive/intent reveals, capability/constraints, state changes, stakes/threats, relationship shifts. Omit ordinary plot details.

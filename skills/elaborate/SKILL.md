@@ -450,9 +450,10 @@ This mode activates when Scene Function Variety is below target — typically on
    - `yes-but`: Y scenes
    - `no`: Z scenes
    - `no-and`: W scenes
+   - `no-but`: V scenes
    - Show the percentage and whether any type is >40% of total
 
-2. **Explain what it means.** Outcome variety creates emotional rhythm. A novel where 45% of scenes end `yes-but` feels like the same emotional beat repeating — the character wins but it costs something, over and over. Readers stop feeling the cost. Mixing in more `no` (flat failure) and `no-and` (failure that makes things worse) creates contrast that makes the `yes-but` scenes land harder.
+2. **Explain what it means.** Outcome variety creates emotional rhythm. A novel where 45% of scenes end `yes-but` feels like the same emotional beat repeating — the character wins but it costs something, over and over. Readers stop feeling the cost. Mixing in more `no` (flat failure) and `no-and` (failure that makes things worse) creates contrast that makes the `yes-but` scenes land harder. `no-but` (failure in which something genuinely goes their way) marks a turning tide; if several `no-but` gains get cancelled a few scenes later, that's Weiland's false progress — busy, not moving (see structural-craft.md §2).
 
 3. **Ask the author.** Show scenes where the dominant outcome could change. Focus on scenes where the current outcome feels like the easiest choice:
    - "This scene's goal is 'convince the council.' The outcome is `yes-but`. What if it were `no` — the council refuses, full stop? That forces a harder decision in the next scene."

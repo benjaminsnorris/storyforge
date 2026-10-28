@@ -2121,7 +2121,7 @@ def detect_value_shift_outcome_mismatch(
     Rules:
     - outcome='yes' → shift should end /+ or /++ → mismatch if /- or /--
     - outcome='no'  → shift should end /- or /-- → mismatch if /+ or /++
-    - outcome='yes-but' or 'no-and' → skip (mixed results, any shift plausible)
+    - outcome='yes-but', 'no-and' or 'no-but' → skip (mixed results, any shift plausible)
 
     Args:
         intent_map: dict keyed by scene ID, values are scene-intent row dicts.
@@ -2146,7 +2146,7 @@ def detect_value_shift_outcome_mismatch(
             continue
 
         # Skip mixed-result outcomes
-        if outcome in ('yes-but', 'no-and'):
+        if outcome in ('yes-but', 'no-and', 'no-but'):
             continue
 
         mismatch = False

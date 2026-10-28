@@ -745,9 +745,9 @@ class SceneRow(NamedTuple):
 # `outcome == 'yes-but'` is statically verifiable as reachable);
 # VALID_BRIEF_OUTCOMES retains the runtime membership set the
 # deterministic pre-pass uses to flag invalid values.
-BriefOutcome = Literal['yes', 'no', 'yes-but', 'no-and']
+BriefOutcome = Literal['yes', 'no', 'yes-but', 'no-and', 'no-but']
 VALID_BRIEF_OUTCOMES: frozenset[BriefOutcome] = frozenset({
-    'yes', 'no', 'yes-but', 'no-and',
+    'yes', 'no', 'yes-but', 'no-and', 'no-but',
 })
 
 
