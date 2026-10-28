@@ -1,0 +1,249 @@
+"""Eval harness: suite discovery, cassette wiring, result schema, baseline.
+
+A suite is a module in ``evals/suites/`` exposing ``SUITE = Suite(...)``. Its
+``run(ctx)`` returns a ``SuiteOutput``: metrics (with an optional per-error-code
+breakdown) and gates. The harness adds provenance, cost, timing, and status,
+and the runner turns the set into one JSON report and an exit code — so an
+agent can run the suite and read pass/fail without a person.
+
+Status is one of three values, and they are not interchangeable:
+``pass`` (every gate held), ``fail`` (the suite ran and a gate did not), and
+``error`` (the suite could not produce a measurement). A baseline is refused
+over an ``error`` result, because a missing number is not a low one.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import operator
+import os
+import subprocess
+import sys
+import tempfile
+import time
+import traceback
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Callable, Literal
+
+EVALS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_ROOT = os.path.dirname(EVALS_DIR)
+PYTHON_LIB = os.path.join(REPO_ROOT, 'scripts', 'lib', 'python')
+if PYTHON_LIB not in sys.path:
+    sys.path.insert(0, PYTHON_LIB)
+
+SCHEMA_VERSION = 1
+ERROR_CODES = ('PHY', 'TIM', 'KNO', 'REL', 'TRT', 'WLD', 'PRM', 'VOI')
+
+Mode = Literal['replay', 'record', 'auto']
+Status = Literal['pass', 'fail', 'error']
+
+_OPS = {'>=': operator.ge, '>': operator.gt, '<=': operator.le,
+        '<': operator.lt, '==': operator.eq}
+
+
+@dataclass
+class Gate:
+    name: str
+    actual: float
+    op: str
+    threshold: float
+
+    def __post_init__(self):
+        if self.op not in _OPS:
+            raise ValueError(f'gate {self.name!r}: unknown op {self.op!r}')
+
+    @property
+    def passed(self) -> bool:
+        return _OPS[self.op](self.actual, self.threshold)
+
+    def to_dict(self) -> dict:
+        return {'name': self.name, 'actual': self.actual, 'op': self.op,
+                'threshold': self.threshold, 'passed': self.passed}
+
+
+@dataclass
+class SuiteOutput:
+    metrics: dict[str, float] = field(default_factory=dict)
+    by_code: dict[str, dict[str, float]] = field(default_factory=dict)
+    gates: list[Gate] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        unknown = set(self.by_code) - set(ERROR_CODES)
+        if unknown:
+            raise ValueError(f'unknown error codes in by_code: {sorted(unknown)}')
+
+
+@dataclass
+class SuiteContext:
+    name: str
+    mode: Mode
+    cassette_dir: str
+    work_dir: str
+    repo_root: str = REPO_ROOT
+
+    def env(self) -> dict[str, str]:
+        """Environment for a subprocess that should share this suite's cassette."""
+        env = dict(os.environ)
+        env['STORYFORGE_CASSETTE'] = self.cassette_dir
+        env['STORYFORGE_CASSETTE_MODE'] = self.mode
+        return env
+
+
+@dataclass
+class Suite:
+    name: str
+    description: str
+    run: Callable[[SuiteContext], SuiteOutput]
+
+
+def discover(suites_dir: str) -> list[Suite]:
+    """Load every ``SUITE`` from ``suites_dir/*.py``, sorted by name."""
+    suites = []
+    if not os.path.isdir(suites_dir):
+        return suites
+    for filename in sorted(os.listdir(suites_dir)):
+        if not filename.endswith('.py') or filename.startswith('_'):
+            continue
+        path = os.path.join(suites_dir, filename)
+        spec = importlib.util.spec_from_file_location(f'evals_suite_{filename[:-3]}', path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        suite = getattr(module, 'SUITE', None)
+        if not isinstance(suite, Suite):
+            raise RuntimeError(f'{path} defines no SUITE = Suite(...)')
+        suites.append(suite)
+    names = [s.name for s in suites]
+    duplicates = {n for n in names if names.count(n) > 1}
+    if duplicates:
+        raise RuntimeError(f'duplicate suite names: {sorted(duplicates)}')
+    return suites
+
+
+def _cost(log_file: str) -> dict:
+    from storyforge.costs import calculate_cost
+    totals = {'calls': 0, 'replayed_calls': 0, 'input_tokens': 0,
+              'output_tokens': 0, 'usd_if_live': 0.0, 'usd_spent': 0.0}
+    if not os.path.isfile(log_file):
+        return totals
+    with open(log_file) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            usage = entry.get('usage', {})
+            usd = calculate_cost(
+                entry.get('model', ''), usage.get('input_tokens', 0),
+                usage.get('output_tokens', 0),
+                cache_read=usage.get('cache_read_input_tokens', 0),
+                cache_create=usage.get('cache_creation_input_tokens', 0))
+            totals['calls'] += 1
+            totals['input_tokens'] += usage.get('input_tokens', 0)
+            totals['output_tokens'] += usage.get('output_tokens', 0)
+            totals['usd_if_live'] += usd
+            if entry.get('replayed'):
+                totals['replayed_calls'] += 1
+            else:
+                totals['usd_spent'] += usd
+    totals['usd_if_live'] = round(totals['usd_if_live'], 4)
+    totals['usd_spent'] = round(totals['usd_spent'], 4)
+    return totals
+
+
+def provenance() -> dict:
+    with open(os.path.join(REPO_ROOT, '.claude-plugin', 'plugin.json')) as f:
+        version = json.load(f)['version']
+    sha = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=REPO_ROOT,
+                         capture_output=True, text=True)
+    dirty = subprocess.run(['git', 'status', '--porcelain'], cwd=REPO_ROOT,
+                           capture_output=True, text=True)
+    return {
+        'storyforge_version': version,
+        'git_sha': sha.stdout.strip() if sha.returncode == 0 else 'unknown',
+        'git_dirty': bool(dirty.stdout.strip()) if dirty.returncode == 0 else None,
+    }
+
+
+def run_suite(suite: Suite, mode: Mode, cassettes_root: str) -> dict:
+    """Run one suite with its cassette active; never raises."""
+    cassette_dir = os.path.join(cassettes_root, suite.name)
+    saved = {k: os.environ.get(k) for k in
+             ('STORYFORGE_CASSETTE', 'STORYFORGE_CASSETTE_MODE', 'STORYFORGE_CASSETTE_LOG')}
+    started = time.time()
+    result = {'suite': suite.name, 'description': suite.description, 'mode': mode,
+              'started_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+              'status': 'error', 'metrics': {}, 'by_code': {}, 'gates': [],
+              'notes': [], 'error': None}
+    with tempfile.TemporaryDirectory(prefix=f'eval-{suite.name}-') as work_dir:
+        log_file = os.path.join(work_dir, '.cassette-log.jsonl')
+        os.environ['STORYFORGE_CASSETTE'] = cassette_dir
+        os.environ['STORYFORGE_CASSETTE_MODE'] = mode
+        os.environ['STORYFORGE_CASSETTE_LOG'] = log_file
+        try:
+            output = suite.run(SuiteContext(suite.name, mode, cassette_dir, work_dir))
+            if not isinstance(output, SuiteOutput):
+                raise TypeError(f'run() returned {type(output).__name__}, not SuiteOutput')
+            result['metrics'] = output.metrics
+            result['by_code'] = output.by_code
+            result['gates'] = [g.to_dict() for g in output.gates]
+            result['notes'] = output.notes
+            result['status'] = 'pass' if all(g.passed for g in output.gates) else 'fail'
+        except Exception as e:
+            result['error'] = f'{type(e).__name__}: {e}'
+            result['traceback'] = traceback.format_exc()
+        finally:
+            result['cost'] = _cost(log_file)
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+    result['duration_s'] = round(time.time() - started, 2)
+    return result
+
+
+def run_all(suites: list[Suite], mode: Mode, cassettes_root: str) -> dict:
+    results = [run_suite(s, mode, cassettes_root) for s in suites]
+    statuses = {r['status'] for r in results}
+    overall: Status = 'error' if 'error' in statuses else 'fail' if 'fail' in statuses else 'pass'
+    return {
+        'schema_version': SCHEMA_VERSION,
+        **provenance(),
+        'mode': mode,
+        'status': overall,
+        'suite_count': len(results),
+        'cost': {k: round(sum(r['cost'][k] for r in results), 4)
+                 for k in ('calls', 'replayed_calls', 'input_tokens', 'output_tokens',
+                           'usd_if_live', 'usd_spent')},
+        'results': results,
+    }
+
+
+def compare(report: dict, baseline: dict) -> dict[str, dict[str, dict]]:
+    """Per suite, per metric: baseline value, current value, delta.
+
+    Covers ``metrics`` and ``by_code`` (as ``CODE.metric``). A metric present
+    on only one side is reported with the other side ``None`` rather than
+    dropped, so a suite that stopped emitting a number is visible.
+    """
+    def flatten(result: dict) -> dict[str, float]:
+        flat = dict(result.get('metrics', {}))
+        for code, metrics in result.get('by_code', {}).items():
+            for name, value in metrics.items():
+                flat[f'{code}.{name}'] = value
+        return flat
+
+    base_by_suite = {r['suite']: flatten(r) for r in baseline.get('results', [])}
+    out = {}
+    for result in report['results']:
+        current = flatten(result)
+        base = base_by_suite.get(result['suite'], {})
+        rows = {}
+        for name in sorted(set(current) | set(base)):
+            b, c = base.get(name), current.get(name)
+            rows[name] = {'baseline': b, 'current': c,
+                          'delta': None if b is None or c is None else round(c - b, 6)}
+        out[result['suite']] = rows
+    return out

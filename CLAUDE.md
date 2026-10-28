@@ -91,8 +91,13 @@ Scene files (`scenes/{id}.md`) are pure prose — **no frontmatter**. Filename i
 
 pytest; files `tests/test_*.py` and `tests/commands/`. Run `./tests/run-tests.sh` or `python3 -m pytest tests/`. Fixtures in `tests/conftest.py`: `fixture_dir` (read-only `tests/fixtures/test-project`), `project_dir` (writable copy), `plugin_dir`, `ref_dir`, `meta_csv`, `intent_csv`, `briefs_csv`. Every fix gets a regression test.
 
+## Evals
+
+`python3 evals/run.py` runs the eval suites (`evals/suites/*.py`) with API calls replayed from `evals/fixtures/cassettes/`; exit 0/1/2 = pass/gate failed/errored. See `evals/README.md`. Plan: `docs/plans/2026-10-28-storyforge-rethink.md`.
+
 ## Architecture
 
+- `evals/` — eval harness and suites
 - `scripts/lib/python/storyforge/` — commands (`cmd_*.py`), shared infrastructure, domain modules (scoring, prompts, extraction, illustrations, …)
 - `skills/` — interactive skills; `scripts/prompts/` — prompt templates; `references/` — craft engine, rubrics, schemas; `templates/` — project scaffolding; `docs/` — GitHub Pages + design docs
 

@@ -76,7 +76,15 @@ def get_api_key() -> str:
 
 def _api_request(path: str, body: dict | None = None, method: str = 'GET',
                  timeout: int = API_TIMEOUT) -> dict:
-    """Make an authenticated API request."""
+    """Make an authenticated API request, through the eval cassette if one is set."""
+    from storyforge import cassette
+    if cassette.active_dir():
+        return cassette.request(method, path, body,
+                                lambda: _live_request(path, body, method, timeout))
+    return _live_request(path, body, method, timeout)
+
+
+def _live_request(path: str, body: dict | None, method: str, timeout: int) -> dict:
     url = f'{API_BASE}/{path}'
     headers = {
         'x-api-key': get_api_key(),
@@ -195,6 +203,9 @@ def invoke_api(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
         _invoke_api_consecutive_failures = 0
         return extract_text(response)
     except Exception as e:
+        from storyforge.cassette import CassetteMiss
+        if isinstance(e, CassetteMiss):
+            raise  # an eval replay with no recording must fail, not read as an empty answer
         from storyforge.common import log
         _invoke_api_consecutive_failures += 1
         log(f'WARNING: API call failed: {e}')
