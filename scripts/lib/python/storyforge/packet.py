@@ -499,7 +499,7 @@ def needs_render(project_dir: str, *,
 
 def resolve(project_dir: str, *,
             canon_cutoff: str | None = None,
-            batch: AnchorBatch | None = None) -> PacketContents:
+            batch: 'AnchorBatch | None' = None) -> PacketContents:
     """Collect what the packet says, recording every gap rather than filtering.
 
     Reads the canon tier (phase 1), the visual-state matrix (phase 2), and the
@@ -1509,7 +1509,7 @@ def _packet_references(
         project_dir: str, rows: list[dict[str, str]], *,
         canon_cutoff: str | None = None,
         style: "StyleReference | None" = None,
-        batch: AnchorBatch | None = None,
+        batch: 'AnchorBatch | None' = None,
 ) -> tuple[list[tuple[str, str]], list[str]]:
     """The labeled reference-image list for the whole packet, and why it is short.
 

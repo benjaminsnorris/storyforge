@@ -7,6 +7,21 @@ import importlib
 import os
 import sys
 
+# The package uses `X | None` annotations, which fail to import before 3.10
+# with a bare TypeError. This file must stay parseable on older Pythons so the
+# check below can say so plainly.
+PYTHON_FLOOR = (3, 10)
+
+
+def python_too_old(version):
+    """The error message when `version` is below the floor, else None."""
+    if tuple(version[:2]) >= PYTHON_FLOOR:
+        return None
+    return ('Storyforge needs Python {}.{} or newer; this is Python {} '
+            '(the python3 first on PATH).'.format(
+                PYTHON_FLOOR[0], PYTHON_FLOOR[1],
+                '.'.join(str(n) for n in version[:3])))
+
 # Commands that don't yet support graphic-novel mode (Plan 1 boundary).
 # When a project's medium is graphic-novel, these commands return a clear
 # error instead of silently running novel-mode logic on the wrong data.
@@ -79,6 +94,11 @@ COMMANDS['scenes'] = COMMANDS['scenes-setup']
 
 
 def main():
+    too_old = python_too_old(sys.version_info)
+    if too_old:
+        print('ERROR: ' + too_old, file=sys.stderr)
+        sys.exit(1)
+
     if len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help', 'help'):
         print('Usage: storyforge <command> [options]')
         print()
