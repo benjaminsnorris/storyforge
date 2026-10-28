@@ -992,3 +992,29 @@ class TestTruncationIsNeverSilent:
         assert is_truncated({'stop_reason': 'max_tokens'})
         assert not is_truncated({'stop_reason': 'end_turn'})
         assert not is_truncated(None)
+
+
+class TestGatsbyFieldShapes:
+    """Shapes on The Great Gatsby that the delta pass would otherwise send to
+    the model as references: comma-joined MICE entries, and explained
+    placeholders in physical states."""
+
+    def test_explained_placeholders(self):
+        from storyforge.enrich import is_placeholder
+        for entry in ('[none for nick-carraway]',
+                      '[none — Nick carries no tracked physical states into this scene]',
+                      'ewing-klipspringer: (none prior)', '(none prior)'):
+            assert is_placeholder(entry), entry
+        for entry in ('nonesuch-ring', 'none-of-the-above-badge', 'gatsby-has-medal',
+                      'Daisy: bruised knuckle'):
+            assert not is_placeholder(entry), entry
+
+    def test_comma_joined_mice_entries_are_split(self, project_dir):
+        from storyforge.hone import find_unresolved, apply_registry_normalization
+        ref_dir = os.path.join(project_dir, 'reference')
+        _set_column(ref_dir, 'scene-intent.csv', 'mice_threads',
+                    {'act1-sc01': '+map-anomaly,+archive-erasure,+new-thread'})
+        assert find_unresolved('mice-threads', ref_dir) == ['new-thread']
+        apply_registry_normalization('mice-threads', ref_dir)
+        assert _column(ref_dir, 'scene-intent.csv', 'mice_threads')['act1-sc01'] == \
+            '+map-anomaly;+archive-erasure;+new-thread'

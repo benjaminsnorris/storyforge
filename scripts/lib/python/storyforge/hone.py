@@ -197,6 +197,12 @@ def _split_mice(entry: str) -> tuple[str, str, str]:
     return prefix, type_part.strip().lower(), name.strip()
 
 
+def _split_entries(domain: str, value: str) -> list[str]:
+    """A target field's entries. MICE entries may be comma-joined (see
+    :func:`normalize_mice_threads`)."""
+    return re.split(r'[;,]' if domain == 'mice-threads' else ';', value or '')
+
+
 def _reference_key(domain: str, part: str) -> tuple[str, str, str] | None:
     """A target-field entry as ``(lookup key, display text, type hint)``, or
     None for an empty entry or a placeholder. Mirrors the lookups in
@@ -204,6 +210,8 @@ def _reference_key(domain: str, part: str) -> tuple[str, str, str] | None:
     if domain == 'mice-threads':
         _prefix, type_hint, name = _split_mice(part)
         return (name.lower(), name, type_hint) if name else None
+    if domain in _PLACEHOLDER_DOMAINS and is_placeholder(part):
+        return None
     text = strip_parentheticals(part.strip())
     if not text or (domain in _PLACEHOLDER_DOMAINS and is_placeholder(text)):
         return None
@@ -235,7 +243,7 @@ def _unresolved_references(domain: str, ref_dir: str) -> dict[str, dict]:
         rows.sort(key=lambda r: order.get(r.get('id', ''), len(order)))
         for row in rows:
             for col in columns:
-                for part in (row.get(col) or '').split(';'):
+                for part in _split_entries(domain, row.get(col)):
                     ref = _reference_key(domain, part)
                     if not ref or ref[0] in lookup:
                         continue
@@ -578,7 +586,7 @@ def _rewrite_targets(domain: str, ref_dir: str, mapping: dict[str, list[str]]) -
                 if not old_val:
                     continue
                 out: list[str] = []
-                for part in old_val.split(';'):
+                for part in _split_entries(domain, old_val):
                     if not part.strip():
                         continue
                     ref = _reference_key(domain, part)
@@ -686,7 +694,7 @@ def _mice_timelines(ref_dir: str) -> dict[str, list[tuple[str, str]]]:
     intent = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
     timelines: dict[str, list[tuple[str, str]]] = {}
     for sid in _scene_order(ref_dir):
-        for entry in (intent.get(sid, {}).get('mice_threads') or '').split(';'):
+        for entry in _split_entries('mice-threads', intent.get(sid, {}).get('mice_threads')):
             prefix, _type, name = _split_mice(entry)
             if name:
                 timelines.setdefault(name, []).append((sid, prefix))
@@ -767,7 +775,7 @@ def apply_mice_operations(ref_dir: str, decisions: dict[str, tuple[str, str]]) -
     for row in rows:
         old_val = row.get('mice_threads') or ''
         out = []
-        for entry in old_val.split(';'):
+        for entry in _split_entries('mice-threads', old_val):
             if not entry.strip():
                 continue
             _prefix, _type, name = _split_mice(entry)

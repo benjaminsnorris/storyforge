@@ -235,10 +235,21 @@ _PLACEHOLDER_RE = re.compile(
 )
 
 
+# A model also explains its nothing: a bracketed note (`[none for
+# nick-carraway]`, `[none — Nick carries no tracked states]`) or a labelled
+# one (`ewing-klipspringer: (none prior)`). Both seen on The Great Gatsby.
+_NOTE_PLACEHOLDER_RE = re.compile(
+    r'^(?:[\w.\'-]+(?:\s[\w.\'-]+)*:\s*)?[\[(]?\s*none(?![\w-])[^\])]*[\])]?\.?$',
+    re.IGNORECASE,
+)
+
+
 def is_placeholder(entry: str) -> bool:
     """Whether a single list entry is a stand-in for "nothing" (``none``,
-    ``(none)``, ``n/a``, ``(empty)``, ``-``) rather than a value."""
-    return bool(_PLACEHOLDER_RE.match((entry or '').strip()))
+    ``(none)``, ``n/a``, ``(empty)``, ``-``, ``[none for x]``,
+    ``x: (none prior)``) rather than a value."""
+    entry = (entry or '').strip()
+    return bool(_PLACEHOLDER_RE.match(entry) or _NOTE_PLACEHOLDER_RE.match(entry))
 
 
 def strip_placeholders(semicolon_string: str) -> str:
@@ -390,7 +401,9 @@ def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
         return mice_string or ''
 
     result = []
-    for entry in mice_string.split(';'):
+    # A thread name is a slug, so a comma only ever separates entries (the
+    # model sometimes joins them with commas despite the prompt)
+    for entry in re.split(r'[;,]', mice_string):
         entry = entry.strip()
         if not entry:
             continue
