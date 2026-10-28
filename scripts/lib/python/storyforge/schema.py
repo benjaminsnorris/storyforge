@@ -441,6 +441,12 @@ def _check_mice(value: str, alias_map: dict, type_map: dict) -> list[dict]:
             problems.append({'entry': entry, 'reason': 'empty thread name'})
             continue
 
+        # A thread name is a slug; with no registry to check it against,
+        # prose ("gatsby dream opens", "+ +x") must not pass as a mention
+        if not alias_map and not re.fullmatch(r'[\w][\w\'.-]*', name_part):
+            problems.append({'entry': entry, 'reason': 'thread name is not a slug'})
+            continue
+
         # Check name against registry (if available)
         if alias_map and name_part.lower() not in alias_map:
             problems.append({'entry': entry, 'reason': f'thread name "{name_part}" not in mice-threads.csv'})
