@@ -399,6 +399,23 @@ class TestChecks:
         rows = self._rows(('a', '1', 'scene', 'XXXX-06-07~'), ('b', '3', 'scene', 'XXXX-07-04~'))
         assert [f['check'] for f in check_timeline(rows, {})] == ['date_mismatch']
 
+    def test_a_flashback_may_move_on_through_the_past(self):
+        """F-059: Carol's Stave II, each memory cued "earlier" but later than
+        the memory before it, gave 3-4 flashback_not_earlier findings."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('night', '1', 'scene', ''), ('boyhood', '-18250', 'scene', ''),
+                          ('fan', '-17885', 'scene', ''), ('fezziwig', '-14600', 'scene', ''),
+                          ('christmas', '2', 'scene', ''))
+        cues = {'boyhood': {'relation': 'earlier'}, 'fan': {'relation': 'earlier'},
+                'fezziwig': {'relation': 'earlier'}, 'christmas': {'relation': 'later'}}
+        assert check_timeline(rows, cues) == []
+
+    def test_a_flashback_that_does_not_go_back_is_found(self):
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('a', '5', 'scene', ''), ('memory', '5', 'scene', ''))
+        found = check_timeline(rows, {'memory': {'relation': 'earlier'}})
+        assert [f['check'] for f in found] == ['flashback_not_earlier']
+
     def test_gap_after_a_flashback_counts_from_the_present(self):
         """Gatsby VIII: the Louisville memory, then "the next morning"."""
         from storyforge.timeline import check_timeline
@@ -458,3 +475,95 @@ class TestFlashbacksAndCleanup:
                               ('memory2', '-1820', 'scene'), ('frame', '', 'frame')])
         fixes = cleanup_timeline(os.path.join(project_dir, 'reference'))
         assert [(f['scene_id'], f['new_value']) for f in fixes] == [('gap', '10')]
+
+
+class TestVisions:
+    """F-054: A Christmas Carol's Stave IV shows a future the story then
+    averts. Placed on day 4 as if it were the present, it made Stave V's
+    Christmas morning (day 2) read as a flashback: 6 timeline-order
+    advisories and 2 timeline-check findings, all wrong. A vision is never
+    the story's present."""
+
+    # Christmas night, the future shown, waking "moments later"
+    ROWS = [('night', '2', 'scene'), ('dead-man', '4', 'vision'),
+            ('gravestone', '4', 'vision'), ('wakes', '2', 'scene'), ('salary', '3', 'scene')]
+
+    def test_vision_is_a_relation_and_a_mode(self):
+        from storyforge.timeline import parse_cues, TIME_MODES
+        from storyforge.schema import VALID_TIME_MODES
+        assert parse_cues('TIME_RELATION: vision (a future that may be)')['relation'] == 'vision'
+        assert 'vision' in TIME_MODES and 'vision' in VALID_TIME_MODES
+
+    def test_a_past_shown_in_a_vision_is_earlier(self):
+        """First Carol run on this branch: the cue model marked all of Stave
+        II (the Ghost of Christmas Past) as vision on day 1, losing every
+        past day and the flashback gauge. The past is fixed; it stays earlier."""
+        from storyforge.timeline import CUE_INSTRUCTIONS, build_assignment_prompt
+        assert 'the past is always earlier, even when a spirit' in CUE_INSTRUCTIONS
+        prompt = build_assignment_prompt([{'id': 'a', 'cues': {}}], None, None, [])
+        assert 'The past is never a vision' in prompt
+
+    def test_a_relation_in_the_mode_column_is_a_scene(self, tmp_path):
+        """Second Carol run: the assignment answered "| -18250 | earlier |"
+        for Stave II, and the fallback took the cue's "vision"."""
+        from storyforge.timeline import assign_calendar
+        items = [{'id': 'night', 'cues': {'relation': 'later'}},
+                 {'id': 'boyhood', 'cues': {'relation': 'vision'}}]
+        placed = assign_calendar(
+            items, lambda *a: 'CALENDAR:\nnight | 1 | scene | x\nboyhood | -18250 | earlier | past\n',
+            str(tmp_path))
+        assert placed['boyhood'] == (-18250, 'scene', 'past')
+
+    def test_walk_reads_the_scene_after_a_vision_against_the_viewer(self):
+        from storyforge.timeline import walk
+        cues = {'night': {'relation': 'later'}, 'dead-man': {'relation': 'vision'},
+                'gravestone': {'relation': 'vision'}, 'wakes': {'relation': 'continues'}}
+        assert walk(list(cues), cues) == {'night': 1, 'dead-man': None,
+                                          'gravestone': None, 'wakes': 1}
+
+    def test_check_does_not_treat_a_vision_as_the_present(self):
+        from storyforge.timeline import check_timeline
+        rows = [{'id': sid, 'timeline_day': day, 'time_mode': mode, 'timeline_date': ''}
+                for sid, day, mode in self.ROWS]
+        cues = {'dead-man': {'relation': 'vision'}, 'gravestone': {'relation': 'vision'},
+                'wakes': {'relation': 'continues', 'gap': 'moments later'},
+                'salary': {'relation': 'later', 'gap': 'the next morning'}}
+        assert check_timeline(rows, cues) == []
+
+    def test_validate_raises_no_flashback_after_a_vision(self):
+        from storyforge.elaborate import _validate_timeline
+        scenes = {sid: {'seq': str(i), 'timeline_day': day, 'time_mode': mode, 'pov': 'scrooge'}
+                  for i, (sid, day, mode) in enumerate(self.ROWS)}
+        checks = []
+        _validate_timeline(scenes, checks)
+        assert [c['message'] for c in checks if not c['passed']] == []
+
+    def test_flashback_gauge_skips_visions(self):
+        from storyforge.structural import assess_flashbacks
+        scenes = {sid: {'seq': str(i), 'timeline_day': day, 'time_mode': mode, 'word_count': '100'}
+                  for i, (sid, day, mode) in enumerate(self.ROWS)}
+        assert assess_flashbacks(scenes, {}) == []
+
+    def test_assignment_keeps_the_present_through_a_vision(self, tmp_path):
+        from storyforge.timeline import assign_calendar
+        items = [{'id': 'night', 'cues': {'relation': 'later'}},
+                 {'id': 'future', 'cues': {'relation': 'vision'}},
+                 {'id': 'lost-mode', 'cues': {'relation': 'vision'}},
+                 {'id': 'wakes', 'cues': {'relation': 'continues'}}]
+        prompts = []
+
+        def invoke(prompt, log_file, label):
+            prompts.append(prompt)
+            return ('CALENDAR:\nnight | 2 | scene | x\nfuture | 400 | vision | a year on\n'
+                    'lost-mode | 400 | the future\nwakes | 2 | scene | moments later\n')
+        placed = assign_calendar(items, invoke, str(tmp_path))
+        assert placed['future'] == (400, 'vision', 'a year on')
+        # A line that lost its mode falls back on the cue, not on "scene"
+        assert placed['lost-mode'][1] == 'vision'
+        assert '- vision:' in prompts[0]
+
+    def test_cleanup_never_fills_from_a_vision(self, project_dir):
+        from storyforge.extract import cleanup_timeline
+        _scenes(project_dir, [('a', '2', 'scene'), ('future', '400', 'vision'), ('gap', '', '')])
+        fixes = cleanup_timeline(os.path.join(project_dir, 'reference'))
+        assert [(f['scene_id'], f['new_value']) for f in fixes] == [('gap', '2')]

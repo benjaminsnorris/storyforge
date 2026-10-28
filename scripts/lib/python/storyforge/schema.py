@@ -20,7 +20,7 @@ VALID_TYPES = frozenset({
     'plot', 'revelation', 'transition', 'world',
 })
 
-VALID_TIME_MODES = frozenset({'scene', 'summary', 'frame'})
+VALID_TIME_MODES = frozenset({'scene', 'summary', 'frame', 'vision'})
 
 VALID_TIMES = frozenset({
     'morning', 'afternoon', 'evening', 'night', 'dawn', 'dusk',

@@ -367,7 +367,7 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 ### Rules
 
 - timeline_day is when a scene's action happens; a flashback keeps the earlier day it depicts (0 or negative before day 1). Flashbacks are a device, not an error: use one where the past changes what the present means
-- time_mode: scene (the action plays out on its day; the default), summary (it covers a stretch of time; timeline_day is where the stretch starts), or frame (narration from after the story, looking back)
+- time_mode: scene (the action plays out on its day; the default), summary (it covers a stretch of time; timeline_day is where the stretch starts), frame (narration from after the story, looking back), or vision (events a character is shown that the story doesn't treat as fixed, such as a future that may be; never the story's present)
 - Say how each scene sits in time in its summary when it isn't simply the same day as the scene before: "the next morning", "three weeks later", "flashback to 1917". The timeline check reads this, and drafting carries it into the prose
 - Every character referenced must exist in the character bible
 - MICE threads: each opens once and closes at most once; they may interleave (nesting is guidance, not a rule)
@@ -753,7 +753,9 @@ _FIELD_INSTRUCTIONS = {
     ),
     'time_mode': (
         'How the scene sits in time: scene (its action plays out on its day), summary (it '
-        'covers a stretch of time), or frame (narration from after the story, looking back).'
+        'covers a stretch of time), frame (narration from after the story, looking back), or '
+        'vision (events a character is shown that the story doesn\'t treat as fixed, such as a '
+        'future that may be; never the story\'s present).'
     ),
 }
 

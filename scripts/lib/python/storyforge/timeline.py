@@ -22,11 +22,12 @@ import os
 import re
 
 from .common import log
+from .elaborate import OFF_PRESENT_MODES
 from .enrich import update_csv_field
 
 
-RELATIONS = ('continues', 'later', 'earlier', 'frame', 'unclear')
-TIME_MODES = ('scene', 'summary', 'frame')
+RELATIONS = ('continues', 'later', 'earlier', 'frame', 'vision', 'unclear')
+TIME_MODES = ('scene', 'summary', 'frame', 'vision')
 
 CUE_COLUMNS = ['id', 'relation', 'gap', 'anchor', 'refers', 'span', 'date']
 CUES_FILE = os.path.join('working', 'timeline-cues.csv')
@@ -43,7 +44,7 @@ _BATCH_MAX_TOKENS = 16000
 # Cues: the prompt fields, parsing and storage
 # ============================================================================
 
-CUE_INSTRUCTIONS = """TIME_RELATION: [when this scene happens relative to the scene before it in reading order — one of: continues (picks up at the same time or moments later), later (some time after it), earlier (before it: a flashback or a recollection told as a scene; also a scene whose present is only a line or a short lead-in before it mostly tells the past, such as a story a character tells or the narrator's account of someone's youth, but not one where the present has real action on the page around the telling), frame (narration from after the story, looking back), unclear]
+CUE_INSTRUCTIONS = """TIME_RELATION: [when this scene happens relative to the scene before it in reading order — one of: continues (picks up at the same time or moments later), later (some time after it), earlier (before it: a flashback or a recollection told as a scene, including a past that a spirit, dream or vision shows a character; also a scene whose present is only a line or a short lead-in before it mostly tells the past, such as a story a character tells or the narrator's account of someone's youth, but not one where the present has real action on the page around the telling), frame (narration from after the story, looking back), vision (events that have not happened, or may not happen, as the story tells them: a prophecy, a future a character is shown that may be averted, a dream of what might come; the past is always earlier, even when a spirit, a dream or a vision shows it), unclear]
 TIME_GAP: [the gap from the previous scene in at most six words, no explanation: "an hour", "the next morning", "three weeks", "five years", "several weeks"; empty if none is stated or implied]
 TIME_ANCHOR: [a calendar fact pinning when THIS scene's action happens — a date, weekday, month, season, holiday or named day ("the hottest day of the summer") — quoted briefly; not a habit ("every Friday") or a date the scene only mentions; empty if none]
 TIME_REFERS: [any statement in this scene of how long ago or how long until another event in the story, quoted briefly: "that June night three months before", "five years since he'd seen her", "the funeral was on the third day"; separate several with semicolons; empty if none]
@@ -279,7 +280,7 @@ def walk(order: list[str], cues: dict[str, dict], last: int | None = None,
     """Provisional days from the cues alone, in reading order.
 
     A scene is placed relative to the previous scene: ``continues`` on its
-    day, ``later``/``earlier`` by a parseable gap. After a flashback scene a
+    day, ``later``/``earlier`` by a parseable gap; a vision is placed like a frame. After a flashback scene a
     ``continues`` stays in the flashback (Gatsby VIII runs 1917 into 1919),
     but a ``later`` is left for the model: code can't tell "later in the
     memory" from "back to the present", and counting from the remembered day
@@ -298,7 +299,10 @@ def walk(order: list[str], cues: dict[str, dict], last: int | None = None,
         cue = cues.get(sid, {})
         relation = cue.get('relation') or 'unclear'
         gap = gap_to_days(cue.get('gap', ''))
-        if relation == 'frame':
+        # A vision, like a frame, is off the story's clock: the scene after
+        # it is read against the scene before it (Scrooge wakes "moments
+        # later" in his own night, not in the future he was shown)
+        if relation in OFF_PRESENT_MODES:
             days[sid] = None
             after_frame = True
             continue
@@ -371,10 +375,11 @@ Each scene's cues say how it relates to the scene before it. A provisional day w
 - earlier: a flashback or recollection; it gets the earlier day it depicts and does not move the present.
 - A recollection told inside a present scene is placed by weight, the same way every time: if the present frame is a line or a short lead-in and the page mostly tells the past, the scene gets the remembered day; if the present has real action on the page around the telling, it gets the present day. Follow an "earlier" cue unless the summary shows real present action.
 - frame: narration from after the story; it gets the day it is narrated from (after the story's end, roughly) and does not move the present.
+- vision: events that have not happened, or may not happen (a future a character is shown that may be averted, a prophecy); it gets the day it shows if the text fixes one, otherwise the viewer's day, and does not move the present. The scene after a vision continues from the scene before it. The past is never a vision: a past shown by a spirit or a dream is earlier and gets its past day.
 - Fix the calendar first: from the dates, months, holidays and named days in the cues (including "refers" cues such as "that June night"), work out which calendar date day 1 falls on, and say so. Then turn every such anchor into a day by counting from day 1's date: with day 1 on June 7, "a few days before the Fourth of July" is about day 25 and "late in July" about day 45-55. Vague gaps give way to these.
 - A date anchor pins a scene: keep dates consistent with the days between them. Weekdays are weak evidence (characters misname days, and "Saturday" may be a day mentioned rather than the scene's own): use them where they agree, and where they conflict, drop them rather than work them out.
 - "refers" cues state how far apart two events are ("that June night three months before" puts this scene about 90 days after that night). They are the firmest evidence of distance: where vague gaps ("several weeks", "some time later") add up to something else, stretch or shrink the vague gaps to fit the stated durations, counting back as well as forward.
-- mode: scene (the action plays out on its day), summary (it covers a stretch of time; the day is where the stretch starts), or frame.
+- mode: scene (the action plays out on its day), summary (it covers a stretch of time; the day is where the stretch starts), frame, or vision.
 
 {"Write a line CALENDAR: and nothing before it; after it" if terse else "First work out the calendar under a line REASONING: — give day 1's calendar date, list the anchors and every stated duration (refers), fix the days they pin, then fit the vague gaps between them; note any scene you are unsure of — in at most 600 words. Then write a line CALENDAR: and, after it,"} exactly one line per scene, in order:
 
@@ -386,8 +391,9 @@ basis: a few words on why ("next morning", "anchor: July 4", "1917, five years b
 def parse_assignments(response: str, ids: list[str]) -> dict[str, tuple[int, str, str]]:
     """Parse ``scene_id | day | mode | basis`` lines for the scenes in *ids*.
 
-    Days may be zero or negative. A missing or unknown mode comes back as
-    ``''`` for the caller to decide. Lines for other ids or with a
+    Days may be zero or negative. A relation given as the mode (``earlier``)
+    means ``scene``; a missing or unknown mode comes back as ``''`` for the
+    caller to decide. Lines for other ids or with a
     non-integer day are ignored.
     """
     wanted = set(ids)
@@ -408,7 +414,11 @@ def parse_assignments(response: str, ids: list[str]) -> dict[str, tuple[int, str
             day = int(parts[1].lstrip('+'))
         except ValueError:
             continue
-        mode = parts[2].lower() if len(parts) > 2 and parts[2].lower() in TIME_MODES else ''
+        raw = parts[2].lower() if len(parts) > 2 else ''
+        # A relation in the mode column ("earlier") still says the scene is
+        # on the story's clock: Carol's Stave II came back "| -18250 |
+        # earlier |", and falling back on its "vision" cue hid the past
+        mode = raw if raw in TIME_MODES else 'scene' if raw in ('earlier', 'later', 'continues') else ''
         basis = parts[3] if len(parts) > 3 else ''
         result[parts[0]] = (day, mode, basis)
     return result
@@ -457,14 +467,14 @@ def assign_calendar(items: list[dict], invoke, log_dir: str) -> dict[str, tuple[
                 # A line that lost its mode column ("id | 800 | frame
                 # narration") must not make a frame the story's present
                 if not mode:
-                    mode = 'frame' if cue.get('relation') == 'frame' else 'scene'
+                    mode = cue.get('relation') if cue.get('relation') in OFF_PRESENT_MODES else 'scene'
                 placed[sid] = (day, mode, basis)
             elif it['provisional'] is not None:
                 placed[sid] = (it['provisional'], 'scene', 'from cues')
             if sid not in placed:
                 continue
             day, mode, _basis = placed[sid]
-            if mode != 'frame':
+            if mode not in OFF_PRESENT_MODES:
                 last_day = day
                 if cue.get('relation') != 'earlier' and (present is None or day > present):
                     present = day
@@ -494,7 +504,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
 
     *scenes*: scenes.csv rows in reading order. Returns findings
     ``{'scene_id', 'check', 'message'}``. Checks: the present going
-    backwards on a scene not told as earlier and not a frame; a stated gap
+    backwards on a scene not told as earlier and not a frame or vision; a stated gap
     the days disagree with; two dates, or two weekdays, the days contradict.
     """
     findings = []
@@ -510,7 +520,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         mode = (row.get('time_mode') or 'scene').strip() or 'scene'
         cue = cues.get(sid, {})
         relation = cue.get('relation', '')
-        if mode == 'frame':
+        if mode in OFF_PRESENT_MODES:
             after_frame = True
             continue
         if day is None:
@@ -527,7 +537,10 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
             findings.append({'scene_id': sid, 'check': 'present_backwards',
                              'message': f'day {day} is before the story\'s present (day {present}) '
                                         f'but the scene reads as "{relation}", not a flashback'})
-        if relation == 'earlier' and last_day is not None and day >= last_day:
+        # Only a step back from the present must go back: inside a flashback
+        # an "earlier" cue may move on through the past (Carol's Stave II runs
+        # from Scrooge's boyhood to Belle's family)
+        if relation == 'earlier' and at_present and day >= last_day:
             findings.append({'scene_id': sid, 'check': 'flashback_not_earlier',
                              'message': f'reads as set earlier, but its day ({day}) is not before '
                                         f'the previous scene\'s ({last_day})'})
@@ -654,7 +667,7 @@ def run_assignment(project_dir: str, model: str, log_dir: str, force: bool) -> d
         # (shared-dark: 81 of 100 days 'differed', mostly by one shift)
         offsets = sorted(placed[r['id']][0] - _int(r['timeline_day']) for r in rows
                          if r.get('id') in placed and _int(r.get('timeline_day')) is not None
-                         and placed[r['id']][1] != 'frame')
+                         and placed[r['id']][1] not in OFF_PRESENT_MODES)
         shift = offsets[len(offsets) // 2] if offsets else 0
         if shift:
             placed = {sid: (day - shift, mode, basis) for sid, (day, mode, basis) in placed.items()}

@@ -12,7 +12,7 @@ import math
 import os
 
 from storyforge.elaborate import (
-    _read_csv, _read_csv_as_map, _write_csv, _FILE_MAP, DELIMITER,
+    _read_csv, _read_csv_as_map, _write_csv, _FILE_MAP, DELIMITER, OFF_PRESENT_MODES,
 )
 
 
@@ -935,9 +935,9 @@ def assess_flashbacks(scenes_map, briefs_map):
     present_day, present_pov = None, ''
     in_present = []   # scene ids at or after the present, in reading order
     for sid, scene in ordered:
-        # Frame narration (from after the story) is neither the present nor a
-        # flashback
-        if _s(scene.get('time_mode')).strip() == 'frame':
+        # Frame narration (from after the story) and visions are neither the
+        # present nor a flashback
+        if _s(scene.get('time_mode')).strip() in OFF_PRESENT_MODES:
             continue
         day = _int(scene.get('timeline_day'))
         pov = _s(scene.get('pov')).strip()

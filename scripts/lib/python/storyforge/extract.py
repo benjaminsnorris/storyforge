@@ -844,12 +844,13 @@ def cleanup_timeline(ref_dir: str) -> list[dict]:
 
     A neighbour set before the story's present (a flashback) or a frame
     scene never lends its day: filling a gap from a flashback would make the
-    empty scene a flashback too. Frame scenes are not filled. The timeline
-    pass, not this, is what places scenes; this only covers stray gaps.
+    empty scene a flashback too. Frame and vision scenes are not filled. The
+    timeline pass, not this, is what places scenes; this only covers stray
+    gaps.
 
     Returns a list of fixes applied: [{scene_id, field, old_value, new_value}]
     """
-    from .elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+    from .elaborate import _read_csv_as_map, _write_csv, _FILE_MAP, OFF_PRESENT_MODES
 
     scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
     sorted_ids = sorted(scenes_map.keys(),
@@ -861,7 +862,7 @@ def cleanup_timeline(ref_dir: str) -> list[dict]:
     days = []
     present = None
     for sid in sorted_ids:
-        if (scenes_map[sid].get('time_mode') or '').strip() == 'frame':
+        if (scenes_map[sid].get('time_mode') or '').strip() in OFF_PRESENT_MODES:
             days.append((sid, None, False))
             continue
         try:
