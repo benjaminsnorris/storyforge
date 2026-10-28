@@ -391,7 +391,8 @@ class TestSplitChaptersMode:
     def test_split_with_explicit_markers(self, mock_api, mock_git,
                                          mock_costs, project_dir,
                                          monkeypatch):
-        """Chapters with *** markers should split without Claude calls."""
+        """Chapters with *** markers split at the markers; Claude only names
+        the scenes (one call per chapter, checked in TestSceneIds)."""
         monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
                             lambda: project_dir)
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
@@ -408,9 +409,6 @@ class TestSplitChaptersMode:
                       {'act1-sc01.md', 'act1-sc02.md', 'act2-sc01.md', 'new-x1.md'}]
         assert len(new_scenes) >= 2
 
-        # Should not have called Claude API (explicit markers, no detection needed)
-        api_calls = mock_api.calls_for('invoke_to_file')
-        assert len(api_calls) == 0
 
     def test_split_creates_metadata_entries(self, mock_api, mock_git,
                                             mock_costs, project_dir,
@@ -640,7 +638,6 @@ class TestRowAlignment:
                     '# Chapter One\n\nOpening prose here.\n\n***\n\nLater prose.\n')
         _, rows = _new_rows(project_dir, 'scenes.csv')
         assert [r['title'] for r in rows] == ['', '']
-        assert [r['id'] for r in rows] == ['scene-ch1-1', 'scene-ch1-2']
 
 
 class TestChapterOrder:
@@ -732,3 +729,73 @@ class TestParts:
         assert not _is_part_heading('Part of me wanted to stay.')
         assert _is_part_heading('BOOK FIRST')
         assert _is_part_heading('Part 3')
+
+
+class TestSceneIds:
+    """Scene ids are 3-5 word slugs of the scene's event, never positional:
+    order lives in seq, so a scene can move without its id lying."""
+
+    def _run(self, project_dir, monkeypatch, mock_api, content, response):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        prompts = []
+
+        def respond(prompt):
+            prompts.append(prompt)
+            return response
+        mock_api.set_response_fn(respond)
+        ch_dir = os.path.join(project_dir, 'chapters')
+        os.makedirs(ch_dir, exist_ok=True)
+        with open(os.path.join(ch_dir, 'ch01.md'), 'w') as f:
+            f.write(content)
+        main(['--split-chapters', '--source', 'chapters', '--yes', '--direct'])
+        _, rows = _new_rows(project_dir, 'scenes.csv')
+        return prompts, sorted(rows, key=lambda r: int(r['seq']))
+
+    def test_marker_scenes_named_by_claude(self, mock_api, mock_git, mock_costs,
+                                           project_dir, monkeypatch):
+        prompts, rows = self._run(
+            project_dir, monkeypatch, mock_api,
+            'Nick dines at East Egg.\n\n***\n\nTom takes a call.\n',
+            'SCENE: 1 | nick-dines-with-the-buchanans | a\n'
+            'SCENE: 5 | tom-takes-a-secret-call | b\n')
+        assert len(prompts) == 1
+        assert 'already fixed by break markers, at lines 1, 5' in prompts[0]
+        assert [r['id'] for r in rows] == ['nick-dines-with-the-buchanans',
+                                          'tom-takes-a-secret-call']
+
+    def test_detected_scenes_use_slug_capped_at_five_words(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        _, rows = self._run(
+            project_dir, monkeypatch, mock_api,
+            'Line one.\nLine two.\nLine three.\n',
+            'SCENE: 1 | tom-forces-nick-to-meet-his-mistress | a\n'
+            'SCENE: 3 | myrtle-buys-a-dog | b\n')
+        assert [r['id'] for r in rows] == ['tom-forces-nick-to-meet', 'myrtle-buys-a-dog']
+        assert [r['title'] for r in rows] == ['', '']
+
+    def test_unnamed_scene_falls_back_to_content_not_position(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        _, rows = self._run(
+            project_dir, monkeypatch, mock_api,
+            '# Chapter 1\n\nGatsby stood alone on the lawn.\n\n***\n\nDawn came.\n',
+            'no usable answer')
+        assert [r['id'] for r in rows] == ['gatsby-stood-alone', 'dawn-came']
+        assert not any('ch1' in r['id'] or 'chapter' in r['id'] for r in rows)
+
+
+class TestSceneIdSlug:
+    def test_caps_words(self):
+        from storyforge.scenes import scene_id_slug
+        assert scene_id_slug('Gatsby Reunites With Daisy At Last In The Rain') == \
+            'gatsby-reunites-with-daisy'
+
+    def test_no_dangling_function_word(self):
+        from storyforge.scenes import scene_id_slug
+        assert scene_id_slug('gatsby-is-shot-in-the-pool') == 'gatsby-is-shot'
+        assert scene_id_slug('daisy-yields-to-tom-while-gatsby-waits') == 'daisy-yields-to-tom'
+
+    def test_short_name_kept(self):
+        from storyforge.scenes import scene_id_slug
+        assert scene_id_slug('the-valley-of-ashes') == 'valley-of-ashes'

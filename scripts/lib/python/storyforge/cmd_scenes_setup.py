@@ -36,7 +36,7 @@ from storyforge.costs import (
     estimate_cost, check_threshold, print_summary, log_operation,
 )
 from storyforge.scenes import (
-    generate_slug, unique_slug, parse_scene_boundaries,
+    generate_slug, unique_slug, scene_id_slug, parse_scene_boundaries,
     build_boundary_prompt, scenes_header, intent_header,
     _title_from_file,
 )
@@ -247,7 +247,7 @@ def main(argv=None):
             seg_text = '\n'.join(lines_list[start_line - 1:end_line])
             seg_words = count_words(seg_text)
             opening = next((l.strip() for l in seg_text.splitlines() if l.strip()), '')
-            label = split['title'] or f'{opening[:60]}...'
+            label = split.get('slug') or split.get('title') or f'{opening[:60]}...'
             print(f'    Scene {s_idx + 1}: "{label}" '
                   f'(lines {start_line}-{end_line}, ~{seg_words} words) -- {split["reason"]}')
 
@@ -317,11 +317,15 @@ def main(argv=None):
                 cleaned.pop(0)
             scene_text = '\n'.join(cleaned)
 
-            # Generate slug
-            stitle = re.sub(r'^#+\s*', '', split['title'])
-            slug = generate_slug(stitle)
+            # Scene id: a slug of the scene's event, never its position. When
+            # Claude supplied no name, fall back to the scene's opening words.
+            stitle = re.sub(r'^#+\s*', '', split.get('title', ''))
+            slug = scene_id_slug(split.get('slug', ''))
             if not slug:
-                slug = f'scene-ch{chapter_num}-{s_idx + 1}'
+                opening = next((l for l in cleaned if l.strip()
+                                and not re.match(r'^#', l.strip())), '')
+                slug = scene_id_slug(opening) or 'scene'
+                log(f'  WARNING: no scene name from Claude; using "{slug}"')
             slug = unique_slug(slug, used_slugs)
 
             scene_file = os.path.join(scenes_dir, f'{slug}.md')
@@ -346,9 +350,17 @@ def main(argv=None):
 
         return written_ids
 
+    def chapter_prompt(chapter_text):
+        """Boundary prompt for a chapter; marker boundaries are fixed, so the
+        model only names those scenes."""
+        breaks = detect_explicit_breaks(chapter_text)
+        fixed = ([s['line'] for s in build_splits_from_markers(chapter_text, breaks)]
+                 if breaks else None)
+        return build_boundary_prompt(chapter_text, fixed)
+
     def claude_detect_scenes(chapter_text, chapter_id):
-        """Use direct API to detect scene boundaries."""
-        prompt = build_boundary_prompt(chapter_text)
+        """Use direct API to detect scene boundaries and name the scenes."""
+        prompt = chapter_prompt(chapter_text)
         lf = os.path.join(log_dir, f'scenes-setup-detect-{chapter_id}.json')
 
         response_data = invoke_to_file(prompt, model, lf, max_tokens=4096, system=system)
@@ -536,8 +548,11 @@ def main(argv=None):
                     marker_chapters.append(cf)
                 else:
                     claude_chapters.append(cf)
-            log(f'{len(marker_chapters)} chapters have explicit markers, '
-                f'{len(claude_chapters)} need Claude detection')
+            log(f'{len(marker_chapters)} chapters have explicit markers (Claude names '
+                f'their scenes), {len(claude_chapters)} need Claude detection')
+            # Every chapter needs Claude: scene ids are slugs of each scene's
+            # event, which markers alone cannot supply.
+            claude_chapters = list(chapter_files)
 
         # Process chapters needing Claude detection
         if not args.dry_run and claude_chapters:
@@ -553,7 +568,7 @@ def main(argv=None):
                         ch_name = os.path.splitext(os.path.basename(cf))[0]
                         with open(cf) as fh:
                             chapter_text = fh.read()
-                        prompt = build_boundary_prompt(chapter_text)
+                        prompt = chapter_prompt(chapter_text)
                         request = build_batch_request(ch_name, prompt, model,
                                                       max_tokens=4096, system=system)
                         bf.write(json.dumps(request) + '\n')
@@ -644,38 +659,39 @@ def main(argv=None):
             detect_file = os.path.join(work_dir, f'.detect-{ch_name}.txt')
             breaks = detect_explicit_breaks(chapter_text)
 
+            boundaries = []
+            if os.path.isfile(detect_file):
+                with open(detect_file) as f:
+                    boundaries = parse_scene_boundaries(f.read())
+                os.remove(detect_file)
+
             if breaks:
                 log(f'\nProcessing chapter {chapter_num}: {ch_name}')
                 log('  Found explicit scene break markers')
                 splits = build_splits_from_markers(chapter_text, breaks)
-            elif os.path.isfile(detect_file):
+                # Markers fix the boundaries; Claude's response names them
+                named = {b['line_number']: b['title'] for b in boundaries}
+                for split in splits:
+                    split['slug'] = named.get(split['line'], '')
+                if boundaries and len(named) != len(splits):
+                    log(f'  WARNING: scene names returned for {len(named)} of '
+                        f'{len(splits)} marked scenes')
+            elif boundaries:
                 log(f'\nProcessing chapter {chapter_num}: {ch_name}')
-                with open(detect_file) as f:
-                    response = f.read()
-                boundaries = parse_scene_boundaries(response)
-                os.remove(detect_file)
-
-                if not boundaries:
-                    log('  WARNING: No scene boundaries detected. Treating as single scene.')
-                    ftitle = _title_from_file(chapter_file)
-                    splits = [{'line': 1, 'title': ftitle or ch_name,
-                               'reason': 'Single scene (no boundaries detected)'}]
-                else:
-                    splits = [
-                        {'line': b['line_number'], 'title': b['title'],
-                         'reason': b['description'] or 'Claude detection'}
-                        for b in boundaries
-                    ]
+                splits = [
+                    {'line': b['line_number'], 'slug': b['title'], 'title': '',
+                     'reason': b['description'] or 'Claude detection'}
+                    for b in boundaries
+                ]
             elif args.dry_run:
                 log(f'\nProcessing chapter {chapter_num}: {ch_name}')
                 tw = count_words(chapter_text)
                 log(f'  [DRY RUN] Would invoke Claude for scene detection ({tw} words)')
                 continue
             else:
-                # Fallback: single scene
                 log(f'\nProcessing chapter {chapter_num}: {ch_name}')
-                ftitle = _title_from_file(chapter_file)
-                splits = [{'line': 1, 'title': ftitle or ch_name, 'reason': 'Single scene'}]
+                log('  WARNING: No scene boundaries detected. Treating as single scene.')
+                splits = [{'line': 1, 'slug': '', 'title': '', 'reason': 'Single scene'}]
 
             # Confirm and write
             if splits:

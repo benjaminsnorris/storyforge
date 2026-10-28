@@ -61,6 +61,23 @@ def generate_slug(title: str) -> str:
     return slug
 
 
+_TRAILING_STOPWORDS = frozenset(
+    'a an and as at by for from in into of on or the to while with'.split())
+
+
+def scene_id_slug(text: str, max_words: int = 5) -> str:
+    """Slug for a scene id: at most max_words words naming the scene's event.
+
+    Scene ids are permanent and describe what happens, never where the scene
+    sits: order lives in seq, so a scene can move without its id lying.
+    """
+    words = [w for w in generate_slug(text).split('-') if w][:max_words]
+    # Truncation can strand a function word ("gatsby-is-shot-in-the")
+    while len(words) > 1 and words[-1] in _TRAILING_STOPWORDS:
+        words.pop()
+    return '-'.join(words)
+
+
 def unique_slug(base_slug: str, used: set[str]) -> str:
     """Return a unique slug, appending ``-2``, ``-3``, etc. if needed.
 
@@ -391,11 +408,14 @@ def _title_from_file(filepath: str) -> str:
 # Scene boundary detection prompt
 # ============================================================================
 
-def build_boundary_prompt(chapter_text: str) -> str:
-    """Build a prompt for Claude to detect scene boundaries in a chapter.
+def build_boundary_prompt(chapter_text: str,
+                          fixed_lines: list[int] | None = None) -> str:
+    """Build a prompt for Claude to find scene boundaries and name each scene.
 
     Args:
         chapter_text: The full text of a chapter.
+        fixed_lines: Boundaries already fixed by explicit break markers. The
+            model then only names the scenes at those lines.
 
     Returns:
         The assembled prompt string.
@@ -405,6 +425,13 @@ def build_boundary_prompt(chapter_text: str) -> str:
     numbered = '\n'.join(
         f'{n}: {line}' for n, line in enumerate(chapter_text.splitlines(), 1)
     )
+    if fixed_lines:
+        task = ('The scene boundaries in this chapter are already fixed by break markers, '
+                f'at lines {", ".join(str(n) for n in fixed_lines)}. Output exactly one '
+                'SCENE line for each of these lines, in order. Do not add or remove boundaries.')
+    else:
+        task = ('Identify where each scene begins. For each scene boundary (including the '
+                'very start of the chapter), output one line.')
     return f"""You are identifying scene boundaries in a chapter of a novel.
 
 A scene is a continuous unit of action in one time and place. A new scene begins when there is a significant shift in:
@@ -423,12 +450,15 @@ Each line is prefixed with its line number and a colon.
 
 ## Instructions
 
-Identify where each scene begins. For each scene boundary (including the very start of the chapter), output one line:
+{task}
 
-SCENE: <line_number> | <suggested_title> | <brief_reason>
+SCENE: <line_number> | <scene_id> | <brief_reason>
 
-Where line_number is the number prefixed to the line where this scene begins.
-The first scene always starts at line 1.
+Where line_number is the number prefixed to the line where this scene begins
+(the first scene always starts at line 1), and scene_id is the scene's
+permanent id: 3-5 lowercase words joined by hyphens naming the scene's core
+event (e.g., gatsby-reunites-with-daisy). Describe what happens, never where
+the scene falls: no chapter or scene numbers.
 
 Output ONLY SCENE: lines, nothing else."""
 
