@@ -420,11 +420,14 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
                                         f'the previous scene\'s ({last_day})'})
         gap = gap_to_days(cue.get('gap', ''))
         if last_day is not None and gap is not None and relation in ('continues', 'later'):
-            actual = day - last_day
+            # Back from a flashback, "the next morning" counts from the
+            # present, not from the remembered scene before it
+            base = present if (present is not None and last_day < present <= day) else last_day
+            actual = day - base
             if abs(actual - gap) > max(1, gap // 2):
                 findings.append({'scene_id': sid, 'check': 'gap_mismatch',
-                                 'message': f'the text says "{cue["gap"]}" after the previous scene '
-                                            f'(about {gap} day(s)), but the days differ by {actual}'})
+                                 'message': f'the text says "{cue["gap"]}" (about {gap} day(s)), '
+                                            f'but the calendar puts it {actual} day(s) on'})
         md = _month_day(row.get('timeline_date', ''))
         if md:
             dated.append((sid, day, md))

@@ -253,6 +253,15 @@ class TestChecks:
         checks = [f['check'] for f in check_timeline(rows, cues)]
         assert checks == ['date_mismatch', 'weekday_mismatch']
 
+    def test_gap_after_a_flashback_counts_from_the_present(self):
+        """Gatsby VIII: the Louisville memory, then "the next morning"."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('dawn', '77', 'scene', ''), ('louisville', '-1676', 'scene', ''),
+                          ('next', '78', 'scene', ''))
+        cues = {'louisville': {'relation': 'earlier', 'gap': 'five years'},
+                'next': {'relation': 'later', 'gap': 'the next morning'}}
+        assert check_timeline(rows, cues) == []
+
     def test_habitual_weekdays_are_not_anchors(self):
         """Gatsby's guest catalogue: "on Sunday mornings" is a habit."""
         from storyforge.timeline import check_timeline
