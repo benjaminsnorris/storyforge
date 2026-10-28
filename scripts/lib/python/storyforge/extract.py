@@ -661,7 +661,7 @@ Output each field on its own labeled line. Leave a field empty when there is not
 
 PHYSICAL_STATE_IN: [semicolon-separated state IDs active at START — carry forward from prior states for on-stage characters only]
 PHYSICAL_STATE_OUT: [semicolon-separated state IDs active at END — state_in plus new states acquired, minus states resolved]
-NEW_STATES: [one per line if any: id|character|description|category|action_gating — use kebab-case IDs]
+NEW_STATES: [one per line if any: id|character|description|category|action_gating — use kebab-case IDs; action_gating is the single word true (the state limits what the character can physically do) or false, with no explanation]
 RESOLVED_STATES: [semicolon-separated state IDs that resolve during this scene, or empty if none]
 
 IMPORTANT: Use EXACT state IDs for carry-forward. New states need new IDs in kebab-case (e.g., broken-arm-marcus, has-compass-elena)."""

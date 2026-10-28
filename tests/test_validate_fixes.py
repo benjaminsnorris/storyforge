@@ -99,3 +99,9 @@ class TestCleanupAnswerFormats:
         assert b[0]['continuity_deps'] == '' and b[1]['continuity_deps'] == 'act1-sc01'
         # Idempotent
         assert run_cleanup(ref_dir)['answer_formats']['count'] == 0
+
+
+def test_physical_state_prompt_asks_for_a_boolean():
+    import inspect
+    from storyforge import extract
+    assert 'action_gating is the single word true' in inspect.getsource(extract)
