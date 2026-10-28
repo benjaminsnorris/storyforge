@@ -256,7 +256,7 @@ class TestValidateStructure:
         severities = [c.get('severity', 'blocking') for c in timeline_checks]
         messages = ' '.join(c.get('message', '') for c in timeline_checks)
         assert 'advisory' in severities
-        assert 'crosscut' in messages
+        assert 'crosscut' in messages.lower()
         assert 'blocking' not in severities
 
     def test_advisory_only_failures_do_not_fail_passed(self, tmp_path):

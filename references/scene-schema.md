@@ -133,7 +133,7 @@ Run `./storyforge validate` to check both structural integrity and schema compli
 **Structural checks:**
 - **Identity:** Every ID in intent/briefs exists in scenes.csv
 - **Completeness:** Required columns for the scene's status are populated
-- **Timeline:** No backwards jumps without explicit markers
+- **Timeline:** flashbacks and crosscuts (scenes set before the story's present) are listed and gauged, never errors
 - **Knowledge flow:** knowledge_in references match prior scenes' knowledge_out
 - **Thread management:** each MICE thread opens once and closes at most once; interleaving is reported, not an error; no thread dormant >8 scenes
 - **Pacing:** No flat polarity stretches (3+ scenes); action/sequel rhythm varied; turning point types varied

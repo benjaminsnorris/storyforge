@@ -623,7 +623,9 @@ class TestAnalyzeGaps:
         if 'intent-fields' in groups:
             assert 's01' in groups['intent-fields']['scenes']
 
-    def test_structural_failures_listed(self, tmp_path):
+    def test_flashback_is_not_a_structural_gap(self, tmp_path):
+        # Flashbacks are a device, not an error (author's decision), so a
+        # scene earlier in story time than the one before it is not a gap.
         ref = str(tmp_path / 'reference')
         os.makedirs(ref)
 
@@ -644,9 +646,7 @@ class TestAnalyzeGaps:
             f.write('s02|g|c|o|cr|d|||a|d|e|m|||false||\n')
 
         result = analyze_gaps(ref)
-        assert len(result['structural']) > 0
-        assert any('timeline' in c.get('category', '') or 'backwards' in c.get('message', '').lower()
-                    for c in result['structural'])
+        assert not any(c.get('category') == 'timeline' for c in result['structural'])
 
 
 # ============================================================================

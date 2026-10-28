@@ -612,42 +612,38 @@ def _validate_threads(scenes_map, intent_map, checks, ref_dir=''):
 
 
 def _validate_timeline(scenes_map, checks):
-    """Check timeline consistency: no backwards jumps without markers."""
+    """Describe how the reading order moves through story time.
+
+    The story's present is the latest day reached so far in reading order.
+    A scene set before it is a flashback (or a crosscut, when the POV
+    changes). These are devices, not errors, so they are advisory and listed
+    plainly; assess_flashbacks in structural.py gauges whether they work.
+    """
     sorted_ids = sorted(scenes_map.keys(),
                         key=lambda sid: int(scenes_map[sid].get('seq', 0)))
 
-    prev_day = None
-    prev_id = None
+    present_day = None
+    present_id = None
     for sid in sorted_ids:
         day_str = scenes_map[sid].get('timeline_day', '').strip()
-        if not day_str:
-            continue
         try:
             day = int(day_str)
         except ValueError:
             continue
 
-        if prev_day is not None and day < prev_day:
+        if present_day is not None and day < present_day:
             pov = scenes_map[sid].get('pov', '').strip()
-            prev_pov = scenes_map[prev_id].get('pov', '').strip()
-            if pov and prev_pov and pov != prev_pov:
-                # POV change with backwards jump = deliberate crosscut
-                checks.append(_check(
-                    'timeline', 'timeline-order', False,
-                    f"Scene {sid} (day {day}, POV {pov}) steps back from "
-                    f"{prev_id} (day {prev_day}, POV {prev_pov}) — crosscut",
-                    scene_id=sid,
-                    severity='advisory',
-                ))
-            else:
-                checks.append(_check(
-                    'timeline', 'timeline-order', False,
-                    f"Scene {sid} (day {day}) comes after {prev_id} (day {prev_day}) — backwards jump",
-                    scene_id=sid,
-                ))
-
-        prev_day = day
-        prev_id = sid
+            present_pov = scenes_map[present_id].get('pov', '').strip()
+            kind = 'crosscut' if pov and present_pov and pov != present_pov else 'flashback'
+            checks.append(_check(
+                'timeline', 'timeline-order', False,
+                f"{kind.capitalize()}: {sid} (day {day}) is set before the story's present "
+                f"(day {present_day}, reached in {present_id})",
+                scene_id=sid,
+                severity='advisory',
+            ))
+        else:
+            present_day, present_id = day, sid
 
     if not any(c['check'] == 'timeline-order' and not c['passed'] for c in checks):
         checks.append(_check('timeline', 'timeline-order', True, 'Timeline order is consistent'))

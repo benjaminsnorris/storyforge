@@ -118,7 +118,10 @@ COLUMN_SCHEMA = {
     },
     'timeline_day': {
         'type': 'integer', 'file': 'scenes.csv', 'stage': 'map',
-        'description': 'Chronological position (day number within the story).',
+        'description': 'Day on which the scene\'s action happens, in story chronology. Day 1 is '
+                       'the first day of the main story; flashbacks keep the earlier day they '
+                       'depict (0 or negative before day 1). Reading order is seq, so a scene '
+                       'earlier in time than the story\'s present is a flashback.',
     },
     'time_of_day': {
         'type': 'enum', 'values': VALID_TIMES,

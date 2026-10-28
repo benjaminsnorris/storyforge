@@ -47,6 +47,13 @@ def main(argv=None):
 
     scene_ids = validate_scene_ids(ref_dir)
 
+    from storyforge.elaborate import _read_csv_as_map
+    from storyforge.structural import assess_flashbacks
+    flashbacks = assess_flashbacks(
+        _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv')),
+        _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv')),
+    )
+
     knowledge = None
     knowledge_path = os.path.join(ref_dir, 'knowledge.csv')
     if os.path.isfile(knowledge_path):
@@ -109,6 +116,7 @@ def main(argv=None):
         'schema': schema,
         'knowledge': knowledge,
         'scene_ids': scene_ids,
+        'flashbacks': flashbacks,
         'illustrations': illus_result,
         'canon': canon_result,
         'scores': structural_scores,
@@ -134,6 +142,7 @@ def _print_human_readable(combined):
     schema = combined['schema']
     knowledge = combined.get('knowledge')
     scene_ids = combined.get('scene_ids') or {'warnings': [], 'total': 0}
+    flashbacks = combined.get('flashbacks') or []
 
     total = len(r['checks'])
     fail_count = len(r['failures'])
@@ -180,6 +189,19 @@ def _print_human_readable(combined):
                     elif e['constraint'] == 'scene_ids':
                         unresolved = ', '.join(e.get('unresolved', []))
                         print(f'    {e["row"]} | {e["column"]}: "{unresolved}" — not in scenes.csv')
+
+    if flashbacks:
+        share = sum(f['share'] for f in flashbacks)
+        print()
+        print('--- Flashbacks ---')
+        print(f'  {len(flashbacks)} passage(s) set before the story\'s present '
+              f'({share:.0%} of words)')
+        for f in flashbacks:
+            payoff = (f'{f["facts_used_later"]} of {f["new_facts"]} new facts reach the present'
+                      if f['new_facts'] else 'establishes no new facts')
+            print(f'    {f["kind"]}: {", ".join(f["scenes"])} — day {f["earliest_day"]}, '
+                  f'{f["depth_days"]} days before day {f["present_day"]}; '
+                  f'{f["words"]:,} words; {payoff}')
 
     if scene_ids['warnings']:
         from storyforge.scenes import SCENE_ID_RULE

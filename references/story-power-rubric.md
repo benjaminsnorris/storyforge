@@ -677,7 +677,8 @@ comprehension.
   travel beat or scene break.
 - **Low signals:** Adjacent scenes share pov + location + day but
   feel like cuts; pov changes appear mid-sequence without setup;
-  timeline_day goes backward and the scene type is regular.
+  (a scene earlier in story time than the one before it is a
+  flashback, a device rather than a low signal).
 
 The 1.5x weight reflects this axis's unique-and-load-bearing role:
 **no other scoring mode catches adjacency.** Spine causal handoff

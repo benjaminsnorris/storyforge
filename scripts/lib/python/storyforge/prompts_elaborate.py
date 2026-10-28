@@ -366,7 +366,7 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 
 ### Rules
 
-- Timeline must be consistent: no backward jumps without explicit justification
+- timeline_day is when a scene's action happens; a flashback keeps the earlier day it depicts (0 or negative before day 1). Flashbacks are a device, not an error: use one where the past changes what the present means
 - Every character referenced must exist in the character bible
 - MICE threads: each opens once and closes at most once; they may interleave (nesting is guidance, not a rule)
 - No thread dormant for more than 8-10 scenes without acknowledgment

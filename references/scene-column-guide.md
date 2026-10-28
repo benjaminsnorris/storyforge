@@ -33,7 +33,7 @@ This document explains **why** each column in the scene CSV files matters and **
 
 ### timeline_day — Chronological Position
 **Why it matters:** Validates that the story's internal clock is consistent. Characters can't reference Tuesday's events on Monday.
-**How to check:** Run `./storyforge validate` — it flags backwards timeline jumps. Check the Timeline scatter chart.
+**How to check:** Run `./storyforge validate` — it lists flashbacks and crosscuts (scenes set before the story's present) with how far back they reach and whether the facts they establish reach the present. These are devices, not errors. Check the Timeline scatter chart.
 **How to improve:** If validation finds gaps, determine whether the gap is intentional (time skip) or an extraction error.
 
 ### type — Narrative Purpose
