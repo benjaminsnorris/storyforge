@@ -31,7 +31,7 @@ _SCENES_COLS = [
     'id', 'seq', 'title', 'summary', 'part', 'act', 'pov', 'location',
     'timeline_day', 'time_of_day', 'duration', 'type', 'status',
     'word_count', 'target_words',
-    # How the scene sits in time (scene | summary | frame) and the calendar
+    # How the scene sits in time (scene | summary | frame | vision) and the calendar
     # date its own text states, in EDTF (docs/plans/timeline-pass.md)
     'time_mode', 'timeline_date',
     # Graphic-novel-mode columns (ignored in novel mode, written in GN mode)

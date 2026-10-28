@@ -410,6 +410,16 @@ class TestChecks:
                 'fezziwig': {'relation': 'earlier'}, 'christmas': {'relation': 'later'}}
         assert check_timeline(rows, cues) == []
 
+    def test_an_earlier_scene_that_leaves_the_flashback_is_found(self):
+        """Review of #338: inside a flashback, an "earlier" scene placed at
+        or after the present is still wrong."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('a', '10', 'scene', ''), ('memory', '-1825', 'scene', ''),
+                          ('more', '12', 'scene', ''))
+        found = check_timeline(rows, {'memory': {'relation': 'earlier'},
+                                      'more': {'relation': 'earlier'}})
+        assert [f['check'] for f in found] == ['flashback_not_earlier']
+
     def test_a_flashback_that_does_not_go_back_is_found(self):
         from storyforge.timeline import check_timeline
         rows = self._rows(('a', '5', 'scene', ''), ('memory', '5', 'scene', ''))
@@ -514,6 +524,17 @@ class TestVisions:
             str(tmp_path))
         assert placed['boyhood'] == (-18250, 'scene', 'past')
 
+    def test_later_in_the_mode_column_keeps_the_cue(self, tmp_path):
+        """Review of #338: mapping "later" to scene would make a vision line
+        that lost its mode the story's present."""
+        from storyforge.timeline import assign_calendar
+        items = [{'id': 'night', 'cues': {'relation': 'later'}},
+                 {'id': 'future', 'cues': {'relation': 'vision'}}]
+        placed = assign_calendar(
+            items, lambda *a: 'CALENDAR:\nnight | 2 | scene | x\nfuture | 400 | later | a year on\n',
+            str(tmp_path))
+        assert placed['future'] == (400, 'vision', 'a year on')
+
     def test_walk_reads_the_scene_after_a_vision_against_the_viewer(self):
         from storyforge.timeline import walk
         cues = {'night': {'relation': 'later'}, 'dead-man': {'relation': 'vision'},
@@ -567,3 +588,10 @@ class TestVisions:
         _scenes(project_dir, [('a', '2', 'scene'), ('future', '400', 'vision'), ('gap', '', '')])
         fixes = cleanup_timeline(os.path.join(project_dir, 'reference'))
         assert [(f['scene_id'], f['new_value']) for f in fixes] == [('gap', '2')]
+
+    def test_expansion_gaps_skip_visions(self, project_dir):
+        """Review of #338: a vision 400 days out read as a 398-day gap."""
+        from storyforge.extract import analyze_expansion_opportunities
+        _scenes(project_dir, [('a', '1', 'scene'), ('future', '400', 'vision'), ('b', '2', 'scene')])
+        opps = analyze_expansion_opportunities(os.path.join(project_dir, 'reference'))
+        assert [o for o in opps if o['type'] == 'timeline_gap'] == []

@@ -753,7 +753,7 @@ def analyze_expansion_opportunities(ref_dir: str) -> list[dict]:
 
     Returns a list of opportunity dicts with type, scene_id, description, priority.
     """
-    from .elaborate import _read_csv_as_map
+    from .elaborate import _read_csv_as_map, OFF_PRESENT_MODES
 
     scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
     intent_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
@@ -796,10 +796,13 @@ def analyze_expansion_opportunities(ref_dir: str) -> list[dict]:
                     'priority': 'high' if len(new_facts) >= 5 else 'medium',
                 })
 
-    # Timeline gaps: more than 2 days between consecutive scenes
+    # Timeline gaps: more than 2 days between consecutive scenes on the
+    # story's clock (frame narration and visions are off it)
     prev_day = None
     prev_id = None
     for sid in sorted_ids:
+        if (scenes_map[sid].get('time_mode') or '').strip() in OFF_PRESENT_MODES:
+            continue
         day_str = scenes_map[sid].get('timeline_day', '').strip()
         if not day_str:
             continue

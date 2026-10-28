@@ -391,8 +391,8 @@ basis: a few words on why ("next morning", "anchor: July 4", "1917, five years b
 def parse_assignments(response: str, ids: list[str]) -> dict[str, tuple[int, str, str]]:
     """Parse ``scene_id | day | mode | basis`` lines for the scenes in *ids*.
 
-    Days may be zero or negative. A relation given as the mode (``earlier``)
-    means ``scene``; a missing or unknown mode comes back as ``''`` for the
+    Days may be zero or negative. ``earlier`` given as the mode means
+    ``scene``; a missing or unknown mode comes back as ``''`` for the
     caller to decide. Lines for other ids or with a
     non-integer day are ignored.
     """
@@ -415,10 +415,11 @@ def parse_assignments(response: str, ids: list[str]) -> dict[str, tuple[int, str
         except ValueError:
             continue
         raw = parts[2].lower() if len(parts) > 2 else ''
-        # A relation in the mode column ("earlier") still says the scene is
-        # on the story's clock: Carol's Stave II came back "| -18250 |
-        # earlier |", and falling back on its "vision" cue hid the past
-        mode = raw if raw in TIME_MODES else 'scene' if raw in ('earlier', 'later', 'continues') else ''
+        # "earlier" in the mode column still says the scene is on the story's
+        # clock: Carol's Stave II came back "| -18250 | earlier |", and
+        # falling back on its "vision" cue hid the past. Only "earlier": a
+        # "later" could be a frame or vision line that lost its mode
+        mode = raw if raw in TIME_MODES else 'scene' if raw == 'earlier' else ''
         basis = parts[3] if len(parts) > 3 else ''
         result[parts[0]] = (day, mode, basis)
     return result
@@ -537,10 +538,11 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
             findings.append({'scene_id': sid, 'check': 'present_backwards',
                              'message': f'day {day} is before the story\'s present (day {present}) '
                                         f'but the scene reads as "{relation}", not a flashback'})
-        # Only a step back from the present must go back: inside a flashback
-        # an "earlier" cue may move on through the past (Carol's Stave II runs
-        # from Scrooge's boyhood to Belle's family)
-        if relation == 'earlier' and at_present and day >= last_day:
+        # A step back from the present must go back. Inside a flashback an
+        # "earlier" cue may move on through the past (Carol's Stave II runs
+        # from Scrooge's boyhood to Belle's family), but not out of it
+        if relation == 'earlier' and last_day is not None and (
+                day >= last_day if at_present else day >= present):
             findings.append({'scene_id': sid, 'check': 'flashback_not_earlier',
                              'message': f'reads as set earlier, but its day ({day}) is not before '
                                         f'the previous scene\'s ({last_day})'})
