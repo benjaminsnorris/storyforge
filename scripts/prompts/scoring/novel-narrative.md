@@ -4,7 +4,7 @@ You are evaluating the narrative structure of "{{PROJECT_TITLE}}".
 
 Score how well this manuscript aligns with each of the 7 narrative frameworks below. This is NOT about whether the manuscript SHOULD follow each framework — it's about measuring how strongly each framework's structural patterns are present.
 
-A score of 1 means "not using this framework" (which is a valid creative choice). A score of 5 means "strongly aligned with this framework's structure."
+Write `n/a` for a framework the manuscript does not use (a valid creative choice, not a weakness). For a framework it does use, 1 means barely aligned and 5 means "strongly aligned with this framework's structure."
 
 ## The Manuscript
 
@@ -33,9 +33,9 @@ A score of 1 means "not using this framework" (which is a valid creative choice)
 
 ## Instructions
 
-- Score each framework as an integer from 1 to 5 (1=Not present, 2=Loosely aligned, 3=Partially aligned, 4=Mostly aligned, 5=Strongly aligned).
+- Score each framework as `n/a` (not used) or an integer from 1 to 5 (1=Barely aligned, 2=Loosely aligned, 3=Partially aligned, 4=Mostly aligned, 5=Strongly aligned).
 - Anchor every score in observable structural evidence from the scene index, chapter structure, and story architecture — not subjective impression.
-- A low score is NOT a deficit. It reflects that the manuscript does not follow that particular framework, which is a valid creative choice.
+- Neither `n/a` nor a low score is a deficit: they say how far the manuscript follows that particular framework, which is a creative choice.
 - Output ONLY the two CSV blocks below. No prose, no explanation, no commentary before, between, or after the blocks.
 
 ## Output Format

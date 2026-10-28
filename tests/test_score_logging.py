@@ -195,3 +195,79 @@ def test_improvement_cycle_coach_skips_apply(
     # Should still collect exemplars
     assert 'Improvement cycle: collecting exemplars...' in captured
     assert 'Improvement cycle: complete' in captured
+
+
+@patch('storyforge.scoring.check_validated_patterns', return_value='')
+@patch('storyforge.scoring.collect_exemplars')
+@patch('storyforge.scoring.generate_proposals')
+@patch('storyforge.scoring.generate_diagnosis')
+@patch('storyforge.cmd_score.get_coaching_level', return_value='full')
+def test_no_apply_leaves_proposals_pending_in_full_coaching(
+    mock_coaching, mock_diag, mock_proposals, mock_exemplars,
+    mock_patterns, tmp_path, capsys
+):
+    """Evals F-037: a calibration run over The Great Gatsby in full coaching
+    auto-applied its proposals (wound_lie weight 6 -> 7). --no-apply keeps
+    the weights and the proposals untouched."""
+    cycle_dir = str(tmp_path / 'cycle-1')
+    os.makedirs(cycle_dir)
+    project_dir = str(tmp_path / 'project')
+    os.makedirs(os.path.join(project_dir, 'working'), exist_ok=True)
+
+    weights_file = str(tmp_path / 'craft-weights.csv')
+    weights = 'principle|weight\nprose_repetition|5\n'
+    with open(weights_file, 'w') as f:
+        f.write(weights)
+    intent_csv = str(tmp_path / 'scene-intent.csv')
+    with open(intent_csv, 'w') as f:
+        f.write('id|function\n')
+
+    def fake_diagnosis(cd, pd, wf):
+        with open(os.path.join(cd, 'diagnosis.csv'), 'w') as f:
+            f.write('principle|scale|avg_score|worst_items|delta_from_last|priority|root_cause\n'
+                    'prose_repetition|scene|1.8|s1||high|craft\n')
+    mock_diag.side_effect = fake_diagnosis
+
+    def fake_proposals(cd, wf):
+        with open(os.path.join(cd, 'proposals.csv'), 'w') as f:
+            f.write('id|principle|lever|target|change|rationale|status\n'
+                    'p001|prose_repetition|craft_weight|global|weight 5 → 7|avg_score 1.8, priority high|pending\n')
+    mock_proposals.side_effect = fake_proposals
+
+    _run_improvement_cycle(
+        cycle=1, cycle_dir=cycle_dir, project_dir=project_dir,
+        weights_file=weights_file, plugin_dir='/fake',
+        intent_csv=intent_csv, title='Test', no_apply=True,
+    )
+
+    captured = capsys.readouterr().out
+    assert '--no-apply: proposals left pending' in captured
+    assert 'auto-approving' not in captured
+    assert 'applying proposals' not in captured
+    with open(weights_file) as f:
+        assert f.read() == weights
+    with open(os.path.join(cycle_dir, 'proposals.csv')) as f:
+        assert f.read().strip().endswith('|pending')
+    assert 'Improvement cycle: complete' in captured
+
+
+def test_no_apply_flag_parses():
+    from storyforge.cmd_score import parse_args
+    assert parse_args(['--no-apply']).no_apply is True
+    assert parse_args([]).no_apply is False
+
+
+def test_every_improvement_cycle_call_passes_no_apply():
+    """Both paths into the improvement cycle (full scoring and
+    --diagnosis-only) must honour --no-apply; a call that drops it would
+    apply proposals on an eval run."""
+    import ast
+    import inspect
+    import storyforge.cmd_score as cmd_score
+    tree = ast.parse(inspect.getsource(cmd_score))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and getattr(n.func, 'id', '') == '_run_improvement_cycle']
+    assert len(calls) == 2
+    for call in calls:
+        kw = {k.arg: ast.unparse(k.value) for k in call.keywords}
+        assert kw.get('no_apply') == 'args.no_apply'
