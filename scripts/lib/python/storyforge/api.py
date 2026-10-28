@@ -161,8 +161,9 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
     Returns:
         Full API response dict.
     """
+    extra = {'temperature': temperature} if temperature is not None else {}
     response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system,
-                      temperature=temperature)
+                      **extra)
     os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
     with open(log_file, 'w') as f:
         json.dump(response, f)
