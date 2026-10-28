@@ -1012,6 +1012,22 @@ function frameworkScoreText(value) {
     return isNaN(n) ? 'n/a' : n + '/5';
 }
 
+// Scenes with a timeline day, in reading order (evals F-059). Day 0 and
+// days before the story are real days. Frame and vision scenes stand off
+// the story's present, so the scatter leaves them off its line.
+function timelinePoints(scenes) {
+    var points = [];
+    scenes.forEach(function(s, i) {
+        var raw = (s.timeline_day || '').trim();
+        var day = raw === '' ? NaN : Number(raw);
+        if (!isFinite(day)) return;
+        var mode = (s.time_mode || '').trim() || 'scene';
+        points.push({ id: s.id, index: i, day: day, mode: mode,
+                      offPresent: mode === 'frame' || mode === 'vision' });
+    });
+    return points;
+}
+
 function showAllActRationales(actId) {
     var rat = actRationaleById[actId];
     var scores = ACT_SCORES.filter(function(a) { return a.id === actId; })[0];
@@ -2824,8 +2840,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 // ============================================================================
 
 (function renderTimelineScatter() {
-    const withTimeline = sortedScenes.filter(s => s.timeline_day && s.timeline_day.trim() !== '');
-    if (withTimeline.length < 3) return;
+    const timeline = timelinePoints(sortedScenes);
+    if (timeline.length < 3) return;
 
     document.getElementById('timeline-section').style.display = '';
     const container = document.getElementById('timeline-scatter');
@@ -2835,22 +2851,16 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     const PAD_L = timeNarrow ? 20 : 60, PAD_R = 20, PAD_T = 16, PAD_B = timeNarrow ? 16 : 32;
     const svg = makeSvg(container, W, H);
 
-    const days = sortedScenes.map(s => parseFloat(s.timeline_day) || 0);
-    const minDay = Math.min(...days.filter(d => d > 0));
+    const days = timeline.map(p => p.day);
+    const minDay = Math.min(...days);
     const maxDay = Math.max(...days);
     const dayRange = maxDay - minDay || 1;
 
-    const points = [];
-    sortedScenes.forEach((s, i) => {
-        const day = parseFloat(s.timeline_day);
-        if (isNaN(day) || day <= 0) return;
-        points.push({
-            x: PAD_L + (i / (sceneCount - 1 || 1)) * (W - PAD_L - PAD_R),
-            y: PAD_T + (1 - (day - minDay) / dayRange) * (H - PAD_T - PAD_B),
-            id: s.id,
-            day
-        });
-    });
+    const points = timeline.map(p => ({
+        ...p,
+        x: PAD_L + (p.index / (sceneCount - 1 || 1)) * (W - PAD_L - PAD_R),
+        y: PAD_T + (1 - (p.day - minDay) / dayRange) * (H - PAD_T - PAD_B)
+    }));
 
     // Axes
     if (!timeNarrow) {
@@ -2875,24 +2885,36 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         }));
     }
 
-    // Connecting lines
-    for (let i = 1; i < points.length; i++) {
+    // Connecting lines through the story's present and its flashbacks;
+    // frame and vision scenes stand off it
+    const linked = points.filter(p => !p.offPresent);
+    for (let i = 1; i < linked.length; i++) {
         svg.appendChild(svgEl('line', {
-            x1: points[i-1].x, y1: points[i-1].y,
-            x2: points[i].x, y2: points[i].y,
+            x1: linked[i-1].x, y1: linked[i-1].y,
+            x2: linked[i].x, y2: linked[i].y,
             stroke: 'var(--teal)', 'stroke-width': 1, opacity: 0.3
         }));
     }
 
-    // Dots
+    // Dots: hollow for a frame or vision
     points.forEach(p => {
-        const dot = svgEl('circle', {
+        const dot = svgEl('circle', p.offPresent ? {
+            cx: p.x, cy: p.y, r: 4,
+            fill: 'none', stroke: 'var(--teal)', 'stroke-width': 1.5, opacity: 0.8
+        } : {
             cx: p.x, cy: p.y, r: 4,
             fill: 'var(--teal)', opacity: 0.8
         });
         attachSceneHandlers(dot, p.id);
         svg.appendChild(dot);
     });
+
+    if (points.some(p => p.offPresent)) {
+        const note = document.createElement('div');
+        note.style.cssText = 'padding:4px 0 0 ' + PAD_L + 'px;color:var(--text-dim);font-size:11px;font-family:var(--font-mono)';
+        note.textContent = 'Hollow: a frame or vision scene, off the story\'s present';
+        container.appendChild(note);
+    }
 })();
 
 // ============================================================================

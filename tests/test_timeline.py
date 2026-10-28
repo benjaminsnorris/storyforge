@@ -399,6 +399,23 @@ class TestChecks:
         rows = self._rows(('a', '1', 'scene', 'XXXX-06-07~'), ('b', '3', 'scene', 'XXXX-07-04~'))
         assert [f['check'] for f in check_timeline(rows, {})] == ['date_mismatch']
 
+    def test_a_year_less_date_that_steps_back_says_so(self):
+        """F-059: a Christmas Eve after a Christmas Day, with the year
+        unstated, read as "364 day(s) after"; it is one day before."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('wakes', '1', 'scene', 'XXXX-12-25'),
+                          ('fezziwig', '1', 'scene', 'XXXX-12-24'))
+        found = check_timeline(rows, {})
+        assert [f['check'] for f in found] == ['date_mismatch']
+        message = found[0]['message']
+        assert message.startswith('its date (24 December) is 1 day(s) before wakes\'s (25 December)')
+        assert '364 day(s) after if the year turned' in message
+
+    def test_a_year_less_date_across_new_year_reads_forward(self):
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('a', '1', 'scene', 'XXXX-12-30'), ('b', '3', 'scene', 'XXXX-01-02'))
+        assert check_timeline(rows, {}) == []
+
     def test_a_flashback_may_move_on_through_the_past(self):
         """F-059: Carol's Stave II, each memory cued "earlier" but later than
         the memory before it, gave 3-4 flashback_not_earlier findings."""
