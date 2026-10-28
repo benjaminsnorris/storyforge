@@ -2497,6 +2497,15 @@ Rules:
             else:
                 commit_and_push(project_dir, f'Revision: {pass_name}', ['.'])
 
+        # Does the revised prose still agree with the calendar? Reported in
+        # the log, never fixed: the prose or the calendar may be wrong.
+        changed = _git(project_dir, 'diff', '--name-only', head_before, 'HEAD',
+                       '--', 'scenes/', check=False).stdout.split()
+        if changed:
+            from storyforge.timeline import drift_check
+            drift_check(project_dir, [os.path.splitext(os.path.basename(p))[0]
+                                      for p in changed if p.endswith('.md')])
+
         # Push
         _git(project_dir, 'push', check=False)
 

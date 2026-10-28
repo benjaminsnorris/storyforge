@@ -147,7 +147,7 @@ def main(argv=None):
                          args.dry_run, system=system)
             if not args.dry_run:
                 commit_and_push(project_dir,
-                                'Extract: Phase 1 — skeleton (scenes.csv)',
+                                'Extract: Phase 1 — skeleton and timeline (scenes.csv)',
                                 ['reference/scenes.csv', 'working/'])
                 update_pr_task('Phase 1: Extract skeleton', project_dir)
 
@@ -429,6 +429,8 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     _safe_remove(batch_file)
 
     log(f'  Building batch for {len(sorted_scene_ids)} scenes...')
+    from storyforge.timeline import tail_words
+    previous_text = ''
     for scene_id in sorted_scene_ids:
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
         if not os.path.isfile(scene_path):
@@ -439,7 +441,9 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             continue
 
         prompt = build_skeleton_prompt(scene_id, scene_text, profile,
-                                        registries_text=registries)
+                                        registries_text=registries,
+                                        previous_tail=tail_words(previous_text))
+        previous_text = scene_text
         request = build_batch_request(scene_id, prompt, model, 1024,
                                       system=system)
         with open(batch_file, 'a') as f:
@@ -451,7 +455,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     skel_output = os.path.join(log_dir, 'extract-phase1-output')
     os.makedirs(skel_output, exist_ok=True)
-    download_batch_results(results_url, skel_output, log_dir)
+    succeeded = set(download_batch_results(results_url, skel_output, log_dir) or [])
 
     # Process results
     log('  Processing skeleton results...')
@@ -470,6 +474,21 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         log_dir, parse_skeleton_response, alias_maps, force,
         new_row=new_skeleton_row, sort_key=lambda r: int(r.get('seq') or 0))
     _log_merge('scenes.csv', count, len(sorted_scene_ids))
+
+    # The timeline pass: store each scene's time cues, then place every scene
+    # on one calendar. Nobody authored these days, so they are replaced.
+    from storyforge.timeline import parse_cues, write_cues, run_assignment
+    cues = {}
+    for sid in sorted_scene_ids:
+        txt_file = os.path.join(log_dir, f'{sid}.txt')
+        # Only this batch's answers: never a stale file from an earlier run
+        if sid in succeeded and os.path.isfile(txt_file):
+            with open(txt_file) as f:
+                cues[sid] = parse_cues(f.read())
+    write_cues(project_dir, cues)
+    log('  Placing scenes on the calendar...')
+    result = run_assignment(project_dir, select_model('evaluation'), log_dir, force=True)
+    log(f'  Timeline: {result["assigned"]} value(s) set, {result["unplaced"]} scene(s) unplaced')
 
     _safe_remove(batch_file)
     _safe_rmdir(skel_output)

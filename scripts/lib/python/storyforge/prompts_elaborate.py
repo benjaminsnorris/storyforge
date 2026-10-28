@@ -353,7 +353,7 @@ For each scene:
 ### Output Format
 
 ```scenes-csv
-id|seq|title|act|pov|location|timeline_day|time_of_day|duration|status
+id|seq|title|act|pov|location|timeline_day|time_mode|time_of_day|duration|status
 (all scenes — status is "mapped" for new/updated scenes)
 ```
 
@@ -367,6 +367,8 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 ### Rules
 
 - timeline_day is when a scene's action happens; a flashback keeps the earlier day it depicts (0 or negative before day 1). Flashbacks are a device, not an error: use one where the past changes what the present means
+- time_mode: scene (the action plays out on its day; the default), summary (it covers a stretch of time; timeline_day is where the stretch starts), or frame (narration from after the story, looking back)
+- Say how each scene sits in time in its summary when it isn't simply the same day as the scene before: "the next morning", "three weeks later", "flashback to 1917". The timeline check reads this, and drafting carries it into the prose
 - Every character referenced must exist in the character bible
 - MICE threads: each opens once and closes at most once; they may interleave (nesting is guidance, not a rule)
 - No thread dormant for more than 8-10 scenes without acknowledgment
@@ -748,6 +750,10 @@ _FIELD_INSTRUCTIONS = {
         'Determine the day this scene\'s action happens, in story chronology (integer): day 1 '
         'is the first day of the main story, and a flashback keeps the earlier day it depicts '
         '(0 or negative before day 1). Consider the surrounding scenes for context.'
+    ),
+    'time_mode': (
+        'How the scene sits in time: scene (its action plays out on its day), summary (it '
+        'covers a stretch of time), or frame (narration from after the story, looking back).'
     ),
 }
 

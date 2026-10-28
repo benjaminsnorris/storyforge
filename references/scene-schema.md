@@ -72,6 +72,8 @@ print(dump_schema_markdown())
 | `pov` | registry: characters.csv | architecture | POV character. Normalized against reference/characters.csv. |
 | `location` | registry: locations.csv (array) | map | Places where the scene's action happens on the page, in order: usually one; the first is where the scene opens, the last where it ends. Semicolon-separated. Never a route or transition as one place. Normalized against reference/locations.csv. |
 | `timeline_day` | integer | map | Chronological position (day number within the story). |
+| `time_mode` | enum: frame, scene, summary | map | How the scene sits in time: scene (its action plays out on its day; the default when empty), summary (it covers a stretch of time; timeline_day is where it starts), or frame (narration from after the story, looking back; never the story's present). |
+| `timeline_date` | edtf | map | The calendar date the scene's own text states, in EDTF; empty when it states none. Unknown digits are X and never filled in: `XXXX-07-04` (no year given), `1922-22` (summer 1922), `1917~` (around 1917), `1922-06/1922-09` (a stretch). |
 | `time_of_day` | enum: afternoon, dawn, dusk, evening, morning, night | map | Time of day when the scene takes place. |
 | `duration` | free_text | map | In-story duration (e.g., "2 hours", "30 minutes"). |
 | `type` | enum: action, character, confrontation, dialogue, introspection, plot, revelation, transition, world | map | Narrative purpose of the scene. |
