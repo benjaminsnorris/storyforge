@@ -12,6 +12,11 @@ import csv
 import os
 from typing import Any
 
+# Time modes that are never the story's present: frame narration from after
+# the story, and a vision (a future or a "shadow" the story doesn't treat as
+# fixed, such as A Christmas Carol's Stave IV)
+OFF_PRESENT_MODES = frozenset({'frame', 'vision'})
+
 
 DELIMITER = '|'
 
@@ -26,7 +31,7 @@ _SCENES_COLS = [
     'id', 'seq', 'title', 'summary', 'part', 'act', 'pov', 'location',
     'timeline_day', 'time_of_day', 'duration', 'type', 'status',
     'word_count', 'target_words',
-    # How the scene sits in time (scene | summary | frame) and the calendar
+    # How the scene sits in time (scene | summary | frame | vision) and the calendar
     # date its own text states, in EDTF (docs/plans/timeline-pass.md)
     'time_mode', 'timeline_date',
     # Graphic-novel-mode columns (ignored in novel mode, written in GN mode)
@@ -639,8 +644,8 @@ def _validate_timeline(scenes_map, checks):
     present_day = None
     present_id = None
     for sid in sorted_ids:
-        # Frame narration, from after the story, is never its present
-        if (scenes_map[sid].get('time_mode') or '').strip() == 'frame':
+        # Frame narration and visions are never the story's present
+        if (scenes_map[sid].get('time_mode') or '').strip() in OFF_PRESENT_MODES:
             continue
         day_str = scenes_map[sid].get('timeline_day', '').strip()
         try:

@@ -37,7 +37,7 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to improve:** Run `./storyforge timeline --check` to compare the prose with the calendar: it reports a "next morning" the days put a week on, a scene that steps back from the present without being told as a flashback, and dates or weekdays the days contradict. `write` and `revise` run the same check on the scenes they change. It never rewrites either side; decide which one is wrong. `./storyforge timeline` places every scene on one calendar (proposals go to `working/timeline-proposed.csv` where days are already set; `--force` replaces them).
 
 ### time_mode and timeline_date — How a Scene Sits in Time
-**time_mode:** `scene` (default), `summary` (covers a stretch; the day is where it starts), or `frame` (narration from after the story, which is never treated as the present, so it can't make the whole book look like a flashback).
+**time_mode:** `scene` (default), `summary` (covers a stretch; the day is where it starts), `frame` (narration from after the story, which is never treated as the present, so it can't make the whole book look like a flashback), or `vision` (events a character is shown that the story doesn't treat as fixed: a prophecy, a future that may be, a dream. Never the present, so a future shown on day 400 doesn't turn the next morning into a flashback. A memory of the real past is a flashback, not a vision).
 **timeline_date:** the date the scene's own text states, in EDTF. Only what the text gives: "the Fourth of July" with no year is `XXXX-07-04`, never a guessed year.
 
 ### type — Narrative Purpose

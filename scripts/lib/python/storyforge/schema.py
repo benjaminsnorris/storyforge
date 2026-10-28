@@ -20,7 +20,7 @@ VALID_TYPES = frozenset({
     'plot', 'revelation', 'transition', 'world',
 })
 
-VALID_TIME_MODES = frozenset({'scene', 'summary', 'frame'})
+VALID_TIME_MODES = frozenset({'scene', 'summary', 'frame', 'vision'})
 
 VALID_TIMES = frozenset({
     'morning', 'afternoon', 'evening', 'night', 'dawn', 'dusk',
@@ -140,8 +140,10 @@ COLUMN_SCHEMA = {
         'file': 'scenes.csv', 'stage': 'map',
         'description': 'How the scene sits in time: scene (its action plays out on its day; '
                        'the default when empty), summary (it covers a stretch of time; '
-                       'timeline_day is where the stretch starts), or frame (narration from '
-                       'after the story, looking back; never the story\'s present).',
+                       'timeline_day is where the stretch starts), frame (narration from '
+                       'after the story, looking back; never the story\'s present), or '
+                       'vision (events that have not happened or may not happen, such as a '
+                       'future a character is shown; never the story\'s present).',
     },
     'timeline_date': {
         'type': 'edtf', 'file': 'scenes.csv', 'stage': 'map',
