@@ -612,7 +612,7 @@ class TestRowAlignment:
         assert len(rows) == 2
         for row in rows:
             assert len(row) == len(header)
-            assert row['part'] == '1'
+            assert row['part'] == ''   # chapter files carry no part information
             assert row['location'] == ''
             assert row['status'] == ''
         assert [r['word_count'] for r in rows] == ['3', '2']
@@ -670,3 +670,54 @@ class TestChapterOrder:
         _, rows = _new_rows(project_dir, 'scenes.csv')
         rows.sort(key=lambda r: int(r['seq']))
         assert [r['title'][:4] for r in rows[::2]] == ['Ch1 ', 'Ch2 ', 'Ch10']
+
+
+class TestParts:
+    """Parts come from the manuscript's own part headings. The Great Gatsby
+    has none, but every five chapters used to be made into a new part."""
+
+    def _split(self, project_dir, monkeypatch, text):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        with open(os.path.join(project_dir, 'manuscript.md'), 'w') as f:
+            f.write(text)
+        main(['--split-manuscript', '--yes'])
+        _, rows = _new_rows(project_dir, 'scenes.csv')
+        return sorted(rows, key=lambda r: int(r['seq']))
+
+    @staticmethod
+    def _chapter(n):
+        return f'Chapter {n}\n\nOpening of {n}.\n\n***\n\nClose of {n}.\n\n'
+
+    def test_book_without_parts_has_empty_part(self, mock_api, mock_git,
+                                               mock_costs, project_dir, monkeypatch):
+        rows = self._split(project_dir, monkeypatch,
+                           ''.join(self._chapter(n) for n in range(1, 8)))
+        assert len(rows) == 14
+        assert {r['part'] for r in rows} == {''}
+
+    def test_part_headings_assign_parts(self, mock_api, mock_git, mock_costs,
+                                        project_dir, monkeypatch):
+        text = ('PART ONE\n\n' + self._chapter(1) + self._chapter(2)
+                + '# Part Two: The Return\n\n' + self._chapter(3))
+        rows = self._split(project_dir, monkeypatch, text)
+        assert [(r['title'], r['part']) for r in rows[::2]] == [
+            ('Chapter 1', '1'), ('Chapter 2', '1'), ('Chapter 3', '2')]
+
+    def test_part_heading_is_not_a_chapter_or_scene_text(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        text = self._chapter(1) + 'Part II\n\n' + self._chapter(2)
+        rows = self._split(project_dir, monkeypatch, text)
+        assert len(rows) == 4
+        assert [r['part'] for r in rows] == ['', '', '1', '1']
+        scenes_dir = os.path.join(project_dir, 'scenes')
+        for r in rows:
+            with open(os.path.join(scenes_dir, r['id'] + '.md')) as f:
+                assert 'Part II' not in f.read()
+
+    def test_prose_starting_with_part_is_not_a_heading(self):
+        from storyforge.cmd_scenes_setup import _is_part_heading
+        assert not _is_part_heading('Part of me wanted to stay.')
+        assert _is_part_heading('BOOK FIRST')
+        assert _is_part_heading('Part 3')

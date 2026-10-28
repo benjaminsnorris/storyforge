@@ -43,6 +43,21 @@ from storyforge.scenes import (
 from storyforge.csv_cli import get_field, get_column, append_row
 
 
+# A part (or book) heading: "Part One", "PART II", "# Part 3: The Lighthouse",
+# "BOOK FIRST". Ordinal required, so prose such as "Part of me" never matches.
+_PART_HEADING_RE = re.compile(
+    r'^(?:#{1,2}\s+)?(?:part|book)\s+(?:[0-9]+|[ivxlc]+|one|two|three|four|five|'
+    r'six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|'
+    r'eighth|ninth|tenth)\b',
+    re.IGNORECASE,
+)
+
+
+def _is_part_heading(line):
+    stripped = line.strip()
+    return len(stripped) <= 80 and bool(_PART_HEADING_RE.match(stripped))
+
+
 def _natural_key(path):
     """Sort key that orders chapter-2 before chapter-10."""
     name = os.path.basename(path).lower()
@@ -138,6 +153,11 @@ def main(argv=None):
 
     # Track used slugs
     used_slugs = set()
+
+    # Part number per temp chapter file, filled by split-manuscript from the
+    # manuscript's own part headings. A book without parts leaves `part`
+    # empty rather than having parts invented for it.
+    chapter_parts = {}
 
     # ==================================================================
     # Shared utilities
@@ -619,7 +639,7 @@ def main(argv=None):
 
         for chapter_file in chapter_files:
             chapter_num += 1
-            part_num = (chapter_num - 1) // 5 + 1
+            part_num = chapter_parts.get(os.path.basename(chapter_file), '')
             seq_start = max_seq + total_new_scenes + 1
 
             ch_name = os.path.splitext(os.path.basename(chapter_file))[0]
@@ -707,15 +727,21 @@ def main(argv=None):
         total_lines = len(ms_lines)
         log(f'Manuscript: {total_words} words, {total_lines} lines')
 
-        # Step 1: Detect chapter boundaries
+        # Step 1: Detect part and chapter boundaries
         chapter_starts = []
         chapter_names = []
+        part_starts = []
 
         for line_num, line in enumerate(ms_lines, 1):
             stripped = line.strip()
 
-            # Markdown headings with "Chapter" or "Part"
-            if re.match(r'^#{1,2}\s+(Chapter|Part)', stripped, re.IGNORECASE):
+            # Part headings divide chapters into parts; they are not chapters
+            if _is_part_heading(stripped):
+                part_starts.append(line_num)
+                continue
+
+            # Markdown chapter headings
+            if re.match(r'^#{1,2}\s+Chapter', stripped, re.IGNORECASE):
                 chapter_starts.append(line_num)
                 chapter_names.append(re.sub(r'^#+\s*', '', stripped))
                 continue
@@ -749,6 +775,9 @@ def main(argv=None):
             chapter_count = 1
         else:
             log(f'Found {chapter_count} chapter boundaries')
+        if part_starts:
+            log(f'Found {len(part_starts)} part headings')
+        boundaries = sorted(chapter_starts + part_starts)
 
         # Step 2: Create temporary chapter files
         tmp_chapters_dir = os.path.join(work_dir, 'chapters')
@@ -756,10 +785,8 @@ def main(argv=None):
 
         for c in range(chapter_count):
             start_line = chapter_starts[c]
-            if c + 1 < chapter_count:
-                end_line = chapter_starts[c + 1] - 1
-            else:
-                end_line = total_lines
+            later = [b for b in boundaries if b > start_line]
+            end_line = later[0] - 1 if later else total_lines
 
             ch_name = chapter_names[c]
             ch_slug = generate_slug(ch_name)
@@ -770,6 +797,8 @@ def main(argv=None):
             # files by name, and slugs like chapter-ix / chapter-v do not
             # sort into reading order.
             ch_file = os.path.join(tmp_chapters_dir, f'{c + 1:04d}-{ch_slug}.md')
+            parts_before = sum(1 for p in part_starts if p < start_line)
+            chapter_parts[os.path.basename(ch_file)] = parts_before or ''
             ch_text = '\n'.join(ms_lines[start_line - 1:end_line])
             with open(ch_file, 'w') as f:
                 f.write(ch_text + '\n')
