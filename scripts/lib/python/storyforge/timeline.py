@@ -244,12 +244,13 @@ def describe_edtf(value: str) -> str:
     year, month, day, qual = m.group('year'), m.group('month'), m.group('day'), m.group('qual')
     words = []
     if day and 'X' not in day:
-        words.append(str(int(day)))
+        words.append(str(int(day)) if month and 'X' not in month
+                     else f'day {int(day)} of an unstated month')
     if month and 'X' not in month:
         mi = int(month)
         words.append(_SEASONS.get(mi) or _MONTHS[mi - 1])
     year_text = year if 'X' not in year else ('' if year == 'XXXX' else year.replace('X', '?'))
-    text = ' '.join(words + ([year_text] if year_text else []))
+    text = ' '.join(words + ([year_text] if year_text else [])).strip()
     if year == 'XXXX':
         text += ' (year not stated)'
     if qual:
@@ -392,9 +393,11 @@ def parse_assignments(response: str, ids: list[str]) -> dict[str, tuple[int, str
     # Only the answer after CALENDAR: counts; reasoning above it may try out
     # days it then revises
     text = response or ''
-    marker = re.search(r'^\s*CALENDAR:\s*$', text, re.MULTILINE)
-    if marker:
-        text = text[marker.end():]
+    # The last marker, wherever the answer starts: "CALENDAR: a | 5 | ..."
+    # or "**CALENDAR:**" on its own line
+    markers = list(re.finditer(r'^\W*CALENDAR:\W*?(?=\w|$)', text, re.MULTILINE))
+    if markers:
+        text = text[markers[-1].end():]
     for line in text.split('\n'):
         parts = [p.strip() for p in line.strip().lstrip('-* ').split('|')]
         if len(parts) < 2 or parts[0] not in wanted:
@@ -441,6 +444,8 @@ def assign_calendar(items: list[dict], invoke, log_dir: str) -> dict[str, tuple[
             text = invoke(build_assignment_prompt(batch, present, last_day, anchors, terse=True),
                           os.path.join(log_dir, f'timeline-assign-{n}-retry.json'),
                           f'{label}, answer only')
+            if text is None:
+                log(f'  WARNING: {label} gave no calendar; its scenes keep their provisional days')
         answers = parse_assignments(text, [it['id'] for it in batch]) if text is not None else {}
         for it in batch:
             sid = it['id']
@@ -463,8 +468,8 @@ def assign_calendar(items: list[dict], invoke, log_dir: str) -> dict[str, tuple[
                     present = day
             for key in ('anchor', 'refers', 'date'):
                 if cue.get(key):
-                    text = describe_edtf(cue[key]) if key == 'date' else cue[key]
-                    anchors.append(f'{sid}: day {day} — {text}')
+                    shown = describe_edtf(cue[key]) if key == 'date' else cue[key]
+                    anchors.append(f'{sid}: day {day} — {shown}')
     return placed
 
 
@@ -609,11 +614,10 @@ def _invoke_assignment(model: str):
             response = invoke_to_file(prompt, model, log_file, max_tokens=_BATCH_MAX_TOKENS,
                                       label=label, temperature=0)
         except Exception as e:  # noqa: BLE001 — one failed batch, not the pass
-            log(f'  WARNING: {label} failed ({e}); its scenes keep their provisional days')
+            log(f'  WARNING: {label} failed ({e})')
             return None
         if is_truncated(response):
-            log(f'  WARNING: {label} hit the {_BATCH_MAX_TOKENS}-token limit; '
-                f'its scenes keep their provisional days')
+            log(f'  WARNING: {label} hit the {_BATCH_MAX_TOKENS}-token limit')
             return None
         return extract_text_from_file(log_file)
     return invoke
