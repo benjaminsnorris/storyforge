@@ -148,8 +148,8 @@ class TestValidateStructure:
         from storyforge.elaborate import validate_structure
         report = validate_structure(os.path.join(fixture_dir, 'reference'))
         thread_checks = [c for c in report['checks'] if c['category'] == 'threads']
-        nesting = [c for c in thread_checks if c['check'] == 'mice-nesting']
-        assert any(c['passed'] for c in nesting)
+        ops = [c for c in thread_checks if c['check'] == 'mice-ops']
+        assert any(c['passed'] for c in ops)
 
     def test_cross_type_parallel_pass(self, tmp_path):
         from storyforge.elaborate import validate_structure
@@ -176,11 +176,12 @@ class TestValidateStructure:
 
         report = validate_structure(ref)
         thread_checks = [c for c in report['checks'] if c['category'] == 'threads']
-        nesting = [c for c in thread_checks if c['check'] == 'mice-nesting']
-        assert any(c['passed'] for c in nesting)
-        assert not any('nesting violation' in c.get('message', '') for c in thread_checks)
+        assert any(c['check'] == 'mice-ops' and c['passed'] for c in thread_checks)
+        assert not any(c['check'] == 'mice-interleaving' for c in thread_checks)
 
-    def test_same_type_nesting_violation(self, tmp_path):
+    def test_same_type_interleaving_is_advisory(self, tmp_path):
+        # Nesting is guidance, not a rule (author's decision): literary
+        # novels interleave threads, so this is described, never blocking.
         from storyforge.elaborate import validate_structure
         ref = str(tmp_path / 'reference')
         os.makedirs(ref)
@@ -203,9 +204,12 @@ class TestValidateStructure:
 
         report = validate_structure(ref)
         thread_checks = [c for c in report['checks'] if c['category'] == 'threads']
-        messages = ' '.join(c.get('message', '') for c in thread_checks)
-        assert 'nesting violation' in messages
-        assert 'inquiry:inner-question' in messages
+        interleaving = [c for c in thread_checks if c['check'] == 'mice-interleaving']
+        assert len(interleaving) == 1
+        assert interleaving[0]['severity'] == 'advisory'
+        assert 'inquiry:inner-question' in interleaving[0]['message']
+        assert not [c for c in report['failures'] if c['category'] == 'threads'
+                    and c.get('severity', 'blocking') != 'advisory']
 
     def test_timeline_order(self, fixture_dir):
         from storyforge.elaborate import validate_structure
@@ -355,3 +359,49 @@ class TestScoreStructure:
         scores = score_structure(os.path.join(fixture_dir, 'reference'))
         act2 = [s for s in scores if s['scene_id'] == 'act2-sc01']
         assert act2[0]['score'] == 0
+
+
+class TestMiceOps:
+    """F-020: per-scene extraction marked scenes that touch a thread with
+    +/-, so The Great Gatsby had one thread opened in 15 scenes and another
+    closed in 9, producing 53 blocking 'nesting violations'."""
+
+    def _report(self, tmp_path, mice):
+        from storyforge.elaborate import validate_structure
+        ref = str(tmp_path / 'reference')
+        os.makedirs(ref)
+        with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            for i in range(1, len(mice) + 1):
+                f.write(f's0{i}|{i}|Scene {i}|1|Alice|Room|{i}|morning|1 hour|action|briefed|1000|2000\n')
+        with open(os.path.join(ref, 'scene-intent.csv'), 'w') as f:
+            f.write('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n')
+            for i, m in enumerate(mice, 1):
+                f.write(f's0{i}|test|action|flat|truth|+/-|revelation|Alice|Alice|{m}\n')
+        with open(os.path.join(ref, 'scene-briefs.csv'), 'w') as f:
+            f.write('id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow\n')
+            for i in range(1, len(mice) + 1):
+                f.write(f's0{i}|g|c|o|cr|d|k|k|a|d|e|m||false\n')
+        return validate_structure(ref)
+
+    def test_repeated_ops_are_advisory_data_findings(self, tmp_path):
+        report = self._report(tmp_path, ['+inquiry:q', '+inquiry:q', '-inquiry:q', '-inquiry:q'])
+        msgs = [c for c in report['checks'] if c['check'] == 'mice-ops' and not c['passed']]
+        assert any('opened in 2 scenes' in c['message'] for c in msgs)
+        assert any('closed in 2 scenes' in c['message'] for c in msgs)
+        assert all(c['severity'] == 'advisory' for c in msgs)
+
+    def test_mentions_are_not_operations(self, tmp_path):
+        report = self._report(tmp_path, ['+inquiry:q', 'inquiry:q', 'inquiry:q', '-inquiry:q'])
+        assert any(c['check'] == 'mice-ops' and c['passed'] for c in report['checks'])
+
+    def test_mice_never_blocks(self, tmp_path):
+        report = self._report(tmp_path, ['+inquiry:a', '+inquiry:b', '-inquiry:a', '-inquiry:a', '-inquiry:z'])
+        assert not [c for c in report['failures'] if c['category'] == 'threads'
+                    and c.get('severity', 'blocking') != 'advisory']
+
+    def test_prompts_use_open_once_notation(self):
+        from storyforge.extract import build_intent_prompt
+        prompt = build_intent_prompt('s1', 'Prose.', {}, {})
+        assert 'only if this scene is where the thread begins' in prompt
+        assert 'bare thread-name' in prompt

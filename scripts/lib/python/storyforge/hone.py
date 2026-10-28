@@ -285,8 +285,10 @@ Output ONLY the CSV (with header row). No commentary."""
     elif domain == 'mice-threads':
         existing = _read_existing_registry(ref_dir, 'mice-threads.csv')
         timeline = _collect_mice_timeline(ref_dir)
+        functions = {sid: (row.get('function') or '').strip()[:100] for sid, row in
+                     _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv')).items()}
         timeline_text = '\n'.join(
-            f'  Scene {sid} (seq {seq}): {entry}'
+            f'  Scene {sid} (seq {seq}): {entry}    [function: {functions.get(sid, "")}]'
             for sid, seq, entry in timeline
         )
 
@@ -318,7 +320,9 @@ After the registry CSV, output a UPDATES section listing every scene whose mice_
 
 UPDATE: scene_id | new_mice_threads_value
 
-Only include scenes that need changes (orphan matches, name normalization, type corrections).
+Each thread opens exactly once, in the scene where it begins (+name), and closes at most once, in the scene where it is actually resolved (-name); judge that from the scene functions. Every other appearance is a bare mention (name). Threads may interleave: never reorder closes to make them nest.
+
+Only include scenes that need changes (repeated opens or closes turned into mentions, orphan matches, name normalization, type corrections).
 
 Output the registry CSV first, then a blank line, then "UPDATES" on its own line, then the update lines. No other commentary."""
 
@@ -793,6 +797,10 @@ def reconcile_domain(
         build_registry_prompt(domain, ref_dir, context=context),
         f'reconcile-{domain}.json')
     fields_normalized = apply_registry_normalization(domain, ref_dir)
+    if domain == 'mice-threads':
+        # Repeated opens of an already-open thread are mentions
+        from storyforge.extract import cleanup_mice_threads
+        fields_normalized += len(cleanup_mice_threads(ref_dir))
 
     # The prompt requires every reference to resolve to exactly one entry,
     # but a model can drop ones it finds ambiguous (a bare "West Egg" beside

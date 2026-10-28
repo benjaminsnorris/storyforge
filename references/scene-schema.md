@@ -92,7 +92,7 @@ print(dump_schema_markdown())
 | `turning_point` | enum: action, revelation | architecture | What turns the scene — action (character does something) or revelation (new information). |
 | `characters` | registry: characters.csv (array) | map | All characters present or referenced. Normalized against reference/characters.csv. |
 | `on_stage` | registry: characters.csv (array) | map | Characters physically present (subset of characters). |
-| `mice_threads` | mice: mice-threads.csv | map | MICE thread operations: +type:name (open) or -type:name (close). FILO within each type; cross-type threads run in parallel (Kowal). |
+| `mice_threads` | mice: mice-threads.csv | map | MICE threads (Kowal): +name where the thread begins (once), -name where it resolves (at most once), bare name where a scene advances or touches an open thread. Threads may interleave; nesting is guidance, not a rule. |
 
 ### scene-briefs.csv — drafting contracts
 
@@ -135,7 +135,7 @@ Run `./storyforge validate` to check both structural integrity and schema compli
 - **Completeness:** Required columns for the scene's status are populated
 - **Timeline:** No backwards jumps without explicit markers
 - **Knowledge flow:** knowledge_in references match prior scenes' knowledge_out
-- **Thread management:** MICE threads nest in valid FILO order within each type (M/I/C/E independently); no thread dormant >8 scenes
+- **Thread management:** each MICE thread opens once and closes at most once; interleaving is reported, not an error; no thread dormant >8 scenes
 - **Pacing:** No flat polarity stretches (3+ scenes); action/sequel rhythm varied; turning point types varied
 
 **Schema checks:**

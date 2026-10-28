@@ -181,9 +181,13 @@ Every story thread is one of four types:
 - **Character** — opens with dissatisfaction, closes with acceptance or change. A character who is unhappy with their role in life. The thread resolves when they either change or accept their situation.
 - **Event** — opens with a disruption of the status quo, closes when a new normal is established. A murder disrupts a town. The thread resolves when order is restored (or a new order replaces the old).
 
-### The Nesting Rule (Per-Type FILO)
+### Notation
 
-MICE threads of the **same type** must close in reverse order of opening — First In, Last Out, like nested parentheses:
+Each thread opens once (`+thread`, where it begins), closes at most once (`-thread`, where it resolves), and is otherwise mentioned by bare name (`thread`) in scenes that advance or touch it. Mentions keep a thread alive in the reader's mind and are what the dormancy check counts.
+
+### Nesting (Guidance, Not a Rule)
+
+Kowal's MICE Quotient suggests that threads of the **same type** close in reverse order of opening — First In, Last Out, like nested parentheses:
 
 ```
 +inquiry:who-sent-the-letter
@@ -203,7 +207,9 @@ Threads of **different types** run in parallel — they don't constrain each oth
 -character:protagonist-transformation     (closes scene 28)
 ```
 
-This is valid even though milieu closes before character, because they are independent types. A character arc spanning the whole novel doesn't prevent a milieu thread from opening and closing within it. Same-type nesting still matters: if you open two inquiries, readers expect the inner one resolved first.
+Milieu can close before character because they are independent types; a character arc spanning the whole novel doesn't prevent a milieu thread from opening and closing within it.
+
+Storyforge reports same-type interleaving but never treats it as an error. Nesting is a useful default for genre plotting, where readers expect the inner question resolved first, but literary novels interleave threads deliberately. Whether MICE threads earn their place at all is an open question being tested against classic novels.
 
 ### Why It Matters
 
@@ -215,14 +221,14 @@ Thread count also affects complexity. Six to eleven active threads is the sweet 
 
 - **Orphaned threads:** A thread opens and never closes. "Who sent the mysterious letter?" is asked in Chapter 3 and never answered.
 - **Premature closes:** A thread closes before it's been developed enough to earn the resolution. The mystery is solved in two scenes — the question didn't have time to build tension.
-- **FILO violations:** Threads close in the wrong order. The outer journey resolves before the inner question is answered, creating a structural dissonance.
+- **Unintended interleaving:** In plot-driven fiction, an outer journey that resolves before its inner question can feel dissonant. Check whether the interleaving is doing work before changing it.
 - **Thread dormancy:** A thread goes more than 8-10 scenes without being referenced. The reader forgets it exists. When it reappears, it feels like a discontinuity.
 
 ### How to Fix It
 
 If a thread is dormant, add a brief reference — a character's passing thought, a detail in the environment, a line of dialogue that touches the thread without resolving it. This keeps it alive in the reader's awareness.
 
-If FILO is violated, consider whether you can reorder the closings. Sometimes a scene that closes thread A can be moved after the scene that closes thread B. If reordering isn't possible, the nesting structure may need redesign — which is exactly the kind of problem that's cheap to fix in the CSV and expensive to fix in prose.
+If interleaving reads as dissonance rather than design, consider whether you can reorder the closings. Sometimes a scene that closes thread A can be moved after the scene that closes thread B. If reordering isn't possible, the nesting structure may need redesign — which is exactly the kind of problem that's cheap to fix in the CSV and expensive to fix in prose.
 
 ---
 

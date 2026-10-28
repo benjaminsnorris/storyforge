@@ -305,7 +305,7 @@ VALUE_SHIFT: [polarity change using +/- notation: +/- means positive to negative
 TURNING_POINT: [action or revelation — action means a character does something that changes the situation; revelation means new information changes the situation]
 CHARACTERS: [semicolon-separated list of ALL characters present or referenced by name]
 ON_STAGE: [semicolon-separated list of characters physically present in the scene — subset of CHARACTERS]
-MICE_THREADS: [semicolon-separated MICE thread operations — +thread-name to open, -thread-name to close. Use + for opening, - for closing. Use the thread's canonical name from the registry, not the type prefix.]
+MICE_THREADS: [semicolon-separated MICE threads this scene affects: +thread-name only if this scene is where the thread begins, -thread-name only if this scene resolves it, and the bare thread-name if the scene advances or touches a thread that is already open. Most scenes open or close nothing. Use the thread's canonical name from the registry, not the type prefix.]
 CONFIDENCE: [high / medium / low — your overall confidence in these extractions]"""
 
 
@@ -962,11 +962,14 @@ def cleanup_physical_states(ref_dir: str) -> list[dict]:
 
 
 def cleanup_mice_threads(ref_dir: str) -> list[dict]:
-    """Fix unambiguous MICE thread nesting violations.
+    """Turn repeated opens of an already-open MICE thread into mentions.
 
-    - Remove duplicate opens (thread opened twice without close)
-    - Remove closes for threads that were never opened
-    - Reorder closes when the fix is unambiguous (only one thread to close)
+    Per-scene extraction cannot see whether a thread is already open, so it
+    marks scenes that merely touch a thread with "+". Only that case is
+    unambiguous: the thread is open, so a later "+thread" is a mention
+    ("thread"), which keeps the dormancy signal. Which of several closes is
+    the real resolution is a judgment the reconcile pass makes with scene
+    functions; leftovers are reported by validation, not guessed here.
 
     Returns a list of fixes applied.
     """
@@ -978,7 +981,7 @@ def cleanup_mice_threads(ref_dir: str) -> list[dict]:
                         key=lambda s: int(scenes_map[s].get('seq', 0)))
 
     fixes = []
-    open_threads = set()  # currently open thread names
+    open_threads = set()
 
     for sid in sorted_ids:
         intent = intent_map.get(sid, {})
@@ -986,44 +989,27 @@ def cleanup_mice_threads(ref_dir: str) -> list[dict]:
         if not mice:
             continue
 
-        entries = [e.strip() for e in mice.split(';') if e.strip()]
         new_entries = []
-        changed = False
-
-        for entry in entries:
+        for entry in (e.strip() for e in mice.split(';') if e.strip()):
+            thread_name = entry.lstrip('+-')
+            if entry.startswith('+') and thread_name in open_threads:
+                new_entries.append(thread_name)
+                fixes.append({
+                    'scene_id': sid,
+                    'field': 'mice_threads',
+                    'old_value': entry,
+                    'new_value': f'{thread_name} (already open: mention)',
+                })
+                continue
             if entry.startswith('+'):
-                thread_name = entry[1:]
-                if thread_name in open_threads:
-                    # Duplicate open — skip it
-                    changed = True
-                    fixes.append({
-                        'scene_id': sid,
-                        'field': 'mice_threads',
-                        'old_value': entry,
-                        'new_value': '(removed duplicate open)',
-                    })
-                else:
-                    open_threads.add(thread_name)
-                    new_entries.append(entry)
+                open_threads.add(thread_name)
             elif entry.startswith('-'):
-                thread_name = entry[1:]
-                if thread_name not in open_threads:
-                    # Close for unopened thread — skip it
-                    changed = True
-                    fixes.append({
-                        'scene_id': sid,
-                        'field': 'mice_threads',
-                        'old_value': entry,
-                        'new_value': '(removed close for unopened thread)',
-                    })
-                else:
-                    open_threads.discard(thread_name)
-                    new_entries.append(entry)
-            else:
-                new_entries.append(entry)
+                open_threads.discard(thread_name)
+            new_entries.append(entry)
 
-        if changed:
-            intent_map[sid]['mice_threads'] = ';'.join(new_entries)
+        new_value = ';'.join(dict.fromkeys(new_entries))
+        if new_value != mice:
+            intent_map[sid]['mice_threads'] = new_value
 
     if fixes:
         ordered = sorted(intent_map.values(), key=lambda r: r.get('id', ''))
@@ -1122,7 +1108,7 @@ Do not invent facts. Do not add knowledge that isn't in the chain. Only normaliz
 
 
 def build_mice_cleanup_prompt(ref_dir: str) -> str:
-    """Build a prompt for Claude to reconcile MICE thread nesting."""
+    """Build a prompt for Claude to reconcile MICE thread opens and closes."""
     from .elaborate import _read_csv_as_map, validate_structure
 
     scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
@@ -1148,48 +1134,45 @@ def build_mice_cleanup_prompt(ref_dir: str) -> str:
     for f in thread_failures:
         failure_lines.append(f"- {f['message']}")
 
-    return f"""You are fixing MICE thread nesting in a novel's scene intent data.
+    return f"""You are reconciling MICE thread operations in a novel's scene intent data.
 
-## MICE Thread Rules
+## MICE Thread Notation
 
-MICE threads use per-type FILO (first in, last out) nesting:
-- +name opens a thread
-- -type:name closes a thread
+- +name: this scene is where the thread begins
+- -name: this scene resolves the thread
+- name (bare): this scene advances or touches a thread that is already open
 - Types: milieu (place), inquiry (question), character (transformation), event (disruption)
-- Threads of the SAME type must close in reverse order of opening (FILO within type)
-- Threads of DIFFERENT types run in parallel — closing an inquiry does NOT require closing a milieu opened after it
 
-Example of valid parallel threading:
-  +arc (scene 1) → +mystery (scene 3) → -mystery (scene 8) → -arc (scene 20)
-  This is valid: character and inquiry are different types, so they nest independently.
+Threads may interleave freely. Nesting order is not a rule: never reorder or
+remove a close to make threads nest.
 
 ## Current Thread Timeline
 
 {chr(10).join(thread_lines) if thread_lines else "(no MICE threads found)"}
 
-## Validation Failures
+## Validation Notes
 
-{chr(10).join(failure_lines) if failure_lines else "No failures — nesting is valid."}
+{chr(10).join(failure_lines) if failure_lines else "None."}
 
 ## Instructions
 
-Fix the MICE thread nesting. For each scene that needs changes, output:
+Each thread is opened exactly once, in the scene where it begins, and closed
+at most once, in the scene where it is actually resolved. Use the scene
+functions to judge which scene that is. Every other appearance of the thread
+is a bare mention. For each scene that needs changes, output:
 
 UPDATE: scene_id | new_mice_threads_value
 
-The new value should be a semicolon-separated list of thread operations (e.g., "+question;-place").
+The new value is a semicolon-separated list (e.g., "+who-sent-the-letter;the-feud").
 
 Rules:
-- Every opened thread must eventually close
-- Same-type closes must happen in reverse order of same-type opens (FILO within each type)
-- Cross-type threads are independent — no nesting constraint between different MICE types
-- If a thread is legitimately unclosed at the end of the manuscript (e.g., the story is incomplete), output: UNCLOSED: thread_name | reason
-- Remove duplicate opens
-- Remove closes for threads that were never opened
-- If reordering same-type closes fixes the nesting, do that rather than removing them
-- Preserve the narrative intent — don't remove threads that are genuinely part of the story
+- A repeated "+name" for a thread already open becomes "name"
+- Of several "-name" closes, keep the one where the thread truly resolves; the others become "name"
+- A close for a thread never opened: if it matches an opened thread under another name, use that name; otherwise make it a bare mention
+- If a thread is legitimately unclosed at the end of the manuscript, output: UNCLOSED: thread_name | reason
+- Preserve the narrative intent: never drop a thread that is genuinely part of the story
 
-Output ONLY UPDATE, UNCLOSED, or REMOVE lines. No commentary."""
+Output ONLY UPDATE or UNCLOSED lines. No commentary."""
 
 
 def parse_knowledge_cleanup_response(response: str, ref_dir: str) -> list[dict]:

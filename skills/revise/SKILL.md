@@ -145,7 +145,7 @@ The plan is a pipe-delimited CSV at `working/plans/revision-plan.csv`:
 ```
 pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location
 1|knowledge-chain-fix|Fix knowledge violations flagged in evaluation|scene-level|scene-a;scene-b|Specific guidance here|voice-quality|F001;F003|pending|sonnet|brief
-2|mice-thread-fix|Fix MICE thread nesting issues|full||Ensure FILO nesting order|all-strengths|F007|pending|sonnet|intent
+2|mice-thread-fix|Fix MICE thread operations|full||Each thread opens once and closes once, where it resolves|all-strengths|F007|pending|sonnet|intent
 3|prose-tightening|Voice consistency and AI pattern cleanup|full||Follow voice guide strictly|scene-30b|F012;F015|pending|opus|craft
 ```
 

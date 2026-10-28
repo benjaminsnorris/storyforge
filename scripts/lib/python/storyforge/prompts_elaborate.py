@@ -348,7 +348,7 @@ For each scene:
 2. Fill in gaps: transitions, subplot scenes, breathing room
 3. Assign locations (the places the scene's action happens in, in order, semicolon-separated: usually one, several only when the action truly moves; never a route as a place), timeline days, time of day, duration
 4. List all characters present (on_stage) and referenced (characters)
-5. Track MICE thread opens (+) and closes (-) — FILO within each type, parallel across types
+5. Track MICE threads: +thread where it begins, -thread where it resolves, the bare name where a scene advances an open thread. Threads may interleave
 
 ### Output Format
 
@@ -368,7 +368,7 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 
 - Timeline must be consistent: no backward jumps without explicit justification
 - Every character referenced must exist in the character bible
-- MICE threads: same-type threads nest in FILO order; different types (milieu, inquiry, character, event) run in parallel
+- MICE threads: each opens once and closes at most once; they may interleave (nesting is guidance, not a rule)
 - No thread dormant for more than 8-10 scenes without acknowledgment
 - Every scene must have at least one on-stage character
 - Location names must be consistent (same place = same name)

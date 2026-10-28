@@ -554,8 +554,8 @@ class TestValidateThreadsEdgeCases:
 
         report = validate_structure(ref)
         t_checks = [c for c in report['checks'] if c['category'] == 'threads']
-        nesting = [c for c in t_checks if c['check'] == 'mice-nesting']
-        assert any(c['passed'] for c in nesting)
+        assert any(c['check'] == 'mice-ops' and c['passed'] for c in t_checks)
+        assert not any(c['check'] == 'mice-interleaving' for c in t_checks)
 
 
 # ============================================================================

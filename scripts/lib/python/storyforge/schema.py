@@ -221,7 +221,7 @@ COLUMN_SCHEMA = {
     'mice_threads': {
         'type': 'mice', 'registry': 'mice-threads.csv',
         'file': 'scene-intent.csv', 'stage': 'map',
-        'description': 'MICE thread operations: +name (open) or -name (close). Type resolved from registry. FILO nesting order (Kowal).',
+        'description': 'MICE threads (Kowal): +name where the thread begins (once), -name where it resolves (at most once), bare name where a scene advances or touches an open thread. Type resolved from registry. Threads may interleave; nesting is guidance, not a rule.',
     },
     'theme_threads': {
         'type': 'registry', 'registry': 'themes.csv', 'array': True,
