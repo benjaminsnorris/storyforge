@@ -949,6 +949,17 @@ class TestMiceOperations:
         })
         assert sorted(find_mice_anomalies(ref_dir)) == ['archive-erasure', 'map-anomaly']
 
+    def test_never_opened_is_an_anomaly_but_foreshadowing_is_not(self, project_dir):
+        """A thread only ever mentioned has no open; a mention before the open
+        is foreshadowing (Gatsby's frame), not an error."""
+        from storyforge.hone import find_mice_anomalies
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._set_threads(ref_dir, {
+            'act1-sc01': 'map-anomaly', 'act1-sc02': '+map-anomaly',
+            'new-x1': 'archive-erasure', 'act2-sc01': 'archive-erasure',
+        })
+        assert find_mice_anomalies(ref_dir) == ['archive-erasure']
+
     def test_thread_rewritten_from_decision(self, project_dir, monkeypatch, tmp_path):
         from storyforge.hone import reconcile_domain, find_mice_anomalies
         ref_dir = os.path.join(project_dir, 'reference')
