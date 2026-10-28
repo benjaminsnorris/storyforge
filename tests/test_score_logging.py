@@ -255,3 +255,19 @@ def test_no_apply_flag_parses():
     from storyforge.cmd_score import parse_args
     assert parse_args(['--no-apply']).no_apply is True
     assert parse_args([]).no_apply is False
+
+
+def test_every_improvement_cycle_call_passes_no_apply():
+    """Both paths into the improvement cycle (full scoring and
+    --diagnosis-only) must honour --no-apply; a call that drops it would
+    apply proposals on an eval run."""
+    import ast
+    import inspect
+    import storyforge.cmd_score as cmd_score
+    tree = ast.parse(inspect.getsource(cmd_score))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and getattr(n.func, 'id', '') == '_run_improvement_cycle']
+    assert len(calls) == 2
+    for call in calls:
+        kw = {k.arg: ast.unparse(k.value) for k in call.keywords}
+        assert kw.get('no_apply') == 'args.no_apply'

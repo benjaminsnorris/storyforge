@@ -1004,6 +1004,14 @@ function showAllCharacterRationales(characterName) {
     openRationaleDrawer('character-drawer', characterName + ' — All Rationales', html);
 }
 
+// A framework score as drawer text: "4/5", or "n/a" when the book or act
+// doesn't use the framework (evals F-036). One place, so no drawer prints
+// "NaN/5" or "0/5" for n/a.
+function frameworkScoreText(value) {
+    var n = parseInt(value);
+    return isNaN(n) ? 'n/a' : n + '/5';
+}
+
 function showAllActRationales(actId) {
     var rat = actRationaleById[actId];
     var scores = ACT_SCORES.filter(function(a) { return a.id === actId; })[0];
@@ -1026,12 +1034,13 @@ function showAllActRationales(actId) {
     var html = '';
     principles.forEach(function(p) {
         if (!rat[p]) return;
-        var scoreVal = scores ? parseInt(scores[p]) : 0;
-        var color = scoreColorClass(scoreVal);
+        var raw = scores ? scores[p] : '';
+        var scoreVal = parseInt(raw);
+        var color = isNaN(scoreVal) ? 'var(--text-dim)' : scoreColorClass(scoreVal);
         var label = FRAMEWORK_LABELS[p] || formatPrincipleLabel(p);
         html += '<p><strong style="font-family:var(--font-mono);font-size:10px">' +
             label +
-            ' <span style="color:' + color + '">' + scoreVal + '/5</span></strong></p>' +
+            ' <span style="color:' + color + '">' + frameworkScoreText(raw) + '</span></strong></p>' +
             '<p>' + rat[p] + '</p>';
     });
 
@@ -2627,7 +2636,9 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     // Draw filled polygon
     if (points.length > 0) {
-        var polyPoints = points.map(function(p) { return p.x + ',' + p.y; }).join(' ');
+        // n/a frameworks keep their clickable dot but don't pull the shape inward
+        var polyPoints = points.filter(function(p) { return !p.na; })
+            .map(function(p) { return p.x + ',' + p.y; }).join(' ');
         svg.appendChild(svgEl('polygon', {
             points: polyPoints,
             fill: 'var(--score-high)', 'fill-opacity': 0.15,
@@ -2653,7 +2664,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
                 if (!rat || !rat.rationale) return;
                 var label = LABELS[p.principle] || formatPrincipleLabel(p.principle);
                 var html = '<div class="rationale-principle">' + label +
-                    '<span class="rationale-score" style="color:' + color + '">' + p.score + '/5</span></div>' +
+                    '<span class="rationale-score" style="color:' + color + '">' + frameworkScoreText(p.na ? 'n/a' : p.score) + '</span></div>' +
                     '<p>' + rat.rationale + '</p>';
                 openRationaleDrawer('narrative-radar-drawer', 'Narrative Rationale', html);
             });
