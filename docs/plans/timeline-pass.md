@@ -1,7 +1,8 @@
 # A timeline pass: one calendar for the whole book
 
-Status: design for the author's review (finding F-035 in
-`benjaminsnorris/storyforge-evals`). Nothing implemented.
+Status: design; the author answered the open questions on 2026-10-28
+(see "Author's decisions"). Finding F-035 in
+`benjaminsnorris/storyforge-evals`. Nothing implemented.
 
 ## Problem
 
@@ -109,24 +110,71 @@ needs order and rough depth, not exact dates.
   `working/timeline-proposed.csv` and reports the differences; extraction
   (where nobody authored the days) writes them.
 
-## Open questions for the author
+## Author's decisions
 
-1. **Frame narration.** The flashback gauge takes the present to be the
-   latest day reached. A frame scene (Nick narrating two years later) would
-   either jump the present forward, making the whole book look like a
-   flashback, or have to be excluded. Proposal: add a `time_mode` column to
-   `scenes.csv` (`scene` | `summary` | `frame`); frame scenes keep the day
-   they are narrated from and the gauge ignores them for the present.
-   Alternative: no new column; frame scenes take the day of the first
-   scene they introduce.
-2. **Calendar dates.** Store only relative days (proposed), or also an
-   absolute date when the text gives one (`1922-07-04`)? Dates help anchor
-   checks and readers, but most novels never give a year.
-3. **What went wrong in your projects?** Your elaborated projects have
-   plausible-looking day sequences (ashes 1 → 43, shared-dark -2 → 97).
-   If the frustration was days drifting while drafting or revising, or
-   prose contradicting them, the checks in §3 should also run against
-   drafted prose, and that changes the scope.
+The author named three frustrations, seen in every project: extraction
+gets the timeline wrong, the timeline drifts while drafting and revising,
+and flashbacks and time jumps are hard to record. The design covers all
+three.
+
+### 1. `time_mode` column for frame and summary scenes
+
+`scenes.csv` gains `time_mode`: `scene` (default; the action happens on
+its day), `summary` (a passage covering a stretch: "all that summer";
+`timeline_day` is where the stretch starts, `duration` its length), or
+`frame` (narration from after the story, like Nick two years on). A frame
+scene keeps the day it is narrated from; the flashback gauge ignores frame
+scenes when deciding the present, so they never turn the book into one
+long flashback.
+
+### 2. Optional `timeline_date`, in EDTF, and never invented
+
+`scenes.csv` gains an optional `timeline_date` holding only what the
+scene's own text pins down, in the Extended Date/Time Format (EDTF, the
+Library of Congress format whose features ISO 8601-2 describes):
+
+| the text says | `timeline_date` |
+|---|---|
+| "the Fourth of July" (no year in the scene) | `XXXX-07-04` |
+| "in the summer of 1922" | `1922-22` (EDTF season code: summer) |
+| "in 1917" | `1917` |
+| "around 1917" | `1917~` (approximate) |
+| "it might have been October" | `XXXX-10?` (uncertain) |
+| a summary "from June to September 1922" | `1922-06/1922-09` |
+| "five years before" / nothing | empty: a relative gap is a cue, not a date |
+
+Rules:
+
+- **Unknown digits are `X`, never filled in.** A year stated once in
+  Chapter I is not copied onto a later scene's `XXXX-07-04`; a report may
+  show the inferred year, labelled as inferred, but the column never stores
+  it.
+- A weekday isn't a date: "Sunday" stays a cue (`TIME_ANCHOR`) used to
+  place the scene and to check anchors against each other.
+- Validation accepts the EDTF subset above (Level 2 unspecified digits,
+  seasons 21-24, `?` `~` `%` qualifiers, intervals) and rejects anything
+  else, so a sentence or a guessed date in natural language never gets in.
+- Dates also feed the checks: two scenes whose dates and days disagree
+  (`XXXX-07-04` on day 30 and `XXXX-07-06` on day 31) are reported.
+
+### 3. Drift while drafting and revising is in scope
+
+The checks in §3 run on drafted and revised prose, not just at
+extraction:
+
+- After `write` or `revise` changes a scene, its time cues are read again
+  from the new prose (one cheap call per changed scene) and compared with
+  its assigned day, its `time_mode`, its date and its neighbours ("the next
+  morning" on a scene the calendar puts a week later; a scene that now
+  reads as a flashback but isn't marked `earlier`). Mismatches are
+  reported in the run's review; prose and CSVs are never rewritten to make
+  them agree, since either may be the one that's wrong.
+- `storyforge timeline --check` runs the same comparison on demand, for
+  the whole book or `--scenes`, without assigning anything.
+- In elaboration, the scene-map prompt asks for the relation and gap as
+  well as the day, so a planned flashback is recorded as one (`earlier`,
+  day ≤ 0) rather than looking like an error, and the drafting brief
+  carries "set N days after X" or "flashback to 1917" into the prose.
 
 ## Verification
 
