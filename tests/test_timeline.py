@@ -88,6 +88,16 @@ class TestCues:
         assert 'work out which calendar date day 1 falls on' in prompt
         assert "give day 1's calendar date" in prompt
 
+    def test_recollection_inside_a_present_scene_is_placed_by_weight(self):
+        """Gatsby: Jordan's Louisville story and the reporter scene (Cody's
+        backstory after a one-line lead-in) flipped between the past and the
+        present from run to run, and the flashback gauge with them."""
+        from storyforge.timeline import CUE_INSTRUCTIONS, build_assignment_prompt
+        assert 'only a line or a short lead-in before it mostly tells the past' in CUE_INSTRUCTIONS
+        prompt = build_assignment_prompt([{'id': 's', 'cues': {}, 'provisional': None}],
+                                         None, None, [])
+        assert 'placed by weight, the same way every time' in prompt
+
     def test_unknown_relation_is_unclear_and_bad_date_dropped(self):
         from storyforge.timeline import parse_cues
         cues = parse_cues('TIME_RELATION: sometime\nTIME_DATE: July 4th, 1922\n')
