@@ -1,6 +1,6 @@
 # Storyforge Rethink — Plan
 
-Date: 2026-10-28 (revised twice the same day: Ben's decisions, then the corpus survey). Status: approved direction; handoff to an implementing agent (Opus in Claude Code). Read Section 6 first: it records what is decided. The corpus survey is in `storyforge-corpus-survey.md` beside this file; Section 4.4 summarizes what it changed.
+Date: 2026-10-28 (revised twice the same day: Ben's decisions, then the corpus survey). Status: approved direction; handoff to an implementing agent (Opus in Claude Code). Read Section 6 first: it records what is decided. The corpus survey is in `docs/plans/2026-10-28-storyforge-corpus-survey.md` beside this file; Section 4.4 summarizes what it changed.
 
 ## 1. Principle
 
@@ -147,7 +147,7 @@ The real corpus is heavy on TIM (counts, durations, day math) and TRT (names, pr
 ## 5. Phases
 
 ### Phase 0 — Evals and baseline
-- Corpus survey done (`storyforge-corpus-survey.md`). Label shared-dark fully first, then thornwall, then lantern-folk; governor and meridian-line as needed to reach 100+. Build E2, E3, E5, E7, E8 harness. Baseline the current system. Log the survey's Storyforge bugs as tickets (no fixes yet).
+- Corpus survey done (`docs/plans/2026-10-28-storyforge-corpus-survey.md`). Label shared-dark fully first, then thornwall, then lantern-folk; governor and meridian-line as needed to reach 100+. Build E2, E3, E5, E7, E8 harness. Baseline the current system. Log the survey's Storyforge bugs as tickets (no fixes yet).
 - Success: `baseline.json` exists; E1 has 100+ prose cases with the three subsets tagged; suite runs unattended.
 - Keep everything. Nothing changes in the plugin.
 
@@ -178,7 +178,7 @@ The real corpus is heavy on TIM (counts, durations, day math) and TRT (names, pr
 
 ### Decided
 
-**1. Corpus sources.** Ben's novel repos may be used, including in public fixtures. The survey (`storyforge-corpus-survey.md`) ranked them: **shared-dark** (label first: ~62 fix commits, two author-written label sets, full novel length, fix-induced regressions), **thornwall** (strong provenance, mostly numeric TIM/TRT, three id eras), **lantern-folk** (dense and fast to label, but an illustrated children's book; use it as the afternoon schema pilot if one is wanted), **governor** (self-labeled continuity report; many tool-introduced errors), **meridian-line** (PHY quantities, TIM counts), then understory, slipform, ashes for specific cases only. guardian does not exist.
+**1. Corpus sources.** Ben's novel repos may be used, including in public fixtures. The survey (`docs/plans/2026-10-28-storyforge-corpus-survey.md`) ranked them: **shared-dark** (label first: ~62 fix commits, two author-written label sets, full novel length, fix-induced regressions), **thornwall** (strong provenance, mostly numeric TIM/TRT, three id eras), **lantern-folk** (dense and fast to label, but an illustrated children's book; use it as the afternoon schema pilot if one is wanted), **governor** (self-labeled continuity report; many tool-introduced errors), **meridian-line** (PHY quantities, TIM counts), then understory, slipform, ashes for specific cases only. guardian does not exist.
 
 **2. Audit cadence.** Audit entries are a free byproduct of the gate (the extracted facts for a scene), so they are written **per scene, always**, to an audit log the author can read at any pace. What costs something is Ben's attention, so surfacing is tiered:
 
@@ -219,7 +219,7 @@ None. Ben can reopen any of the above.
 
 Each chunk is independently verifiable. Do them in order.
 
-0. **Corpus survey.** Done; see `storyforge-corpus-survey.md`. Read its per-repo data-quality notes before touching any repo.
+0. **Corpus survey.** Done; see `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Read its per-repo data-quality notes before touching any repo.
 1. `evals/harness` — runner, fixture recording, result schema, baseline command. Verify: runs on an empty suite.
 2. `evals/e1-corpus` — labeling template with the fields in 4.2 E1; per-repo scene-id maps (slipform's full map is already in the survey; build the others, thornwall by content); exclude author retcons; split bundled fix commits; restrict `git log -S` to `-- scenes/`. Label shared-dark, then thornwall, then lantern-folk, then governor until 100+ prose cases; tag the three subsets; hold out 20% stratified by repo. Verify: counts per code and per subset, holdout file.
 3. `evals/e2-detection` + `evals/e7-classics` + `evals/e8-revision-safety` — Gatsby and A Christmas Carol fixtures with injected KNO/REL/PRM errors; fold in Ben's Carol verdicts; E8 built from the `tool-introduced` subset. Verify: baseline numbers recorded per code.
