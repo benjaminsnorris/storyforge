@@ -98,9 +98,11 @@ COLUMN_SCHEMA = {
         'description': 'POV character. Normalized against reference/characters.csv.',
     },
     'location': {
-        'type': 'registry', 'registry': 'locations.csv', 'array': False,
+        'type': 'registry', 'registry': 'locations.csv', 'array': True,
         'file': 'scenes.csv', 'stage': 'map',
-        'description': 'Physical location. Normalized against reference/locations.csv.',
+        'description': 'Places where the scene\'s action happens on the page, in order: '
+                       'usually one; the first is where the scene opens, the last where '
+                       'it ends. Semicolon-separated. Normalized against reference/locations.csv.',
     },
     'timeline_day': {
         'type': 'integer', 'file': 'scenes.csv', 'stage': 'map',

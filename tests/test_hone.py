@@ -609,3 +609,31 @@ class TestPhysicalStateCharacters:
         prompt = build_registry_prompt('physical-states', ref_dir)
         assert '## Character Registry' in prompt
         assert "character's id from the Character Registry" in prompt
+
+
+class TestLocationRegistryFromPlaces:
+    """The locations registry is built from individual places, and never
+    holds routes (Gatsby's first pass invented east-egg-to-nyc-route)."""
+
+    def test_prompt_lists_each_place_once(self, project_dir):
+        import csv as _csv
+        from storyforge.hone import build_registry_prompt
+        ref_dir = os.path.join(project_dir, 'reference')
+        path = os.path.join(ref_dir, 'scenes.csv')
+        with open(path) as f:
+            rows = list(_csv.DictReader(f, delimiter='|'))
+            header = list(rows[0].keys())
+        rows[0]['location'] = 'East Egg;Valley of Ashes;Plaza Hotel'
+        with open(path, 'w') as f:
+            w = _csv.DictWriter(f, fieldnames=header, delimiter='|', lineterminator='\n')
+            w.writeheader()
+            w.writerows(rows)
+        prompt = build_registry_prompt('locations', ref_dir)
+        refs = prompt.split('## All Location References Found in the Manuscript')[1]
+        assert '- Valley of Ashes' in refs
+        assert 'East Egg;Valley' not in refs
+
+    def test_prompt_forbids_route_entries(self, project_dir):
+        from storyforge.hone import build_registry_prompt
+        prompt = build_registry_prompt('locations', os.path.join(project_dir, 'reference'))
+        assert 'Never make an entry for a route, journey or transition' in prompt

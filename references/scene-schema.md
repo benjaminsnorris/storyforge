@@ -70,7 +70,7 @@ print(dump_schema_markdown())
 | `part` | integer | architecture | Book part this scene belongs to, from the manuscript's part headings; empty if the book has no parts. |
 | `act` | integer | architecture | Structural act this scene belongs to (1, 2, 3, ...). Drives act-level scoring, act proportions, and --act filters. |
 | `pov` | registry: characters.csv | architecture | POV character. Normalized against reference/characters.csv. |
-| `location` | registry: locations.csv | map | Physical location. Normalized against reference/locations.csv. |
+| `location` | registry: locations.csv (array) | map | Places where the scene's action happens on the page, in order: usually one; the first is where the scene opens, the last where it ends. Semicolon-separated. Never a route or transition as one place. Normalized against reference/locations.csv. |
 | `timeline_day` | integer | map | Chronological position (day number within the story). |
 | `time_of_day` | enum: afternoon, dawn, dusk, evening, morning, night | map | Time of day when the scene takes place. |
 | `duration` | free_text | map | In-story duration (e.g., "2 hours", "30 minutes"). |

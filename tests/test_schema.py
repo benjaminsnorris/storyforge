@@ -300,3 +300,36 @@ class TestSceneIdRule:
         from storyforge.scenes import SCENE_ID_RULE
         prompt = getattr(prompts_elaborate, builder)(project_dir, plugin_dir)
         assert SCENE_ID_RULE in prompt
+
+
+class TestMultipleLocations:
+    """A scene can move (The Great Gatsby's drive from East Egg past the
+    valley of ashes to the Plaza), so location is an ordered list of places;
+    routes are never places."""
+
+    def test_location_is_array(self):
+        from storyforge.schema import COLUMN_SCHEMA
+        assert COLUMN_SCHEMA['location']['array'] is True
+
+    def test_multiple_known_locations_validate(self, project_dir):
+        import csv as _csv
+        from storyforge.schema import validate_schema
+        ref_dir = os.path.join(project_dir, 'reference')
+        path = os.path.join(ref_dir, 'scenes.csv')
+        with open(path) as f:
+            rows = list(_csv.DictReader(f, delimiter='|'))
+            header = list(rows[0].keys())
+        rows[0]['location'] = 'cartography-office;deep-archive'
+        with open(path, 'w') as f:
+            w = _csv.DictWriter(f, fieldnames=header, delimiter='|', lineterminator='\n')
+            w.writeheader()
+            w.writerows(rows)
+        errors = [e for e in validate_schema(ref_dir, project_dir)['errors']
+                  if e['column'] == 'location' and e['row'] == rows[0]['id']]
+        assert errors == []
+
+    def test_extraction_asks_for_places_in_order(self):
+        from storyforge.extract import build_skeleton_prompt
+        prompt = build_skeleton_prompt('s1', 'Scene prose.', {})
+        assert 'in order, semicolon-separated' in prompt
+        assert 'never "X to Y" as one place' in prompt

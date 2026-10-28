@@ -820,9 +820,10 @@ def _field_instruction(field: str) -> str:
             'POV: <the POV character — use their canonical ID or full name>'
         ),
         'location': (
-            'LOCATION: <the physical location — use a short, reusable label '
-            '(the name of the place, not a description). If two scenes '
-            'happen in the same place, use the same string.>'
+            'LOCATION: <the places where the action happens, in order, '
+            'semicolon-separated — usually one. Short, reusable labels (the '
+            'name of the place, not a description); if two scenes happen in '
+            'the same place, use the same string. Never a route as one place.>'
         ),
         'time_of_day': (
             'TIME_OF_DAY: <one of: morning, afternoon, evening, night, '

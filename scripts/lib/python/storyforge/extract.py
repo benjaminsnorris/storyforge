@@ -209,7 +209,7 @@ Output each field on its own labeled line. If a value cannot be determined, outp
 
 TITLE: [a short evocative title for this scene, 3-7 words]
 POV: [the POV character's full name]
-LOCATION: [the primary physical location — use a consistent canonical name]
+LOCATION: [the places where this scene's action happens on the page, in order, semicolon-separated — usually just one. Use consistent canonical names. Only places the action is in, not places mentioned or remembered; a journey lists the places it passes through, never "X to Y" as one place]
 TIMELINE_DAY: [integer day number within the story chronology, starting from 1]
 TIME_OF_DAY: [morning / afternoon / evening / night / dawn / dusk]
 DURATION: [approximate in-story duration, e.g., "2 hours", "30 minutes", "an afternoon"]

@@ -225,7 +225,7 @@ Output ONLY the CSV (with header row). No commentary."""
 
     elif domain == 'locations':
         existing = _read_existing_registry(ref_dir, 'locations.csv')
-        loc_vals = _collect_column_values(ref_dir, 'scenes.csv', 'location')
+        loc_vals = _collect_array_values(ref_dir, 'scenes.csv', 'location')
         all_refs = sorted(set(loc_vals))
         raw_values = '\n'.join(f'- {v}' for v in all_refs)
 
@@ -246,6 +246,7 @@ Rules:
 - name: canonical display name (e.g., Resonance Chamber)
 - aliases: semicolon-separated variants found in the data
 - Collapse variants of the same place (case differences, parenthetical additions, punctuation differences)
+- Every entry is one real place. Never make an entry for a route, journey or transition ("East Egg to New York", "on the road to the city"); a scene that moves lists each place it passes through
 - If an existing registry is provided, preserve its IDs and add new entries
 - Every reference in the manuscript data must resolve to exactly one registry entry
 

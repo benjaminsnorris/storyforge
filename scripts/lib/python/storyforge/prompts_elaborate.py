@@ -346,7 +346,7 @@ For each scene:
 
 1. Keep all existing scenes (adjust as needed)
 2. Fill in gaps: transitions, subplot scenes, breathing room
-3. Assign locations, timeline days, time of day, duration
+3. Assign locations (the places the scene's action happens in, in order, semicolon-separated: usually one, several only when the action truly moves; never a route as a place), timeline days, time of day, duration
 4. List all characters present (on_stage) and referenced (characters)
 5. Track MICE thread opens (+) and closes (-) — FILO within each type, parallel across types
 
@@ -738,8 +738,9 @@ _FIELD_INSTRUCTIONS = {
         'Semicolon-separated (e.g., "+inquiry:who-killed-X;-milieu:the-castle").'
     ),
     'location': (
-        'Identify the primary location where this scene takes place. '
-        'Use a canonical name consistent with other scenes.'
+        'List the places where this scene\'s action happens, in order, semicolon-separated '
+        '(usually one; several only when the action moves on the page). Use canonical names '
+        'consistent with other scenes; never a route or transition as one place.'
     ),
     'timeline_day': (
         'Determine what day number this scene takes place on (integer, starting from 1). '
