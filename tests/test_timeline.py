@@ -62,7 +62,18 @@ class TestCues:
                           'TIME_GAP: "five years"\nTIME_ANCHOR: (none)\n'
                           'TIME_SPAN:\nTIME_DATE: 1917\n')
         assert cues == {'relation': 'earlier', 'gap': 'five years', 'anchor': '',
-                        'span': '', 'date': '1917'}
+                        'refers': '', 'span': '', 'date': '1917'}
+
+    def test_refers_cue_reaches_the_assignment_prompt(self):
+        """Gatsby VII: "that June night three months before" pins the
+        hottest day, but no cue carried it."""
+        from storyforge.timeline import parse_cues, build_assignment_prompt
+        cues = parse_cues('TIME_RELATION: continues\n'
+                          'TIME_REFERS: that June night three months before\n')
+        assert cues['refers'] == 'that June night three months before'
+        prompt = build_assignment_prompt([{'id': 's', 'cues': cues, 'provisional': None}],
+                                         10, 10, [])
+        assert 'refers "that June night three months before"' in prompt
 
     def test_unknown_relation_is_unclear_and_bad_date_dropped(self):
         from storyforge.timeline import parse_cues

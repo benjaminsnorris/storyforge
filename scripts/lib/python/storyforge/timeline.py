@@ -28,7 +28,7 @@ from .enrich import update_csv_field
 RELATIONS = ('continues', 'later', 'earlier', 'frame', 'unclear')
 TIME_MODES = ('scene', 'summary', 'frame')
 
-CUE_COLUMNS = ['id', 'relation', 'gap', 'anchor', 'span', 'date']
+CUE_COLUMNS = ['id', 'relation', 'gap', 'anchor', 'refers', 'span', 'date']
 CUES_FILE = os.path.join('working', 'timeline-cues.csv')
 PROPOSED_FILE = os.path.join('working', 'timeline-proposed.csv')
 
@@ -46,6 +46,7 @@ _BATCH_MAX_TOKENS = 16000
 CUE_INSTRUCTIONS = """TIME_RELATION: [when this scene happens relative to the scene before it in reading order — one of: continues (picks up at the same time or moments later), later (some time after it), earlier (before it: a flashback or a recollection told as a scene), frame (narration from after the story, looking back), unclear]
 TIME_GAP: [the gap from the previous scene in at most six words, no explanation: "an hour", "the next morning", "three weeks", "five years", "several weeks"; empty if none is stated or implied]
 TIME_ANCHOR: [a calendar fact pinning when THIS scene's action happens — a date, weekday, month, season, holiday or named day ("the hottest day of the summer") — quoted briefly; not a habit ("every Friday") or a date the scene only mentions; empty if none]
+TIME_REFERS: [any statement in this scene of how long ago or how long until another event in the story, quoted briefly: "that June night three months before", "five years since he'd seen her", "the funeral was on the third day"; separate several with semicolons; empty if none]
 TIME_SPAN: [when the scene summarizes a stretch of time ("all that summer"), how long; empty for a scene that plays out in one sitting]
 TIME_DATE: [only what this scene's own text states about the calendar date, in EDTF: "1922-07-04", "XXXX-07-04" when the year isn't given here, "1922" for a year, "1922-22" for summer 1922 (21 spring, 22 summer, 23 autumn, 24 winter), "1917~" for "around 1917", "1922-06/1922-09" for a stretch. Never fill in a part the text doesn't give; empty if the text gives no date]"""
 
@@ -53,6 +54,7 @@ _CUE_LABELS = {
     'TIME_RELATION': 'relation',
     'TIME_GAP': 'gap',
     'TIME_ANCHOR': 'anchor',
+    'TIME_REFERS': 'refers',
     'TIME_SPAN': 'span',
     'TIME_DATE': 'date',
 }
@@ -301,7 +303,7 @@ def build_assignment_prompt(batch: list[dict], present: int | None,
     for item in batch:
         cue = item.get('cues', {})
         parts = [f'relation {cue.get("relation") or "unclear"}']
-        for key in ('gap', 'anchor', 'span', 'date'):
+        for key in ('gap', 'anchor', 'refers', 'span', 'date'):
             if cue.get(key):
                 parts.append(f'{key} "{cue[key]}"')
         provisional = item.get('provisional')
@@ -311,7 +313,7 @@ def build_assignment_prompt(batch: list[dict], present: int | None,
             f'  time of day: {item.get("time_of_day") or "?"}; duration: {item.get("duration") or "?"}\n'
             f'  cues: {"; ".join(parts)}\n'
             f'  provisional day: {provisional if provisional is not None else "?"}')
-    anchor_text = '\n'.join(f'- {a}' for a in anchors[-15:]) or '(none yet)'
+    anchor_text = '\n'.join(f'- {a}' for a in anchors[-30:]) or '(none yet)'
     return f"""You are placing the scenes of a novel on one calendar. Day 1 is the first day of the main story; a scene set before it gets day 0 or a negative day (five years before is about -1825). Scenes are listed in reading order.
 
 ## Where the Calendar Stands
@@ -333,6 +335,7 @@ Each scene's cues say how it relates to the scene before it. A provisional day w
 - earlier: a flashback or recollection; it gets the earlier day it depicts and does not move the present.
 - frame: narration from after the story; it gets the day it is narrated from (after the story's end, roughly) and does not move the present.
 - A weekday or date anchor pins a scene: keep weekdays 7 days apart and dates consistent with the days between them.
+- "refers" cues state how far apart two events are ("that June night three months before" puts this scene about 90 days after that night): honour them, counting back as well as forward.
 - mode: scene (the action plays out on its day), summary (it covers a stretch of time; the day is where the stretch starts), or frame.
 
 First work out the calendar under a line REASONING: — the anchors, the stated durations (count back from a "three months before" as well as forward), and any scene you are unsure of — in at most 600 words. Then write a line CALENDAR: and, after it, exactly one line per scene, in order:
@@ -416,8 +419,9 @@ def assign_calendar(items: list[dict], invoke, log_dir: str) -> dict[str, tuple[
                 last_day = day
                 if cue.get('relation') != 'earlier' and (present is None or day > present):
                     present = day
-            if cue.get('anchor') or cue.get('date'):
-                anchors.append(f'{sid}: day {day} — {cue.get("anchor") or cue.get("date")}')
+            for key in ('anchor', 'refers', 'date'):
+                if cue.get(key):
+                    anchors.append(f'{sid}: day {day} — {cue[key]}')
     return placed
 
 
@@ -558,8 +562,9 @@ def _invoke_assignment(model: str):
 
     def invoke(prompt, log_file, label):
         try:
-            response = invoke_to_file(prompt, model, log_file,
-                                      max_tokens=_BATCH_MAX_TOKENS, label=label)
+            # Temperature 0: the same cues should give the same calendar
+            response = invoke_to_file(prompt, model, log_file, max_tokens=_BATCH_MAX_TOKENS,
+                                      label=label, temperature=0)
         except Exception as e:  # noqa: BLE001 — one failed batch, not the pass
             log(f'  WARNING: {label} failed ({e}); its scenes keep their provisional days')
             return None

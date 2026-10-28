@@ -112,7 +112,8 @@ def _api_request(path: str, body: dict | None = None, method: str = 'GET',
 
 
 def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
-           timeout: int = API_TIMEOUT, system: list[dict] | None = None) -> dict:
+           timeout: int = API_TIMEOUT, system: list[dict] | None = None,
+           temperature: float | None = None) -> dict:
     """Call the Anthropic Messages API.
 
     Args:
@@ -133,6 +134,8 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
     }
     if system:
         body['system'] = system
+    if temperature is not None:
+        body['temperature'] = temperature
     heartbeat = _Heartbeat(label or model)
     heartbeat.start()
     try:
@@ -142,7 +145,8 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
 
 
 def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 4096, label: str = '',
-                   timeout: int = API_TIMEOUT, system: list[dict] | None = None) -> dict:
+                   timeout: int = API_TIMEOUT, system: list[dict] | None = None,
+                   temperature: float | None = None) -> dict:
     """Call the API and write the response to a JSON file.
 
     Args:
@@ -157,7 +161,8 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
     Returns:
         Full API response dict.
     """
-    response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system)
+    response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system,
+                      temperature=temperature)
     os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
     with open(log_file, 'w') as f:
         json.dump(response, f)
