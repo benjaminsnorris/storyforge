@@ -612,7 +612,7 @@ class TestReconcileByDeltas:
         ref_dir = os.path.join(project_dir, 'reference')
         _set_column(ref_dir, 'scenes.csv', 'location',
                     ['the office;somewhere unspecified', 'various rooms'])
-        calls = _mock_api(monkeypatch, ['1 | SKIP\n2 | skip (noise)\n'])
+        calls = _mock_api(monkeypatch, ['1 | SKIP\n2 | SKIP (noise)\n'])
 
         result = reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
 
@@ -1057,9 +1057,9 @@ class TestReviewFixes:
         ref_dir = os.path.join(project_dir, 'reference')
         _set_column(ref_dir, 'scenes.csv', 'pov', ['the Merrins'])
         _set_column(ref_dir, 'scene-intent.csv', 'characters', {'act1-sc01': 'the Merrins'})
-        _mock_api(monkeypatch, ['1 | tessa-merrin;dorren-hayle\n2 | SKIP\n',
-                                '1 | tessa-merrin;dorren-hayle\n'])
+        calls = _mock_api(monkeypatch, ['1 | tessa-merrin;dorren-hayle\n2 | SKIP\n'])
         reconcile_domain('characters', ref_dir, 'test-model', str(tmp_path))
+        assert len(calls) == 1  # answered, so not retried
         assert _column(ref_dir, 'scenes.csv', 'pov')['act1-sc01'] == 'the Merrins'
         assert _column(ref_dir, 'scene-intent.csv', 'characters')['act1-sc01'] == \
             'tessa-merrin;dorren-hayle'
@@ -1096,3 +1096,27 @@ class TestReviewFixes:
         hone.reconcile_domain('knowledge', ref_dir, 'test-model', str(tmp_path))
         k = _read_csv_as_map(os.path.join(ref_dir, 'knowledge.csv'))
         assert k['pell-is-a-spy']['origin'] == 'act1-sc02'
+
+    def test_skip_never_blanks_pov(self, project_dir, monkeypatch, tmp_path):
+        from storyforge.hone import reconcile_domain
+        ref_dir = os.path.join(project_dir, 'reference')
+        _set_column(ref_dir, 'scenes.csv', 'pov', ['the narrator'])
+        _set_column(ref_dir, 'scene-intent.csv', 'characters', {'act1-sc01': 'the narrator'})
+        _mock_api(monkeypatch, ['1 | SKIP\n2 | SKIP\n'])
+        reconcile_domain('characters', ref_dir, 'test-model', str(tmp_path))
+        assert _column(ref_dir, 'scenes.csv', 'pov')['act1-sc01'] == 'the narrator'
+        assert _column(ref_dir, 'scene-intent.csv', 'characters')['act1-sc01'] == ''
+
+    def test_new_id_findable_by_its_spelling(self):
+        from storyforge.hone import parse_mapping_response
+        mapping, new_rows, _ = parse_mapping_response(
+            'locations', "1 | NEW | Daisy's Car | Daisy's car\n2 | Daisy's Car\n3 | daisy-s-car\n",
+            3, set())
+        assert [r['id'] for r in new_rows] == ['daisy-s-car']
+        assert mapping == {1: ['daisy-s-car'], 2: ['daisy-s-car'], 3: ['daisy-s-car']}
+
+    def test_lowercase_skip_is_an_id(self):
+        from storyforge.hone import parse_mapping_response
+        mapping, _, skipped = parse_mapping_response(
+            'characters', '1 | skip\n', 1, {'skip': 'skip'})
+        assert mapping == {1: ['skip']} and skipped == set()

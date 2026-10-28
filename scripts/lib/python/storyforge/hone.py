@@ -574,6 +574,7 @@ def parse_mapping_response(
         values = parts[2:2 + len(fields)]
         row = {'id': rid, **{f: (values[i] if i < len(values) else '') for i, f in enumerate(fields)}}
         known[rid] = rid
+        known[parts[1].strip().lower()] = rid
         new_rows.append(row)
 
     mapping: dict[int, list[str]] = {}
@@ -581,7 +582,8 @@ def parse_mapping_response(
     for num, parts in lines:
         head = parts[0]
         words = head.split()
-        if words and words[0].upper().rstrip('.:,') == 'SKIP':
+        # Case-sensitive, as the prompt asks: a character called "skip" is an id
+        if words and words[0].rstrip('.:,') == 'SKIP':
             skipped.add(num)
             continue
         if head.upper() == 'NEW':
@@ -590,7 +592,8 @@ def parse_mapping_response(
             raw = parts[1].strip().lower()
             ids = [known.get(raw) or known.get(_slugify(raw))]
         else:
-            ids = [known.get(i.strip().lower()) for i in head.split(';') if i.strip()]
+            ids = [known.get(i.strip().lower()) or known.get(_slugify(i))
+                   for i in head.split(';') if i.strip()]
         if ids and all(ids):
             mapping[num] = list(dict.fromkeys(ids))
     return mapping, new_rows, skipped
@@ -603,9 +606,10 @@ _SINGLE_VALUE_COLUMNS = {'pov'}
 def _rewrite_targets(domain: str, ref_dir: str, mapping: dict[str, list[str]]) -> int:
     """Rewrite target fields through *mapping* (lookup key → ids), keeping
     MICE ``+``/``-`` prefixes. An empty id list removes the entry (a
-    reference answered SKIP). A composite mapping is not applied to a
-    single-value column such as ``pov``; that reference stays unresolved and
-    is reported. Returns the number of fields changed."""
+    reference answered SKIP). In a single-value column such as ``pov`` only
+    a single-id mapping applies: a composite or a SKIP leaves the reference
+    there, unresolved and reported, rather than writing several ids or
+    blanking the field. Returns the number of fields changed."""
     changed = 0
     for filename, columns in _DOMAIN_TARGETS[domain]:
         path = os.path.join(ref_dir, filename)
@@ -622,7 +626,7 @@ def _rewrite_targets(domain: str, ref_dir: str, mapping: dict[str, list[str]]) -
                         continue
                     ref = _reference_key(domain, part)
                     ids = mapping.get(ref[0]) if ref else None
-                    if ids is None or (col in _SINGLE_VALUE_COLUMNS and len(ids) > 1):
+                    if ids is None or (col in _SINGLE_VALUE_COLUMNS and len(ids) != 1):
                         out.append(part.strip())
                     elif domain == 'mice-threads':
                         prefix = _split_mice(part)[0]
@@ -918,7 +922,10 @@ def reconcile_domain(
     calls = 0
     skipped: list[str] = []
     created: set[str] = set()
-    cut_off: set[str] = set()
+    # Not retried: references in a batch cut off at the token limit, and
+    # ones that were answered but stay unresolved (a composite or SKIP for
+    # pov, which is left for the author)
+    not_retried: set[str] = set()
 
     def run_batches(refs: list[dict], retry: bool) -> None:
         nonlocal mapped, calls, fields_normalized
@@ -937,19 +944,19 @@ def reconcile_domain(
                 model, os.path.join(log_dir, log_name), label)
             calls += 1
             if text is None:
-                cut_off.update(r['key'] for r in batch)
+                not_retried.update(r['key'] for r in batch)
                 continue
             mapping, new_rows, skip = parse_mapping_response(domain, text, len(batch), lookup)
+            not_retried.update(batch[i - 1]['key'] for i in list(mapping) + list(skip))
             fields_normalized += apply_mapping(domain, ref_dir, batch, mapping, new_rows, skip)
             mapped += len(mapping)
             created.update(r['id'] for r in new_rows)
             skipped.extend(batch[i - 1]['text'] for i in sorted(skip))
 
     run_batches(unresolved, retry=False)
-    # One more round for references whose answer named an unknown id; a
-    # batch cut off at the token limit is not retried
+    # One more round for references whose answer named an unknown id
     leftover = [r for r in _unresolved_references(domain, ref_dir).values()
-                if r['key'] not in cut_off]
+                if r['key'] not in not_retried]
     if leftover:
         log(f'  {domain}: asking again about {len(leftover)} reference(s)')
         run_batches(leftover, retry=True)
