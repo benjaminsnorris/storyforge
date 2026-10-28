@@ -10,6 +10,12 @@ Status is one of three values, and they are not interchangeable:
 ``pass`` (every gate held), ``fail`` (the suite ran and a gate did not), and
 ``error`` (the suite could not produce a measurement). A baseline is refused
 over an ``error`` result, because a missing number is not a low one.
+
+A suite is ``error`` — whatever it returned — when it declares no gates (it
+measured nothing anyone could fail), or when the cassette logged a failure
+during it. The second matters because command code swallows API exceptions
+into skipped scenes, so a replay miss can otherwise come back as a confident
+number computed over whatever survived.
 """
 
 from __future__ import annotations
@@ -101,9 +107,9 @@ class Suite:
 
 def discover(suites_dir: str) -> list[Suite]:
     """Load every ``SUITE`` from ``suites_dir/*.py``, sorted by name."""
-    suites = []
     if not os.path.isdir(suites_dir):
-        return suites
+        raise RuntimeError(f'suites directory not found: {suites_dir}')
+    suites = []
     for filename in sorted(os.listdir(suites_dir)):
         if not filename.endswith('.py') or filename.startswith('_'):
             continue
@@ -122,26 +128,54 @@ def discover(suites_dir: str) -> list[Suite]:
     return suites
 
 
-def _cost(log_file: str) -> dict:
+COST_KEYS = ('calls', 'replayed_calls', 'unpriced_calls', 'input_tokens',
+             'output_tokens', 'usd_if_live', 'usd_spent')
+_PRICED_FAMILIES = ('opus', 'sonnet', 'haiku')
+
+
+def _tokens(usage: dict, key: str) -> int:
+    value = usage.get(key)
+    return value if isinstance(value, int) else 0
+
+
+def read_cassette_log(log_file: str) -> tuple[dict, list[str]]:
+    """Sum the cassette log into cost totals; also return the failures it recorded.
+
+    An unreadable line is itself reported as a failure rather than skipped,
+    since it most likely belongs to a call that was then not counted.
+    """
     from storyforge.costs import calculate_cost
-    totals = {'calls': 0, 'replayed_calls': 0, 'input_tokens': 0,
-              'output_tokens': 0, 'usd_if_live': 0.0, 'usd_spent': 0.0}
+    totals = dict.fromkeys(COST_KEYS, 0)
+    totals['usd_if_live'] = totals['usd_spent'] = 0.0
+    failures = []
     if not os.path.isfile(log_file):
-        return totals
+        return totals, failures
     with open(log_file) as f:
-        for line in f:
+        for n, line in enumerate(f, 1):
             if not line.strip():
                 continue
-            entry = json.loads(line)
-            usage = entry.get('usage', {})
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                failures.append(f'cassette log line {n} is not JSON')
+                continue
+            if not isinstance(entry, dict):
+                failures.append(f'cassette log line {n} is not an object')
+                continue
+            if 'error' in entry:
+                failures.append(str(entry['error']))
+                continue
+            usage = entry.get('usage') if isinstance(entry.get('usage'), dict) else {}
+            model = str(entry.get('model') or '')
+            if not any(family in model.lower() for family in _PRICED_FAMILIES):
+                totals['unpriced_calls'] += 1  # costs.py would silently price it as sonnet
             usd = calculate_cost(
-                entry.get('model', ''), usage.get('input_tokens', 0),
-                usage.get('output_tokens', 0),
-                cache_read=usage.get('cache_read_input_tokens', 0),
-                cache_create=usage.get('cache_creation_input_tokens', 0))
+                model, _tokens(usage, 'input_tokens'), _tokens(usage, 'output_tokens'),
+                cache_read=_tokens(usage, 'cache_read_input_tokens'),
+                cache_create=_tokens(usage, 'cache_creation_input_tokens'))
             totals['calls'] += 1
-            totals['input_tokens'] += usage.get('input_tokens', 0)
-            totals['output_tokens'] += usage.get('output_tokens', 0)
+            totals['input_tokens'] += _tokens(usage, 'input_tokens')
+            totals['output_tokens'] += _tokens(usage, 'output_tokens')
             totals['usd_if_live'] += usd
             if entry.get('replayed'):
                 totals['replayed_calls'] += 1
@@ -149,7 +183,7 @@ def _cost(log_file: str) -> dict:
                 totals['usd_spent'] += usd
     totals['usd_if_live'] = round(totals['usd_if_live'], 4)
     totals['usd_spent'] = round(totals['usd_spent'], 4)
-    return totals
+    return totals, failures
 
 
 def provenance() -> dict:
@@ -167,7 +201,7 @@ def provenance() -> dict:
 
 
 def run_suite(suite: Suite, mode: Mode, cassettes_root: str) -> dict:
-    """Run one suite with its cassette active; never raises."""
+    """Run one suite with its cassette active; never raises, except on Ctrl-C."""
     cassette_dir = os.path.join(cassettes_root, suite.name)
     saved = {k: os.environ.get(k) for k in
              ('STORYFORGE_CASSETTE', 'STORYFORGE_CASSETTE_MODE', 'STORYFORGE_CASSETTE_LOG')}
@@ -189,17 +223,30 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str) -> dict:
             result['by_code'] = output.by_code
             result['gates'] = [g.to_dict() for g in output.gates]
             result['notes'] = output.notes
-            result['status'] = 'pass' if all(g.passed for g in output.gates) else 'fail'
-        except Exception as e:
+            if not output.gates:
+                result['error'] = 'suite declared no gates, so it measured nothing that could fail'
+            else:
+                result['status'] = 'pass' if all(g.passed for g in output.gates) else 'fail'
+        except (Exception, SystemExit) as e:  # a command calling sys.exit must not kill the run
             result['error'] = f'{type(e).__name__}: {e}'
             result['traceback'] = traceback.format_exc()
         finally:
-            result['cost'] = _cost(log_file)
             for key, value in saved.items():
                 if value is None:
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
+        try:
+            result['cost'], failures = read_cassette_log(log_file)
+        except OSError as e:
+            result['cost'], failures = dict.fromkeys(COST_KEYS, 0), [f'cassette log unreadable: {e}']
+        if failures:
+            result['status'] = 'error'
+            result['cassette_failures'] = failures
+            result['error'] = result['error'] or (
+                f'{len(failures)} cassette failure(s), e.g. {failures[0]}')
+        if result['error']:
+            result['status'] = 'error'
     result['duration_s'] = round(time.time() - started, 2)
     return result
 
@@ -214,9 +261,7 @@ def run_all(suites: list[Suite], mode: Mode, cassettes_root: str) -> dict:
         'mode': mode,
         'status': overall,
         'suite_count': len(results),
-        'cost': {k: round(sum(r['cost'][k] for r in results), 4)
-                 for k in ('calls', 'replayed_calls', 'input_tokens', 'output_tokens',
-                           'usd_if_live', 'usd_spent')},
+        'cost': {k: round(sum(r['cost'][k] for r in results), 4) for k in COST_KEYS},
         'results': results,
     }
 
@@ -226,7 +271,8 @@ def compare(report: dict, baseline: dict) -> dict[str, dict[str, dict]]:
 
     Covers ``metrics`` and ``by_code`` (as ``CODE.metric``). A metric present
     on only one side is reported with the other side ``None`` rather than
-    dropped, so a suite that stopped emitting a number is visible.
+    dropped, so a metric that stopped being emitted is visible. A suite in only
+    one of the two runs is listed the same way.
     """
     def flatten(result: dict) -> dict[str, float]:
         flat = dict(result.get('metrics', {}))
@@ -236,14 +282,15 @@ def compare(report: dict, baseline: dict) -> dict[str, dict[str, dict]]:
         return flat
 
     base_by_suite = {r['suite']: flatten(r) for r in baseline.get('results', [])}
+    current_by_suite = {r['suite']: flatten(r) for r in report['results']}
     out = {}
-    for result in report['results']:
-        current = flatten(result)
-        base = base_by_suite.get(result['suite'], {})
+    for suite in sorted(set(current_by_suite) | set(base_by_suite)):
+        current = current_by_suite.get(suite, {})
+        base = base_by_suite.get(suite, {})
         rows = {}
         for name in sorted(set(current) | set(base)):
             b, c = base.get(name), current.get(name)
             rows[name] = {'baseline': b, 'current': c,
                           'delta': None if b is None or c is None else round(c - b, 6)}
-        out[result['suite']] = rows
+        out[suite] = rows
     return out

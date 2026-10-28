@@ -17,6 +17,12 @@ commands as subprocesses too, and the environment is what they inherit.
 call (key, model, usage, whether it was replayed). The harness sums it into a
 cost report; a replayed call reports what it *would* have cost live.
 
+Every cassette failure is a ``CassetteError``, and every one is also written
+to that log before it is raised. Command code is full of ``except Exception``
+that turns an API failure into a skipped scene, so the exception alone cannot
+be trusted to reach the harness — the log line can, and the harness treats a
+logged failure as an errored suite whatever the suite returned.
+
 The Batch API is refused under a cassette: its ids and polling sequence are
 not reproducible, so a recording of one could never replay.
 """
@@ -24,11 +30,16 @@ not reproducible, so a recording of one could never replay.
 import hashlib
 import json
 import os
+import tempfile
 
 MODES = ('replay', 'record', 'auto')
 
 
-class CassetteMiss(RuntimeError):
+class CassetteError(RuntimeError):
+    """The cassette could not serve a request (bad mode, bad recording, batch call)."""
+
+
+class CassetteMiss(CassetteError):
     """A replay-mode request has no recording."""
 
 
@@ -39,7 +50,7 @@ def active_dir() -> str:
 def mode() -> str:
     value = os.environ.get('STORYFORGE_CASSETTE_MODE', 'replay')
     if value not in MODES:
-        raise RuntimeError(
+        raise CassetteError(
             f'STORYFORGE_CASSETTE_MODE={value!r} is not one of {", ".join(MODES)}')
     return value
 
@@ -54,18 +65,38 @@ def recording_path(cassette_dir: str, key: str) -> str:
     return os.path.join(cassette_dir, key[:2], f'{key}.json')
 
 
-def _log_call(key: str, body: dict | None, response: dict, replayed: bool) -> None:
+def _append_log(entry: dict) -> None:
     log_file = os.environ.get('STORYFORGE_CASSETTE_LOG', '')
-    if not log_file:
-        return
-    entry = {
+    if log_file:
+        with open(log_file, 'a') as f:
+            f.write(json.dumps(entry) + '\n')
+
+
+def _log_call(key: str, body: dict | None, response: dict, replayed: bool) -> None:
+    _append_log({
         'key': key,
         'model': (body or {}).get('model', ''),
         'usage': response.get('usage', {}) if isinstance(response, dict) else {},
         'replayed': replayed,
-    }
-    with open(log_file, 'a') as f:
-        f.write(json.dumps(entry) + '\n')
+    })
+
+
+def _fail(error: CassetteError) -> CassetteError:
+    """Log ``error`` where the harness will see it, then hand it back to raise."""
+    try:
+        _append_log({'error': f'{type(error).__name__}: {error}'})
+    except OSError:
+        pass  # the raise below still reports it; a log we cannot write is not a second failure
+    return error
+
+
+def _prompt_preview(body: dict | None) -> str:
+    try:
+        content = body['messages'][-1]['content']
+    except (KeyError, IndexError, TypeError):
+        return ''
+    text = content if isinstance(content, str) else json.dumps(content)
+    return ' '.join(text[:200].split())
 
 
 def request(method: str, path: str, body: dict | None, live) -> dict:
@@ -75,31 +106,38 @@ def request(method: str, path: str, body: dict | None, live) -> dict:
     """
     cassette_dir = active_dir()
     if path.startswith('messages/batches'):
-        raise RuntimeError(
+        raise _fail(CassetteError(
             'The Batch API cannot run under STORYFORGE_CASSETTE: batch ids and '
-            'polling are not reproducible. Run the command in direct mode.')
-
-    current = mode()
+            'polling are not reproducible. Run the command in direct mode.'))
+    try:
+        current = mode()
+    except CassetteError as e:
+        raise _fail(e)
     key = request_key(method, path, body)
     target = recording_path(cassette_dir, key)
 
     if current != 'record' and os.path.isfile(target):
-        with open(target) as f:
-            response = json.load(f)['response']
+        try:
+            with open(target) as f:
+                response = json.load(f)['response']
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            raise _fail(CassetteError(f'Unreadable recording {target}: {e}')) from e
         _log_call(key, body, response, replayed=True)
         return response
 
     if current == 'replay':
-        raise CassetteMiss(
+        raise _fail(CassetteMiss(
             f'No recording for {method} {path} (key {key[:12]}) in {cassette_dir}. '
-            f'Re-run with STORYFORGE_CASSETTE_MODE=record or auto to make one.')
+            f'Prompt starts: "{_prompt_preview(body)}". If the prompt embeds a temp '
+            f'path, date, or id it changes every run and can never replay. Otherwise '
+            f're-run with STORYFORGE_CASSETTE_MODE=record or auto.'))
 
     response = live()
+    _log_call(key, body, response, replayed=False)
     os.makedirs(os.path.dirname(target), exist_ok=True)
-    tmp = target + '.tmp'
-    with open(tmp, 'w') as f:
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), suffix='.tmp')
+    with os.fdopen(fd, 'w') as f:
         json.dump({'request': {'method': method, 'path': path, 'body': body},
                    'response': response}, f, indent=1)
     os.replace(tmp, target)
-    _log_call(key, body, response, replayed=False)
     return response

@@ -203,9 +203,9 @@ def invoke_api(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
         _invoke_api_consecutive_failures = 0
         return extract_text(response)
     except Exception as e:
-        from storyforge.cassette import CassetteMiss
-        if isinstance(e, CassetteMiss):
-            raise  # an eval replay with no recording must fail, not read as an empty answer
+        from storyforge.cassette import CassetteError
+        if isinstance(e, CassetteError):
+            raise  # an eval replay that cannot be served must fail, not read as an empty answer
         from storyforge.common import log
         _invoke_api_consecutive_failures += 1
         log(f'WARNING: API call failed: {e}')

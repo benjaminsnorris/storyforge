@@ -57,6 +57,9 @@ def _summary(report: dict, deltas: dict | None) -> str:
              f"@ {report['git_sha'][:10]}{' (dirty)' if report['git_dirty'] else ''}"]
     if not report['results']:
         lines.append('No suites found. Add a module defining SUITE to evals/suites/.')
+    reported = {r['suite'] for r in report['results']}
+    for name in sorted(set(deltas or {}) - reported):
+        lines.append(f"  [MISSING] {name}: in the baseline, not in this run")
     for r in report['results']:
         lines.append(f"  [{r['status'].upper()}] {r['suite']} ({r['duration_s']}s, "
                      f"{r['cost']['calls']} calls, ${r['cost']['usd_spent']} spent, "
@@ -75,6 +78,9 @@ def _summary(report: dict, deltas: dict | None) -> str:
     cost = report['cost']
     lines.append(f"Total: {cost['calls']} calls ({cost['replayed_calls']} replayed), "
                  f"${cost['usd_spent']} spent, ${cost['usd_if_live']} if live")
+    if cost['unpriced_calls']:
+        lines.append(f"  {cost['unpriced_calls']} call(s) used a model with no known price "
+                     f"and were costed at sonnet rates")
     return '\n'.join(lines)
 
 
@@ -85,6 +91,16 @@ def main(argv=None) -> int:
         print('ERROR: ' + too_old, file=sys.stderr)
         return 2
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if os.path.isfile(args.results_file):
+        os.remove(args.results_file)  # a crash must not leave the last run's report to be read as this one's
+    try:
+        return _main(args)
+    except Exception as e:  # infrastructure, not a measurement: never exit 1 ("a gate failed")
+        print(f'ERROR: {type(e).__name__}: {e}', file=sys.stderr)
+        return 2
+
+
+def _main(args) -> int:
     suites = discover(args.suites_dir)
     if args.list:
         for s in suites:

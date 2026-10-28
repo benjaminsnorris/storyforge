@@ -41,8 +41,15 @@ Every Anthropic call goes through `api._api_request`, which consults
 `evals/fixtures/cassettes/<suite>/` for each suite. Replay mode never goes live:
 a call with no recording raises `CassetteMiss` and the suite errors. Recordings
 are keyed by a hash of the request, so any prompt change is a miss — re-record
-that suite with `--mode auto`. The Batch API is refused under a cassette; run
-commands in direct mode.
+that suite with `--mode auto`. A prompt that embeds a temp path, date, or id
+changes every run and can never replay; keep those out of what a suite sends.
+The Batch API is refused under a cassette; run commands in direct mode.
+
+A suite reports `error`, whatever it returned, when the cassette logged any
+failure during it (command code often catches API errors and skips the scene,
+which would otherwise turn a replay gap into a confident partial number), or
+when it declares no gates.
 
 Cost is reported per suite: `usd_spent` (live calls this run) and `usd_if_live`
-(what the run would cost without recordings).
+(what the run would cost without recordings). `unpriced_calls` counts calls
+to a model `costs.py` has no price for (they are costed at sonnet rates).
