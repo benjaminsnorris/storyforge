@@ -32,6 +32,12 @@ class TestMiceMentionsValidate:
         problems = _check_mice('no-such-thread', {'a': 'a'}, {})
         assert problems and 'not in mice-threads.csv' in problems[0]['reason']
 
+    def test_prose_is_not_a_mention_without_a_registry(self):
+        from storyforge.schema import _check_mice
+        assert _check_mice('gatsby dream opens', {}, {})
+        assert _check_mice('+ +x', {}, {})
+        assert _check_mice('gatsby-dream;+inquiry:who', {}, {}) == []
+
     def test_bare_operator_is_invalid(self):
         from storyforge.schema import _check_mice
         assert _check_mice('+', {}, {})
@@ -51,6 +57,10 @@ class TestBooleanAnswers:
         assert reduce_boolean('Limits ability to care for himself') == \
             'Limits ability to care for himself'
         assert reduce_boolean('nothing') == 'nothing'
+        # Review of #323: hedges and other labels are left alone
+        for raw in ('Yes/no', 'no — but yes in act 3', 'yes, partially; no when seated',
+                    'Maybe: yes', 'partially: no'):
+            assert reduce_boolean(raw) == raw, raw
 
     def test_physical_state_parser_reduces(self):
         from storyforge.extract import parse_physical_state_response
@@ -99,6 +109,21 @@ class TestCleanupAnswerFormats:
         assert b[0]['continuity_deps'] == '' and b[1]['continuity_deps'] == 'act1-sc01'
         # Idempotent
         assert run_cleanup(ref_dir)['answer_formats']['count'] == 0
+
+    def test_keeps_columns_an_author_added(self, project_dir):
+        from storyforge.extract import cleanup_answer_formats
+        ref_dir = os.path.join(project_dir, 'reference')
+        path = os.path.join(ref_dir, 'physical-states.csv')
+        with open(path) as f:
+            lines = f.read().splitlines()
+        lines[0] += '|notes'
+        lines[1] = lines[1].rsplit('|', 1)[0] + '|Yes — limps|keep me'
+        with open(path, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        cleanup_answer_formats(ref_dir)
+        with open(path) as f:
+            text = f.read()
+        assert text.splitlines()[0].endswith('|notes') and 'keep me' in text
 
 
 def test_physical_state_prompt_asks_for_a_boolean():

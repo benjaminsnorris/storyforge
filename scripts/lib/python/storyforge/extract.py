@@ -1149,11 +1149,12 @@ def cleanup_answer_formats(ref_dir: str) -> list[dict]:
         new = reduce_boolean(old)
         if new != old:
             row['action_gating'] = new
-            fixes.append({'scene_id': row.get('id', ''), 'field': 'action_gating',
+            fixes.append({'state_id': row.get('id', ''), 'field': 'action_gating',
                           'old_value': old, 'new_value': new})
-    if any(f['field'] == 'action_gating' for f in fixes):
-        columns = list(phys[0].keys())
-        _write_csv(phys_path, phys, columns)
+    if fixes:
+        # The file's own columns, so nothing an author added is dropped; a
+        # stray '|' in a row (DictReader's None key) never becomes a column
+        _write_csv(phys_path, phys, [c for c in _header(phys_path) if c])
 
     briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
     briefs = _read_csv(briefs_path)
@@ -1167,8 +1168,16 @@ def cleanup_answer_formats(ref_dir: str) -> list[dict]:
             fixes.append({'scene_id': row.get('id', ''), 'field': 'continuity_deps',
                           'old_value': old, 'new_value': new})
     if changed:
-        _write_csv(briefs_path, briefs, _FILE_MAP['scene-briefs.csv'])
+        header = _header(briefs_path)
+        _write_csv(briefs_path, briefs,
+                   header + [c for c in _FILE_MAP['scene-briefs.csv'] if c not in header])
     return fixes
+
+
+def _header(path: str) -> list[str]:
+    import csv as _csv
+    with open(path, newline='', encoding='utf-8') as f:
+        return next(_csv.reader(f, delimiter='|'), [])
 
 
 def run_cleanup(ref_dir: str) -> dict:
