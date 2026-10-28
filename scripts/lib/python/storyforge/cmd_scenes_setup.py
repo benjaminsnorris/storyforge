@@ -214,26 +214,19 @@ def main(argv=None):
         return after_line
 
     def build_splits_from_markers(chapter_text, break_lines):
-        """Build split info from explicit break markers."""
-        lines_list = chapter_text.splitlines()
-        splits = [{'line': 1, 'title': '', 'reason': 'Chapter opening'}]
-        # Title for first segment
-        first_line = lines_list[0].strip() if lines_list else 'Opening'
-        splits[0]['title'] = first_line or 'Opening'
+        """Build split info from explicit break markers.
 
+        Markers give boundaries but no titles. Titles are left empty for
+        extraction to write (it only fills empty fields), rather than filled
+        with a chapter heading or the first 60 characters of prose.
+        """
+        splits = [{'line': 1, 'title': '', 'reason': 'Chapter opening'}]
         for brk in break_lines:
-            content_start = find_content_start(chapter_text, brk)
-            seg_title = ''
-            if content_start <= len(lines_list):
-                seg_title = lines_list[content_start - 1].strip()[:60]
-            if not seg_title:
-                seg_title = f'Scene {len(splits) + 1}'
             splits.append({
-                'line': content_start,
-                'title': seg_title,
+                'line': find_content_start(chapter_text, brk),
+                'title': '',
                 'reason': 'Explicit scene break marker',
             })
-
         return splits
 
     def confirm_splits(chapter_name, chapter_text, splits):
@@ -253,7 +246,9 @@ def main(argv=None):
                 end_line = total_lines
             seg_text = '\n'.join(lines_list[start_line - 1:end_line])
             seg_words = count_words(seg_text)
-            print(f'    Scene {s_idx + 1}: "{split["title"]}" '
+            opening = next((l.strip() for l in seg_text.splitlines() if l.strip()), '')
+            label = split['title'] or f'{opening[:60]}...'
+            print(f'    Scene {s_idx + 1}: "{label}" '
                   f'(lines {start_line}-{end_line}, ~{seg_words} words) -- {split["reason"]}')
 
         if args.yes:

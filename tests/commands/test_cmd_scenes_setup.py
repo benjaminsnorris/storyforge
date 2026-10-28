@@ -591,6 +591,12 @@ def _new_rows(project_dir, csv_name):
     return header, [r for r in rows if r['id'] not in fixture_ids]
 
 
+def _opening(project_dir, scene_id):
+    """First non-blank line of a scene file."""
+    with open(os.path.join(project_dir, 'scenes', f'{scene_id}.md')) as f:
+        return next(l.strip() for l in f if l.strip())
+
+
 class TestRowAlignment:
     """Rows written by a split must line up with the CSV's header."""
 
@@ -625,13 +631,16 @@ class TestRowAlignment:
         assert len(rows) == 2
         assert all(len(r) == len(header) for r in rows)
 
-    def test_heading_markup_stripped_from_title(self, mock_api, mock_git,
-                                                mock_costs, project_dir,
-                                                monkeypatch):
+    def test_marker_splits_leave_title_for_extraction(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        # The Great Gatsby got titles like "# Chapter I" and "Inside, the
+        # crimson room bloomed with light. Tom and Miss Ba"; extraction only
+        # fills empty fields, so its real titles were discarded.
         self._split(project_dir, monkeypatch,
-                    '# Chapter One\n\nOpening.\n\n***\n\nLater.\n')
+                    '# Chapter One\n\nOpening prose here.\n\n***\n\nLater prose.\n')
         _, rows = _new_rows(project_dir, 'scenes.csv')
-        assert rows[0]['title'] == 'Chapter One'
+        assert [r['title'] for r in rows] == ['', '']
+        assert [r['id'] for r in rows] == ['scene-ch1-1', 'scene-ch1-2']
 
 
 class TestChapterOrder:
@@ -652,7 +661,8 @@ class TestChapterOrder:
 
         _, rows = _new_rows(project_dir, 'scenes.csv')
         rows.sort(key=lambda r: int(r['seq']))
-        assert [r['title'] for r in rows[::2]] == [f'Chapter {n}' for n in numerals]
+        assert [_opening(project_dir, r['id']) for r in rows[::2]] == [
+            f'Chapter {n}' for n in numerals]
 
     def test_split_chapters_orders_numbers_naturally(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
@@ -669,7 +679,8 @@ class TestChapterOrder:
 
         _, rows = _new_rows(project_dir, 'scenes.csv')
         rows.sort(key=lambda r: int(r['seq']))
-        assert [r['title'][:4] for r in rows[::2]] == ['Ch1 ', 'Ch2 ', 'Ch10']
+        assert [_opening(project_dir, r['id']) for r in rows[::2]] == [
+            'Ch1 opens.', 'Ch2 opens.', 'Ch10 opens.']
 
 
 class TestParts:
@@ -702,7 +713,7 @@ class TestParts:
         text = ('PART ONE\n\n' + self._chapter(1) + self._chapter(2)
                 + '# Part Two: The Return\n\n' + self._chapter(3))
         rows = self._split(project_dir, monkeypatch, text)
-        assert [(r['title'], r['part']) for r in rows[::2]] == [
+        assert [(_opening(project_dir, r['id']), r['part']) for r in rows[::2]] == [
             ('Chapter 1', '1'), ('Chapter 2', '1'), ('Chapter 3', '2')]
 
     def test_part_heading_is_not_a_chapter_or_scene_text(
