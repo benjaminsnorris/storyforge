@@ -88,6 +88,18 @@ def scene_id_problems(scene_id: str) -> list[str]:
     return problems
 
 
+# A scene-break line: three or more of one break character, optionally
+# spaced ("***", "* * *", "# # #", "~~~", and the long dash rules of
+# Project Gutenberg texts). Markdown headings are excluded by requiring the
+# whole line to be break characters.
+_BREAK_MARKER = re.compile(r'^\s*([*\-_#~•·—])(\s*\1){2,}\s*$')
+
+
+def is_break_marker(line: str) -> bool:
+    """True if the line is a scene-break marker."""
+    return bool(_BREAK_MARKER.match(line))
+
+
 _TRAILING_STOPWORDS = frozenset(
     'a an and as at by for from in into of on or the to while with'.split())
 
@@ -310,7 +322,7 @@ def split_by_scene_markers(text: str,
         cleaned = []
         for ln in segment_lines:
             stripped = ln.strip()
-            if stripped in ('***', '---', '# # #', '* * *'):
+            if is_break_marker(stripped):
                 continue
             cleaned.append(ln)
 

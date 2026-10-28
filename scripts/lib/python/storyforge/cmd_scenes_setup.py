@@ -36,7 +36,7 @@ from storyforge.costs import (
     estimate_cost, check_threshold, print_summary, log_operation,
 )
 from storyforge.scenes import (
-    generate_slug, unique_slug, scene_id_slug, parse_scene_boundaries,
+    generate_slug, unique_slug, scene_id_slug, is_break_marker, parse_scene_boundaries,
     build_boundary_prompt, scenes_header, intent_header,
     _title_from_file,
 )
@@ -186,7 +186,7 @@ def main(argv=None):
 
         for line_num, line in enumerate(text.splitlines(), 1):
             stripped = line.strip()
-            if stripped in ('***', '---', '# # #', '* * *'):
+            if is_break_marker(stripped):
                 if line_num > 1:
                     breaks.append(line_num)
                 blank_count = 0
@@ -309,7 +309,7 @@ def main(argv=None):
             cleaned = []
             for ln in seg_lines:
                 stripped = ln.strip()
-                if stripped in ('***', '---', '# # #', '* * *'):
+                if is_break_marker(stripped):
                     continue
                 cleaned.append(ln)
             # Trim leading blank lines

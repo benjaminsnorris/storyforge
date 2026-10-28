@@ -511,3 +511,21 @@ class TestBuildBoundaryPrompt:
         prompt = build_boundary_prompt('')
         # Should still produce a prompt, just with empty text section
         assert 'SCENE:' in prompt
+
+
+class TestBreakMarkers:
+    """The Great Gatsby's Gutenberg text marks breaks with long dash rules,
+    which the exact-match list ('***', '---', '# # #', '* * *') missed."""
+
+    @pytest.mark.parametrize('line', [
+        '***', '* * *', '---', '# # #', '~~~', '•  •  •',
+        '-' * 72, '   ' + '-' * 72 + '  ', '———'])
+    def test_markers_recognized(self, line):
+        from storyforge.scenes import is_break_marker
+        assert is_break_marker(line)
+
+    @pytest.mark.parametrize('line', [
+        '# Chapter One', '**', '-- he said', '* item', '===', 'The end.', ''])
+    def test_non_markers_rejected(self, line):
+        from storyforge.scenes import is_break_marker
+        assert not is_break_marker(line)
