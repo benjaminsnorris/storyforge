@@ -1061,6 +1061,18 @@ class TestMainCsvMode:
 class TestMainDryRun:
     """Test main() in dry-run mode."""
 
+    def test_dry_run_says_the_report_is_written(self, mock_api, mock_git, mock_costs,
+                                                project_dir, monkeypatch, capsys):
+        """F-027: the banner said 'no changes will be made', then the report
+        (cleanup's product, written by design) appeared."""
+        monkeypatch.setattr('storyforge.cmd_cleanup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_cleanup.subprocess.run',
+                            lambda *a, **kw: subprocess.CompletedProcess(
+                                a[0] if a else [], 0, stdout='', stderr=''))
+        main(['--dry-run'])
+        assert 'only the report (working/cleanup-report.csv) is written' in capsys.readouterr().out
+
     def test_dry_run_no_commits(self, mock_api, mock_git, mock_costs,
                                 project_dir, monkeypatch):
         monkeypatch.setattr('storyforge.cmd_cleanup.detect_project_root',
