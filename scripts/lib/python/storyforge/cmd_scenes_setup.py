@@ -788,6 +788,26 @@ def main(argv=None):
                         chapter_starts.append(line_num)
                         chapter_names.append(f'Chapter {stripped}')
 
+        # No chapter headings: fall back to any standalone markdown heading,
+        # so books divided into staves, books or letters keep their divisions.
+        # A heading with no prose before the next one (a title) is skipped and
+        # left as front matter.
+        if not chapter_starts:
+            part_lines = {n for n, _ in part_starts}
+            headings = [
+                n for n, line in enumerate(ms_lines, 1)
+                if n not in part_lines
+                and re.match(r'^#{1,2}\s+\S', line.strip())
+                and (n == 1 or not ms_lines[n - 2].strip())
+                and (n == total_lines or not ms_lines[n].strip())
+            ]
+            bounds = sorted(headings + list(part_lines)) + [total_lines + 1]
+            for n in headings:
+                end = next(b for b in bounds if b > n)
+                if any(l.strip() for l in ms_lines[n:end - 1]):
+                    chapter_starts.append(n)
+                    chapter_names.append(re.sub(r'^#+\s*', '', ms_lines[n - 1].strip()))
+
         if chapter_starts:
             log(f'Found {len(chapter_starts)} chapter boundaries')
         else:
