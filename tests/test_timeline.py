@@ -277,14 +277,30 @@ class TestAssignment:
         assert _column(project_dir, 'time_mode')['c'] == ''
         with open(os.path.join(project_dir, tl.PROPOSED_FILE)) as f:
             proposed = f.read()
-        assert 'b|timeline_day|5|2|next' in proposed and 'c|time_mode||frame|' in proposed
-        assert result['assigned'] == 0 and result['proposed'] == 4
+        # Aligned to the author's day: b (5) agrees once shifted by +3
+        assert 'b|timeline_day' not in proposed
+        assert 'a|timeline_day||4|start' in proposed and 'c|time_mode||frame|' in proposed
+        assert result['assigned'] == 0 and result['proposed'] == 3
 
         tl.run_assignment(project_dir, 'm', logs, force=True)
         assert _column(project_dir, 'timeline_day') == {'a': '1', 'b': '2', 'c': '800'}
         assert _column(project_dir, 'time_mode')['c'] == 'frame'
         # A clean run leaves no stale proposal behind
         assert not os.path.exists(os.path.join(project_dir, tl.PROPOSED_FILE))
+
+    def test_proposals_are_aligned_to_the_authors_day_one(self, project_dir, monkeypatch):
+        import storyforge.timeline as tl
+        _scenes(project_dir, [('a', '-2', 'scene'), ('b', '0', 'scene'), ('c', '9', 'scene')])
+        tl.write_cues(project_dir, {'a': {'relation': 'later'}})
+        monkeypatch.setattr(tl, '_invoke_assignment', lambda model: (
+            lambda prompt, log_file, label: 'CALENDAR:\na | 1 | scene | x\nb | 3 | scene | x\n'
+                                            'c | 7 | scene | x\n'))
+        result = tl.run_assignment(project_dir, 'm', os.path.join(project_dir, 'working', 'logs'),
+                                   force=False)
+        # Shifted by -3: a and b agree; only c (6 vs the author's 9) is proposed
+        with open(os.path.join(project_dir, tl.PROPOSED_FILE)) as f:
+            assert f.read().splitlines()[1:] == ['c|timeline_day|9|4|x']
+        assert result['proposed'] == 1
 
     def test_unplaced_book_is_written_when_nothing_was_authored(self, project_dir, monkeypatch):
         import storyforge.timeline as tl

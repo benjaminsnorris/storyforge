@@ -642,6 +642,17 @@ def run_assignment(project_dir: str, model: str, log_dir: str, force: bool) -> d
     # is only proposed, never mixed in (its days may be offset from theirs)
     authored = any((r.get('timeline_day') or '').strip() for r in rows if r.get('id') in placed)
     write = force or not authored
+    if not write:
+        # Proposals are made on the author's calendar: where they counted
+        # day 1 differently, a constant offset is not a disagreement
+        # (shared-dark: 81 of 100 days 'differed', mostly by one shift)
+        offsets = sorted(placed[r['id']][0] - _int(r['timeline_day']) for r in rows
+                         if r.get('id') in placed and _int(r.get('timeline_day')) is not None
+                         and placed[r['id']][1] != 'frame')
+        shift = offsets[len(offsets) // 2] if offsets else 0
+        if shift:
+            placed = {sid: (day - shift, mode, basis) for sid, (day, mode, basis) in placed.items()}
+            log(f'  Timeline: proposals aligned to your calendar (shifted {-shift:+d} days)')
     assigned = 0
     differences = []
     for row in rows:
