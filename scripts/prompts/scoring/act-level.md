@@ -21,9 +21,10 @@ Scale: 1 = Absent, 2 = Developing, 3 = Competent, 4 = Strong, 5 = Masterful.
 
 ## Instructions
 
-- Score each principle as an integer from 1 to 5 (1=Absent, 2=Developing, 3=Competent, 4=Strong, 5=Masterful).
+- Score each principle as an integer from 1 to 5 (1=Absent, 2=Developing, 3=Competent, 4=Strong, 5=Masterful), or `n/a` for a narrative framework the act does not use.
 - Evaluate the act as a whole -- how scenes accumulate, build, and connect -- not individual scenes in isolation.
 - For narrative frameworks: assess how effectively the act realizes each framework's structural principles (beat placement, energy shape, transformation arc).
+- A framework this act does not use (its structure follows another logic) scores `n/a`, not 1. A 1 means the act uses the framework and realizes it poorly. Not using a framework is a valid creative choice and must not read as a weakness. character_web and character_as_theme always get a number.
 - For character_web: assess whether characters are defined in relation to each other, with relationships producing subtext and dynamic tension across scenes.
 - For character_as_theme: assess whether major characters embody distinct answers to the story's central thematic question, with theme emerging from their collision.
 - Anchor every score in observable textual evidence, not subjective impression.

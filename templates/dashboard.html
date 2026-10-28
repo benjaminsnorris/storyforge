@@ -2487,9 +2487,11 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         yOffset += 16;
 
         principles.forEach(function(p) {
-            var score = parseInt(act[p]) || 0;
+            // n/a: the act doesn't use this framework; no bar, not a 0
+            var na = isNaN(parseInt(act[p]));
+            var score = na ? 0 : parseInt(act[p]);
             var barW = (score / 5) * MAX_BAR_W;
-            var color = scoreColorClass(score);
+            var color = na ? 'var(--text-dim)' : scoreColorClass(score);
 
             // Label
             var label = svgEl('text', {
@@ -2522,7 +2524,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
                 'font-weight': 700, fill: color,
                 'data-act-group': act.id
             });
-            scoreLabel.textContent = score;
+            scoreLabel.textContent = na ? 'n/a' : score;
             svg.appendChild(scoreLabel);
 
             yOffset += BAR_H + BAR_GAP;
@@ -2585,7 +2587,9 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     var points = [];
     principles.forEach(function(p, i) {
         var angle = startAngle + i * angleStep;
-        var score = parseInt(p.score) || 0;
+        // n/a: the book doesn't use this framework; drawn at the centre, labelled n/a
+        var na = isNaN(parseInt(p.score));
+        var score = na ? 0 : parseInt(p.score);
         var sr = (score / RINGS) * R;
 
         // Spoke line
@@ -2599,7 +2603,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         // Data point
         var px = CX + Math.cos(angle) * sr;
         var py = CY + Math.sin(angle) * sr;
-        points.push({ x: px, y: py, score: score, principle: p.principle });
+        points.push({ x: px, y: py, score: score, na: na, principle: p.principle });
 
         // Framework label around perimeter
         var labelR = R + 24;
@@ -2618,7 +2622,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             x: px, y: py - 8, 'text-anchor': 'middle',
             'font-family': 'var(--font-mono)', 'font-size': 10,
             fill: 'var(--text)', 'font-weight': 700
-        })).textContent = score;
+        })).textContent = na ? 'n/a' : score;
     });
 
     // Draw filled polygon
@@ -2632,7 +2636,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
         // Draw clickable score dots
         points.forEach(function(p) {
-            var color = p.score <= 1 ? 'var(--score-low)' :
+            var color = p.na ? 'var(--text-dim)' :
+                        p.score <= 1 ? 'var(--score-low)' :
                         p.score <= 2 ? 'var(--score-mid-low)' :
                         p.score <= 3 ? 'var(--score-mid)' :
                         p.score <= 4 ? 'var(--score-mid-high)' :
