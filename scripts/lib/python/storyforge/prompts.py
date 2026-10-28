@@ -1562,6 +1562,7 @@ Do NOT follow it with a reflection, a thematic echo, or a landscape-as-metaphor 
 
 **Guardrails:**
 - Do NOT invent character relationships, history, or backstory not present in the brief, knowledge chain, or character bible
+- Interpretive brief fields (function, motifs, subtext, emotions, and how key_actions are phrased) are notes to you, written with hindsight. The narration may reveal only what knowledge_in and knowledge_out allow: never state a fact, motive or meaning that appears only in those notes
 - Do NOT add characters not listed in on_stage
 - Do NOT resolve threads not listed in mice_threads for this scene
 - Acknowledge all action-gating physical states — characters cannot use injured limbs, don't have lost equipment
