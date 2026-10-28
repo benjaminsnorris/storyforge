@@ -2060,7 +2060,7 @@ def has_ingested_rows(rows: list[dict[str, str]]) -> bool:
 def staleness_unchecked_finding(
         project_dir: str,
         rows: list[dict[str, str]],
-        canon_cutoff: str) -> list[IllustrationFinding]:
+        canon_cutoff: str) -> 'list[IllustrationFinding]':
     """One finding when canon exists, filed art exists, and nothing can date it.
 
     **Silence would be indistinguishable from "everything is current."** With no
@@ -2108,7 +2108,7 @@ def staleness_unchecked_finding(
 def stale_render_findings(
         project_dir: str, *,
         plan: list[dict[str, str]] | None = None,
-        canon_cutoff: str | None = None) -> list[IllustrationFinding]:
+        canon_cutoff: str | None = None) -> 'list[IllustrationFinding]':
     """One finding per ingested row whose art predates the current canon.
 
     Plus `staleness_unchecked_finding`, because "no stale rows" and "could not
