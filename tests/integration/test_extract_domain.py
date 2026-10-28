@@ -489,6 +489,13 @@ class TestBuildBriefParallelPrompt:
         assert 'Value at stake: truth' in prompt
         assert 'Value shift: +/-' in prompt
 
+    def test_keeps_actions_and_motifs_to_the_page(self):
+        # F-045: motifs glossed with later revelations, and key_actions
+        # naming unstated motives, were written into drafts as narration.
+        prompt = build_brief_parallel_prompt('act1-sc01', 'Scene text.', {}, {}, {})
+        assert 'Do not name a motive or meaning the scene leaves unstated' in prompt
+        assert 'Never gloss an image with facts or meanings the reader learns only in later scenes' in prompt
+
 
 class TestBuildKnowledgePrompt:
     """Tests for build_knowledge_prompt."""

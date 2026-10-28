@@ -622,6 +622,15 @@ class TestBuildScenePromptFromBriefs:
             'act1-sc01', project_dir, plugin_dir, coaching_level='full')
         assert 'Write the complete prose' in prompt
 
+    def test_interpretive_fields_do_not_license_reveals(self, project_dir, plugin_dir):
+        # F-045: a hindsight motif ("the original dreamer who was robbed")
+        # counted as "present in the brief", so the draft revealed backstory
+        # the POV character doesn't know yet. Knowledge bounds the narration.
+        prompt = build_scene_prompt_from_briefs(
+            'act1-sc01', project_dir, plugin_dir, coaching_level='full')
+        assert 'notes to you, written with hindsight' in prompt
+        assert 'may reveal only what knowledge_in and knowledge_out allow' in prompt
+
     def test_coach_coaching_has_writing_guide(self, project_dir, plugin_dir):
         prompt = build_scene_prompt_from_briefs(
             'act1-sc01', project_dir, plugin_dir, coaching_level='coach')

@@ -405,10 +405,10 @@ CONFLICT: [what specifically opposes the goal?]
 OUTCOME: [how does the scene end for the POV character? One of: {OUTCOME_GUIDE}]
 CRISIS: [the key dilemma — a best bad choice or irreconcilable goods that the character faces]
 DECISION: [what the character actively chooses in response to the crisis]
-KEY_ACTIONS: [semicolon-separated concrete things that happen in this scene]
+KEY_ACTIONS: [semicolon-separated concrete things that happen in this scene, as the page shows them. Do not name a motive or meaning the scene leaves unstated (write "takes a phone call he cuts short", not "takes a call about criminal business")]
 KEY_DIALOGUE: [semicolon-separated specific lines or exchanges that are essential to the scene — quote directly from the text]
 EMOTIONS: [semicolon-separated emotional beats in sequence as they occur through the scene]
-MOTIFS: [semicolon-separated recurring images, symbols, or sensory details that carry thematic weight]
+MOTIFS: [semicolon-separated recurring images, symbols, or sensory details that carry thematic weight, described as they appear in this scene. Never gloss an image with facts or meanings the reader learns only in later scenes: the drafter will write them]
 SUBTEXT: [ONE sentence, max 150 characters. The gap between what a character says/does and what they mean. Format: "X says/does A but means B; don't state B." If no subtext, write NONE. Do NOT write multiple clauses or a paragraph.]"""
 
 
