@@ -147,7 +147,16 @@ def merge_score_files(target_path: str, source_path: str):
 
     # Same headers: append rows
     if t_header == s_header:
+        # The first act's file is copied as written, often with no final
+        # newline; appending to it glued act 3 onto act 1's row (evals F-050)
+        needs_newline = False
+        with open(target_path, 'rb') as f:
+            if f.seek(0, os.SEEK_END) > 0:
+                f.seek(-1, os.SEEK_END)
+                needs_newline = f.read(1) != b'\n'
         with open(target_path, 'a') as f:
+            if needs_newline:
+                f.write('\n')
             for row in s_rows:
                 f.write('|'.join(row) + '\n')
         return
