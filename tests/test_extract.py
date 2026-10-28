@@ -3,6 +3,8 @@
 import os
 import shutil
 
+import pytest
+
 
 class TestParseCharacterizeResponse:
     def test_extracts_fields(self):
@@ -299,3 +301,73 @@ class TestEnumAnswersReduced:
         from storyforge.extract import parse_skeleton_response
         r = parse_skeleton_response('TIME_OF_DAY: Evening (after dinner)\n', 's1')
         assert r['time_of_day'] == 'evening'
+
+
+class TestKnowledgeIdsAtSource:
+    """Phase 3b writes knowledge_in/out as ids from a registry built while the
+    chain is extracted, not as sentences matched up afterwards (F-022)."""
+
+    def test_prompt_offers_registry_ids(self):
+        from storyforge.extract import build_knowledge_prompt
+        prompt = build_knowledge_prompt(
+            's2', 'Scene text.', {'pov': 'Nick'}, {},
+            {'Nick': 'tom-affair-ny'}, [],
+            known_facts={'tom-affair-ny': 'Tom has a mistress in New York',
+                         'gatsby-throws-parties': 'Gatsby throws the parties'})
+        assert '- tom-affair-ny — Tom has a mistress in New York' in prompt
+        assert '- gatsby-throws-parties — Gatsby throws the parties' in prompt
+        assert 'NEW_FACTS:' in prompt
+        assert 'IDs only, never sentences' in prompt
+        assert 'at most 15 words' in prompt
+        assert 'never write "none"' in prompt
+
+    def test_parses_new_facts(self):
+        from storyforge.extract import parse_knowledge_response
+        result = parse_knowledge_response(
+            'KNOWLEDGE_IN: tom-affair-ny\n'
+            'KNOWLEDGE_OUT: tom-affair-ny;myrtle-is-mistress;wilson-unaware\n'
+            'NEW_FACTS: myrtle-is-mistress | Tom\'s mistress is Myrtle Wilson | identity\n'
+            'wilson-unaware | George Wilson does not know of the affair | identity\n'
+            'CONTINUITY_DEPS: s1\n'
+            'SCENE_SUMMARY: Nick meets Myrtle.', 's2')
+        assert [f['id'] for f in result['_new_facts']] == ['myrtle-is-mistress', 'wilson-unaware']
+        assert result['_new_facts'][0]['category'] == 'identity'
+        assert result['continuity_deps'] == 's1'
+        assert result['_summary'] == 'Nick meets Myrtle.'
+
+    @pytest.mark.parametrize('value', ['none', '(none)', 'None.', 'n/a', '(empty)', '-',
+                                       'No new facts'])
+    def test_placeholder_fields_are_empty(self, value):
+        from storyforge.extract import parse_knowledge_response
+        result = parse_knowledge_response(
+            f'KNOWLEDGE_IN: {value}\nKNOWLEDGE_OUT: fact-a;{value}\n'
+            f'NEW_FACTS: {value}\nCONTINUITY_DEPS: {value}\n', 's1')
+        assert 'knowledge_in' not in result
+        assert result['knowledge_out'] == 'fact-a'
+        assert 'continuity_deps' not in result
+        assert result['_new_facts'] == []
+
+    def test_physical_state_placeholders_are_empty(self):
+        from storyforge.extract import parse_physical_state_response
+        result = parse_physical_state_response(
+            'PHYSICAL_STATE_IN: (none)\nPHYSICAL_STATE_OUT: none\n'
+            'NEW_STATES: none\nRESOLVED_STATES: none\n', 's1')
+        assert 'physical_state_in' not in result
+        assert 'physical_state_out' not in result
+        assert result['_new_states'] == []
+        assert result['_resolved'] == []
+
+    def test_registry_grows_and_names_resolve_to_ids(self):
+        from storyforge.extract import merge_new_knowledge_facts, resolve_knowledge_ids
+        registry = {'tom-affair-ny': {'id': 'tom-affair-ny', 'name': 'Tom has a mistress',
+                                      'aliases': '', 'category': 'identity', 'origin': 's1'}}
+        added = merge_new_knowledge_facts(registry, [
+            {'id': 'tom-affair-ny', 'name': 'dup', 'category': ''},
+            {'id': 'myrtle-is-mistress', 'name': 'The mistress is Myrtle', 'category': 'identity'},
+        ], 's2')
+        assert added == ['myrtle-is-mistress']
+        assert registry['myrtle-is-mistress']['origin'] == 's2'
+        assert registry['tom-affair-ny']['name'] == 'Tom has a mistress'
+        assert resolve_knowledge_ids(
+            registry, 'Tom has a mistress;myrtle-is-mistress;(none);something else'
+        ) == 'tom-affair-ny;myrtle-is-mistress;something else'

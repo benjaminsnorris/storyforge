@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 from .enrich import load_registry_alias_maps, normalize_fields  # noqa: F401
+from .enrich import is_placeholder, normalize_aliases, strip_placeholders
 from .common import log
 from .prompts import read_yaml_field
 
@@ -427,12 +428,37 @@ def build_knowledge_prompt(scene_id: str, scene_text: str,
                            intent: dict[str, str],
                            prior_knowledge: dict[str, str],
                            prior_scene_summaries: list[str],
-                           registries_text: str = '') -> str:
+                           registries_text: str = '',
+                           known_facts: dict[str, str] | None = None) -> str:
     """Build prompt for Phase 3b: extract knowledge_in, knowledge_out, and
-    continuity_deps. Must be called sequentially."""
+    continuity_deps. Must be called sequentially.
+
+    ``known_facts`` is the knowledge registry so far (id -> name). The fields
+    are registry-backed, so the model reports facts by id, reusing these ids
+    for facts already established and declaring each new fact once on a
+    NEW_FACTS line. ``prior_knowledge`` maps each POV character to the
+    semicolon-separated ids they know; with a registry, each is rendered
+    with its name.
+    """
+    from .schema import MAX_FACT_NAME_WORDS
+    known_facts = known_facts or {}
     pov = skeleton.get('pov', 'unknown')
     prior_context = '\n'.join(prior_scene_summaries[-10:]) if prior_scene_summaries else '(first scene)'
-    pov_knowledge = prior_knowledge.get(pov, 'No prior knowledge established')
+    pov_raw = prior_knowledge.get(pov, '')
+    if pov_raw:
+        pov_lines = []
+        for fact in (f.strip() for f in pov_raw.split(';')):
+            if fact:
+                name = known_facts.get(fact)
+                pov_lines.append(f'- {fact} — {name}' if name else f'- {fact}')
+        pov_knowledge = '\n'.join(pov_lines)
+    else:
+        pov_knowledge = 'No prior knowledge established'
+
+    if known_facts:
+        registry_text = '\n'.join(f'- {fid} — {name}' for fid, name in known_facts.items())
+    else:
+        registry_text = '(no facts established yet)'
 
     registries_section = f'\n{registries_text}\n' if registries_text else ''
 
@@ -442,6 +468,9 @@ def build_knowledge_prompt(scene_id: str, scene_text: str,
 
 ## What {pov} knows entering this scene (from prior scenes):
 {pov_knowledge}
+
+## Knowledge registry (every fact established so far, any character)
+{registry_text}
 
 ## Recent prior scenes (for context):
 {prior_context}
@@ -466,33 +495,114 @@ A fact is structurally useful if it fits one of these categories:
 **Too granular (don't do this):** "Maren notices the surveyor's hands are shaking"; "Kael orders ale at the tavern"
 **Right level:** "the mine assay was forged"; "Dara is alive and hiding in the northern pass"
 
-Output each field on its own labeled line.
+Every fact is referred to by its **ID**. If a fact is already in the knowledge registry above, use its existing ID — even if this scene words it differently. Only a fact not in the registry is new: give it a new kebab-case ID (2-5 words, e.g. assay-was-forged, dara-hiding-northern-pass) and declare it on a NEW_FACTS line. A fact's name states the fact alone, in at most {MAX_FACT_NAME_WORDS} words — no reasons, no consequences, no second clause.
 
-KNOWLEDGE_IN: [semicolon-separated structurally useful facts that {pov} knows at the START — carry forward only facts from prior knowledge that are relevant to this scene's decisions]
-KNOWLEDGE_OUT: [semicolon-separated structurally useful facts that {pov} knows at the END — knowledge_in plus 0-2 new facts learned during the scene]
+Output each field on its own labeled line. Leave a field empty when there is nothing to list — never write "none" or "(none)".
+
+KNOWLEDGE_IN: [semicolon-separated fact IDs {pov} knows at the START — carry forward only facts from prior knowledge that are relevant to this scene's decisions]
+KNOWLEDGE_OUT: [semicolon-separated fact IDs {pov} knows at the END — knowledge_in plus 0-2 new facts learned during the scene]
+NEW_FACTS: [one per line for each new ID used above: id | name | category — category is identity, motive-intent, capability-constraint, state-change, stakes-threat, or relationship-shift]
 CONTINUITY_DEPS: [semicolon-separated scene IDs that this scene directly depends on — which prior scenes established facts that this scene uses?]
 SCENE_SUMMARY: [one sentence summarizing what happens in this scene — this will be used as context for subsequent scenes]
 
-IMPORTANT: Use EXACT wording for knowledge facts. If a prior scene established "the eastern readings don't match", use that exact phrase, not a paraphrase. This enables automated validation."""
+IMPORTANT: KNOWLEDGE_IN and KNOWLEDGE_OUT contain IDs only, never sentences. Every ID must be either in the knowledge registry above or declared on a NEW_FACTS line. This enables automated validation."""
 
 
-def parse_knowledge_response(response: str, scene_id: str) -> dict[str, str]:
-    """Parse Phase 3b response."""
-    result = {'id': scene_id}
+def _parse_new_fact(line: str) -> dict[str, str] | None:
+    """Parse one ``id | name | category`` NEW_FACTS entry, or None."""
+    parts = [p.strip() for p in line.split('|')]
+    if len(parts) < 2 or not parts[0] or not parts[1] or is_placeholder(parts[0]):
+        return None
+    return {
+        'id': parts[0],
+        'name': parts[1],
+        'category': parts[2] if len(parts) > 2 else '',
+    }
+
+
+def parse_knowledge_response(response: str, scene_id: str) -> dict:
+    """Parse Phase 3b response.
+
+    Placeholder entries (``none``, ``(none)``, ``n/a``) are dropped from the
+    list fields, so a scene with nothing to report stores an empty field
+    rather than a fact named "none". New facts declared on NEW_FACTS lines
+    are returned under ``_new_facts`` as ``{id, name, category}`` dicts.
+    """
+    result: dict = {'id': scene_id, '_new_facts': []}
     label_map = {
         'KNOWLEDGE_IN': 'knowledge_in',
         'KNOWLEDGE_OUT': 'knowledge_out',
         'CONTINUITY_DEPS': 'continuity_deps',
         'SCENE_SUMMARY': '_summary',
     }
+    list_fields = {'knowledge_in', 'knowledge_out', 'continuity_deps'}
+    in_new_facts = False
     for line in response.split('\n'):
-        match = re.match(r'^([A-Z_]+):\s*(.*)', line.strip())
-        if match:
+        stripped = line.strip()
+        match = re.match(r'^([A-Z_]+):\s*(.*)', stripped)
+        if match and (match.group(1) in label_map or match.group(1) == 'NEW_FACTS'):
             label = match.group(1)
             value = match.group(2).strip()
-            if label in label_map and value:
-                result[label_map[label]] = value
+            in_new_facts = label == 'NEW_FACTS'
+            if in_new_facts:
+                fact = _parse_new_fact(value) if value else None
+                if fact:
+                    result['_new_facts'].append(fact)
+                continue
+            key = label_map[label]
+            if key in list_fields:
+                value = strip_placeholders(value)
+            if value:
+                result[key] = value
+        elif in_new_facts and stripped:
+            fact = _parse_new_fact(stripped.lstrip('-* ').strip())
+            if fact:
+                result['_new_facts'].append(fact)
     return result
+
+
+KNOWLEDGE_COLUMNS = ['id', 'name', 'aliases', 'category', 'origin']
+
+
+def merge_new_knowledge_facts(registry: dict[str, dict[str, str]],
+                              new_facts: list[dict[str, str]],
+                              scene_id: str) -> list[str]:
+    """Add facts declared on NEW_FACTS lines to the running knowledge registry.
+
+    ``registry`` maps id -> knowledge.csv row and is updated in place; a new
+    fact's origin is the scene that declared it. An id already registered
+    keeps its existing row (first declaration wins). Returns the ids added.
+    """
+    added = []
+    for fact in new_facts:
+        fid = fact.get('id', '').strip()
+        if not fid or fid in registry:
+            continue
+        registry[fid] = {
+            'id': fid,
+            'name': fact.get('name', '').strip(),
+            'aliases': '',
+            'category': fact.get('category', '').strip(),
+            'origin': scene_id,
+        }
+        added.append(fid)
+    return added
+
+
+def resolve_knowledge_ids(registry: dict[str, dict[str, str]], value: str) -> str:
+    """Map each entry of a knowledge list to its registry id.
+
+    Matches id, name or alias case-insensitively, so a model that echoes a
+    fact's name instead of its id still lands on the id. Placeholders are
+    dropped; entries that match nothing pass through unchanged for
+    reconciliation to resolve or report.
+    """
+    alias_map: dict[str, str] = {}
+    for fid, row in registry.items():
+        for key in [fid, row.get('name', '')] + (row.get('aliases') or '').split(';'):
+            if key.strip():
+                alias_map.setdefault(key.strip().lower(), fid)
+    return normalize_aliases(alias_map, strip_placeholders(value))
 
 
 # ============================================================================
@@ -544,7 +654,7 @@ Litmus test: Would a drafter who knows about this state write a *different scene
 Too granular (don't): "Character frowns", "Hair is windblown", "Feels cold"
 Right level: "Left arm broken, splinted", "Carrying the stolen compass", "Exhausted after 36 hours awake"
 
-Output each field on its own labeled line:
+Output each field on its own labeled line. Leave a field empty when there is nothing to list — never write "none" or "(none)".
 
 PHYSICAL_STATE_IN: [semicolon-separated state IDs active at START — carry forward from prior states for on-stage characters only]
 PHYSICAL_STATE_OUT: [semicolon-separated state IDs active at END — state_in plus new states acquired, minus states resolved]
@@ -575,13 +685,15 @@ def parse_physical_state_response(response: str, scene_id: str) -> dict:
         if match:
             label = match.group(1)
             value = match.group(2).strip()
-            if label in label_map and value:
-                result[label_map[label]] = value
+            if label in label_map:
+                value = strip_placeholders(value)
+                if value:
+                    result[label_map[label]] = value
             elif label == 'NEW_STATES':
                 # First new state may be on this line
                 if value:
                     parts = value.split('|')
-                    if len(parts) >= 4:
+                    if len(parts) >= 4 and not is_placeholder(parts[0]):
                         result['_new_states'].append({
                             'id': parts[0].strip(),
                             'character': parts[1].strip(),
@@ -596,7 +708,7 @@ def parse_physical_state_response(response: str, scene_id: str) -> dict:
                     if not nline or re.match(r'^[A-Z_]+:', nline):
                         break
                     nparts = nline.split('|')
-                    if len(nparts) >= 4:
+                    if len(nparts) >= 4 and not is_placeholder(nparts[0]):
                         result['_new_states'].append({
                             'id': nparts[0].strip(),
                             'character': nparts[1].strip(),
@@ -607,7 +719,8 @@ def parse_physical_state_response(response: str, scene_id: str) -> dict:
                     i += 1
                 continue
             elif label == 'RESOLVED_STATES' and value:
-                result['_resolved'] = [s.strip() for s in value.split(';') if s.strip()]
+                result['_resolved'] = [s.strip() for s in strip_placeholders(value).split(';')
+                                       if s.strip()]
         i += 1
 
     return result
@@ -828,7 +941,7 @@ def cleanup_knowledge(ref_dir: str) -> list[dict]:
 
             if changed:
                 old_val = knowledge_in
-                new_val = '; '.join(new_facts)
+                new_val = ';'.join(new_facts)
                 briefs_map[sid]['knowledge_in'] = new_val
                 fixes.append({
                     'scene_id': sid,

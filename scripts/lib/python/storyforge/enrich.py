@@ -222,6 +222,41 @@ def strip_parentheticals(value: str) -> str:
     return re.sub(r'\s*\([^)]*\)\s*$', '', value).strip()
 
 
+# A model asked for a list it has nothing to put in writes a word for
+# "nothing" instead (`none`, `(none)`, `n/a`, `(empty)` — the last echoed from
+# the reconcile prompt's own rendering of an empty field). Stored, it becomes a
+# fact or a physical state named "(none)" that the chain checks then report as
+# never established. An empty field is the only representation of nothing.
+_PLACEHOLDER_RE = re.compile(
+    r'^[\[(]?\s*(?:none|n/?a|nil|null|empty|nothing|-+|—|–'
+    r'|no (?:new |prior )?(?:facts?|knowledge|states?|changes?)(?: established)?'
+    r')\s*[\])]?\.?$',
+    re.IGNORECASE,
+)
+
+
+def is_placeholder(entry: str) -> bool:
+    """Whether a single list entry is a stand-in for "nothing" (``none``,
+    ``(none)``, ``n/a``, ``(empty)``, ``-``) rather than a value."""
+    return bool(_PLACEHOLDER_RE.match((entry or '').strip()))
+
+
+def strip_placeholders(semicolon_string: str) -> str:
+    """Drop placeholder entries from a semicolon-separated list.
+
+    A list with no placeholder comes back as given (outer whitespace
+    trimmed). Otherwise entries are trimmed and empty ones dropped, the rest
+    keeping their order and text; a list of nothing but placeholders becomes
+    ``''``.
+    """
+    if not semicolon_string:
+        return ''
+    parts = [p.strip() for p in semicolon_string.split(';')]
+    if not any(is_placeholder(p) for p in parts if p):
+        return semicolon_string.strip()
+    return ';'.join(p for p in parts if p and not is_placeholder(p))
+
+
 def normalize_aliases(alias_map: dict[str, str], semicolon_string: str) -> str:
     """Resolve aliases in a semicolon-separated string.
 
@@ -403,7 +438,8 @@ _VALUE_FIELDS = ('value_at_stake',)
 _KNOWLEDGE_FIELDS = ('knowledge_in', 'knowledge_out')
 
 
-def format_registries_for_prompt(project_dir: str) -> str:
+def format_registries_for_prompt(project_dir: str,
+                                 exclude: tuple[str, ...] = ()) -> str:
     """Format registry CSV contents as a prompt section.
 
     Reads all registry files and returns a formatted string showing
@@ -412,6 +448,8 @@ def format_registries_for_prompt(project_dir: str) -> str:
 
     Args:
         project_dir: Root directory of the novel project.
+        exclude: Registry filenames to leave out (e.g. ``('knowledge.csv',)``
+            for a prompt that renders that registry itself).
 
     Returns:
         Formatted markdown string, or empty string if no registries exist.
@@ -432,6 +470,8 @@ def format_registries_for_prompt(project_dir: str) -> str:
     sections: list[str] = []
 
     for filename, title, extra_cols in registries:
+        if filename in exclude:
+            continue
         csv_path = os.path.join(ref_dir, filename)
         if not os.path.isfile(csv_path):
             continue
