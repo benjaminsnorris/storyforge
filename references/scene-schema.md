@@ -64,7 +64,7 @@ print(dump_schema_markdown())
 
 | Column | Constraint | Stage | Description |
 |--------|-----------|-------|-------------|
-| `id` | free_text | spine | Unique scene identifier — a descriptive slug (e.g., hidden-canyon). Also the filename (scenes/{id}.md). |
+| `id` | free_text | spine | Unique, permanent scene identifier: a 3-5 word slug naming the scene's core event (e.g., gatsby-reunites-with-daisy), never its position (no act1-sc03, scene-12). Never renamed when the scene moves or its title changes; order lives in `seq`. Also the filename (scenes/{id}.md). |
 | `seq` | integer | spine | Reading order. Scenes are sorted by seq. |
 | `title` | free_text | spine | Scene title — evocative, used for reference. |
 | `part` | integer | architecture | Book part this scene belongs to, from the manuscript's part headings; empty if the book has no parts. |

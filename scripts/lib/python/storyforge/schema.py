@@ -72,7 +72,9 @@ COLUMN_SCHEMA = {
     # scenes.csv
     'id': {
         'type': 'free_text', 'file': 'scenes.csv', 'stage': 'spine',
-        'description': 'Unique scene identifier — a descriptive slug (e.g., hidden-canyon). Also the filename (scenes/{id}.md).',
+        'description': 'Unique, permanent scene identifier: a 3-5 word slug naming the '
+                       'scene\'s core event (e.g., gatsby-reunites-with-daisy), never its '
+                       'position. Order lives in seq. Also the filename (scenes/{id}.md).',
     },
     'seq': {
         'type': 'integer', 'file': 'scenes.csv', 'stage': 'spine',
@@ -653,6 +655,24 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
 # ============================================================================
 # Knowledge granularity validation
 # ============================================================================
+
+def validate_scene_ids(ref_dir: str) -> dict:
+    """Advisory check of scenes.csv ids against SCENE_ID_RULE.
+
+    Returns {'total': int, 'warnings': [{'id', 'problems'}]}. Advisory, not
+    blocking: renaming an id breaks references, so an existing project
+    should only change ids deliberately.
+    """
+    from .scenes import scene_id_problems
+    rows = _read_csv(os.path.join(ref_dir, 'scenes.csv'))
+    warnings = []
+    for row in rows:
+        sid = (row.get('id') or '').strip()
+        problems = scene_id_problems(sid) if sid else []
+        if problems:
+            warnings.append({'id': sid, 'problems': problems})
+    return {'total': len(rows), 'warnings': warnings}
+
 
 MAX_FACT_NAME_WORDS = 15
 MAX_NEW_FACTS_PER_SCENE = 4

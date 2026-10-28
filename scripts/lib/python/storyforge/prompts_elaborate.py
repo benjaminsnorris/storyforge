@@ -8,6 +8,7 @@ content for reference documents.
 
 import os
 from .prompts import read_yaml_field
+from .scenes import SCENE_ID_RULE
 
 
 def _read_file(path: str) -> str:
@@ -174,8 +175,10 @@ Output in a fenced block labeled `scenes-csv`:
 
 ```scenes-csv
 id|seq|title|status
-(one row per spine event — id is a descriptive slug, seq is reading order, status is always "spine")
+(one row per spine event — seq is reading order, status is always "spine")
 ```
+
+Scene ids: {SCENE_ID_RULE}
 
 And the intent for each scene:
 
@@ -246,6 +249,8 @@ Update the scenes CSV with new columns filled:
 id|seq|title|act|pov|status
 (all scenes — existing spine scenes updated, new scenes added, status is "architecture")
 ```
+
+Scene ids: {SCENE_ID_RULE} Keep every existing scene's id exactly as it is; to move a scene, change its seq.
 
 Update the intent CSV with new columns:
 
@@ -351,6 +356,8 @@ For each scene:
 id|seq|title|act|pov|location|timeline_day|time_of_day|duration|status
 (all scenes — status is "mapped" for new/updated scenes)
 ```
+
+Scene ids: {SCENE_ID_RULE} Keep every existing scene's id exactly as it is; to move a scene, change its seq.
 
 ```intent-csv
 id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads

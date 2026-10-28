@@ -130,7 +130,7 @@ When fixing CSV fields interactively (upstream passes), all registry-backed fiel
 
 ### Ordering Principles (upstream first)
 
-1. **Structural passes first** — scene additions, removals, reordering
+1. **Structural passes first** — scene additions, removals, reordering. Reorder by changing `seq`; never rename a scene id. New scenes get a 3-5 word slug of their core event as id, never a positional one (see the elaborate skill's Scene IDs section).
 2. **Intent passes second** — value shift corrections, MICE thread management
 3. **Brief passes third** — knowledge chain fixes, goal/conflict/outcome
 4. **Craft passes last** — prose polish (only after all upstream changes settle)

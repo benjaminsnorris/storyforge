@@ -1,6 +1,8 @@
 """Tests for CSV schema validation (migrated from test-schema.sh)."""
 
 import json
+
+import pytest
 import os
 import shutil
 import tempfile
@@ -262,3 +264,39 @@ class TestRegistryFileValidation:
         errors = validate_schema(ref_dir, project_dir)['errors']
         assert any(e['file'] == 'physical-states.csv' and e['column'] == 'category'
                    for e in errors)
+
+
+class TestSceneIdRule:
+    """Scene ids are 3-5 word event slugs, never positional."""
+
+    @pytest.mark.parametrize('sid', [
+        'act1-sc03', 'scene-12', 'ch3-2', 'chapter-ix', 'scene-ch3-2', 'part-2-scene-4'])
+    def test_positional_ids_flagged(self, sid):
+        from storyforge.scenes import scene_id_problems
+        assert 'positional' in scene_id_problems(sid)
+
+    @pytest.mark.parametrize('sid', [
+        'gatsby-reunites-with-daisy', 'valley-of-ashes', 'myrtle-buys-a-dog',
+        'nick-says-goodbye-gatsby-house'])
+    def test_event_slugs_pass(self, sid):
+        from storyforge.scenes import scene_id_problems
+        assert scene_id_problems(sid) == []
+
+    def test_word_count_outside_range_flagged(self):
+        from storyforge.scenes import scene_id_problems
+        assert scene_id_problems('funeral') == ['1 words (want 3-5)']
+        assert scene_id_problems('my-family-have-been-prominent-well-to-do') == ['8 words (want 3-5)']
+
+    def test_validate_scene_ids_reports(self, project_dir):
+        from storyforge.schema import validate_scene_ids
+        report = validate_scene_ids(os.path.join(project_dir, 'reference'))
+        flagged = {w['id'] for w in report['warnings']}
+        assert 'act1-sc01' in flagged   # the fixture's own ids are positional
+
+    @pytest.mark.parametrize('builder', [
+        'build_spine_prompt', 'build_architecture_prompt', 'build_map_prompt'])
+    def test_elaborate_prompts_carry_rule(self, builder, project_dir, plugin_dir):
+        from storyforge import prompts_elaborate
+        from storyforge.scenes import SCENE_ID_RULE
+        prompt = getattr(prompts_elaborate, builder)(project_dir, plugin_dir)
+        assert SCENE_ID_RULE in prompt

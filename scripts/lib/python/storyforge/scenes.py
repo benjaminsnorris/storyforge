@@ -61,6 +61,33 @@ def generate_slug(title: str) -> str:
     return slug
 
 
+# The scene-id rule, shared by the schema, validation and every prompt that
+# mints ids. An id is permanent; order lives in seq.
+SCENE_ID_RULE = (
+    "A scene id is a 3-5 word lowercase hyphenated slug naming the scene's core "
+    "event (e.g., gatsby-reunites-with-daisy). It is permanent: never encode the "
+    "scene's position (no act1-sc03, scene-12, ch3-2), and never rename an id when "
+    "a scene moves or its title changes. Order lives in seq."
+)
+
+_POSITION_WORDS = frozenset('act part ch chapter sc scene s book'.split())
+_NUMERAL = re.compile(r'^(\d+|[ivxlc]+)$')
+_POSITIONAL_TOKEN = re.compile(r'^(act|part|ch|chapter|sc|scene|s|book)\d+$')
+
+
+def scene_id_problems(scene_id: str) -> list[str]:
+    """Ways a scene id breaks SCENE_ID_RULE; empty if it follows it."""
+    tokens = [t for t in scene_id.lower().split('-') if t]
+    problems = []
+    positional = any(_POSITIONAL_TOKEN.match(t) for t in tokens) or any(
+        a in _POSITION_WORDS and _NUMERAL.match(b) for a, b in zip(tokens, tokens[1:]))
+    if positional or (tokens and all(_NUMERAL.match(t) or t in _POSITION_WORDS for t in tokens)):
+        problems.append('positional')
+    if not 3 <= len(tokens) <= 5:
+        problems.append(f'{len(tokens)} words (want 3-5)')
+    return problems
+
+
 _TRAILING_STOPWORDS = frozenset(
     'a an and as at by for from in into of on or the to while with'.split())
 

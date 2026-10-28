@@ -50,6 +50,16 @@ Read all registry files in `reference/` to know the canonical IDs for normalized
 
 **When the author introduces a new character, location, value, knowledge fact, motif, or MICE thread that does not exist in a registry:** add it to the appropriate registry CSV first, then use the new ID in scene data.
 
+## Scene IDs
+
+A scene id is a 3-5 word lowercase hyphenated slug naming the scene's core event (e.g., `gatsby-reunites-with-daisy`). It is permanent:
+
+- **Never positional.** No `act1-sc03`, `scene-12`, `ch3-2`. Position belongs in `seq` (reading order), `act` (structure) and `part` (book divisions), which exist so they can change.
+- **Never renamed.** Not when a scene moves, not when its title changes. Every reference (`continuity_deps`, knowledge `origin`, physical-state `acquired`/`resolves`, chapter maps) points at the id.
+- **Reason about order from `seq`, not the id.** When considering whether a scene belongs elsewhere, judge it by what happens in it; the id should not anchor you to where it started.
+
+`storyforge validate` reports ids that break this rule (advisory).
+
 ## Step 2: Determine Current Stage
 
 Based on the project state, identify where the author is:
@@ -206,7 +216,7 @@ author.
 
 1. Read the spine scenes and story architecture
 2. Expand to 15-25 scenes: add supporting scenes, transitions, subplot introductions
-3. Assign parts, POV, scene types (action/sequel), value shifts, turning points
+3. Assign acts, POV, scene types (action/sequel), value shifts, turning points
    - **Use canonical IDs from registries** for pov, characters, locations, value_at_stake. Add new registry entries for any new characters/locations/values introduced at this stage.
 4. Deepen character bible with supporting characters
 5. Create world bible if needed

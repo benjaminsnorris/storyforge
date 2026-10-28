@@ -35,13 +35,17 @@ def main(argv=None):
         sys.exit(1)
 
     from storyforge.elaborate import validate_structure
-    from storyforge.schema import validate_schema, validate_knowledge_granularity
+    from storyforge.schema import (
+        validate_schema, validate_knowledge_granularity, validate_scene_ids,
+    )
 
     structural = validate_structure(ref_dir)
 
     schema = None
     if not args.no_schema:
         schema = validate_schema(ref_dir, project_dir)
+
+    scene_ids = validate_scene_ids(ref_dir)
 
     knowledge = None
     knowledge_path = os.path.join(ref_dir, 'knowledge.csv')
@@ -104,6 +108,7 @@ def main(argv=None):
         'structural': structural,
         'schema': schema,
         'knowledge': knowledge,
+        'scene_ids': scene_ids,
         'illustrations': illus_result,
         'canon': canon_result,
         'scores': structural_scores,
@@ -128,6 +133,7 @@ def _print_human_readable(combined):
     r = combined['structural']
     schema = combined['schema']
     knowledge = combined.get('knowledge')
+    scene_ids = combined.get('scene_ids') or {'warnings': [], 'total': 0}
 
     total = len(r['checks'])
     fail_count = len(r['failures'])
@@ -174,6 +180,17 @@ def _print_human_readable(combined):
                     elif e['constraint'] == 'scene_ids':
                         unresolved = ', '.join(e.get('unresolved', []))
                         print(f'    {e["row"]} | {e["column"]}: "{unresolved}" — not in scenes.csv')
+
+    if scene_ids['warnings']:
+        from storyforge.scenes import SCENE_ID_RULE
+        print()
+        print('--- Scene ids (advisory) ---')
+        print(f'  {len(scene_ids["warnings"])} of {scene_ids["total"]} ids break the rule: '
+              f'{SCENE_ID_RULE}')
+        for w in scene_ids['warnings'][:20]:
+            print(f'    {w["id"]}: {", ".join(w["problems"])}')
+        if len(scene_ids['warnings']) > 20:
+            print(f'    ... and {len(scene_ids["warnings"]) - 20} more')
 
     if knowledge is not None:
         print()
