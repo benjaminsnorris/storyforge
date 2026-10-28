@@ -252,6 +252,20 @@ def is_placeholder(entry: str) -> bool:
     return bool(_PLACEHOLDER_RE.match(entry) or _NOTE_PLACEHOLDER_RE.match(entry))
 
 
+_BOOLEAN_ANSWER_RE = re.compile(r'^(?:[a-z_]+:\s*)?(true|false|yes|no)\b', re.IGNORECASE)
+
+
+def reduce_boolean(raw: str) -> str:
+    """Reduce a boolean answer that carries an explanation to ``true`` or
+    ``false`` (``Yes — Wilson cannot move`` → ``true``, ``action_gating: no``
+    → ``false``). Anything else comes back unchanged, for validation to
+    report rather than for this to guess."""
+    m = _BOOLEAN_ANSWER_RE.match((raw or '').strip())
+    if not m:
+        return raw
+    return 'true' if m.group(1).lower() in ('true', 'yes') else 'false'
+
+
 def strip_placeholders(semicolon_string: str) -> str:
     """Drop placeholder entries from a semicolon-separated list.
 
