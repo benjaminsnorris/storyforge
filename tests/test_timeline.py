@@ -243,6 +243,17 @@ class TestAssignment:
         assert 'present (latest day the main story has reached): 11' in prompts[1]
         assert placed['s4'] == (30, 'scene', 'test')
 
+    def test_failed_batch_is_asked_again_for_the_answer_only(self, tmp_path):
+        from storyforge.timeline import assign_calendar
+        prompts = []
+
+        def invoke(prompt, log_file, label):
+            prompts.append(prompt)
+            return None if len(prompts) == 1 else 'CALENDAR:\ns0 | 5 | scene | x\n'
+        placed = assign_calendar(self._items(1), invoke, str(tmp_path))
+        assert len(prompts) == 2 and 'REASONING' not in prompts[1]
+        assert placed['s0'] == (5, 'scene', 'x')
+
     def test_truncated_batch_keeps_provisional_days(self, tmp_path):
         from storyforge.timeline import assign_calendar
         items = self._items(3)
