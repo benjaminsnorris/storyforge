@@ -554,6 +554,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     from storyforge.extract import (
         build_brief_parallel_prompt, parse_brief_parallel_response,
         build_knowledge_prompt, parse_knowledge_response,
+        merge_new_knowledge_facts, resolve_knowledge_ids, KNOWLEDGE_COLUMNS,
         build_physical_state_prompt, parse_physical_state_response,
     )
     from storyforge.elaborate import (
@@ -623,6 +624,15 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     knowledge_model = select_model('evaluation')
     knowledge_state = {}
     summaries = []
+    # knowledge_in/out are registry-backed: build knowledge.csv as the chain
+    # is extracted, so each scene's prompt can offer the ids established so
+    # far and the fields are written as ids, not sentences. Seeded from an
+    # existing registry so a re-extraction reuses its ids.
+    knowledge_csv = os.path.join(ref_dir, 'knowledge.csv')
+    knowledge_registry = {fid: row for fid, row in _read_csv_as_map(knowledge_csv).items()
+                          if fid}
+    knowledge_registries = format_registries_for_prompt(
+        project_dir, exclude=('knowledge.csv',))
 
     for scene_id in sorted_scene_ids:
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
@@ -637,9 +647,11 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'act']}
         intent = {k: scene_data.get(k, '') for k in ['function', 'action_sequel']}
 
-        prompt = build_knowledge_prompt(scene_id, scene_text, skeleton, intent,
-                                         knowledge_state, summaries,
-                                         registries_text=registries)
+        prompt = build_knowledge_prompt(
+            scene_id, scene_text, skeleton, intent, knowledge_state, summaries,
+            registries_text=knowledge_registries,
+            known_facts={fid: row.get('name', '')
+                         for fid, row in knowledge_registry.items()})
 
         knowledge_log = os.path.join(log_dir, f'extract-knowledge-{scene_id}.json')
 
@@ -654,6 +666,15 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             continue
 
         result = parse_knowledge_response(text, scene_id)
+
+        # Register the scene's new facts, then resolve both fields to ids
+        if merge_new_knowledge_facts(knowledge_registry,
+                                     result.get('_new_facts', []), scene_id):
+            _write_csv(knowledge_csv, list(knowledge_registry.values()),
+                       KNOWLEDGE_COLUMNS)
+        for k in ('knowledge_in', 'knowledge_out'):
+            if result.get(k):
+                result[k] = resolve_knowledge_ids(knowledge_registry, result[k])
 
         # Update briefs CSV
         updates = {}
@@ -677,7 +698,8 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     commit_and_push(project_dir,
                     'Extract: Phase 3b — knowledge chain',
-                    ['reference/scene-briefs.csv', 'working/'])
+                    ['reference/scene-briefs.csv', 'reference/knowledge.csv',
+                     'working/'])
 
     # --- Phase 3c: Physical state chain (sequential) ---
     log('')
