@@ -949,6 +949,17 @@ class TestMiceOperations:
         })
         assert sorted(find_mice_anomalies(ref_dir)) == ['archive-erasure', 'map-anomaly']
 
+    def test_touched_before_it_opens(self, project_dir):
+        """Gatsby: the mystery of Gatsby's origins, raised in scene 2,
+        'opened' in scene 11."""
+        from storyforge.hone import find_mice_anomalies
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._set_threads(ref_dir, {
+            'act1-sc01': 'map-anomaly', 'act1-sc02': '+map-anomaly',
+            'new-x1': 'archive-erasure', 'act2-sc01': 'archive-erasure',
+        })
+        assert sorted(find_mice_anomalies(ref_dir)) == ['archive-erasure', 'map-anomaly']
+
     def test_thread_rewritten_from_decision(self, project_dir, monkeypatch, tmp_path):
         from storyforge.hone import reconcile_domain, find_mice_anomalies
         ref_dir = os.path.join(project_dir, 'reference')
