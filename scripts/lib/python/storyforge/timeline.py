@@ -33,7 +33,10 @@ CUES_FILE = os.path.join('working', 'timeline-cues.csv')
 PROPOSED_FILE = os.path.join('working', 'timeline-proposed.csv')
 
 _BATCH_SIZE = 40
-_BATCH_MAX_TOKENS = 6000
+# Reasoning (capped in the prompt) plus one line per scene: bounded by the
+# batch size, never by the book. On Gatsby a 6,000-token budget was cut off
+# mid-answer once the model worked through its anchors.
+_BATCH_MAX_TOKENS = 16000
 
 
 # ============================================================================
@@ -232,19 +235,24 @@ def walk(order: list[str], cues: dict[str, dict]) -> dict[str, int | None]:
     """Provisional days from the cues alone, in reading order.
 
     A scene is placed relative to the previous scene: ``continues`` on its
-    day, ``later``/``earlier`` by a parseable gap. The first scene is day 1
-    unless it is a flashback or frame. Frame scenes, unclear ones, vague gaps
+    day, ``later``/``earlier`` by a parseable gap. The first scene that
+    isn't frame narration is day 1 unless it is a flashback. Frame scenes, unclear ones, vague gaps
     and anything after an unplaced scene stay None for the model.
     """
     days: dict[str, int | None] = {}
     last: int | None = None
-    for i, sid in enumerate(order):
+    started = False
+    for sid in order:
         cue = cues.get(sid, {})
         relation = cue.get('relation') or 'unclear'
         gap = gap_to_days(cue.get('gap', ''))
         day = None
-        if i == 0 and relation in ('continues', 'later', 'unclear'):
-            day = 1
+        # The clock starts at the first scene that isn't frame narration
+        # (Gatsby opens with Nick looking back)
+        if not started and relation != 'frame':
+            started = True
+            if relation in ('continues', 'later', 'unclear'):
+                day = 1
         elif last is not None and relation == 'continues':
             day = last
         elif last is not None and relation == 'later' and gap is not None:
@@ -301,11 +309,11 @@ Each scene's cues say how it relates to the scene before it. A provisional day w
 - A weekday or date anchor pins a scene: keep weekdays 7 days apart and dates consistent with the days between them.
 - mode: scene (the action plays out on its day), summary (it covers a stretch of time; the day is where the stretch starts), or frame.
 
-Output exactly one line per scene, in order:
+First work out the calendar under a line REASONING: — the anchors, the stated durations (count back from a "three months before" as well as forward), and any scene you are unsure of — in at most 600 words. Then write a line CALENDAR: and, after it, exactly one line per scene, in order:
 
 scene_id | day | mode | basis
 
-basis: a few words on why ("next morning", "anchor: July 4", "1917, five years before"). Output only these lines."""
+basis: a few words on why ("next morning", "anchor: July 4", "1917, five years before"). Nothing after the calendar lines."""
 
 
 def parse_assignments(response: str, ids: list[str]) -> dict[str, tuple[int, str, str]]:
@@ -316,7 +324,13 @@ def parse_assignments(response: str, ids: list[str]) -> dict[str, tuple[int, str
     """
     wanted = set(ids)
     result: dict[str, tuple[int, str, str]] = {}
-    for line in (response or '').split('\n'):
+    # Only the answer after CALENDAR: counts; reasoning above it may try out
+    # days it then revises
+    text = response or ''
+    marker = re.search(r'^\s*CALENDAR:\s*$', text, re.MULTILINE)
+    if marker:
+        text = text[marker.end():]
+    for line in text.split('\n'):
         parts = [p.strip() for p in line.strip().lstrip('-* ').split('|')]
         if len(parts) < 2 or parts[0] not in wanted:
             continue

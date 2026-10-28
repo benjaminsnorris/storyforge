@@ -151,6 +151,13 @@ class TestWalk:
         days = walk(list(cues), cues)
         assert days == {'a': 1, 'b': 2, 'c': 2 - 1825, 'd': 2 - 1825, 'e': None, 'f': None}
 
+    def test_clock_starts_after_an_opening_frame(self):
+        """Gatsby opens with Nick looking back; nothing was placed at all."""
+        from storyforge.timeline import walk
+        cues = {'frame': {'relation': 'frame'}, 'a': {'relation': 'later'},
+                'b': {'relation': 'later', 'gap': 'the next day'}}
+        assert walk(list(cues), cues) == {'frame': None, 'a': 1, 'b': 2}
+
     def test_first_scene_flashback_is_left_for_the_model(self):
         from storyforge.timeline import walk
         assert walk(['a'], {'a': {'relation': 'earlier', 'gap': 'a year'}}) == {'a': None}
@@ -168,6 +175,12 @@ class TestAssignment:
             's3 | 90 | odd | x\nother | 1 | scene\ns4 | soon | scene\n', ['s1', 's2', 's3', 's4'])
         assert result == {'s1': (3, 'scene', 'next day'), 's2': (-1825, 'summary', '1917'),
                           's3': (90, 'scene', 'x')}
+
+    def test_only_lines_after_calendar_count(self):
+        from storyforge.timeline import parse_assignments
+        result = parse_assignments('REASONING:\ns1 | 76 | scene | first try\n'
+                                   'CALENDAR:\ns1 | 87 | scene | three months on\n', ['s1'])
+        assert result == {'s1': (87, 'scene', 'three months on')}
 
     def test_batches_carry_the_present(self, tmp_path, monkeypatch):
         import storyforge.timeline as tl
