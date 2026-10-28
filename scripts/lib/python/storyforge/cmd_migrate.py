@@ -425,6 +425,10 @@ def step6_create_story_summary(project_dir: str, dry_run: bool) -> str:
 # migration writer and the rest of the codebase that reads the file.
 from storyforge.elaborate import _SPINE_COLS, _ARCHITECTURE_COLS
 
+#: spine.csv and architecture.csv once called their structural act `part`.
+#: Those tiers have no book parts, so the old column is the act, renamed.
+_LEGACY_ACT_RENAME = {'part': 'act'}
+
 
 def step7_extract_spine(ref_dir: str, dry_run: bool) -> str:
     """Move status=spine rows from scenes.csv into reference/spine.csv.
@@ -465,7 +469,8 @@ def step7_extract_spine(ref_dir: str, dry_run: bool) -> str:
     # append, so stranded rows don't get written with a column-arity
     # mismatch against the existing header.
     if not dry_run:
-        _upgrade_csv_header_if_drifted(spine_path, _SPINE_COLS)
+        _upgrade_csv_header_if_drifted(spine_path, _SPINE_COLS,
+                                       renames=_LEGACY_ACT_RENAME)
 
     scenes_header, scenes_rows = _read_csv(scenes_path)
     intent_header, intent_rows = _read_csv(intent_path)
@@ -483,7 +488,7 @@ def step7_extract_spine(ref_dir: str, dry_run: bool) -> str:
                 'seq': row.get('seq', ''),
                 'title': row.get('title', ''),
                 'function': intent.get('function', ''),
-                'part': row.get('part', ''),
+                'act': row.get('act') or row.get('part', ''),
             })
             moved_ids.add(row.get('id', ''))
         else:
@@ -555,7 +560,8 @@ def step8_extract_architecture(ref_dir: str, dry_run: bool) -> str:
 
     # Upgrade old-schema architecture.csv before any append.
     if not dry_run:
-        _upgrade_csv_header_if_drifted(arch_path, _ARCHITECTURE_COLS)
+        _upgrade_csv_header_if_drifted(arch_path, _ARCHITECTURE_COLS,
+                                       renames=_LEGACY_ACT_RENAME)
 
     scenes_header, scenes_rows = _read_csv(scenes_path)
     intent_header, intent_rows = _read_csv(intent_path)
@@ -572,7 +578,7 @@ def step8_extract_architecture(ref_dir: str, dry_run: bool) -> str:
                 'id': row.get('id', ''),
                 'seq': row.get('seq', ''),
                 'title': row.get('title', ''),
-                'part': row.get('part', ''),
+                'act': row.get('act') or row.get('part', ''),
                 'pov': row.get('pov', ''),
                 'spine_event': '',
                 'action_sequel': intent.get('action_sequel', ''),
@@ -628,10 +634,15 @@ def step8_extract_architecture(ref_dir: str, dry_run: bool) -> str:
 # Write helpers — atomicity for the multi-file migration steps
 # ============================================================================
 
-def _upgrade_csv_header_if_drifted(path: str, target_cols: list[str]) -> bool:
+def _upgrade_csv_header_if_drifted(path: str, target_cols: list[str],
+                                   renames: dict[str, str] | None = None
+                                   ) -> bool:
     """If the CSV at `path` has a header that's a strict subset of
     `target_cols` (older schema), rewrite the file with the new header and
     pad existing rows with empty cells for the added columns.
+
+    `renames` maps a legacy column name to its current one; the old column's
+    values carry over when the file does not already have the new column.
 
     Returns True if an upgrade was performed; False if the header already
     matches or the file is absent. Raises ValueError if the existing
@@ -646,6 +657,10 @@ def _upgrade_csv_header_if_drifted(path: str, target_cols: list[str]) -> bool:
     existing_header = lines[0].split('|')
     if existing_header == target_cols:
         return False
+    for old, new in (renames or {}).items():
+        if (old in existing_header and old not in target_cols
+                and new not in existing_header):
+            existing_header = [new if c == old else c for c in existing_header]
     extra = [c for c in existing_header if c not in target_cols]
     if extra:
         raise ValueError(

@@ -14,7 +14,7 @@ This document defines the complete schema for the `storyforge.yaml` file that li
 | `evaluation` | Configuration for custom evaluation personas |
 | `phase` | Current workflow phase of the project |
 | `production` | Formatting, metadata, and output settings for manuscript assembly |
-| `parts` | Optional part/act groupings for multi-part books |
+| `parts` | Optional book parts (physical divisions with title pages) for multi-part books. Structural acts live in `scenes.csv` `act`, not here |
 
 ---
 

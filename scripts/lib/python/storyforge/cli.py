@@ -28,7 +28,7 @@ def add_scene_filter_args(parser: argparse.ArgumentParser) -> None:
     group.add_argument('--scenes', type=str, default=None,
                        help='Comma-separated scene IDs')
     group.add_argument('--act', type=str, default=None,
-                       help='Filter to a specific act/part')
+                       help='Filter to a specific act')
     group.add_argument('--from-seq', type=str, default=None,
                        help='Start from sequence number (N or N-M range)')
 

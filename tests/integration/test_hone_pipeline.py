@@ -129,9 +129,25 @@ class TestSceneFilter:
         args = parse_args(['--act', '1'])
         ref_dir = os.path.join(project_dir, 'reference')
         result = _resolve_scene_filter(args, ref_dir)
-        # Part 1 scenes from fixture
+        # Act 1 scenes from fixture
         assert 'act1-sc01' in result
         assert 'act1-sc02' in result
+
+    def test_act_filter_reads_act_not_part(self, project_dir):
+        """`--act` filters on the structural act; a scene's book part is
+        irrelevant to it."""
+        ref_dir = os.path.join(project_dir, 'reference')
+        path = os.path.join(ref_dir, 'scenes.csv')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('id|seq|title|part|act\n'
+                    'a|1|A|1|2\n'
+                    'b|2|B|2|1\n'
+                    'c|3|C|2|2\n')
+        assert _resolve_scene_filter(parse_args(['--act', '2']),
+                                     ref_dir) == ['a', 'c']
+        # The legacy --part spelling is the same flag: it means act too.
+        assert _resolve_scene_filter(parse_args(['--part', '1']),
+                                     ref_dir) == ['b']
 
 
 # ---------------------------------------------------------------------------

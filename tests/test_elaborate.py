@@ -157,7 +157,7 @@ class TestValidateStructure:
         os.makedirs(ref)
 
         with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
-            f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            f.write('id|seq|title|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
             for i in range(1, 6):
                 f.write(f's0{i}|{i}|Scene {i}|1|Alice|Room|{i}|morning|1 hour|action|briefed|1000|2000\n')
 
@@ -186,7 +186,7 @@ class TestValidateStructure:
         os.makedirs(ref)
 
         with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
-            f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            f.write('id|seq|title|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
             for i in range(1, 4):
                 f.write(f's0{i}|{i}|Scene {i}|1|Alice|Room|{i}|morning|1 hour|action|briefed|1000|2000\n')
 
@@ -231,7 +231,7 @@ class TestValidateStructure:
         os.makedirs(ref)
 
         with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
-            f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            f.write('id|seq|title|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
             f.write('s01|1|Scene One|1|Emmett|Town|13|morning|1 hour|action|briefed|1000|2000\n')
             f.write('s02|2|Scene Two|1|Emmett|Town|14|morning|1 hour|action|briefed|1000|2000\n')
             f.write('s03|3|Scene Three|1|Lena|Station|12|morning|1 hour|action|briefed|1000|2000\n')
@@ -270,7 +270,7 @@ class TestValidateStructure:
 
         # Same crosscut scenario as above — produces an advisory timeline check.
         with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
-            f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            f.write('id|seq|title|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
             f.write('s01|1|Scene One|1|Emmett|Town|13|morning|1 hour|action|briefed|1000|2000\n')
             f.write('s02|2|Scene Two|1|Emmett|Town|14|morning|1 hour|action|briefed|1000|2000\n')
             f.write('s03|3|Scene Three|1|Lena|Station|12|morning|1 hour|action|briefed|1000|2000\n')

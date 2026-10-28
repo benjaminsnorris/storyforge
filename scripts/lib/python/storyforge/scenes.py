@@ -136,7 +136,7 @@ def parse_scene_boundaries(response: str) -> list[dict]:
 # CSV generation
 # ============================================================================
 
-_SCENES_HEADER = 'id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words'
+_SCENES_HEADER = 'id|seq|title|part|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words'
 _INTENT_HEADER = 'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads'
 
 
@@ -146,7 +146,7 @@ def generate_scenes_rows(scenes: list[dict],
     """Generate pipe-delimited CSV rows for ``scenes.csv``.
 
     Each row uses the header order:
-    ``id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words``
+    ``id|seq|title|part|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words``
 
     The scene dicts must have at least ``title`` (str).  They may
     optionally include ``word_count`` (int) and ``slug`` (str).  If
@@ -156,7 +156,8 @@ def generate_scenes_rows(scenes: list[dict],
     Args:
         scenes: Scene dicts as returned by :func:`parse_scene_boundaries`
             (or any list of dicts with a ``title`` key).
-        part_num: Optional part/act number to fill the ``part`` column.
+        part_num: Optional book part number to fill the ``part`` column.
+            ``act`` is left empty — acts are assigned by extract/elaborate.
         seq_start: Starting sequence number (default 1).
 
     Returns:
@@ -176,7 +177,7 @@ def generate_scenes_rows(scenes: list[dict],
         part = str(part_num) if part_num is not None else ''
         word_count = str(scene.get('word_count', ''))
 
-        row = f'{slug}|{seq}|{title}|{part}|||||||||{word_count}|'
+        row = f'{slug}|{seq}|{title}|{part}||||||||||{word_count}|'
         rows.append(row)
 
     return rows

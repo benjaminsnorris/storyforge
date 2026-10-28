@@ -1,4 +1,4 @@
-You are scoring an act/part of a novel against Narrative Framework principles and relational Character Craft principles. Score each principle 1-5 based on the rubric. You are evaluating how all scenes in this act work together as a structural unit.
+You are scoring an act of a novel against Narrative Framework principles and relational Character Craft principles. Score each principle 1-5 based on the rubric. You are evaluating how all scenes in this act work together as a structural unit.
 
 Scale: 1 = Absent, 2 = Developing, 3 = Competent, 4 = Strong, 5 = Masterful.
 

@@ -158,7 +158,7 @@ class TestAppendCsvRow:
         tmp_csv = str(tmp_path / 'scenes.csv')
         shutil.copy(meta_csv, tmp_csv)
 
-        csv_cli.append_row(tmp_csv, 'act3-sc01|5|The Final Descent|3|Dorren Hayle|The Chasm|5|night||plot|planned|0|3000')
+        csv_cli.append_row(tmp_csv, 'act3-sc01|5|The Final Descent|3|3|Dorren Hayle|The Chasm|5|night||plot|planned|0|3000')
         assert _capture(csv_cli.get_field, tmp_csv, 'act3-sc01', 'title') == 'The Final Descent'
         assert _capture(csv_cli.get_field, tmp_csv, 'act3-sc01', 'status') == 'planned'
 
@@ -166,7 +166,7 @@ class TestAppendCsvRow:
         tmp_csv = str(tmp_path / 'scenes.csv')
         shutil.copy(meta_csv, tmp_csv)
 
-        csv_cli.append_row(tmp_csv, 'act3-sc01|5|The Final Descent|3|Dorren Hayle|The Chasm|5|night||plot|planned|0|3000')
+        csv_cli.append_row(tmp_csv, 'act3-sc01|5|The Final Descent|3|3|Dorren Hayle|The Chasm|5|night||plot|planned|0|3000')
         ids = _capture(csv_cli.list_ids, tmp_csv)
         lines = [l for l in ids.strip().split('\n') if l.strip()]
         assert len(lines) == 7
@@ -175,7 +175,7 @@ class TestAppendCsvRow:
         tmp_csv = str(tmp_path / 'scenes.csv')
         shutil.copy(meta_csv, tmp_csv)
 
-        csv_cli.append_row(tmp_csv, 'act3-sc01|5|The Final Descent|3|Dorren Hayle|The Chasm|5|night||plot|planned|0|3000')
+        csv_cli.append_row(tmp_csv, 'act3-sc01|5|The Final Descent|3|3|Dorren Hayle|The Chasm|5|night||plot|planned|0|3000')
         assert _capture(csv_cli.get_field, tmp_csv, 'act1-sc01', 'title') == 'The Finest Cartographer'
 
     def test_missing_file_noop(self, tmp_path):

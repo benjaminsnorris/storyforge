@@ -126,7 +126,7 @@ Return the updated scene index inside a fenced block tagged `scenes-csv`,
 populating target_pages for each scene:
 
 ```scenes-csv
-id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words|target_pages|panel_count|page_count
+id|seq|title|part|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words|target_pages|panel_count|page_count
 (all scenes — status is "mapped" for new/updated scenes)
 ```
 """

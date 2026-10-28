@@ -590,7 +590,7 @@ def test_script_package_handles_missing_scene_file(project_dir_gn, monkeypatch):
     # 16 columns matching the GN scenes.csv header (id|seq|title|part|pov|location|
     # timeline_day|time_of_day|duration|type|status|word_count|target_words|
     # target_pages|panel_count|page_count)
-    append_row(scenes_csv, 'nonexistent-scene|99|Missing|1|cartographer|study|1|night|short|action|drafted||||')
+    append_row(scenes_csv, 'nonexistent-scene|99|Missing||1|cartographer|study|1|night|short|action|drafted||||')
     from storyforge import cmd_script_package
     cmd_script_package.main([])
     script_md = open(os.path.join(project_dir_gn, 'manuscript', 'script.md')).read()

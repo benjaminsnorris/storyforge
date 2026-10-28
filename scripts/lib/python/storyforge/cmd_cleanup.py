@@ -75,7 +75,7 @@ EXPECTED_TOP_FILES = set('storyforge.yaml CLAUDE.md .gitignore .DS_Store storyfo
 EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
     # Core scene data (reference/)
     'reference/scenes.csv': [
-        'id', 'seq', 'title', 'part', 'pov', 'location',
+        'id', 'seq', 'title', 'part', 'act', 'pov', 'location',
         'timeline_day', 'time_of_day', 'duration', 'type', 'status',
         'word_count', 'target_words',
     ],
@@ -160,7 +160,7 @@ EXPECTED_WORKING_DIRS = set(
 # projects where project.medium == 'graphic-novel'.
 GN_CSV_SCHEMA_OVERRIDES: dict[str, list[str]] = {
     'reference/scenes.csv': [
-        'id', 'seq', 'title', 'part', 'pov', 'location',
+        'id', 'seq', 'title', 'part', 'act', 'pov', 'location',
         'timeline_day', 'time_of_day', 'duration', 'type', 'status',
         'word_count', 'target_words', 'target_pages', 'panel_count', 'page_count',
     ],

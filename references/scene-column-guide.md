@@ -11,9 +11,14 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to check:** Read the `function` column in seq order. Does each scene build on what came before? Are there jumps that feel unmotivated?
 **How to improve:** If a scene feels out of place, check whether moving it changes the reader's knowledge state. Use the timeline scatter chart to spot where reading order and chronology diverge.
 
-### part — Act/Part Assignment
-**Why it matters:** Defines the story's macro structure. Parts should hit roughly: Act 1 ~25% of word count, midpoint ~50%, climax ~75-85%.
-**How to check:** Sum `target_words` by part. Are the proportions right? Does the midpoint fall where it should?
+### part — Book Part
+**Why it matters:** The book's physical divisions — parts with their own title pages ("Part One: The Wick"). Filled from the manuscript's part headings; empty for a book without parts. Assembly takes part pages from `reference/chapter-map.csv` and `storyforge.yaml` `parts:`, not from this column.
+**How to check:** Every scene under a part heading carries that part's number; a book with no part headings leaves the column empty.
+**How to improve:** Don't use `part` for structure — that is `act`.
+
+### act — Act Assignment
+**Why it matters:** Defines the story's macro structure. Acts should hit roughly: Act 1 ~25% of word count, midpoint ~50%, climax ~75-85%. Act-level scoring, structural act proportions, and every `--act` filter read this column.
+**How to check:** Sum `target_words` by act. Are the proportions right? Does the midpoint fall where it should?
 **How to improve:** If Act 2 is too long, look for scenes that could move to Act 1 (setup) or Act 3 (escalation).
 
 ### pov — Point of View Character

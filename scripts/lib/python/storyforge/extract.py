@@ -215,7 +215,7 @@ TIME_OF_DAY: [morning / afternoon / evening / night / dawn / dusk]
 DURATION: [approximate in-story duration, e.g., "2 hours", "30 minutes", "an afternoon"]
 TYPE: [the scene's primary narrative purpose — one of: character, plot, world, action, transition, confrontation, dialogue, introspection, revelation]
 TARGET_WORDS: [current word count is a reasonable target — output the approximate word count]
-PART: [which act/part number this scene belongs to, based on its position in the story]"""
+ACT: [which structural act this scene belongs to, as an integer (1, 2, 3, ...), based on its position in the story's dramatic shape — not a book part or section heading]"""
 
 
 def _reduce_enums(result: dict[str, str]) -> dict[str, str]:
@@ -252,7 +252,9 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
         'DURATION': 'duration',
         'TYPE': 'type',
         'TARGET_WORDS': 'target_words',
-        'PART': 'part',
+        # No PART: book parts come from the manuscript's part headings
+        # (scenes-setup), never from the model.
+        'ACT': 'act',
     }
     for line in response.split('\n'):
         match = re.match(r'^([A-Z_]+):\s*(.*)', line.strip())
@@ -276,7 +278,7 @@ def build_intent_prompt(scene_id: str, scene_text: str,
     context = f"""Title: {skeleton.get('title', scene_id)}
 POV: {skeleton.get('pov', 'unknown')}
 Location: {skeleton.get('location', 'unknown')}
-Part: {skeleton.get('part', 'unknown')}
+Act: {skeleton.get('act', 'unknown')}
 Major threads in this manuscript: {profile.get('major_threads', 'unknown')}
 Central conflict: {profile.get('central_conflict', 'unknown')}"""
 

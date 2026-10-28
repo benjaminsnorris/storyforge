@@ -67,7 +67,8 @@ print(dump_schema_markdown())
 | `id` | free_text | spine | Unique scene identifier — a descriptive slug (e.g., hidden-canyon). Also the filename (scenes/{id}.md). |
 | `seq` | integer | spine | Reading order. Scenes are sorted by seq. |
 | `title` | free_text | spine | Scene title — evocative, used for reference. |
-| `part` | integer | architecture | Which act/part this scene belongs to. |
+| `part` | integer | architecture | Book part this scene belongs to, from the manuscript's part headings; empty if the book has no parts. |
+| `act` | integer | architecture | Structural act this scene belongs to (1, 2, 3, ...). Drives act-level scoring, act proportions, and --act filters. |
 | `pov` | registry: characters.csv | architecture | POV character. Normalized against reference/characters.csv. |
 | `location` | registry: locations.csv | map | Physical location. Normalized against reference/locations.csv. |
 | `timeline_day` | integer | map | Chronological position (day number within the story). |
@@ -119,7 +120,7 @@ The `status` field tracks how deeply a scene has been elaborated:
 | Status | What's populated | Pipeline stage |
 |--------|-----------------|---------------|
 | `spine` | id, seq, title, function | Stage 1: irreducible story events |
-| `architecture` | + part, pov, action_sequel, emotional_arc, value_shift, turning_point | Stage 2: structure |
+| `architecture` | + act, pov, action_sequel, emotional_arc, value_shift, turning_point | Stage 2: structure |
 | `mapped` | + location, timeline_day, time_of_day, duration, type, characters, on_stage, mice_threads | Stage 3: full scene map |
 | `briefed` | + goal, conflict, outcome, crisis, decision, knowledge_in/out, key_actions, key_dialogue, emotions, motifs, continuity_deps | Stage 4: drafting contracts |
 | `drafted` | + word_count (prose exists in scenes/{id}.md) | After drafting |

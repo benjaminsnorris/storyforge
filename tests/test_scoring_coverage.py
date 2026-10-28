@@ -37,7 +37,7 @@ def test_coverage_act_2_to_spine_passes_when_all_acts_have_events(tmp_path):
     _seed_summary(str(tmp_path), act_count=3)
     _write(
         os.path.join(str(tmp_path), 'reference', 'spine.csv'),
-        'id|seq|title|summary|function|part\n'
+        'id|seq|title|summary|function|act\n'
         'ev-1|1|t|s|inciting|1\n'
         'ev-2|2|t|s|turn|1\n'
         'ev-3|3|t|s|mid|2\n'
@@ -54,10 +54,10 @@ def test_coverage_act_2_to_spine_flags_empty_act(tmp_path):
     _seed_summary(str(tmp_path), act_count=3)
     _write(
         os.path.join(str(tmp_path), 'reference', 'spine.csv'),
-        'id|seq|title|summary|function|part\n'
+        'id|seq|title|summary|function|act\n'
         'ev-1|1|t|s|inciting|1\n'
         'ev-2|2|t|s|turn|1\n'
-        # No part=2 event
+        # No act=2 event
         'ev-3|3|t|s|climax|3\n',
     )
     from storyforge.scoring_coverage import score_coverage_at_level
@@ -89,7 +89,7 @@ def test_coverage_warns_on_unrecognized_scene_status(tmp_path):
     silently from the coverage filter. Surface the typo'd value."""
     _write(
         os.path.join(str(tmp_path), 'reference', 'architecture.csv'),
-        'id|seq|title|summary|part|pov|spine_event|action_sequel|emotional_arc|'
+        'id|seq|title|summary|act|pov|spine_event|action_sequel|emotional_arc|'
         'value_at_stake|value_shift|turning_point\n'
         'a-1|1|t|s|1|p|ev-1|action|arc|truth|+/-|reveal\n',
     )
@@ -130,13 +130,13 @@ def test_coverage_act_2_fails_when_act_shape_empty(tmp_path):
 def test_coverage_spine_to_architecture_passes(tmp_path):
     _write(
         os.path.join(str(tmp_path), 'reference', 'spine.csv'),
-        'id|seq|title|summary|function|part\n'
+        'id|seq|title|summary|function|act\n'
         'ev-1|1|t|s|f|1\n'
         'ev-2|2|t|s|f|2\n',
     )
     _write(
         os.path.join(str(tmp_path), 'reference', 'architecture.csv'),
-        'id|seq|title|summary|part|pov|spine_event|action_sequel|emotional_arc|'
+        'id|seq|title|summary|act|pov|spine_event|action_sequel|emotional_arc|'
         'value_at_stake|value_shift|turning_point\n'
         'a-1|1|t|s|1|p|ev-1|action|arc|truth|+/-|reveal\n'
         'a-2|2|t|s|2|p|ev-2|action|arc|truth|+/-|reveal\n',
@@ -150,13 +150,13 @@ def test_coverage_spine_to_architecture_flags_orphan_spine(tmp_path):
     """A spine event with no architecture anchor referencing it fails."""
     _write(
         os.path.join(str(tmp_path), 'reference', 'spine.csv'),
-        'id|seq|title|summary|function|part\n'
+        'id|seq|title|summary|function|act\n'
         'ev-1|1|t|s|f|1\n'
         'ev-orphan|2|t|s|f|2\n',
     )
     _write(
         os.path.join(str(tmp_path), 'reference', 'architecture.csv'),
-        'id|seq|title|summary|part|pov|spine_event|action_sequel|emotional_arc|'
+        'id|seq|title|summary|act|pov|spine_event|action_sequel|emotional_arc|'
         'value_at_stake|value_shift|turning_point\n'
         'a-1|1|t|s|1|p|ev-1|action|arc|truth|+/-|reveal\n',
     )
@@ -169,7 +169,7 @@ def test_coverage_spine_to_architecture_flags_orphan_spine(tmp_path):
 def test_coverage_spine_to_architecture_fails_when_arch_empty(tmp_path):
     _write(
         os.path.join(str(tmp_path), 'reference', 'spine.csv'),
-        'id|seq|title|summary|function|part\n'
+        'id|seq|title|summary|function|act\n'
         'ev-1|1|t|s|f|1\n',
     )
     from storyforge.scoring_coverage import score_coverage_at_level
@@ -184,7 +184,7 @@ def test_coverage_spine_to_architecture_fails_when_arch_empty(tmp_path):
 def test_coverage_architecture_to_scenes_passes(tmp_path):
     _write(
         os.path.join(str(tmp_path), 'reference', 'architecture.csv'),
-        'id|seq|title|summary|part|pov|spine_event|action_sequel|emotional_arc|'
+        'id|seq|title|summary|act|pov|spine_event|action_sequel|emotional_arc|'
         'value_at_stake|value_shift|turning_point\n'
         'a-1|1|t|s|1|p|ev-1|action|arc|truth|+/-|reveal\n',
     )
@@ -202,7 +202,7 @@ def test_coverage_architecture_to_scenes_passes(tmp_path):
 def test_coverage_architecture_to_scenes_flags_orphan_anchor(tmp_path):
     _write(
         os.path.join(str(tmp_path), 'reference', 'architecture.csv'),
-        'id|seq|title|summary|part|pov|spine_event|action_sequel|emotional_arc|'
+        'id|seq|title|summary|act|pov|spine_event|action_sequel|emotional_arc|'
         'value_at_stake|value_shift|turning_point\n'
         'a-1|1|t|s|1|p|ev-1|action|arc|truth|+/-|reveal\n'
         'a-orphan|2|t|s|1|p|ev-1|action|arc|truth|+/-|reveal\n',
@@ -224,7 +224,7 @@ def test_coverage_ignores_pre_map_status_rows(tmp_path):
     coverage — they belong to architecture.csv conceptually."""
     _write(
         os.path.join(str(tmp_path), 'reference', 'architecture.csv'),
-        'id|seq|title|summary|part|pov|spine_event|action_sequel|emotional_arc|'
+        'id|seq|title|summary|act|pov|spine_event|action_sequel|emotional_arc|'
         'value_at_stake|value_shift|turning_point\n'
         'a-1|1|t|s|1|p|ev-1|action|arc|truth|+/-|reveal\n',
     )
@@ -277,13 +277,13 @@ def test_coverage_respects_overrides(tmp_path):
     it surfaces tagged accepted=True."""
     _write(
         os.path.join(str(tmp_path), 'reference', 'spine.csv'),
-        'id|seq|title|summary|function|part\n'
+        'id|seq|title|summary|function|act\n'
         'ev-1|1|t|s|f|1\n'
         'ev-orphan|2|t|s|f|2\n',
     )
     _write(
         os.path.join(str(tmp_path), 'reference', 'architecture.csv'),
-        'id|seq|title|summary|part|pov|spine_event|action_sequel|emotional_arc|'
+        'id|seq|title|summary|act|pov|spine_event|action_sequel|emotional_arc|'
         'value_at_stake|value_shift|turning_point\n'
         'a-1|1|t|s|1|p|ev-1|action|arc|truth|+/-|reveal\n',
     )

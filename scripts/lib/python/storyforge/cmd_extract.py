@@ -576,7 +576,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     log(f'  Building batch for {len(sorted_scene_ids)} scenes...')
     for scene_id in sorted_scene_ids:
         scene_data = get_scene(scene_id, ref_dir) or {}
-        skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'part']}
+        skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'act']}
         intent = {k: scene_data.get(k, '') for k in
                   ['function', 'action_sequel', 'value_at_stake', 'value_shift', 'emotional_arc']}
 
@@ -634,7 +634,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             continue
 
         scene_data = get_scene(scene_id, ref_dir) or {}
-        skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'part']}
+        skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'act']}
         intent = {k: scene_data.get(k, '') for k in ['function', 'action_sequel']}
 
         prompt = build_knowledge_prompt(scene_id, scene_text, skeleton, intent,
@@ -698,7 +698,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
         scene_data = get_scene(scene_id, ref_dir) or {}
         skeleton = {k: scene_data.get(k, '')
-                    for k in ['title', 'pov', 'location', 'part', 'on_stage']}
+                    for k in ['title', 'pov', 'location', 'act', 'on_stage']}
 
         prompt = build_physical_state_prompt(scene_id, scene_text, skeleton,
                                               phys_states, phys_summaries,

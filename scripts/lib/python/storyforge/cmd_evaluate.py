@@ -75,7 +75,7 @@ def parse_args(argv):
     scope.add_argument('--chapter', type=int, default=None,
                        help='Evaluate a single assembled chapter')
     scope.add_argument('--act', '--part', type=str, default=None,
-                       help='Evaluate scenes in act/part N')
+                       help='Evaluate scenes in act N')
     scope.add_argument('--scenes', type=str, default=None,
                        help='Evaluate specific scenes (comma-separated or ID..ID range)')
     scope.add_argument('--scene', type=str, default=None,
