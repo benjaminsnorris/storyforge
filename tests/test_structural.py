@@ -512,3 +512,34 @@ class TestDeadCharacterOnStageRatio:
         assert len(ratio_findings) == 1, (
             f"Alive character with low ratio should be flagged, got: {ratio_findings}"
         )
+
+
+class TestActProportionsReadAct:
+    """Act proportions come from the `act` column. `part` is the book's
+    physical division and says nothing about act shape."""
+
+    @staticmethod
+    def _scenes(acts, parts):
+        return {
+            f's{i}': {'id': f's{i}', 'seq': str(i), 'act': act, 'part': part,
+                      'target_words': '1000'}
+            for i, (act, part) in enumerate(zip(acts, parts), start=1)
+        }
+
+    @staticmethod
+    def _act_findings(scenes):
+        from storyforge.structural import score_pacing
+        result = score_pacing(scenes, {}, {})
+        return [f['message'] for f in result['findings']
+                if f['message'].startswith(('First act', 'Last act'))]
+
+    def test_lopsided_acts_are_found_even_without_parts(self):
+        scenes = self._scenes(acts=['1', '1', '2', '3'], parts=['', '', '', ''])
+        assert any(m.startswith('First act is 50%')
+                   for m in self._act_findings(scenes))
+
+    def test_book_parts_do_not_count_as_acts(self):
+        # Balanced acts (25% / 50% / 25%) inside lopsided book parts.
+        scenes = self._scenes(acts=['1', '2', '2', '3'],
+                              parts=['1', '1', '2', '3'])
+        assert self._act_findings(scenes) == []

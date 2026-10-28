@@ -248,10 +248,10 @@ def test_a_cut_scene_stays_an_error_even_though_scenes_csv_lists_it(project_dir)
     with open(path, encoding='utf-8') as f:
         text = f.read()
     with open(path, 'w', encoding='utf-8') as f:
-        f.write(text.replace('new-x1|3|The Archivist\'s Warning|1|Kael Maren|'
+        f.write(text.replace('new-x1|3|The Archivist\'s Warning|1|1|Kael Maren|'
                              'The Deep Archive|2|afternoon|30 minutes|'
                              'revelation|mapped',
-                             'new-x1|3|The Archivist\'s Warning|1|Kael Maren|'
+                             'new-x1|3|The Archivist\'s Warning|1|1|Kael Maren|'
                              'The Deep Archive|2|afternoon|30 minutes|'
                              'revelation|cut'))
     _write_state(project_dir, [('master-survey', 'new-x1', 'burned', '')])

@@ -236,7 +236,7 @@ class TestGenerateScenesRows:
         scenes = [{'title': 'Scene', 'word_count': 1500}]
         rows = generate_scenes_rows(scenes)
         parts = rows[0].split('|')
-        assert parts[12] == '1500'  # word_count column (index 12 per header)
+        assert parts[13] == '1500'  # word_count column (index 13 per header)
 
     def test_empty_title_gets_fallback_slug(self):
         scenes = [{'title': ''}]

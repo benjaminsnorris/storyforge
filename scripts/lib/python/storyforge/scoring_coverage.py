@@ -8,7 +8,7 @@ catch fragmentation between layers of the expanding outline.
 Coverage runs at the *upstream* level (the one being checked for
 fan-out):
 
-  - level 2 (act-shape) — every Act has ≥ 1 spine event in that part
+  - level 2 (act-shape) — every Act has ≥ 1 spine event in that act
   - level 3 (spine)     — every spine event has ≥ 1 architecture anchor
   - level 4 (architecture) — every anchor has ≥ 1 mapped scene
 
@@ -118,7 +118,7 @@ def score_coverage_all_levels(project_dir: str) -> list[dict]:
 
 def _coverage_acts_to_spine(project_dir: str) -> list[dict]:
     """Every Act named in story-summary.md's act-shape has ≥ 1 spine event
-    whose `part` matches that act number."""
+    whose `act` matches that act number."""
     summary = parse_story_summary(project_dir) or {}
     act_shape = summary.get('act_shape', '')
     if not act_shape.strip():
@@ -151,9 +151,9 @@ def _coverage_acts_to_spine(project_dir: str) -> list[dict]:
 
     spine_parts: dict[str, int] = {}
     for row in spine_rows:
-        part = row.get('part', '').strip()
-        if part:
-            spine_parts[part] = spine_parts.get(part, 0) + 1
+        act = row.get('act', '').strip()
+        if act:
+            spine_parts[act] = spine_parts.get(act, 0) + 1
 
     checks: list[dict] = []
     for n in sorted(act_numbers):
@@ -162,7 +162,7 @@ def _coverage_acts_to_spine(project_dir: str) -> list[dict]:
         checks.append(_check(
             f'Act {n} has ≥ 1 spine event',
             count >= 1,
-            (f'no spine.csv rows have part={n_str}'
+            (f'no spine.csv rows have act={n_str}'
              if count == 0 else ''),
             severity='medium',
         ))

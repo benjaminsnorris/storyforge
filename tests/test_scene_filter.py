@@ -38,7 +38,7 @@ class TestBuildSceneList:
         ref = str(tmp_path / 'reference')
         shutil.copytree(os.path.join(fixture_dir, 'reference'), ref)
         with open(os.path.join(ref, 'scenes.csv'), 'a') as f:
-            f.write('cut-scene|7|Cut Scene|1|Someone|Somewhere|1|morning||character|cut|500|500\n')
+            f.write('cut-scene|7|Cut Scene|1|1|Someone|Somewhere|1|morning||character|cut|500|500\n')
 
         scenes = get_scenes(ref, columns=['id', 'status'])
         active = [s for s in scenes if s['status'] != 'cut']

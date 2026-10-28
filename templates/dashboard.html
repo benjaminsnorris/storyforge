@@ -1264,6 +1264,7 @@ function updateDetailPanel(sceneId) {
     html += detailRow('POV', displayName(s.pov));
     html += detailRow('Location', displayName(s.location));
     html += detailRow('Part', s.part);
+    html += detailRow('Act', s.act);
     html += detailRow('Type', s.type);
     html += detailRow('Words', (+getWordCount(s)).toLocaleString());
     html += detailRow('Status', s.status, true);
@@ -1410,21 +1411,21 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     // Scale widths
     const totalWC = sortedScenes.reduce((s, sc) => s + getWordCount(sc), 0) || 1;
     let x = 0;
-    let lastPart = '';
+    let lastAct = '';
 
     sortedScenes.forEach(s => {
         const wc = getWordCount(s);
         const w = Math.min(Math.max(2, (wc / totalWC) * W), W - x);
         const color = TYPE_COLORS[s.type] || 'var(--text-dim)';
 
-        // Part divider
-        if (s.part && s.part !== lastPart && lastPart !== '') {
+        // Act divider
+        if (s.act && s.act !== lastAct && lastAct !== '') {
             svg.appendChild(svgEl('line', {
                 x1: x, y1: 0, x2: x, y2: H,
                 stroke: 'var(--text)', 'stroke-width': 1.5, opacity: 0.3
             }));
         }
-        lastPart = s.part;
+        lastAct = s.act;
 
         const rect = svgEl('rect', {
             x, y: 0, width: w, height: H - 5,

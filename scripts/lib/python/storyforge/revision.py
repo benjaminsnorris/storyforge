@@ -98,7 +98,9 @@ def resolve_scope(scope: str, project_dir: str) -> list[str]:
     Scope formats:
         "full"                              — all scenes (excluding cut)
         "scene-level" / "targeted"          — treated as full (targets narrow in prompt)
-        "act-N" / "part-N"                  — scenes in that act/part
+        "act-N" / "part-N"                  — scenes in that act (`act` column;
+                                              "part-N" is a legacy alias and
+                                              does not mean a book part)
         "slug-a,slug-b,slug-c"             — comma-separated scene IDs
         "1,5,12"                           — all-numeric → resolve as seq numbers
         "[30, 31]"                         — inline list syntax (normalized)
@@ -131,10 +133,10 @@ def resolve_scope(scope: str, project_dir: str) -> list[str]:
         target_ids = [r['id'].strip() for r in active_rows]
 
     elif re.match(r'^(act|part)-\d+$', scope):
-        part_num = scope.split('-')[-1]
+        act_num = scope.split('-')[-1]
         target_ids = [
             r['id'].strip() for r in active_rows
-            if r.get('part', '').strip() == part_num
+            if r.get('act', '').strip() == act_num
         ]
 
     else:

@@ -60,7 +60,7 @@ def parse_args(argv):
     parser.add_argument('--scenes', type=str, default=None,
                         help='Comma-separated scene IDs')
     parser.add_argument('--act', type=str, default=None,
-                        help='Score scenes in act/part N')
+                        help='Score scenes in act N')
     parser.add_argument('--from-seq', type=str, default=None,
                         help='Start from sequence number (N or N-M range)')
     parser.add_argument('--principles', type=str, default=None,
@@ -1505,7 +1505,7 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
         act_template = f.read()
 
     # Discover unique acts
-    act_values = get_column(metadata_csv, 'part')
+    act_values = get_column(metadata_csv, 'act')
     acts = list(dict.fromkeys(v for v in act_values if v))  # unique, ordered
 
     from storyforge.scoring import (
@@ -1518,8 +1518,8 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
         act_id = f'act-{act_label}'
 
         for sid in scene_ids:
-            scene_part = get_field(metadata_csv, sid, 'part')
-            if scene_part != act_label:
+            scene_act = get_field(metadata_csv, sid, 'act')
+            if scene_act != act_label:
                 continue
             scene_file = os.path.join(scenes_dir, f'{sid}.md')
             if not os.path.isfile(scene_file):

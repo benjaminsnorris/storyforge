@@ -84,7 +84,11 @@ COLUMN_SCHEMA = {
     },
     'part': {
         'type': 'integer', 'file': 'scenes.csv', 'stage': 'architecture',
-        'description': 'Which act/part this scene belongs to.',
+        'description': "Book part this scene belongs to, from the manuscript's part headings; empty if the book has no parts.",
+    },
+    'act': {
+        'type': 'integer', 'file': 'scenes.csv', 'stage': 'architecture',
+        'description': 'Structural act this scene belongs to (1, 2, 3, ...). Drives act-level scoring, act proportions, and --act filters.',
     },
     'pov': {
         'type': 'registry', 'registry': 'characters.csv', 'array': False,

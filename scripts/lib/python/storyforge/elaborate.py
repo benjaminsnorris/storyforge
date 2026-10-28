@@ -21,7 +21,9 @@ DELIMITER = '|'
 # of the story. Other columns add structural detail for downstream
 # elaboration.
 _SCENES_COLS = [
-    'id', 'seq', 'title', 'summary', 'part', 'pov', 'location',
+    # `part` is the book's physical division (from the manuscript's part
+    # headings; empty for a book without parts). `act` is the structural act.
+    'id', 'seq', 'title', 'summary', 'part', 'act', 'pov', 'location',
     'timeline_day', 'time_of_day', 'duration', 'type', 'status',
     'word_count', 'target_words',
     # Graphic-novel-mode columns (ignored in novel mode, written in GN mode)
@@ -48,17 +50,17 @@ _BRIEFS_COLS = [
 ]
 # Structural-anchor tier: discrete CSVs with their own row identity.
 _SPINE_COLS = [
-    'id', 'seq', 'title', 'summary', 'function', 'part',
+    'id', 'seq', 'title', 'summary', 'function', 'act',
 ]
 _ARCHITECTURE_COLS = [
-    'id', 'seq', 'title', 'summary', 'part', 'pov', 'spine_event',
+    'id', 'seq', 'title', 'summary', 'act', 'pov', 'spine_event',
     'action_sequel', 'emotional_arc', 'value_at_stake',
     'value_shift', 'turning_point',
 ]
 
 # Order matters: `_file_for_column` returns the first file whose column
 # list contains the lookup. The manuscript-tier files come first because
-# they own shared column names (seq, title, part, etc.) in the legacy code
+# they own shared column names (seq, title, act, etc.) in the legacy code
 # path. Structural-anchor files (spine.csv, architecture.csv) follow; they
 # share several column names with the manuscript files, so callers that
 # need to disambiguate by tier should use a tier-aware helper rather than
@@ -250,7 +252,7 @@ def update_scene(scene_id: str, ref_dir: str, updates: dict[str, str]) -> None:
 
     **Manuscript tier only.** This function does NOT update spine.csv or
     architecture.csv. Several columns are shared between the manuscript
-    files and the structural-anchor files (id, seq, title, part, pov,
+    files and the structural-anchor files (id, seq, title, act, pov,
     action_sequel, emotional_arc, value_at_stake, value_shift,
     turning_point) — for those columns, `_file_for_column` returns the
     manuscript-tier file because `_FILE_MAP` puts those first. If a
@@ -460,24 +462,24 @@ def score_structure(ref_dir: str) -> list[dict]:
 # Required columns per status level
 _REQUIRED_BY_STATUS = {
     'spine': ['id', 'seq', 'title', 'function'],
-    'architecture': ['id', 'seq', 'title', 'part', 'pov', 'function',
+    'architecture': ['id', 'seq', 'title', 'act', 'pov', 'function',
                       'action_sequel', 'emotional_arc', 'value_at_stake',
                       'value_shift', 'turning_point'],
-    'mapped': ['id', 'seq', 'title', 'part', 'pov', 'location',
+    'mapped': ['id', 'seq', 'title', 'act', 'pov', 'location',
                'timeline_day', 'time_of_day', 'function', 'action_sequel',
                'emotional_arc', 'value_at_stake', 'value_shift',
                'turning_point', 'characters', 'on_stage'],
-    'briefed': ['id', 'seq', 'title', 'part', 'pov', 'location',
+    'briefed': ['id', 'seq', 'title', 'act', 'pov', 'location',
                 'timeline_day', 'time_of_day', 'function', 'action_sequel',
                 'emotional_arc', 'value_at_stake', 'value_shift',
                 'turning_point', 'characters', 'on_stage',
                 'goal', 'conflict', 'outcome'],
-    'drafted': ['id', 'seq', 'title', 'part', 'pov', 'location',
+    'drafted': ['id', 'seq', 'title', 'act', 'pov', 'location',
                 'timeline_day', 'time_of_day', 'function', 'action_sequel',
                 'emotional_arc', 'value_at_stake', 'value_shift',
                 'turning_point', 'characters', 'on_stage',
                 'goal', 'conflict', 'outcome'],
-    'polished': ['id', 'seq', 'title', 'part', 'pov', 'location',
+    'polished': ['id', 'seq', 'title', 'act', 'pov', 'location',
                  'timeline_day', 'time_of_day', 'function', 'action_sequel',
                  'emotional_arc', 'value_at_stake', 'value_shift',
                  'turning_point', 'characters', 'on_stage',
@@ -982,7 +984,7 @@ def validate_structure(ref_dir: str) -> dict:
 # Gap group definitions: which fields belong to which group
 _GAP_GROUPS = {
     'scene-fields': {
-        'fields': ['type', 'time_of_day', 'duration', 'part'],
+        'fields': ['type', 'time_of_day', 'duration', 'act'],
         'file': 'scenes.csv',
         'batch_type': 'parallel',
     },

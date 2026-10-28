@@ -139,7 +139,7 @@ def _apply_scene_filter(metadata_csv: str, filter_mode: str,
         selected = {s.strip() for s in filter_value.split(',')}
         return [sid for sid in all_ids if sid in selected]
     elif filter_mode == 'act':
-        return [r['id'] for r in active if r.get('part', '') == filter_value]
+        return [r['id'] for r in active if r.get('act', '') == filter_value]
     elif filter_mode == 'from_seq':
         if '-' in filter_value:
             start, end = filter_value.split('-', 1)
@@ -193,7 +193,7 @@ def parse_args(argv):
     scope_group.add_argument('--scenes', type=str, default=None,
                              help='Enrich specific scenes only (comma-separated)')
     scope_group.add_argument('--act', type=str, default=None,
-                             help='Enrich scenes in act/part N only')
+                             help='Enrich scenes in act N only')
     scope_group.add_argument('--from-seq', type=str, default=None,
                              help='Enrich from sequence number N onward (or N-M range)')
 

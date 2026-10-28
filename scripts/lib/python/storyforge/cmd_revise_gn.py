@@ -51,7 +51,7 @@ def parse_args(argv):
     parser.add_argument('--scenes', type=str, default=None,
                         help='Comma-separated scene IDs')
     parser.add_argument('--act', '--part', type=str, default=None,
-                        help='Revise all scenes in act/part N')
+                        help='Revise all scenes in act N')
     parser.add_argument('--from-seq', type=str, default=None,
                         help='Start from sequence number (N or N-M range)')
     parser.add_argument('--no-findings', action='store_true',

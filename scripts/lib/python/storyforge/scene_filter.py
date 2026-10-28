@@ -137,12 +137,12 @@ def apply_scene_filter(
     if mode == 'act':
         # Read all rows once for efficiency
         rows = _read_csv_rows(metadata_csv)
-        id_to_part = {r['id']: r.get('part', '') for r in rows}
-        result = [sid for sid in all_scene_ids if id_to_part.get(sid) == value]
+        id_to_act = {r['id']: r.get('act', '') for r in rows}
+        result = [sid for sid in all_scene_ids if id_to_act.get(sid) == value]
         if not result:
-            log(f'ERROR: No scenes found in act/part {value}')
+            log(f'ERROR: No scenes found in act {value}')
             raise SystemExit(1)
-        log(f'Filtered to {len(result)} scenes in act/part {value}')
+        log(f'Filtered to {len(result)} scenes in act {value}')
         return result
 
     if mode == 'from_seq':

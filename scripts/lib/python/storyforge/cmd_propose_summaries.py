@@ -132,7 +132,7 @@ def _run_strict(project_dir: str, level: int, medium: str, dry_run: bool) -> Non
     out_lines.append('- Describes what happens (not what it means)')
     out_lines.append('- Identifies the change in state (before → after)')
     if level == 3:
-        out_lines.append('- Ties to a specific Act number via the `part` column')
+        out_lines.append('- Ties to a specific Act number via the `act` column')
     if level == 4:
         out_lines.append('- References its parent spine event via `spine_event`')
         out_lines.append('- Specifies POV, action/sequel, value at stake')
@@ -242,7 +242,7 @@ def _build_prompt(level: int, upstream: str, range_str: str,
     extra_fields = ''
     if level == 3:
         extra_fields = ('Each event should belong to a specific Act '
-                        '(part 1, 2, or 3 typically).')
+                        '(act 1, 2, or 3 typically).')
     elif level == 4:
         extra_fields = ('Each anchor should clearly tie to a spine event '
                         '(reference the spine event id in your reasoning).')

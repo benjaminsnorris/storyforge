@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 
+from storyforge.assembly import count_parts
 from storyforge.canon import CANON_DIR, CanonFinding, validate_canon_directory
 from storyforge.illustrations import (
     OPTIONAL_PLAN_COLUMNS, PLAN_COLUMNS, IllustrationFindingKind,
@@ -75,7 +76,7 @@ EXPECTED_TOP_FILES = set('storyforge.yaml CLAUDE.md .gitignore .DS_Store storyfo
 EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
     # Core scene data (reference/)
     'reference/scenes.csv': [
-        'id', 'seq', 'title', 'part', 'pov', 'location',
+        'id', 'seq', 'title', 'part', 'act', 'pov', 'location',
         'timeline_day', 'time_of_day', 'duration', 'type', 'status',
         'word_count', 'target_words',
     ],
@@ -160,7 +161,7 @@ EXPECTED_WORKING_DIRS = set(
 # projects where project.medium == 'graphic-novel'.
 GN_CSV_SCHEMA_OVERRIDES: dict[str, list[str]] = {
     'reference/scenes.csv': [
-        'id', 'seq', 'title', 'part', 'pov', 'location',
+        'id', 'seq', 'title', 'part', 'act', 'pov', 'location',
         'timeline_day', 'time_of_day', 'duration', 'type', 'status',
         'word_count', 'target_words', 'target_pages', 'panel_count', 'page_count',
     ],
@@ -227,9 +228,10 @@ class PlannedChange(NamedTuple):
 #: two inconsistent ways. A missing verb is a `KeyError` at planning time,
 #: which is the right moment and the right volume.
 _PAST_TENSE: Final = {
-    'add': 'Added', 'clean': 'Cleaned', 'create': 'Created',
-    'delete': 'Deleted', 'migrate': 'Migrated', 'move': 'Moved',
-    'remove': 'Removed', 'update': 'Updated',
+    'add': 'Added', 'clean': 'Cleaned', 'clear': 'Cleared',
+    'create': 'Created', 'delete': 'Deleted', 'migrate': 'Migrated',
+    'move': 'Moved', 'remove': 'Removed', 'rename': 'Renamed',
+    'update': 'Updated',
 }
 
 
@@ -924,6 +926,130 @@ def _migrated_pipeline_lines(lines: list[str]) -> list[str] | None:
         new_lines.append('|'.join(new_vals) + '\n')
 
     return new_lines
+
+
+# ============================================================================
+# Act column migration
+# ============================================================================
+#
+# `part` used to mean "act/part", and structural code read it as the act. It
+# now means only a real book part (a division with a title page), and the act
+# has its own `act` column. In a project that predates the split, `part`
+# holds act numbers — that is what Storyforge told the author to put there.
+
+#: Each CSV whose `part` column used to carry the act, and how to migrate it.
+#: scenes.csv keeps `part` (now the book part) beside the new `act`; spine.csv
+#: and architecture.csv are structural tiers with no book parts, so their
+#: `part` simply becomes `act`.
+_ACT_MIGRATION_FILES: Final = (
+    ('reference/scenes.csv', 'copy'),
+    ('reference/spine.csv', 'rename'),
+    ('reference/architecture.csv', 'rename'),
+)
+
+
+def _defines_book_parts(project_dir: str) -> bool:
+    """Whether storyforge.yaml lists any `parts:` entries.
+
+    An unreadable file answers True: the answer decides whether `part` is
+    cleared, and keeping a value is the direction that loses nothing.
+    """
+    try:
+        return count_parts(project_dir) > 0
+    except (OSError, UnicodeDecodeError) as exc:
+        log(f'WARNING: could not read storyforge.yaml ({type(exc).__name__}), '
+            f'so scenes.csv `part` is kept as it is rather than cleared.')
+        return True
+
+
+def _act_migrated_text(text: str, rel_path: str, mode: str,
+                       clear_part: bool
+                       ) -> tuple[str, tuple[PlannedChange, ...]] | None:
+    """The CSV with an `act` column made from `part`, or None if not needed.
+
+    Not needed when the header already has `act` (migrated, or written by a
+    current writer) or has no `part` to migrate from. `mode` is `'copy'`
+    (insert `act` right after `part`, copying its values, and empty `part`
+    when `clear_part`) or `'rename'` (the column is renamed in place).
+    """
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return None
+    header = [c.strip() for c in lines[0].split('|')]
+    if 'act' in header or 'part' not in header:
+        return None
+    idx = header.index('part')
+    rows = [line.split('|') for line in lines[1:]]
+    for row in rows:
+        row.extend([''] * (len(header) - len(row)))
+
+    if mode == 'rename':
+        header[idx] = 'act'
+        changes = (_change('rename', f'part to act in {rel_path}'),)
+    else:
+        had_parts = any(row[idx].strip() for row in rows)
+        header.insert(idx + 1, 'act')
+        for row in rows:
+            row.insert(idx + 1, row[idx])
+            if clear_part:
+                row[idx] = ''
+        changes = (_change('add', f'act column to {rel_path}, copied from '
+                                  f'part'),)
+        if clear_part and had_parts:
+            changes += (_change('clear', f'part in {rel_path} (storyforge.yaml '
+                                         f'defines no parts:, so it held '
+                                         f'acts)'),)
+
+    new_text = '\n'.join('|'.join(cells) for cells in [header, *rows]) + '\n'
+    return new_text, changes
+
+
+def plan_act_column(project_dir: str) -> StepPlan:
+    """Plan the `part` → `act` migration for pre-act-column projects.
+
+    scenes.csv: `act` is always created from `part`; `part` is then emptied
+    only when storyforge.yaml defines no `parts:`, because with parts defined
+    the column may hold real part numbers the assembler relies on. spine.csv
+    and architecture.csv: `part` is renamed `act`. Writes LF, like every
+    other CSV writer.
+    """
+    title = 'Checking act column...'
+    clear_part: bool | None = None
+    pending: list[tuple[str, str, tuple[PlannedChange, ...]]] = []
+    for rel_path, mode in _ACT_MIGRATION_FILES:
+        path = os.path.join(project_dir, rel_path)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding='utf-8', newline='') as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError) as exc:
+            log(f'WARNING: could not read {rel_path} ({type(exc).__name__}: '
+                f'{exc}). Skipping its act-column migration; the rest of '
+                f'cleanup still runs.')
+            continue
+        if mode == 'copy' and clear_part is None:
+            clear_part = not _defines_book_parts(project_dir)
+        migrated = _act_migrated_text(text, rel_path, mode, bool(clear_part))
+        if migrated is not None:
+            pending.append((path, *migrated))
+
+    def apply() -> tuple[PlannedChange, ...]:
+        done: tuple[PlannedChange, ...] = ()
+        for path, new_text, changes in pending:
+            try:
+                with open(path, 'w', encoding='utf-8', newline='') as f:
+                    f.write(new_text)
+            except OSError as exc:
+                log(f'WARNING: could not write {os.path.relpath(path, project_dir)} '
+                    f'({type(exc).__name__}: {exc}). It is unchanged.')
+                continue
+            done += changes
+        return done
+
+    changes = tuple(c for _path, _text, file_changes in pending
+                    for c in file_changes)
+    return StepPlan(title, changes, apply if changes else _no_op)
 
 
 # ============================================================================
@@ -1655,6 +1781,17 @@ def _classify_issue(issue: str, rename_pairs: dict[str, list[tuple[str, str]]]) 
                     'rename_from': extra, 'rename_to': missing,
                     'severity': 'warning',
                 }
+        if path == 'reference/scenes.csv' and col == 'act':
+            # Not a hand edit: the act-column step creates it from `part`.
+            return {
+                'type': 'missing_column', 'file': path, 'column': col,
+                'detail': f'{path} is missing column "act" (acts used to '
+                          f'live in "part")',
+                'action': 'Run storyforge cleanup — it creates "act" from '
+                          '"part"',
+                'command': 'storyforge cleanup',
+                'severity': 'warning',
+            }
         return {
             'type': 'missing_column', 'file': path, 'column': col,
             'detail': f'{path} is missing column "{col}"',
@@ -1781,6 +1918,11 @@ def _detect_rename_pairs(issues: list[str]) -> dict[str, list[tuple[str, str]]]:
     for issue in issues:
         if issue.startswith('MISSING_COLUMN:'):
             _, path, col = issue.split(':', 2)
+            # A missing `act` is never a renamed column: the act-column step
+            # creates it from `part`, which stays. Pairing it would tell the
+            # author to rename some unrelated extra column to `act`.
+            if (path, col) == ('reference/scenes.csv', 'act'):
+                continue
             missing[path].append(col)
         elif issue.startswith('EXTRA_COLUMN:'):
             _, path, col = issue.split(':', 2)
@@ -2667,6 +2809,7 @@ def plan_cleanup(project_dir: str, scenes: bool = False) -> list[StepPlan]:
         plan_missing_dirs(project_dir, missing_dirs),
         plan_storyforge_yaml(project_dir, disk),
         plan_pipeline_csv(project_dir),
+        plan_act_column(project_dir),
         plan_junk_files(project_dir, disk),
         plan_legacy_files(project_dir, disk),
         plan_loose_files(project_dir, disk),

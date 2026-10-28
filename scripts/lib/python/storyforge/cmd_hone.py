@@ -48,7 +48,8 @@ def parse_args(argv):
     parser.add_argument('--scenes', type=str, default=None,
                         help='Comma-separated scene IDs')
     parser.add_argument('--act', '--part', type=str, default=None,
-                        help='Scope to scenes in part/act N')
+                        help='Scope to scenes in act N (--part is a legacy alias; '
+                             'it filters on act, not on book parts)')
     parser.add_argument('--threshold', type=float, default=3.5,
                         help='Prose naturalness threshold for briefs (default: 3.5)')
     parser.add_argument('--coaching', choices=['full', 'coach', 'strict'], default=None,
@@ -170,7 +171,7 @@ def _resolve_scene_filter(args, ref_dir: str) -> list[str] | None:
     if args.act:
         from storyforge.elaborate import _read_csv
         rows = _read_csv(os.path.join(ref_dir, 'scenes.csv'))
-        return [r['id'] for r in rows if r.get('part', '') == args.act]
+        return [r['id'] for r in rows if r.get('act', '') == args.act]
     return None
 
 

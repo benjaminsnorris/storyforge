@@ -111,6 +111,28 @@ class TestBuildPrompts:
                                        {'pov_characters': 'Alice', 'timeline': 'linear'})
         assert 'POV' in prompt and 'TITLE' in prompt and 'LOCATION' in prompt
 
+    def test_skeleton_prompt_asks_for_act_not_part(self):
+        """Book parts come from the manuscript's part headings
+        (scenes-setup); the model is asked only for the structural act."""
+        from storyforge.extract import build_skeleton_prompt
+        prompt = build_skeleton_prompt('act1-sc01', 'Some scene prose here.',
+                                       {'pov_characters': 'Alice'})
+        assert '\nACT: ' in prompt
+        assert 'PART:' not in prompt
+
+    def test_skeleton_response_maps_act_and_ignores_part(self):
+        from storyforge.extract import parse_skeleton_response
+        result = parse_skeleton_response('TITLE: T\nACT: 2\nPART: 1', 's1')
+        assert result['act'] == '2'
+        assert 'part' not in result
+
+    def test_intent_prompt_context_names_the_act(self):
+        from storyforge.extract import build_intent_prompt
+        prompt = build_intent_prompt('s1', 'Prose.', {},
+                                     {'title': 'T', 'act': '3', 'part': '1'})
+        assert 'Act: 3' in prompt
+        assert 'Part:' not in prompt
+
     def test_intent_prompt(self):
         from storyforge.extract import build_intent_prompt
         prompt = build_intent_prompt('act1-sc01', 'Scene prose.',

@@ -330,11 +330,12 @@ def score_pacing(scenes_map, intent_map, briefs_map):
         tensions.append(raw + position_boost)
 
     # --- 1. Act proportions ---
-    # Gather word counts per part
+    # Gather word counts per act. `act` is the structural act; `part` is the
+    # book's physical division and says nothing about act shape.
     part_words = {}
     total_words = 0
     for sid, scene in ordered:
-        part = _s(scene.get('part')).strip() or '1'
+        part = _s(scene.get('act')).strip() or '1'
         wc = 0
         for field in ('target_words', 'word_count'):
             try:

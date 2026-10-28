@@ -413,9 +413,9 @@ Update `reference/world-bible.md` (and `reference/systems-bible.md` if the world
 
 This mode activates when structural scoring shows Pacing Shape below target — typically "second half tension does not exceed first half." This is a creative decision, not a data fix.
 
-1. **Show the data.** Read `reference/scene-intent.csv` and present the value_shift distribution by act/part:
-   - Count shifts by type per part: `++`, `+/-`, `-/-`, `-/--`, etc.
-   - Show which part has the most negative/dramatic shifts
+1. **Show the data.** Read `reference/scene-intent.csv` and present the value_shift distribution by act (`act` column):
+   - Count shifts by type per act: `++`, `+/-`, `-/-`, `-/--`, etc.
+   - Show which act has the most negative/dramatic shifts
    - Highlight where the second half has fewer negative shifts than the first
 
 2. **Explain what it means.** Pacing shape measures whether tension escalates through the novel. A novel where the first half has harder shifts than the second feels like it peaks early and coasts. The target is for the second half to have more tension than the first — not necessarily monotonic escalation, but the overall pressure should increase.
@@ -429,7 +429,7 @@ This mode activates when structural scoring shows Pacing Shape below target — 
 **Coaching level adaptation:**
 - **Full:** Propose specific shift changes with reasoning. "Scene 38 (betrayal) is `+/-` — the betrayal is discovered but Zara still has her crew. If this became `-/--` — she loses Naji AND the crew fractures — the second half gets harder."
 - **Coach:** Show the distribution, ask the author which scenes feel too easy. Don't propose specific changes.
-- **Strict:** Show the raw shift counts per part. No interpretation.
+- **Strict:** Show the raw shift counts per act. No interpretation.
 
 ### Outcome Review (Interactive)
 

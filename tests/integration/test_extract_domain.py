@@ -224,7 +224,7 @@ TIME_OF_DAY: morning
 DURATION: 2 hours
 TYPE: character
 TARGET_WORDS: 2500
-PART: 1"""
+ACT: 1"""
 
         result = parse_skeleton_response(response, 'act1-sc01')
         assert result['id'] == 'act1-sc01'
@@ -235,7 +235,7 @@ PART: 1"""
         assert result['time_of_day'] == 'morning'
         assert result['type'] == 'character'
         assert result['target_words'] == '2500'
-        assert result['part'] == '1'
+        assert result['act'] == '1'
 
     def test_skips_unknown_values(self):
         response = """TITLE: A Scene
@@ -593,12 +593,12 @@ class TestCleanupTimeline:
             lines = f.readlines()
 
         # Remove timeline_day for act1-sc02 (seq=2, day=1)
-        # Header: id|seq|title|part|pov|location|timeline_day|...
+        # Header: id|seq|title|part|act|pov|location|timeline_day|...
         new_lines = [lines[0]]
         for line in lines[1:]:
             fields = line.strip().split('|')
             if fields[0] == 'act1-sc02':
-                fields[6] = ''  # timeline_day
+                fields[7] = ''  # timeline_day
                 new_lines.append('|'.join(fields) + '\n')
             else:
                 new_lines.append(line)

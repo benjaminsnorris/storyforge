@@ -233,7 +233,7 @@ Expand the spine (5-10 events) into 15-25 scenes. For each scene:
 
 1. Keep all existing spine scenes (you may adjust titles and functions)
 2. Add supporting scenes: character development, subplot introduction, transitions, world-building
-3. Assign every scene to a part/act
+3. Assign every scene to a structural act (`act` — 1, 2, 3, ...)
 4. Assign POV characters
 5. Classify each as action or sequel (Swain's scene/sequel pattern)
 6. Define the value at stake and its polarity shift (McKee)
@@ -243,7 +243,7 @@ Expand the spine (5-10 events) into 15-25 scenes. For each scene:
 Update the scenes CSV with new columns filled:
 
 ```scenes-csv
-id|seq|title|part|pov|status
+id|seq|title|act|pov|status
 (all scenes — existing spine scenes updated, new scenes added, status is "architecture")
 ```
 
@@ -272,7 +272,7 @@ If the world needs a bible, output:
 - Vary scene types: no 4+ consecutive action or sequel scenes
 - Vary turning point types: no 4+ consecutive action or revelation turning points
 - Every thread introduced must have a planned resolution
-- Parts should hit roughly: first act ~25%, midpoint ~50%, climax ~75-85%
+- Acts should hit roughly: first act ~25%, midpoint ~50%, climax ~75-85%
 - Character arcs need structural progression: lie reinforced → challenged → confronted → truth/refusal
 """
 
@@ -348,7 +348,7 @@ For each scene:
 ### Output Format
 
 ```scenes-csv
-id|seq|title|part|pov|location|timeline_day|time_of_day|duration|status
+id|seq|title|act|pov|location|timeline_day|time_of_day|duration|status
 (all scenes — status is "mapped" for new/updated scenes)
 ```
 
@@ -698,8 +698,8 @@ _FIELD_INSTRUCTIONS = {
     'duration': (
         'Estimate the in-story duration of this scene (e.g., "2 hours", "30 minutes", "15 minutes").'
     ),
-    'part': (
-        'Determine which act/part this scene belongs to (integer, e.g., 1, 2, 3).'
+    'act': (
+        'Determine which structural act this scene belongs to (integer, e.g., 1, 2, 3).'
     ),
     'action_sequel': (
         'Classify as action or sequel using Swain\'s scene/sequel pattern. '
