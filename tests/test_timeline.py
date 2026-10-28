@@ -100,6 +100,8 @@ class TestGaps:
             'three days': 3, '2 weeks': 14, 'a fortnight': 14, 'a month': 30,
             'five years': 1825, 'two years later': 730,
             'some time later': None, 'a few weeks': None, '': None,
+            # Gatsby: an explanation in the gap field, not a gap
+            'The text indicates this occurs some days after the previous scene, the next day': None,
         }
         for text, days in cases.items():
             assert gap_to_days(text) == days, text
@@ -250,6 +252,15 @@ class TestChecks:
         cues = {'c': {'anchor': 'that Sunday'}, 'd': {'anchor': 'on Sunday'}}
         checks = [f['check'] for f in check_timeline(rows, cues)]
         assert checks == ['date_mismatch', 'weekday_mismatch']
+
+    def test_habitual_weekdays_are_not_anchors(self):
+        """Gatsby's guest catalogue: "on Sunday mornings" is a habit."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('a', '1', 'scene', ''), ('b', '3', 'summary', ''),
+                          ('c', '9', 'scene', ''))
+        cues = {'a': {'anchor': 'Friday'}, 'b': {'anchor': 'on Sunday mornings'},
+                'c': {'anchor': 'Saturday and Sunday'}}
+        assert check_timeline(rows, cues) == []
 
     def test_drift_check_skips_a_book_without_days(self, project_dir, monkeypatch):
         import storyforge.timeline as tl

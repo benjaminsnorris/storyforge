@@ -41,8 +41,8 @@ _BATCH_MAX_TOKENS = 6000
 # ============================================================================
 
 CUE_INSTRUCTIONS = """TIME_RELATION: [when this scene happens relative to the scene before it in reading order — one of: continues (picks up at the same time or moments later), later (some time after it), earlier (before it: a flashback or a recollection told as a scene), frame (narration from after the story, looking back), unclear]
-TIME_GAP: [the gap from the previous scene, in the text's own terms, e.g. "an hour", "the next morning", "three weeks", "five years"; empty if none is stated or implied]
-TIME_ANCHOR: [a calendar fact this scene's text gives — a date, weekday, month, season, holiday or named day ("the hottest day of the summer") — quoted briefly; empty if none]
+TIME_GAP: [the gap from the previous scene in at most six words, no explanation: "an hour", "the next morning", "three weeks", "five years", "several weeks"; empty if none is stated or implied]
+TIME_ANCHOR: [a calendar fact pinning when THIS scene's action happens — a date, weekday, month, season, holiday or named day ("the hottest day of the summer") — quoted briefly; not a habit ("every Friday") or a date the scene only mentions; empty if none]
 TIME_SPAN: [when the scene summarizes a stretch of time ("all that summer"), how long; empty for a scene that plays out in one sitting]
 TIME_DATE: [only what this scene's own text states about the calendar date, in EDTF: "1922-07-04", "XXXX-07-04" when the year isn't given here, "1922" for a year, "1922-22" for summer 1922 (21 spring, 22 summer, 23 autumn, 24 winter), "1917~" for "around 1917", "1922-06/1922-09" for a stretch. Never fill in a part the text doesn't give; empty if the text gives no date]"""
 
@@ -154,7 +154,8 @@ def gap_to_days(gap: str) -> int | None:
     later", "a few weeks") or absent. Years count as 365 days, months as 30:
     order and rough depth are what matter."""
     text = (gap or '').strip().lower()
-    if not text:
+    # An explanation, not a gap: a phrase picked out of it would be a guess
+    if not text or len(text.split()) > 8:
         return None
     if _SAME_DAY.search(text) and not re.search(r'\b(days?|weeks?|months?|years?)\b', text):
         return 0
@@ -428,7 +429,10 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         if md:
             dated.append((sid, day, md))
         anchor = (cue.get('anchor') or '').lower()
-        weekday = next((i for i, w in enumerate(_WEEKDAYS) if re.search(rf'\b{w}\b', anchor)), None)
+        named = [i for i, w in enumerate(_WEEKDAYS) if re.search(rf'\b{w}s?\b', anchor)]
+        # One weekday, on a scene that happens on one day: a summary's
+        # "Sunday mornings" is a habit, not a date
+        weekday = named[0] if len(named) == 1 and mode == 'scene' else None
         if weekday is not None:
             weekdays.append((sid, day, weekday))
         last_day = day
