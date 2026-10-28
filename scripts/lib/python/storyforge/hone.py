@@ -20,7 +20,7 @@ from storyforge.elaborate import (
 )
 from storyforge.enrich import (
     load_alias_map, load_mice_registry, normalize_aliases,
-    normalize_mice_threads,
+    normalize_mice_threads, strip_parentheticals,
 )
 
 # ============================================================================
@@ -694,6 +694,47 @@ def apply_registry_normalization(
     return total_changed
 
 
+# Domains whose fields are resolved by plain alias lookup, so an unresolved
+# reference is simply a value missing from the registry.
+_ALIAS_DOMAINS = {'characters', 'locations', 'values'}
+
+
+def find_unresolved(domain: str, ref_dir: str) -> list[str]:
+    """Return target-column references the domain's registry does not resolve.
+
+    Mirrors :func:`normalize_aliases`: semicolon-split, parentheticals
+    stripped, case-insensitive. Only meaningful for ``_ALIAS_DOMAINS``.
+    """
+    alias_map = load_alias_map(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
+    canonical = {v.lower() for v in alias_map.values()}
+    unresolved = set()
+    for filename, columns in _DOMAIN_TARGETS.get(domain, []):
+        for row in _read_csv(os.path.join(ref_dir, filename)):
+            for col in columns:
+                for part in (row.get(col) or '').split(';'):
+                    ref = strip_parentheticals(part.strip())
+                    if ref and ref.lower() not in alias_map and ref.lower() not in canonical:
+                        unresolved.add(ref)
+    return sorted(unresolved)
+
+
+def find_alias_collisions(domain: str, ref_dir: str) -> dict[str, list[str]]:
+    """Return aliases (lowercased) claimed by more than one registry entry.
+
+    :func:`load_alias_map` keeps whichever entry comes last, so a collision
+    silently routes references to the wrong entry.
+    """
+    owners: dict[str, set[str]] = {}
+    for row in _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain])):
+        entry_id = row.get('id', '')
+        names = [row.get('name', ''), entry_id] + (row.get('aliases') or '').split(';')
+        for name in names:
+            key = name.strip().lower()
+            if key:
+                owners.setdefault(key, set()).add(entry_id)
+    return {k: sorted(v) for k, v in sorted(owners.items()) if len(v) > 1}
+
+
 # ============================================================================
 # Full domain reconciliation
 # ============================================================================
@@ -726,27 +767,62 @@ def reconcile_domain(
 
     from storyforge.api import invoke_to_file, extract_text_from_file
 
-    # Build prompt
-    prompt = build_registry_prompt(domain, ref_dir, context=context)
-
-    # Call API
     os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f'reconcile-{domain}.json')
-    invoke_to_file(prompt, model, log_file, max_tokens=4096,
-                   label=f'hone registries/{domain}')
 
-    # Extract and parse response
-    response = extract_text_from_file(log_file)
-    registry_rows, updates = parse_registry_response(response, domain)
+    def build_and_apply(prompt, log_name):
+        log_file = os.path.join(log_dir, log_name)
+        invoke_to_file(prompt, model, log_file, max_tokens=4096,
+                       label=f'hone registries/{domain}')
+        response = extract_text_from_file(log_file)
+        rows, updates = parse_registry_response(response, domain)
+        write_registry(ref_dir, domain, rows)
+        return rows, apply_updates(ref_dir, domain, updates)
 
-    # Write registry
-    write_registry(ref_dir, domain, registry_rows)
-
-    # Apply updates
-    updates_applied = apply_updates(ref_dir, domain, updates)
-
-    # Normalize fields
+    registry_rows, updates_applied = build_and_apply(
+        build_registry_prompt(domain, ref_dir, context=context),
+        f'reconcile-{domain}.json')
     fields_normalized = apply_registry_normalization(domain, ref_dir)
+
+    # The prompt requires every reference to resolve to exactly one entry,
+    # but a model can drop ones it finds ambiguous (a bare "West Egg" beside
+    # "Gatsby's mansion, West Egg") or give two entries the same alias, and
+    # normalization handles both silently. Give the model one pass at the
+    # problems, then report what remains.
+    if domain in _ALIAS_DOMAINS:
+        unresolved = find_unresolved(domain, ref_dir)
+        collisions = find_alias_collisions(domain, ref_dir)
+        if unresolved or collisions:
+            log(f'  {domain}: {len(unresolved)} unresolved reference(s), '
+                f'{len(collisions)} shared alias(es); asking for a corrected registry')
+            sections = []
+            if unresolved:
+                sections.append(
+                    '## Unresolved References\n\nThese references match no entry '
+                    'in the existing registry. Add each one as an alias of the entry '
+                    'it denotes, or as a new entry when it denotes something '
+                    'distinct.\n\n' + '\n'.join(f'- {u}' for u in unresolved))
+            if collisions:
+                sections.append(
+                    '## Shared Aliases\n\nEach of these aliases is listed under more '
+                    'than one entry. Keep each alias under the single entry it '
+                    'denotes.\n\n' + '\n'.join(
+                        f'- {alias}: {", ".join(ids)}' for alias, ids in collisions.items()))
+            retry_prompt = (
+                build_registry_prompt(domain, ref_dir, context=context)
+                + '\n\n' + '\n\n'.join(sections)
+                + '\n\nOutput the complete updated registry.')
+            registry_rows, retry_updates = build_and_apply(
+                retry_prompt, f'reconcile-{domain}-retry.json')
+            updates_applied += retry_updates
+            fields_normalized += apply_registry_normalization(domain, ref_dir)
+            remaining = find_unresolved(domain, ref_dir)
+            if remaining:
+                log(f'  WARNING: {len(remaining)} {domain} reference(s) still '
+                    f'unresolved: {"; ".join(remaining)}')
+            shared = find_alias_collisions(domain, ref_dir)
+            if shared:
+                log(f'  WARNING: {len(shared)} {domain} alias(es) still shared: '
+                    + '; '.join(f'{a} ({", ".join(i)})' for a, i in shared.items()))
 
     return {
         'registry_entries': len(registry_rows),

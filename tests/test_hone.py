@@ -456,3 +456,126 @@ class TestCountBriefIssues:
         counts = _count_brief_issues(ref, None)
         assert counts['total'] == 0
         assert counts['scenes'] == 0
+
+
+class TestUnresolvedReferences:
+    """Every reference must resolve to a registry entry; the model's registry
+    can silently omit some (The Great Gatsby: a bare "West Egg" beside
+    "Gatsby's Mansion, West Egg"), and normalization passes unknowns through."""
+
+    def _registry_response(self, *rows):
+        return 'id|name|aliases\n' + '\n'.join(rows) + '\n'
+
+    def _set_locations(self, ref_dir, locations):
+        import csv as _csv
+        path = os.path.join(ref_dir, 'scenes.csv')
+        with open(path) as f:
+            rows = list(_csv.DictReader(f, delimiter='|'))
+            header = list(rows[0].keys())
+        for i, row in enumerate(rows):
+            row['location'] = locations[i] if i < len(locations) else ''
+        with open(path, 'w') as f:
+            w = _csv.DictWriter(f, fieldnames=header, delimiter='|', lineterminator='\n')
+            w.writeheader()
+            w.writerows(rows)
+
+    def _mock_api(self, monkeypatch, responses):
+        calls = []
+
+        def fake_invoke(prompt, model, log_file, **kwargs):
+            calls.append(prompt)
+            with open(log_file, 'w') as f:
+                f.write(responses[len(calls) - 1])
+
+        monkeypatch.setattr('storyforge.api.invoke_to_file', fake_invoke)
+        monkeypatch.setattr('storyforge.api.extract_text_from_file',
+                            lambda path: open(path).read())
+        return calls
+
+    def test_find_unresolved_lists_missing_references(self, project_dir):
+        from storyforge.hone import find_unresolved
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._set_locations(ref_dir, ['the office', 'West Egg;the study',
+                                      'Plaza Hotel (tea-garden)'])
+        assert find_unresolved('locations', ref_dir) == ['Plaza Hotel', 'West Egg']
+
+    def test_find_unresolved_accepts_canonical_ids(self, project_dir):
+        from storyforge.hone import find_unresolved
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._set_locations(ref_dir, ['cartography-office', 'deep-archive'])
+        assert 'cartography-office' not in find_unresolved('locations', ref_dir)
+
+    def test_reconcile_retries_unresolved_once(self, project_dir, monkeypatch, tmp_path):
+        from storyforge.hone import reconcile_domain, find_unresolved
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._set_locations(ref_dir, ['West Egg', 'the office'])
+        first = self._registry_response(
+            'cartography-office|Pressure Cartography Office|the office')
+        second = self._registry_response(
+            'cartography-office|Pressure Cartography Office|the office',
+            'west-egg|West Egg|West Egg')
+        calls = self._mock_api(monkeypatch, [first, second])
+
+        reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
+
+        assert len(calls) == 2
+        assert '- West Egg' in calls[1].split('## Unresolved References')[1]
+        assert '## Shared Aliases' not in calls[1]
+        assert find_unresolved('locations', ref_dir) == []
+
+    def test_reconcile_skips_retry_when_all_resolve(self, project_dir, monkeypatch, tmp_path):
+        from storyforge.hone import reconcile_domain
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._set_locations(ref_dir, ['the office'] * 6)
+        calls = self._mock_api(monkeypatch, [self._registry_response(
+            'cartography-office|Pressure Cartography Office|the office')])
+
+        reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
+
+        assert len(calls) == 1
+
+    def test_reconcile_warns_on_remaining(self, project_dir, monkeypatch, tmp_path, capsys):
+        from storyforge.hone import reconcile_domain
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._set_locations(ref_dir, ['West Egg'] * 6)
+        empty = self._registry_response('cartography-office|Office|the office')
+        self._mock_api(monkeypatch, [empty, empty])
+
+        reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
+
+        assert 'still unresolved: West Egg' in capsys.readouterr().out
+
+
+class TestAliasCollisions:
+    """An alias under two entries silently resolves to whichever loads last
+    (The Great Gatsby: `power` listed `love` beside a `love` entry)."""
+
+    def _write_registry(self, ref_dir, *rows):
+        with open(os.path.join(ref_dir, 'values.csv'), 'w') as f:
+            f.write('id|name|aliases\n' + '\n'.join(rows) + '\n')
+
+    def test_detects_alias_shared_by_two_entries(self, project_dir):
+        from storyforge.hone import find_alias_collisions
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._write_registry(ref_dir, 'love|Love|romance', 'power|Power|love;control')
+        assert find_alias_collisions('values', ref_dir) == {'love': ['love', 'power']}
+
+    def test_distinct_aliases_have_no_collisions(self, project_dir):
+        from storyforge.hone import find_alias_collisions
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._write_registry(ref_dir, 'love|Love|romance', 'power|Power|control')
+        assert find_alias_collisions('values', ref_dir) == {}
+
+    def test_reconcile_retries_on_collision(self, project_dir, monkeypatch, tmp_path):
+        from storyforge.hone import reconcile_domain, find_alias_collisions
+        ref_dir = os.path.join(project_dir, 'reference')
+        bad = 'id|name|aliases\ncartography-office|Office|the office\nother|Other|the office\n'
+        good = 'id|name|aliases\ncartography-office|Office|the office\n'
+        TestUnresolvedReferences()._set_locations(ref_dir, ['the office'])
+        calls = TestUnresolvedReferences()._mock_api(monkeypatch, [bad, good])
+
+        reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
+
+        assert len(calls) == 2
+        assert '- the office: cartography-office, other' in calls[1]
+        assert find_alias_collisions('locations', ref_dir) == {}

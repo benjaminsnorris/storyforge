@@ -30,7 +30,9 @@ from storyforge.git import commit_and_push, ensure_on_branch
 
 ALL_DOMAINS = ['registries', 'gaps', 'structural', 'briefs', 'intent']
 PHASE1_REGISTRY = ['characters', 'locations']
-PHASE2_REGISTRY = ['values', 'mice-threads']
+# Characters again: phase 1 only has the pov column, so the cast lists in
+# scene-intent (characters, on_stage) first exist after phase 2.
+PHASE2_REGISTRY = ['characters', 'values', 'mice-threads']
 PHASE3_REGISTRY = ['knowledge', 'outcomes', 'physical-states']
 ALL_REGISTRY_SUBS = ['characters', 'locations', 'values', 'mice-threads',
                      'knowledge', 'outcomes', 'physical-states']

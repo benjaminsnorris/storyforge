@@ -219,3 +219,31 @@ class TestFitManuscript:
         fitted = _fit_manuscript('\n'.join(lines) + '\n', limit=20_000)
         kept = [l for l in fitted.splitlines() if l.startswith('line ')]
         assert all(l in set(lines) for l in kept)
+
+
+class TestValueAtStakeIsBare:
+    """value_at_stake must be the value alone so the values registry can
+    resolve it (The Great Gatsby yielded "truth — specifically ...")."""
+
+    def _parse(self, value):
+        from storyforge.extract import parse_intent_response
+        return parse_intent_response(f'VALUE_AT_STAKE: {value}\n', 's1')['value_at_stake']
+
+    def test_em_dash_elaboration_dropped(self):
+        assert self._parse('truth — specifically, the hidden past') == 'truth'
+
+    def test_unspaced_em_dash_and_en_dash(self):
+        assert self._parse('Truth—the gap between persona and reality') == 'Truth'
+        assert self._parse('hope – that the past can return') == 'hope'
+
+    def test_spaced_hyphen_and_colon(self):
+        assert self._parse('love - whether it can be recovered') == 'love'
+        assert self._parse('loyalty: to the dead') == 'loyalty'
+
+    def test_hyphenated_value_kept(self):
+        assert self._parse('self-respect') == 'self-respect'
+
+    def test_prompt_asks_for_value_only(self):
+        from storyforge.extract import build_intent_prompt
+        prompt = build_intent_prompt('s1', 'Scene prose.', {}, {})
+        assert 'Name only the value' in prompt

@@ -159,7 +159,8 @@ def main(argv=None):
         # Phase 2: Intent
         if args.phase is None or args.phase == 2:
             _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir,
-                         log_dir, profile_file, args.dry_run, system=system)
+                         log_dir, profile_file, args.force, args.dry_run,
+                         system=system)
             if not args.dry_run:
                 commit_and_push(project_dir,
                                 'Extract: Phase 2 — intent (scene-intent.csv)',
@@ -294,6 +295,30 @@ def _run_hone(plugin_dir: str, phase: int) -> None:
 # Phase 0: Characterize
 # ============================================================================
 
+def _merge_fields(row: dict, result: dict, force: bool) -> bool:
+    """Copy extracted values into an existing CSV row; return whether it changed.
+
+    Empty fields are filled; populated ones are overwritten only with force.
+    Keys starting with '_' (e.g. _confidence) are response metadata, not columns.
+    """
+    changed = False
+    for k, v in result.items():
+        if not v or k == 'id' or k.startswith('_'):
+            continue
+        if (force or not row.get(k, '').strip()) and row.get(k) != v:
+            row[k] = v
+            changed = True
+    return changed
+
+
+def _log_merge(csv_name: str, changed: int, total: int, skipped: list[str],
+               suffix: str = '') -> None:
+    log(f'  Updated {csv_name}: {changed} of {total} scenes changed{suffix}')
+    if skipped:
+        log(f'  WARNING: {len(skipped)} scene(s) have no row in {csv_name} and were '
+            f'not added: {", ".join(skipped)}')
+
+
 def _run_phase_0(project_dir, scenes_dir, log_dir, profile_file, dry_run,
                  system=None):
     log('')
@@ -397,6 +422,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     existing = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
 
     count = 0
+    skipped = []
     for i, sid in enumerate(sorted_scene_ids):
         txt_file = os.path.join(log_dir, f'{sid}.txt')
         if not os.path.isfile(txt_file):
@@ -407,9 +433,8 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         normalize_fields(result, alias_maps)
 
         if sid in existing:
-            for k, v in result.items():
-                if v and k != 'id' and (force or not existing[sid].get(k, '').strip()):
-                    existing[sid][k] = v
+            count += _merge_fields(existing[sid], result, force)
+            continue
         elif not existing:
             row = {c: '' for c in _FILE_MAP['scenes.csv']}
             row.update(result)
@@ -421,12 +446,13 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                     row['word_count'] = str(len(f.read().split()))
             existing[sid] = row
         else:
+            skipped.append(sid)
             continue
         count += 1
 
     ordered = sorted(existing.values(), key=lambda r: int(r.get('seq', 0)))
     _write_csv(os.path.join(ref_dir, 'scenes.csv'), ordered, _FILE_MAP['scenes.csv'])
-    log(f'  Updated scenes.csv: {count} scenes')
+    _log_merge('scenes.csv', count, len(sorted_scene_ids), skipped)
 
     _safe_remove(batch_file)
     _safe_rmdir(skel_output)
@@ -437,7 +463,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 # ============================================================================
 
 def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
-                 profile_file, dry_run, system=None):
+                 profile_file, force, dry_run, system=None):
     log('')
     log('--- Phase 2: Extract intent (scene-intent.csv) ---')
 
@@ -484,11 +510,11 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     # Process results
     log('  Processing intent results...')
     alias_maps = load_registry_alias_maps(project_dir)
-    force = False  # Phase 2 doesn't use --force for intent
 
     existing = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
 
     count = 0
+    skipped = []
     for sid in sorted_scene_ids:
         txt_file = os.path.join(log_dir, f'{sid}.txt')
         if not os.path.isfile(txt_file):
@@ -499,22 +525,21 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         normalize_fields(result, alias_maps)
 
         if sid in existing:
-            for k, v in result.items():
-                if v and k != 'id' and not k.startswith('_'):
-                    if force or not existing[sid].get(k, '').strip():
-                        existing[sid][k] = v
+            count += _merge_fields(existing[sid], result, force)
+            continue
         elif not existing:
             row = {c: '' for c in _FILE_MAP['scene-intent.csv']}
             row.update({k: v for k, v in result.items() if not k.startswith('_')})
             existing[sid] = row
         else:
+            skipped.append(sid)
             continue
         count += 1
 
     ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
     _write_csv(os.path.join(ref_dir, 'scene-intent.csv'), ordered,
                _FILE_MAP['scene-intent.csv'])
-    log(f'  Updated scene-intent.csv: {count} scenes')
+    _log_merge('scene-intent.csv', count, len(sorted_scene_ids), skipped)
 
     _safe_remove(batch_file)
     _safe_rmdir(intent_output)
@@ -592,6 +617,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     existing = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
 
     count = 0
+    skipped = []
     for sid in sorted_scene_ids:
         txt_file = os.path.join(log_dir, f'{sid}.txt')
         if not os.path.isfile(txt_file):
@@ -602,21 +628,22 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         normalize_fields(result, alias_maps)
 
         if sid in existing:
-            for k, v in result.items():
-                if v and k != 'id' and (force or not existing[sid].get(k, '').strip()):
-                    existing[sid][k] = v
+            count += _merge_fields(existing[sid], result, force)
+            continue
         elif not existing:
             row = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
             row.update(result)
             existing[sid] = row
         else:
+            skipped.append(sid)
             continue
         count += 1
 
     ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
     _write_csv(os.path.join(ref_dir, 'scene-briefs.csv'), ordered,
                _FILE_MAP['scene-briefs.csv'])
-    log(f'  Updated scene-briefs.csv: {count} scenes (knowledge fields pending)')
+    _log_merge('scene-briefs.csv', count, len(sorted_scene_ids), skipped,
+               ' (knowledge fields pending)')
 
     commit_and_push(project_dir,
                     'Extract: Phase 3a — briefs (parallel fields)',

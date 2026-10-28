@@ -276,7 +276,7 @@ Output each field on its own labeled line. Use semicolons to separate list items
 FUNCTION: [one sentence: why this scene exists — what it accomplishes in the story. Must be specific and testable, not vague like "develops character"]
 ACTION_SEQUEL: [action or sequel — action scenes have goal/conflict/outcome; sequel scenes have reaction/dilemma/decision]
 EMOTIONAL_ARC: [starting emotion giving way to ending emotion, e.g., "controlled competence to buried unease"]
-VALUE_AT_STAKE: [the abstract value being tested: safety, love, justice, truth, freedom, honor, etc.]
+VALUE_AT_STAKE: [the single abstract value being tested, in one or two words: safety, love, justice, truth, freedom, honor, etc. Name only the value, with no explanation; the specifics belong in FUNCTION]
 VALUE_SHIFT: [polarity change using +/- notation: +/- means positive to negative, -/+ means negative to positive, +/++ means good to better, -/-- means bad to worse]
 TURNING_POINT: [action or revelation — action means a character does something that changes the situation; revelation means new information changes the situation]
 CHARACTERS: [semicolon-separated list of ALL characters present or referenced by name]
@@ -305,9 +305,21 @@ def parse_intent_response(response: str, scene_id: str) -> dict[str, str]:
         if match:
             label = match.group(1)
             value = match.group(2).strip()
+            if label == 'VALUE_AT_STAKE':
+                value = _bare_value(value)
             if label in label_map and value and value.upper() != 'UNKNOWN':
                 result[label_map[label]] = value
     return result
+
+
+def _bare_value(value: str) -> str:
+    """Reduce a value-at-stake answer to the value itself.
+
+    Models often append an elaboration ("truth — specifically whether ..."),
+    which no registry alias can match. Keep the text before the first dash
+    or colon separator.
+    """
+    return re.split(r'\s+-+\s+|\s*[—–]\s*|:\s', value, maxsplit=1)[0].strip()
 
 
 # ============================================================================

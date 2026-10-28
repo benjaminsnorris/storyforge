@@ -512,3 +512,61 @@ class TestExpandMode:
                             lambda: project_dir)
         main(['--dry-run', '--expand'])
         assert mock_api.call_count == 0
+
+
+# ============================================================================
+# Merging extracted values into existing rows
+# ============================================================================
+
+
+class TestMergeFields:
+    """Re-extraction on The Great Gatsby with --force kept every old value but
+    reported 'Updated scene-intent.csv: 39 scenes'."""
+
+    def test_fills_empty_field(self):
+        from storyforge.cmd_extract import _merge_fields
+        row = {'id': 's1', 'value_at_stake': ''}
+        assert _merge_fields(row, {'value_at_stake': 'truth'}, force=False)
+        assert row['value_at_stake'] == 'truth'
+
+    def test_keeps_populated_field_without_force(self):
+        from storyforge.cmd_extract import _merge_fields
+        row = {'id': 's1', 'value_at_stake': 'truth — specifically'}
+        assert not _merge_fields(row, {'value_at_stake': 'truth'}, force=False)
+        assert row['value_at_stake'] == 'truth — specifically'
+
+    def test_force_overwrites(self):
+        from storyforge.cmd_extract import _merge_fields
+        row = {'id': 's1', 'value_at_stake': 'truth — specifically'}
+        assert _merge_fields(row, {'value_at_stake': 'truth'}, force=True)
+        assert row['value_at_stake'] == 'truth'
+
+    def test_identical_value_is_not_a_change(self):
+        from storyforge.cmd_extract import _merge_fields
+        row = {'id': 's1', 'value_at_stake': 'truth'}
+        assert not _merge_fields(row, {'value_at_stake': 'truth'}, force=True)
+
+    def test_metadata_keys_not_copied(self):
+        from storyforge.cmd_extract import _merge_fields
+        row = {'id': 's1'}
+        _merge_fields(row, {'_confidence': 'high', 'id': 'other'}, force=True)
+        assert row == {'id': 's1'}
+
+
+class TestPhase2Force:
+    def test_force_reaches_phase_2(self, mock_api, mock_git, mock_costs,
+                                   project_dir, monkeypatch):
+        monkeypatch.setattr('storyforge.cmd_extract.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        seen = {}
+
+        def fake_phase_2(*args, **kwargs):
+            seen['force'] = args[6]
+
+        monkeypatch.setattr('storyforge.cmd_extract._run_phase_2', fake_phase_2)
+        monkeypatch.setattr('storyforge.cmd_extract._run_hone', lambda *a, **k: None)
+
+        main(['--phase', '2', '--force'])
+
+        assert seen['force'] is True
