@@ -400,6 +400,11 @@ def build_boundary_prompt(chapter_text: str) -> str:
     Returns:
         The assembled prompt string.
     """
+    # Number the lines: the model cannot reliably count them itself, and a
+    # miscounted boundary shifts every scene's text away from its title.
+    numbered = '\n'.join(
+        f'{n}: {line}' for n, line in enumerate(chapter_text.splitlines(), 1)
+    )
     return f"""You are identifying scene boundaries in a chapter of a novel.
 
 A scene is a continuous unit of action in one time and place. A new scene begins when there is a significant shift in:
@@ -412,7 +417,9 @@ Minor transitions within the same time/place/focus are NOT scene breaks.
 
 ## Chapter Text
 
-{chapter_text}
+Each line is prefixed with its line number and a colon.
+
+{numbered}
 
 ## Instructions
 
@@ -420,7 +427,7 @@ Identify where each scene begins. For each scene boundary (including the very st
 
 SCENE: <line_number> | <suggested_title> | <brief_reason>
 
-Where line_number is the line in the chapter text where this scene begins (1-indexed).
+Where line_number is the number prefixed to the line where this scene begins.
 The first scene always starts at line 1.
 
 Output ONLY SCENE: lines, nothing else."""

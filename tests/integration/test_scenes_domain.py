@@ -503,6 +503,10 @@ class TestBuildBoundaryPrompt:
         assert 'Time' in prompt or 'time' in prompt
         assert 'Setting' in prompt or 'location' in prompt.lower()
 
+    def test_numbers_each_line(self):
+        prompt = build_boundary_prompt('First line\n\nThird line\n')
+        assert '1: First line\n2: \n3: Third line' in prompt
+
     def test_empty_chapter(self):
         prompt = build_boundary_prompt('')
         # Should still produce a prompt, just with empty text section

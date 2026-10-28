@@ -43,6 +43,23 @@ from storyforge.scenes import (
 from storyforge.csv_cli import get_field, get_column, append_row
 
 
+def _natural_key(path):
+    """Sort key that orders chapter-2 before chapter-10."""
+    name = os.path.basename(path).lower()
+    return [int(t) if t.isdigit() else t for t in re.split(r'(\d+)', name)]
+
+
+def _row_for_header(csv_path, values):
+    """Build a pipe-delimited row in the column order of csv_path's header.
+
+    Columns absent from values are left empty, so the row stays aligned
+    whichever schema version the project's CSV was created with.
+    """
+    with open(csv_path, encoding='utf-8') as f:
+        header = f.readline().rstrip('\r\n').split('|')
+    return '|'.join(str(values.get(col, '')) for col in header)
+
+
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         prog='storyforge scenes-setup',
@@ -286,7 +303,7 @@ def main(argv=None):
             scene_text = '\n'.join(cleaned)
 
             # Generate slug
-            stitle = split['title']
+            stitle = re.sub(r'^#+\s*', '', split['title'])
             slug = generate_slug(stitle)
             if not slug:
                 slug = f'scene-ch{chapter_num}-{s_idx + 1}'
@@ -300,9 +317,11 @@ def main(argv=None):
 
                 seq_num = seq_start + s_idx
                 word_count = count_words(scene_text)
-                append_row(metadata_csv,
-                           f'{slug}|{seq_num}|{stitle}|||{part_num}|||||{word_count}|')
-                append_row(intent_csv, f'{slug}||||||||||')
+                append_row(metadata_csv, _row_for_header(metadata_csv, {
+                    'id': slug, 'seq': seq_num, 'title': stitle,
+                    'part': part_num, 'word_count': word_count,
+                }))
+                append_row(intent_csv, _row_for_header(intent_csv, {'id': slug}))
 
                 log(f'  Created scenes/{slug}.md ({word_count} words)')
             else:
@@ -466,9 +485,10 @@ def main(argv=None):
 
         # Collect chapter files (sorted)
         chapter_files = sorted(
-            os.path.join(src_dir, f)
-            for f in os.listdir(src_dir)
-            if f.endswith('.md') or f.endswith('.txt')
+            (os.path.join(src_dir, f)
+             for f in os.listdir(src_dir)
+             if f.endswith('.md') or f.endswith('.txt')),
+            key=_natural_key,
         )
         chapter_files = [f for f in chapter_files if os.path.isfile(f)]
 
@@ -483,12 +503,10 @@ def main(argv=None):
 
         # Find next available seq number
         max_seq = 0
-        seq_col = get_column(metadata_csv, 'seq')
-        if seq_col:
-            for val in seq_col.strip().splitlines():
-                val = val.strip()
-                if val.isdigit():
-                    max_seq = max(max_seq, int(val))
+        for val in get_column(metadata_csv, 'seq'):
+            val = val.strip()
+            if val.isdigit():
+                max_seq = max(max_seq, int(val))
 
         # Separate chapters with explicit markers vs needing Claude
         marker_chapters = []
@@ -748,7 +766,10 @@ def main(argv=None):
             if not ch_slug:
                 ch_slug = f'chapter-{c + 1}'
 
-            ch_file = os.path.join(tmp_chapters_dir, f'{ch_slug}.md')
+            # Prefix with the manuscript position: split-chapters orders
+            # files by name, and slugs like chapter-ix / chapter-v do not
+            # sort into reading order.
+            ch_file = os.path.join(tmp_chapters_dir, f'{c + 1:04d}-{ch_slug}.md')
             ch_text = '\n'.join(ms_lines[start_line - 1:end_line])
             with open(ch_file, 'w') as f:
                 f.write(ch_text + '\n')
