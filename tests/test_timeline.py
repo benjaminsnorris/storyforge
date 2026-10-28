@@ -75,6 +75,19 @@ class TestCues:
                                          10, 10, [])
         assert 'refers "that June night three months before"' in prompt
 
+    def test_derived_date_and_day_one_calendar(self):
+        """Gatsby (research: Bruccoli, Pendleton): "In two weeks it'll be the
+        longest day" fixes the dinner at about June 7, but the cue prompt
+        forbade deriving it, so day 1 had no date and the assigner put "a few
+        days before the Fourth of July" on day 2, 24 days early."""
+        from storyforge.timeline import CUE_INSTRUCTIONS, parse_cues, build_assignment_prompt
+        assert '"XXXX-06-07~"' in CUE_INSTRUCTIONS
+        assert parse_cues('TIME_DATE: XXXX-06-07~\n')['date'] == 'XXXX-06-07~'
+        prompt = build_assignment_prompt([{'id': 's', 'cues': {}, 'provisional': None}],
+                                         None, None, [])
+        assert 'work out which calendar date day 1 falls on' in prompt
+        assert "give day 1's calendar date" in prompt
+
     def test_unknown_relation_is_unclear_and_bad_date_dropped(self):
         from storyforge.timeline import parse_cues
         cues = parse_cues('TIME_RELATION: sometime\nTIME_DATE: July 4th, 1922\n')
@@ -368,6 +381,13 @@ class TestChecks:
         cues = {'c': {'anchor': 'that Sunday'}, 'd': {'anchor': 'on Sunday'}}
         checks = [f['check'] for f in check_timeline(rows, cues)]
         assert checks == ['date_mismatch', 'weekday_mismatch']
+
+    def test_derived_date_is_checked_against_the_days(self):
+        """A derived (~) day-1 date checks later dates: Gatsby's dinner at
+        about June 7 on day 1 and July 4 on day 3 contradict."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('a', '1', 'scene', 'XXXX-06-07~'), ('b', '3', 'scene', 'XXXX-07-04~'))
+        assert [f['check'] for f in check_timeline(rows, {})] == ['date_mismatch']
 
     def test_gap_after_a_flashback_counts_from_the_present(self):
         """Gatsby VIII: the Louisville memory, then "the next morning"."""
