@@ -455,7 +455,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     skel_output = os.path.join(log_dir, 'extract-phase1-output')
     os.makedirs(skel_output, exist_ok=True)
-    download_batch_results(results_url, skel_output, log_dir)
+    succeeded = set(download_batch_results(results_url, skel_output, log_dir) or [])
 
     # Process results
     log('  Processing skeleton results...')
@@ -481,7 +481,8 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     cues = {}
     for sid in sorted_scene_ids:
         txt_file = os.path.join(log_dir, f'{sid}.txt')
-        if os.path.isfile(txt_file):
+        # Only this batch's answers: never a stale file from an earlier run
+        if sid in succeeded and os.path.isfile(txt_file):
             with open(txt_file) as f:
                 cues[sid] = parse_cues(f.read())
     write_cues(project_dir, cues)

@@ -101,11 +101,12 @@ def main(argv=None):
     else:
         timeline_mode = 'batch'
 
-    if not args.dry_run and not args.interactive and not args.embedded:
+    # Every mode calls the API (interactive only adds review checkpoints);
+    # embedded runs inherit the caller's check
+    if not args.dry_run and not args.embedded:
         if not os.environ.get('ANTHROPIC_API_KEY'):
-            log('ERROR: ANTHROPIC_API_KEY is required for autonomous mode (batch/direct API).')
+            log('ERROR: ANTHROPIC_API_KEY is required (the timeline pass calls the API).')
             log('  Set it with: export ANTHROPIC_API_KEY=your-key')
-            log('  Or use --interactive mode which uses claude -p instead.')
             sys.exit(1)
 
     title = read_yaml_field('project.title', project_dir) or read_yaml_field('title', project_dir) or 'Unknown'
@@ -284,11 +285,13 @@ def _extract_cues_batch(project_dir, scene_ids, model, log_dir):
     results_url = poll_batch(batch_id, log_fn=log)
     out_dir = os.path.join(log_dir, 'timeline-cues')
     os.makedirs(out_dir, exist_ok=True)
-    download_batch_results(results_url, out_dir, log_dir)
+    # Only this batch's successes: a {sid}.txt left by an earlier extract or
+    # score run must not be read as this scene's cues
+    succeeded = set(download_batch_results(results_url, out_dir, log_dir) or [])
     cues = {}
     for sid in prompts:
         txt = os.path.join(log_dir, f'{sid}.txt')
-        if os.path.isfile(txt):
+        if sid in succeeded and os.path.isfile(txt):
             with open(txt) as f:
                 cues[sid] = parse_cues(f.read())
         else:

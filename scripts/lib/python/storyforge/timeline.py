@@ -138,6 +138,8 @@ _NUMBER_WORDS = {
     'twelve': 12, 'fifteen': 15, 'twenty': 20, 'thirty': 30, 'forty': 40,
     'fifty': 50, 'a couple of': 2, 'a couple': 2, 'couple of': 2,
 }
+_TENS = {'twenty': 20, 'thirty': 30, 'forty': 40, 'fifty': 50, 'sixty': 60,
+         'seventy': 70, 'eighty': 80, 'ninety': 90}
 _UNIT_DAYS = {
     'minute': 0, 'hour': 0, 'day': 1, 'night': 1, 'week': 7, 'fortnight': 14,
     'month': 30, 'season': 91, 'year': 365, 'decade': 3650,
@@ -164,6 +166,12 @@ def gap_to_days(gap: str) -> int | None:
         return 0
     if _NEXT_DAY.search(text):
         return 1
+    tens = re.search(r'\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)-'
+                     r'(one|two|three|four|five|six|seven|eight|nine)\s+'
+                     r'(day|week|month|year)s?\b', text)
+    if tens:
+        n = _TENS[tens.group(1)] + _NUMBER_WORDS[tens.group(2)]
+        return n * _UNIT_DAYS[tens.group(3)]
     match = re.search(
         r'\b(\d+|a couple of|a couple|couple of|' + '|'.join(
             sorted((w for w in _NUMBER_WORDS if ' ' not in w), key=len, reverse=True))
@@ -231,37 +239,55 @@ def _month_day(value: str) -> tuple[str, int, int] | None:
 # Assignment: the running-present walk, then batches
 # ============================================================================
 
-def walk(order: list[str], cues: dict[str, dict]) -> dict[str, int | None]:
+def walk(order: list[str], cues: dict[str, dict], last: int | None = None,
+         present: int | None = None) -> dict[str, int | None]:
     """Provisional days from the cues alone, in reading order.
 
     A scene is placed relative to the previous scene: ``continues`` on its
-    day, ``later``/``earlier`` by a parseable gap. The first scene that
-    isn't frame narration is day 1 unless it is a flashback. Frame scenes, unclear ones, vague gaps
-    and anything after an unplaced scene stay None for the model.
+    day, ``later``/``earlier`` by a parseable gap. After a flashback scene a
+    ``continues`` stays in the flashback (Gatsby VIII runs 1917 into 1919),
+    but a ``later`` is left for the model: code can't tell "later in the
+    memory" from "back to the present", and counting from the remembered day
+    would put the present years in the past. The first scene that isn't frame
+    narration is day 1 unless it is a flashback. A scene after a frame
+    interjection is read against the scene before the frame, and an
+    ``earlier`` there is a return from the frame, not a flashback. Frame
+    scenes, unclear ones, vague gaps and anything after an unplaced scene
+    stay None for the model. *last* and *present* continue a walk begun in
+    an earlier batch.
     """
     days: dict[str, int | None] = {}
-    last: int | None = None
-    started = False
+    started = last is not None
+    after_frame = False
     for sid in order:
         cue = cues.get(sid, {})
         relation = cue.get('relation') or 'unclear'
         gap = gap_to_days(cue.get('gap', ''))
+        if relation == 'frame':
+            days[sid] = None
+            after_frame = True
+            continue
+        if after_frame and relation == 'earlier':
+            relation, gap = 'continues', None
+        after_frame = False
+        in_flashback = last is not None and present is not None and last < present
         day = None
         # The clock starts at the first scene that isn't frame narration
         # (Gatsby opens with Nick looking back)
-        if not started and relation != 'frame':
+        if not started:
             started = True
             if relation in ('continues', 'later', 'unclear'):
                 day = 1
         elif last is not None and relation == 'continues':
             day = last
-        elif last is not None and relation == 'later' and gap is not None:
+        elif last is not None and relation == 'later' and gap is not None and not in_flashback:
             day = last + gap
         elif last is not None and relation == 'earlier' and gap is not None:
             day = last - gap
         days[sid] = day
-        if relation != 'frame':
-            last = day
+        last = day
+        if day is not None and relation != 'earlier' and (present is None or day > present):
+            present = day
     return days
 
 
@@ -319,8 +345,9 @@ basis: a few words on why ("next morning", "anchor: July 4", "1917, five years b
 def parse_assignments(response: str, ids: list[str]) -> dict[str, tuple[int, str, str]]:
     """Parse ``scene_id | day | mode | basis`` lines for the scenes in *ids*.
 
-    Days may be zero or negative. An unknown mode becomes ``scene``. Lines
-    for other ids or with a non-integer day are ignored.
+    Days may be zero or negative. A missing or unknown mode comes back as
+    ``''`` for the caller to decide. Lines for other ids or with a
+    non-integer day are ignored.
     """
     wanted = set(ids)
     result: dict[str, tuple[int, str, str]] = {}
@@ -338,7 +365,7 @@ def parse_assignments(response: str, ids: list[str]) -> dict[str, tuple[int, str
             day = int(parts[1].lstrip('+'))
         except ValueError:
             continue
-        mode = parts[2].lower() if len(parts) > 2 and parts[2].lower() in TIME_MODES else 'scene'
+        mode = parts[2].lower() if len(parts) > 2 and parts[2].lower() in TIME_MODES else ''
         basis = parts[3] if len(parts) > 3 else ''
         result[parts[0]] = (day, mode, basis)
     return result
@@ -349,34 +376,42 @@ def assign_calendar(items: list[dict], invoke, log_dir: str) -> dict[str, tuple[
 
     *items*: dicts with id, title, summary, time_of_day, duration, cues.
     *invoke(prompt, log_file, label)* returns the response text, or None when
-    the call was cut off. Returns scene id → (day, mode, basis); a scene in a
-    cut-off batch keeps its provisional day if it has one, else is absent.
+    the call failed or was cut off. Each batch's provisional days are walked
+    from where the previous batch left the calendar, so an anchor that moved
+    batch 1 carries into batch 2. Returns scene id → (day, mode, basis); a
+    scene in a failed batch keeps its provisional day if it has one, else is
+    absent.
     """
-    order = [it['id'] for it in items]
-    provisional = walk(order, {it['id']: it.get('cues', {}) for it in items})
-    for it in items:
-        it['provisional'] = provisional[it['id']]
-
     placed: dict[str, tuple[int, str, str]] = {}
     present: int | None = None
     last_day: int | None = None
     anchors: list[str] = []
     batches = [items[i:i + _BATCH_SIZE] for i in range(0, len(items), _BATCH_SIZE)]
     for n, batch in enumerate(batches, 1):
+        provisional = walk([it['id'] for it in batch],
+                           {it['id']: it.get('cues', {}) for it in batch},
+                           last=last_day, present=present)
+        for it in batch:
+            it['provisional'] = provisional[it['id']]
         label = f'timeline (batch {n} of {len(batches)})'
         text = invoke(build_assignment_prompt(batch, present, last_day, anchors),
                       os.path.join(log_dir, f'timeline-assign-{n}.json'), label)
         answers = parse_assignments(text, [it['id'] for it in batch]) if text is not None else {}
         for it in batch:
             sid = it['id']
+            cue = it.get('cues', {})
             if sid in answers:
-                placed[sid] = answers[sid]
+                day, mode, basis = answers[sid]
+                # A line that lost its mode column ("id | 800 | frame
+                # narration") must not make a frame the story's present
+                if not mode:
+                    mode = 'frame' if cue.get('relation') == 'frame' else 'scene'
+                placed[sid] = (day, mode, basis)
             elif it['provisional'] is not None:
                 placed[sid] = (it['provisional'], 'scene', 'from cues')
             if sid not in placed:
                 continue
             day, mode, _basis = placed[sid]
-            cue = it.get('cues', {})
             if mode != 'frame':
                 last_day = day
                 if cue.get('relation') != 'earlier' and (present is None or day > present):
@@ -411,6 +446,8 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     findings = []
     present = None
     last_day = None
+    last_mode = ''
+    after_frame = False
     dated: list[tuple[str, int, tuple]] = []
     weekdays: list[tuple[str, int, int]] = []
     for row in scenes:
@@ -419,8 +456,16 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         mode = (row.get('time_mode') or 'scene').strip() or 'scene'
         cue = cues.get(sid, {})
         relation = cue.get('relation', '')
-        if day is None or mode == 'frame':
+        if mode == 'frame':
+            after_frame = True
             continue
+        if day is None:
+            continue
+        # A scene after a frame interjection relates to the frame, not to
+        # the scene before it, so its relation and gap say nothing here
+        if after_frame:
+            relation, cue = '', {}
+        after_frame = False
         # Only a step back from the present counts: a scene that continues
         # inside a flashback is behind the present too, legitimately
         at_present = last_day is not None and present is not None and last_day >= present
@@ -433,7 +478,10 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
                              'message': f'reads as set earlier, but its day ({day}) is not before '
                                         f'the previous scene\'s ({last_day})'})
         gap = gap_to_days(cue.get('gap', ''))
-        if last_day is not None and gap is not None and relation in ('continues', 'later'):
+        # After a summary the gap counts from the end of a stretch whose
+        # length is only roughly known, so it isn't checked
+        if (last_day is not None and gap is not None and last_mode != 'summary'
+                and relation in ('continues', 'later')):
             # Back from a flashback, "the next morning" counts from the
             # present, not from the remembered scene before it
             base = present if (present is not None and last_day < present <= day) else last_day
@@ -453,6 +501,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         if weekday is not None:
             weekdays.append((sid, day, weekday))
         last_day = day
+        last_mode = mode
         if relation != 'earlier' and (present is None or day > present):
             present = day
 
@@ -465,6 +514,10 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         year = 2001 if 'X' in y1 else int(y1)
         try:
             between = (date(year, m2, dd2) - date(year, m1, dd1)).days
+            # With the year unstated, December 30 then January 2 may
+            # simply cross into the next year
+            if 'X' in y1 and between < 0:
+                between = (date(year + 1, m2, dd2) - date(year, m1, dd1)).days
         except ValueError:
             continue
         if abs(between - (d2 - d1)) > 1:
@@ -504,8 +557,12 @@ def _invoke_assignment(model: str):
     from .api import invoke_to_file, extract_text_from_file, is_truncated
 
     def invoke(prompt, log_file, label):
-        response = invoke_to_file(prompt, model, log_file,
-                                  max_tokens=_BATCH_MAX_TOKENS, label=label)
+        try:
+            response = invoke_to_file(prompt, model, log_file,
+                                      max_tokens=_BATCH_MAX_TOKENS, label=label)
+        except Exception as e:  # noqa: BLE001 — one failed batch, not the pass
+            log(f'  WARNING: {label} failed ({e}); its scenes keep their provisional days')
+            return None
         if is_truncated(response):
             log(f'  WARNING: {label} hit the {_BATCH_MAX_TOKENS}-token limit; '
                 f'its scenes keep their provisional days')
@@ -533,6 +590,10 @@ def run_assignment(project_dir: str, model: str, log_dir: str, force: bool) -> d
 
     scenes_path = os.path.join(project_dir, 'reference', 'scenes.csv')
     rows = _read_csv(scenes_path)
+    # A calendar is one piece: where the author has set any day, a new one
+    # is only proposed, never mixed in (its days may be offset from theirs)
+    authored = any((r.get('timeline_day') or '').strip() for r in rows if r.get('id') in placed)
+    write = force or not authored
     assigned = 0
     differences = []
     for row in rows:
@@ -542,9 +603,9 @@ def run_assignment(project_dir: str, model: str, log_dir: str, force: bool) -> d
         day, mode, basis = placed[sid]
         for col, new in (('timeline_day', str(day)), ('time_mode', mode)):
             old = (row.get(col) or '').strip()
-            if old == new:
+            if old == new or (col == 'time_mode' and not old and new == 'scene' and not write):
                 continue
-            if not old or force:
+            if write:
                 row[col] = new
                 assigned += 1
             else:
@@ -552,14 +613,16 @@ def run_assignment(project_dir: str, model: str, log_dir: str, force: bool) -> d
     if assigned:
         _write_csv(scenes_path, rows, _FILE_MAP['scenes.csv'])
 
+    proposed_path = os.path.join(project_dir, PROPOSED_FILE)
     if differences:
-        path = os.path.join(project_dir, PROPOSED_FILE)
-        with open(path, 'w', newline='', encoding='utf-8') as f:
+        with open(proposed_path, 'w', newline='', encoding='utf-8') as f:
             w = csv.writer(f, delimiter='|', lineterminator='\n')
             w.writerow(['id', 'field', 'current', 'proposed', 'basis'])
             w.writerows(differences)
-        log(f'  Timeline: {len(differences)} value(s) differ from what is set; '
-            f'proposals in {PROPOSED_FILE} (nothing overwritten; --force replaces)')
+        log(f'  Timeline: days are set already, so nothing was changed; {len(differences)} '
+            f'difference(s) proposed in {PROPOSED_FILE} (--force replaces)')
+    elif os.path.isfile(proposed_path):
+        os.remove(proposed_path)
 
     unplaced = [it['id'] for it in items if it['id'] not in placed]
     if unplaced:

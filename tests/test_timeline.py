@@ -151,6 +151,30 @@ class TestWalk:
         days = walk(list(cues), cues)
         assert days == {'a': 1, 'b': 2, 'c': 2 - 1825, 'd': 2 - 1825, 'e': None, 'f': None}
 
+    def test_after_a_flashback(self):
+        """Review of #324: "the next morning" after a memory counted from the
+        memory and put the present years in the past."""
+        from storyforge.timeline import walk
+        cues = {'a': {'relation': 'later'}, 'b': {'relation': 'later', 'gap': 'ten days'},
+                'memory': {'relation': 'earlier', 'gap': 'five years'},
+                'more': {'relation': 'continues'},
+                'back': {'relation': 'later', 'gap': 'the next morning'}}
+        days = walk(list(cues), cues)
+        assert days['memory'] == days['more'] == 11 - 1825
+        assert days['back'] is None  # the model decides
+
+    def test_scene_after_a_mid_book_frame(self):
+        from storyforge.timeline import walk
+        cues = {'a': {'relation': 'later'}, 'b': {'relation': 'later', 'gap': 'a week'},
+                'frame': {'relation': 'frame'},
+                'c': {'relation': 'earlier', 'gap': 'two years'}}
+        assert walk(list(cues), cues) == {'a': 1, 'b': 8, 'frame': None, 'c': 8}
+
+    def test_continues_from_an_earlier_batch(self):
+        from storyforge.timeline import walk
+        cues = {'x': {'relation': 'later', 'gap': 'two days'}}
+        assert walk(['x'], cues, last=40, present=40) == {'x': 42}
+
     def test_clock_starts_after_an_opening_frame(self):
         """Gatsby opens with Nick looking back; nothing was placed at all."""
         from storyforge.timeline import walk
@@ -174,7 +198,7 @@ class TestAssignment:
             's1 | 3 | scene | next day\n- s2 | -1825 | summary | 1917\n'
             's3 | 90 | odd | x\nother | 1 | scene\ns4 | soon | scene\n', ['s1', 's2', 's3', 's4'])
         assert result == {'s1': (3, 'scene', 'next day'), 's2': (-1825, 'summary', '1917'),
-                          's3': (90, 'scene', 'x')}
+                          's3': (90, '', 'x')}
 
     def test_only_lines_after_calendar_count(self):
         from storyforge.timeline import parse_assignments
@@ -216,17 +240,41 @@ class TestAssignment:
         monkeypatch.setattr(tl, '_invoke_assignment', lambda model: (
             lambda prompt, log_file, label: 'a | 1 | scene | start\nb | 2 | scene | next\n'
                                             'c | 800 | frame | two years on\n'))
-        result = tl.run_assignment(project_dir, 'm', os.path.join(project_dir, 'working', 'logs'),
-                                   force=False)
-        days = _column(project_dir, 'timeline_day')
-        assert days == {'a': '1', 'b': '5', 'c': '800'}  # b was authored: kept
-        assert _column(project_dir, 'time_mode')['c'] == 'frame'
-        assert result['proposed'] == 1
+        logs = os.path.join(project_dir, 'working', 'logs')
+        result = tl.run_assignment(project_dir, 'm', logs, force=False)
+        # One authored day: the whole calendar is only proposed
+        assert _column(project_dir, 'timeline_day') == {'a': '', 'b': '5', 'c': ''}
+        assert _column(project_dir, 'time_mode')['c'] == ''
         with open(os.path.join(project_dir, tl.PROPOSED_FILE)) as f:
-            assert 'b|timeline_day|5|2|next' in f.read()
+            proposed = f.read()
+        assert 'b|timeline_day|5|2|next' in proposed and 'c|time_mode||frame|' in proposed
+        assert result['assigned'] == 0 and result['proposed'] == 4
 
-        tl.run_assignment(project_dir, 'm', os.path.join(project_dir, 'working', 'logs'), force=True)
-        assert _column(project_dir, 'timeline_day')['b'] == '2'
+        tl.run_assignment(project_dir, 'm', logs, force=True)
+        assert _column(project_dir, 'timeline_day') == {'a': '1', 'b': '2', 'c': '800'}
+        assert _column(project_dir, 'time_mode')['c'] == 'frame'
+        # A clean run leaves no stale proposal behind
+        assert not os.path.exists(os.path.join(project_dir, tl.PROPOSED_FILE))
+
+    def test_unplaced_book_is_written_when_nothing_was_authored(self, project_dir, monkeypatch):
+        import storyforge.timeline as tl
+        _scenes(project_dir, [('a', '', ''), ('b', '', '')])
+        tl.write_cues(project_dir, {'a': {'relation': 'later'}, 'b': {'relation': 'continues'}})
+        monkeypatch.setattr(tl, '_invoke_assignment', lambda model: (
+            lambda prompt, log_file, label: 'CALENDAR:\na | 1 | scene | x\nb | 1 | frame narration\n'))
+        tl.run_assignment(project_dir, 'm', os.path.join(project_dir, 'working', 'logs'), force=False)
+        assert _column(project_dir, 'timeline_day') == {'a': '1', 'b': '1'}
+        # "frame narration" is no mode; the cue says continues, so scene
+        assert _column(project_dir, 'time_mode') == {'a': 'scene', 'b': 'scene'}
+
+    def test_failed_batch_keeps_provisional_days(self, project_dir, monkeypatch):
+        import storyforge.timeline as tl
+
+        def boom(*a, **k):
+            raise RuntimeError('HTTP 529')
+        monkeypatch.setattr('storyforge.api.invoke_to_file', boom)
+        invoke = tl._invoke_assignment('m')
+        assert invoke('p', os.path.join(project_dir, 'x.json'), 'timeline (batch 1 of 1)') is None
 
 
 class TestChecks:
@@ -275,6 +323,14 @@ class TestChecks:
                 'next': {'relation': 'later', 'gap': 'the next morning'}}
         assert check_timeline(rows, cues) == []
 
+    def test_summary_gap_frame_and_year_wrap(self):
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('a', '10', 'summary', ''), ('b', '71', 'scene', 'XXXX-12-30'),
+                          ('f', '900', 'frame', ''), ('c', '74', 'scene', 'XXXX-01-02'))
+        cues = {'b': {'relation': 'later', 'gap': 'the next morning'},
+                'c': {'relation': 'earlier', 'gap': 'two years'}}
+        assert check_timeline(rows, cues) == []
+
     def test_habitual_weekdays_are_not_anchors(self):
         """Gatsby's guest catalogue: "on Sunday mornings" is a habit."""
         from storyforge.timeline import check_timeline
@@ -312,7 +368,8 @@ class TestFlashbacksAndCleanup:
 
     def test_cleanup_never_fills_from_a_flashback(self, project_dir):
         from storyforge.extract import cleanup_timeline
-        _scenes(project_dir, [('a', '10', 'scene'), ('memory', '-1825', 'scene'),
-                              ('gap', '', ''), ('b', '12', 'scene'), ('frame', '', 'frame')])
+        _scenes(project_dir, [('a', '10', 'scene'), ('gap', '', ''), ('b', '12', 'scene'),
+                              ('memory', '-1825', 'scene'), ('inside', '', ''),
+                              ('memory2', '-1820', 'scene'), ('frame', '', 'frame')])
         fixes = cleanup_timeline(os.path.join(project_dir, 'reference'))
         assert [(f['scene_id'], f['new_value']) for f in fixes] == [('gap', '10')]

@@ -193,17 +193,15 @@ class TestMainApiKeyCheck:
             main([])
         assert exc_info.value.code == 1
 
-    def test_no_api_key_ok_in_interactive_mode(self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
-        """Interactive mode does not require ANTHROPIC_API_KEY."""
+    def test_interactive_mode_still_needs_a_key(self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """Interactive only adds checkpoints; the pass calls the API."""
         monkeypatch.setattr('storyforge.cmd_timeline.detect_project_root', lambda: project_dir)
         _patch_interactive(monkeypatch)
         monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
-        _ensure_scene_files(project_dir)
-        _patch_pass(monkeypatch)
-        # Should not exit with API key error
-        main(['--interactive'])
-        # Completed without SystemExit — interactive mode skipped API key check
-        assert mock_api.call_count >= 0
+        with pytest.raises(SystemExit) as exc_info:
+            main(['--interactive'])
+        assert exc_info.value.code == 1
+        assert mock_git.calls_for('create_branch') == []
 
     def test_no_api_key_ok_in_embedded_mode(self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
         """Embedded mode does not require ANTHROPIC_API_KEY."""

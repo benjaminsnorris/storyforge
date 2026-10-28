@@ -878,8 +878,14 @@ def cleanup_timeline(ref_dir: str) -> list[dict]:
         if day is not None or not on_track:
             continue
 
-        prev_day = next((d for _, d, t in reversed(days[:i]) if d is not None and t), None)
-        next_day = next((d for _, d, t in days[i + 1:] if d is not None and t), None)
+        # Inside a flashback (a known neighbour on either side is behind the
+        # present) the gap isn't filled: the present's day would split it
+        prev_known = next(((d, t) for _, d, t in reversed(days[:i]) if d is not None), None)
+        next_known = next(((d, t) for _, d, t in days[i + 1:] if d is not None), None)
+        if (prev_known and not prev_known[1]) or (next_known and not next_known[1]):
+            continue
+        prev_day = prev_known[0] if prev_known else None
+        next_day = next_known[0] if next_known else None
         # Same day as the previous scene until something says otherwise
         inferred = prev_day if prev_day is not None else next_day
 
