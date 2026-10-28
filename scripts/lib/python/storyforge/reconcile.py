@@ -7,10 +7,10 @@ This module re-exports public functions for existing callers.
 from storyforge.hone import (  # noqa: F401
     normalize_outcomes,
     reconcile_outcomes,
-    build_registry_prompt,
-    parse_registry_response,
+    build_mapping_prompt,
+    parse_mapping_response,
+    apply_mapping,
     write_registry,
-    apply_updates,
     apply_registry_normalization,
     reconcile_domain,
     _collect_knowledge_chain,

@@ -164,6 +164,13 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
     return response
 
 
+def is_truncated(response) -> bool:
+    """Whether an API response stopped at its ``max_tokens`` limit, so its
+    text is cut off. Callers that parse a structured answer must check this
+    rather than apply a partial one."""
+    return isinstance(response, dict) and response.get('stop_reason') == 'max_tokens'
+
+
 _invoke_api_consecutive_failures = 0
 _INVOKE_API_FAILURE_THRESHOLD = 5
 

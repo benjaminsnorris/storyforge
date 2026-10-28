@@ -7,10 +7,10 @@ import shutil
 class TestHoneExports:
     def test_exports_reconcile_functions(self):
         from storyforge.hone import (
-            build_registry_prompt,
-            parse_registry_response,
+            build_mapping_prompt,
+            parse_mapping_response,
+            apply_mapping,
             write_registry,
-            apply_updates,
             apply_registry_normalization,
             reconcile_domain,
             reconcile_outcomes,
@@ -21,10 +21,10 @@ class TestHoneExports:
 
     def test_backwards_compatible_reconcile(self):
         from storyforge.reconcile import (
-            build_registry_prompt,
-            parse_registry_response,
+            build_mapping_prompt,
+            parse_mapping_response,
+            apply_mapping,
             write_registry,
-            apply_updates,
             reconcile_domain,
         )
 
@@ -458,39 +458,55 @@ class TestCountBriefIssues:
         assert counts['scenes'] == 0
 
 
+def _set_column(ref_dir, filename, column, values):
+    """Set *column* in each row of *filename*: a list (by row) or a dict
+    (by scene id). Rows not given get ''."""
+    import csv as _csv
+    path = os.path.join(ref_dir, filename)
+    with open(path) as f:
+        rows = list(_csv.DictReader(f, delimiter='|'))
+        header = list(rows[0].keys())
+    for i, row in enumerate(rows):
+        if isinstance(values, dict):
+            row[column] = values.get(row['id'], '')
+        else:
+            row[column] = values[i] if i < len(values) else ''
+    with open(path, 'w') as f:
+        w = _csv.DictWriter(f, fieldnames=header, delimiter='|', lineterminator='\n')
+        w.writeheader()
+        w.writerows(rows)
+
+
+def _column(ref_dir, filename, column):
+    from storyforge.elaborate import _read_csv_as_map
+    return {sid: row.get(column, '') for sid, row in
+            _read_csv_as_map(os.path.join(ref_dir, filename)).items()}
+
+
+def _mock_api(monkeypatch, responses, stop_reasons=None):
+    """Answer each call with the next response; returns the prompts sent."""
+    calls = []
+
+    def fake_invoke(prompt, model, log_file, **kwargs):
+        calls.append(prompt)
+        n = len(calls) - 1
+        with open(log_file, 'w') as f:
+            f.write(responses[n])
+        return {'stop_reason': (stop_reasons or {}).get(n, 'end_turn')}
+
+    monkeypatch.setattr('storyforge.api.invoke_to_file', fake_invoke)
+    monkeypatch.setattr('storyforge.api.extract_text_from_file',
+                        lambda path: open(path).read())
+    return calls
+
+
 class TestUnresolvedReferences:
-    """Every reference must resolve to a registry entry; the model's registry
-    can silently omit some (The Great Gatsby: a bare "West Egg" beside
+    """Every reference must resolve to a registry entry; a registry can
+    silently omit some (The Great Gatsby: a bare "West Egg" beside
     "Gatsby's Mansion, West Egg"), and normalization passes unknowns through."""
 
-    def _registry_response(self, *rows):
-        return 'id|name|aliases\n' + '\n'.join(rows) + '\n'
-
     def _set_locations(self, ref_dir, locations):
-        import csv as _csv
-        path = os.path.join(ref_dir, 'scenes.csv')
-        with open(path) as f:
-            rows = list(_csv.DictReader(f, delimiter='|'))
-            header = list(rows[0].keys())
-        for i, row in enumerate(rows):
-            row['location'] = locations[i] if i < len(locations) else ''
-        with open(path, 'w') as f:
-            w = _csv.DictWriter(f, fieldnames=header, delimiter='|', lineterminator='\n')
-            w.writeheader()
-            w.writerows(rows)
-
-    def _mock_api(self, monkeypatch, responses):
-        calls = []
-
-        def fake_invoke(prompt, model, log_file, **kwargs):
-            calls.append(prompt)
-            with open(log_file, 'w') as f:
-                f.write(responses[len(calls) - 1])
-
-        monkeypatch.setattr('storyforge.api.invoke_to_file', fake_invoke)
-        monkeypatch.setattr('storyforge.api.extract_text_from_file',
-                            lambda path: open(path).read())
-        return calls
+        _set_column(ref_dir, 'scenes.csv', 'location', locations)
 
     def test_find_unresolved_lists_missing_references(self, project_dir):
         from storyforge.hone import find_unresolved
@@ -505,45 +521,152 @@ class TestUnresolvedReferences:
         self._set_locations(ref_dir, ['cartography-office', 'deep-archive'])
         assert 'cartography-office' not in find_unresolved('locations', ref_dir)
 
-    def test_reconcile_retries_unresolved_once(self, project_dir, monkeypatch, tmp_path):
+    def test_find_unresolved_ignores_placeholders(self, project_dir):
+        from storyforge.hone import find_unresolved
+        ref_dir = os.path.join(project_dir, 'reference')
+        _set_column(ref_dir, 'scene-briefs.csv', 'knowledge_in', ['(none)', 'n/a'])
+        assert find_unresolved('knowledge', ref_dir) == []
+
+
+class TestReconcileByDeltas:
+    """F-026: a registry rebuild re-emitted the whole registry plus an UPDATE
+    per scene, so output grew with the book and Gatsby's knowledge reconcile
+    was cut off. Only unresolved references go to the model, in batches."""
+
+    def test_reconciled_project_makes_no_call(self, project_dir, monkeypatch, tmp_path):
+        from storyforge.hone import reconcile_domain
+        ref_dir = os.path.join(project_dir, 'reference')
+        # The fixture names a few people and places its registries lack
+        with open(os.path.join(ref_dir, 'characters.csv'), 'a') as f:
+            f.write('council-members|Council Members||minor|\n')
+        with open(os.path.join(ref_dir, 'locations.csv'), 'a') as f:
+            f.write('council-chamber|Council Chamber|\neastern-ridge|Eastern Ridge|\n')
+        calls = _mock_api(monkeypatch, [])
+        for domain in ('characters', 'locations', 'values', 'mice-threads',
+                       'knowledge', 'physical-states'):
+            result = reconcile_domain(domain, ref_dir, 'test-model', str(tmp_path))
+            assert result['calls'] == 0, domain
+        assert calls == []
+
+    def test_only_unresolved_references_are_sent(self, project_dir, monkeypatch, tmp_path):
         from storyforge.hone import reconcile_domain, find_unresolved
         ref_dir = os.path.join(project_dir, 'reference')
-        self._set_locations(ref_dir, ['West Egg', 'the office'])
-        first = self._registry_response(
-            'cartography-office|Pressure Cartography Office|the office')
-        second = self._registry_response(
-            'cartography-office|Pressure Cartography Office|the office',
-            'west-egg|West Egg|West Egg')
-        calls = self._mock_api(monkeypatch, [first, second])
+        _set_column(ref_dir, 'scenes.csv', 'location', ['the office', 'West Egg'])
+        calls = _mock_api(monkeypatch, ['1 | NEW | west-egg | West Egg\n'])
 
         reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
 
-        assert len(calls) == 2
-        assert '- West Egg' in calls[1].split('## Unresolved References')[1]
-        assert '## Shared Aliases' not in calls[1]
+        refs = calls[0].split('## Unresolved References')[1].split('## Instructions')[0]
+        assert '1. West Egg' in refs and 'the office' not in refs
         assert find_unresolved('locations', ref_dir) == []
+        assert _column(ref_dir, 'scenes.csv', 'location')['act1-sc02'] == 'west-egg'
 
-    def test_reconcile_skips_retry_when_all_resolve(self, project_dir, monkeypatch, tmp_path):
+    def test_existing_entry_gains_alias(self, project_dir, monkeypatch, tmp_path):
         from storyforge.hone import reconcile_domain
+        from storyforge.enrich import load_alias_map
         ref_dir = os.path.join(project_dir, 'reference')
-        self._set_locations(ref_dir, ['the office'] * 6)
-        calls = self._mock_api(monkeypatch, [self._registry_response(
-            'cartography-office|Pressure Cartography Office|the office')])
+        _set_column(ref_dir, 'scenes.csv', 'location', ['Cartography HQ'])
+        _mock_api(monkeypatch, ['1 | cartography-office\n'])
 
         reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
 
-        assert len(calls) == 1
+        aliases = load_alias_map(os.path.join(ref_dir, 'locations.csv'))
+        assert aliases['cartography hq'] == 'cartography-office'
+        assert _column(ref_dir, 'scenes.csv', 'location')['act1-sc01'] == 'cartography-office'
 
-    def test_reconcile_warns_on_remaining(self, project_dir, monkeypatch, tmp_path, capsys):
+    def test_composite_reference_maps_to_each_place(self, project_dir, monkeypatch, tmp_path):
         from storyforge.hone import reconcile_domain
         ref_dir = os.path.join(project_dir, 'reference')
-        self._set_locations(ref_dir, ['West Egg'] * 6)
-        empty = self._registry_response('cartography-office|Office|the office')
-        self._mock_api(monkeypatch, [empty, empty])
+        _set_column(ref_dir, 'scenes.csv', 'location',
+                    ['the office to the archive', 'Plaza Hotel'])
+        _mock_api(monkeypatch, ['1 | cartography-office;deep-archive\n'
+                                '2 | NEW | plaza-hotel | Plaza Hotel\n'])
+
+        reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
+
+        locs = _column(ref_dir, 'scenes.csv', 'location')
+        assert locs['act1-sc01'] == 'cartography-office;deep-archive'
+        assert locs['act1-sc02'] == 'plaza-hotel'
+        # A composite mapping is never recorded as one entry's alias
+        with open(os.path.join(ref_dir, 'locations.csv')) as f:
+            assert 'the office to the archive' not in f.read()
+
+    def test_batches_apply_in_order(self, project_dir, monkeypatch, tmp_path):
+        """Batch 2's prompt lists the entry batch 1 declared, and may map to it."""
+        import storyforge.hone as hone
+        ref_dir = os.path.join(project_dir, 'reference')
+        monkeypatch.setattr(hone, '_BATCH_SIZE', 1)
+        _set_column(ref_dir, 'scenes.csv', 'location', ['Plaza Hotel', 'the Plaza'])
+        calls = _mock_api(monkeypatch, ['1 | NEW | plaza-hotel | Plaza Hotel\n',
+                                        '1 | plaza-hotel\n'])
+
+        result = hone.reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
+
+        assert len(calls) == 2 and result['calls'] == 2
+        assert '- plaza-hotel — Plaza Hotel' in calls[1]
+        locs = _column(ref_dir, 'scenes.csv', 'location')
+        assert locs['act1-sc01'] == locs['act1-sc02'] == 'plaza-hotel'
+
+    def test_skip_is_reported_and_left_alone(self, project_dir, monkeypatch, tmp_path, capsys):
+        from storyforge.hone import reconcile_domain
+        ref_dir = os.path.join(project_dir, 'reference')
+        _set_column(ref_dir, 'scenes.csv', 'location', ['somewhere unspecified'])
+        _mock_api(monkeypatch, ['1 | SKIP\n'])
+
+        result = reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
+
+        out = capsys.readouterr().out
+        assert 'skipped as not a place: somewhere unspecified' in out
+        assert 'still unresolved' not in out
+        assert result['unresolved'] == 1
+        assert _column(ref_dir, 'scenes.csv', 'location')['act1-sc01'] == 'somewhere unspecified'
+
+    def test_unknown_id_is_ignored_and_reported(self, project_dir, monkeypatch, tmp_path, capsys):
+        from storyforge.hone import reconcile_domain
+        ref_dir = os.path.join(project_dir, 'reference')
+        _set_column(ref_dir, 'scenes.csv', 'location', ['West Egg'])
+        _mock_api(monkeypatch, ['1 | not-a-registered-id\n'])
 
         reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
 
         assert 'still unresolved: West Egg' in capsys.readouterr().out
+
+    def test_truncated_batch_is_not_applied(self, project_dir, monkeypatch, tmp_path, capsys):
+        from storyforge.hone import reconcile_domain
+        ref_dir = os.path.join(project_dir, 'reference')
+        with open(os.path.join(ref_dir, 'locations.csv')) as f:
+            before = f.read()
+        _set_column(ref_dir, 'scenes.csv', 'location', ['West Egg', 'East Egg'])
+        _mock_api(monkeypatch, ['1 | NEW | west-egg | West Egg\n2 | NEW | east'],
+                  stop_reasons={0: 'max_tokens'})
+
+        reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
+
+        out = capsys.readouterr().out
+        assert 'hit the' in out and 'token limit' in out
+        with open(os.path.join(ref_dir, 'locations.csv')) as f:
+            assert f.read() == before
+        assert _column(ref_dir, 'scenes.csv', 'location')['act1-sc01'] == 'West Egg'
+
+    def test_character_columns_beyond_the_domain_are_kept(self, project_dir, monkeypatch, tmp_path):
+        from storyforge.hone import reconcile_domain
+        ref_dir = os.path.join(project_dir, 'reference')
+        _set_column(ref_dir, 'scenes.csv', 'pov', ['Nick Carraway'])
+        _mock_api(monkeypatch, ['1 | NEW | nick-carraway | Nick Carraway | protagonist\n'])
+
+        reconcile_domain('characters', ref_dir, 'test-model', str(tmp_path))
+
+        with open(os.path.join(ref_dir, 'characters.csv')) as f:
+            text = f.read()
+        assert 'death_scene' in text.split('\n')[0]
+        assert 'nick-carraway|Nick Carraway|protagonist' in text
+
+    def test_dry_run_counts_calls(self, project_dir, capsys):
+        from storyforge.cmd_hone import _run_registry_domain
+        ref_dir = os.path.join(project_dir, 'reference')
+        _set_column(ref_dir, 'scenes.csv', 'location', ['West Egg'])
+        _run_registry_domain('locations', ref_dir, project_dir, '', 'm', '', True)
+        assert '1 unresolved reference(s): 1 mapping call(s)' in capsys.readouterr().out
 
 
 class TestAliasCollisions:
@@ -566,19 +689,34 @@ class TestAliasCollisions:
         self._write_registry(ref_dir, 'love|Love|romance', 'power|Power|control')
         assert find_alias_collisions('values', ref_dir) == {}
 
-    def test_reconcile_retries_on_collision(self, project_dir, monkeypatch, tmp_path):
+    def test_alias_stays_with_entry_named_by_it(self, project_dir, capsys):
+        from storyforge.hone import resolve_alias_collisions, find_alias_collisions
+        from storyforge.elaborate import _read_csv_as_map
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._write_registry(ref_dir, 'power|Power|love;control', 'love|Love|romance')
+        resolve_alias_collisions('values', ref_dir)
+        assert find_alias_collisions('values', ref_dir) == {}
+        assert _read_csv_as_map(os.path.join(ref_dir, 'values.csv'))['power']['aliases'] == 'control'
+        assert 'alias "love" kept on love, removed from power' in capsys.readouterr().out
+
+    def test_otherwise_first_entry_keeps_it(self, project_dir):
+        from storyforge.hone import resolve_alias_collisions
+        from storyforge.elaborate import _read_csv_as_map
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._write_registry(ref_dir, 'love|Love|desire', 'lust|Lust|desire;want')
+        resolve_alias_collisions('values', ref_dir)
+        reg = _read_csv_as_map(os.path.join(ref_dir, 'values.csv'))
+        assert reg['love']['aliases'] == 'desire' and reg['lust']['aliases'] == 'want'
+
+    def test_reconcile_resolves_collisions_without_a_call(self, project_dir, monkeypatch, tmp_path):
         from storyforge.hone import reconcile_domain, find_alias_collisions
         ref_dir = os.path.join(project_dir, 'reference')
-        bad = 'id|name|aliases\ncartography-office|Office|the office\nother|Other|the office\n'
-        good = 'id|name|aliases\ncartography-office|Office|the office\n'
-        TestUnresolvedReferences()._set_locations(ref_dir, ['the office'])
-        calls = TestUnresolvedReferences()._mock_api(monkeypatch, [bad, good])
-
-        reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
-
-        assert len(calls) == 2
-        assert '- the office: cartography-office, other' in calls[1]
-        assert find_alias_collisions('locations', ref_dir) == {}
+        self._write_registry(ref_dir, 'truth|Truth|honesty', 'safety|Safety|honesty',
+                             'justice|Justice|', 'life|Life|')
+        calls = _mock_api(monkeypatch, [])
+        reconcile_domain('values', ref_dir, 'test-model', str(tmp_path))
+        assert calls == []
+        assert find_alias_collisions('values', ref_dir) == {}
 
 
 class TestPhysicalStateCharacters:
@@ -604,63 +742,69 @@ class TestPhysicalStateCharacters:
         assert chars == ['daisy-buchanan', 'daisy-buchanan']
 
     def test_prompt_includes_character_registry(self, project_dir):
-        from storyforge.hone import build_registry_prompt
+        from storyforge.hone import build_mapping_prompt
         ref_dir = os.path.join(project_dir, 'reference')
-        prompt = build_registry_prompt('physical-states', ref_dir)
+        batch = [{'key': 'bruised', 'text': 'bruised', 'type': '', 'scenes': []}]
+        prompt = build_mapping_prompt('physical-states', ref_dir, batch)
         assert '## Character Registry' in prompt
+        assert '- dorren-hayle — Dorren Hayle' in prompt
         assert "character's id from the Character Registry" in prompt
 
-
-class TestLocationRegistryFromPlaces:
-    """The locations registry is built from individual places, and never
-    holds routes (Gatsby's first pass invented east-egg-to-nyc-route)."""
-
-    def test_prompt_lists_each_place_once(self, project_dir):
-        import csv as _csv
-        from storyforge.hone import build_registry_prompt
+    def test_new_state_gets_derived_columns(self, project_dir, monkeypatch, tmp_path):
+        from storyforge.hone import reconcile_domain
+        from storyforge.elaborate import _read_csv_as_map
         ref_dir = os.path.join(project_dir, 'reference')
-        path = os.path.join(ref_dir, 'scenes.csv')
-        with open(path) as f:
-            rows = list(_csv.DictReader(f, delimiter='|'))
-            header = list(rows[0].keys())
-        rows[0]['location'] = 'East Egg;Valley of Ashes;Plaza Hotel'
-        with open(path, 'w') as f:
-            w = _csv.DictWriter(f, fieldnames=header, delimiter='|', lineterminator='\n')
-            w.writeheader()
-            w.writerows(rows)
-        prompt = build_registry_prompt('locations', ref_dir)
-        refs = prompt.split('## All Location References Found in the Manuscript')[1]
-        assert '- Valley of Ashes' in refs
-        assert 'East Egg;Valley' not in refs
+        _set_column(ref_dir, 'scene-briefs.csv', 'physical_state_in',
+                    {'act2-sc03': 'Dorren has a cut hand'})
+        _set_column(ref_dir, 'scene-briefs.csv', 'physical_state_out',
+                    {'act1-sc02': 'Dorren has a cut hand'})
+        _mock_api(monkeypatch, ['1 | NEW | cut-hand-dorren | Dorren Hayle | '
+                                'shallow cut across right palm | injury | false\n'])
+
+        reconcile_domain('physical-states', ref_dir, 'test-model', str(tmp_path))
+
+        row = _read_csv_as_map(os.path.join(ref_dir, 'physical-states.csv'))['cut-hand-dorren']
+        assert row['character'] == 'dorren-hayle'
+        assert row['acquired'] == 'act1-sc02'
+        assert row['resolves'] == 'never'
+        assert row['action_gating'] == 'false'
+        assert _column(ref_dir, 'scene-briefs.csv', 'physical_state_in')['act2-sc03'] == 'cut-hand-dorren'
+
+
+class TestLocationPrompt:
+    """The locations registry holds individual places, never routes (Gatsby's
+    first pass invented east-egg-to-nyc-route)."""
 
     def test_prompt_forbids_route_entries(self, project_dir):
-        from storyforge.hone import build_registry_prompt
-        prompt = build_registry_prompt('locations', os.path.join(project_dir, 'reference'))
+        from storyforge.hone import build_mapping_prompt
+        batch = [{'key': 'x', 'text': 'x', 'type': '', 'scenes': ['act1-sc01']}]
+        prompt = build_mapping_prompt('locations', os.path.join(project_dir, 'reference'), batch)
         assert 'Never make an entry for a route, journey or transition' in prompt
+        assert '1. x  [scenes: act1-sc01]' in prompt
+        assert '- cartography-office — Pressure Cartography Office' in prompt
+
+    def test_place_list_splits_into_references(self, project_dir):
+        from storyforge.hone import find_unresolved
+        ref_dir = os.path.join(project_dir, 'reference')
+        _set_column(ref_dir, 'scenes.csv', 'location', ['East Egg;Valley of Ashes'])
+        assert find_unresolved('locations', ref_dir) == ['East Egg', 'Valley of Ashes']
 
 
 class TestKnowledgeIdsAfterReconcile:
     """knowledge_in/out are registry-backed id lists. On The Great Gatsby the
     knowledge reconcile response ran past its token limit mid-registry, so no
-    UPDATE lines arrived, rows that omitted the empty aliases column were
-    dropped, and the briefs kept raw sentences beside ids (F-022)."""
+    UPDATE lines arrived and the briefs kept raw sentences beside ids (F-022)."""
 
     def _set_briefs(self, ref_dir, knowledge, physical=None):
-        import csv as _csv
-        path = os.path.join(ref_dir, 'scene-briefs.csv')
-        with open(path) as f:
-            rows = list(_csv.DictReader(f, delimiter='|'))
-            header = list(rows[0].keys())
-        for row in rows:
-            k_in, k_out = knowledge.get(row['id'], ('', ''))
-            row['knowledge_in'], row['knowledge_out'] = k_in, k_out
-            if physical is not None:
-                p_in, p_out = physical.get(row['id'], ('', ''))
-                row['physical_state_in'], row['physical_state_out'] = p_in, p_out
-        with open(path, 'w') as f:
-            w = _csv.DictWriter(f, fieldnames=header, delimiter='|', lineterminator='\n')
-            w.writeheader()
-            w.writerows(rows)
+        _set_column(ref_dir, 'scene-briefs.csv', 'knowledge_in',
+                    {k: v[0] for k, v in knowledge.items()})
+        _set_column(ref_dir, 'scene-briefs.csv', 'knowledge_out',
+                    {k: v[1] for k, v in knowledge.items()})
+        if physical is not None:
+            _set_column(ref_dir, 'scene-briefs.csv', 'physical_state_in',
+                        {k: v[0] for k, v in physical.items()})
+            _set_column(ref_dir, 'scene-briefs.csv', 'physical_state_out',
+                        {k: v[1] for k, v in physical.items()})
 
     def _entries(self, ref_dir, cols=('knowledge_in', 'knowledge_out')):
         from storyforge.elaborate import _read_csv
@@ -674,154 +818,177 @@ class TestKnowledgeIdsAfterReconcile:
         from storyforge.elaborate import _read_csv
         return {r['id'] for r in _read_csv(os.path.join(ref_dir, 'knowledge.csv'))}
 
-    _mock_api = TestUnresolvedReferences._mock_api
-
     def test_reconcile_maps_sentences_to_ids(self, project_dir, monkeypatch, tmp_path):
         from storyforge.hone import reconcile_domain
+        from storyforge.elaborate import _read_csv_as_map
         ref_dir = os.path.join(project_dir, 'reference')
         self._set_briefs(ref_dir, {
-            'act1-sc01': ('', 'Gatsby has been shot and killed in his pool'),
-            'act1-sc02': ('Gatsby has been shot and killed in his pool',
-                          'Gatsby has been shot and killed in his pool;'
-                          'George Wilson has shot Gatsby and then killed himself;'
-                          'daisy-was-driving'),
+            'act1-sc01': ('', 'A village vanished from the maps'),
+            'act1-sc02': ('A village vanished from the maps',
+                          'A village vanished from the maps;'
+                          'Kael was the one who erased the archive;'
+                          'map-anomaly-exists'),
         })
-        # Registry without the sentences as aliases and no UPDATES section —
-        # the shape of the truncated Gatsby response. One row omits aliases.
-        registry = (
-            'id|name|aliases|category|origin\n'
-            'gatsby-shot-dead|Gatsby has been shot dead|Gatsby was shot|state-change|act1-sc01\n'
-            'daisy-was-driving|Daisy was driving the car|state-change|act1-sc02\n'
-        )
-        # Unresolved entries are numbered in sorted order: 1 = Gatsby..., 2 = George...
-        mapping = ('1 | gatsby-shot-dead\n'
-                   '2 | NEW | wilson-killed-gatsby-and-himself | Wilson shot Gatsby, then himself | state-change\n')
-        calls = self._mock_api(monkeypatch, [registry, mapping])
+        # Numbered in scene order: 1 = the village sentence, 2 = Kael's
+        calls = _mock_api(monkeypatch, [
+            '1 | village-vanished\n'
+            '2 | NEW | kael-erased-archive | Kael erased the archive | identity\n'])
 
         reconcile_domain('knowledge', ref_dir, 'test-model', str(tmp_path))
 
-        assert len(calls) == 2
+        assert len(calls) == 1
         ids = self._ids(ref_dir)
-        assert 'daisy-was-driving' in ids  # 4-field row kept
         entries = self._entries(ref_dir)
         assert entries and all(e in ids for e in entries), entries
-        from storyforge.elaborate import _read_csv_as_map
         k = _read_csv_as_map(os.path.join(ref_dir, 'knowledge.csv'))
-        assert k['wilson-killed-gatsby-and-himself']['origin'] == 'act1-sc02'
+        assert k['kael-erased-archive']['origin'] == 'act1-sc02'
+        assert k['kael-erased-archive']['category'] == 'identity'
+        # Sentences are not kept as aliases
+        assert k['village-vanished']['aliases'] == 'missing village;village disappeared'
+
+    def test_new_fact_only_in_knowledge_in_is_backstory(self, project_dir, monkeypatch, tmp_path):
+        from storyforge.hone import reconcile_domain
+        from storyforge.elaborate import _read_csv_as_map
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._set_briefs(ref_dir, {'act1-sc01': ('Dorren trained at the academy', '')})
+        _mock_api(monkeypatch, ['1 | NEW | dorren-academy-trained | '
+                                'Dorren trained at the academy | identity\n'])
+        reconcile_domain('knowledge', ref_dir, 'test-model', str(tmp_path))
+        k = _read_csv_as_map(os.path.join(ref_dir, 'knowledge.csv'))
+        assert k['dorren-academy-trained']['origin'] == 'backstory'
 
     def test_mapping_prompt_numbers_entries_and_lists_registry(self, project_dir):
-        from storyforge.hone import build_knowledge_mapping_prompt
+        from storyforge.hone import build_mapping_prompt
+        from storyforge.schema import MAX_FACT_NAME_WORDS
         ref_dir = os.path.join(project_dir, 'reference')
-        prompt = build_knowledge_mapping_prompt(ref_dir, ['the maps are wrong'])
+        batch = [{'key': 'the maps are wrong', 'text': 'the maps are wrong',
+                  'type': '', 'scenes': []}]
+        prompt = build_mapping_prompt('knowledge', ref_dir, batch)
         assert '- map-anomaly-exists — A map anomaly exists' in prompt
         assert '1. the maps are wrong' in prompt
+        assert f'at most {MAX_FACT_NAME_WORDS} words' in prompt
 
-    def test_no_mapping_call_when_all_ids(self, project_dir, monkeypatch, tmp_path):
-        from storyforge.hone import reconcile_domain
-        ref_dir = os.path.join(project_dir, 'reference')
-        registry = ('id|name|aliases|category|origin\n'
-                    'map-anomaly-exists|A map anomaly exists||identity|act1-sc01\n'
-                    'village-vanished|A village vanished||state-change|act1-sc02\n'
-                    'archive-erasure|The archive was erased||state-change|act1-sc02\n'
-                    'council-dismisses-evidence|The council dismissed it||stakes-threat|act2-sc03\n')
-        calls = self._mock_api(monkeypatch, [registry])
-        reconcile_domain('knowledge', ref_dir, 'test-model', str(tmp_path))
-        assert len(calls) == 1
-
-    def test_unmapped_entries_are_reported(self, project_dir, monkeypatch, tmp_path, capsys):
-        from storyforge.hone import reconcile_domain
-        ref_dir = os.path.join(project_dir, 'reference')
-        self._set_briefs(ref_dir, {'act1-sc01': ('', 'Nick distrusts Tom')})
-        registry = 'id|name|aliases|category|origin\nx-fact|X||identity|act1-sc01\n'
-        self._mock_api(monkeypatch, [registry, '1 | not-a-registered-id\n'])
-        reconcile_domain('knowledge', ref_dir, 'test-model', str(tmp_path))
-        out = capsys.readouterr().out
-        assert 'still not in knowledge.csv: Nick distrusts Tom' in out
-
-    def test_truncated_response_is_reported(self, project_dir, monkeypatch, tmp_path, capsys):
-        from storyforge.hone import reconcile_domain
-        ref_dir = os.path.join(project_dir, 'reference')
-
-        def fake_invoke(prompt, model, log_file, **kwargs):
-            with open(log_file, 'w') as f:
-                f.write('id|name|aliases|category|origin\n')
-            return {'stop_reason': 'max_tokens'}
-
-        monkeypatch.setattr('storyforge.api.invoke_to_file', fake_invoke)
-        monkeypatch.setattr('storyforge.api.extract_text_from_file',
-                            lambda path: open(path).read())
-        reconcile_domain('knowledge', ref_dir, 'test-model', str(tmp_path))
-        assert 'knowledge response hit the' in capsys.readouterr().out
-
-    def test_knowledge_budget_exceeds_4096(self):
-        from storyforge.hone import _REGISTRY_MAX_TOKENS
-        assert _REGISTRY_MAX_TOKENS['knowledge'] > 4096
-
-    def test_placeholders_never_stored(self, project_dir, monkeypatch, tmp_path):
-        """`(empty)` is how the reconcile prompt renders an empty field; a
+    def test_placeholders_never_stored(self, project_dir):
+        """`(empty)` is how an empty field used to be rendered in prompts; a
         model echoing it (or `none`) must not create a fact or a state."""
-        from storyforge.hone import apply_updates, apply_registry_normalization
+        from storyforge.hone import apply_registry_normalization
         ref_dir = os.path.join(project_dir, 'reference')
         self._set_briefs(
             ref_dir,
-            {'act1-sc01': ('none', 'map-anomaly-exists;(none)')},
+            {'act1-sc01': ('none', 'map-anomaly-exists;(none)'),
+             'act1-sc02': ('(empty)', 'village-vanished;none')},
             physical={'act1-sc01': ('(none)', 'n/a'), 'act1-sc02': ('none', '')})
         apply_registry_normalization('knowledge', ref_dir)
         apply_registry_normalization('physical-states', ref_dir)
-        apply_updates(ref_dir, 'knowledge', [('act1-sc02', '(empty) | village-vanished;none')])
-        apply_updates(ref_dir, 'physical-states', [('new-x1', '(empty) | (none)')])
         entries = self._entries(ref_dir, ('knowledge_in', 'knowledge_out',
                                           'physical_state_in', 'physical_state_out'))
         from storyforge.enrich import is_placeholder
         assert not [e for e in entries if is_placeholder(e)], entries
         assert 'map-anomaly-exists' in entries and 'village-vanished' in entries
 
-    def test_registry_prompt_caps_fact_names(self, project_dir):
-        from storyforge.hone import build_registry_prompt
-        from storyforge.schema import MAX_FACT_NAME_WORDS
-        prompt = build_registry_prompt('knowledge', os.path.join(project_dir, 'reference'))
-        assert f'at most {MAX_FACT_NAME_WORDS} words' in prompt
-        assert 'never a sentence' in prompt
 
-    def test_parse_keeps_row_missing_empty_aliases(self):
-        from storyforge.hone import parse_registry_response
-        rows, _ = parse_registry_response(
-            'id|name|aliases|category|origin\n'
-            'tom-affair-ny|Tom is having an affair|identity|s1\n', 'knowledge')
-        assert rows == [{'id': 'tom-affair-ny', 'name': 'Tom is having an affair',
-                         'aliases': '', 'category': 'identity', 'origin': 's1'}]
+class TestParseMappingResponse:
+    def test_line_forms(self):
+        from storyforge.hone import parse_mapping_response
+        mapping, new_rows, skipped = parse_mapping_response(
+            'characters',
+            '1 | tom\n'
+            '2. | tom;daisy\n'
+            '- 3 | NEW | nick | Nick Carraway | protagonist\n'
+            '4 | nick\n'
+            '5 | SKIP\n'
+            '6 | stranger\n'
+            '9 | tom\n'
+            'commentary\n',
+            batch_size=6, known_ids={'tom', 'daisy'})
+        assert mapping == {1: ['tom'], 2: ['tom', 'daisy'], 3: ['nick'], 4: ['nick']}
+        assert new_rows == [{'id': 'nick', 'name': 'Nick Carraway', 'role': 'protagonist'}]
+        assert skipped == {5}
+
+    def test_new_with_registered_id_maps_to_it(self):
+        from storyforge.hone import parse_mapping_response
+        mapping, new_rows, _ = parse_mapping_response(
+            'locations', '1 | NEW | West-Egg | West Egg\n', 1, {'west-egg'})
+        assert mapping == {1: ['west-egg']} and new_rows == []
 
 
-class TestRegistryNotOverwrittenByBadOutput:
-    """Review #5: a truncated or empty reconcile response replaced the
-    registry, wiping entries."""
+class TestMiceOperations:
+    """MICE opens/closes used to be normalized by per-scene UPDATEs in the
+    full rebuild. Now only anomalous threads are sent, one line each."""
 
-    def _registry(self, ref_dir):
-        with open(os.path.join(ref_dir, 'locations.csv')) as f:
-            return f.read()
+    def _set_threads(self, ref_dir, threads):
+        _set_column(ref_dir, 'scene-intent.csv', 'mice_threads', threads)
 
-    def _run(self, project_dir, monkeypatch, tmp_path, text, stop_reason='end_turn'):
+    def test_fixture_has_no_anomalies(self, project_dir):
+        from storyforge.hone import find_mice_anomalies
+        assert find_mice_anomalies(os.path.join(project_dir, 'reference')) == []
+
+    def test_detects_double_close_and_close_before_open(self, project_dir):
+        from storyforge.hone import find_mice_anomalies
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._set_threads(ref_dir, {
+            'act1-sc01': '+map-anomaly;-archive-erasure',
+            'act1-sc02': '-map-anomaly',
+            'new-x1': '-map-anomaly;+archive-erasure',
+        })
+        assert sorted(find_mice_anomalies(ref_dir)) == ['archive-erasure', 'map-anomaly']
+
+    def test_thread_rewritten_from_decision(self, project_dir, monkeypatch, tmp_path):
+        from storyforge.hone import reconcile_domain, find_mice_anomalies
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._set_threads(ref_dir, {
+            'act1-sc01': '+inquiry:map-anomaly',
+            'act1-sc02': '-inquiry:map-anomaly',
+            'new-x1': '+inquiry:map-anomaly',
+            'act2-sc03': '-inquiry:map-anomaly;+milieu:uncharted-reaches',
+        })
+        calls = _mock_api(monkeypatch, ['map-anomaly | act1-sc01 | act2-sc03\n'])
+
+        result = reconcile_domain('mice-threads', ref_dir, 'test-model', str(tmp_path))
+
+        assert len(calls) == 1 and result['calls'] == 1
+        assert '### map-anomaly — Map anomaly (inquiry)' in calls[0]
+        assert 'uncharted-reaches' not in calls[0]
+        threads = _column(ref_dir, 'scene-intent.csv', 'mice_threads')
+        assert threads['act1-sc01'] == '+map-anomaly'
+        assert threads['act1-sc02'] == 'map-anomaly'
+        assert threads['new-x1'] == 'map-anomaly'
+        assert threads['act2-sc03'] == '-map-anomaly;+uncharted-reaches'
+        assert find_mice_anomalies(ref_dir) == []
+
+    def test_unclosed_and_invalid_scenes(self, project_dir):
+        from storyforge.hone import parse_mice_operations_response
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._set_threads(ref_dir, {
+            'act1-sc01': '+map-anomaly',
+            'act1-sc02': '+map-anomaly',
+            'new-x1': '+archive-erasure',
+            'act2-sc01': '+archive-erasure',
+        })
+        decisions = parse_mice_operations_response(
+            'map-anomaly | act1-sc01 | UNCLOSED\n'
+            'archive-erasure | act2-sc01 | new-x1\n'   # close before open
+            'other | act1-sc01 | UNCLOSED\n',
+            ref_dir, ['map-anomaly', 'archive-erasure'])
+        assert decisions == {'map-anomaly': ('act1-sc01', '')}
+
+    def test_unresolved_thread_name_keeps_prefix(self, project_dir, monkeypatch, tmp_path):
         from storyforge.hone import reconcile_domain
-
-        def fake_invoke(prompt, model, log_file, **kwargs):
-            with open(log_file, 'w') as f:
-                f.write(text)
-            return {'stop_reason': stop_reason}
-        monkeypatch.setattr('storyforge.api.invoke_to_file', fake_invoke)
-        monkeypatch.setattr('storyforge.api.extract_text_from_file',
-                            lambda path: open(path).read())
-        reconcile_domain('locations', os.path.join(project_dir, 'reference'),
-                         'test-model', str(tmp_path))
-
-    def test_truncated_response_keeps_registry(self, project_dir, monkeypatch, tmp_path):
         ref_dir = os.path.join(project_dir, 'reference')
-        before = self._registry(ref_dir)
-        self._run(project_dir, monkeypatch, tmp_path,
-                  'id|name|aliases\ncartography-office|Office|', stop_reason='max_tokens')
-        assert self._registry(ref_dir) == before
+        self._set_threads(ref_dir, {
+            'act1-sc01': '+inquiry:what-is-wrong-with-the-maps',
+            'act2-sc03': '-inquiry:map-anomaly',
+        })
+        _mock_api(monkeypatch, ['1 | map-anomaly\n'])
+        reconcile_domain('mice-threads', ref_dir, 'test-model', str(tmp_path))
+        threads = _column(ref_dir, 'scene-intent.csv', 'mice_threads')
+        assert threads['act1-sc01'] == '+map-anomaly'
+        assert threads['act2-sc03'] == '-map-anomaly'
 
-    def test_empty_response_keeps_registry(self, project_dir, monkeypatch, tmp_path):
-        ref_dir = os.path.join(project_dir, 'reference')
-        before = self._registry(ref_dir)
-        self._run(project_dir, monkeypatch, tmp_path, 'Sorry, I cannot do that.')
-        assert self._registry(ref_dir) == before
+
+class TestTruncationIsNeverSilent:
+    def test_is_truncated(self):
+        from storyforge.api import is_truncated
+        assert is_truncated({'stop_reason': 'max_tokens'})
+        assert not is_truncated({'stop_reason': 'end_turn'})
+        assert not is_truncated(None)

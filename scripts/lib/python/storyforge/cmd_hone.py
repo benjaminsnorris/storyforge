@@ -213,13 +213,10 @@ def _run_registry_domain(domain: str, ref_dir: str, project_dir: str,
         if domain == 'outcomes':
             log('  (deterministic — no API call needed)')
         else:
-            from storyforge.hone import build_registry_prompt
-            context = ''
-            if domain == 'characters' and os.path.isfile(char_bible):
-                with open(char_bible) as f:
-                    context = f.read()
-            prompt = build_registry_prompt(domain, ref_dir, context=context)
-            log(f'  Prompt for {domain} ({len(prompt)} chars)')
+            from storyforge.hone import find_unresolved, _BATCH_SIZE
+            unresolved = find_unresolved(domain, ref_dir)
+            calls = -(-len(unresolved) // _BATCH_SIZE)
+            log(f'  {len(unresolved)} unresolved reference(s): {calls} mapping call(s)')
         return
 
     from storyforge.hone import reconcile_domain
@@ -231,7 +228,8 @@ def _run_registry_domain(domain: str, ref_dir: str, project_dir: str,
     result = reconcile_domain(domain, ref_dir, model, log_dir, context=context)
     entries = result.get('registry_entries', 0)
     normalized = result.get('fields_normalized', 0)
-    log(f'  Registry: {entries} entries, {normalized} normalizations')
+    log(f'  Registry: {entries} entries, {normalized} normalizations, '
+        f'{result.get("calls", 0)} call(s), {result.get("unresolved", 0)} unresolved')
 
     commit_and_push(project_dir,
                     f'Hone: registries/{domain} — {entries} entries, {normalized} normalizations',
