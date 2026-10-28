@@ -759,16 +759,18 @@ def _mice_timelines(ref_dir: str) -> dict[str, list[tuple[str, str]]]:
 
 def find_mice_anomalies(ref_dir: str) -> list[str]:
     """Threads opened more than once, closed more than once, closed before
-    (or without) being opened, or touched before they open (or never
-    opened at all): a thread can't be advanced before it begins, so its
-    open is in the wrong scene. On The Great Gatsby the mystery of Gatsby's
-    origins was raised in scene 2 but opened in scene 11."""
+    (or without) being opened, or touched but never opened.
+
+    A mention before the open is not an anomaly: on The Great Gatsby the
+    per-thread pass kept every such open where it was and called the earlier
+    touches foreshadowing (Nick's frame previews everything), so flagging
+    them would re-ask the same question on every run."""
     anomalous = []
     for thread, timeline in _mice_timelines(ref_dir).items():
         ops = [op for _sid, op in timeline if op]
         if (ops.count('+') > 1 or ops.count('-') > 1
                 or ('-' in ops and ('+' not in ops or ops.index('-') < ops.index('+')))
-                or (timeline and timeline[0][1] != '+')):
+                or (timeline and '+' not in ops)):
             anomalous.append(thread)
     return anomalous
 
@@ -785,7 +787,7 @@ def build_mice_operations_prompt(ref_dir: str, threads: list[str]) -> str:
         lines = [f'  {sid}: {op or "mention"}    [function: {functions.get(sid, "")}]'
                  for sid, op in timelines.get(thread, [])]
         blocks.append(head + '\n' + '\n'.join(lines))
-    return f"""These MICE threads in a novel are opened more than once, closed more than once, closed before they open, or touched in scenes before the one marked as their open. Each is listed with every scene that touches it, in scene order, with the operation the scene currently records (+ open, - close, or a mention) and the scene's function.
+    return f"""These MICE threads in a novel are opened more than once, closed more than once, closed before they open, or never opened. Each is listed with every scene that touches it, in scene order, with the operation the scene currently records (+ open, - close, or a mention) and the scene's function.
 
 {chr(10).join(blocks)}
 
