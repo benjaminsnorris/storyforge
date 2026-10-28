@@ -19,8 +19,9 @@ from storyforge.elaborate import (
     _read_csv, _read_csv_as_map, _write_csv, _FILE_MAP, DELIMITER,
 )
 from storyforge.enrich import (
-    load_alias_map, load_mice_registry, normalize_aliases,
-    normalize_mice_threads, strip_parentheticals, strip_placeholders,
+    is_placeholder, load_alias_map, load_mice_registry, normalize_aliases,
+    normalize_mice_threads, split_mice_entries, strip_parentheticals,
+    strip_placeholders,
 )
 
 # ============================================================================
@@ -74,359 +75,13 @@ def reconcile_outcomes(ref_dir: str) -> int:
 
 
 # ============================================================================
-# Registry prompt builders
-# ============================================================================
-
-def _collect_column_values(ref_dir: str, filename: str, column: str) -> list[str]:
-    """Collect all non-empty values from a column across all rows."""
-    path = os.path.join(ref_dir, filename)
-    rows = _read_csv(path)
-    values = []
-    for row in rows:
-        v = row.get(column, '').strip()
-        if v:
-            values.append(v)
-    return values
-
-
-def _collect_array_values(ref_dir: str, filename: str, column: str) -> list[str]:
-    """Collect all unique values from a semicolon-separated column."""
-    path = os.path.join(ref_dir, filename)
-    rows = _read_csv(path)
-    seen = set()
-    values = []
-    for row in rows:
-        raw = row.get(column, '').strip()
-        if not raw:
-            continue
-        for item in raw.split(';'):
-            item = item.strip()
-            if item and item not in seen:
-                seen.add(item)
-                values.append(item)
-    return values
-
-
-def _read_existing_registry(ref_dir: str, filename: str) -> str:
-    """Read an existing registry CSV file as raw text, or empty string."""
-    path = os.path.join(ref_dir, filename)
-    if os.path.isfile(path):
-        with open(path, encoding='utf-8') as f:
-            content = f.read().strip()
-        # Only return if it has more than just a header
-        lines = [l for l in content.split('\n') if l.strip()]
-        if len(lines) > 1:
-            return content
-    return ''
-
-
-def _collect_mice_timeline(ref_dir: str) -> list[tuple[str, str, str]]:
-    """Collect MICE thread entries with scene context: [(scene_id, seq, entry), ...]."""
-    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
-    intent_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
-    sorted_ids = sorted(scenes_map.keys(),
-                        key=lambda sid: int(scenes_map[sid].get('seq', 0)))
-    timeline = []
-    for sid in sorted_ids:
-        intent = intent_map.get(sid, {})
-        mice = intent.get('mice_threads', '').strip()
-        if not mice:
-            continue
-        seq = scenes_map[sid].get('seq', '0')
-        for entry in mice.split(';'):
-            entry = entry.strip()
-            if entry:
-                timeline.append((sid, seq, entry))
-    return timeline
-
-
-def _collect_knowledge_chain(ref_dir: str) -> list[tuple[str, str, str, str]]:
-    """Collect knowledge facts in scene order: [(scene_id, seq, knowledge_in, knowledge_out), ...]."""
-    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
-    briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
-    sorted_ids = sorted(scenes_map.keys(),
-                        key=lambda sid: int(scenes_map[sid].get('seq', 0)))
-    chain = []
-    for sid in sorted_ids:
-        brief = briefs_map.get(sid, {})
-        k_in = brief.get('knowledge_in', '').strip()
-        k_out = brief.get('knowledge_out', '').strip()
-        seq = scenes_map[sid].get('seq', '0')
-        if k_in or k_out:
-            chain.append((sid, seq, k_in, k_out))
-    return chain
-
-
-def _collect_physical_state_chain(ref_dir: str) -> list[tuple[str, str, str, str]]:
-    """Collect physical states in scene order: [(scene_id, seq, state_in, state_out), ...]."""
-    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
-    briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
-    sorted_ids = sorted(scenes_map.keys(),
-                        key=lambda sid: int(scenes_map[sid].get('seq', 0)))
-    chain = []
-    for sid in sorted_ids:
-        brief = briefs_map.get(sid, {})
-        ps_in = brief.get('physical_state_in', '').strip()
-        ps_out = brief.get('physical_state_out', '').strip()
-        seq = scenes_map[sid].get('seq', '0')
-        if ps_in or ps_out:
-            chain.append((sid, seq, ps_in, ps_out))
-    return chain
-
-
-def build_registry_prompt(domain: str, ref_dir: str,
-                          context: str = '') -> str:
-    """Build an Opus prompt to create/update a canonical registry.
-
-    Args:
-        domain: One of 'characters', 'locations', 'values',
-                'mice-threads', 'knowledge'.
-        ref_dir: Path to the reference/ directory.
-        context: Optional extra context (e.g., character bible text).
-
-    Returns:
-        The prompt string for Opus.
-    """
-    existing = ''
-    raw_values = ''
-
-    if domain == 'characters':
-        existing = _read_existing_registry(ref_dir, 'characters.csv')
-        # Collect from pov, characters, on_stage
-        pov_vals = _collect_column_values(ref_dir, 'scenes.csv', 'pov')
-        char_vals = _collect_array_values(ref_dir, 'scene-intent.csv', 'characters')
-        onstage_vals = _collect_array_values(ref_dir, 'scene-intent.csv', 'on_stage')
-        all_refs = sorted(set(pov_vals + char_vals + onstage_vals))
-        raw_values = '\n'.join(f'- {v}' for v in all_refs)
-
-        return f"""Build a canonical character registry for a novel.
-
-## All Character References Found in the Manuscript
-
-{raw_values}
-
-{f"## Existing Registry{chr(10)}{chr(10)}```{chr(10)}{existing}{chr(10)}```" if existing else ""}
-
-{f"## Additional Context{chr(10)}{chr(10)}{context}" if context else ""}
-
-## Instructions
-
-Produce a pipe-delimited CSV with columns: id|name|role|aliases
-
-Rules:
-- id: kebab-case slug (e.g., kael-davreth)
-- name: display name (e.g., Kael Davreth)
-- role: protagonist, antagonist, supporting, minor, or referenced
-- aliases: semicolon-separated variants found in the data (e.g., Kael;kael;Kael Davreth)
-- Merge variants of the same character (Kael, kael, Kael Davreth = one entry)
-- If an existing registry is provided, preserve its IDs for known characters and add new ones
-- Every reference in the manuscript data must resolve to exactly one registry entry
-
-Output ONLY the CSV (with header row). No commentary."""
-
-    elif domain == 'locations':
-        existing = _read_existing_registry(ref_dir, 'locations.csv')
-        loc_vals = _collect_array_values(ref_dir, 'scenes.csv', 'location')
-        all_refs = sorted(set(loc_vals))
-        raw_values = '\n'.join(f'- {v}' for v in all_refs)
-
-        return f"""Build a canonical location registry for a novel.
-
-## All Location References Found in the Manuscript
-
-{raw_values}
-
-{f"## Existing Registry{chr(10)}{chr(10)}```{chr(10)}{existing}{chr(10)}```" if existing else ""}
-
-## Instructions
-
-Produce a pipe-delimited CSV with columns: id|name|aliases
-
-Rules:
-- id: kebab-case slug (e.g., resonance-chamber)
-- name: canonical display name (e.g., Resonance Chamber)
-- aliases: semicolon-separated variants found in the data
-- Collapse variants of the same place (case differences, parenthetical additions, punctuation differences)
-- Every entry is one real place. Never make an entry for a route, journey or transition ("East Egg to New York", "on the road to the city"); a scene that moves lists each place it passes through
-- If an existing registry is provided, preserve its IDs and add new entries
-- Every reference in the manuscript data must resolve to exactly one registry entry
-
-Output ONLY the CSV (with header row). No commentary."""
-
-    elif domain == 'values':
-        existing = _read_existing_registry(ref_dir, 'values.csv')
-        val_vals = _collect_column_values(ref_dir, 'scene-intent.csv', 'value_at_stake')
-        all_refs = sorted(set(val_vals))
-        raw_values = '\n'.join(f'- {v}' for v in all_refs)
-
-        return f"""Build a canonical value-at-stake registry for a novel.
-
-## All Value-at-Stake References Found in the Manuscript
-
-{raw_values}
-
-{f"## Existing Registry{chr(10)}{chr(10)}```{chr(10)}{existing}{chr(10)}```" if existing else ""}
-
-## Instructions
-
-A novel should have 8-15 core thematic values. Collapse over-specified entries into canonical abstract values.
-
-Produce a pipe-delimited CSV with columns: id|name|aliases
-
-Rules:
-- id: kebab-case abstract concept (e.g., justice, truth, autonomy)
-- name: display name (e.g., Justice)
-- aliases: semicolon-separated variants and over-specified forms from the data
-- "justice-specifically-whether-institutional-forms..." and "justice-specifically-restorative-accountability..." both map to "justice"
-- If an existing registry has well-defined values, preserve those IDs
-- Every reference in the manuscript data must resolve to exactly one registry entry
-
-Output ONLY the CSV (with header row). No commentary."""
-
-    elif domain == 'mice-threads':
-        existing = _read_existing_registry(ref_dir, 'mice-threads.csv')
-        timeline = _collect_mice_timeline(ref_dir)
-        functions = {sid: (row.get('function') or '').strip()[:100] for sid, row in
-                     _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv')).items()}
-        timeline_text = '\n'.join(
-            f'  Scene {sid} (seq {seq}): {entry}    [function: {functions.get(sid, "")}]'
-            for sid, seq, entry in timeline
-        )
-
-        return f"""Build a canonical MICE thread registry for a novel and reconcile thread opens/closes.
-
-## MICE Thread Timeline (in scene order)
-
-{timeline_text}
-
-{f"## Existing Registry{chr(10)}{chr(10)}```{chr(10)}{existing}{chr(10)}```" if existing else ""}
-
-## Instructions
-
-### Part 1: Registry
-
-Produce a pipe-delimited CSV with columns: id|name|type|aliases
-
-Rules:
-- id: kebab-case slug (e.g., who-killed-rowan)
-- name: descriptive name (e.g., Who killed Rowan?)
-- type: milieu, inquiry, character, or event
-- aliases: semicolon-separated variants from the data
-- Match orphaned closes to opens — if -inquiry:can-Cora-be-trusted-at-Lenas-table has no open but +inquiry:can-cora-be-trusted exists, they are the same thread
-- Every +/- reference in the timeline must resolve to exactly one registry entry
-
-### Part 2: Normalized Timeline
-
-After the registry CSV, output a UPDATES section listing every scene whose mice_threads value should change:
-
-UPDATE: scene_id | new_mice_threads_value
-
-Each thread opens exactly once, in the scene where it begins (+name), and closes at most once, in the scene where it is actually resolved (-name); judge that from the scene functions. Every other appearance is a bare mention (name). Threads may interleave: never reorder closes to make them nest.
-
-Only include scenes that need changes (repeated opens or closes turned into mentions, orphan matches, name normalization, type corrections).
-
-Output the registry CSV first, then a blank line, then "UPDATES" on its own line, then the update lines. No other commentary."""
-
-    elif domain == 'knowledge':
-        from storyforge.schema import MAX_FACT_NAME_WORDS
-        existing = _read_existing_registry(ref_dir, 'knowledge.csv')
-        chain = _collect_knowledge_chain(ref_dir)
-        chain_text = '\n'.join(
-            f'  Scene {sid} (seq {seq}):\n'
-            f'    IN:  {k_in or "(empty)"}\n'
-            f'    OUT: {k_out or "(empty)"}'
-            for sid, seq, k_in, k_out in chain
-        )
-
-        return f"""Build a canonical knowledge fact registry for a novel and normalize the knowledge chain.
-
-## Knowledge Chain (in scene order)
-
-{chain_text}
-
-{f"## Existing Registry{chr(10)}{chr(10)}```{chr(10)}{existing}{chr(10)}```" if existing else ""}
-
-## Instructions
-
-### Part 1: Registry
-
-Produce a pipe-delimited CSV with columns: id|name|aliases|category|origin
-
-Rules:
-- Every row has all five columns; an empty aliases column is still written (`id|name||category|origin`)
-- id: kebab-case slug, 2-5 words (e.g., marcus-killed-elena)
-- name: the fact alone in at most {MAX_FACT_NAME_WORDS} words (e.g., Marcus killed Elena) — no reasons, consequences, or second clause
-- aliases: semicolon-separated short variants of the same fact found across scenes
-- category: identity, motive-intent, capability-constraint, state-change, stakes-threat, or relationship-shift
-- origin: scene ID where this fact first appears in knowledge_out, or "backstory" if the fact is known before scene 1
-- Merge variants: if the same fact is worded differently in different scenes, they are one registry entry
-- If an existing registry is provided, preserve its IDs where possible
-
-### Part 2: Normalized Chain
-
-After the registry CSV, output an UPDATES section:
-
-UPDATE: scene_id | knowledge_in | knowledge_out
-
-Use canonical fact IDs (semicolon-separated) — every entry must be an id from your registry, never a sentence. Include every scene whose knowledge_in or knowledge_out contains anything that is not already a registry id; omit only scenes that are already all ids. An empty field stays empty: never write "(empty)" or "none".
-Backstory facts that characters know entering scene 1 should appear in scene 1's knowledge_in.
-
-Output the registry CSV first, then a blank line, then "UPDATES" on its own line, then the update lines. No other commentary."""
-
-    elif domain == 'physical-states':
-        existing = _read_existing_registry(ref_dir, 'physical-states.csv')
-        characters = _read_existing_registry(ref_dir, 'characters.csv')
-        chain = _collect_physical_state_chain(ref_dir)
-        chain_text = '\n'.join(
-            f'  Scene {sid} (seq {seq}):\n'
-            f'    IN:  {ps_in or "(empty)"}\n'
-            f'    OUT: {ps_out or "(empty)"}'
-            for sid, seq, ps_in, ps_out in chain
-        )
-
-        return f"""Build a canonical physical state registry for a novel and normalize the state chain.
-
-## Physical State Chain (in scene order)
-
-{chain_text}
-
-{f"## Existing Registry{chr(10)}{chr(10)}```{chr(10)}{existing}{chr(10)}```" if existing else ""}
-
-{f"## Character Registry{chr(10)}{chr(10)}```{chr(10)}{characters}{chr(10)}```" if characters else ""}
-
-## Instructions
-
-### Part 1: Registry
-
-Produce a pipe-delimited CSV with columns: id|character|description|category|acquired|resolves|action_gating
-
-Rules:
-- id: kebab-case slug scoped to character (e.g., broken-arm-marcus, has-compass-elena)
-- character: the character's id from the Character Registry (e.g., marcus-hale, not Marcus Hale)
-- description: concise, prose-usable description (under 20 words)
-- category: injury, equipment, ability, appearance, or fatigue
-- acquired: scene ID where this state first appears in physical_state_out
-- resolves: scene ID where removed from physical_state_out, or "never" for permanent
-- action_gating: true if this state constrains what the character can physically do, false otherwise
-- Merge variants: if the same state is described differently across scenes, they are one entry
-- If an existing registry is provided, preserve its IDs where possible
-
-### Part 2: Normalized Chain
-
-After the registry CSV, output an UPDATES section:
-
-UPDATE: scene_id | physical_state_in | physical_state_out
-
-Use canonical state IDs (semicolon-separated). Only include scenes that need changes.
-
-Output the registry CSV first, then a blank line, then "UPDATES" on its own line, then the update lines. No other commentary."""
-
-    else:
-        raise ValueError(f'Unknown reconciliation domain: {domain}')
-
-
-# ============================================================================
-# Registry response parsing
+# Registry reconcile by deltas
+#
+# A registry is never rebuilt by the model. Code resolves every reference it
+# can through the registry's aliases; only the references that still don't
+# resolve go to the model, in fixed-size numbered batches, and it answers one
+# line per reference. Code applies each batch before the next. No call's
+# output grows with the book, and a reconciled project makes no call at all.
 # ============================================================================
 
 KNOWLEDGE_CATEGORIES = frozenset({
@@ -442,77 +97,6 @@ _REGISTRY_COLUMNS = {
     'knowledge': ['id', 'name', 'aliases', 'category', 'origin'],
     'physical-states': ['id', 'character', 'description', 'category', 'acquired', 'resolves', 'action_gating'],
 }
-
-
-def parse_registry_response(
-    response: str, domain: str
-) -> tuple[list[dict[str, str]], list[tuple[str, str]]]:
-    """Parse an Opus registry-build response.
-
-    Returns:
-        (registry_rows, updates) where registry_rows is a list of dicts
-        keyed by the domain's columns, and updates is a list of
-        (scene_id, value_string) tuples from UPDATE lines.
-    """
-    if domain not in _REGISTRY_COLUMNS:
-        raise ValueError(f'Unknown reconciliation domain: {domain}')
-
-    columns = _REGISTRY_COLUMNS[domain]
-    rows: list[dict[str, str]] = []
-    updates: list[tuple[str, str]] = []
-    in_updates = False
-    header_seen = False
-
-    for line in response.split('\n'):
-        line = line.strip()
-        if not line:
-            continue
-
-        # Check for UPDATES section marker
-        if line.upper() == 'UPDATES':
-            in_updates = True
-            continue
-
-        if in_updates:
-            if not line.startswith('UPDATE:'):
-                continue
-            payload = line[len('UPDATE:'):].strip()
-            parts = payload.split('|', 1)
-            if len(parts) < 2:
-                continue
-            scene_id = parts[0].strip()
-            value = parts[1].strip()
-            if scene_id:
-                updates.append((scene_id, value))
-        else:
-            # Registry CSV parsing
-            fields = [f.strip() for f in line.split('|')]
-            # Skip header row
-            if not header_seen and len(fields) > 0 and fields[0] == 'id':
-                header_seen = True
-                continue
-            # A knowledge row with no aliases often drops the empty column
-            # (`id|name|category|origin`); requiring five fields discarded it,
-            # and with it every reference to the fact.
-            if (domain == 'knowledge' and len(fields) == len(columns) - 1
-                    and fields[2] in KNOWLEDGE_CATEGORIES):
-                fields.insert(2, '')
-            # Map fields to column names
-            if len(fields) < len(columns):
-                continue
-            row = {}
-            for i, col in enumerate(columns):
-                row[col] = fields[i] if i < len(fields) else ''
-            if not row.get('id'):
-                continue
-            rows.append(row)
-
-    return rows, updates
-
-
-# ============================================================================
-# Domain-to-file mapping
-# ============================================================================
 
 _DOMAIN_TO_REGISTRY = {
     'characters': 'characters.csv',
@@ -546,13 +130,199 @@ _DOMAIN_TARGETS = {
     ],
 }
 
+# Fields a NEW line supplies, after the id. Derived columns (knowledge
+# origin; physical-state acquired/resolves) are filled by code.
+_NEW_FIELDS = {
+    'characters': ['name', 'role'],
+    'locations': ['name'],
+    'values': ['name'],
+    'mice-threads': ['name', 'type'],
+    'knowledge': ['name', 'category'],
+    'physical-states': ['character', 'description', 'category', 'action_gating'],
+}
+
+# References per call. Output is one short line per reference, so this bounds
+# every call's output regardless of the book's length.
+_BATCH_SIZE = 60
+_BATCH_MAX_TOKENS = 8000
+
+# Chain fields where a model writes "none" / "(none)" / "(empty)" for an empty
+# list. Normalization drops those entries, so a placeholder is never stored as
+# a fact or a physical state (and is cleaned from data written before the
+# extraction parsers dropped them).
+_PLACEHOLDER_DOMAINS = {'knowledge', 'physical-states'}
+
+
+def _scene_order(ref_dir: str) -> list[str]:
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    return sorted(scenes_map, key=lambda sid: int(scenes_map[sid].get('seq') or 0))
+
+
+def _collect_knowledge_chain(ref_dir: str) -> list[tuple[str, str, str, str]]:
+    """Collect knowledge facts in scene order: [(scene_id, seq, knowledge_in, knowledge_out), ...]."""
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    chain = []
+    for sid in _scene_order(ref_dir):
+        brief = briefs_map.get(sid, {})
+        k_in = brief.get('knowledge_in', '').strip()
+        k_out = brief.get('knowledge_out', '').strip()
+        if k_in or k_out:
+            chain.append((sid, scenes_map[sid].get('seq', '0'), k_in, k_out))
+    return chain
+
+
+def _collect_physical_state_chain(ref_dir: str) -> list[tuple[str, str, str, str]]:
+    """Collect physical states in scene order: [(scene_id, seq, state_in, state_out), ...]."""
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    chain = []
+    for sid in _scene_order(ref_dir):
+        brief = briefs_map.get(sid, {})
+        ps_in = brief.get('physical_state_in', '').strip()
+        ps_out = brief.get('physical_state_out', '').strip()
+        if ps_in or ps_out:
+            chain.append((sid, scenes_map[sid].get('seq', '0'), ps_in, ps_out))
+    return chain
+
+
+def _split_mice(entry: str) -> tuple[str, str, str]:
+    """``+inquiry:who-is-gatsby`` → ``('+', 'inquiry', 'who-is-gatsby')``."""
+    entry = entry.strip()
+    prefix = ''
+    if len(entry) > 1 and entry[0] in '+-':
+        prefix, entry = entry[0], entry[1:]
+    type_part, sep, name = entry.partition(':')
+    if not sep:
+        return prefix, '', entry.strip()
+    return prefix, type_part.strip().lower(), name.strip()
+
+
+def _split_entries(domain: str, value: str) -> list[str]:
+    """A target field's entries. MICE entries may be comma-joined (see
+    :func:`split_mice_entries`)."""
+    if domain == 'mice-threads':
+        return split_mice_entries(value)
+    return (value or '').split(';')
+
+
+def _reference_key(domain: str, part: str) -> tuple[str, str, str] | None:
+    """A target-field entry as ``(lookup key, display text, type hint)``, or
+    None for an empty entry or a placeholder. Mirrors the lookups in
+    :func:`normalize_aliases` and :func:`normalize_mice_threads`."""
+    if domain == 'mice-threads':
+        _prefix, type_hint, name = _split_mice(part)
+        return (name.lower(), name, type_hint) if name else None
+    if domain in _PLACEHOLDER_DOMAINS and is_placeholder(part):
+        return None
+    text = strip_parentheticals(part.strip())
+    if not text or (domain in _PLACEHOLDER_DOMAINS and is_placeholder(text)):
+        return None
+    return text.lower(), text, ''
+
+
+def _registry_lookup(domain: str, ref_dir: str) -> dict[str, str]:
+    """Lowercased id, name and alias → canonical id for the domain's registry."""
+    path = os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain])
+    if domain == 'mice-threads':
+        lookup = load_mice_registry(path)[0]
+    else:
+        lookup = load_alias_map(path)
+    # physical-states.csv has no name column, so load_alias_map is empty
+    for row in _read_csv(path):
+        if row.get('id'):
+            lookup.setdefault(row['id'].lower(), row['id'])
+    return lookup
+
+
+def _unresolved_references(domain: str, ref_dir: str) -> dict[str, dict]:
+    """Target-field references the registry does not resolve, in scene order:
+    ``{key: {'key', 'text', 'type', 'scenes'}}``."""
+    lookup = _registry_lookup(domain, ref_dir)
+    order = {sid: i for i, sid in enumerate(_scene_order(ref_dir))}
+    found: dict[str, dict] = {}
+    for filename, columns in _DOMAIN_TARGETS[domain]:
+        rows = _read_csv(os.path.join(ref_dir, filename))
+        rows.sort(key=lambda r: order.get(r.get('id', ''), len(order)))
+        for row in rows:
+            for col in columns:
+                for part in _split_entries(domain, row.get(col)):
+                    ref = _reference_key(domain, part)
+                    if not ref or ref[0] in lookup:
+                        continue
+                    entry = found.setdefault(ref[0], {'key': ref[0], 'text': ref[1],
+                                                      'type': ref[2], 'scenes': []})
+                    if row.get('id') and row['id'] not in entry['scenes']:
+                        entry['scenes'].append(row['id'])
+    return found
+
+
+def find_unresolved(domain: str, ref_dir: str) -> list[str]:
+    """Return target-column references the domain's registry does not resolve.
+
+    Semicolon-split, parentheticals stripped, case-insensitive, placeholders
+    ignored; a MICE entry is resolved by its thread name.
+    """
+    return sorted(e['text'] for e in _unresolved_references(domain, ref_dir).values())
+
+
+def find_alias_collisions(domain: str, ref_dir: str) -> dict[str, list[str]]:
+    """Return aliases (lowercased) claimed by more than one registry entry.
+
+    :func:`load_alias_map` keeps whichever entry comes last, so a collision
+    silently routes references to the wrong entry.
+    """
+    owners: dict[str, set[str]] = {}
+    for row in _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain])):
+        entry_id = row.get('id', '')
+        names = [row.get('name', ''), entry_id] + (row.get('aliases') or '').split(';')
+        for name in names:
+            key = name.strip().lower()
+            if key:
+                owners.setdefault(key, set()).add(entry_id)
+    return {k: sorted(v) for k, v in sorted(owners.items()) if len(v) > 1}
+
+
+def resolve_alias_collisions(domain: str, ref_dir: str) -> int:
+    """Give each shared alias to one entry, deterministically.
+
+    The alias stays with the entry whose id or name equals it, otherwise with
+    the first entry listing it, and is removed from the others' aliases. Each
+    move is logged. A clash between two ids or names can't be fixed by moving
+    aliases and is left for :func:`find_alias_collisions` to report. Returns
+    the number of aliases removed.
+    """
+    collisions = find_alias_collisions(domain, ref_dir)
+    if not collisions:
+        return 0
+    rows = _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
+    removed = 0
+    for alias, _ids in collisions.items():
+        named = [r for r in rows if alias in (r.get('id', '').lower(), r.get('name', '').strip().lower())]
+        listing = [r for r in rows if alias in
+                   (a.strip().lower() for a in (r.get('aliases') or '').split(';'))]
+        owner = (named or listing)[0]
+        for row in listing:
+            if row is owner:
+                continue
+            row['aliases'] = ';'.join(a for a in row['aliases'].split(';')
+                                      if a.strip() and a.strip().lower() != alias)
+            removed += 1
+            log(f'  {domain}: alias "{alias}" kept on {owner["id"]}, removed from {row["id"]}')
+    if removed:
+        write_registry(ref_dir, domain, rows)
+    return removed
+
 
 # ============================================================================
-# Registry writing
+# Registry writing and normalization
 # ============================================================================
 
 def write_registry(ref_dir: str, domain: str, rows: list[dict[str, str]]) -> None:
     """Write registry rows to the domain's CSV file.
+
+    Columns beyond the domain's own (a ``death_scene`` an author added to
+    characters.csv) are kept.
 
     Args:
         ref_dir: Path to the reference/ directory.
@@ -577,98 +347,10 @@ def write_registry(ref_dir: str, domain: str, rows: list[dict[str, str]]) -> Non
             if row.get('character'):
                 row['character'] = normalize_aliases(char_map, row['character'])
 
-    filename = _DOMAIN_TO_REGISTRY[domain]
-    columns = _REGISTRY_COLUMNS[domain]
-    path = os.path.join(ref_dir, filename)
-    _write_csv(path, rows, columns)
-
-
-# ============================================================================
-# Update application
-# ============================================================================
-
-def apply_updates(
-    ref_dir: str, domain: str, updates: list[tuple[str, str]]
-) -> int:
-    """Apply UPDATE lines from Opus response to scene CSVs.
-
-    Args:
-        ref_dir: Path to the reference/ directory.
-        domain: The reconciliation domain.
-        updates: List of (scene_id, value_string) tuples.
-
-    Returns:
-        Number of updates successfully applied.
-    """
-    if not updates:
-        return 0
-
-    if domain == 'mice-threads':
-        intent_path = os.path.join(ref_dir, 'scene-intent.csv')
-        rows = _read_csv(intent_path)
-        if not rows:
-            return 0
-        row_map = {r['id']: r for r in rows if 'id' in r}
-        applied = 0
-        for scene_id, value in updates:
-            if scene_id in row_map:
-                row_map[scene_id]['mice_threads'] = value
-                applied += 1
-        if applied:
-            _write_csv(intent_path, rows, _FILE_MAP['scene-intent.csv'])
-        return applied
-
-    elif domain == 'knowledge':
-        briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
-        rows = _read_csv(briefs_path)
-        if not rows:
-            return 0
-        row_map = {r['id']: r for r in rows if 'id' in r}
-        applied = 0
-        for scene_id, value in updates:
-            if scene_id not in row_map:
-                continue
-            parts = value.split('|', 1)
-            if len(parts) == 2:
-                row_map[scene_id]['knowledge_in'] = strip_placeholders(parts[0])
-                row_map[scene_id]['knowledge_out'] = strip_placeholders(parts[1])
-                applied += 1
-        if applied:
-            _write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
-        return applied
-
-    elif domain == 'physical-states':
-        briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
-        rows = _read_csv(briefs_path)
-        if not rows:
-            return 0
-        row_map = {r['id']: r for r in rows if 'id' in r}
-        applied = 0
-        for scene_id, value in updates:
-            if scene_id not in row_map:
-                continue
-            parts = value.split('|', 1)
-            if len(parts) == 2:
-                row_map[scene_id]['physical_state_in'] = strip_placeholders(parts[0])
-                row_map[scene_id]['physical_state_out'] = strip_placeholders(parts[1])
-                applied += 1
-        if applied:
-            _write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
-        return applied
-
-    # Other domains have no update lines
-    return 0
-
-
-# ============================================================================
-# Registry normalization
-# ============================================================================
-
-# Chain fields where a model writes "none" / "(none)" / "(empty)" for an empty
-# list. Normalization drops those entries, so a placeholder is never stored as
-# a fact or a physical state (and is cleaned from data written before the
-# extraction parsers dropped them).
-_PLACEHOLDER_DOMAINS = {'knowledge', 'physical-states'}
+    columns = list(_REGISTRY_COLUMNS[domain])
+    for row in rows:
+        columns += [c for c in row if c not in columns]
+    _write_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]), rows, columns)
 
 
 def apply_registry_normalization(
@@ -692,7 +374,7 @@ def apply_registry_normalization(
     if domain == 'mice-threads':
         alias_map, type_map = load_mice_registry(registry_path)
     else:
-        alias_map = load_alias_map(registry_path)
+        alias_map = _registry_lookup(domain, ref_dir)
         type_map = None
 
     if not alias_map and domain not in _PLACEHOLDER_DOMAINS:
@@ -732,54 +414,462 @@ def apply_registry_normalization(
     return total_changed
 
 
-# Domains whose fields are resolved by plain alias lookup, so an unresolved
-# reference is simply a value missing from the registry. Knowledge fields
-# are alias-resolved too, but their unresolved entries are usually long
-# sentences that a registry retry cannot reliably echo back as aliases, so
-# they get their own numbered mapping pass (resolve_unresolved_knowledge).
-_ALIAS_DOMAINS = {'characters', 'locations', 'values'}
+# ============================================================================
+# Mapping prompt, parsing and application
+# ============================================================================
 
-# Output budget per registry build. The knowledge registry plus an UPDATE
-# line per scene ran past 4096 tokens on a full novel (The Great Gatsby): the
-# response stopped mid-registry, so no UPDATES were ever applied.
-_REGISTRY_MAX_TOKENS = {'knowledge': 16000, 'physical-states': 16000}
+_DOMAIN_NOUN = {
+    'characters': 'character',
+    'locations': 'place',
+    'values': 'value at stake',
+    'mice-threads': 'MICE thread',
+    'knowledge': 'knowledge fact',
+    'physical-states': 'physical state',
+}
 
 
-def find_unresolved(domain: str, ref_dir: str) -> list[str]:
-    """Return target-column references the domain's registry does not resolve.
+def _domain_rules(domain: str) -> str:
+    from storyforge.schema import MAX_FACT_NAME_WORDS
+    return {
+        'characters': """- NEW fields: `N | NEW | id | name | role`
+- id: kebab-case slug of the full name (e.g., kael-davreth); name: display name (e.g., Kael Davreth)
+- role: protagonist, antagonist, supporting, minor, or referenced
+- Variants of one person are one entry (Kael, kael, Kael Davreth); a group ("the Buchanans") maps to each member's id""",
+        'locations': """- NEW fields: `N | NEW | id | name`
+- id: kebab-case slug (e.g., resonance-chamber); name: canonical display name (e.g., Resonance Chamber)
+- Every entry is one real place. Never make an entry for a route, journey or transition ("East Egg to New York", "on the road to the city"): map it to each place it passes through (`N | east-egg;new-york`)
+- Variants of one place (case, punctuation, a parenthetical detail, "the" or not) map to the same id""",
+        'values': """- NEW fields: `N | NEW | id | name`
+- id: kebab-case abstract concept (e.g., justice, truth, autonomy); name: display name (e.g., Justice)
+- A novel has 8-15 core thematic values. Map an over-specified value onto the abstract value it specifies ("justice-specifically-restorative-accountability" → justice); declare NEW only for a distinct core value""",
+        'mice-threads': """- NEW fields: `N | NEW | id | name | type`
+- id: kebab-case slug (e.g., who-killed-rowan); name: descriptive name (e.g., Who killed Rowan?)
+- type: milieu, inquiry, character, or event (the reference's own type prefix, when it has one, is usually right)
+- One thread worded differently in different scenes is one entry: an orphaned close like `can-Cora-be-trusted-at-Lenas-table` maps to an open `can-cora-be-trusted`""",
+        'knowledge': f"""- NEW fields: `N | NEW | id | name | category`
+- id: kebab-case, 2-5 words (e.g., marcus-killed-elena)
+- name: the fact alone in at most {MAX_FACT_NAME_WORDS} words (e.g., Marcus killed Elena), no reasons, consequences, or second clause
+- category: identity, motive-intent, capability-constraint, state-change, stakes-threat, or relationship-shift
+- A rewording of a fact already in the registry maps to its id; a reference stating two facts maps to both (`N | id1;id2`)""",
+        'physical-states': """- NEW fields: `N | NEW | id | character | description | category | action_gating`
+- id: kebab-case slug scoped to the character (e.g., broken-arm-marcus, has-compass-elena)
+- character: the character's id from the Character Registry (e.g., marcus-hale, not Marcus Hale)
+- description: concise, prose-usable description (under 20 words)
+- category: injury, equipment, ability, appearance, or fatigue
+- action_gating: true if this state constrains what the character can physically do, false otherwise
+- One state described differently in different scenes is one entry""",
+    }[domain]
 
-    Mirrors :func:`normalize_aliases`: semicolon-split, parentheticals
-    stripped, case-insensitive. Meaningful for ``_ALIAS_DOMAINS`` and
-    ``knowledge``.
+
+def _registry_line(domain: str, row: dict[str, str]) -> str:
+    if domain == 'characters':
+        return f'- {row["id"]} — {row.get("name", "")} ({row.get("role", "")})'
+    if domain == 'mice-threads':
+        return f'- {row["id"]} — {row.get("name", "")} ({row.get("type", "")})'
+    if domain == 'knowledge':
+        return f'- {row["id"]} — {row.get("name", "")}'
+    if domain == 'physical-states':
+        return (f'- {row["id"]} — {row.get("description", "")} '
+                f'({row.get("character", "")}, {row.get("category", "")})')
+    return f'- {row["id"]} — {row.get("name", "")}'
+
+
+def build_mapping_prompt(domain: str, ref_dir: str, batch: list[dict],
+                         context: str = '', retry: bool = False) -> str:
+    """Prompt asking what each unresolved reference in *batch* denotes.
+
+    References are numbered so the answer names them by number: echoing a
+    long sentence back verbatim is what failed when these were matched as
+    aliases of a rebuilt registry.
     """
-    alias_map = load_alias_map(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
-    canonical = {v.lower() for v in alias_map.values()}
-    unresolved = set()
-    for filename, columns in _DOMAIN_TARGETS.get(domain, []):
-        for row in _read_csv(os.path.join(ref_dir, filename)):
+    noun = _DOMAIN_NOUN[domain]
+    registry = [r for r in _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
+                if r.get('id')]
+    registry_text = '\n'.join(_registry_line(domain, r) for r in registry) or '(empty)'
+    refs = []
+    for i, ref in enumerate(batch, 1):
+        text = f'{ref["type"]}:{ref["text"]}' if ref.get('type') else ref['text']
+        used = ref['scenes'][:3]
+        refs.append(f'{i}. {text}' + (f'  [scenes: {", ".join(used)}]' if used else ''))
+
+    sections = [f'## {noun[0].upper() + noun[1:]} Registry\n\n{registry_text}']
+    if domain == 'physical-states':
+        chars = [r for r in _read_csv(os.path.join(ref_dir, 'characters.csv')) if r.get('id')]
+        if chars:
+            sections.append('## Character Registry\n\n' + '\n'.join(
+                f'- {r["id"]} — {r.get("name", "")}' for r in chars))
+    if context:
+        sections.append(f'## Additional Context\n\n{context}')
+    sections.append('## Unresolved References\n\n'
+                    + ('These were asked before, and the answer named an id that is '
+                       'not in the registry and was not declared NEW, so it was '
+                       'discarded. Answer again.\n\n' if retry else '')
+                    + '\n'.join(refs))
+
+    return f"""A novel's scene data refers to each {noun} by an id from its registry, but these references match no registry id, name, or alias. Decide what each one denotes.
+
+{chr(10).join(s + chr(10) for s in sections)}
+## Instructions
+
+For each numbered reference, output exactly one line:
+
+N | id
+  the reference denotes this registry entry.
+
+N | id1;id2
+  the reference names several entries at once.
+
+N | NEW | id | <fields>
+  only when it denotes a {noun} the registry does not contain. A NEW id may be used by other lines too.
+
+N | SKIP
+  the reference is not a {noun} at all (a placeholder or noise).
+
+Rules:
+{_domain_rules(domain)}
+- Every id you name must be in the registry above or declared on a NEW line of this answer; a line naming any other id is discarded
+- Map several references to one id when they denote the same {noun}; never declare a NEW id that is already in the registry
+
+Output only these lines, one per reference, no other commentary."""
+
+
+_SLUG_RE = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
+
+
+def _slugify(raw: str) -> str:
+    return re.sub(r'[^a-z0-9]+', '-', raw.strip().lower()).strip('-')
+
+
+def parse_mapping_response(
+    domain: str, response: str, batch_size: int, known: dict[str, str] | set[str]
+) -> tuple[dict[int, list[str]], list[dict[str, str]], set[int]]:
+    """Parse ``N | id``, ``N | id1;id2``, ``N | NEW | id | …`` and ``N | SKIP``.
+
+    *known* is the registry lookup (lowercased id, name or alias → id), or a
+    set of ids. Returns ``(mapping, new_rows, skipped)``: mapping is reference
+    number → ids, new_rows are registry rows with the NEW fields filled
+    (derived columns left to the caller), skipped the numbers answered SKIP.
+    A line naming an id that is neither known nor declared NEW is ignored, as
+    is a number outside the batch. A NEW id is slugged; one that already
+    resolves maps to that entry, and one holding ``;`` is ignored.
+    """
+    fields = _NEW_FIELDS[domain]
+    if isinstance(known, set):
+        known = {i.lower(): i for i in known}
+    known = dict(known)
+    lines = []
+    for line in response.split('\n'):
+        parts = [p.strip() for p in line.strip().lstrip('-* ').split('|')]
+        num = parts[0].rstrip('.').strip()
+        if len(parts) >= 2 and num.isdigit() and 1 <= int(num) <= batch_size:
+            lines.append((int(num), parts[1:]))
+
+    new_rows: list[dict[str, str]] = []
+    for _num, parts in lines:
+        if parts[0].upper() != 'NEW' or len(parts) < 3 or ';' in parts[1]:
+            continue
+        rid = _slugify(parts[1])
+        if not rid or not parts[2] or rid in known or parts[1].strip().lower() in known:
+            continue
+        values = parts[2:2 + len(fields)]
+        row = {'id': rid, **{f: (values[i] if i < len(values) else '') for i, f in enumerate(fields)}}
+        known[rid] = rid
+        known[parts[1].strip().lower()] = rid
+        new_rows.append(row)
+
+    mapping: dict[int, list[str]] = {}
+    skipped: set[int] = set()
+    for num, parts in lines:
+        head = parts[0]
+        words = head.split()
+        # Case-sensitive, as the prompt asks: a character called "skip" is an id
+        if words and words[0].rstrip('.:,') == 'SKIP':
+            skipped.add(num)
+            continue
+        if head.upper() == 'NEW':
+            if len(parts) < 2 or ';' in parts[1]:
+                continue
+            raw = parts[1].strip().lower()
+            ids = [known.get(raw) or known.get(_slugify(raw))]
+        else:
+            ids = [known.get(i.strip().lower()) or known.get(_slugify(i))
+                   for i in head.split(';') if i.strip()]
+        if ids and all(ids):
+            mapping[num] = list(dict.fromkeys(ids))
+    return mapping, new_rows, skipped
+
+
+# Columns that hold one value, where a composite mapping is not applied
+_SINGLE_VALUE_COLUMNS = {'pov'}
+
+
+def _rewrite_targets(domain: str, ref_dir: str, mapping: dict[str, list[str]]) -> int:
+    """Rewrite target fields through *mapping* (lookup key → ids), keeping
+    MICE ``+``/``-`` prefixes. An empty id list removes the entry (a
+    reference answered SKIP). In a single-value column such as ``pov`` only
+    a single-id mapping applies: a composite or a SKIP leaves the reference
+    there, unresolved and reported, rather than writing several ids or
+    blanking the field. Returns the number of fields changed."""
+    changed = 0
+    for filename, columns in _DOMAIN_TARGETS[domain]:
+        path = os.path.join(ref_dir, filename)
+        rows = _read_csv(path)
+        file_changed = 0
+        for row in rows:
             for col in columns:
-                for part in (row.get(col) or '').split(';'):
-                    ref = strip_parentheticals(part.strip())
-                    if ref and ref.lower() not in alias_map and ref.lower() not in canonical:
-                        unresolved.add(ref)
-    return sorted(unresolved)
+                old_val = row.get(col) or ''
+                if not old_val:
+                    continue
+                out: list[str] = []
+                for part in _split_entries(domain, old_val):
+                    if not part.strip():
+                        continue
+                    ref = _reference_key(domain, part)
+                    ids = mapping.get(ref[0]) if ref else None
+                    if ids is None or (col in _SINGLE_VALUE_COLUMNS and len(ids) != 1):
+                        out.append(part.strip())
+                    elif domain == 'mice-threads':
+                        prefix = _split_mice(part)[0]
+                        out += [prefix + i for i in ids]
+                    else:
+                        out += ids
+                new_val = ';'.join(dict.fromkeys(out))
+                if new_val != old_val:
+                    row[col] = new_val
+                    file_changed += 1
+        if file_changed:
+            _write_csv(path, rows, _FILE_MAP[filename])
+            changed += file_changed
+    return changed
 
 
-def find_alias_collisions(domain: str, ref_dir: str) -> dict[str, list[str]]:
-    """Return aliases (lowercased) claimed by more than one registry entry.
+def _first_scene_with(ref_dir: str, column: str, entry_id: str) -> str:
+    briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    for sid in _scene_order(ref_dir):
+        if entry_id in (briefs.get(sid, {}).get(column) or '').split(';'):
+            return sid
+    return ''
 
-    :func:`load_alias_map` keeps whichever entry comes last, so a collision
-    silently routes references to the wrong entry.
+
+def _derive_columns(domain: str, ref_dir: str, row: dict[str, str]) -> None:
+    if domain == 'knowledge':
+        row.setdefault('aliases', '')
+        row['origin'] = _first_scene_with(ref_dir, 'knowledge_out', row['id']) or 'backstory'
+    elif domain == 'physical-states':
+        row['acquired'] = (_first_scene_with(ref_dir, 'physical_state_out', row['id'])
+                           or _first_scene_with(ref_dir, 'physical_state_in', row['id']))
+        row.setdefault('resolves', 'never')
+
+
+def rederive_columns(domain: str, ref_dir: str, ids: set[str]) -> None:
+    """Recompute derived columns (knowledge origin, physical-state acquired)
+    for the entries in *ids*, once every batch has rewritten its fields: a
+    fact declared from its knowledge_in wording in one batch may be mapped
+    from the knowledge_out wording that establishes it in a later one."""
+    if not ids or domain not in ('knowledge', 'physical-states'):
+        return
+    registry = _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
+    for row in registry:
+        if row.get('id') in ids:
+            _derive_columns(domain, ref_dir, row)
+    write_registry(ref_dir, domain, registry)
+
+
+def apply_mapping(domain: str, ref_dir: str, batch: list[dict],
+                  mapping: dict[int, list[str]], new_rows: list[dict[str, str]],
+                  skipped: set[int] = frozenset()) -> int:
+    """Apply one parsed batch: add NEW rows (derived columns filled), record
+    single-id mappings as aliases, rewrite the target fields, and remove the
+    references answered SKIP (so a re-run doesn't ask about them again).
+    Returns the number of fields changed."""
+    by_key = {batch[n - 1]['key']: ids for n, ids in mapping.items()}
+    by_key.update({batch[n - 1]['key']: [] for n in skipped})
+    changed = _rewrite_targets(domain, ref_dir, by_key)
+
+    registry = _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
+    for row in new_rows:
+        _derive_columns(domain, ref_dir, row)
+        registry.append(row)
+
+    # A reference mapped to one entry becomes its alias, so the next
+    # extraction's spelling resolves without a call. Knowledge is the
+    # exception: its references are sentences that won't recur verbatim, and
+    # extraction prompts list the registry, so they would only bloat it.
+    if 'aliases' in _REGISTRY_COLUMNS[domain] and domain != 'knowledge':
+        rows_by_id = {r['id']: r for r in registry if r.get('id')}
+        for n, ids in mapping.items():
+            text = batch[n - 1]['text']
+            row = rows_by_id.get(ids[0])
+            if len(ids) != 1 or row is None or '|' in text:
+                continue
+            existing = {a.strip().lower() for a in (row.get('aliases') or '').split(';')}
+            if text.lower() in existing | {row['id'].lower(), row.get('name', '').lower()}:
+                continue
+            row['aliases'] = ';'.join(a for a in [row.get('aliases', ''), text] if a)
+
+    if new_rows or mapping:
+        write_registry(ref_dir, domain, registry)
+    return changed
+
+
+def _invoke_batch(prompt: str, model: str, log_file: str, label: str) -> str | None:
+    """One hone call. Returns the response text, or None when it was cut off
+    at the token limit (a partial batch is never applied)."""
+    from storyforge.api import invoke_to_file, extract_text_from_file, is_truncated
+    response = invoke_to_file(prompt, model, log_file, max_tokens=_BATCH_MAX_TOKENS, label=label)
+    if is_truncated(response):
+        log(f'  WARNING: {label} hit the {_BATCH_MAX_TOKENS}-token limit; '
+            f'its references are left unresolved')
+        return None
+    return extract_text_from_file(log_file)
+
+
+def _report_remaining(domain: str, ref_dir: str, skipped: list[str]) -> int:
+    left = find_unresolved(domain, ref_dir)
+    if skipped:
+        log(f'  {domain}: removed {len(skipped)} reference(s) that are not a {_DOMAIN_NOUN[domain]}: '
+            + '; '.join(skipped[:10]) + (f' (and {len(skipped) - 10} more)' if len(skipped) > 10 else ''))
+    if left:
+        log(f'  WARNING: {len(left)} {domain} reference(s) still unresolved: '
+            + '; '.join(left[:10]) + (f' (and {len(left) - 10} more)' if len(left) > 10 else ''))
+    shared = find_alias_collisions(domain, ref_dir) if domain != 'physical-states' else {}
+    if shared:
+        log(f'  WARNING: {len(shared)} {domain} alias(es) still shared: '
+            + '; '.join(f'{a} ({", ".join(i)})' for a, i in shared.items()))
+    return len(left)
+
+
+# ============================================================================
+# MICE operations: one open and at most one close per thread
+# ============================================================================
+
+def _mice_timelines(ref_dir: str) -> dict[str, list[tuple[str, str]]]:
+    """Thread id → [(scene_id, '+' | '-' | ''), ...] in scene order."""
+    intent = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+    timelines: dict[str, list[tuple[str, str]]] = {}
+    for sid in _scene_order(ref_dir):
+        for entry in _split_entries('mice-threads', intent.get(sid, {}).get('mice_threads')):
+            prefix, _type, name = _split_mice(entry)
+            if name:
+                timelines.setdefault(name, []).append((sid, prefix))
+    return timelines
+
+
+def find_mice_anomalies(ref_dir: str) -> list[str]:
+    """Threads opened more than once, closed more than once, or closed
+    before (or without) being opened."""
+    anomalous = []
+    for thread, timeline in _mice_timelines(ref_dir).items():
+        ops = [op for _sid, op in timeline if op]
+        if (ops.count('+') > 1 or ops.count('-') > 1
+                or ('-' in ops and ('+' not in ops or ops.index('-') < ops.index('+')))):
+            anomalous.append(thread)
+    return anomalous
+
+
+def build_mice_operations_prompt(ref_dir: str, threads: list[str]) -> str:
+    registry = _read_csv_as_map(os.path.join(ref_dir, 'mice-threads.csv'))
+    functions = {sid: (row.get('function') or '').strip()[:100] for sid, row in
+                 _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv')).items()}
+    timelines = _mice_timelines(ref_dir)
+    blocks = []
+    for thread in threads:
+        entry = registry.get(thread, {})
+        head = f'### {thread}' + (f' — {entry.get("name", "")} ({entry.get("type", "")})' if entry else '')
+        lines = [f'  {sid}: {op or "mention"}    [function: {functions.get(sid, "")}]'
+                 for sid, op in timelines.get(thread, [])]
+        blocks.append(head + '\n' + '\n'.join(lines))
+    return f"""These MICE threads in a novel are opened more than once, closed more than once, or closed before they open. Each is listed with every scene that touches it, in scene order, with the operation the scene currently records (+ open, - close, or a mention) and the scene's function.
+
+{chr(10).join(blocks)}
+
+## Instructions
+
+Each thread opens exactly once, in the scene where it begins, and closes at most once, in the scene where it is actually resolved; judge both from the scene functions. Threads may interleave: never move a close to make threads nest.
+
+For each thread, output exactly one line:
+
+thread | open_scene | close_scene
+
+Use UNCLOSED as close_scene when the thread is never resolved in the book. Both scenes must be scenes listed under the thread. Output only these lines, no other commentary."""
+
+
+def parse_mice_operations_response(
+    response: str, ref_dir: str, threads: list[str]
+) -> dict[str, tuple[str, str]]:
+    """Parse ``thread | open | close`` lines into thread → (open, close);
+    close is ``''`` for UNCLOSED. A line naming a thread outside the batch,
+    a scene that doesn't touch the thread, or a close before the open is
+    ignored."""
+    timelines = _mice_timelines(ref_dir)
+    result = {}
+    for line in response.split('\n'):
+        parts = [p.strip() for p in line.strip().lstrip('-* ').split('|')]
+        if len(parts) < 3 or parts[0] not in threads:
+            continue
+        sids = [sid for sid, _op in timelines.get(parts[0], [])]
+        open_sid = parts[1]
+        close_sid = '' if parts[2].upper() == 'UNCLOSED' else parts[2]
+        if open_sid not in sids or (close_sid and (close_sid not in sids
+                                                   or sids.index(close_sid) < sids.index(open_sid))):
+            continue
+        result[parts[0]] = (open_sid, close_sid)
+    return result
+
+
+def apply_mice_operations(ref_dir: str, decisions: dict[str, tuple[str, str]]) -> int:
+    """Rewrite each decided thread: ``+`` at its open scene, ``-`` at its
+    close scene (both, when it opens and closes in one scene), a bare
+    mention everywhere else. Returns the number of fields changed."""
+    if not decisions:
+        return 0
+    path = os.path.join(ref_dir, 'scene-intent.csv')
+    rows = _read_csv(path)
+    changed = 0
+    for row in rows:
+        old_val = row.get('mice_threads') or ''
+        out = []
+        for entry in _split_entries('mice-threads', old_val):
+            if not entry.strip():
+                continue
+            _prefix, _type, name = _split_mice(entry)
+            if name not in decisions:
+                out.append(entry.strip())
+                continue
+            open_sid, close_sid = decisions[name]
+            ops = [op for op, sid in (('+', open_sid), ('-', close_sid)) if sid == row.get('id')]
+            out += [op + name for op in ops] or [name]
+        new_val = ';'.join(dict.fromkeys(out))
+        if new_val != old_val:
+            row['mice_threads'] = new_val
+            changed += 1
+    if changed:
+        _write_csv(path, rows, _FILE_MAP['scene-intent.csv'])
+    return changed
+
+
+def reconcile_mice_operations(ref_dir: str, model: str, log_dir: str) -> tuple[int, int]:
+    """Decide the open and close of each anomalous thread, in batches.
+
+    No call when no thread is anomalous. Returns (fields changed, calls made).
     """
-    owners: dict[str, set[str]] = {}
-    for row in _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain])):
-        entry_id = row.get('id', '')
-        names = [row.get('name', ''), entry_id] + (row.get('aliases') or '').split(';')
-        for name in names:
-            key = name.strip().lower()
-            if key:
-                owners.setdefault(key, set()).add(entry_id)
-    return {k: sorted(v) for k, v in sorted(owners.items()) if len(v) > 1}
+    threads = find_mice_anomalies(ref_dir)
+    changed = 0
+    n = 0
+    for n, start in enumerate(range(0, len(threads), _BATCH_SIZE), 1):
+        batch = threads[start:start + _BATCH_SIZE]
+        log(f'  mice-threads: deciding opens and closes for {len(batch)} thread(s)')
+        text = _invoke_batch(build_mice_operations_prompt(ref_dir, batch), model,
+                             os.path.join(log_dir, f'reconcile-mice-threads-ops-{n}.json'),
+                             f'hone registries/mice-threads operations (batch {n})')
+        if text is not None:
+            changed += apply_mice_operations(
+                ref_dir, parse_mice_operations_response(text, ref_dir, batch))
+    remaining = find_mice_anomalies(ref_dir)
+    if remaining:
+        log(f'  WARNING: {len(remaining)} MICE thread(s) still opened or closed '
+            f'more than once: {"; ".join(remaining[:10])}')
+    return changed, n
 
 
 # ============================================================================
@@ -790,280 +880,106 @@ def reconcile_domain(
     domain: str, ref_dir: str, model: str, log_dir: str,
     context: str = ''
 ) -> dict:
-    """Run full reconciliation for one domain.
+    """Reconcile one domain's registry with the scene data, by deltas.
+
+    Shared aliases are resolved and every resolvable reference normalized to
+    its id in code; the references left over go to the model in numbered
+    batches (see :func:`build_mapping_prompt`), each applied before the next.
+    For MICE threads, threads with anomalous operations are then decided per
+    thread. A project with nothing unresolved makes no call.
 
     Args:
         domain: One of 'characters', 'locations', 'values',
-                'mice-threads', 'knowledge', or 'outcomes'.
+                'mice-threads', 'knowledge', 'physical-states', or 'outcomes'.
         ref_dir: Path to the reference/ directory.
-        model: Anthropic model ID for the API call.
+        model: Anthropic model ID for the API calls.
         log_dir: Directory for API log files.
-        context: Optional extra context for the prompt.
+        context: Optional extra context for the prompt (the character bible).
 
     Returns:
-        Dict with keys: registry_entries, updates_applied, fields_normalized.
+        Dict with keys: registry_entries, references_mapped,
+        fields_normalized, unresolved, calls.
     """
     # Outcomes are deterministic — no API call needed
     if domain == 'outcomes':
         changed = reconcile_outcomes(ref_dir)
-        return {
-            'registry_entries': 0,
-            'updates_applied': 0,
-            'fields_normalized': changed,
-        }
+        return {'registry_entries': 0, 'references_mapped': 0,
+                'fields_normalized': changed, 'unresolved': 0, 'calls': 0}
 
-    from storyforge.api import invoke_to_file, extract_text_from_file
+    if domain not in _DOMAIN_TO_REGISTRY:
+        raise ValueError(f'Unknown reconciliation domain: {domain}')
 
     os.makedirs(log_dir, exist_ok=True)
-
-    max_tokens = _REGISTRY_MAX_TOKENS.get(domain, 4096)
-
-    def build_and_apply(prompt, log_name):
-        log_file = os.path.join(log_dir, log_name)
-        raw = invoke_to_file(prompt, model, log_file, max_tokens=max_tokens,
-                             label=f'hone registries/{domain}')
-        response = extract_text_from_file(log_file)
-        rows, updates = parse_registry_response(response, domain)
-        # Never replace a registry with output known to be incomplete: a
-        # truncated or empty response would wipe entries (phase 3b's
-        # knowledge registry, or a good first pass when the retry fails).
-        if isinstance(raw, dict) and raw.get('stop_reason') == 'max_tokens':
-            log(f'  WARNING: {domain} response hit the {max_tokens}-token limit; '
-                f'keeping the existing registry unchanged')
-            return _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain])), 0
-        if not rows:
-            log(f'  WARNING: {domain} response had no registry rows; '
-                f'keeping the existing registry unchanged')
-            return _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain])), 0
-        write_registry(ref_dir, domain, rows)
-        return rows, apply_updates(ref_dir, domain, updates)
-
-    registry_rows, updates_applied = build_and_apply(
-        build_registry_prompt(domain, ref_dir, context=context),
-        f'reconcile-{domain}.json')
+    if domain != 'physical-states':
+        resolve_alias_collisions(domain, ref_dir)
     fields_normalized = apply_registry_normalization(domain, ref_dir)
+
+    unresolved = list(_unresolved_references(domain, ref_dir).values())
+    if unresolved:
+        log(f'  {domain}: {len(unresolved)} unresolved reference(s) in '
+            f'{-(-len(unresolved) // _BATCH_SIZE)} batch(es)')
+    mapped = 0
+    calls = 0
+    skipped: list[str] = []
+    created: set[str] = set()
+    # Not retried: references in a batch cut off at the token limit, and
+    # ones that were answered but stay unresolved (a composite or SKIP for
+    # pov, which is left for the author)
+    not_retried: set[str] = set()
+
+    def run_batches(refs: list[dict], retry: bool) -> None:
+        nonlocal mapped, calls, fields_normalized
+        batches = [refs[i:i + _BATCH_SIZE] for i in range(0, len(refs), _BATCH_SIZE)]
+        for n, batch in enumerate(batches, 1):
+            # An earlier batch's new entries or aliases may already resolve some
+            lookup = _registry_lookup(domain, ref_dir)
+            batch = [r for r in batch if r['key'] not in lookup]
+            if not batch:
+                continue
+            round_name = 'retry ' if retry else ''
+            label = f'hone registries/{domain} ({round_name}batch {n} of {len(batches)})'
+            log_name = f'reconcile-{domain}-{"retry-" if retry else ""}{n}.json'
+            text = _invoke_batch(
+                build_mapping_prompt(domain, ref_dir, batch, context=context, retry=retry),
+                model, os.path.join(log_dir, log_name), label)
+            calls += 1
+            if text is None:
+                not_retried.update(r['key'] for r in batch)
+                continue
+            mapping, new_rows, skip = parse_mapping_response(domain, text, len(batch), lookup)
+            not_retried.update(batch[i - 1]['key'] for i in list(mapping) + list(skip))
+            fields_normalized += apply_mapping(domain, ref_dir, batch, mapping, new_rows, skip)
+            mapped += len(mapping)
+            created.update(r['id'] for r in new_rows)
+            skipped.extend(batch[i - 1]['text'] for i in sorted(skip))
+
+    run_batches(unresolved, retry=False)
+    # One more round for references whose answer named an unknown id
+    leftover = [r for r in _unresolved_references(domain, ref_dir).values()
+                if r['key'] not in not_retried]
+    if leftover:
+        log(f'  {domain}: asking again about {len(leftover)} reference(s)')
+        run_batches(leftover, retry=True)
+    rederive_columns(domain, ref_dir, created)
+
+    fields_normalized += apply_registry_normalization(domain, ref_dir)
     if domain == 'mice-threads':
         # Repeated opens of an already-open thread are mentions
         from storyforge.extract import cleanup_mice_threads
         fields_normalized += len(cleanup_mice_threads(ref_dir))
+        ops_changed, ops_calls = reconcile_mice_operations(ref_dir, model, log_dir)
+        fields_normalized += ops_changed
+        calls += ops_calls
 
-    # The prompt requires every reference to resolve to exactly one entry,
-    # but a model can drop ones it finds ambiguous (a bare "West Egg" beside
-    # "Gatsby's mansion, West Egg") or give two entries the same alias, and
-    # normalization handles both silently. Give the model one pass at the
-    # problems, then report what remains.
-    if domain in _ALIAS_DOMAINS:
-        unresolved = find_unresolved(domain, ref_dir)
-        collisions = find_alias_collisions(domain, ref_dir)
-        if unresolved or collisions:
-            log(f'  {domain}: {len(unresolved)} unresolved reference(s), '
-                f'{len(collisions)} shared alias(es); asking for a corrected registry')
-            sections = []
-            if unresolved:
-                sections.append(
-                    '## Unresolved References\n\nThese references match no entry '
-                    'in the existing registry. Add each one as an alias of the entry '
-                    'it denotes, or as a new entry when it denotes something '
-                    'distinct.\n\n' + '\n'.join(f'- {u}' for u in unresolved))
-            if collisions:
-                sections.append(
-                    '## Shared Aliases\n\nEach of these aliases is listed under more '
-                    'than one entry. Keep each alias under the single entry it '
-                    'denotes.\n\n' + '\n'.join(
-                        f'- {alias}: {", ".join(ids)}' for alias, ids in collisions.items()))
-            retry_prompt = (
-                build_registry_prompt(domain, ref_dir, context=context)
-                + '\n\n' + '\n\n'.join(sections)
-                + '\n\nOutput the complete updated registry.')
-            registry_rows, retry_updates = build_and_apply(
-                retry_prompt, f'reconcile-{domain}-retry.json')
-            updates_applied += retry_updates
-            fields_normalized += apply_registry_normalization(domain, ref_dir)
-            remaining = find_unresolved(domain, ref_dir)
-            if remaining:
-                log(f'  WARNING: {len(remaining)} {domain} reference(s) still '
-                    f'unresolved: {"; ".join(remaining)}')
-            shared = find_alias_collisions(domain, ref_dir)
-            if shared:
-                log(f'  WARNING: {len(shared)} {domain} alias(es) still shared: '
-                    + '; '.join(f'{a} ({", ".join(i)})' for a, i in shared.items()))
-
-    # Knowledge entries that are still not ids (sentences the model neither
-    # aliased nor rewrote, or ids its UPDATE lines used without registering)
-    # get one mapping pass, then whatever remains is reported.
-    if domain == 'knowledge':
-        fields_normalized += resolve_unresolved_knowledge(ref_dir, model, log_dir)
-
+    remaining = _report_remaining(domain, ref_dir, skipped)
+    registry = _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
     return {
-        'registry_entries': len(registry_rows),
-        'updates_applied': updates_applied,
+        'registry_entries': len(registry),
+        'references_mapped': mapped,
         'fields_normalized': fields_normalized,
+        'unresolved': remaining,
+        'calls': calls,
     }
-
-
-# ============================================================================
-# Knowledge: map unresolved entries to registry ids
-# ============================================================================
-
-def _knowledge_entry_scenes(ref_dir: str) -> dict[str, dict[str, list[str]]]:
-    """Map each knowledge entry (lowercased, parentheticals stripped) to the
-    scenes using it: ``{key: {'text': first spelling, 'in': [...], 'out': [...]}}``,
-    scenes in seq order."""
-    entries: dict[str, dict] = {}
-    for sid, _seq, k_in, k_out in _collect_knowledge_chain(ref_dir):
-        for side, value in (('in', k_in), ('out', k_out)):
-            for part in value.split(';'):
-                text = strip_parentheticals(part.strip())
-                if not text:
-                    continue
-                entry = entries.setdefault(text.lower(), {'text': text, 'in': [], 'out': []})
-                if sid not in entry[side]:
-                    entry[side].append(sid)
-    return entries
-
-
-def build_knowledge_mapping_prompt(ref_dir: str, unresolved: list[str]) -> str:
-    """Prompt asking which registry fact each unresolved entry denotes.
-
-    Entries are numbered so the answer names them by number: echoing a long
-    sentence back verbatim is exactly what failed when these were meant to be
-    matched as aliases.
-    """
-    from storyforge.schema import MAX_FACT_NAME_WORDS
-    registry = _read_csv(os.path.join(ref_dir, 'knowledge.csv'))
-    registry_text = '\n'.join(
-        f'- {r.get("id", "")} — {r.get("name", "")}' for r in registry if r.get('id')
-    ) or '(empty)'
-    scenes = _knowledge_entry_scenes(ref_dir)
-    lines = []
-    for i, entry in enumerate(unresolved, 1):
-        where = scenes.get(entry.lower(), {})
-        used = (where.get('in', []) + where.get('out', []))[:3]
-        lines.append(f'{i}. {entry}' + (f'  [used in: {", ".join(used)}]' if used else ''))
-    return f"""A novel's scene briefs list knowledge facts by id from a knowledge registry, but these entries match no registry id, name, or alias.
-
-## Knowledge Registry
-
-{registry_text}
-
-## Unresolved Entries
-
-{chr(10).join(lines)}
-
-## Instructions
-
-For each numbered entry, output exactly one line:
-
-N | id
-  when the entry states (or is a rewording of) a fact already in the registry.
-
-N | NEW | id | name | category
-  only when the entry is a fact the registry does not contain. id: kebab-case, 2-5 words, not already in the registry. name: the fact alone in at most {MAX_FACT_NAME_WORDS} words. category: identity, motive-intent, capability-constraint, state-change, stakes-threat, or relationship-shift.
-
-Map several entries to one id when they state the same fact. Output only these lines, one per entry, no other commentary."""
-
-
-def parse_knowledge_mapping_response(
-    response: str, unresolved: list[str], known_ids: set[str]
-) -> tuple[dict[str, str], list[dict[str, str]]]:
-    """Parse ``N | id`` / ``N | NEW | id | name | category`` lines.
-
-    Returns ``(mapping, new_rows)``: mapping is lowercased entry -> id; new_rows
-    are knowledge.csv rows (origin left for the caller). A line naming an id
-    that is neither registered nor declared NEW is ignored, as is a number
-    outside the list.
-    """
-    mapping: dict[str, str] = {}
-    new_rows: list[dict[str, str]] = []
-    declared = set(known_ids)
-    for line in response.split('\n'):
-        parts = [p.strip() for p in line.strip().lstrip('-* ').split('|')]
-        if len(parts) < 2:
-            continue
-        num = parts[0].rstrip('.').strip()
-        if not num.isdigit() or not 1 <= int(num) <= len(unresolved):
-            continue
-        entry = unresolved[int(num) - 1]
-        if parts[1].upper() == 'NEW':
-            if len(parts) < 4 or not parts[2] or not parts[3]:
-                continue
-            fid = parts[2]
-            if fid not in declared:
-                declared.add(fid)
-                new_rows.append({'id': fid, 'name': parts[3], 'aliases': '',
-                                 'category': parts[4] if len(parts) > 4 else '',
-                                 'origin': ''})
-            mapping[entry.lower()] = fid
-        elif parts[1] in declared:
-            mapping[entry.lower()] = parts[1]
-    return mapping, new_rows
-
-
-def resolve_unresolved_knowledge(ref_dir: str, model: str, log_dir: str) -> int:
-    """Map knowledge_in/out entries that are not registry ids onto ids.
-
-    One API call over the unresolved entries; new facts it declares are added
-    to knowledge.csv (origin: the first scene with the entry in knowledge_out,
-    else ``backstory``) and every mapped entry is rewritten to its id in
-    scene-briefs.csv. Entries still unresolved afterwards are logged as a
-    WARNING, not dropped. Returns the number of fields changed.
-    """
-    unresolved = find_unresolved('knowledge', ref_dir)
-    if not unresolved:
-        return 0
-
-    from storyforge.api import invoke_to_file, extract_text_from_file
-
-    log(f'  knowledge: {len(unresolved)} entr{"y" if len(unresolved) == 1 else "ies"} '
-        f'not in the registry; asking which fact each one is')
-    registry_path = os.path.join(ref_dir, 'knowledge.csv')
-    registry = _read_csv(registry_path)
-    known_ids = {r['id'] for r in registry if r.get('id')}
-
-    log_file = os.path.join(log_dir, 'reconcile-knowledge-map.json')
-    max_tokens = _REGISTRY_MAX_TOKENS['knowledge']
-    raw = invoke_to_file(build_knowledge_mapping_prompt(ref_dir, unresolved),
-                         model, log_file, max_tokens=max_tokens,
-                         label='hone registries/knowledge (mapping)')
-    if isinstance(raw, dict) and raw.get('stop_reason') == 'max_tokens':
-        log(f'  WARNING: knowledge mapping response hit the {max_tokens}-token '
-            f'limit; some entries were not mapped')
-    mapping, new_rows = parse_knowledge_mapping_response(
-        extract_text_from_file(log_file), unresolved, known_ids)
-
-    if new_rows:
-        scenes = _knowledge_entry_scenes(ref_dir)
-        for row in new_rows:
-            outs = [scenes[e]['out'][0] for e, fid in mapping.items()
-                    if fid == row['id'] and scenes.get(e, {}).get('out')]
-            row['origin'] = outs[0] if outs else 'backstory'
-        write_registry(ref_dir, 'knowledge', registry + new_rows)
-
-    changed = 0
-    if mapping:
-        briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
-        rows = _read_csv(briefs_path)
-        for row in rows:
-            for col in ('knowledge_in', 'knowledge_out'):
-                old_val = row.get(col, '')
-                if not old_val:
-                    continue
-                new_val = normalize_aliases(mapping, old_val)
-                if new_val != old_val:
-                    row[col] = new_val
-                    changed += 1
-        if changed:
-            _write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
-        changed += apply_registry_normalization('knowledge', ref_dir)
-
-    remaining = find_unresolved('knowledge', ref_dir)
-    if remaining:
-        shown = remaining[:10]
-        more = f' (and {len(remaining) - 10} more)' if len(remaining) > 10 else ''
-        log(f'  WARNING: {len(remaining)} knowledge entr'
-            f'{"y" if len(remaining) == 1 else "ies"} still not in knowledge.csv: '
-            + '; '.join(shown) + more)
-    return changed
 
 
 # ============================================================================

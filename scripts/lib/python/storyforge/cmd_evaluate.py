@@ -38,7 +38,7 @@ from storyforge.git import (
     update_pr_task, commit_and_push,
 )
 from storyforge.api import (
-    invoke_to_file, extract_text, extract_text_from_file,
+    invoke_to_file, extract_text, extract_text_from_file, is_truncated,
     extract_usage, calculate_cost_from_usage,
     submit_batch, poll_batch, download_batch_results,
     get_api_key, invoke_api, build_batch_request,
@@ -1134,6 +1134,9 @@ def main(argv=None):
             try:
                 response = invoke_to_file(prompt, model, eval_log, max_tokens=8192,
                                           system=system)
+                if is_truncated(response):
+                    log(f'WARNING: evaluator {name} hit the 8192-token limit; '
+                        f'its report is cut off')
                 text = extract_text(response)
                 if text:
                     os.makedirs(eval_dir, exist_ok=True)
@@ -1235,6 +1238,8 @@ def main(argv=None):
             log(f'Running synthesis via direct API (model: {synth_model})...')
             response = invoke_to_file(synth_prompt, synth_model, synth_log, max_tokens=8192,
                                       system=system)
+            if is_truncated(response):
+                log('WARNING: synthesis hit the 8192-token limit; it is cut off')
             synth_response = extract_text(response)
 
             if synth_response:
@@ -1304,6 +1309,8 @@ def main(argv=None):
                 log(f'Running assessment via direct API (model: {assess_model})...')
                 response = invoke_to_file(assess_prompt, assess_model, assess_log, max_tokens=8192,
                                           system=system)
+                if is_truncated(response):
+                    log('WARNING: assessment hit the 8192-token limit; it is cut off')
                 assess_response = extract_text(response)
                 if assess_response:
                     with open(os.path.join(eval_dir, 'assessment.md'), 'w') as f:

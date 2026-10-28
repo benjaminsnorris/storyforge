@@ -5,7 +5,7 @@ detect_verbose_fields, detect_conflict_free, detect_brief_issues,
 detect_vague_function, detect_overlong_function, detect_flat_emotional_arc,
 detect_abstract_emotional_arc, detect_onstage_subset_violation,
 detect_value_shift_outcome_mismatch, detect_intent_issues, detect_gaps,
-parse_registry_response, parse_concretize_response, load_external_findings,
+parse_mapping_response, parse_concretize_response, load_external_findings,
 build_concretize_prompt, build_trim_prompt, reconcile_outcomes.
 """
 
@@ -30,7 +30,7 @@ from storyforge.hone import (
     detect_value_shift_outcome_mismatch,
     detect_intent_issues,
     detect_gaps,
-    parse_registry_response,
+    parse_mapping_response,
     parse_concretize_response,
     load_external_findings,
     build_concretize_prompt,
@@ -619,46 +619,26 @@ class TestDetectGaps:
 
 
 # ============================================================================
-# parse_registry_response
+# parse_mapping_response
 # ============================================================================
 
-class TestParseRegistryResponse:
-    def test_parses_characters_registry(self):
-        response = """id|name|role|aliases
-dorren-hayle|Dorren Hayle|protagonist|Dorren;dorren;Hayle
-kael-maren|Kael Maren|supporting|Kael;kael"""
-        rows, updates = parse_registry_response(response, 'characters')
-        assert len(rows) == 2
-        assert rows[0]['id'] == 'dorren-hayle'
-        assert rows[0]['name'] == 'Dorren Hayle'
-        assert rows[1]['role'] == 'supporting'
-        assert len(updates) == 0
-
-    def test_parses_updates_section(self):
-        response = """id|name|type|aliases
-who-killed-rowan|Who killed Rowan?|inquiry|who-killed
-
-UPDATES
-UPDATE: act1-sc01 | +inquiry:who-killed-rowan
-UPDATE: act2-sc03 | -inquiry:who-killed-rowan"""
-        rows, updates = parse_registry_response(response, 'mice-threads')
-        assert len(rows) == 1
-        assert len(updates) == 2
-        assert updates[0] == ('act1-sc01', '+inquiry:who-killed-rowan')
-        assert updates[1] == ('act2-sc03', '-inquiry:who-killed-rowan')
-
-    def test_unknown_domain_raises(self):
-        with pytest.raises(ValueError, match='Unknown'):
-            parse_registry_response('', 'nonexistent')
+class TestParseMappingResponse:
+    def test_parses_knowledge_lines(self):
+        mapping, new_rows, skipped = parse_mapping_response(
+            'knowledge',
+            '1 | gatsby-shot\n'
+            '2 | NEW | wilson-shot-gatsby | Wilson shot Gatsby | state-change\n'
+            '3 | SKIP\n',
+            3, {'gatsby-shot'})
+        assert mapping == {1: ['gatsby-shot'], 2: ['wilson-shot-gatsby']}
+        assert new_rows == [{'id': 'wilson-shot-gatsby', 'name': 'Wilson shot Gatsby',
+                             'category': 'state-change'}]
+        assert skipped == {3}
 
     def test_skips_malformed_lines(self):
-        response = """id|name|role|aliases
-dorren-hayle|Dorren Hayle|protagonist|Dorren
-incomplete
-|also missing"""
-        rows, _ = parse_registry_response(response, 'characters')
-        assert len(rows) == 1
-        assert rows[0]['id'] == 'dorren-hayle'
+        mapping, new_rows, _ = parse_mapping_response(
+            'characters', 'incomplete\n|also missing\n1 |\n2 | NEW |\n', 2, set())
+        assert mapping == {} and new_rows == []
 
 
 # ============================================================================

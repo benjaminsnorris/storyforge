@@ -47,7 +47,7 @@ Based on the author's request and project state:
 → Gaps domain. Scan for empty required fields and report (or fill via elaborate).
 
 **"Reconcile" / "Normalize" / "Build registries" / "Clean up values":**
-→ Registries domain. Build canonical registries and normalize field values.
+→ Registries domain. Build canonical registries and normalize field values. Only references a registry can't already resolve go to the model, in small batches, so a reconciled project makes no API call and re-running is free. Anything still unresolved, skipped as noise, or cut off at a token limit is named in the log.
 
 **"Fix CSV issues" / "Apply evaluation fixes" / "Upstream fixes":**
 → Structural domain. Apply CSV fixes from evaluation findings.

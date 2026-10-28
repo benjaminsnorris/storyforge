@@ -235,10 +235,21 @@ _PLACEHOLDER_RE = re.compile(
 )
 
 
+# A model also explains its nothing: a bracketed note (`[none for
+# nick-carraway]`, `[none — Nick carries no tracked states]`) or a labelled
+# one (`ewing-klipspringer: (none prior)`). Both seen on The Great Gatsby.
+_NOTE_PLACEHOLDER_RE = re.compile(
+    r'^(?:[\w.\'-]+(?:\s[\w.\'-]+)*:\s*)?[\[(]\s*none(?![\w-])[^\])]*[\])]\.?$',
+    re.IGNORECASE,
+)
+
+
 def is_placeholder(entry: str) -> bool:
     """Whether a single list entry is a stand-in for "nothing" (``none``,
-    ``(none)``, ``n/a``, ``(empty)``, ``-``) rather than a value."""
-    return bool(_PLACEHOLDER_RE.match((entry or '').strip()))
+    ``(none)``, ``n/a``, ``(empty)``, ``-``, ``[none for x]``,
+    ``x: (none prior)``) rather than a value."""
+    entry = (entry or '').strip()
+    return bool(_PLACEHOLDER_RE.match(entry) or _NOTE_PLACEHOLDER_RE.match(entry))
 
 
 def strip_placeholders(semicolon_string: str) -> str:
@@ -367,6 +378,18 @@ def load_mice_registry(csv_file: str) -> tuple[dict[str, str], dict[str, str]]:
     return alias_map, type_map
 
 
+# The model sometimes joins MICE entries with commas despite the prompt
+# (`+a,+b`). A comma separates entries only when an operation or a type
+# follows it, so a comma inside a free-text name stays put.
+_MICE_SEPARATOR_RE = re.compile(
+    r';|,(?=\s*(?:[+-]|(?:milieu|inquiry|character|event)\s*:))', re.IGNORECASE)
+
+
+def split_mice_entries(mice_string: str) -> list[str]:
+    """Split a mice_threads value into its entries."""
+    return _MICE_SEPARATOR_RE.split(mice_string or '')
+
+
 def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
                            type_map: dict[str, str] | None = None) -> str:
     """Normalize a semicolon-separated mice_threads value.
@@ -390,7 +413,7 @@ def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
         return mice_string or ''
 
     result = []
-    for entry in mice_string.split(';'):
+    for entry in split_mice_entries(mice_string):
         entry = entry.strip()
         if not entry:
             continue

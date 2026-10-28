@@ -32,7 +32,7 @@ from storyforge.git import (
     update_pr_task, run_review_phase,
 )
 from storyforge.api import (
-    invoke_to_file, extract_text, extract_text_from_file, extract_usage,
+    invoke_to_file, extract_text, extract_text_from_file, extract_usage, is_truncated,
     calculate_cost_from_usage, submit_batch, poll_batch, download_batch_results,
     build_batch_request,
 )
@@ -378,6 +378,9 @@ def _run_phase_0(project_dir, scenes_dir, log_dir, profile_file, dry_run,
     log(f'  Invoking {model} for manuscript characterization...')
 
     response = invoke_to_file(prompt, model, char_log, 4096, system=system)
+    if is_truncated(response):
+        log('  WARNING: characterization hit the 4096-token limit; '
+            'the profile is cut off and may be missing fields')
     text = extract_text(response)
     _log_api_usage(char_log, 'extract-characterize', 'manuscript', model, project_dir)
 
