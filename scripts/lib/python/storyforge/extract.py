@@ -13,6 +13,8 @@ import re
 from typing import Any
 
 from .enrich import load_registry_alias_maps, normalize_fields  # noqa: F401
+from .enrich import is_placeholder, normalize_aliases, strip_placeholders
+from .common import log
 from .prompts import read_yaml_field
 
 
@@ -79,6 +81,35 @@ def _read_manuscript(project_dir: str) -> str:
 # Phase 0: Characterize
 # ============================================================================
 
+# Phase 0 sends the whole manuscript alongside the shared project context.
+# Budget roughly 120k tokens (~4 chars/token) for the manuscript so the
+# request fits a 200k-token window with room for context and output. Novels
+# up to roughly 85k words (~480k chars) are sent whole; a 100k-word novel
+# (~560k chars) loses about a seventh of its middle.
+CHARACTERIZE_MAX_CHARS = 480_000
+
+
+def _fit_manuscript(manuscript: str, limit: int = CHARACTERIZE_MAX_CHARS) -> str:
+    """Return the manuscript, or its opening and ending if it exceeds limit.
+
+    Characterization judges act structure, arcs and resolution, so an over-long
+    manuscript keeps both ends and drops the middle, with a marker saying how
+    much is missing. Cutting only the tail hid the climax and ending, and the
+    profile then reported the unseen resolution as a structural gap.
+    """
+    if len(manuscript) <= limit:
+        return manuscript
+    half = limit // 2
+    head = manuscript[:manuscript.rfind('\n', 0, half) + 1 or half]
+    tail_start = manuscript.find('\n', len(manuscript) - half) + 1 or len(manuscript) - half
+    tail = manuscript[tail_start:]
+    omitted = len(manuscript[len(head):tail_start].split())
+    log(f'WARNING: Manuscript exceeds {limit:,} chars; characterizing its opening '
+        f'and ending and omitting ~{omitted:,} words from the middle')
+    return (f'{head}\n[... {omitted:,} words from the middle of the manuscript are '
+            f'omitted here; the ending follows ...]\n\n{tail}')
+
+
 def build_characterize_prompt(project_dir: str) -> str:
     """Build prompt for Phase 0: manuscript characterization."""
     yaml_path = os.path.join(project_dir, 'storyforge.yaml')
@@ -89,9 +120,7 @@ def build_characterize_prompt(project_dir: str) -> str:
     if not manuscript:
         return ''
 
-    # Truncate if extremely long — Phase 0 needs the shape, not every word
-    if len(manuscript) > 200000:
-        manuscript = manuscript[:200000] + '\n\n[...truncated for characterization...]'
+    manuscript = _fit_manuscript(manuscript)
 
     return f"""You are analyzing a manuscript to characterize its structure before detailed extraction.
 
@@ -181,13 +210,38 @@ Output each field on its own labeled line. If a value cannot be determined, outp
 
 TITLE: [a short evocative title for this scene, 3-7 words]
 POV: [the POV character's full name]
-LOCATION: [the primary physical location — use a consistent canonical name]
-TIMELINE_DAY: [integer day number within the story chronology, starting from 1]
+LOCATION: [the places where this scene's action happens on the page, in order, semicolon-separated — usually just one. Use consistent canonical names. Only places the action is in, not places mentioned or remembered; a journey lists the places it passes through, never "X to Y" as one place]
+TIMELINE_DAY: [integer day on which this scene's action happens, in story chronology: day 1 is the first day of the main story; a flashback gets the earlier day it depicts (0 or negative before day 1, roughly: five years earlier is about -1825)]
 TIME_OF_DAY: [morning / afternoon / evening / night / dawn / dusk]
 DURATION: [approximate in-story duration, e.g., "2 hours", "30 minutes", "an afternoon"]
 TYPE: [the scene's primary narrative purpose — one of: character, plot, world, action, transition, confrontation, dialogue, introspection, revelation]
 TARGET_WORDS: [current word count is a reasonable target — output the approximate word count]
-PART: [which act/part number this scene belongs to, based on its position in the story]"""
+ACT: [which structural act this scene belongs to, as an integer (1, 2, 3, ...), based on its position in the story's dramatic shape — not a book part or section heading]"""
+
+
+def _reduce_enums(result: dict[str, str]) -> dict[str, str]:
+    """Reduce enum answers to their allowed value.
+
+    Models often explain an enum answer ("sequel — reaction: Nick ...",
+    "+/- (the hope that ...)"), which fails validation outright. When the
+    answer starts with an allowed value, keep just that value; otherwise
+    leave it for validation to report.
+    """
+    from .schema import COLUMN_SCHEMA
+    for field, value in result.items():
+        spec = COLUMN_SCHEMA.get(field)
+        if not value or not spec or spec.get('type') != 'enum':
+            continue
+        answer = value.strip().lower()
+        if field == 'outcome':
+            from .schema import canonical_outcome_phrase
+            answer = canonical_outcome_phrase(answer)
+        for allowed in sorted(spec['values'], key=len, reverse=True):
+            rest = answer[len(allowed):]
+            if answer.startswith(allowed) and (not rest or not (rest[0].isalnum() or rest[0] in '/+-')):
+                result[field] = allowed
+                break
+    return result
 
 
 def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
@@ -202,7 +256,9 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
         'DURATION': 'duration',
         'TYPE': 'type',
         'TARGET_WORDS': 'target_words',
-        'PART': 'part',
+        # No PART: book parts come from the manuscript's part headings
+        # (scenes-setup), never from the model.
+        'ACT': 'act',
     }
     for line in response.split('\n'):
         match = re.match(r'^([A-Z_]+):\s*(.*)', line.strip())
@@ -211,7 +267,7 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
             value = match.group(2).strip()
             if label in label_map and value and value.upper() != 'UNKNOWN':
                 result[label_map[label]] = value
-    return result
+    return _reduce_enums(result)
 
 
 # ============================================================================
@@ -226,7 +282,7 @@ def build_intent_prompt(scene_id: str, scene_text: str,
     context = f"""Title: {skeleton.get('title', scene_id)}
 POV: {skeleton.get('pov', 'unknown')}
 Location: {skeleton.get('location', 'unknown')}
-Part: {skeleton.get('part', 'unknown')}
+Act: {skeleton.get('act', 'unknown')}
 Major threads in this manuscript: {profile.get('major_threads', 'unknown')}
 Central conflict: {profile.get('central_conflict', 'unknown')}"""
 
@@ -248,12 +304,12 @@ Output each field on its own labeled line. Use semicolons to separate list items
 FUNCTION: [one sentence: why this scene exists — what it accomplishes in the story. Must be specific and testable, not vague like "develops character"]
 ACTION_SEQUEL: [action or sequel — action scenes have goal/conflict/outcome; sequel scenes have reaction/dilemma/decision]
 EMOTIONAL_ARC: [starting emotion giving way to ending emotion, e.g., "controlled competence to buried unease"]
-VALUE_AT_STAKE: [the abstract value being tested: safety, love, justice, truth, freedom, honor, etc.]
+VALUE_AT_STAKE: [the single abstract value being tested, in one or two words: safety, love, justice, truth, freedom, honor, etc. Name only the value, with no explanation; the specifics belong in FUNCTION]
 VALUE_SHIFT: [polarity change using +/- notation: +/- means positive to negative, -/+ means negative to positive, +/++ means good to better, -/-- means bad to worse]
 TURNING_POINT: [action or revelation — action means a character does something that changes the situation; revelation means new information changes the situation]
 CHARACTERS: [semicolon-separated list of ALL characters present or referenced by name]
 ON_STAGE: [semicolon-separated list of characters physically present in the scene — subset of CHARACTERS]
-MICE_THREADS: [semicolon-separated MICE thread operations — +thread-name to open, -thread-name to close. Use + for opening, - for closing. Use the thread's canonical name from the registry, not the type prefix.]
+MICE_THREADS: [semicolon-separated MICE threads this scene affects: +thread-name only if this scene is where the thread begins, -thread-name only if this scene resolves it, and the bare thread-name if the scene advances or touches a thread that is already open. Most scenes open or close nothing. Use the thread's canonical name from the registry, not the type prefix.]
 CONFIDENCE: [high / medium / low — your overall confidence in these extractions]"""
 
 
@@ -277,9 +333,21 @@ def parse_intent_response(response: str, scene_id: str) -> dict[str, str]:
         if match:
             label = match.group(1)
             value = match.group(2).strip()
+            if label == 'VALUE_AT_STAKE':
+                value = _bare_value(value)
             if label in label_map and value and value.upper() != 'UNKNOWN':
                 result[label_map[label]] = value
-    return result
+    return _reduce_enums(result)
+
+
+def _bare_value(value: str) -> str:
+    """Reduce a value-at-stake answer to the value itself.
+
+    Models often append an elaboration ("truth — specifically whether ..."),
+    which no registry alias can match. Keep the text before the first dash
+    or colon separator.
+    """
+    return re.split(r'\s+-+\s+|\s*[—–]\s*|:\s', value, maxsplit=1)[0].strip()
 
 
 # ============================================================================
@@ -303,6 +371,7 @@ Emotional arc: {intent.get('emotional_arc', 'unknown')}"""
 
     registries_section = f'\n{registries_text}\n' if registries_text else ''
 
+    from .schema import OUTCOME_GUIDE
     return f"""Extract the drafting contract details from this scene — the specific actions, choices, and dialogue that make it work.
 
 ## Context
@@ -318,7 +387,7 @@ Output each field on its own labeled line. Use semicolons to separate list items
 
 GOAL: [the POV character's concrete objective entering this scene — what are they trying to do?]
 CONFLICT: [what specifically opposes the goal?]
-OUTCOME: [how does the scene end for the POV character? Use: yes / no / yes-but / no-and]
+OUTCOME: [how does the scene end for the POV character? One of: {OUTCOME_GUIDE}]
 CRISIS: [the key dilemma — a best bad choice or irreconcilable goods that the character faces]
 DECISION: [what the character actively chooses in response to the crisis]
 KEY_ACTIONS: [semicolon-separated concrete things that happen in this scene]
@@ -350,7 +419,7 @@ def parse_brief_parallel_response(response: str, scene_id: str) -> dict[str, str
             value = match.group(2).strip()
             if label in label_map and value and value.upper() not in ('UNKNOWN', 'NONE'):
                 result[label_map[label]] = value
-    return result
+    return _reduce_enums(result)
 
 
 # ============================================================================
@@ -362,12 +431,37 @@ def build_knowledge_prompt(scene_id: str, scene_text: str,
                            intent: dict[str, str],
                            prior_knowledge: dict[str, str],
                            prior_scene_summaries: list[str],
-                           registries_text: str = '') -> str:
+                           registries_text: str = '',
+                           known_facts: dict[str, str] | None = None) -> str:
     """Build prompt for Phase 3b: extract knowledge_in, knowledge_out, and
-    continuity_deps. Must be called sequentially."""
+    continuity_deps. Must be called sequentially.
+
+    ``known_facts`` is the knowledge registry so far (id -> name). The fields
+    are registry-backed, so the model reports facts by id, reusing these ids
+    for facts already established and declaring each new fact once on a
+    NEW_FACTS line. ``prior_knowledge`` maps each POV character to the
+    semicolon-separated ids they know; with a registry, each is rendered
+    with its name.
+    """
+    from .schema import MAX_FACT_NAME_WORDS
+    known_facts = known_facts or {}
     pov = skeleton.get('pov', 'unknown')
     prior_context = '\n'.join(prior_scene_summaries[-10:]) if prior_scene_summaries else '(first scene)'
-    pov_knowledge = prior_knowledge.get(pov, 'No prior knowledge established')
+    pov_raw = prior_knowledge.get(pov, '')
+    if pov_raw:
+        pov_lines = []
+        for fact in (f.strip() for f in pov_raw.split(';')):
+            if fact:
+                name = known_facts.get(fact)
+                pov_lines.append(f'- {fact} — {name}' if name else f'- {fact}')
+        pov_knowledge = '\n'.join(pov_lines)
+    else:
+        pov_knowledge = 'No prior knowledge established'
+
+    if known_facts:
+        registry_text = '\n'.join(f'- {fid} — {name}' for fid, name in known_facts.items())
+    else:
+        registry_text = '(no facts established yet)'
 
     registries_section = f'\n{registries_text}\n' if registries_text else ''
 
@@ -377,6 +471,9 @@ def build_knowledge_prompt(scene_id: str, scene_text: str,
 
 ## What {pov} knows entering this scene (from prior scenes):
 {pov_knowledge}
+
+## Knowledge registry (every fact established so far, any character)
+{registry_text}
 
 ## Recent prior scenes (for context):
 {prior_context}
@@ -401,33 +498,114 @@ A fact is structurally useful if it fits one of these categories:
 **Too granular (don't do this):** "Maren notices the surveyor's hands are shaking"; "Kael orders ale at the tavern"
 **Right level:** "the mine assay was forged"; "Dara is alive and hiding in the northern pass"
 
-Output each field on its own labeled line.
+Every fact is referred to by its **ID**. If a fact is already in the knowledge registry above, use its existing ID — even if this scene words it differently. Only a fact not in the registry is new: give it a new kebab-case ID (2-5 words, e.g. assay-was-forged, dara-hiding-northern-pass) and declare it on a NEW_FACTS line. A fact's name states the fact alone, in at most {MAX_FACT_NAME_WORDS} words — no reasons, no consequences, no second clause.
 
-KNOWLEDGE_IN: [semicolon-separated structurally useful facts that {pov} knows at the START — carry forward only facts from prior knowledge that are relevant to this scene's decisions]
-KNOWLEDGE_OUT: [semicolon-separated structurally useful facts that {pov} knows at the END — knowledge_in plus 0-2 new facts learned during the scene]
+Output each field on its own labeled line. Leave a field empty when there is nothing to list — never write "none" or "(none)".
+
+KNOWLEDGE_IN: [semicolon-separated fact IDs {pov} knows at the START — carry forward only facts from prior knowledge that are relevant to this scene's decisions]
+KNOWLEDGE_OUT: [semicolon-separated fact IDs {pov} knows at the END — knowledge_in plus 0-2 new facts learned during the scene]
+NEW_FACTS: [one per line for each new ID used above: id | name | category — category is identity, motive-intent, capability-constraint, state-change, stakes-threat, or relationship-shift]
 CONTINUITY_DEPS: [semicolon-separated scene IDs that this scene directly depends on — which prior scenes established facts that this scene uses?]
 SCENE_SUMMARY: [one sentence summarizing what happens in this scene — this will be used as context for subsequent scenes]
 
-IMPORTANT: Use EXACT wording for knowledge facts. If a prior scene established "the eastern readings don't match", use that exact phrase, not a paraphrase. This enables automated validation."""
+IMPORTANT: KNOWLEDGE_IN and KNOWLEDGE_OUT contain IDs only, never sentences. Every ID must be either in the knowledge registry above or declared on a NEW_FACTS line. This enables automated validation."""
 
 
-def parse_knowledge_response(response: str, scene_id: str) -> dict[str, str]:
-    """Parse Phase 3b response."""
-    result = {'id': scene_id}
+def _parse_new_fact(line: str) -> dict[str, str] | None:
+    """Parse one ``id | name | category`` NEW_FACTS entry, or None."""
+    parts = [p.strip() for p in line.split('|')]
+    if len(parts) < 2 or not parts[0] or not parts[1] or is_placeholder(parts[0]):
+        return None
+    return {
+        'id': parts[0],
+        'name': parts[1],
+        'category': parts[2] if len(parts) > 2 else '',
+    }
+
+
+def parse_knowledge_response(response: str, scene_id: str) -> dict:
+    """Parse Phase 3b response.
+
+    Placeholder entries (``none``, ``(none)``, ``n/a``) are dropped from the
+    list fields, so a scene with nothing to report stores an empty field
+    rather than a fact named "none". New facts declared on NEW_FACTS lines
+    are returned under ``_new_facts`` as ``{id, name, category}`` dicts.
+    """
+    result: dict = {'id': scene_id, '_new_facts': []}
     label_map = {
         'KNOWLEDGE_IN': 'knowledge_in',
         'KNOWLEDGE_OUT': 'knowledge_out',
         'CONTINUITY_DEPS': 'continuity_deps',
         'SCENE_SUMMARY': '_summary',
     }
+    list_fields = {'knowledge_in', 'knowledge_out', 'continuity_deps'}
+    in_new_facts = False
     for line in response.split('\n'):
-        match = re.match(r'^([A-Z_]+):\s*(.*)', line.strip())
-        if match:
+        stripped = line.strip()
+        match = re.match(r'^([A-Z_]+):\s*(.*)', stripped)
+        if match and (match.group(1) in label_map or match.group(1) == 'NEW_FACTS'):
             label = match.group(1)
             value = match.group(2).strip()
-            if label in label_map and value:
-                result[label_map[label]] = value
+            in_new_facts = label == 'NEW_FACTS'
+            if in_new_facts:
+                fact = _parse_new_fact(value) if value else None
+                if fact:
+                    result['_new_facts'].append(fact)
+                continue
+            key = label_map[label]
+            if key in list_fields:
+                value = strip_placeholders(value)
+            if value:
+                result[key] = value
+        elif in_new_facts and stripped:
+            fact = _parse_new_fact(stripped.lstrip('-* ').strip())
+            if fact:
+                result['_new_facts'].append(fact)
     return result
+
+
+KNOWLEDGE_COLUMNS = ['id', 'name', 'aliases', 'category', 'origin']
+
+
+def merge_new_knowledge_facts(registry: dict[str, dict[str, str]],
+                              new_facts: list[dict[str, str]],
+                              scene_id: str) -> list[str]:
+    """Add facts declared on NEW_FACTS lines to the running knowledge registry.
+
+    ``registry`` maps id -> knowledge.csv row and is updated in place; a new
+    fact's origin is the scene that declared it. An id already registered
+    keeps its existing row (first declaration wins). Returns the ids added.
+    """
+    added = []
+    for fact in new_facts:
+        fid = fact.get('id', '').strip()
+        if not fid or fid in registry:
+            continue
+        registry[fid] = {
+            'id': fid,
+            'name': fact.get('name', '').strip(),
+            'aliases': '',
+            'category': fact.get('category', '').strip(),
+            'origin': scene_id,
+        }
+        added.append(fid)
+    return added
+
+
+def resolve_knowledge_ids(registry: dict[str, dict[str, str]], value: str) -> str:
+    """Map each entry of a knowledge list to its registry id.
+
+    Matches id, name or alias case-insensitively, so a model that echoes a
+    fact's name instead of its id still lands on the id. Placeholders are
+    dropped; entries that match nothing pass through unchanged for
+    reconciliation to resolve or report.
+    """
+    alias_map: dict[str, str] = {}
+    for fid, row in registry.items():
+        for key in [fid, row.get('name', '')] + (row.get('aliases') or '').split(';'):
+            if key.strip():
+                alias_map.setdefault(key.strip().lower(), fid)
+    return normalize_aliases(alias_map, strip_placeholders(value))
 
 
 # ============================================================================
@@ -479,7 +657,7 @@ Litmus test: Would a drafter who knows about this state write a *different scene
 Too granular (don't): "Character frowns", "Hair is windblown", "Feels cold"
 Right level: "Left arm broken, splinted", "Carrying the stolen compass", "Exhausted after 36 hours awake"
 
-Output each field on its own labeled line:
+Output each field on its own labeled line. Leave a field empty when there is nothing to list — never write "none" or "(none)".
 
 PHYSICAL_STATE_IN: [semicolon-separated state IDs active at START — carry forward from prior states for on-stage characters only]
 PHYSICAL_STATE_OUT: [semicolon-separated state IDs active at END — state_in plus new states acquired, minus states resolved]
@@ -510,13 +688,15 @@ def parse_physical_state_response(response: str, scene_id: str) -> dict:
         if match:
             label = match.group(1)
             value = match.group(2).strip()
-            if label in label_map and value:
-                result[label_map[label]] = value
+            if label in label_map:
+                value = strip_placeholders(value)
+                if value:
+                    result[label_map[label]] = value
             elif label == 'NEW_STATES':
                 # First new state may be on this line
                 if value:
                     parts = value.split('|')
-                    if len(parts) >= 4:
+                    if len(parts) >= 4 and not is_placeholder(parts[0]):
                         result['_new_states'].append({
                             'id': parts[0].strip(),
                             'character': parts[1].strip(),
@@ -531,7 +711,7 @@ def parse_physical_state_response(response: str, scene_id: str) -> dict:
                     if not nline or re.match(r'^[A-Z_]+:', nline):
                         break
                     nparts = nline.split('|')
-                    if len(nparts) >= 4:
+                    if len(nparts) >= 4 and not is_placeholder(nparts[0]):
                         result['_new_states'].append({
                             'id': nparts[0].strip(),
                             'character': nparts[1].strip(),
@@ -542,7 +722,8 @@ def parse_physical_state_response(response: str, scene_id: str) -> dict:
                     i += 1
                 continue
             elif label == 'RESOLVED_STATES' and value:
-                result['_resolved'] = [s.strip() for s in value.split(';') if s.strip()]
+                result['_resolved'] = [s.strip() for s in strip_placeholders(value).split(';')
+                                       if s.strip()]
         i += 1
 
     return result
@@ -763,7 +944,7 @@ def cleanup_knowledge(ref_dir: str) -> list[dict]:
 
             if changed:
                 old_val = knowledge_in
-                new_val = '; '.join(new_facts)
+                new_val = ';'.join(new_facts)
                 briefs_map[sid]['knowledge_in'] = new_val
                 fixes.append({
                     'scene_id': sid,
@@ -897,11 +1078,14 @@ def cleanup_physical_states(ref_dir: str) -> list[dict]:
 
 
 def cleanup_mice_threads(ref_dir: str) -> list[dict]:
-    """Fix unambiguous MICE thread nesting violations.
+    """Turn repeated opens of an already-open MICE thread into mentions.
 
-    - Remove duplicate opens (thread opened twice without close)
-    - Remove closes for threads that were never opened
-    - Reorder closes when the fix is unambiguous (only one thread to close)
+    Per-scene extraction cannot see whether a thread is already open, so it
+    marks scenes that merely touch a thread with "+". Only that case is
+    unambiguous: the thread is open, so a later "+thread" is a mention
+    ("thread"), which keeps the dormancy signal. Which of several closes is
+    the real resolution is a judgment the reconcile pass makes with scene
+    functions; leftovers are reported by validation, not guessed here.
 
     Returns a list of fixes applied.
     """
@@ -913,7 +1097,7 @@ def cleanup_mice_threads(ref_dir: str) -> list[dict]:
                         key=lambda s: int(scenes_map[s].get('seq', 0)))
 
     fixes = []
-    open_threads = set()  # currently open thread names
+    open_threads = set()
 
     for sid in sorted_ids:
         intent = intent_map.get(sid, {})
@@ -921,44 +1105,27 @@ def cleanup_mice_threads(ref_dir: str) -> list[dict]:
         if not mice:
             continue
 
-        entries = [e.strip() for e in mice.split(';') if e.strip()]
         new_entries = []
-        changed = False
-
-        for entry in entries:
+        for entry in (e.strip() for e in mice.split(';') if e.strip()):
+            thread_name = entry.lstrip('+-')
+            if entry.startswith('+') and thread_name in open_threads:
+                new_entries.append(thread_name)
+                fixes.append({
+                    'scene_id': sid,
+                    'field': 'mice_threads',
+                    'old_value': entry,
+                    'new_value': f'{thread_name} (already open: mention)',
+                })
+                continue
             if entry.startswith('+'):
-                thread_name = entry[1:]
-                if thread_name in open_threads:
-                    # Duplicate open — skip it
-                    changed = True
-                    fixes.append({
-                        'scene_id': sid,
-                        'field': 'mice_threads',
-                        'old_value': entry,
-                        'new_value': '(removed duplicate open)',
-                    })
-                else:
-                    open_threads.add(thread_name)
-                    new_entries.append(entry)
+                open_threads.add(thread_name)
             elif entry.startswith('-'):
-                thread_name = entry[1:]
-                if thread_name not in open_threads:
-                    # Close for unopened thread — skip it
-                    changed = True
-                    fixes.append({
-                        'scene_id': sid,
-                        'field': 'mice_threads',
-                        'old_value': entry,
-                        'new_value': '(removed close for unopened thread)',
-                    })
-                else:
-                    open_threads.discard(thread_name)
-                    new_entries.append(entry)
-            else:
-                new_entries.append(entry)
+                open_threads.discard(thread_name)
+            new_entries.append(entry)
 
-        if changed:
-            intent_map[sid]['mice_threads'] = ';'.join(new_entries)
+        new_value = ';'.join(dict.fromkeys(new_entries))
+        if new_value != mice:
+            intent_map[sid]['mice_threads'] = new_value
 
     if fixes:
         ordered = sorted(intent_map.values(), key=lambda r: r.get('id', ''))
@@ -1057,7 +1224,7 @@ Do not invent facts. Do not add knowledge that isn't in the chain. Only normaliz
 
 
 def build_mice_cleanup_prompt(ref_dir: str) -> str:
-    """Build a prompt for Claude to reconcile MICE thread nesting."""
+    """Build a prompt for Claude to reconcile MICE thread opens and closes."""
     from .elaborate import _read_csv_as_map, validate_structure
 
     scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
@@ -1083,48 +1250,45 @@ def build_mice_cleanup_prompt(ref_dir: str) -> str:
     for f in thread_failures:
         failure_lines.append(f"- {f['message']}")
 
-    return f"""You are fixing MICE thread nesting in a novel's scene intent data.
+    return f"""You are reconciling MICE thread operations in a novel's scene intent data.
 
-## MICE Thread Rules
+## MICE Thread Notation
 
-MICE threads use per-type FILO (first in, last out) nesting:
-- +name opens a thread
-- -type:name closes a thread
+- +name: this scene is where the thread begins
+- -name: this scene resolves the thread
+- name (bare): this scene advances or touches a thread that is already open
 - Types: milieu (place), inquiry (question), character (transformation), event (disruption)
-- Threads of the SAME type must close in reverse order of opening (FILO within type)
-- Threads of DIFFERENT types run in parallel — closing an inquiry does NOT require closing a milieu opened after it
 
-Example of valid parallel threading:
-  +arc (scene 1) → +mystery (scene 3) → -mystery (scene 8) → -arc (scene 20)
-  This is valid: character and inquiry are different types, so they nest independently.
+Threads may interleave freely. Nesting order is not a rule: never reorder or
+remove a close to make threads nest.
 
 ## Current Thread Timeline
 
 {chr(10).join(thread_lines) if thread_lines else "(no MICE threads found)"}
 
-## Validation Failures
+## Validation Notes
 
-{chr(10).join(failure_lines) if failure_lines else "No failures — nesting is valid."}
+{chr(10).join(failure_lines) if failure_lines else "None."}
 
 ## Instructions
 
-Fix the MICE thread nesting. For each scene that needs changes, output:
+Each thread is opened exactly once, in the scene where it begins, and closed
+at most once, in the scene where it is actually resolved. Use the scene
+functions to judge which scene that is. Every other appearance of the thread
+is a bare mention. For each scene that needs changes, output:
 
 UPDATE: scene_id | new_mice_threads_value
 
-The new value should be a semicolon-separated list of thread operations (e.g., "+question;-place").
+The new value is a semicolon-separated list (e.g., "+who-sent-the-letter;the-feud").
 
 Rules:
-- Every opened thread must eventually close
-- Same-type closes must happen in reverse order of same-type opens (FILO within each type)
-- Cross-type threads are independent — no nesting constraint between different MICE types
-- If a thread is legitimately unclosed at the end of the manuscript (e.g., the story is incomplete), output: UNCLOSED: thread_name | reason
-- Remove duplicate opens
-- Remove closes for threads that were never opened
-- If reordering same-type closes fixes the nesting, do that rather than removing them
-- Preserve the narrative intent — don't remove threads that are genuinely part of the story
+- A repeated "+name" for a thread already open becomes "name"
+- Of several "-name" closes, keep the one where the thread truly resolves; the others become "name"
+- A close for a thread never opened: if it matches an opened thread under another name, use that name; otherwise make it a bare mention
+- If a thread is legitimately unclosed at the end of the manuscript, output: UNCLOSED: thread_name | reason
+- Preserve the narrative intent: never drop a thread that is genuinely part of the story
 
-Output ONLY UPDATE, UNCLOSED, or REMOVE lines. No commentary."""
+Output ONLY UPDATE or UNCLOSED lines. No commentary."""
 
 
 def parse_knowledge_cleanup_response(response: str, ref_dir: str) -> list[dict]:

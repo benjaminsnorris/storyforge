@@ -184,7 +184,7 @@ Map the author's request to the right flags:
 
 | Author says | Flag |
 |-------------|------|
-| "act 2" / "part 2" | `--act 2` |
+| "act 2" | `--act 2` (filters on the `act` column; book parts are not a hone scope) |
 | "these scenes" / specific IDs | `--scenes ID,ID` |
 | "coaching mode" / "coach" | `--coaching coach` |
 | "just show me" / "dry run" | `--dry-run` |

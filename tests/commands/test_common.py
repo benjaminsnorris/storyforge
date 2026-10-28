@@ -357,8 +357,8 @@ class TestCheckChapterMapFreshness:
             content = f.read()
         # Change act2-sc02 to status=cut
         content = content.replace(
-            'act2-sc02|5|First Collapse|2|Tessa Merrin|Eastern Ridge|3|afternoon|1 hour|action|spine',
-            'act2-sc02|5|First Collapse|2|Tessa Merrin|Eastern Ridge|3|afternoon|1 hour|action|cut',
+            'act2-sc02|5|First Collapse|2|2|Tessa Merrin|Eastern Ridge|3|afternoon|1 hour|action|spine',
+            'act2-sc02|5|First Collapse|2|2|Tessa Merrin|Eastern Ridge|3|afternoon|1 hour|action|cut',
         )
         with open(scenes_csv, 'w') as f:
             f.write(content)

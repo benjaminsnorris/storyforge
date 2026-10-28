@@ -330,11 +330,12 @@ def score_pacing(scenes_map, intent_map, briefs_map):
         tensions.append(raw + position_boost)
 
     # --- 1. Act proportions ---
-    # Gather word counts per part
+    # Gather word counts per act. `act` is the structural act; `part` is the
+    # book's physical division and says nothing about act shape.
     part_words = {}
     total_words = 0
     for sid, scene in ordered:
-        part = _s(scene.get('part')).strip() or '1'
+        part = _s(scene.get('act')).strip() or '1'
         wc = 0
         for field in ('target_words', 'word_count'):
             try:
@@ -892,6 +893,87 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
 # ---------------------------------------------------------------------------
 # MICE Health
 # ---------------------------------------------------------------------------
+
+def _facts(value):
+    return {f.strip() for f in _s(value).split(';') if f.strip()}
+
+
+def assess_flashbacks(scenes_map, briefs_map):
+    """Describe each flashback passage so its work can be judged.
+
+    Reading order is seq; story time is timeline_day. The story's present is
+    the latest day reached so far, and a run of consecutive scenes set before
+    it is one flashback passage (a crosscut when its POV differs from the
+    present's). For each passage: how far back it reaches, its share of the
+    words, the facts it establishes (knowledge_out not in knowledge_in), and
+    how many of those facts later present-time scenes take in. A flashback
+    whose facts never reach the present is the one worth questioning. This
+    is descriptive; what counts as healthy is being calibrated on classics.
+
+    Returns a list of dicts with keys scenes, kind, earliest_day,
+    present_day, depth_days, words, share, new_facts, facts_used_later.
+    """
+    def _seq(item):
+        try:
+            return int(item[1].get('seq', 0))
+        except (ValueError, TypeError):
+            return 0
+
+    def _int(value):
+        try:
+            return int(_s(value).strip())
+        except ValueError:
+            return None
+
+    # Cut and merged scenes are not part of the book's reading order
+    ordered = sorted(((sid, sc) for sid, sc in scenes_map.items()
+                      if _s(sc.get('status')).strip() not in ('cut', 'merged')), key=_seq)
+    total_words = sum(_int(sc.get('word_count')) or 0 for _, sc in ordered)
+
+    passages, current = [], None
+    present_day, present_pov = None, ''
+    in_present = []   # scene ids at or after the present, in reading order
+    for sid, scene in ordered:
+        day = _int(scene.get('timeline_day'))
+        pov = _s(scene.get('pov')).strip()
+        if day is not None and present_day is not None and day < present_day:
+            if current is None:
+                current = {'scenes': [], 'days': [], 'present_day': present_day,
+                           'kind': 'crosscut' if pov and present_pov and pov != present_pov
+                           else 'flashback', 'start_index': len(in_present)}
+                passages.append(current)
+            current['scenes'].append(sid)
+            current['days'].append(day)
+            continue
+        current = None
+        if day is not None:
+            present_day, present_pov = day, pov
+        in_present.append(sid)
+
+    results = []
+    for p in passages:
+        new_facts = set()
+        for sid in p['scenes']:
+            brief = briefs_map.get(sid) or {}
+            new_facts |= _facts(brief.get('knowledge_out')) - _facts(brief.get('knowledge_in'))
+        later = set()
+        for sid in in_present[p['start_index']:]:
+            later |= _facts((briefs_map.get(sid) or {}).get('knowledge_in'))
+        words = sum(_int(scenes_map[sid].get('word_count')) or 0 for sid in p['scenes'])
+        earliest = min(p['days'])
+        results.append({
+            'scenes': p['scenes'],
+            'kind': p['kind'],
+            'earliest_day': earliest,
+            'present_day': p['present_day'],
+            'depth_days': p['present_day'] - earliest,
+            'words': words,
+            'share': round(words / total_words, 3) if total_words else 0.0,
+            'new_facts': len(new_facts),
+            'facts_used_later': len(new_facts & later),
+        })
+    return results
+
 
 def score_mice_health(scenes_map, intent_map, ref_dir=''):
     """Score MICE thread effectiveness — close ratio, dormancy, type balance, resolution positioning.
@@ -1897,7 +1979,7 @@ _PRESCRIPTIONS_FULL = {
         'knowledge_out so they feel discovered rather than assumed.'
     ),
     'function_variety': (
-        'For dominant outcomes: change 3-5 yes-but outcomes to yes, no, or no-and '
+        'For dominant outcomes: change 3-5 yes-but outcomes to yes, no, no-and or no-but '
         'to increase unpredictability. For action/sequel imbalance: insert sequel '
         'scenes (reaction/dilemma/decision) between action sequences, or add an '
         'action scene in a run of sequels. For turning point monotony: convert '

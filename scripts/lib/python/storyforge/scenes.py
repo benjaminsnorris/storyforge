@@ -61,6 +61,62 @@ def generate_slug(title: str) -> str:
     return slug
 
 
+# The scene-id rule, shared by the schema, validation and every prompt that
+# mints ids. An id is permanent; order lives in seq.
+SCENE_ID_RULE = (
+    "A scene id is a 3-5 word lowercase hyphenated slug naming the scene's core "
+    "event (e.g., gatsby-reunites-with-daisy). It is permanent: never encode the "
+    "scene's position (no act1-sc03, scene-12, ch3-2), and never rename an id when "
+    "a scene moves or its title changes. Order lives in seq."
+)
+
+_POSITION_WORDS = frozenset('act part ch chapter sc scene s book'.split())
+_NUMERAL = re.compile(r'^(\d+|[ivxlc]+)$')
+_POSITIONAL_TOKEN = re.compile(r'^(act|part|ch|chapter|sc|scene|s|book)\d+$')
+
+
+def scene_id_problems(scene_id: str) -> list[str]:
+    """Ways a scene id breaks SCENE_ID_RULE; empty if it follows it."""
+    tokens = [t for t in scene_id.lower().split('-') if t]
+    problems = []
+    positional = any(_POSITIONAL_TOKEN.match(t) for t in tokens) or any(
+        a in _POSITION_WORDS and _NUMERAL.match(b) for a, b in zip(tokens, tokens[1:]))
+    if positional or (tokens and all(_NUMERAL.match(t) or t in _POSITION_WORDS for t in tokens)):
+        problems.append('positional')
+    if not 3 <= len(tokens) <= 5:
+        problems.append(f'{len(tokens)} words (want 3-5)')
+    return problems
+
+
+# A scene-break line: three or more of one break character, optionally
+# spaced ("***", "* * *", "# # #", "~~~", and the long dash rules of
+# Project Gutenberg texts). Markdown headings are excluded by requiring the
+# whole line to be break characters.
+_BREAK_MARKER = re.compile(r'^\s*([*\-_#~•·—])(\s*\1){2,}\s*$')
+
+
+def is_break_marker(line: str) -> bool:
+    """True if the line is a scene-break marker."""
+    return bool(_BREAK_MARKER.match(line))
+
+
+_TRAILING_STOPWORDS = frozenset(
+    'a an and as at by for from in into of on or the to while with'.split())
+
+
+def scene_id_slug(text: str, max_words: int = 5) -> str:
+    """Slug for a scene id: at most max_words words naming the scene's event.
+
+    Scene ids are permanent and describe what happens, never where the scene
+    sits: order lives in seq, so a scene can move without its id lying.
+    """
+    words = [w for w in generate_slug(text).split('-') if w][:max_words]
+    # Truncation can strand a function word ("gatsby-is-shot-in-the")
+    while len(words) > 1 and words[-1] in _TRAILING_STOPWORDS:
+        words.pop()
+    return '-'.join(words)
+
+
 def unique_slug(base_slug: str, used: set[str]) -> str:
     """Return a unique slug, appending ``-2``, ``-3``, etc. if needed.
 
@@ -136,7 +192,7 @@ def parse_scene_boundaries(response: str) -> list[dict]:
 # CSV generation
 # ============================================================================
 
-_SCENES_HEADER = 'id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words'
+_SCENES_HEADER = 'id|seq|title|part|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words'
 _INTENT_HEADER = 'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads'
 
 
@@ -146,7 +202,7 @@ def generate_scenes_rows(scenes: list[dict],
     """Generate pipe-delimited CSV rows for ``scenes.csv``.
 
     Each row uses the header order:
-    ``id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words``
+    ``id|seq|title|part|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words``
 
     The scene dicts must have at least ``title`` (str).  They may
     optionally include ``word_count`` (int) and ``slug`` (str).  If
@@ -156,7 +212,8 @@ def generate_scenes_rows(scenes: list[dict],
     Args:
         scenes: Scene dicts as returned by :func:`parse_scene_boundaries`
             (or any list of dicts with a ``title`` key).
-        part_num: Optional part/act number to fill the ``part`` column.
+        part_num: Optional book part number to fill the ``part`` column.
+            ``act`` is left empty — acts are assigned by extract/elaborate.
         seq_start: Starting sequence number (default 1).
 
     Returns:
@@ -176,8 +233,9 @@ def generate_scenes_rows(scenes: list[dict],
         part = str(part_num) if part_num is not None else ''
         word_count = str(scene.get('word_count', ''))
 
-        row = f'{slug}|{seq}|{title}|{part}|||||||||{word_count}|'
-        rows.append(row)
+        values = {'id': slug, 'seq': str(seq), 'title': title, 'part': part,
+                  'word_count': word_count}
+        rows.append('|'.join(values.get(col, '') for col in _SCENES_HEADER.split('|')))
 
     return rows
 
@@ -205,8 +263,7 @@ def generate_intent_rows(scenes: list[dict]) -> list[str]:
             slug = f'scene-unknown'
         slug = unique_slug(slug, used_slugs)
 
-        row = f'{slug}||||||||||'
-        rows.append(row)
+        rows.append('|'.join([slug] + [''] * (len(_INTENT_HEADER.split('|')) - 1)))
 
     return rows
 
@@ -265,7 +322,7 @@ def split_by_scene_markers(text: str,
         cleaned = []
         for ln in segment_lines:
             stripped = ln.strip()
-            if stripped in ('***', '---', '# # #', '* * *'):
+            if is_break_marker(stripped):
                 continue
             cleaned.append(ln)
 
@@ -391,15 +448,30 @@ def _title_from_file(filepath: str) -> str:
 # Scene boundary detection prompt
 # ============================================================================
 
-def build_boundary_prompt(chapter_text: str) -> str:
-    """Build a prompt for Claude to detect scene boundaries in a chapter.
+def build_boundary_prompt(chapter_text: str,
+                          fixed_lines: list[int] | None = None) -> str:
+    """Build a prompt for Claude to find scene boundaries and name each scene.
 
     Args:
         chapter_text: The full text of a chapter.
+        fixed_lines: Boundaries already fixed by explicit break markers. The
+            model then only names the scenes at those lines.
 
     Returns:
         The assembled prompt string.
     """
+    # Number the lines: the model cannot reliably count them itself, and a
+    # miscounted boundary shifts every scene's text away from its title.
+    numbered = '\n'.join(
+        f'{n}: {line}' for n, line in enumerate(chapter_text.splitlines(), 1)
+    )
+    if fixed_lines:
+        task = ('The scene boundaries in this chapter are already fixed by break markers, '
+                f'at lines {", ".join(str(n) for n in fixed_lines)}. Output exactly one '
+                'SCENE line for each of these lines, in order. Do not add or remove boundaries.')
+    else:
+        task = ('Identify where each scene begins. For each scene boundary (including the '
+                'very start of the chapter), output one line.')
     return f"""You are identifying scene boundaries in a chapter of a novel.
 
 A scene is a continuous unit of action in one time and place. A new scene begins when there is a significant shift in:
@@ -412,16 +484,21 @@ Minor transitions within the same time/place/focus are NOT scene breaks.
 
 ## Chapter Text
 
-{chapter_text}
+Each line is prefixed with its line number and a colon.
+
+{numbered}
 
 ## Instructions
 
-Identify where each scene begins. For each scene boundary (including the very start of the chapter), output one line:
+{task}
 
-SCENE: <line_number> | <suggested_title> | <brief_reason>
+SCENE: <line_number> | <scene_id> | <brief_reason>
 
-Where line_number is the line in the chapter text where this scene begins (1-indexed).
-The first scene always starts at line 1.
+Where line_number is the number prefixed to the line where this scene begins
+(the first scene always starts at line 1), and scene_id is the scene's
+permanent id: 3-5 lowercase words joined by hyphens naming the scene's core
+event (e.g., gatsby-reunites-with-daisy). Describe what happens, never where
+the scene falls: no chapter or scene numbers.
 
 Output ONLY SCENE: lines, nothing else."""
 

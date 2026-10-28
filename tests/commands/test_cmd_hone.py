@@ -159,6 +159,8 @@ class TestConstants:
         assert 'locations' in PHASE1_REGISTRY
 
     def test_phase2_registry(self):
+        # Cast lists (characters, on_stage) first exist after phase 2.
+        assert 'characters' in PHASE2_REGISTRY
         assert 'values' in PHASE2_REGISTRY
         assert 'mice-threads' in PHASE2_REGISTRY
 

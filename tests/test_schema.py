@@ -1,6 +1,8 @@
 """Tests for CSV schema validation (migrated from test-schema.sh)."""
 
 import json
+
+import pytest
 import os
 import shutil
 import tempfile
@@ -236,3 +238,165 @@ class TestKnowledgeGranularity:
         assert len(long_names) == 1
         assert long_names[0]['id'] == 'wordy-fact'
         assert long_names[0]['word_count'] > 15
+
+
+class TestRegistryFileValidation:
+    """physical-states.csv columns are declared in COLUMN_SCHEMA but were never
+    validated, so display names in its character column went unreported."""
+
+    def _write(self, ref_dir, character, category='injury'):
+        with open(os.path.join(ref_dir, 'physical-states.csv'), 'w') as f:
+            f.write('id|character|description|category|acquired|resolves|action_gating\n'
+                    f'bruise|{character}|a bruise|{category}|act1-sc01|never|false\n')
+
+    def test_unknown_character_reported(self, project_dir):
+        from storyforge.schema import validate_schema
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._write(ref_dir, 'Somebody Unknown')
+        errors = validate_schema(ref_dir, project_dir)['errors']
+        assert any(e['file'] == 'physical-states.csv' and e['column'] == 'character'
+                   for e in errors)
+
+    def test_bad_category_reported(self, project_dir):
+        from storyforge.schema import validate_schema
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._write(ref_dir, '', category='bruising')
+        errors = validate_schema(ref_dir, project_dir)['errors']
+        assert any(e['file'] == 'physical-states.csv' and e['column'] == 'category'
+                   for e in errors)
+
+
+class TestSceneIdRule:
+    """Scene ids are 3-5 word event slugs, never positional."""
+
+    @pytest.mark.parametrize('sid', [
+        'act1-sc03', 'scene-12', 'ch3-2', 'chapter-ix', 'scene-ch3-2', 'part-2-scene-4'])
+    def test_positional_ids_flagged(self, sid):
+        from storyforge.scenes import scene_id_problems
+        assert 'positional' in scene_id_problems(sid)
+
+    @pytest.mark.parametrize('sid', [
+        'gatsby-reunites-with-daisy', 'valley-of-ashes', 'myrtle-buys-a-dog',
+        'nick-says-goodbye-gatsby-house'])
+    def test_event_slugs_pass(self, sid):
+        from storyforge.scenes import scene_id_problems
+        assert scene_id_problems(sid) == []
+
+    def test_word_count_outside_range_flagged(self):
+        from storyforge.scenes import scene_id_problems
+        assert scene_id_problems('funeral') == ['1 words (want 3-5)']
+        assert scene_id_problems('my-family-have-been-prominent-well-to-do') == ['8 words (want 3-5)']
+
+    def test_validate_scene_ids_reports(self, project_dir):
+        from storyforge.schema import validate_scene_ids
+        report = validate_scene_ids(os.path.join(project_dir, 'reference'))
+        flagged = {w['id'] for w in report['warnings']}
+        assert 'act1-sc01' in flagged   # the fixture's own ids are positional
+
+    @pytest.mark.parametrize('builder', [
+        'build_spine_prompt', 'build_architecture_prompt', 'build_map_prompt'])
+    def test_elaborate_prompts_carry_rule(self, builder, project_dir, plugin_dir):
+        from storyforge import prompts_elaborate
+        from storyforge.scenes import SCENE_ID_RULE
+        prompt = getattr(prompts_elaborate, builder)(project_dir, plugin_dir)
+        assert SCENE_ID_RULE in prompt
+
+
+class TestMultipleLocations:
+    """A scene can move (The Great Gatsby's drive from East Egg past the
+    valley of ashes to the Plaza), so location is an ordered list of places;
+    routes are never places."""
+
+    def test_location_is_array(self):
+        from storyforge.schema import COLUMN_SCHEMA
+        assert COLUMN_SCHEMA['location']['array'] is True
+
+    def test_multiple_known_locations_validate(self, project_dir):
+        import csv as _csv
+        from storyforge.schema import validate_schema
+        ref_dir = os.path.join(project_dir, 'reference')
+        path = os.path.join(ref_dir, 'scenes.csv')
+        with open(path) as f:
+            rows = list(_csv.DictReader(f, delimiter='|'))
+            header = list(rows[0].keys())
+        rows[0]['location'] = 'cartography-office;deep-archive'
+        with open(path, 'w') as f:
+            w = _csv.DictWriter(f, fieldnames=header, delimiter='|', lineterminator='\n')
+            w.writeheader()
+            w.writerows(rows)
+        errors = [e for e in validate_schema(ref_dir, project_dir)['errors']
+                  if e['column'] == 'location' and e['row'] == rows[0]['id']]
+        assert errors == []
+
+    def test_extraction_asks_for_places_in_order(self):
+        from storyforge.extract import build_skeleton_prompt
+        prompt = build_skeleton_prompt('s1', 'Scene prose.', {})
+        assert 'in order, semicolon-separated' in prompt
+        assert 'never "X to Y" as one place' in prompt
+
+
+class TestOutcomes:
+    """Five outcomes: Bickham's scene disasters (yes, no, yes-but, no-and)
+    plus no-but from Kowal's try/fail cycles. Hone produced no-but while the
+    schema rejected it; every place now agrees."""
+
+    def test_no_but_is_valid(self):
+        from storyforge.schema import _check_enum, VALID_OUTCOMES
+        assert _check_enum('no-but', VALID_OUTCOMES)
+
+    def test_story_power_set_matches_schema(self):
+        from storyforge.schema import VALID_OUTCOMES
+        from storyforge.scoring_story_power import VALID_BRIEF_OUTCOMES
+        assert set(VALID_BRIEF_OUTCOMES) == set(VALID_OUTCOMES)
+
+    def test_hone_normalizes_into_schema_set(self):
+        from storyforge.schema import VALID_OUTCOMES
+        from storyforge.hone import _OUTCOME_ENUM
+        assert set(_OUTCOME_ENUM) == set(VALID_OUTCOMES)
+
+    def test_scorer_weights_every_outcome(self):
+        from storyforge.schema import VALID_OUTCOMES
+        from storyforge.structural import _OUTCOME_TENSION
+        assert set(_OUTCOME_TENSION) == set(VALID_OUTCOMES)
+
+    def test_guide_defines_every_outcome(self):
+        from storyforge.schema import OUTCOME_GUIDE, VALID_OUTCOMES
+        for outcome in VALID_OUTCOMES:
+            assert f'{outcome} (' in OUTCOME_GUIDE
+
+    def test_extraction_prompt_uses_guide(self):
+        from storyforge.extract import build_brief_parallel_prompt
+        from storyforge.schema import OUTCOME_GUIDE
+        assert OUTCOME_GUIDE in build_brief_parallel_prompt('s1', 'Prose.', {}, {}, {})
+
+    def test_enrich_and_elaborate_prompts_use_guide(self, project_dir, plugin_dir):
+        from storyforge.enrich import _field_instruction
+        from storyforge.prompts_elaborate import build_briefs_prompt
+        from storyforge.schema import OUTCOME_GUIDE
+        assert OUTCOME_GUIDE in _field_instruction('outcome')
+        assert OUTCOME_GUIDE in build_briefs_prompt(project_dir, plugin_dir)
+
+    def test_no_but_skips_shift_mismatch(self):
+        from storyforge.hone import detect_value_shift_outcome_mismatch
+        intent = {'s1': {'value_shift': '+/-'}}
+        briefs = {'s1': {'outcome': 'no-but'}}
+        assert detect_value_shift_outcome_mismatch(intent, briefs) == []
+
+
+class TestOutcomePhrasing:
+    """Review #3: "No, but ..." was stored as `no`, "yes, but" as `yes`."""
+
+    @pytest.mark.parametrize('answer,expected', [
+        ('no, but she finds the letter', 'no-but'),
+        ('No but something goes right', 'no-but'),
+        ('yes, but at a cost', 'yes-but'),
+        ('no — and furthermore the judge knows', 'no-and'),
+        ('[No, and] worse', 'no-and'),
+        ('no', 'no'),
+        ('Yes.', 'yes'),
+    ])
+    def test_both_normalizers(self, answer, expected):
+        from storyforge.extract import parse_brief_parallel_response
+        from storyforge.hone import normalize_outcomes
+        assert parse_brief_parallel_response(f'OUTCOME: {answer}\n', 's1')['outcome'] == expected
+        assert normalize_outcomes(answer) == expected

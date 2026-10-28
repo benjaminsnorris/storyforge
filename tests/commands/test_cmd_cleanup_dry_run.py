@@ -102,6 +102,15 @@ def _needs_pipeline_csv() -> str:
     return root
 
 
+def _needs_act_column() -> str:
+    # `_bare`'s yaml defines a part, so scenes.csv keeps its `part` values.
+    root = _bare()
+    _write(root, 'reference/scenes.csv', 'id|seq|title|part|pov\ns1|1|T|2|A\n')
+    _write(root, 'reference/spine.csv', 'id|seq|title|function|part\n'
+                                        'e1|1|T|f|1\n')
+    return root
+
+
 def _needs_junk() -> str:
     root = _bare()
     _write(root, 'working/logs/run.log')
@@ -152,6 +161,7 @@ ARRANGEMENTS = {
     'directories': (_bare, 'Checking directories...'),
     'storyforge_yaml': (_bare, 'Checking storyforge.yaml...'),
     'pipeline_csv': (_needs_pipeline_csv, 'Checking pipeline.csv...'),
+    'act_column': (_needs_act_column, 'Checking act column...'),
     'junk_files': (_needs_junk, 'Cleaning junk files...'),
     'legacy_files': (_needs_legacy, 'Checking legacy files...'),
     'loose_files': (_needs_loose_files, 'Reorganizing loose files...'),
@@ -170,6 +180,10 @@ ARRANGEMENTS = {
 #: directory in particular is in this table because it was reported nowhere at
 #: all, and a boolean cannot tell that apart from a step with one thing to say.
 TRANSCRIPTS = {
+    'act_column': [
+        'Would add act column to reference/scenes.csv, copied from part',
+        'Would rename part to act in reference/spine.csv',
+    ],
     'directories': [
         'Would create manuscript/press-kit/',
         'Would create working/logs/',

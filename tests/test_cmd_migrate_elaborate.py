@@ -123,7 +123,7 @@ def test_step7_extracts_spine_rows(project_dir):
     # Header includes the `summary` column (the expanding-outline addition).
     # Migrate leaves the summary field empty for migrated rows — authors
     # backfill it as part of the spine-tier review.
-    assert spine_content.startswith('id|seq|title|summary|function|part\n')
+    assert spine_content.startswith('id|seq|title|summary|function|act\n')
     assert 'act2-sc02' in spine_content
     # And it was removed from scenes.csv
     with open(scenes_csv) as f:
@@ -384,8 +384,8 @@ def test_step7_upgrades_old_header_with_stranded_row(project_dir):
     assert result.startswith('extract:')
     content = _read_file(spine_csv)
     lines = content.strip().split('\n')
-    # Header now has summary
-    assert lines[0] == 'id|seq|title|summary|function|part'
+    # Header now has summary, and the legacy `part` became `act`
+    assert lines[0] == 'id|seq|title|summary|function|act'
     # Existing row was padded with empty summary cell
     assert 'ev-prior|1|Prior event||inciting|1' in lines
     # Every row has the same column count as the header
@@ -419,7 +419,7 @@ def test_step7_upgrades_old_header_without_stranded_rows(project_dir):
     assert result.startswith('skip:')  # nothing to extract
     # Header was upgraded even though no rows were appended.
     content = _read_file(spine_csv)
-    assert content.startswith('id|seq|title|summary|function|part\n')
+    assert content.startswith('id|seq|title|summary|function|act\n')
     assert 'ev-prior|1|Prior event||inciting|1' in content
 
 
@@ -437,7 +437,8 @@ def test_step8_upgrades_old_header_with_stranded_row(project_dir):
     assert result.startswith('extract:') or result.startswith('skip:')
     content = _read_file(arch_csv)
     lines = content.strip().split('\n')
-    expected_header = ('id|seq|title|summary|part|pov|spine_event|'
+    # The legacy `part` column is the structural act, renamed in place.
+    expected_header = ('id|seq|title|summary|act|pov|spine_event|'
                        'action_sequel|emotional_arc|value_at_stake|'
                        'value_shift|turning_point')
     assert lines[0] == expected_header
@@ -445,6 +446,7 @@ def test_step8_upgrades_old_header_with_stranded_row(project_dir):
     prior = next(l for l in lines if l.startswith('arch-prior'))
     cells = prior.split('|')
     assert cells[3] == ''  # summary is empty after upgrade
+    assert cells[4] == '1'  # the old `part` value survives as `act`
     # All rows have matching column counts
     n_cols = len(lines[0].split('|'))
     for line in lines[1:]:

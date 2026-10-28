@@ -224,7 +224,7 @@ TIME_OF_DAY: morning
 DURATION: 2 hours
 TYPE: character
 TARGET_WORDS: 2500
-PART: 1"""
+ACT: 1"""
 
         result = parse_skeleton_response(response, 'act1-sc01')
         assert result['id'] == 'act1-sc01'
@@ -235,7 +235,7 @@ PART: 1"""
         assert result['time_of_day'] == 'morning'
         assert result['type'] == 'character'
         assert result['target_words'] == '2500'
-        assert result['part'] == '1'
+        assert result['act'] == '1'
 
     def test_skips_unknown_values(self):
         response = """TITLE: A Scene
@@ -593,12 +593,12 @@ class TestCleanupTimeline:
             lines = f.readlines()
 
         # Remove timeline_day for act1-sc02 (seq=2, day=1)
-        # Header: id|seq|title|part|pov|location|timeline_day|...
+        # Header: id|seq|title|part|act|pov|location|timeline_day|...
         new_lines = [lines[0]]
         for line in lines[1:]:
             fields = line.strip().split('|')
             if fields[0] == 'act1-sc02':
-                fields[6] = ''  # timeline_day
+                fields[7] = ''  # timeline_day
                 new_lines.append('|'.join(fields) + '\n')
             else:
                 new_lines.append(line)
@@ -649,7 +649,7 @@ class TestCleanupKnowledge:
 class TestCleanupMiceThreads:
     """Tests for cleanup_mice_threads."""
 
-    def test_removes_duplicate_opens(self, project_dir):
+    def test_repeated_open_becomes_mention(self, project_dir):
         ref_dir = os.path.join(project_dir, 'reference')
 
         # Add a duplicate open to act2-sc01
@@ -666,12 +666,14 @@ class TestCleanupMiceThreads:
             f.write(content)
 
         fixes = cleanup_mice_threads(ref_dir)
-        assert len(fixes) >= 1
-        # Should remove the duplicate open
-        dup_fixes = [f for f in fixes if 'duplicate open' in f['new_value']]
-        assert len(dup_fixes) >= 1
+        mentions = [f for f in fixes if f['old_value'] == '+inquiry:map-anomaly']
+        assert len(mentions) == 1
+        with open(intent_csv, encoding='utf-8') as f:
+            rewritten = f.read()
+        # Kept as a bare mention (feeds dormancy), not deleted
+        assert 'inquiry:map-anomaly;+milieu:uncharted-reaches' in rewritten
 
-    def test_removes_close_for_unopened(self, project_dir):
+    def test_close_for_unopened_left_for_reconcile(self, project_dir):
         ref_dir = os.path.join(project_dir, 'reference')
 
         intent_csv = os.path.join(ref_dir, 'scene-intent.csv')
@@ -686,9 +688,15 @@ class TestCleanupMiceThreads:
         with open(intent_csv, 'w', encoding='utf-8') as f:
             f.write(content)
 
-        fixes = cleanup_mice_threads(ref_dir)
-        unopened_fixes = [f for f in fixes if 'unopened' in f['new_value']]
-        assert len(unopened_fixes) >= 1
+        # Which close is real is a judgment for the reconcile pass; the
+        # deterministic cleanup leaves it and validation reports it.
+        cleanup_mice_threads(ref_dir)
+        with open(intent_csv, encoding='utf-8') as f:
+            assert '-inquiry:never-opened' in f.read()
+        from storyforge.elaborate import validate_structure
+        report = validate_structure(ref_dir)
+        assert any('never opened' in c['message'] and c['severity'] == 'advisory'
+                   for c in report['checks'])
 
 
 class TestCleanupPhysicalStates:

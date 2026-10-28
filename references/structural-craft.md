@@ -46,7 +46,7 @@ Varying values across sequences prevents fatigue. If five consecutive scenes all
 
 ---
 
-## 2. Scene Structure (Dwight Swain)
+## 2. Scene Structure (Dwight Swain, Jack Bickham)
 
 ### The Principle
 
@@ -55,7 +55,7 @@ Swain identified two fundamental scene types that alternate to create narrative 
 **Action scenes** have three components:
 1. **Goal** — the character wants something concrete and specific
 2. **Conflict** — something opposes the goal
-3. **Outcome** — the scene resolves in one of four ways: yes, no, yes-but, no-and
+3. **Outcome** — Swain calls it the *disaster*: the scene ends by answering the question its goal raised. Bickham (*Scene & Structure*, 1993) named the answers; see The Five Outcomes below.
 
 **Sequel scenes** have three components:
 1. **Reaction** — the character processes what just happened emotionally
@@ -70,16 +70,21 @@ Action and sequel alternate like breathing — action is the exhale (tension, pu
 - **Literary pacing:** Extended sequels with rich interiority. Action → long sequel → action. The reader lives inside the character's processing.
 - **Balanced pacing:** Roughly equal weight. Each action scene gets a sequel that earns the next action.
 
-### The Four Outcomes
+### The Five Outcomes
 
-The outcome determines forward momentum:
+The outcome determines forward momentum. The disaster answers the scene question; the labels for the first four come from Jack Bickham, building on Swain:
 
-- **Yes** — the character gets what they wanted. Tension drops. Use sparingly — too many "yes" outcomes and there's no conflict.
+- **Yes** — the character gets what they wanted. Tension drops. Use sparingly — too many "yes" outcomes and there's no conflict. (Swain and Bickham end every scene in a disaster; a clean yes is the exception that ends a line of action.)
 - **No** — the character fails. Creates frustration that needs a sequel to process.
-- **Yes, but** — the character succeeds, but a new complication arises. The most useful outcome for maintaining momentum. They got the information they needed, but now someone knows they have it.
-- **No, and furthermore** — the character fails, and things get worse. The most useful outcome for escalation. Not only did the judge dismiss the evidence, but now the judge knows they're investigating.
+- **Yes, but** — the character succeeds, but a new complication arises (Bickham). The most useful outcome for maintaining momentum. They got the information they needed, but now someone knows they have it.
+- **No, and** (Bickham's "no, and furthermore") — the character fails, and things get worse. The most useful outcome for escalation. Not only did the judge dismiss the evidence, but now the judge knows they're investigating.
+- **No, but** — the character fails at the goal, but something genuinely goes their way: an ally appears, a door opens, the loss is softened. This is the turn Mary Robinette Kowal teaches for try/fail cycles as the story starts going the character's way (alongside "yes, and"), borrowed from improv. It eases pressure, so it belongs where the tide is turning, typically late Act 2 into Act 3.
 
 Most scenes in a well-paced manuscript end in "yes-but" or "no-and." These are the outcomes that create the forward pressure readers describe as "I couldn't put it down."
+
+**Naming caution.** K.M. Weiland uses the same labels differently: her "no, and" is a failure that salvages something (a lesson, a clue), and her "no, but" is *false progress* — a failure that leaves the character holding something that seems helpful until it turns out not to be. Storyforge's `no-and` is Bickham's (worse) and its `no-but` is Kowal's (genuinely better). Don't import Weiland's definitions into the outcome field.
+
+**False progress is a pattern across scenes, not an outcome.** Weiland's warning still matters: a `no-but` whose gain a later scene cancels has created "the illusion of movement without true momentum." That can't be seen from inside one scene, so it is not an outcome label; look for it across the sequence — a `no-but` (or `yes-but`) whose gain is nullified within a few scenes with nothing learned. Used sparingly it's a reversal; used repeatedly it's a plot that's busy but going nowhere.
 
 ### What Bad Looks Like
 
@@ -176,9 +181,13 @@ Every story thread is one of four types:
 - **Character** — opens with dissatisfaction, closes with acceptance or change. A character who is unhappy with their role in life. The thread resolves when they either change or accept their situation.
 - **Event** — opens with a disruption of the status quo, closes when a new normal is established. A murder disrupts a town. The thread resolves when order is restored (or a new order replaces the old).
 
-### The Nesting Rule (Per-Type FILO)
+### Notation
 
-MICE threads of the **same type** must close in reverse order of opening — First In, Last Out, like nested parentheses:
+Each thread opens once (`+thread`, where it begins), closes at most once (`-thread`, where it resolves), and is otherwise mentioned by bare name (`thread`) in scenes that advance or touch it. Mentions keep a thread alive in the reader's mind and are what the dormancy check counts.
+
+### Nesting (Guidance, Not a Rule)
+
+Kowal's MICE Quotient suggests that threads of the **same type** close in reverse order of opening — First In, Last Out, like nested parentheses:
 
 ```
 +inquiry:who-sent-the-letter
@@ -198,7 +207,9 @@ Threads of **different types** run in parallel — they don't constrain each oth
 -character:protagonist-transformation     (closes scene 28)
 ```
 
-This is valid even though milieu closes before character, because they are independent types. A character arc spanning the whole novel doesn't prevent a milieu thread from opening and closing within it. Same-type nesting still matters: if you open two inquiries, readers expect the inner one resolved first.
+Milieu can close before character because they are independent types; a character arc spanning the whole novel doesn't prevent a milieu thread from opening and closing within it.
+
+Storyforge reports same-type interleaving but never treats it as an error. Nesting is a useful default for genre plotting, where readers expect the inner question resolved first, but literary novels interleave threads deliberately. Whether MICE threads earn their place at all is an open question being tested against classic novels.
 
 ### Why It Matters
 
@@ -210,14 +221,14 @@ Thread count also affects complexity. Six to eleven active threads is the sweet 
 
 - **Orphaned threads:** A thread opens and never closes. "Who sent the mysterious letter?" is asked in Chapter 3 and never answered.
 - **Premature closes:** A thread closes before it's been developed enough to earn the resolution. The mystery is solved in two scenes — the question didn't have time to build tension.
-- **FILO violations:** Threads close in the wrong order. The outer journey resolves before the inner question is answered, creating a structural dissonance.
+- **Unintended interleaving:** In plot-driven fiction, an outer journey that resolves before its inner question can feel dissonant. Check whether the interleaving is doing work before changing it.
 - **Thread dormancy:** A thread goes more than 8-10 scenes without being referenced. The reader forgets it exists. When it reappears, it feels like a discontinuity.
 
 ### How to Fix It
 
 If a thread is dormant, add a brief reference — a character's passing thought, a detail in the environment, a line of dialogue that touches the thread without resolving it. This keeps it alive in the reader's awareness.
 
-If FILO is violated, consider whether you can reorder the closings. Sometimes a scene that closes thread A can be moved after the scene that closes thread B. If reordering isn't possible, the nesting structure may need redesign — which is exactly the kind of problem that's cheap to fix in the CSV and expensive to fix in prose.
+If interleaving reads as dissonance rather than design, consider whether you can reorder the closings. Sometimes a scene that closes thread A can be moved after the scene that closes thread B. If reordering isn't possible, the nesting structure may need redesign — which is exactly the kind of problem that's cheap to fix in the CSV and expensive to fix in prose.
 
 ---
 

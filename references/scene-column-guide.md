@@ -11,9 +11,14 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to check:** Read the `function` column in seq order. Does each scene build on what came before? Are there jumps that feel unmotivated?
 **How to improve:** If a scene feels out of place, check whether moving it changes the reader's knowledge state. Use the timeline scatter chart to spot where reading order and chronology diverge.
 
-### part — Act/Part Assignment
-**Why it matters:** Defines the story's macro structure. Parts should hit roughly: Act 1 ~25% of word count, midpoint ~50%, climax ~75-85%.
-**How to check:** Sum `target_words` by part. Are the proportions right? Does the midpoint fall where it should?
+### part — Book Part
+**Why it matters:** The book's physical divisions — parts with their own title pages ("Part One: The Wick"). Filled from the manuscript's part headings; empty for a book without parts. Assembly takes part pages from `reference/chapter-map.csv` and `storyforge.yaml` `parts:`, not from this column.
+**How to check:** Every scene under a part heading carries that part's number; a book with no part headings leaves the column empty.
+**How to improve:** Don't use `part` for structure — that is `act`.
+
+### act — Act Assignment
+**Why it matters:** Defines the story's macro structure. Acts should hit roughly: Act 1 ~25% of word count, midpoint ~50%, climax ~75-85%. Act-level scoring, structural act proportions, and every `--act` filter read this column.
+**How to check:** Sum `target_words` by act. Are the proportions right? Does the midpoint fall where it should?
 **How to improve:** If Act 2 is too long, look for scenes that could move to Act 1 (setup) or Act 3 (escalation).
 
 ### pov — Point of View Character
@@ -28,7 +33,7 @@ This document explains **why** each column in the scene CSV files matters and **
 
 ### timeline_day — Chronological Position
 **Why it matters:** Validates that the story's internal clock is consistent. Characters can't reference Tuesday's events on Monday.
-**How to check:** Run `./storyforge validate` — it flags backwards timeline jumps. Check the Timeline scatter chart.
+**How to check:** Run `./storyforge validate` — it lists flashbacks and crosscuts (scenes set before the story's present) with how far back they reach and whether the facts they establish reach the present. These are devices, not errors. Check the Timeline scatter chart.
 **How to improve:** If validation finds gaps, determine whether the gap is intentional (time skip) or an extraction error.
 
 ### type — Narrative Purpose
@@ -76,8 +81,8 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to improve:** If an important character is mostly off-stage, consider adding scenes where they appear in person. If a character is present in many scenes but doesn't affect the action, they may be filling space.
 
 ### mice_threads — MICE Thread Operations
-**Why it matters:** MICE threads (Milieu, Inquiry, Character, Event) track the reader's open questions and spatial sense. Threads of the same type must close in reverse order of opening (FILO) — two inquiries nest like parentheses. Threads of different types run in parallel — a character arc spanning the whole novel doesn't prevent milieu threads from opening and closing within it.
-**How to check:** Run validation (flags same-type FILO violations). The thread nesting is checked automatically per type.
+**Why it matters:** MICE threads (Milieu, Inquiry, Character, Event) track the reader's open questions and spatial sense. Notation: +name where the thread begins (once), -name where it resolves (at most once), bare name where a scene advances or touches an open thread. Kowal suggests same-type threads close in reverse order of opening, like parentheses; Storyforge treats that as guidance, since literary novels interleave threads deliberately.
+**How to check:** Run validation: it reports threads opened or closed more than once, closes with no open, and (descriptively) where threads interleave. None of these block.
 **How to improve:** If same-type nesting is wrong, determine which thread should close first. Sometimes the fix is reordering scenes; sometimes it's adding a brief resolution beat.
 
 ---
@@ -95,7 +100,7 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to improve:** Strengthen conflict by making the opposition active and personal, not abstract.
 
 ### outcome — How It Ends
-**Why it matters:** The outcome determines what the next scene inherits. "Yes" means the story advances; "no" means it's blocked; "yes-but" introduces a new complication; "no-and" makes things worse. Most scenes should end in "yes-but" or "no-and" to maintain forward momentum.
+**Why it matters:** The outcome determines what the next scene inherits. "Yes" means the story advances; "no" means it's blocked; "yes-but" introduces a new complication; "no-and" makes things worse; "no-but" is a failure in which something genuinely goes the character's way (a turning tide). Most scenes should end in "yes-but" or "no-and" to maintain forward momentum; "no-but" belongs where the story starts turning in the character's favor.
 **How to check:** Does the prose actually deliver this outcome? A scene marked "no-and" that reads as a clean resolution has a fidelity problem.
 **How to improve:** If too many scenes end "yes," the story lacks tension. Look for ways to add complications.
 

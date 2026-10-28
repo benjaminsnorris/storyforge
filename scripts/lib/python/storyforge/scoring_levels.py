@@ -346,7 +346,7 @@ def score_architecture(project_dir: str, medium: str = 'novel') -> dict:
     ))
 
     # Required columns populated per row.
-    required = ['part', 'pov', 'action_sequel', 'emotional_arc',
+    required = ['act', 'pov', 'action_sequel', 'emotional_arc',
                 'value_at_stake', 'value_shift', 'turning_point']
     missing_any = []
     for r in rows:

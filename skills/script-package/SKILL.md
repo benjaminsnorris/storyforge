@@ -138,7 +138,7 @@ Analyze the scene index and propose a chapter structure:
 
 Do not generate a complete proposal. Instead:
 
-- Present a scene inventory grouped by part/act: scene ID, title, estimated page count, POV.
+- Present a scene inventory grouped by act (and by book part, if the book has parts): scene ID, title, estimated page count, POV.
 - Surface natural break candidates: "Scenes 3–5 all follow the same POV in the same location — they may feel like one chapter."
 - Ask guiding questions: "These seven scenes total about 40 pages — does that feel like one chapter to you, or two?" "Where do you feel the biggest tonal shift in Act 1?"
 - When the author gives direction, help them refine it — flag potential issues ("Chapter 2 would be 32 pages, which is long for a single-issue format — want to split it?") — but let them make all grouping decisions.

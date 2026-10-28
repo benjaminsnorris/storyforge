@@ -64,12 +64,13 @@ print(dump_schema_markdown())
 
 | Column | Constraint | Stage | Description |
 |--------|-----------|-------|-------------|
-| `id` | free_text | spine | Unique scene identifier — a descriptive slug (e.g., hidden-canyon). Also the filename (scenes/{id}.md). |
+| `id` | free_text | spine | Unique, permanent scene identifier: a 3-5 word slug naming the scene's core event (e.g., gatsby-reunites-with-daisy), never its position (no act1-sc03, scene-12). Never renamed when the scene moves or its title changes; order lives in `seq`. Also the filename (scenes/{id}.md). |
 | `seq` | integer | spine | Reading order. Scenes are sorted by seq. |
 | `title` | free_text | spine | Scene title — evocative, used for reference. |
-| `part` | integer | architecture | Which act/part this scene belongs to. |
+| `part` | integer | architecture | Book part this scene belongs to, from the manuscript's part headings; empty if the book has no parts. |
+| `act` | integer | architecture | Structural act this scene belongs to (1, 2, 3, ...). Drives act-level scoring, act proportions, and --act filters. |
 | `pov` | registry: characters.csv | architecture | POV character. Normalized against reference/characters.csv. |
-| `location` | registry: locations.csv | map | Physical location. Normalized against reference/locations.csv. |
+| `location` | registry: locations.csv (array) | map | Places where the scene's action happens on the page, in order: usually one; the first is where the scene opens, the last where it ends. Semicolon-separated. Never a route or transition as one place. Normalized against reference/locations.csv. |
 | `timeline_day` | integer | map | Chronological position (day number within the story). |
 | `time_of_day` | enum: afternoon, dawn, dusk, evening, morning, night | map | Time of day when the scene takes place. |
 | `duration` | free_text | map | In-story duration (e.g., "2 hours", "30 minutes"). |
@@ -91,7 +92,7 @@ print(dump_schema_markdown())
 | `turning_point` | enum: action, revelation | architecture | What turns the scene — action (character does something) or revelation (new information). |
 | `characters` | registry: characters.csv (array) | map | All characters present or referenced. Normalized against reference/characters.csv. |
 | `on_stage` | registry: characters.csv (array) | map | Characters physically present (subset of characters). |
-| `mice_threads` | mice: mice-threads.csv | map | MICE thread operations: +type:name (open) or -type:name (close). FILO within each type; cross-type threads run in parallel (Kowal). |
+| `mice_threads` | mice: mice-threads.csv | map | MICE threads (Kowal): +name where the thread begins (once), -name where it resolves (at most once), bare name where a scene advances or touches an open thread. Threads may interleave; nesting is guidance, not a rule. |
 
 ### scene-briefs.csv — drafting contracts
 
@@ -100,7 +101,7 @@ print(dump_schema_markdown())
 | `id` | free_text | brief | Join key — matches scenes.csv. |
 | `goal` | free_text | brief | POV character's concrete objective entering the scene (Swain). |
 | `conflict` | free_text | brief | What specifically opposes the goal. |
-| `outcome` | enum: no, no-and, yes, yes-but | brief | How the scene ends for the POV character (Weiland). |
+| `outcome` | enum: yes, no, yes-but, no-and, no-but | brief | How the scene ends for the POV character: yes (gets the goal) / no (fails) / yes-but (gets the goal, with a new complication or cost) / no-and (fails, and things get worse) / no-but (fails, but something genuinely goes their way). Bickham's scene disasters plus Kowal's no-but; see structural-craft.md §2. |
 | `crisis` | free_text | brief | The dilemma: best bad choice or irreconcilable goods (Story Grid). |
 | `decision` | free_text | brief | What the character actively chooses in response to the crisis. |
 | `knowledge_in` | registry: knowledge.csv (array) | brief | Fact IDs the POV character knows entering. Normalized against reference/knowledge.csv. See knowledge-guidelines.md for fact selection criteria. |
@@ -119,7 +120,7 @@ The `status` field tracks how deeply a scene has been elaborated:
 | Status | What's populated | Pipeline stage |
 |--------|-----------------|---------------|
 | `spine` | id, seq, title, function | Stage 1: irreducible story events |
-| `architecture` | + part, pov, action_sequel, emotional_arc, value_shift, turning_point | Stage 2: structure |
+| `architecture` | + act, pov, action_sequel, emotional_arc, value_shift, turning_point | Stage 2: structure |
 | `mapped` | + location, timeline_day, time_of_day, duration, type, characters, on_stage, mice_threads | Stage 3: full scene map |
 | `briefed` | + goal, conflict, outcome, crisis, decision, knowledge_in/out, key_actions, key_dialogue, emotions, motifs, continuity_deps | Stage 4: drafting contracts |
 | `drafted` | + word_count (prose exists in scenes/{id}.md) | After drafting |
@@ -132,9 +133,9 @@ Run `./storyforge validate` to check both structural integrity and schema compli
 **Structural checks:**
 - **Identity:** Every ID in intent/briefs exists in scenes.csv
 - **Completeness:** Required columns for the scene's status are populated
-- **Timeline:** No backwards jumps without explicit markers
+- **Timeline:** flashbacks and crosscuts (scenes set before the story's present) are listed and gauged, never errors
 - **Knowledge flow:** knowledge_in references match prior scenes' knowledge_out
-- **Thread management:** MICE threads nest in valid FILO order within each type (M/I/C/E independently); no thread dormant >8 scenes
+- **Thread management:** each MICE thread opens once and closes at most once; interleaving is reported, not an error; no thread dormant >8 scenes
 - **Pacing:** No flat polarity stretches (3+ scenes); action/sequel rhythm varied; turning point types varied
 
 **Schema checks:**

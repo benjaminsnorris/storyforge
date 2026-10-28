@@ -399,7 +399,7 @@ class TestTheReportSurvivesAnUnreadableFile:
 
 class TestAnUnreadableSceneFileIsSurvivable:
     """`plan_cleanup` builds every plan before the first one runs, so one
-    unreadable file costs all nine steps rather than the tail of them — and
+    unreadable file costs all ten steps rather than the tail of them — and
     the report with them. Before the planner, the run still created directories
     and migrated the yaml before dying.
     """
@@ -409,12 +409,12 @@ class TestAnUnreadableSceneFileIsSurvivable:
         with open(path, 'wb') as f:
             f.write(b'# Malm\xf6\n\nThe prose.\n')
 
-    def test_the_other_eight_steps_still_run(self, project_dir):
+    def test_the_other_nine_steps_still_run(self, project_dir):
         self._bad_scene(project_dir)
 
         plans = cmd_cleanup.plan_cleanup(project_dir, scenes=True)
 
-        assert len(plans) == 9
+        assert len(plans) == 10
         assert any(p.changes for p in plans)
 
     def test_it_becomes_a_finding_rather_than_a_silent_skip(self, project_dir):
@@ -1161,3 +1161,142 @@ class TestMainFullRun:
             header = f.readline().strip()
         assert 'category' in header
         assert 'severity' in header
+
+
+class TestActColumnMigration:
+    """Projects predating the `act` column kept the act in `part`. Cleanup
+    creates `act` from it, and empties `part` only when storyforge.yaml
+    defines no `parts:` — with parts defined the column may hold real part
+    numbers the assembler uses."""
+
+    NO_PARTS_YAML = 'project:\n  title: "X"\n'
+    PARTS_YAML = ('project:\n  title: "X"\n'
+                  'parts:\n  - number: 1\n    title: "One"\n'
+                  '  - number: 2\n    title: "Two"\n')
+    SCENES = ('id|seq|title|part|pov\n'
+              's1|1|One|1|Ann\n'
+              's2|2|Two|2|Ann\n')
+
+    def _project(self, tmp_path, yaml_text, files):
+        (tmp_path / 'storyforge.yaml').write_text(yaml_text)
+        for rel, text in files.items():
+            path = tmp_path / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        return str(tmp_path)
+
+    def _read(self, root, rel):
+        with open(os.path.join(root, rel), encoding='utf-8') as f:
+            return f.read()
+
+    def test_act_is_copied_and_part_cleared_without_yaml_parts(self, tmp_path):
+        root = self._project(tmp_path, self.NO_PARTS_YAML,
+                             {'reference/scenes.csv': self.SCENES})
+        plan = cmd_cleanup.plan_act_column(root)
+        done = plan.apply()
+
+        assert self._read(root, 'reference/scenes.csv') == (
+            'id|seq|title|part|act|pov\n'
+            's1|1|One||1|Ann\n'
+            's2|2|Two||2|Ann\n')
+        assert [c.did for c in done] == [
+            'Added act column to reference/scenes.csv, copied from part',
+            'Cleared part in reference/scenes.csv (storyforge.yaml defines '
+            'no parts:, so it held acts)',
+        ]
+
+    def test_part_is_kept_when_yaml_defines_parts(self, tmp_path):
+        root = self._project(tmp_path, self.PARTS_YAML,
+                             {'reference/scenes.csv': self.SCENES})
+        plan = cmd_cleanup.plan_act_column(root)
+        done = plan.apply()
+
+        assert self._read(root, 'reference/scenes.csv') == (
+            'id|seq|title|part|act|pov\n'
+            's1|1|One|1|1|Ann\n'
+            's2|2|Two|2|2|Ann\n')
+        assert [c.did for c in done] == [
+            'Added act column to reference/scenes.csv, copied from part']
+        # The author is told the copied values may be book parts (review #6)
+        assert plan.summary.did.startswith('Check act in reference/scenes.csv')
+
+    def test_writer_before_cleanup_still_migrates(self, tmp_path):
+        # Review critical #1: a current writer adds an empty `act` column, and
+        # cleanup used to treat any `act` header as already migrated.
+        from storyforge.cmd_cleanup import plan_act_column
+        from storyforge.elaborate import update_scene
+        root = self._project(tmp_path, '', {
+            'reference/scenes.csv': 'id|seq|title|part|pov\ns1|1|One|1|Ann\ns2|2|Two|2|Ann\n'})
+        update_scene('s1', os.path.join(root, 'reference'), {'pov': 'Bea'})
+        assert 'act' in self._read(root, 'reference/scenes.csv').splitlines()[0].split('|')
+        plan = plan_act_column(root)
+        done = plan.apply()
+        import csv as _csv, io
+        rows = list(_csv.DictReader(io.StringIO(self._read(root, 'reference/scenes.csv')),
+                                    delimiter='|'))
+        assert [(r['act'], r['part']) for r in rows] == [('1', ''), ('2', '')]
+        assert any('Filled empty act column' in c.did for c in done)
+
+    def test_structural_tier_rewrite_keeps_acts(self, tmp_path):
+        # A pre-migration architecture.csv rewritten by a current writer
+        # (which emits `act`, not `part`) must not lose its acts.
+        from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP
+        root = self._project(tmp_path, '', {
+            'reference/architecture.csv': 'id|seq|title|part|pov\na1|1|T|2|Ann\n'})
+        path = os.path.join(root, 'reference', 'architecture.csv')
+        rows = _read_csv(path)
+        _write_csv(path, rows, _FILE_MAP['architecture.csv'])
+        assert _read_csv(path)[0]['act'] == '2'
+
+    def test_structural_tiers_rename_part_to_act(self, tmp_path):
+        root = self._project(tmp_path, self.PARTS_YAML, {
+            'reference/spine.csv': 'id|seq|title|function|part\ne1|1|T|f|2\n',
+            'reference/architecture.csv': 'id|seq|title|part|pov\na1|1|T|3|Ann\n',
+        })
+        cmd_cleanup.plan_act_column(root).apply()
+
+        assert self._read(root, 'reference/spine.csv') == (
+            'id|seq|title|function|act\ne1|1|T|f|2\n')
+        assert self._read(root, 'reference/architecture.csv') == (
+            'id|seq|title|act|pov\na1|1|T|3|Ann\n')
+
+    def test_a_migrated_project_plans_nothing(self, tmp_path):
+        root = self._project(tmp_path, self.NO_PARTS_YAML,
+                             {'reference/scenes.csv': self.SCENES})
+        cmd_cleanup.plan_act_column(root).apply()
+        assert cmd_cleanup.plan_act_column(root).changes == ()
+
+    def test_an_existing_act_column_is_left_alone(self, tmp_path):
+        text = 'id|seq|title|part|act|pov\ns1|1|One|1|2|Ann\n'
+        root = self._project(tmp_path, self.NO_PARTS_YAML,
+                             {'reference/scenes.csv': text})
+        assert cmd_cleanup.plan_act_column(root).changes == ()
+        assert self._read(root, 'reference/scenes.csv') == text
+
+    def test_the_real_run_migrates_and_reports_it(self, tmp_path, monkeypatch,
+                                                  capsys):
+        root = self._project(tmp_path, self.NO_PARTS_YAML,
+                             {'reference/scenes.csv': self.SCENES})
+        monkeypatch.setattr(cmd_cleanup, 'detect_project_root', lambda: root)
+        monkeypatch.setattr(cmd_cleanup, 'ensure_on_branch', lambda *a, **k: None)
+        monkeypatch.setattr(cmd_cleanup, 'commit_and_push', lambda *a, **k: None)
+        main(['--verbose'])
+
+        out = capsys.readouterr().out
+        assert 'Added act column to reference/scenes.csv' in out
+        assert self._read(root, 'reference/scenes.csv').startswith(
+            'id|seq|title|part|act|pov\n')
+
+    def test_the_csv_report_points_at_cleanup_for_a_missing_act(self, tmp_path):
+        # One extra column beside the one missing column: without the
+        # exclusion this reads as "rename notes to act".
+        scenes = 'id|seq|title|part|pov|notes\ns1|1|One|1|Ann|x\n'
+        root = self._project(tmp_path, self.NO_PARTS_YAML,
+                             {'reference/scenes.csv': scenes})
+        findings = build_cleanup_report(root)['findings']
+        act = [f for f in findings
+               if f['type'] == 'missing_column' and f.get('column') == 'act']
+        assert len(act) == 1
+        assert act[0]['command'] == 'storyforge cleanup'
+        assert not [f for f in findings if f['type'] == 'rename_column'
+                    and f['file'] == 'reference/scenes.csv']

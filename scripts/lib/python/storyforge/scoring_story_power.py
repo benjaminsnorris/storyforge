@@ -745,9 +745,9 @@ class SceneRow(NamedTuple):
 # `outcome == 'yes-but'` is statically verifiable as reachable);
 # VALID_BRIEF_OUTCOMES retains the runtime membership set the
 # deterministic pre-pass uses to flag invalid values.
-BriefOutcome = Literal['yes', 'no', 'yes-but', 'no-and']
+BriefOutcome = Literal['yes', 'no', 'yes-but', 'no-and', 'no-but']
 VALID_BRIEF_OUTCOMES: frozenset[BriefOutcome] = frozenset({
-    'yes', 'no', 'yes-but', 'no-and',
+    'yes', 'no', 'yes-but', 'no-and', 'no-but',
 })
 
 
@@ -4487,11 +4487,6 @@ def _empty_scene_map_extension(status: StoryPowerStatus) -> SceneMapExtension:
     }
 
 
-_BACKWARD_TIMELINE_ALLOWED_TYPES = frozenset({
-    'flashback', 'interlude', 'prologue',
-})
-
-
 def _check_continuity_deterministic(scenes: list[MappedScene],
                                       architecture_ids: set[str],
                                       ) -> list[ContinuityFinding]:
@@ -4538,29 +4533,11 @@ def _check_continuity_deterministic(scenes: list[MappedScene],
                     ),
                     'severity': 'medium',
                 })
-        if i == 0:
-            continue
-        prev = scenes[i - 1]
-        try:
-            curr_day = int(scene.timeline_day) if scene.timeline_day else None
-            prev_day = int(prev.timeline_day) if prev.timeline_day else None
-        except (TypeError, ValueError):
-            curr_day = prev_day = None
-        if (curr_day is not None and prev_day is not None
-                and curr_day < prev_day
-                and scene.scene_type.lower() not in _BACKWARD_TIMELINE_ALLOWED_TYPES):
-            allowed = ', '.join(sorted(_BACKWARD_TIMELINE_ALLOWED_TYPES))
-            findings.append({
-                'scene_id': scene.id,
-                'preceding_id': prev.id,
-                'field': 'timeline_day',
-                'issue': (
-                    f'timeline_day went backward ({prev_day} → {curr_day}) '
-                    f'but scene_type={scene.scene_type!r} '
-                    f'(expected one of: {allowed})'
-                ),
-                'severity': 'high',
-            })
+        # A scene earlier in story time than the one before it is a
+        # flashback: a device, not a continuity error (structural.py's
+        # assess_flashbacks describes them). This used to be high severity
+        # unless scene_type was flashback/interlude/prologue, none of which
+        # are valid scene types, so every flashback was flagged.
     return findings
 
 

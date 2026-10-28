@@ -105,28 +105,6 @@ def _make_git_return_untracked(monkeypatch, mock_git):
     monkeypatch.setattr('storyforge.cmd_scenes_setup._git', _git_not_tracked)
 
 
-def _patch_get_column_for_split(monkeypatch):
-    """Patch get_column in cmd_scenes_setup to work around the list/string bug.
-
-    The source code calls seq_col.strip().splitlines() but get_column
-    returns a list. This patches it to iterate the list directly.
-    """
-    from storyforge.csv_cli import get_column as real_get_column
-
-    class StrList(list):
-        """A list that also supports .strip().splitlines() for backward compat."""
-        def strip(self):
-            return self
-        def splitlines(self):
-            return list(self)
-
-    def _patched_get_column(path, field):
-        result = real_get_column(path, field)
-        return StrList(result)
-
-    monkeypatch.setattr('storyforge.cmd_scenes_setup.get_column', _patched_get_column)
-
-
 # ============================================================================
 # main — mode validation
 # ============================================================================
@@ -381,7 +359,6 @@ class TestSplitChaptersMode:
                            project_dir, monkeypatch):
         monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
                             lambda: project_dir)
-        _patch_get_column_for_split(monkeypatch)
 
         # Chapter without explicit markers — dry-run logs what it would do
         # and skips both Claude detection and writing
@@ -400,7 +377,6 @@ class TestSplitChaptersMode:
                                    project_dir, monkeypatch):
         monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
                             lambda: project_dir)
-        _patch_get_column_for_split(monkeypatch)
 
         # Ensure no default chapter directories exist
         for candidate in ['chapters', 'manuscript']:
@@ -415,11 +391,11 @@ class TestSplitChaptersMode:
     def test_split_with_explicit_markers(self, mock_api, mock_git,
                                          mock_costs, project_dir,
                                          monkeypatch):
-        """Chapters with *** markers should split without Claude calls."""
+        """Chapters with *** markers split at the markers; Claude only names
+        the scenes (one call per chapter, checked in TestSceneIds)."""
         monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
                             lambda: project_dir)
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
-        _patch_get_column_for_split(monkeypatch)
 
         content = 'First scene opening paragraph.\n\n***\n\nSecond scene paragraph.\n'
         self._make_chapter(project_dir, 'chapters', 'chapter-01.md', content)
@@ -433,9 +409,6 @@ class TestSplitChaptersMode:
                       {'act1-sc01.md', 'act1-sc02.md', 'act2-sc01.md', 'new-x1.md'}]
         assert len(new_scenes) >= 2
 
-        # Should not have called Claude API (explicit markers, no detection needed)
-        api_calls = mock_api.calls_for('invoke_to_file')
-        assert len(api_calls) == 0
 
     def test_split_creates_metadata_entries(self, mock_api, mock_git,
                                             mock_costs, project_dir,
@@ -444,7 +417,6 @@ class TestSplitChaptersMode:
         monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
                             lambda: project_dir)
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
-        _patch_get_column_for_split(monkeypatch)
 
         content = 'Opening scene text.\n\n***\n\nSecond scene text.\n'
         self._make_chapter(project_dir, 'chapters', 'ch01.md', content)
@@ -469,7 +441,6 @@ class TestSplitChaptersMode:
         monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
                             lambda: project_dir)
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
-        _patch_get_column_for_split(monkeypatch)
 
         content = 'Some chapter text with no breaks.\n'
         self._make_chapter(project_dir, 'chapters', 'ch01.md', content)
@@ -488,7 +459,6 @@ class TestSplitChaptersMode:
         """Dry-run should not create a branch or commit."""
         monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
                             lambda: project_dir)
-        _patch_get_column_for_split(monkeypatch)
 
         self._make_chapter(project_dir, 'chapters', 'ch01.md',
                            'Some text.\n')
@@ -550,7 +520,6 @@ class TestSceneFileContent:
         monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
                             lambda: project_dir)
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
-        _patch_get_column_for_split(monkeypatch)
 
         content = (
             'First scene has some prose here.\n'
@@ -584,7 +553,6 @@ class TestSceneFileContent:
         monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
                             lambda: project_dir)
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
-        _patch_get_column_for_split(monkeypatch)
 
         # Create a chapter with known word count
         words = ' '.join(['word'] * 50)
@@ -600,10 +568,305 @@ class TestSceneFileContent:
         with open(meta) as f:
             lines = f.read().strip().splitlines()
 
-        # Check that new rows have non-zero word counts
-        new_rows = lines[7:]  # Skip header + 6 fixture rows
-        for row in new_rows:
-            parts = row.split('|')
-            # word_count is column index 11
-            if len(parts) > 11 and parts[11]:
-                assert int(parts[11]) > 0
+        header = lines[0].split('|')
+        new_rows = [dict(zip(header, row.split('|'))) for row in lines[7:]]
+        assert [r['word_count'] for r in new_rows] == ['50', '50']
+
+
+# ============================================================================
+# main — row alignment and chapter order
+# ============================================================================
+
+
+def _new_rows(project_dir, csv_name):
+    """Rows appended after the fixture's own rows, keyed by header column."""
+    with open(os.path.join(project_dir, 'reference', csv_name)) as f:
+        lines = f.read().strip().splitlines()
+    header = lines[0].split('|')
+    fixture_ids = {'act1-sc01', 'act1-sc02', 'act2-sc01', 'act2-sc02',
+                   'act2-sc03', 'new-x1'}
+    rows = [dict(zip(header, line.split('|'))) for line in lines[1:]]
+    return header, [r for r in rows if r['id'] not in fixture_ids]
+
+
+def _opening(project_dir, scene_id):
+    """First non-blank line of a scene file."""
+    with open(os.path.join(project_dir, 'scenes', f'{scene_id}.md')) as f:
+        return next(l.strip() for l in f if l.strip())
+
+
+class TestRowAlignment:
+    """Rows written by a split must line up with the CSV's header."""
+
+    def _split(self, project_dir, monkeypatch, content):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        ch_dir = os.path.join(project_dir, 'chapters')
+        os.makedirs(ch_dir, exist_ok=True)
+        with open(os.path.join(ch_dir, 'ch01.md'), 'w') as f:
+            f.write(content)
+        main(['--split-chapters', '--source', 'chapters', '--yes'])
+
+    def test_values_land_in_named_columns(self, mock_api, mock_git, mock_costs,
+                                          project_dir, monkeypatch):
+        self._split(project_dir, monkeypatch,
+                    'one two three\n\n***\n\nfour five\n')
+        header, rows = _new_rows(project_dir, 'scenes.csv')
+        assert len(rows) == 2
+        for row in rows:
+            assert len(row) == len(header)
+            assert row['part'] == ''   # chapter files carry no part information
+            assert row['location'] == ''
+            assert row['status'] == ''
+        assert [r['word_count'] for r in rows] == ['3', '2']
+
+    def test_intent_rows_match_intent_header(self, mock_api, mock_git,
+                                             mock_costs, project_dir,
+                                             monkeypatch):
+        self._split(project_dir, monkeypatch, 'alpha\n\n***\n\nbeta\n')
+        header, rows = _new_rows(project_dir, 'scene-intent.csv')
+        assert len(rows) == 2
+        assert all(len(r) == len(header) for r in rows)
+
+    def test_marker_splits_leave_title_for_extraction(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        # The Great Gatsby got titles like "# Chapter I" and "Inside, the
+        # crimson room bloomed with light. Tom and Miss Ba"; extraction only
+        # fills empty fields, so its real titles were discarded.
+        self._split(project_dir, monkeypatch,
+                    '# Chapter One\n\nOpening prose here.\n\n***\n\nLater prose.\n')
+        _, rows = _new_rows(project_dir, 'scenes.csv')
+        assert [r['title'] for r in rows] == ['', '']
+
+
+class TestChapterOrder:
+    """Scenes are sequenced in reading order, not filename order."""
+
+    def test_manuscript_roman_numerals_keep_reading_order(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        numerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X']
+        chapters = [f'Chapter {n}\n\nOpening of {n}.\n\n***\n\nClose of {n}.\n'
+                    for n in numerals]
+        with open(os.path.join(project_dir, 'manuscript.md'), 'w') as f:
+            f.write('\n'.join(chapters))
+
+        main(['--split-manuscript', '--yes'])
+
+        _, rows = _new_rows(project_dir, 'scenes.csv')
+        rows.sort(key=lambda r: int(r['seq']))
+        assert [_opening(project_dir, r['id']) for r in rows[::2]] == [
+            f'Chapter {n}' for n in numerals]
+
+    def test_split_chapters_orders_numbers_naturally(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        ch_dir = os.path.join(project_dir, 'chapters')
+        os.makedirs(ch_dir)
+        for n in (1, 2, 10):
+            with open(os.path.join(ch_dir, f'ch{n}.md'), 'w') as f:
+                f.write(f'Ch{n} opens.\n\n***\n\nCh{n} closes.\n')
+
+        main(['--split-chapters', '--source', 'chapters', '--yes'])
+
+        _, rows = _new_rows(project_dir, 'scenes.csv')
+        rows.sort(key=lambda r: int(r['seq']))
+        assert [_opening(project_dir, r['id']) for r in rows[::2]] == [
+            'Ch1 opens.', 'Ch2 opens.', 'Ch10 opens.']
+
+
+class TestParts:
+    """Parts come from the manuscript's own part headings. The Great Gatsby
+    has none, but every five chapters used to be made into a new part."""
+
+    def _split(self, project_dir, monkeypatch, text):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        with open(os.path.join(project_dir, 'manuscript.md'), 'w') as f:
+            f.write(text)
+        main(['--split-manuscript', '--yes'])
+        _, rows = _new_rows(project_dir, 'scenes.csv')
+        return sorted(rows, key=lambda r: int(r['seq']))
+
+    @staticmethod
+    def _chapter(n):
+        return f'Chapter {n}\n\nOpening of {n}.\n\n***\n\nClose of {n}.\n\n'
+
+    def test_book_without_parts_has_empty_part(self, mock_api, mock_git,
+                                               mock_costs, project_dir, monkeypatch):
+        rows = self._split(project_dir, monkeypatch,
+                           ''.join(self._chapter(n) for n in range(1, 8)))
+        assert len(rows) == 14
+        assert {r['part'] for r in rows} == {''}
+
+    def test_part_headings_assign_parts(self, mock_api, mock_git, mock_costs,
+                                        project_dir, monkeypatch):
+        text = ('PART ONE\n\n' + self._chapter(1) + self._chapter(2)
+                + '# Part Two: The Return\n\n' + self._chapter(3))
+        rows = self._split(project_dir, monkeypatch, text)
+        assert [(_opening(project_dir, r['id']), r['part']) for r in rows[::2]] == [
+            ('Chapter 1', '1'), ('Chapter 2', '1'), ('Chapter 3', '2')]
+
+    def test_part_heading_is_not_a_chapter_or_scene_text(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        text = self._chapter(1) + 'Part II\n\n' + self._chapter(2)
+        rows = self._split(project_dir, monkeypatch, text)
+        assert len(rows) == 4
+        assert [r['part'] for r in rows] == ['', '', '1', '1']
+        scenes_dir = os.path.join(project_dir, 'scenes')
+        for r in rows:
+            with open(os.path.join(scenes_dir, r['id'] + '.md')) as f:
+                assert 'Part II' not in f.read()
+
+    def test_prose_starting_with_part_is_not_a_heading(self):
+        from storyforge.cmd_scenes_setup import _is_part_heading
+        assert not _is_part_heading('Part of me wanted to stay.')
+        assert _is_part_heading('BOOK FIRST')
+        assert _is_part_heading('Part 3')
+
+
+class TestSceneIds:
+    """Scene ids are 3-5 word slugs of the scene's event, never positional:
+    order lives in seq, so a scene can move without its id lying."""
+
+    def _run(self, project_dir, monkeypatch, mock_api, content, response):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        prompts = []
+
+        def respond(prompt):
+            prompts.append(prompt)
+            return response
+        mock_api.set_response_fn(respond)
+        ch_dir = os.path.join(project_dir, 'chapters')
+        os.makedirs(ch_dir, exist_ok=True)
+        with open(os.path.join(ch_dir, 'ch01.md'), 'w') as f:
+            f.write(content)
+        main(['--split-chapters', '--source', 'chapters', '--yes', '--direct'])
+        _, rows = _new_rows(project_dir, 'scenes.csv')
+        return prompts, sorted(rows, key=lambda r: int(r['seq']))
+
+    def test_marker_scenes_named_by_claude(self, mock_api, mock_git, mock_costs,
+                                           project_dir, monkeypatch):
+        prompts, rows = self._run(
+            project_dir, monkeypatch, mock_api,
+            'Nick dines at East Egg.\n\n***\n\nTom takes a call.\n',
+            'SCENE: 1 | nick-dines-with-the-buchanans | a\n'
+            'SCENE: 5 | tom-takes-a-secret-call | b\n')
+        assert len(prompts) == 1
+        assert 'already fixed by break markers, at lines 1, 5' in prompts[0]
+        assert [r['id'] for r in rows] == ['nick-dines-with-the-buchanans',
+                                          'tom-takes-a-secret-call']
+
+    def test_detected_scenes_use_slug_capped_at_five_words(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        _, rows = self._run(
+            project_dir, monkeypatch, mock_api,
+            'Line one.\nLine two.\nLine three.\n',
+            'SCENE: 1 | tom-forces-nick-to-meet-his-mistress | a\n'
+            'SCENE: 3 | myrtle-buys-a-dog | b\n')
+        assert [r['id'] for r in rows] == ['tom-forces-nick-to-meet', 'myrtle-buys-a-dog']
+        assert [r['title'] for r in rows] == ['', '']
+
+    def test_unnamed_scene_falls_back_to_content_not_position(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        _, rows = self._run(
+            project_dir, monkeypatch, mock_api,
+            '# Chapter 1\n\nGatsby stood alone on the lawn.\n\n***\n\nDawn came.\n',
+            'no usable answer')
+        assert [r['id'] for r in rows] == ['gatsby-stood-alone', 'dawn-came']
+        assert not any('ch1' in r['id'] or 'chapter' in r['id'] for r in rows)
+
+
+class TestSceneIdSlug:
+    def test_caps_words(self):
+        from storyforge.scenes import scene_id_slug
+        assert scene_id_slug('Gatsby Reunites With Daisy At Last In The Rain') == \
+            'gatsby-reunites-with-daisy'
+
+    def test_no_dangling_function_word(self):
+        from storyforge.scenes import scene_id_slug
+        assert scene_id_slug('gatsby-is-shot-in-the-pool') == 'gatsby-is-shot'
+        assert scene_id_slug('daisy-yields-to-tom-while-gatsby-waits') == 'daisy-yields-to-tom'
+
+    def test_short_name_kept(self):
+        from storyforge.scenes import scene_id_slug
+        assert scene_id_slug('the-valley-of-ashes') == 'valley-of-ashes'
+
+
+class TestNoTextLost:
+    """Review critical #2: a part heading ended the chapter before it, so
+    prose that looked like a heading cut off the rest of its chapter, and a
+    book with parts but unrecognized chapter headings lost almost all text."""
+
+    def _scene_words(self, project_dir, rows):
+        total = 0
+        for r in rows:
+            with open(os.path.join(project_dir, 'scenes', r['id'] + '.md')) as f:
+                total += len(f.read().split())
+        return total
+
+    def _split(self, project_dir, monkeypatch, text):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        with open(os.path.join(project_dir, 'manuscript.md'), 'w') as f:
+            f.write(text)
+        main(['--split-manuscript', '--yes'])
+        _, rows = _new_rows(project_dir, 'scenes.csv')
+        return rows
+
+    def test_prose_that_starts_like_a_part_heading(self, mock_api, mock_git,
+                                                   mock_costs, project_dir, monkeypatch):
+        text = ('Chapter 1\n\nThe plan had three parts.\n\n'
+                'Part one of the plan was simple: wait for dark.\n\n'
+                'Part two was harder.\n\n***\n\nThey waited all night.\n')
+        rows = self._split(project_dir, monkeypatch, text)
+        assert {r['part'] for r in rows} == {''}
+        # Every word survives except the *** break marker
+        assert self._scene_words(project_dir, rows) == len(text.split()) - 1
+
+    def test_parts_with_unrecognized_chapter_headings(self, mock_api, mock_git,
+                                                      mock_costs, project_dir, monkeypatch):
+        text = ('PART ONE\n\nI\n\nFirst chapter prose here.\n\nII\n\nSecond chapter prose.\n\n'
+                'PART TWO\n\nIII\n\nThird chapter prose at the end.\n')
+        rows = self._split(project_dir, monkeypatch, text)
+        assert self._scene_words(project_dir, rows) == len(text.split()) - 4
+        assert sorted({r['part'] for r in rows}) == ['1', '2']
+
+    def test_part_preamble_opens_next_chapter(self, mock_api, mock_git, mock_costs,
+                                              project_dir, monkeypatch):
+        text = ('Chapter 1\n\nOne.\n\nPART TWO\n\nAn epigraph for part two.\n\n'
+                'Chapter 2\n\nTwo.\n')
+        rows = sorted(self._split(project_dir, monkeypatch, text), key=lambda r: int(r['seq']))
+        assert [r['part'] for r in rows] == ['', '1']
+        with open(os.path.join(project_dir, 'scenes', rows[1]['id'] + '.md')) as f:
+            assert 'An epigraph for part two.' in f.read()
+
+    def test_heading_regex_requires_whole_line(self):
+        from storyforge.cmd_scenes_setup import _is_part_heading
+        assert not _is_part_heading('Part one of the plan was simple: wait for dark.')
+        assert _is_part_heading('Part Two: The Return')
+        assert _is_part_heading('BOOK FIRST')
+
+
+class TestSetextUnderlineIsNotABreak:
+    def test_dash_under_text_is_heading_not_break(self, mock_api, mock_git, mock_costs,
+                                                  project_dir, monkeypatch):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        ch_dir = os.path.join(project_dir, 'chapters')
+        os.makedirs(ch_dir)
+        with open(os.path.join(ch_dir, 'ch01.md'), 'w') as f:
+            f.write('A Heading\n---\n\nProse.\n\n---\n\nMore prose.\n')
+        main(['--split-chapters', '--source', 'chapters', '--yes'])
+        _, rows = _new_rows(project_dir, 'scenes.csv')
+        assert len(rows) == 2   # split at the blank-preceded marker only

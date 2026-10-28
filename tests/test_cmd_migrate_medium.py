@@ -494,11 +494,11 @@ def test_migrate_preserves_cut_and_merged_statuses(project_dir, monkeypatch):
     would reactivate scenes the author deliberately removed."""
     monkeypatch.chdir(project_dir)
     scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
-    # Append rows with terminal statuses (13 columns to match the header:
-    # id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words)
+    # Append rows with terminal statuses (14 columns to match the header:
+    # id|seq|title|part|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words)
     with open(scenes_csv, 'a') as f:
-        f.write('cut-scene|99|Cut Scene|1|||||||cut||\n')
-        f.write('merged-scene|100|Merged Scene|1|||||||merged||\n')
+        f.write('cut-scene|99|Cut Scene|1||||||||cut||\n')
+        f.write('merged-scene|100|Merged Scene|1||||||||merged||\n')
     from storyforge import cmd_migrate_medium
     cmd_migrate_medium.main(['--to', 'graphic-novel', '--no-commit'])
 
@@ -602,7 +602,7 @@ def test_migrate_preserves_readme_and_notes_in_scenes_dir(project_dir, monkeypat
     # Make 'the-opening' an actual scene in scenes.csv
     scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
     with open(scenes_csv, 'a') as f:
-        f.write('the-opening|99|Opening|1|||||||drafted||||\n')
+        f.write('the-opening|99|Opening|1||||||||drafted||||\n')
     from storyforge import cmd_migrate_medium
     cmd_migrate_medium.main(['--to', 'graphic-novel', '--no-commit'])
     # README.md and NOTES.md should still be in scenes/

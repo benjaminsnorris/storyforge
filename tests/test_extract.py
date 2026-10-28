@@ -3,6 +3,8 @@
 import os
 import shutil
 
+import pytest
+
 
 class TestParseCharacterizeResponse:
     def test_extracts_fields(self):
@@ -111,6 +113,28 @@ class TestBuildPrompts:
                                        {'pov_characters': 'Alice', 'timeline': 'linear'})
         assert 'POV' in prompt and 'TITLE' in prompt and 'LOCATION' in prompt
 
+    def test_skeleton_prompt_asks_for_act_not_part(self):
+        """Book parts come from the manuscript's part headings
+        (scenes-setup); the model is asked only for the structural act."""
+        from storyforge.extract import build_skeleton_prompt
+        prompt = build_skeleton_prompt('act1-sc01', 'Some scene prose here.',
+                                       {'pov_characters': 'Alice'})
+        assert '\nACT: ' in prompt
+        assert 'PART:' not in prompt
+
+    def test_skeleton_response_maps_act_and_ignores_part(self):
+        from storyforge.extract import parse_skeleton_response
+        result = parse_skeleton_response('TITLE: T\nACT: 2\nPART: 1', 's1')
+        assert result['act'] == '2'
+        assert 'part' not in result
+
+    def test_intent_prompt_context_names_the_act(self):
+        from storyforge.extract import build_intent_prompt
+        prompt = build_intent_prompt('s1', 'Prose.', {},
+                                     {'title': 'T', 'act': '3', 'part': '1'})
+        assert 'Act: 3' in prompt
+        assert 'Part:' not in prompt
+
     def test_intent_prompt(self):
         from storyforge.extract import build_intent_prompt
         prompt = build_intent_prompt('act1-sc01', 'Scene prose.',
@@ -192,3 +216,158 @@ class TestFidelityScoring:
         prompt = build_fidelity_prompt('act1-sc01', fixture_dir, plugin_dir)
         assert len(prompt) > 0
         assert 'goal' in prompt.lower() and 'conflict' in prompt.lower()
+
+
+class TestFitManuscript:
+    """Phase 0 keeps the ending of an over-long manuscript (a short novel
+    like The Great Gatsby, ~278k chars, used to lose its last chapters)."""
+
+    def test_short_novel_sent_whole(self):
+        from storyforge.extract import _fit_manuscript
+        text = 'paragraph of prose.\n' * 14_000  # ~280k chars
+        assert _fit_manuscript(text) == text
+
+    def test_long_manuscript_keeps_opening_and_ending(self):
+        from storyforge.extract import _fit_manuscript
+        lines = [f'line {n} of the book.' for n in range(10_000)]
+        text = '\n'.join(lines) + '\n'
+        fitted = _fit_manuscript(text, limit=20_000)
+        assert fitted.startswith('line 0 of the book.\n')
+        assert fitted.endswith('line 9999 of the book.\n')
+        assert len(fitted) < 21_000
+        assert 'words from the middle of the manuscript are omitted' in fitted
+
+    def test_trims_on_line_boundaries(self):
+        from storyforge.extract import _fit_manuscript
+        lines = [f'line {n} of the book.' for n in range(10_000)]
+        fitted = _fit_manuscript('\n'.join(lines) + '\n', limit=20_000)
+        kept = [l for l in fitted.splitlines() if l.startswith('line ')]
+        assert all(l in set(lines) for l in kept)
+
+
+class TestValueAtStakeIsBare:
+    """value_at_stake must be the value alone so the values registry can
+    resolve it (The Great Gatsby yielded "truth — specifically ...")."""
+
+    def _parse(self, value):
+        from storyforge.extract import parse_intent_response
+        return parse_intent_response(f'VALUE_AT_STAKE: {value}\n', 's1')['value_at_stake']
+
+    def test_em_dash_elaboration_dropped(self):
+        assert self._parse('truth — specifically, the hidden past') == 'truth'
+
+    def test_unspaced_em_dash_and_en_dash(self):
+        assert self._parse('Truth—the gap between persona and reality') == 'Truth'
+        assert self._parse('hope – that the past can return') == 'hope'
+
+    def test_spaced_hyphen_and_colon(self):
+        assert self._parse('love - whether it can be recovered') == 'love'
+        assert self._parse('loyalty: to the dead') == 'loyalty'
+
+    def test_hyphenated_value_kept(self):
+        assert self._parse('self-respect') == 'self-respect'
+
+    def test_prompt_asks_for_value_only(self):
+        from storyforge.extract import build_intent_prompt
+        prompt = build_intent_prompt('s1', 'Scene prose.', {}, {})
+        assert 'Name only the value' in prompt
+
+
+class TestEnumAnswersReduced:
+    """Every action_sequel and turning_point from The Great Gatsby failed
+    validation because the answer carried an explanation."""
+
+    def _intent(self, **fields):
+        from storyforge.extract import parse_intent_response
+        text = ''.join(f'{k.upper()}: {v}\n' for k, v in fields.items())
+        return parse_intent_response(text, 's1')
+
+    def test_explanations_dropped(self):
+        r = self._intent(action_sequel='sequel — reaction: Nick broods',
+                         turning_point='Revelation — Owl Eyes understands',
+                         value_shift='+/- (the hope briefly sustained)')
+        assert (r['action_sequel'], r['turning_point'], r['value_shift']) == (
+            'sequel', 'revelation', '+/-')
+
+    def test_longest_allowed_value_wins(self):
+        assert self._intent(value_shift='-/-- worse')['value_shift'] == '-/--'
+        assert self._intent(value_shift='-/-')['value_shift'] == '-/-'
+
+    def test_unrecognized_answer_left_for_validation(self):
+        assert self._intent(action_sequel='actionable')['action_sequel'] == 'actionable'
+        assert self._intent(turning_point='a slow realization')['turning_point'] == 'a slow realization'
+
+    def test_skeleton_time_of_day(self):
+        from storyforge.extract import parse_skeleton_response
+        r = parse_skeleton_response('TIME_OF_DAY: Evening (after dinner)\n', 's1')
+        assert r['time_of_day'] == 'evening'
+
+
+class TestKnowledgeIdsAtSource:
+    """Phase 3b writes knowledge_in/out as ids from a registry built while the
+    chain is extracted, not as sentences matched up afterwards (F-022)."""
+
+    def test_prompt_offers_registry_ids(self):
+        from storyforge.extract import build_knowledge_prompt
+        prompt = build_knowledge_prompt(
+            's2', 'Scene text.', {'pov': 'Nick'}, {},
+            {'Nick': 'tom-affair-ny'}, [],
+            known_facts={'tom-affair-ny': 'Tom has a mistress in New York',
+                         'gatsby-throws-parties': 'Gatsby throws the parties'})
+        assert '- tom-affair-ny — Tom has a mistress in New York' in prompt
+        assert '- gatsby-throws-parties — Gatsby throws the parties' in prompt
+        assert 'NEW_FACTS:' in prompt
+        assert 'IDs only, never sentences' in prompt
+        assert 'at most 15 words' in prompt
+        assert 'never write "none"' in prompt
+
+    def test_parses_new_facts(self):
+        from storyforge.extract import parse_knowledge_response
+        result = parse_knowledge_response(
+            'KNOWLEDGE_IN: tom-affair-ny\n'
+            'KNOWLEDGE_OUT: tom-affair-ny;myrtle-is-mistress;wilson-unaware\n'
+            'NEW_FACTS: myrtle-is-mistress | Tom\'s mistress is Myrtle Wilson | identity\n'
+            'wilson-unaware | George Wilson does not know of the affair | identity\n'
+            'CONTINUITY_DEPS: s1\n'
+            'SCENE_SUMMARY: Nick meets Myrtle.', 's2')
+        assert [f['id'] for f in result['_new_facts']] == ['myrtle-is-mistress', 'wilson-unaware']
+        assert result['_new_facts'][0]['category'] == 'identity'
+        assert result['continuity_deps'] == 's1'
+        assert result['_summary'] == 'Nick meets Myrtle.'
+
+    @pytest.mark.parametrize('value', ['none', '(none)', 'None.', 'n/a', '(empty)', '-',
+                                       'No new facts'])
+    def test_placeholder_fields_are_empty(self, value):
+        from storyforge.extract import parse_knowledge_response
+        result = parse_knowledge_response(
+            f'KNOWLEDGE_IN: {value}\nKNOWLEDGE_OUT: fact-a;{value}\n'
+            f'NEW_FACTS: {value}\nCONTINUITY_DEPS: {value}\n', 's1')
+        assert 'knowledge_in' not in result
+        assert result['knowledge_out'] == 'fact-a'
+        assert 'continuity_deps' not in result
+        assert result['_new_facts'] == []
+
+    def test_physical_state_placeholders_are_empty(self):
+        from storyforge.extract import parse_physical_state_response
+        result = parse_physical_state_response(
+            'PHYSICAL_STATE_IN: (none)\nPHYSICAL_STATE_OUT: none\n'
+            'NEW_STATES: none\nRESOLVED_STATES: none\n', 's1')
+        assert 'physical_state_in' not in result
+        assert 'physical_state_out' not in result
+        assert result['_new_states'] == []
+        assert result['_resolved'] == []
+
+    def test_registry_grows_and_names_resolve_to_ids(self):
+        from storyforge.extract import merge_new_knowledge_facts, resolve_knowledge_ids
+        registry = {'tom-affair-ny': {'id': 'tom-affair-ny', 'name': 'Tom has a mistress',
+                                      'aliases': '', 'category': 'identity', 'origin': 's1'}}
+        added = merge_new_knowledge_facts(registry, [
+            {'id': 'tom-affair-ny', 'name': 'dup', 'category': ''},
+            {'id': 'myrtle-is-mistress', 'name': 'The mistress is Myrtle', 'category': 'identity'},
+        ], 's2')
+        assert added == ['myrtle-is-mistress']
+        assert registry['myrtle-is-mistress']['origin'] == 's2'
+        assert registry['tom-affair-ny']['name'] == 'Tom has a mistress'
+        assert resolve_knowledge_ids(
+            registry, 'Tom has a mistress;myrtle-is-mistress;(none);something else'
+        ) == 'tom-affair-ny;myrtle-is-mistress;something else'

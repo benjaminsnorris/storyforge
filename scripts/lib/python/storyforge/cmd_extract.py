@@ -159,7 +159,8 @@ def main(argv=None):
         # Phase 2: Intent
         if args.phase is None or args.phase == 2:
             _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir,
-                         log_dir, profile_file, args.dry_run, system=system)
+                         log_dir, profile_file, args.force, args.dry_run,
+                         system=system)
             if not args.dry_run:
                 commit_and_push(project_dir,
                                 'Extract: Phase 2 — intent (scene-intent.csv)',
@@ -294,6 +295,64 @@ def _run_hone(plugin_dir: str, phase: int) -> None:
 # Phase 0: Characterize
 # ============================================================================
 
+def _merge_fields(row: dict, result: dict, force: bool) -> bool:
+    """Copy extracted values into an existing CSV row; return whether it changed.
+
+    Empty fields are filled; populated ones are overwritten only with force.
+    Keys starting with '_' (e.g. _confidence) are response metadata, not columns.
+    """
+    changed = False
+    for k, v in result.items():
+        if not v or k == 'id' or k.startswith('_'):
+            continue
+        if (force or not row.get(k, '').strip()) and row.get(k) != v:
+            row[k] = v
+            changed = True
+    return changed
+
+
+def _merge_batch_results(csv_path, csv_name, sorted_scene_ids, log_dir, parse,
+                         alias_maps, force, new_row=None,
+                         sort_key=lambda r: r.get('id', '')) -> int:
+    """Merge per-scene batch responses ({log_dir}/{scene_id}.txt) into a scene CSV.
+
+    Scenes with a row are merged per _merge_fields; scenes without one get a
+    new row (new_row(row, index, scene_id) can fill extra columns). Returns
+    the number of scenes added or changed.
+    """
+    from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+    from storyforge.enrich import normalize_fields
+
+    columns = _FILE_MAP[csv_name]
+    existing = _read_csv_as_map(csv_path)
+    count = 0
+    for i, sid in enumerate(sorted_scene_ids):
+        txt_file = os.path.join(log_dir, f'{sid}.txt')
+        if not os.path.isfile(txt_file):
+            continue
+        with open(txt_file) as f:
+            result = parse(f.read(), sid)
+        normalize_fields(result, alias_maps)
+
+        if sid in existing:
+            count += _merge_fields(existing[sid], result, force)
+        else:
+            row = {c: '' for c in columns}
+            _merge_fields(row, result, force=True)
+            row['id'] = sid
+            if new_row:
+                new_row(row, i, sid)
+            existing[sid] = row
+            count += 1
+
+    _write_csv(csv_path, sorted(existing.values(), key=sort_key), columns)
+    return count
+
+
+def _log_merge(csv_name: str, changed: int, total: int, suffix: str = '') -> None:
+    log(f'  Updated {csv_name}: {changed} of {total} scenes changed{suffix}')
+
+
 def _run_phase_0(project_dir, scenes_dir, log_dir, profile_file, dry_run,
                  system=None):
     log('')
@@ -394,39 +453,20 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     # Process results
     log('  Processing skeleton results...')
     alias_maps = load_registry_alias_maps(project_dir)
-    existing = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
 
-    count = 0
-    for i, sid in enumerate(sorted_scene_ids):
-        txt_file = os.path.join(log_dir, f'{sid}.txt')
-        if not os.path.isfile(txt_file):
-            continue
-        with open(txt_file) as f:
-            response_text = f.read()
-        result = parse_skeleton_response(response_text, sid)
-        normalize_fields(result, alias_maps)
+    def new_skeleton_row(row, i, sid):
+        row['seq'] = str(i + 1)
+        row['status'] = 'drafted'
+        scene_file = os.path.join(scenes_dir, f'{sid}.md')
+        if os.path.isfile(scene_file):
+            with open(scene_file) as f:
+                row['word_count'] = str(len(f.read().split()))
 
-        if sid in existing:
-            for k, v in result.items():
-                if v and k != 'id' and (force or not existing[sid].get(k, '').strip()):
-                    existing[sid][k] = v
-        elif not existing:
-            row = {c: '' for c in _FILE_MAP['scenes.csv']}
-            row.update(result)
-            row['seq'] = str(i + 1)
-            row['status'] = 'drafted'
-            scene_file = os.path.join(scenes_dir, f'{sid}.md')
-            if os.path.isfile(scene_file):
-                with open(scene_file) as f:
-                    row['word_count'] = str(len(f.read().split()))
-            existing[sid] = row
-        else:
-            continue
-        count += 1
-
-    ordered = sorted(existing.values(), key=lambda r: int(r.get('seq', 0)))
-    _write_csv(os.path.join(ref_dir, 'scenes.csv'), ordered, _FILE_MAP['scenes.csv'])
-    log(f'  Updated scenes.csv: {count} scenes')
+    count = _merge_batch_results(
+        os.path.join(ref_dir, 'scenes.csv'), 'scenes.csv', sorted_scene_ids,
+        log_dir, parse_skeleton_response, alias_maps, force,
+        new_row=new_skeleton_row, sort_key=lambda r: int(r.get('seq') or 0))
+    _log_merge('scenes.csv', count, len(sorted_scene_ids))
 
     _safe_remove(batch_file)
     _safe_rmdir(skel_output)
@@ -437,7 +477,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 # ============================================================================
 
 def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
-                 profile_file, dry_run, system=None):
+                 profile_file, force, dry_run, system=None):
     log('')
     log('--- Phase 2: Extract intent (scene-intent.csv) ---')
 
@@ -484,37 +524,11 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     # Process results
     log('  Processing intent results...')
     alias_maps = load_registry_alias_maps(project_dir)
-    force = False  # Phase 2 doesn't use --force for intent
 
-    existing = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
-
-    count = 0
-    for sid in sorted_scene_ids:
-        txt_file = os.path.join(log_dir, f'{sid}.txt')
-        if not os.path.isfile(txt_file):
-            continue
-        with open(txt_file) as f:
-            response_text = f.read()
-        result = parse_intent_response(response_text, sid)
-        normalize_fields(result, alias_maps)
-
-        if sid in existing:
-            for k, v in result.items():
-                if v and k != 'id' and not k.startswith('_'):
-                    if force or not existing[sid].get(k, '').strip():
-                        existing[sid][k] = v
-        elif not existing:
-            row = {c: '' for c in _FILE_MAP['scene-intent.csv']}
-            row.update({k: v for k, v in result.items() if not k.startswith('_')})
-            existing[sid] = row
-        else:
-            continue
-        count += 1
-
-    ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
-    _write_csv(os.path.join(ref_dir, 'scene-intent.csv'), ordered,
-               _FILE_MAP['scene-intent.csv'])
-    log(f'  Updated scene-intent.csv: {count} scenes')
+    count = _merge_batch_results(
+        os.path.join(ref_dir, 'scene-intent.csv'), 'scene-intent.csv',
+        sorted_scene_ids, log_dir, parse_intent_response, alias_maps, force)
+    _log_merge('scene-intent.csv', count, len(sorted_scene_ids))
 
     _safe_remove(batch_file)
     _safe_rmdir(intent_output)
@@ -540,13 +554,15 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     from storyforge.extract import (
         build_brief_parallel_prompt, parse_brief_parallel_response,
         build_knowledge_prompt, parse_knowledge_response,
+        merge_new_knowledge_facts, resolve_knowledge_ids, KNOWLEDGE_COLUMNS,
         build_physical_state_prompt, parse_physical_state_response,
     )
     from storyforge.elaborate import (
         get_scene, update_scene, _read_csv_as_map, _write_csv, _FILE_MAP,
     )
     from storyforge.enrich import (
-        format_registries_for_prompt, load_registry_alias_maps, normalize_fields,
+        format_registries_for_prompt, load_registry_alias_maps, normalize_aliases,
+        normalize_fields,
     )
 
     model = select_model('evaluation')
@@ -561,7 +577,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     log(f'  Building batch for {len(sorted_scene_ids)} scenes...')
     for scene_id in sorted_scene_ids:
         scene_data = get_scene(scene_id, ref_dir) or {}
-        skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'part']}
+        skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'act']}
         intent = {k: scene_data.get(k, '') for k in
                   ['function', 'action_sequel', 'value_at_stake', 'value_shift', 'emotional_arc']}
 
@@ -589,34 +605,11 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     # Process results
     log('  Processing brief results...')
-    existing = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
-
-    count = 0
-    for sid in sorted_scene_ids:
-        txt_file = os.path.join(log_dir, f'{sid}.txt')
-        if not os.path.isfile(txt_file):
-            continue
-        with open(txt_file) as f:
-            response_text = f.read()
-        result = parse_brief_parallel_response(response_text, sid)
-        normalize_fields(result, alias_maps)
-
-        if sid in existing:
-            for k, v in result.items():
-                if v and k != 'id' and (force or not existing[sid].get(k, '').strip()):
-                    existing[sid][k] = v
-        elif not existing:
-            row = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
-            row.update(result)
-            existing[sid] = row
-        else:
-            continue
-        count += 1
-
-    ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
-    _write_csv(os.path.join(ref_dir, 'scene-briefs.csv'), ordered,
-               _FILE_MAP['scene-briefs.csv'])
-    log(f'  Updated scene-briefs.csv: {count} scenes (knowledge fields pending)')
+    count = _merge_batch_results(
+        os.path.join(ref_dir, 'scene-briefs.csv'), 'scene-briefs.csv',
+        sorted_scene_ids, log_dir, parse_brief_parallel_response, alias_maps, force)
+    _log_merge('scene-briefs.csv', count, len(sorted_scene_ids),
+               ' (knowledge fields pending)')
 
     commit_and_push(project_dir,
                     'Extract: Phase 3a — briefs (parallel fields)',
@@ -631,6 +624,15 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     knowledge_model = select_model('evaluation')
     knowledge_state = {}
     summaries = []
+    # knowledge_in/out are registry-backed: build knowledge.csv as the chain
+    # is extracted, so each scene's prompt can offer the ids established so
+    # far and the fields are written as ids, not sentences. Seeded from an
+    # existing registry so a re-extraction reuses its ids.
+    knowledge_csv = os.path.join(ref_dir, 'knowledge.csv')
+    knowledge_registry = {fid: row for fid, row in _read_csv_as_map(knowledge_csv).items()
+                          if fid}
+    knowledge_registries = format_registries_for_prompt(
+        project_dir, exclude=('knowledge.csv',))
 
     for scene_id in sorted_scene_ids:
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
@@ -642,12 +644,14 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             continue
 
         scene_data = get_scene(scene_id, ref_dir) or {}
-        skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'part']}
+        skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'act']}
         intent = {k: scene_data.get(k, '') for k in ['function', 'action_sequel']}
 
-        prompt = build_knowledge_prompt(scene_id, scene_text, skeleton, intent,
-                                         knowledge_state, summaries,
-                                         registries_text=registries)
+        prompt = build_knowledge_prompt(
+            scene_id, scene_text, skeleton, intent, knowledge_state, summaries,
+            registries_text=knowledge_registries,
+            known_facts={fid: row.get('name', '')
+                         for fid, row in knowledge_registry.items()})
 
         knowledge_log = os.path.join(log_dir, f'extract-knowledge-{scene_id}.json')
 
@@ -662,6 +666,15 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             continue
 
         result = parse_knowledge_response(text, scene_id)
+
+        # Register the scene's new facts, then resolve both fields to ids
+        if merge_new_knowledge_facts(knowledge_registry,
+                                     result.get('_new_facts', []), scene_id):
+            _write_csv(knowledge_csv, list(knowledge_registry.values()),
+                       KNOWLEDGE_COLUMNS)
+        for k in ('knowledge_in', 'knowledge_out'):
+            if result.get(k):
+                result[k] = resolve_knowledge_ids(knowledge_registry, result[k])
 
         # Update briefs CSV
         updates = {}
@@ -685,7 +698,8 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     commit_and_push(project_dir,
                     'Extract: Phase 3b — knowledge chain',
-                    ['reference/scene-briefs.csv', 'working/'])
+                    ['reference/scene-briefs.csv', 'reference/knowledge.csv',
+                     'working/'])
 
     # --- Phase 3c: Physical state chain (sequential) ---
     log('')
@@ -706,7 +720,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
         scene_data = get_scene(scene_id, ref_dir) or {}
         skeleton = {k: scene_data.get(k, '')
-                    for k in ['title', 'pov', 'location', 'part', 'on_stage']}
+                    for k in ['title', 'pov', 'location', 'act', 'on_stage']}
 
         prompt = build_physical_state_prompt(scene_id, scene_text, skeleton,
                                               phys_states, phys_summaries,
@@ -747,7 +761,8 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                     continue
                 row = {c: '' for c in columns}
                 row['id'] = sid_key
-                row['character'] = ns.get('character', '')
+                row['character'] = normalize_aliases(
+                    alias_maps.get('characters', {}), ns.get('character', ''))
                 row['description'] = ns.get('description', '')
                 row['category'] = ns.get('category', '')
                 row['acquired'] = scene_id

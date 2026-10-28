@@ -3729,7 +3729,10 @@ def test_map_axes_invariants():
         assert not (set(keys) & set(other))
 
 
-def test_continuity_deterministic_flags_timeline_backward():
+def test_continuity_deterministic_does_not_flag_flashback():
+    # Flashbacks are a device, not a continuity error (author's decision).
+    # This used to be high severity unless scene_type was one of
+    # flashback/interlude/prologue, none of which is a valid scene type.
     from storyforge.scoring_story_power import (
         _check_continuity_deterministic, MappedScene,
     )
@@ -3737,11 +3740,10 @@ def test_continuity_deterministic_flags_timeline_backward():
         MappedScene('s1', 1, 'T', 'a.', 'A', 'L', '3', 'morning', '',
                     1000, 1000, ''),
         MappedScene('s2', 2, 'T', 'b.', 'A', 'L', '1', 'morning', '',
-                    1000, 1000, ''),  # day went 3 → 1 with no flashback
+                    1000, 1000, ''),  # day went 3 → 1
     ]
     findings = _check_continuity_deterministic(scenes, set())
-    assert any(f['field'] == 'timeline_day' and f['severity'] == 'high'
-               for f in findings)
+    assert not any(f['field'] == 'timeline_day' for f in findings)
 
 
 def test_continuity_deterministic_skips_timeline_backward_when_flashback():
@@ -4129,28 +4131,6 @@ def test_continuity_deterministic_allows_prologue_and_interlude_types():
     assert not any(f['field'] == 'timeline_day' for f in findings)
 
 
-def test_continuity_finding_issue_text_names_allowed_types():
-    """When timeline goes backward without an allowed scene_type, the
-    issue text should name ALL allowed types (not just 'flashback')
-    so the author knows the actual remedy set."""
-    from storyforge.scoring_story_power import (
-        _check_continuity_deterministic, MappedScene,
-    )
-    scenes = [
-        MappedScene('s1', 1, 'T', 'a.', 'A', 'L', '3', 'morning', '',
-                    1000, 1000, ''),
-        MappedScene('s2', 2, 'T', 'b.', 'A', 'L', '1', 'morning',
-                    'regular', 1000, 1000, ''),
-    ]
-    findings = _check_continuity_deterministic(scenes, set())
-    timeline_findings = [f for f in findings if f['field'] == 'timeline_day']
-    assert timeline_findings
-    issue = timeline_findings[0]['issue']
-    # Names all three allowed types so the author has the full remedy.
-    for kw in ('flashback', 'interlude', 'prologue'):
-        assert kw in issue
-
-
 def test_parse_scene_map_unset_seq_sorts_to_end(tmp_path, capsys):
     """Mixed-seq scenarios: rows with seq=blank/non-int (seq=None) must
     sort AFTER rows with explicit seq. The previous int+0-sentinel sort
@@ -4328,16 +4308,10 @@ def test_scene_map_integration_with_backward_timeline(tmp_path, monkeypatch,
     result = scoring_story_power.score_story_power(str(tmp_path), 'full')
     ext = result['scene_map']
     assert ext is not None
-    assert any(f['field'] == 'timeline_day' and f['severity'] == 'high'
-               for f in ext['continuity_findings'])
-    # The finding's issue text should describe what went wrong (T-9
-    # tightening) — pin the substring so a future generic-ified
-    # message would fail loudly.
-    timeline_finding = next(
-        f for f in ext['continuity_findings']
-        if f['field'] == 'timeline_day'
-    )
-    assert 'went backward' in timeline_finding['issue']
+    # A backward step in story time is a flashback, a device rather than
+    # a continuity error (author's decision), so it is not a finding.
+    assert not any(f['field'] == 'timeline_day'
+                   for f in ext['continuity_findings'])
 
 
 # ---------------------------------------------------------------------------
@@ -4466,8 +4440,8 @@ def test_build_scene_map_prompt_inlines_deterministic_findings():
     scenes = [
         MappedScene('s1', 1, 'T', 'a.', 'A', 'L', '3', 'morning', '',
                     1000, 1000, ''),
-        MappedScene('s2', 2, 'T', 'b.', 'A', 'L', '1', 'morning',
-                    'regular', 1000, 1000, ''),
+        MappedScene('s2', 2, 'T', 'b.', 'A', 'L', '3', 'morning',
+                    'regular', 5000, 1000, ''),
     ]
     artifacts = PitchArtifacts(logline='L', synopsis='S', act_shape='',
                                 theme='', spine_summaries='',
@@ -4478,7 +4452,7 @@ def test_build_scene_map_prompt_inlines_deterministic_findings():
                                        det_findings, 'rubric')
     # The finding's issue text appears in the prompt — the LLM gets
     # the actionable detail, not just the count.
-    assert 'went backward' in prompt
+    assert 'pacing band' in prompt
 
 
 def test_scene_map_partial_per_scene_tags_partial(tmp_path, monkeypatch):

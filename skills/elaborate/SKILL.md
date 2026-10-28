@@ -50,6 +50,16 @@ Read all registry files in `reference/` to know the canonical IDs for normalized
 
 **When the author introduces a new character, location, value, knowledge fact, motif, or MICE thread that does not exist in a registry:** add it to the appropriate registry CSV first, then use the new ID in scene data.
 
+## Scene IDs
+
+A scene id is a 3-5 word lowercase hyphenated slug naming the scene's core event (e.g., `gatsby-reunites-with-daisy`). It is permanent:
+
+- **Never positional.** No `act1-sc03`, `scene-12`, `ch3-2`. Position belongs in `seq` (reading order), `act` (structure) and `part` (book divisions), which exist so they can change.
+- **Never renamed.** Not when a scene moves, not when its title changes. Every reference (`continuity_deps`, knowledge `origin`, physical-state `acquired`/`resolves`, chapter maps) points at the id.
+- **Reason about order from `seq`, not the id.** When considering whether a scene belongs elsewhere, judge it by what happens in it; the id should not anchor you to where it started.
+
+`storyforge validate` reports ids that break this rule (advisory).
+
 ## Step 2: Determine Current Stage
 
 Based on the project state, identify where the author is:
@@ -206,7 +216,7 @@ author.
 
 1. Read the spine scenes and story architecture
 2. Expand to 15-25 scenes: add supporting scenes, transitions, subplot introductions
-3. Assign parts, POV, scene types (action/sequel), value shifts, turning points
+3. Assign acts, POV, scene types (action/sequel), value shifts, turning points
    - **Use canonical IDs from registries** for pov, characters, locations, value_at_stake. Add new registry entries for any new characters/locations/values introduced at this stage.
 4. Deepen character bible with supporting characters
 5. Create world bible if needed
@@ -413,9 +423,9 @@ Update `reference/world-bible.md` (and `reference/systems-bible.md` if the world
 
 This mode activates when structural scoring shows Pacing Shape below target — typically "second half tension does not exceed first half." This is a creative decision, not a data fix.
 
-1. **Show the data.** Read `reference/scene-intent.csv` and present the value_shift distribution by act/part:
-   - Count shifts by type per part: `++`, `+/-`, `-/-`, `-/--`, etc.
-   - Show which part has the most negative/dramatic shifts
+1. **Show the data.** Read `reference/scene-intent.csv` and present the value_shift distribution by act (`act` column):
+   - Count shifts by type per act: `++`, `+/-`, `-/-`, `-/--`, etc.
+   - Show which act has the most negative/dramatic shifts
    - Highlight where the second half has fewer negative shifts than the first
 
 2. **Explain what it means.** Pacing shape measures whether tension escalates through the novel. A novel where the first half has harder shifts than the second feels like it peaks early and coasts. The target is for the second half to have more tension than the first — not necessarily monotonic escalation, but the overall pressure should increase.
@@ -429,7 +439,7 @@ This mode activates when structural scoring shows Pacing Shape below target — 
 **Coaching level adaptation:**
 - **Full:** Propose specific shift changes with reasoning. "Scene 38 (betrayal) is `+/-` — the betrayal is discovered but Zara still has her crew. If this became `-/--` — she loses Naji AND the crew fractures — the second half gets harder."
 - **Coach:** Show the distribution, ask the author which scenes feel too easy. Don't propose specific changes.
-- **Strict:** Show the raw shift counts per part. No interpretation.
+- **Strict:** Show the raw shift counts per act. No interpretation.
 
 ### Outcome Review (Interactive)
 
@@ -440,9 +450,10 @@ This mode activates when Scene Function Variety is below target — typically on
    - `yes-but`: Y scenes
    - `no`: Z scenes
    - `no-and`: W scenes
+   - `no-but`: V scenes
    - Show the percentage and whether any type is >40% of total
 
-2. **Explain what it means.** Outcome variety creates emotional rhythm. A novel where 45% of scenes end `yes-but` feels like the same emotional beat repeating — the character wins but it costs something, over and over. Readers stop feeling the cost. Mixing in more `no` (flat failure) and `no-and` (failure that makes things worse) creates contrast that makes the `yes-but` scenes land harder.
+2. **Explain what it means.** Outcome variety creates emotional rhythm. A novel where 45% of scenes end `yes-but` feels like the same emotional beat repeating — the character wins but it costs something, over and over. Readers stop feeling the cost. Mixing in more `no` (flat failure) and `no-and` (failure that makes things worse) creates contrast that makes the `yes-but` scenes land harder. `no-but` (failure in which something genuinely goes their way) marks a turning tide; if several `no-but` gains get cancelled a few scenes later, that's Weiland's false progress — busy, not moving (see structural-craft.md §2).
 
 3. **Ask the author.** Show scenes where the dominant outcome could change. Focus on scenes where the current outcome feels like the easiest choice:
    - "This scene's goal is 'convince the council.' The outcome is `yes-but`. What if it were `no` — the council refuses, full stop? That forces a harder decision in the next scene."

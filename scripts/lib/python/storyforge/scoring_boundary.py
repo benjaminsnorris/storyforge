@@ -230,7 +230,7 @@ def _collect_per_spine_event(project_dir: str,
         if summary:
             upstream_parts.append(f'Summary: {summary}')
         upstream_parts.append(f'Function: {ev.get("function", "")}')
-        upstream_parts.append(f'Act: {ev.get("part", "")}')
+        upstream_parts.append(f'Act: {ev.get("act", "")}')
         upstream = '\n'.join(upstream_parts)
         descendants = [r for r in arch_rows
                        if r.get('spine_event', '').strip() == ev_id]

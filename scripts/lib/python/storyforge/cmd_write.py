@@ -57,7 +57,7 @@ def parse_args(argv):
     parser.add_argument('--scenes', type=str, default=None,
                         help='Comma-separated scene IDs')
     parser.add_argument('--act', '--part', type=str, default=None,
-                        help='Draft all scenes in act/part N')
+                        help='Draft all scenes in act N')
     parser.add_argument('--from-seq', type=str, default=None,
                         help='Start from sequence number (N or N-M range)')
     return parser.parse_args(argv)

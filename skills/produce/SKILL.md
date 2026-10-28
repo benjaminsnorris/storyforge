@@ -51,9 +51,9 @@ The chapter map doesn't exist yet. Guide the author through creating it. **How y
 
 **If no specific direction and coaching level is `full`**, analyze the scene index and propose a chapter structure:
 
-1. **Read all scene metadata** — IDs, titles, acts/parts, POV, settings, functions.
+1. **Read all scene metadata** — IDs, titles, acts (`act`), book parts (`part`, if any), POV, settings, functions.
 2. **Propose a chapter mapping** based on natural scene groupings:
-   - Scenes in the same act/part that share POV or narrative continuity
+   - Scenes in the same act (or book part) that share POV or narrative continuity
    - Scene breaks at POV shifts, time jumps, or location changes
    - Chapter length targets (typically 2,000–5,000 words per chapter for most genres)
 3. **Present the proposal** as a readable chapter list:

@@ -36,11 +36,45 @@ from storyforge.costs import (
     estimate_cost, check_threshold, print_summary, log_operation,
 )
 from storyforge.scenes import (
-    generate_slug, unique_slug, parse_scene_boundaries,
+    generate_slug, unique_slug, scene_id_slug, is_break_marker, parse_scene_boundaries,
     build_boundary_prompt, scenes_header, intent_header,
     _title_from_file,
 )
 from storyforge.csv_cli import get_field, get_column, append_row
+
+
+# A part (or book) heading: "Part One", "PART II", "# Part 3: The Lighthouse",
+# "BOOK FIRST". The whole line must be the heading (an ordinal, then at most a
+# separator and a short title), so prose such as "Part one of the plan was
+# simple." never matches.
+_PART_HEADING_RE = re.compile(
+    r'^(?:#{1,2}\s+)?(?:part|book)\s+(?:[0-9]+|[ivxlc]+|one|two|three|four|five|'
+    r'six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|'
+    r'eighth|ninth|tenth)\s*(?:[:.\-—–]\s*[^.!?]{0,60})?$',
+    re.IGNORECASE,
+)
+
+
+def _is_part_heading(line):
+    stripped = line.strip()
+    return len(stripped) <= 80 and bool(_PART_HEADING_RE.match(stripped))
+
+
+def _natural_key(path):
+    """Sort key that orders chapter-2 before chapter-10."""
+    name = os.path.basename(path).lower()
+    return [int(t) if t.isdigit() else t for t in re.split(r'(\d+)', name)]
+
+
+def _row_for_header(csv_path, values):
+    """Build a pipe-delimited row in the column order of csv_path's header.
+
+    Columns absent from values are left empty, so the row stays aligned
+    whichever schema version the project's CSV was created with.
+    """
+    with open(csv_path, encoding='utf-8') as f:
+        header = f.readline().rstrip('\r\n').split('|')
+    return '|'.join(str(values.get(col, '')) for col in header)
 
 
 def parse_args(argv):
@@ -122,6 +156,11 @@ def main(argv=None):
     # Track used slugs
     used_slugs = set()
 
+    # Part number per temp chapter file, filled by split-manuscript from the
+    # manuscript's own part headings. A book without parts leaves `part`
+    # empty rather than having parts invented for it.
+    chapter_parts = {}
+
     # ==================================================================
     # Shared utilities
     # ==================================================================
@@ -147,9 +186,12 @@ def main(argv=None):
         blank_count = 0
         prev_blank = False
 
-        for line_num, line in enumerate(text.splitlines(), 1):
+        lines = text.splitlines()
+        for line_num, line in enumerate(lines, 1):
             stripped = line.strip()
-            if stripped in ('***', '---', '# # #', '* * *'):
+            # A marker follows a blank line; "---" or "___" directly under a
+            # line of text is a Markdown setext heading underline instead.
+            if is_break_marker(stripped) and (line_num == 1 or not lines[line_num - 2].strip()):
                 if line_num > 1:
                     breaks.append(line_num)
                 blank_count = 0
@@ -177,26 +219,19 @@ def main(argv=None):
         return after_line
 
     def build_splits_from_markers(chapter_text, break_lines):
-        """Build split info from explicit break markers."""
-        lines_list = chapter_text.splitlines()
-        splits = [{'line': 1, 'title': '', 'reason': 'Chapter opening'}]
-        # Title for first segment
-        first_line = lines_list[0].strip() if lines_list else 'Opening'
-        splits[0]['title'] = first_line or 'Opening'
+        """Build split info from explicit break markers.
 
+        Markers give boundaries but no titles. Titles are left empty for
+        extraction to write (it only fills empty fields), rather than filled
+        with a chapter heading or the first 60 characters of prose.
+        """
+        splits = [{'line': 1, 'title': '', 'reason': 'Chapter opening'}]
         for brk in break_lines:
-            content_start = find_content_start(chapter_text, brk)
-            seg_title = ''
-            if content_start <= len(lines_list):
-                seg_title = lines_list[content_start - 1].strip()[:60]
-            if not seg_title:
-                seg_title = f'Scene {len(splits) + 1}'
             splits.append({
-                'line': content_start,
-                'title': seg_title,
+                'line': find_content_start(chapter_text, brk),
+                'title': '',
                 'reason': 'Explicit scene break marker',
             })
-
         return splits
 
     def confirm_splits(chapter_name, chapter_text, splits):
@@ -216,7 +251,9 @@ def main(argv=None):
                 end_line = total_lines
             seg_text = '\n'.join(lines_list[start_line - 1:end_line])
             seg_words = count_words(seg_text)
-            print(f'    Scene {s_idx + 1}: "{split["title"]}" '
+            opening = next((l.strip() for l in seg_text.splitlines() if l.strip()), '')
+            label = split.get('slug') or split.get('title') or f'{opening[:60]}...'
+            print(f'    Scene {s_idx + 1}: "{label}" '
                   f'(lines {start_line}-{end_line}, ~{seg_words} words) -- {split["reason"]}')
 
         if args.yes:
@@ -277,7 +314,7 @@ def main(argv=None):
             cleaned = []
             for ln in seg_lines:
                 stripped = ln.strip()
-                if stripped in ('***', '---', '# # #', '* * *'):
+                if is_break_marker(stripped):
                     continue
                 cleaned.append(ln)
             # Trim leading blank lines
@@ -285,11 +322,17 @@ def main(argv=None):
                 cleaned.pop(0)
             scene_text = '\n'.join(cleaned)
 
-            # Generate slug
-            stitle = split['title']
-            slug = generate_slug(stitle)
+            # Scene id: a slug of the scene's event, never its position. When
+            # Claude supplied no name, fall back to the scene's opening words.
+            stitle = re.sub(r'^#+\s*', '', split.get('title', ''))
+            slug = scene_id_slug(split.get('slug', ''))
             if not slug:
-                slug = f'scene-ch{chapter_num}-{s_idx + 1}'
+                opening = next((l for l in cleaned if l.strip()
+                                and not re.match(r'^#', l.strip())), '')
+                slug = scene_id_slug(opening) or 'scene'
+                log(f'  WARNING: no scene name from Claude; using "{slug}". Rename it '
+                    f'to a 3-5 word slug of the scene\'s event now, before anything '
+                    f'references it: scene ids are permanent once referenced')
             slug = unique_slug(slug, used_slugs)
 
             scene_file = os.path.join(scenes_dir, f'{slug}.md')
@@ -300,9 +343,11 @@ def main(argv=None):
 
                 seq_num = seq_start + s_idx
                 word_count = count_words(scene_text)
-                append_row(metadata_csv,
-                           f'{slug}|{seq_num}|{stitle}|||{part_num}|||||{word_count}|')
-                append_row(intent_csv, f'{slug}||||||||||')
+                append_row(metadata_csv, _row_for_header(metadata_csv, {
+                    'id': slug, 'seq': seq_num, 'title': stitle,
+                    'part': part_num, 'word_count': word_count,
+                }))
+                append_row(intent_csv, _row_for_header(intent_csv, {'id': slug}))
 
                 log(f'  Created scenes/{slug}.md ({word_count} words)')
             else:
@@ -312,9 +357,17 @@ def main(argv=None):
 
         return written_ids
 
+    def chapter_prompt(chapter_text):
+        """Boundary prompt for a chapter; marker boundaries are fixed, so the
+        model only names those scenes."""
+        breaks = detect_explicit_breaks(chapter_text)
+        fixed = ([s['line'] for s in build_splits_from_markers(chapter_text, breaks)]
+                 if breaks else None)
+        return build_boundary_prompt(chapter_text, fixed)
+
     def claude_detect_scenes(chapter_text, chapter_id):
-        """Use direct API to detect scene boundaries."""
-        prompt = build_boundary_prompt(chapter_text)
+        """Use direct API to detect scene boundaries and name the scenes."""
+        prompt = chapter_prompt(chapter_text)
         lf = os.path.join(log_dir, f'scenes-setup-detect-{chapter_id}.json')
 
         response_data = invoke_to_file(prompt, model, lf, max_tokens=4096, system=system)
@@ -466,9 +519,10 @@ def main(argv=None):
 
         # Collect chapter files (sorted)
         chapter_files = sorted(
-            os.path.join(src_dir, f)
-            for f in os.listdir(src_dir)
-            if f.endswith('.md') or f.endswith('.txt')
+            (os.path.join(src_dir, f)
+             for f in os.listdir(src_dir)
+             if f.endswith('.md') or f.endswith('.txt')),
+            key=_natural_key,
         )
         chapter_files = [f for f in chapter_files if os.path.isfile(f)]
 
@@ -483,12 +537,10 @@ def main(argv=None):
 
         # Find next available seq number
         max_seq = 0
-        seq_col = get_column(metadata_csv, 'seq')
-        if seq_col:
-            for val in seq_col.strip().splitlines():
-                val = val.strip()
-                if val.isdigit():
-                    max_seq = max(max_seq, int(val))
+        for val in get_column(metadata_csv, 'seq'):
+            val = val.strip()
+            if val.isdigit():
+                max_seq = max(max_seq, int(val))
 
         # Separate chapters with explicit markers vs needing Claude
         marker_chapters = []
@@ -503,8 +555,11 @@ def main(argv=None):
                     marker_chapters.append(cf)
                 else:
                     claude_chapters.append(cf)
-            log(f'{len(marker_chapters)} chapters have explicit markers, '
-                f'{len(claude_chapters)} need Claude detection')
+            log(f'{len(marker_chapters)} chapters have explicit markers (Claude names '
+                f'their scenes), {len(claude_chapters)} need Claude detection')
+            # Every chapter needs Claude: scene ids are slugs of each scene's
+            # event, which markers alone cannot supply.
+            claude_chapters = list(chapter_files)
 
         # Process chapters needing Claude detection
         if not args.dry_run and claude_chapters:
@@ -520,7 +575,7 @@ def main(argv=None):
                         ch_name = os.path.splitext(os.path.basename(cf))[0]
                         with open(cf) as fh:
                             chapter_text = fh.read()
-                        prompt = build_boundary_prompt(chapter_text)
+                        prompt = chapter_prompt(chapter_text)
                         request = build_batch_request(ch_name, prompt, model,
                                                       max_tokens=4096, system=system)
                         bf.write(json.dumps(request) + '\n')
@@ -601,7 +656,7 @@ def main(argv=None):
 
         for chapter_file in chapter_files:
             chapter_num += 1
-            part_num = (chapter_num - 1) // 5 + 1
+            part_num = chapter_parts.get(os.path.basename(chapter_file), '')
             seq_start = max_seq + total_new_scenes + 1
 
             ch_name = os.path.splitext(os.path.basename(chapter_file))[0]
@@ -611,38 +666,39 @@ def main(argv=None):
             detect_file = os.path.join(work_dir, f'.detect-{ch_name}.txt')
             breaks = detect_explicit_breaks(chapter_text)
 
+            boundaries = []
+            if os.path.isfile(detect_file):
+                with open(detect_file) as f:
+                    boundaries = parse_scene_boundaries(f.read())
+                os.remove(detect_file)
+
             if breaks:
                 log(f'\nProcessing chapter {chapter_num}: {ch_name}')
                 log('  Found explicit scene break markers')
                 splits = build_splits_from_markers(chapter_text, breaks)
-            elif os.path.isfile(detect_file):
+                # Markers fix the boundaries; Claude's response names them
+                named = {b['line_number']: b['title'] for b in boundaries}
+                for split in splits:
+                    split['slug'] = named.get(split['line'], '')
+                if boundaries and len(named) != len(splits):
+                    log(f'  WARNING: scene names returned for {len(named)} of '
+                        f'{len(splits)} marked scenes')
+            elif boundaries:
                 log(f'\nProcessing chapter {chapter_num}: {ch_name}')
-                with open(detect_file) as f:
-                    response = f.read()
-                boundaries = parse_scene_boundaries(response)
-                os.remove(detect_file)
-
-                if not boundaries:
-                    log('  WARNING: No scene boundaries detected. Treating as single scene.')
-                    ftitle = _title_from_file(chapter_file)
-                    splits = [{'line': 1, 'title': ftitle or ch_name,
-                               'reason': 'Single scene (no boundaries detected)'}]
-                else:
-                    splits = [
-                        {'line': b['line_number'], 'title': b['title'],
-                         'reason': b['description'] or 'Claude detection'}
-                        for b in boundaries
-                    ]
+                splits = [
+                    {'line': b['line_number'], 'slug': b['title'], 'title': '',
+                     'reason': b['description'] or 'Claude detection'}
+                    for b in boundaries
+                ]
             elif args.dry_run:
                 log(f'\nProcessing chapter {chapter_num}: {ch_name}')
                 tw = count_words(chapter_text)
                 log(f'  [DRY RUN] Would invoke Claude for scene detection ({tw} words)')
                 continue
             else:
-                # Fallback: single scene
                 log(f'\nProcessing chapter {chapter_num}: {ch_name}')
-                ftitle = _title_from_file(chapter_file)
-                splits = [{'line': 1, 'title': ftitle or ch_name, 'reason': 'Single scene'}]
+                log('  WARNING: No scene boundaries detected. Treating as single scene.')
+                splits = [{'line': 1, 'slug': '', 'title': '', 'reason': 'Single scene'}]
 
             # Confirm and write
             if splits:
@@ -689,15 +745,25 @@ def main(argv=None):
         total_lines = len(ms_lines)
         log(f'Manuscript: {total_words} words, {total_lines} lines')
 
-        # Step 1: Detect chapter boundaries
+        # Step 1: Detect part and chapter boundaries
         chapter_starts = []
         chapter_names = []
+        part_starts = []
 
         for line_num, line in enumerate(ms_lines, 1):
             stripped = line.strip()
 
-            # Markdown headings with "Chapter" or "Part"
-            if re.match(r'^#{1,2}\s+(Chapter|Part)', stripped, re.IGNORECASE):
+            # Part headings divide chapters into parts; they are not chapters.
+            # A heading stands on its own line between blank lines.
+            if _is_part_heading(stripped):
+                before = line_num == 1 or not ms_lines[line_num - 2].strip()
+                after = line_num == total_lines or not ms_lines[line_num].strip()
+                if before and after:
+                    part_starts.append((line_num, stripped))
+                    continue
+
+            # Markdown chapter headings
+            if re.match(r'^#{1,2}\s+Chapter', stripped, re.IGNORECASE):
                 chapter_starts.append(line_num)
                 chapter_names.append(re.sub(r'^#+\s*', '', stripped))
                 continue
@@ -722,38 +788,71 @@ def main(argv=None):
                         chapter_starts.append(line_num)
                         chapter_names.append(f'Chapter {stripped}')
 
-        chapter_count = len(chapter_starts)
-
-        if chapter_count == 0:
-            log('No chapter headings found. Treating entire manuscript as one chapter.')
-            chapter_starts = [1]
-            chapter_names = ['Manuscript']
-            chapter_count = 1
+        if chapter_starts:
+            log(f'Found {len(chapter_starts)} chapter boundaries')
         else:
-            log(f'Found {chapter_count} chapter boundaries')
+            log('No chapter headings found.')
+        if part_starts:
+            log(f'Found {len(part_starts)} part headings')
 
-        # Step 2: Create temporary chapter files
+        # Step 2: Build chapters. A part heading only marks where a part
+        # begins; it never ends a chapter's text. Text between a part
+        # heading and the next chapter opens that chapter; a part with no
+        # chapter heading after it becomes a chapter of its own.
+        def has_text(lines):
+            return any(l.strip() for l in lines)
+
+        units = sorted([(n, 'chapter', name) for n, name in zip(chapter_starts, chapter_names)]
+                       + [(n, 'part', text) for n, text in part_starts])
+        chapters = []   # (name, lines, part number or '')
+        dropped_words = 0
+        leading = ms_lines[:units[0][0] - 1] if units else ms_lines
+        if has_text(leading):
+            if chapter_starts:
+                # As before: text ahead of the first chapter heading (title
+                # page, epigraph) is front matter, not a scene. Say so.
+                dropped_words = count_words('\n'.join(leading))
+                log(f'  NOTE: {dropped_words} words before the first chapter heading '
+                    f'are treated as front matter and not split into scenes')
+            else:
+                chapters.append(('Opening' if units else 'Manuscript', leading, ''))
+        preamble, parts_seen = [], 0
+        for i, (line_num, kind, name) in enumerate(units):
+            next_line = units[i + 1][0] if i + 1 < len(units) else total_lines + 1
+            if kind == 'chapter':
+                chapters.append((name, preamble + ms_lines[line_num - 1:next_line - 1],
+                                 parts_seen or ''))
+                preamble = []
+                continue
+            parts_seen += 1
+            body = ms_lines[line_num:next_line - 1]
+            if has_text(body):
+                if i + 1 < len(units) and units[i + 1][1] == 'chapter':
+                    preamble = body
+                else:
+                    chapters.append((name, body, parts_seen))
+
+        heading_words = sum(count_words(text) for _, text in part_starts)
+        split_words = sum(count_words('\n'.join(lines)) for _, lines, _ in chapters)
+        if split_words != total_words - heading_words - dropped_words:
+            log(f'  WARNING: chapters hold {split_words} words but the manuscript has '
+                f'{total_words - heading_words - dropped_words} outside headings and '
+                f'front matter; check the split before relying on it')
+
         tmp_chapters_dir = os.path.join(work_dir, 'chapters')
         os.makedirs(tmp_chapters_dir, exist_ok=True)
 
-        for c in range(chapter_count):
-            start_line = chapter_starts[c]
-            if c + 1 < chapter_count:
-                end_line = chapter_starts[c + 1] - 1
-            else:
-                end_line = total_lines
-
-            ch_name = chapter_names[c]
-            ch_slug = generate_slug(ch_name)
-            if not ch_slug:
-                ch_slug = f'chapter-{c + 1}'
-
-            ch_file = os.path.join(tmp_chapters_dir, f'{ch_slug}.md')
-            ch_text = '\n'.join(ms_lines[start_line - 1:end_line])
+        for c, (ch_name, lines, part_num) in enumerate(chapters):
+            ch_slug = generate_slug(ch_name) or f'chapter-{c + 1}'
+            # Prefix with the manuscript position: split-chapters orders
+            # files by name, and slugs like chapter-ix / chapter-v do not
+            # sort into reading order.
+            ch_file = os.path.join(tmp_chapters_dir, f'{c + 1:04d}-{ch_slug}.md')
+            chapter_parts[os.path.basename(ch_file)] = part_num
+            ch_text = '\n'.join(lines)
             with open(ch_file, 'w') as f:
                 f.write(ch_text + '\n')
-            ch_words = count_words(ch_text)
-            log(f'  Chapter {c + 1}: "{ch_name}" (lines {start_line}-{end_line}, {ch_words} words)')
+            log(f'  Chapter {c + 1}: "{ch_name}" ({count_words(ch_text)} words)')
 
         # Step 3: Override source and use split-chapters logic
         # Temporarily set args.source to the temp directory

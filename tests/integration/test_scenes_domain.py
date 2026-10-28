@@ -235,8 +235,16 @@ class TestGenerateScenesRows:
     def test_word_count(self):
         scenes = [{'title': 'Scene', 'word_count': 1500}]
         rows = generate_scenes_rows(scenes)
-        parts = rows[0].split('|')
-        assert parts[12] == '1500'  # word_count column (index 12 per header)
+        # Review #4: the hand-built row had one cell too many, putting
+        # word_count under target_words. Rows follow the header now.
+        header = scenes_header().split('|')
+        row = dict(zip(header, rows[0].split('|')))
+        assert len(rows[0].split('|')) == len(header)
+        assert row['word_count'] == '1500' and row['target_words'] == ''
+
+    def test_intent_row_matches_header(self):
+        rows = generate_intent_rows([{'title': 'Scene'}])
+        assert len(rows[0].split('|')) == len(intent_header().split('|'))
 
     def test_empty_title_gets_fallback_slug(self):
         scenes = [{'title': ''}]
@@ -266,7 +274,7 @@ class TestGenerateIntentRows:
         assert len(rows) == 1
         assert rows[0].startswith('finest-cartographer|')
         # All fields empty (10 pipes)
-        assert rows[0].count('|') == 10
+        assert rows[0].count('|') == len(intent_header().split('|')) - 1
 
     def test_empty_title_fallback(self):
         scenes = [{'title': ''}]
@@ -503,7 +511,29 @@ class TestBuildBoundaryPrompt:
         assert 'Time' in prompt or 'time' in prompt
         assert 'Setting' in prompt or 'location' in prompt.lower()
 
+    def test_numbers_each_line(self):
+        prompt = build_boundary_prompt('First line\n\nThird line\n')
+        assert '1: First line\n2: \n3: Third line' in prompt
+
     def test_empty_chapter(self):
         prompt = build_boundary_prompt('')
         # Should still produce a prompt, just with empty text section
         assert 'SCENE:' in prompt
+
+
+class TestBreakMarkers:
+    """The Great Gatsby's Gutenberg text marks breaks with long dash rules,
+    which the exact-match list ('***', '---', '# # #', '* * *') missed."""
+
+    @pytest.mark.parametrize('line', [
+        '***', '* * *', '---', '# # #', '~~~', '•  •  •',
+        '-' * 72, '   ' + '-' * 72 + '  ', '———'])
+    def test_markers_recognized(self, line):
+        from storyforge.scenes import is_break_marker
+        assert is_break_marker(line)
+
+    @pytest.mark.parametrize('line', [
+        '# Chapter One', '**', '-- he said', '* item', '===', 'The end.', ''])
+    def test_non_markers_rejected(self, line):
+        from storyforge.scenes import is_break_marker
+        assert not is_break_marker(line)

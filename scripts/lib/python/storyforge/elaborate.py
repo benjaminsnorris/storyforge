@@ -21,7 +21,9 @@ DELIMITER = '|'
 # of the story. Other columns add structural detail for downstream
 # elaboration.
 _SCENES_COLS = [
-    'id', 'seq', 'title', 'summary', 'part', 'pov', 'location',
+    # `part` is the book's physical division (from the manuscript's part
+    # headings; empty for a book without parts). `act` is the structural act.
+    'id', 'seq', 'title', 'summary', 'part', 'act', 'pov', 'location',
     'timeline_day', 'time_of_day', 'duration', 'type', 'status',
     'word_count', 'target_words',
     # Graphic-novel-mode columns (ignored in novel mode, written in GN mode)
@@ -48,17 +50,17 @@ _BRIEFS_COLS = [
 ]
 # Structural-anchor tier: discrete CSVs with their own row identity.
 _SPINE_COLS = [
-    'id', 'seq', 'title', 'summary', 'function', 'part',
+    'id', 'seq', 'title', 'summary', 'function', 'act',
 ]
 _ARCHITECTURE_COLS = [
-    'id', 'seq', 'title', 'summary', 'part', 'pov', 'spine_event',
+    'id', 'seq', 'title', 'summary', 'act', 'pov', 'spine_event',
     'action_sequel', 'emotional_arc', 'value_at_stake',
     'value_shift', 'turning_point',
 ]
 
 # Order matters: `_file_for_column` returns the first file whose column
 # list contains the lookup. The manuscript-tier files come first because
-# they own shared column names (seq, title, part, etc.) in the legacy code
+# they own shared column names (seq, title, act, etc.) in the legacy code
 # path. Structural-anchor files (spine.csv, architecture.csv) follow; they
 # share several column names with the manuscript files, so callers that
 # need to disambiguate by tier should use a tier-aware helper rather than
@@ -91,8 +93,19 @@ def _read_csv(path: str) -> list[dict[str, str]]:
     with open(path, newline='', encoding='utf-8') as f:
         raw = f.read().replace('\r\n', '\n').replace('\r', '')
     reader = csv.DictReader(raw.splitlines(), delimiter=DELIMITER)
-    return [{k: (v if v is not None else '') for k, v in row.items()}
+    rows = [{k: (v if v is not None else '') for k, v in row.items()}
             for row in reader]
+    # spine.csv and architecture.csv renamed `part` to `act`. Their writers
+    # emit only the current columns, so reading a pre-migration file without
+    # this would drop the acts on the next rewrite.
+    if os.path.basename(path) in _ACT_RENAMED_FILES:
+        for row in rows:
+            if 'part' in row and not row.get('act', '').strip():
+                row['act'] = row.pop('part')
+    return rows
+
+
+_ACT_RENAMED_FILES = frozenset({'spine.csv', 'architecture.csv'})
 
 
 def _read_csv_as_map(path: str) -> dict[str, dict[str, str]]:
@@ -250,7 +263,7 @@ def update_scene(scene_id: str, ref_dir: str, updates: dict[str, str]) -> None:
 
     **Manuscript tier only.** This function does NOT update spine.csv or
     architecture.csv. Several columns are shared between the manuscript
-    files and the structural-anchor files (id, seq, title, part, pov,
+    files and the structural-anchor files (id, seq, title, act, pov,
     action_sequel, emotional_arc, value_at_stake, value_shift,
     turning_point) — for those columns, `_file_for_column` returns the
     manuscript-tier file because `_FILE_MAP` puts those first. If a
@@ -460,24 +473,24 @@ def score_structure(ref_dir: str) -> list[dict]:
 # Required columns per status level
 _REQUIRED_BY_STATUS = {
     'spine': ['id', 'seq', 'title', 'function'],
-    'architecture': ['id', 'seq', 'title', 'part', 'pov', 'function',
+    'architecture': ['id', 'seq', 'title', 'act', 'pov', 'function',
                       'action_sequel', 'emotional_arc', 'value_at_stake',
                       'value_shift', 'turning_point'],
-    'mapped': ['id', 'seq', 'title', 'part', 'pov', 'location',
+    'mapped': ['id', 'seq', 'title', 'act', 'pov', 'location',
                'timeline_day', 'time_of_day', 'function', 'action_sequel',
                'emotional_arc', 'value_at_stake', 'value_shift',
                'turning_point', 'characters', 'on_stage'],
-    'briefed': ['id', 'seq', 'title', 'part', 'pov', 'location',
+    'briefed': ['id', 'seq', 'title', 'act', 'pov', 'location',
                 'timeline_day', 'time_of_day', 'function', 'action_sequel',
                 'emotional_arc', 'value_at_stake', 'value_shift',
                 'turning_point', 'characters', 'on_stage',
                 'goal', 'conflict', 'outcome'],
-    'drafted': ['id', 'seq', 'title', 'part', 'pov', 'location',
+    'drafted': ['id', 'seq', 'title', 'act', 'pov', 'location',
                 'timeline_day', 'time_of_day', 'function', 'action_sequel',
                 'emotional_arc', 'value_at_stake', 'value_shift',
                 'turning_point', 'characters', 'on_stage',
                 'goal', 'conflict', 'outcome'],
-    'polished': ['id', 'seq', 'title', 'part', 'pov', 'location',
+    'polished': ['id', 'seq', 'title', 'act', 'pov', 'location',
                  'timeline_day', 'time_of_day', 'function', 'action_sequel',
                  'emotional_arc', 'value_at_stake', 'value_shift',
                  'turning_point', 'characters', 'on_stage',
@@ -519,14 +532,14 @@ def _mice_type(thread_name, registry_types=None):
 
 
 def _validate_threads(scenes_map, intent_map, checks, ref_dir=''):
-    """Check thread management: MICE nesting, dormancy, resolution.
+    """Report MICE thread data problems and how threads interleave.
 
-    Uses per-type stacks: FILO nesting is enforced within each MICE type
-    (milieu, inquiry, character, event) independently. Cross-type threads
-    run in parallel — closing an inquiry doesn't require all milieu threads
-    opened after it to close first.
+    All findings are advisory. Kowal's nesting (same-type threads closing in
+    reverse order) is guidance, not a rule: literary novels interleave
+    threads deliberately, so interleaving is described, never an error.
+    What is checked is the notation itself: each thread opens once ("+"),
+    closes at most once ("-"), and is otherwise mentioned by bare name.
     """
-    # Load MICE thread registry for type resolution
     registry_types = {}
     if ref_dir:
         reg_path = os.path.join(ref_dir, 'mice-threads.csv')
@@ -539,74 +552,69 @@ def _validate_threads(scenes_map, intent_map, checks, ref_dir=''):
     sorted_ids = sorted(scenes_map.keys(),
                         key=lambda sid: int(scenes_map[sid].get('seq', 0)))
 
-    # Pass 1: register all thread openings before checking closures
-    thread_registry = {}  # thread_name -> scene_id where it was opened
+    opens = {}    # thread -> [scene ids with "+thread"]
+    closes = {}   # thread -> [scene ids with "-thread"]
+    open_now = {}  # mice type -> [(thread, scene opened)] in opening order
+    interleaved = []
     for sid in sorted_ids:
-        intent = intent_map.get(sid, {})
-        mice = intent.get('mice_threads', '').strip()
-        if not mice:
-            continue
-        for entry in mice.split(';'):
-            entry = entry.strip()
-            if not entry:
-                continue
+        mice = intent_map.get(sid, {}).get('mice_threads', '').strip()
+        for entry in (e.strip() for e in mice.split(';') if e.strip()):
+            name = entry[1:]
             if entry.startswith('+'):
-                thread_name = entry[1:]
-                thread_registry[thread_name] = sid
-
-    # Pass 2: check closures and nesting per MICE type
-    type_stacks = {}  # mice_type -> list of (thread_name, scene_id)
-    for sid in sorted_ids:
-        intent = intent_map.get(sid, {})
-        mice = intent.get('mice_threads', '').strip()
-        if not mice:
-            continue
-        for entry in mice.split(';'):
-            entry = entry.strip()
-            if not entry:
-                continue
-            if entry.startswith('+'):
-                thread_name = entry[1:]
-                mtype = _mice_type(thread_name, registry_types)
-                type_stacks.setdefault(mtype, []).append((thread_name, sid))
+                opens.setdefault(name, []).append(sid)
+                if len(opens[name]) == 1:
+                    open_now.setdefault(_mice_type(name, registry_types), []).append((name, sid))
             elif entry.startswith('-'):
-                thread_name = entry[1:]
-                mtype = _mice_type(thread_name, registry_types)
-                stack = type_stacks.get(mtype, [])
-                if stack and stack[-1][0] == thread_name:
-                    stack.pop()
-                elif any(t[0] == thread_name for t in stack):
-                    checks.append(_check(
-                        'threads', 'mice-nesting', False,
-                        f"MICE nesting violation: closing '{thread_name}' in {sid} "
-                        f"but '{stack[-1][0]}' (opened in {stack[-1][1]}) "
-                        f"should close first",
-                        scene_id=sid,
-                    ))
-                    type_stacks[mtype] = [(t, s) for t, s in stack if t != thread_name]
-                elif thread_name not in thread_registry:
-                    checks.append(_check(
-                        'threads', 'mice-nesting', False,
-                        f"Closing MICE thread '{thread_name}' in {sid} but it was never opened",
-                        scene_id=sid,
-                    ))
-                else:
-                    checks.append(_check(
-                        'threads', 'mice-nesting', False,
-                        f"Closing MICE thread '{thread_name}' in {sid} but it was "
-                        f"already closed or not properly tracked on the {mtype} stack "
-                        f"(opened in {thread_registry[thread_name]})",
-                        scene_id=sid,
-                    ))
+                closes.setdefault(name, []).append(sid)
+                stack = open_now.get(_mice_type(name, registry_types), [])
+                names = [t for t, _ in stack]
+                if name in names:
+                    later = names[names.index(name) + 1:]
+                    if later:
+                        interleaved.append(f"'{name}' closes in {sid} while "
+                                           f"'{later[-1]}' (opened later) is still open")
+                    stack[:] = [(t, s) for t, s in stack if t != name]
 
-    if not any(c['check'] == 'mice-nesting' and not c['passed'] for c in checks):
-        checks.append(_check('threads', 'mice-nesting', True, 'MICE threads nest correctly'))
+    for name, sids in opens.items():
+        if len(sids) > 1:
+            checks.append(_check(
+                'threads', 'mice-ops', False,
+                f"MICE thread '{name}' is opened in {len(sids)} scenes "
+                f"({', '.join(sids[:4])}{'...' if len(sids) > 4 else ''}); "
+                f"it should open once, with later scenes mentioning it by bare name",
+                scene_id=sids[1], severity='advisory',
+            ))
+    for name, sids in closes.items():
+        if len(sids) > 1:
+            checks.append(_check(
+                'threads', 'mice-ops', False,
+                f"MICE thread '{name}' is closed in {len(sids)} scenes "
+                f"({', '.join(sids[:4])}{'...' if len(sids) > 4 else ''}); "
+                f"it should close once, where it resolves",
+                scene_id=sids[1], severity='advisory',
+            ))
+        if name not in opens:
+            checks.append(_check(
+                'threads', 'mice-ops', False,
+                f"MICE thread '{name}' is closed in {sids[0]} but never opened",
+                scene_id=sids[0], severity='advisory',
+            ))
+    if not any(c['check'] == 'mice-ops' and not c['passed'] for c in checks):
+        checks.append(_check('threads', 'mice-ops', True,
+                             'MICE threads open once and close at most once'))
 
-    all_unclosed = []
-    for stack in type_stacks.values():
-        all_unclosed.extend(stack)
-    if all_unclosed:
-        unclosed = [f"{name} (opened in {sid})" for name, sid in all_unclosed]
+    if interleaved:
+        checks.append(_check(
+            'threads', 'mice-interleaving', False,
+            f"{len(interleaved)} MICE thread closing(s) interleave rather than nest "
+            f"(descriptive, not an error): " + '; '.join(interleaved[:5])
+            + ('...' if len(interleaved) > 5 else ''),
+            severity='advisory',
+        ))
+
+    unclosed = [f"{name} (opened in {sids[0]})" for name, sids in opens.items()
+                if name not in closes]
+    if unclosed:
         checks.append(_check(
             'threads', 'unclosed-mice-threads', False,
             f"Unclosed MICE threads: {unclosed}",
@@ -615,42 +623,38 @@ def _validate_threads(scenes_map, intent_map, checks, ref_dir=''):
 
 
 def _validate_timeline(scenes_map, checks):
-    """Check timeline consistency: no backwards jumps without markers."""
+    """Describe how the reading order moves through story time.
+
+    The story's present is the latest day reached so far in reading order.
+    A scene set before it is a flashback (or a crosscut, when the POV
+    changes). These are devices, not errors, so they are advisory and listed
+    plainly; assess_flashbacks in structural.py gauges whether they work.
+    """
     sorted_ids = sorted(scenes_map.keys(),
                         key=lambda sid: int(scenes_map[sid].get('seq', 0)))
 
-    prev_day = None
-    prev_id = None
+    present_day = None
+    present_id = None
     for sid in sorted_ids:
         day_str = scenes_map[sid].get('timeline_day', '').strip()
-        if not day_str:
-            continue
         try:
             day = int(day_str)
         except ValueError:
             continue
 
-        if prev_day is not None and day < prev_day:
+        if present_day is not None and day < present_day:
             pov = scenes_map[sid].get('pov', '').strip()
-            prev_pov = scenes_map[prev_id].get('pov', '').strip()
-            if pov and prev_pov and pov != prev_pov:
-                # POV change with backwards jump = deliberate crosscut
-                checks.append(_check(
-                    'timeline', 'timeline-order', False,
-                    f"Scene {sid} (day {day}, POV {pov}) steps back from "
-                    f"{prev_id} (day {prev_day}, POV {prev_pov}) — crosscut",
-                    scene_id=sid,
-                    severity='advisory',
-                ))
-            else:
-                checks.append(_check(
-                    'timeline', 'timeline-order', False,
-                    f"Scene {sid} (day {day}) comes after {prev_id} (day {prev_day}) — backwards jump",
-                    scene_id=sid,
-                ))
-
-        prev_day = day
-        prev_id = sid
+            present_pov = scenes_map[present_id].get('pov', '').strip()
+            kind = 'crosscut' if pov and present_pov and pov != present_pov else 'flashback'
+            checks.append(_check(
+                'timeline', 'timeline-order', False,
+                f"{kind.capitalize()}: {sid} (day {day}) is set before the story's present "
+                f"(day {present_day}, reached in {present_id})",
+                scene_id=sid,
+                severity='advisory',
+            ))
+        else:
+            present_day, present_id = day, sid
 
     if not any(c['check'] == 'timeline-order' and not c['passed'] for c in checks):
         checks.append(_check('timeline', 'timeline-order', True, 'Timeline order is consistent'))
@@ -941,6 +945,17 @@ def validate_structure(ref_dir: str) -> dict:
     ))
 
     # --- Completeness: required columns for status ---
+    # A pre-migration project has its acts in `part` and `act` empty: report
+    # that once, rather than as a missing column on every scene.
+    unmigrated = (scenes_map
+                  and not any(s.get('act', '').strip() for s in scenes_map.values())
+                  and any(s.get('part', '').strip() for s in scenes_map.values()))
+    if unmigrated:
+        checks.append(_check(
+            'completeness', 'act-migration', False,
+            "Acts are still in the part column (act is empty on every scene). "
+            "Run `storyforge cleanup`, which moves them into act",
+        ))
     for sid, scene in scenes_map.items():
         status = scene.get('status', 'spine')
         if status not in _REQUIRED_BY_STATUS:
@@ -953,7 +968,8 @@ def validate_structure(ref_dir: str) -> dict:
         if sid in briefs_map:
             merged.update({k: v for k, v in briefs_map[sid].items() if k != 'id'})
 
-        missing = [col for col in required if not merged.get(col, '').strip()]
+        missing = [col for col in required if not merged.get(col, '').strip()
+                   and not (unmigrated and col == 'act')]
         checks.append(_check(
             'completeness', f'required-columns-{sid}',
             len(missing) == 0,
@@ -982,7 +998,7 @@ def validate_structure(ref_dir: str) -> dict:
 # Gap group definitions: which fields belong to which group
 _GAP_GROUPS = {
     'scene-fields': {
-        'fields': ['type', 'time_of_day', 'duration', 'part'],
+        'fields': ['type', 'time_of_day', 'duration', 'act'],
         'file': 'scenes.csv',
         'batch_type': 'parallel',
     },

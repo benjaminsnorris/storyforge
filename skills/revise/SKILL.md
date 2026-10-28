@@ -130,7 +130,7 @@ When fixing CSV fields interactively (upstream passes), all registry-backed fiel
 
 ### Ordering Principles (upstream first)
 
-1. **Structural passes first** — scene additions, removals, reordering
+1. **Structural passes first** — scene additions, removals, reordering. Reorder by changing `seq`; never rename a scene id. New scenes get a 3-5 word slug of their core event as id, never a positional one (see the elaborate skill's Scene IDs section).
 2. **Intent passes second** — value shift corrections, MICE thread management
 3. **Brief passes third** — knowledge chain fixes, goal/conflict/outcome
 4. **Craft passes last** — prose polish (only after all upstream changes settle)
@@ -145,7 +145,7 @@ The plan is a pipe-delimited CSV at `working/plans/revision-plan.csv`:
 ```
 pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location
 1|knowledge-chain-fix|Fix knowledge violations flagged in evaluation|scene-level|scene-a;scene-b|Specific guidance here|voice-quality|F001;F003|pending|sonnet|brief
-2|mice-thread-fix|Fix MICE thread nesting issues|full||Ensure FILO nesting order|all-strengths|F007|pending|sonnet|intent
+2|mice-thread-fix|Fix MICE thread operations|full||Each thread opens once and closes once, where it resolves|all-strengths|F007|pending|sonnet|intent
 3|prose-tightening|Voice consistency and AI pattern cleanup|full||Follow voice guide strictly|scene-30b|F012;F015|pending|opus|craft
 ```
 

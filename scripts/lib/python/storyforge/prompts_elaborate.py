@@ -8,6 +8,7 @@ content for reference documents.
 
 import os
 from .prompts import read_yaml_field
+from .scenes import SCENE_ID_RULE
 
 
 def _read_file(path: str) -> str:
@@ -174,8 +175,10 @@ Output in a fenced block labeled `scenes-csv`:
 
 ```scenes-csv
 id|seq|title|status
-(one row per spine event — id is a descriptive slug, seq is reading order, status is always "spine")
+(one row per spine event — seq is reading order, status is always "spine")
 ```
+
+Scene ids: {SCENE_ID_RULE}
 
 And the intent for each scene:
 
@@ -233,7 +236,7 @@ Expand the spine (5-10 events) into 15-25 scenes. For each scene:
 
 1. Keep all existing spine scenes (you may adjust titles and functions)
 2. Add supporting scenes: character development, subplot introduction, transitions, world-building
-3. Assign every scene to a part/act
+3. Assign every scene to a structural act (`act` — 1, 2, 3, ...)
 4. Assign POV characters
 5. Classify each as action or sequel (Swain's scene/sequel pattern)
 6. Define the value at stake and its polarity shift (McKee)
@@ -243,9 +246,11 @@ Expand the spine (5-10 events) into 15-25 scenes. For each scene:
 Update the scenes CSV with new columns filled:
 
 ```scenes-csv
-id|seq|title|part|pov|status
+id|seq|title|act|pov|status
 (all scenes — existing spine scenes updated, new scenes added, status is "architecture")
 ```
+
+Scene ids: {SCENE_ID_RULE} Keep every existing scene's id exactly as it is; to move a scene, change its seq.
 
 Update the intent CSV with new columns:
 
@@ -272,7 +277,7 @@ If the world needs a bible, output:
 - Vary scene types: no 4+ consecutive action or sequel scenes
 - Vary turning point types: no 4+ consecutive action or revelation turning points
 - Every thread introduced must have a planned resolution
-- Parts should hit roughly: first act ~25%, midpoint ~50%, climax ~75-85%
+- Acts should hit roughly: first act ~25%, midpoint ~50%, climax ~75-85%
 - Character arcs need structural progression: lie reinforced → challenged → confronted → truth/refusal
 """
 
@@ -341,16 +346,18 @@ For each scene:
 
 1. Keep all existing scenes (adjust as needed)
 2. Fill in gaps: transitions, subplot scenes, breathing room
-3. Assign locations, timeline days, time of day, duration
+3. Assign locations (the places the scene's action happens in, in order, semicolon-separated: usually one, several only when the action truly moves; never a route as a place), timeline days, time of day, duration
 4. List all characters present (on_stage) and referenced (characters)
-5. Track MICE thread opens (+) and closes (-) — FILO within each type, parallel across types
+5. Track MICE threads: +thread where it begins, -thread where it resolves, the bare name where a scene advances an open thread. Threads may interleave
 
 ### Output Format
 
 ```scenes-csv
-id|seq|title|part|pov|location|timeline_day|time_of_day|duration|status
+id|seq|title|act|pov|location|timeline_day|time_of_day|duration|status
 (all scenes — status is "mapped" for new/updated scenes)
 ```
+
+Scene ids: {SCENE_ID_RULE} Keep every existing scene's id exactly as it is; to move a scene, change its seq.
 
 ```intent-csv
 id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
@@ -359,9 +366,9 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 
 ### Rules
 
-- Timeline must be consistent: no backward jumps without explicit justification
+- timeline_day is when a scene's action happens; a flashback keeps the earlier day it depicts (0 or negative before day 1). Flashbacks are a device, not an error: use one where the past changes what the present means
 - Every character referenced must exist in the character bible
-- MICE threads: same-type threads nest in FILO order; different types (milieu, inquiry, character, event) run in parallel
+- MICE threads: each opens once and closes at most once; they may interleave (nesting is guidance, not a rule)
 - No thread dormant for more than 8-10 scenes without acknowledgment
 - Every scene must have at least one on-stage character
 - Location names must be consistent (same place = same name)
@@ -404,6 +411,7 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
     refs_section = f'\n## Reference Materials\n\n{refs}\n' if refs else ''
     craft_section = f'\n## Craft Principles\n\n{craft}\n' if craft else ''
 
+    from .schema import OUTCOME_GUIDE   # schema imports elaborate
     return f"""You are writing the drafting contracts for a novel — the scene-level briefs that define exactly what happens in each scene, in enough detail that scenes can be drafted independently and still cohere.
 
 {context}
@@ -432,10 +440,10 @@ For each scene that needs a brief, define the complete drafting contract:
 
 - **goal**: The POV character's concrete objective entering the scene (Swain)
 - **conflict**: What specifically opposes the goal
-- **outcome**: How the scene ends — yes / no / yes-but / no-and (Weiland)
+- **outcome**: How the scene ends — {OUTCOME_GUIDE} (Bickham's scene disasters, plus no-but from Kowal's try/fail cycles)
 - **crisis**: The dilemma — best bad choice or irreconcilable goods (Story Grid)
 - **decision**: What the character actively chooses
-- **knowledge_in**: Semicolon-separated STRUCTURALLY USEFUL facts the POV character knows entering. Use EXACT wording that matches prior scenes' knowledge_out. Only include facts that gate this scene's decisions — identity reveals, motive/intent reveals, capability/constraints, state changes, stakes/threats, relationship shifts. Omit ordinary plot details.
+- **knowledge_in**: Semicolon-separated ids of STRUCTURALLY USEFUL facts the POV character knows entering. Facts are knowledge.csv ids (kebab-case, 2-5 words); reuse an existing id for a fact already established, and give a genuinely new fact a new id. Only include facts that gate this scene's decisions — identity reveals, motive/intent reveals, capability/constraints, state changes, stakes/threats, relationship shifts. Omit ordinary plot details.
 - **knowledge_out**: knowledge_in plus 0-2 NEW structurally useful facts learned during this scene. A fact is useful only if a character who knows it would make a different decision than one who doesn't, or a future scene requires it. Most scenes add 0-1 new facts.
 - **physical_state_in**: Semicolon-separated state IDs that on-stage characters carry INTO this scene. Use EXACT IDs from prior scenes' physical_state_out. Only track states that affect capability, appearance, or equipment — injuries, items gained/lost, abilities changed, visible changes, fatigue. Not temporary emotions or scene-local conditions.
 - **physical_state_out**: physical_state_in plus 0-2 NEW states acquired during this scene, minus any states that resolve during this scene.
@@ -463,7 +471,7 @@ id|status
 
 ### Rules
 
-- knowledge_in must use EXACT wording from prior scenes' knowledge_out — validation will check this
+- knowledge_in uses the same fact ids as prior scenes' knowledge_out, never sentences — validation will check this
 - Target 0-2 new knowledge facts per scene. Most scenes should add 0-1. A full novel should have 50-120 total facts, not 500+
 - continuity_deps should list the minimum set of scenes whose knowledge_out this scene needs
 - physical_state_in must reference IDs established in prior scenes' physical_state_out
@@ -698,8 +706,8 @@ _FIELD_INSTRUCTIONS = {
     'duration': (
         'Estimate the in-story duration of this scene (e.g., "2 hours", "30 minutes", "15 minutes").'
     ),
-    'part': (
-        'Determine which act/part this scene belongs to (integer, e.g., 1, 2, 3).'
+    'act': (
+        'Determine which structural act this scene belongs to (integer, e.g., 1, 2, 3).'
     ),
     'action_sequel': (
         'Classify as action or sequel using Swain\'s scene/sequel pattern. '
@@ -726,17 +734,20 @@ _FIELD_INSTRUCTIONS = {
         'or revelation (character learns something new).'
     ),
     'mice_threads': (
-        'List MICE thread operations: +name to open, -name to close (type is resolved from registry). '
-        'Types: milieu, inquiry, character, event. '
-        'Semicolon-separated (e.g., "+inquiry:who-killed-X;-milieu:the-castle").'
+        'List MICE threads: +name only where the thread begins, -name only where it resolves, '
+        'and the bare name where this scene advances a thread already open. Use the canonical '
+        'name from the registry, not a type prefix (type is resolved from the registry). '
+        'Semicolon-separated (e.g., "+who-killed-x;the-castle").'
     ),
     'location': (
-        'Identify the primary location where this scene takes place. '
-        'Use a canonical name consistent with other scenes.'
+        'List the places where this scene\'s action happens, in order, semicolon-separated '
+        '(usually one; several only when the action moves on the page). Use canonical names '
+        'consistent with other scenes; never a route or transition as one place.'
     ),
     'timeline_day': (
-        'Determine what day number this scene takes place on (integer, starting from 1). '
-        'Consider the surrounding scenes for context.'
+        'Determine the day this scene\'s action happens, in story chronology (integer): day 1 '
+        'is the first day of the main story, and a flashback keeps the earlier day it depicts '
+        '(0 or negative before day 1). Consider the surrounding scenes for context.'
     ),
 }
 
@@ -852,23 +863,23 @@ def build_knowledge_fix_prompt(
 
     sorted_knowledge = sorted(available_knowledge) if available_knowledge else ['(none yet — this is the first scene)']
 
-    return f"""You are fixing the knowledge chain for a scene in a novel. The knowledge_in field must use EXACT wording from prior scenes' knowledge_out.
+    return f"""You are fixing the knowledge chain for a scene in a novel. The knowledge_in field must use the fact ids from prior scenes' knowledge_out.
 
 ## Scene: {scene_id}
 
 ### Prose Excerpt
 {prose if prose else '(no prose available)'}
 
-### Current Values (may have wording mismatches)
+### Current Values (may contain sentences or ids that don't match)
 - knowledge_in: {current_kin}
 - knowledge_out: {current_kout}
 
-### Available Knowledge (exact wording from all prior scenes' knowledge_out)
+### Available Knowledge (fact ids from all prior scenes' knowledge_out)
 {chr(10).join(f'- {k}' for k in sorted_knowledge)}
 
 ## Instructions
 
-1. Rewrite knowledge_in using ONLY facts from the available knowledge list above, using their EXACT wording. Drop any facts not in the list. Add any facts from the list that this POV character would know entering this scene.
+1. Rewrite knowledge_in using ONLY fact ids from the available knowledge list above. Drop any facts not in the list. Add any facts from the list that this POV character would know entering this scene.
 2. Rewrite knowledge_out as: the corrected knowledge_in PLUS any new facts learned during this scene (read the prose to determine what's new).
 3. List continuity_deps: the scene IDs whose knowledge_out contributed facts to this scene's knowledge_in.
 

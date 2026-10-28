@@ -222,6 +222,41 @@ def strip_parentheticals(value: str) -> str:
     return re.sub(r'\s*\([^)]*\)\s*$', '', value).strip()
 
 
+# A model asked for a list it has nothing to put in writes a word for
+# "nothing" instead (`none`, `(none)`, `n/a`, `(empty)` — the last echoed from
+# the reconcile prompt's own rendering of an empty field). Stored, it becomes a
+# fact or a physical state named "(none)" that the chain checks then report as
+# never established. An empty field is the only representation of nothing.
+_PLACEHOLDER_RE = re.compile(
+    r'^[\[(]?\s*(?:none|n/?a|nil|null|empty|nothing|-+|—|–'
+    r'|no (?:new |prior )?(?:facts?|knowledge|states?|changes?)(?: established)?'
+    r')\s*[\])]?\.?$',
+    re.IGNORECASE,
+)
+
+
+def is_placeholder(entry: str) -> bool:
+    """Whether a single list entry is a stand-in for "nothing" (``none``,
+    ``(none)``, ``n/a``, ``(empty)``, ``-``) rather than a value."""
+    return bool(_PLACEHOLDER_RE.match((entry or '').strip()))
+
+
+def strip_placeholders(semicolon_string: str) -> str:
+    """Drop placeholder entries from a semicolon-separated list.
+
+    A list with no placeholder comes back as given (outer whitespace
+    trimmed). Otherwise entries are trimmed and empty ones dropped, the rest
+    keeping their order and text; a list of nothing but placeholders becomes
+    ``''``.
+    """
+    if not semicolon_string:
+        return ''
+    parts = [p.strip() for p in semicolon_string.split(';')]
+    if not any(is_placeholder(p) for p in parts if p):
+        return semicolon_string.strip()
+    return ';'.join(p for p in parts if p and not is_placeholder(p))
+
+
 def normalize_aliases(alias_map: dict[str, str], semicolon_string: str) -> str:
     """Resolve aliases in a semicolon-separated string.
 
@@ -388,6 +423,11 @@ def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
 
 # Fields that hold character references (semicolon-separated or single)
 _CHAR_FIELDS = ('pov', 'characters', 'on_stage')
+def _outcome_guide() -> str:
+    from .schema import OUTCOME_GUIDE   # schema imports this module
+    return OUTCOME_GUIDE
+
+
 # Fields that hold location references
 _LOCATION_FIELDS = ('location',)
 # Fields that hold motif references
@@ -398,7 +438,8 @@ _VALUE_FIELDS = ('value_at_stake',)
 _KNOWLEDGE_FIELDS = ('knowledge_in', 'knowledge_out')
 
 
-def format_registries_for_prompt(project_dir: str) -> str:
+def format_registries_for_prompt(project_dir: str,
+                                 exclude: tuple[str, ...] = ()) -> str:
     """Format registry CSV contents as a prompt section.
 
     Reads all registry files and returns a formatted string showing
@@ -407,6 +448,8 @@ def format_registries_for_prompt(project_dir: str) -> str:
 
     Args:
         project_dir: Root directory of the novel project.
+        exclude: Registry filenames to leave out (e.g. ``('knowledge.csv',)``
+            for a prompt that renders that registry itself).
 
     Returns:
         Formatted markdown string, or empty string if no registries exist.
@@ -427,6 +470,8 @@ def format_registries_for_prompt(project_dir: str) -> str:
     sections: list[str] = []
 
     for filename, title, extra_cols in registries:
+        if filename in exclude:
+            continue
         csv_path = os.path.join(ref_dir, filename)
         if not os.path.isfile(csv_path):
             continue
@@ -820,9 +865,10 @@ def _field_instruction(field: str) -> str:
             'POV: <the POV character — use their canonical ID or full name>'
         ),
         'location': (
-            'LOCATION: <the physical location — use a short, reusable label '
-            '(the name of the place, not a description). If two scenes '
-            'happen in the same place, use the same string.>'
+            'LOCATION: <the places where the action happens, in order, '
+            'semicolon-separated — usually one. Short, reusable labels (the '
+            'name of the place, not a description); if two scenes happen in '
+            'the same place, use the same string. Never a route as one place.>'
         ),
         'time_of_day': (
             'TIME_OF_DAY: <one of: morning, afternoon, evening, night, '
@@ -882,8 +928,8 @@ def _field_instruction(field: str) -> str:
             'CONFLICT: <what specifically opposes the goal?>'
         ),
         'outcome': (
-            'OUTCOME: <how the scene ends for the POV character: '
-            'yes / no / yes-but / no-and>'
+            'OUTCOME: <how the scene ends for the POV character, one of: '
+            + _outcome_guide() + '>'
         ),
         'crisis': (
             'CRISIS: <the key dilemma — a best bad choice or irreconcilable '
@@ -894,14 +940,14 @@ def _field_instruction(field: str) -> str:
             'to the crisis>'
         ),
         'knowledge_in': (
-            'KNOWLEDGE_IN: <semicolon-separated STRUCTURALLY USEFUL facts '
-            'the POV character knows entering — only facts that gate this '
+            'KNOWLEDGE_IN: <semicolon-separated ids of STRUCTURALLY USEFUL facts '
+            '(knowledge.csv ids, kebab-case, 2-5 words: reuse an existing id for a fact already established; give a genuinely new fact a new id) the POV character knows entering — only facts that gate this '
             "scene's decisions. Categories: identity reveals, motive/intent "
             'reveals, capability/constraints, state changes, stakes/threats, '
             'relationship shifts. Omit ordinary plot details.>'
         ),
         'knowledge_out': (
-            'KNOWLEDGE_OUT: <knowledge_in plus 0-2 NEW structurally useful '
+            'KNOWLEDGE_OUT: <knowledge_in plus the ids of 0-2 NEW structurally useful '
             'facts learned during this scene. A fact is useful only if a '
             'character who knows it would make a different decision than one '
             'who does not, or a future scene requires it. Most scenes add '

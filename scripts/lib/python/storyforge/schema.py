@@ -26,7 +26,29 @@ VALID_TIMES = frozenset({
 
 VALID_ACTION_SEQUEL = frozenset({'action', 'sequel'})
 
-VALID_OUTCOMES = frozenset({'yes', 'no', 'yes-but', 'no-and'})
+VALID_OUTCOMES = frozenset({'yes', 'no', 'yes-but', 'no-and', 'no-but'})
+
+_OUTCOME_PHRASE_RE = re.compile(r'^\s*\[?\s*(yes|no)[\s,;:—–-]+(but|and)\b', re.IGNORECASE)
+
+
+def canonical_outcome_phrase(answer: str) -> str:
+    """Rewrite "No, but ..." / "yes but" / "no — and furthermore" to the
+    hyphenated outcome ("no-but ...") so a matcher cannot stop at "no"."""
+    return _OUTCOME_PHRASE_RE.sub(lambda m: f'{m.group(1).lower()}-{m.group(2).lower()}',
+                                  answer, count=1)
+
+
+# How each scene outcome reads, used verbatim by every prompt that asks for
+# one. The disaster answers the scene's question (Swain's goal-conflict-
+# disaster; labels from Bickham, Scene & Structure, 1993). no-but is the
+# improv / Kowal try-fail turn, used as the story starts going the
+# character's way. Note no-and here is Bickham's "no, and furthermore"
+# (worse), not Weiland's "no, and" (fails but salvages something).
+OUTCOME_GUIDE = (
+    'yes (gets the goal) / no (fails) / yes-but (gets the goal, with a new '
+    'complication or cost) / no-and (fails, and things get worse) / no-but '
+    '(fails, but something genuinely goes their way)'
+)
 
 VALID_STATUSES = frozenset({
     'spine', 'architecture', 'mapped', 'briefed', 'drafted', 'polished',
@@ -72,7 +94,9 @@ COLUMN_SCHEMA = {
     # scenes.csv
     'id': {
         'type': 'free_text', 'file': 'scenes.csv', 'stage': 'spine',
-        'description': 'Unique scene identifier — a descriptive slug (e.g., hidden-canyon). Also the filename (scenes/{id}.md).',
+        'description': 'Unique, permanent scene identifier: a 3-5 word slug naming the '
+                       'scene\'s core event (e.g., gatsby-reunites-with-daisy), never its '
+                       'position. Order lives in seq. Also the filename (scenes/{id}.md).',
     },
     'seq': {
         'type': 'integer', 'file': 'scenes.csv', 'stage': 'spine',
@@ -84,7 +108,11 @@ COLUMN_SCHEMA = {
     },
     'part': {
         'type': 'integer', 'file': 'scenes.csv', 'stage': 'architecture',
-        'description': 'Which act/part this scene belongs to.',
+        'description': "Book part this scene belongs to, from the manuscript's part headings; empty if the book has no parts.",
+    },
+    'act': {
+        'type': 'integer', 'file': 'scenes.csv', 'stage': 'architecture',
+        'description': 'Structural act this scene belongs to (1, 2, 3, ...). Drives act-level scoring, act proportions, and --act filters.',
     },
     'pov': {
         'type': 'registry', 'registry': 'characters.csv', 'array': False,
@@ -92,13 +120,18 @@ COLUMN_SCHEMA = {
         'description': 'POV character. Normalized against reference/characters.csv.',
     },
     'location': {
-        'type': 'registry', 'registry': 'locations.csv', 'array': False,
+        'type': 'registry', 'registry': 'locations.csv', 'array': True,
         'file': 'scenes.csv', 'stage': 'map',
-        'description': 'Physical location. Normalized against reference/locations.csv.',
+        'description': 'Places where the scene\'s action happens on the page, in order: '
+                       'usually one; the first is where the scene opens, the last where '
+                       'it ends. Semicolon-separated. Normalized against reference/locations.csv.',
     },
     'timeline_day': {
         'type': 'integer', 'file': 'scenes.csv', 'stage': 'map',
-        'description': 'Chronological position (day number within the story).',
+        'description': 'Day on which the scene\'s action happens, in story chronology. Day 1 is '
+                       'the first day of the main story; flashbacks keep the earlier day they '
+                       'depict (0 or negative before day 1). Reading order is seq, so a scene '
+                       'earlier in time than the story\'s present is a flashback.',
     },
     'time_of_day': {
         'type': 'enum', 'values': VALID_TIMES,
@@ -201,7 +234,7 @@ COLUMN_SCHEMA = {
     'mice_threads': {
         'type': 'mice', 'registry': 'mice-threads.csv',
         'file': 'scene-intent.csv', 'stage': 'map',
-        'description': 'MICE thread operations: +name (open) or -name (close). Type resolved from registry. FILO nesting order (Kowal).',
+        'description': 'MICE threads (Kowal): +name where the thread begins (once), -name where it resolves (at most once), bare name where a scene advances or touches an open thread. Type resolved from registry. Threads may interleave; nesting is guidance, not a rule.',
     },
     'theme_threads': {
         'type': 'registry', 'registry': 'themes.csv', 'array': True,
@@ -221,7 +254,7 @@ COLUMN_SCHEMA = {
     'outcome': {
         'type': 'enum', 'values': VALID_OUTCOMES,
         'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'How the scene ends for the POV character (Weiland).',
+        'description': 'How the scene ends for the POV character: ' + OUTCOME_GUIDE + '.',
     },
     'crisis': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
@@ -426,6 +459,24 @@ def _check_registry(value: str, alias_map: dict, is_array: bool) -> list[str]:
     return failures
 
 
+def _validated_files() -> list[tuple[str, list[str], str]]:
+    """(filename, columns, schema-key prefix) for every CSV the schema covers.
+
+    Scene CSVs key their columns directly. Registry files declare theirs with
+    a file-stem prefix (physical-states.csv's `character` column is
+    `physical_states_character`), and were previously never validated.
+    """
+    files = [(name, cols, '') for name, cols in _FILE_MAP.items()]
+    registry_files = sorted({spec['file'] for spec in COLUMN_SCHEMA.values()
+                             if spec.get('file', '').endswith('.csv')
+                             and spec['file'] not in _FILE_MAP})
+    for name in registry_files:
+        prefix = name.removesuffix('.csv').replace('-', '_') + '_'
+        cols = [key[len(prefix):] for key in COLUMN_SCHEMA if key.startswith(prefix)]
+        files.append((name, ['id'] + cols, prefix))
+    return files
+
+
 def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
     """Validate all scene CSV values against column schema.
 
@@ -477,7 +528,7 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
     skipped = 0
     errors: list[dict] = []
 
-    for filename, columns in _FILE_MAP.items():
+    for filename, columns, key_prefix in _validated_files():
         path = os.path.join(ref_dir, filename)
         if not os.path.isfile(path):
             continue
@@ -496,7 +547,7 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                     skipped += 1
                     continue
 
-                schema = COLUMN_SCHEMA.get(col)
+                schema = COLUMN_SCHEMA.get(key_prefix + col)
                 if not schema:
                     skipped += 1
                     continue
@@ -631,6 +682,24 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
 # ============================================================================
 # Knowledge granularity validation
 # ============================================================================
+
+def validate_scene_ids(ref_dir: str) -> dict:
+    """Advisory check of scenes.csv ids against SCENE_ID_RULE.
+
+    Returns {'total': int, 'warnings': [{'id', 'problems'}]}. Advisory, not
+    blocking: renaming an id breaks references, so an existing project
+    should only change ids deliberately.
+    """
+    from .scenes import scene_id_problems
+    rows = _read_csv(os.path.join(ref_dir, 'scenes.csv'))
+    warnings = []
+    for row in rows:
+        sid = (row.get('id') or '').strip()
+        problems = scene_id_problems(sid) if sid else []
+        if problems:
+            warnings.append({'id': sid, 'problems': problems})
+    return {'total': len(rows), 'warnings': warnings}
+
 
 MAX_FACT_NAME_WORDS = 15
 MAX_NEW_FACTS_PER_SCENE = 4

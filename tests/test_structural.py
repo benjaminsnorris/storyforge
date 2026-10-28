@@ -512,3 +512,99 @@ class TestDeadCharacterOnStageRatio:
         assert len(ratio_findings) == 1, (
             f"Alive character with low ratio should be flagged, got: {ratio_findings}"
         )
+
+
+class TestActProportionsReadAct:
+    """Act proportions come from the `act` column. `part` is the book's
+    physical division and says nothing about act shape."""
+
+    @staticmethod
+    def _scenes(acts, parts):
+        return {
+            f's{i}': {'id': f's{i}', 'seq': str(i), 'act': act, 'part': part,
+                      'target_words': '1000'}
+            for i, (act, part) in enumerate(zip(acts, parts), start=1)
+        }
+
+    @staticmethod
+    def _act_findings(scenes):
+        from storyforge.structural import score_pacing
+        result = score_pacing(scenes, {}, {})
+        return [f['message'] for f in result['findings']
+                if f['message'].startswith(('First act', 'Last act'))]
+
+    def test_lopsided_acts_are_found_even_without_parts(self):
+        scenes = self._scenes(acts=['1', '1', '2', '3'], parts=['', '', '', ''])
+        assert any(m.startswith('First act is 50%')
+                   for m in self._act_findings(scenes))
+
+    def test_book_parts_do_not_count_as_acts(self):
+        # Balanced acts (25% / 50% / 25%) inside lopsided book parts.
+        scenes = self._scenes(acts=['1', '2', '2', '3'],
+                              parts=['1', '1', '2', '3'])
+        assert self._act_findings(scenes) == []
+
+
+class TestAssessFlashbacks:
+    """Flashbacks are listed and gauged, never errors. The Great Gatsby's
+    Chapter VIII return to 1917 was flagged as a blocking 'backwards jump'."""
+
+    def _maps(self, rows, briefs):
+        scenes = {sid: {'seq': str(i), 'timeline_day': str(day), 'pov': pov,
+                        'word_count': str(words)}
+                  for i, (sid, day, pov, words) in enumerate(rows, 1)}
+        return scenes, {sid: {'knowledge_in': kin, 'knowledge_out': kout}
+                        for sid, (kin, kout) in briefs.items()}
+
+    def test_passage_with_payoff(self):
+        from storyforge.structural import assess_flashbacks
+        scenes, briefs = self._maps(
+            [('arrive', 1, 'nick', 1000), ('party', 40, 'nick', 1000),
+             ('courtship-1917', -1825, 'nick', 500), ('courtship-war', -1700, 'nick', 500),
+             ('confrontation', 41, 'nick', 1000)],
+            {'courtship-1917': ('', 'daisy-waited'), 'courtship-war': ('daisy-waited', 'daisy-waited;daisy-married-tom'),
+             'confrontation': ('daisy-married-tom', 'daisy-married-tom')})
+        [p] = assess_flashbacks(scenes, briefs)
+        assert p['scenes'] == ['courtship-1917', 'courtship-war']
+        assert p['kind'] == 'flashback'
+        assert (p['earliest_day'], p['present_day'], p['depth_days']) == (-1825, 40, 1865)
+        assert p['share'] == 0.25
+        assert (p['new_facts'], p['facts_used_later']) == (2, 1)
+
+    def test_crosscut_when_pov_differs(self):
+        from storyforge.structural import assess_flashbacks
+        scenes, briefs = self._maps(
+            [('a', 5, 'nick', 100), ('b', 4, 'michaelis', 100), ('c', 6, 'nick', 100)], {})
+        [p] = assess_flashbacks(scenes, briefs)
+        assert p['kind'] == 'crosscut' and p['new_facts'] == 0
+
+    def test_chronological_book_has_none(self):
+        from storyforge.structural import assess_flashbacks
+        scenes, briefs = self._maps([('a', 1, 'x', 1), ('b', 1, 'x', 1), ('c', 3, 'x', 1)], {})
+        assert assess_flashbacks(scenes, briefs) == []
+
+
+class TestTimelineNeverBlocks:
+    def test_flashback_is_advisory(self, tmp_path):
+        from storyforge.elaborate import validate_structure
+        ref = str(tmp_path / 'reference')
+        os.makedirs(ref)
+        with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            for i, day in enumerate([1, 40, -1825, 41], 1):
+                f.write(f's0{i}|{i}|S{i}|1|nick|Room|{day}|morning|1h|action|briefed|1000|2000\n')
+        report = validate_structure(ref)
+        timeline = [c for c in report['checks'] if c['category'] == 'timeline' and not c['passed']]
+        assert len(timeline) == 1
+        assert timeline[0]['severity'] == 'advisory'
+        assert timeline[0]['message'].startswith('Flashback: s03 (day -1825)')
+
+
+class TestFlashbacksIgnoreCutScenes:
+    def test_cut_scene_is_not_a_flashback(self):
+        from storyforge.structural import assess_flashbacks
+        scenes = {'a': {'seq': '1', 'timeline_day': '5', 'pov': 'x', 'word_count': '10'},
+                  'b': {'seq': '2', 'timeline_day': '1', 'pov': 'x', 'word_count': '10',
+                        'status': 'cut'},
+                  'c': {'seq': '3', 'timeline_day': '6', 'pov': 'x', 'word_count': '10'}}
+        assert assess_flashbacks(scenes, {}) == []

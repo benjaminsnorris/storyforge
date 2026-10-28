@@ -677,7 +677,8 @@ comprehension.
   travel beat or scene break.
 - **Low signals:** Adjacent scenes share pov + location + day but
   feel like cuts; pov changes appear mid-sequence without setup;
-  timeline_day goes backward and the scene type is regular.
+  (a scene earlier in story time than the one before it is a
+  flashback, a device rather than a low signal).
 
 The 1.5x weight reflects this axis's unique-and-load-bearing role:
 **no other scoring mode catches adjacency.** Spine causal handoff
@@ -822,7 +823,7 @@ scenes-as-engines.
   cohere as a single causal sequence for this scene?
 - **High signals:** Goal names a concrete objective; conflict names
   the specific opposition (person, force, internal block); outcome
-  matches the allowed enum (`yes`, `no`, `yes-but`, `no-and`) and
+  matches the allowed enum (`yes`, `no`, `yes-but`, `no-and`, `no-but`) and
   follows from the goal/conflict; crisis articulates a real dilemma
   (best-bad-choice or irreconcilable goods); decision names what the
   character actively chooses in response.
@@ -849,7 +850,8 @@ scenes-as-engines.
   way that builds escalation, or does the same outcome repeat in
   streaks?
 - **High signals:** Outcomes spread across `yes` / `no` / `yes-but` /
-  `no-and`; the `no-and` outcomes cluster around turning points;
+  `no-and` / `no-but`; the `no-and` outcomes cluster around turning points;
+  `no-but` appears where the tide turns toward the protagonist;
   Act 2's midpoint has a `no-and` (Save the Cat all-is-lost).
 - **Low signals:** A streak of 4+ consecutive `yes` outcomes (no
   stakes); a streak of 4+ `no` outcomes (the protagonist loses
@@ -959,7 +961,7 @@ corpus (parallel to scene-map's continuity pre-pass):
 1. **Missing required field:** any of `goal`, `conflict`, `outcome`,
    `crisis`, `decision` is empty: high severity per missing field.
 2. **Invalid outcome:** `outcome` is non-empty but not in
-   `{yes, no, yes-but, no-and}`: high severity.
+   `{yes, no, yes-but, no-and, no-but}`: high severity.
 3. **Knowledge orphan:** a scene's `knowledge_in` ∋ a fact that no
    upstream brief's `knowledge_out` provides (walking the
    `continuity_deps` graph transitively when present, falling back

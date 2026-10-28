@@ -185,7 +185,7 @@ The CSV files depend on which pipeline the author chose.
 
 **`{project-dir}/reference/scenes.csv`:**
 ```
-id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words|target_pages|panel_count|page_count|architecture_scene
+id|seq|title|part|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words|target_pages|panel_count|page_count|architecture_scene
 ```
 
 **`{project-dir}/reference/scene-intent.csv`:**
@@ -200,12 +200,12 @@ id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|
 
 **`{project-dir}/reference/spine.csv`:**
 ```
-id|seq|title|function|part
+id|seq|title|function|act
 ```
 
 **`{project-dir}/reference/architecture.csv`:**
 ```
-id|seq|title|part|pov|spine_event|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
+id|seq|title|act|pov|spine_event|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 ```
 
 **`{project-dir}/reference/themes.csv`:**
@@ -223,7 +223,7 @@ Copy these from the plugin's `templates/reference/` directory if available.
 
 **`{project-dir}/reference/scenes.csv`:**
 ```
-id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+id|seq|title|part|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
 ```
 
 **`{project-dir}/reference/scene-intent.csv`:**

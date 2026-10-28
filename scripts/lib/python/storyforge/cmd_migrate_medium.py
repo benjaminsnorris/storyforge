@@ -207,7 +207,7 @@ def step4_update_yaml(project_dir: str, target: str, dry_run: bool) -> None:
 # This lets the author immediately edit target_pages (N→GN) or target_words (GN→N)
 # without adding columns manually.
 _SCENES_FULL_HEADER = [
-    'id', 'seq', 'title', 'part', 'pov', 'location',
+    'id', 'seq', 'title', 'part', 'act', 'pov', 'location',
     'timeline_day', 'time_of_day', 'duration', 'type', 'status',
     'word_count', 'target_words',      # novel columns
     'target_pages', 'panel_count', 'page_count',  # GN columns
