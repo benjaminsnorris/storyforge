@@ -131,6 +131,14 @@ class TestEdtf:
                       'XXXX-XX-XX', '22', '1922/July', ''):
             assert not is_valid_edtf(value), value
 
+    def test_described_in_words_for_prompts(self):
+        """Gatsby: the model read 1922-22 (summer 1922) as June 22."""
+        from storyforge.timeline import describe_edtf
+        assert describe_edtf('1922-22') == 'summer 1922'
+        assert describe_edtf('XXXX-07-04') == '4 July (year not stated)'
+        assert describe_edtf('1917~') == '1917, approximately'
+        assert describe_edtf('1922-06/1922-09') == 'from June 1922 to September 1922'
+
     def test_schema_validates_new_columns(self, project_dir):
         from storyforge.schema import validate_schema
         ref = os.path.join(project_dir, 'reference')

@@ -225,6 +225,38 @@ def is_valid_edtf(value: str) -> bool:
     return _edtf_date_ok(value)
 
 
+_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+           'September', 'October', 'November', 'December']
+_SEASONS = {21: 'spring', 22: 'summer', 23: 'autumn', 24: 'winter'}
+
+
+def describe_edtf(value: str) -> str:
+    """An EDTF date in words, for prompts: models read ``1922-22`` (summer
+    1922) as June 22. ``XXXX-07-04`` → "4 July (year not stated)"."""
+    value = (value or '').strip()
+    if '/' in value:
+        start, _, end = value.partition('/')
+        parts = [describe_edtf(p) if p not in ('', '..') else 'open' for p in (start, end)]
+        return f'from {parts[0]} to {parts[1]}'
+    m = _EDTF_DATE.match(value)
+    if not m:
+        return value
+    year, month, day, qual = m.group('year'), m.group('month'), m.group('day'), m.group('qual')
+    words = []
+    if day and 'X' not in day:
+        words.append(str(int(day)))
+    if month and 'X' not in month:
+        mi = int(month)
+        words.append(_SEASONS.get(mi) or _MONTHS[mi - 1])
+    year_text = year if 'X' not in year else ('' if year == 'XXXX' else year.replace('X', '?'))
+    text = ' '.join(words + ([year_text] if year_text else []))
+    if year == 'XXXX':
+        text += ' (year not stated)'
+    if qual:
+        text += {'~': ', approximately', '?': ', uncertain', '%': ', approximate and uncertain'}[qual]
+    return text
+
+
 def _month_day(value: str) -> tuple[str, int, int] | None:
     """``(year, month, day)`` for a single EDTF date with a known month and
     day (year may be ``XXXX``), else None."""
@@ -303,9 +335,11 @@ def build_assignment_prompt(batch: list[dict], present: int | None,
     for item in batch:
         cue = item.get('cues', {})
         parts = [f'relation {cue.get("relation") or "unclear"}']
-        for key in ('gap', 'anchor', 'refers', 'span', 'date'):
+        for key in ('gap', 'anchor', 'refers', 'span'):
             if cue.get(key):
                 parts.append(f'{key} "{cue[key]}"')
+        if cue.get('date'):
+            parts.append(f'date stated: {describe_edtf(cue["date"])}')
         provisional = item.get('provisional')
         lines.append(
             f'{item["id"]} — {item.get("title", "")}\n'
@@ -335,10 +369,10 @@ Each scene's cues say how it relates to the scene before it. A provisional day w
 - earlier: a flashback or recollection; it gets the earlier day it depicts and does not move the present.
 - frame: narration from after the story; it gets the day it is narrated from (after the story's end, roughly) and does not move the present.
 - A weekday or date anchor pins a scene: keep weekdays 7 days apart and dates consistent with the days between them.
-- "refers" cues state how far apart two events are ("that June night three months before" puts this scene about 90 days after that night): honour them, counting back as well as forward.
+- "refers" cues state how far apart two events are ("that June night three months before" puts this scene about 90 days after that night). They are the firmest evidence of distance: where vague gaps ("several weeks", "some time later") add up to something else, stretch or shrink the vague gaps to fit the stated durations, counting back as well as forward.
 - mode: scene (the action plays out on its day), summary (it covers a stretch of time; the day is where the stretch starts), or frame.
 
-First work out the calendar under a line REASONING: — the anchors, the stated durations (count back from a "three months before" as well as forward), and any scene you are unsure of — in at most 600 words. Then write a line CALENDAR: and, after it, exactly one line per scene, in order:
+First work out the calendar under a line REASONING: — list the anchors and every stated duration ("refers"), fix the days they pin, then fit the vague gaps between them; note any scene you are unsure of — in at most 600 words. Then write a line CALENDAR: and, after it, exactly one line per scene, in order:
 
 scene_id | day | mode | basis
 
@@ -421,7 +455,8 @@ def assign_calendar(items: list[dict], invoke, log_dir: str) -> dict[str, tuple[
                     present = day
             for key in ('anchor', 'refers', 'date'):
                 if cue.get(key):
-                    anchors.append(f'{sid}: day {day} — {cue[key]}')
+                    text = describe_edtf(cue[key]) if key == 'date' else cue[key]
+                    anchors.append(f'{sid}: day {day} — {text}')
     return placed
 
 
