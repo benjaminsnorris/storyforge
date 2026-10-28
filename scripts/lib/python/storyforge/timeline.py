@@ -48,7 +48,7 @@ TIME_GAP: [the gap from the previous scene in at most six words, no explanation:
 TIME_ANCHOR: [a calendar fact pinning when THIS scene's action happens — a date, weekday, month, season, holiday or named day ("the hottest day of the summer") — quoted briefly; not a habit ("every Friday") or a date the scene only mentions; empty if none]
 TIME_REFERS: [any statement in this scene of how long ago or how long until another event in the story, quoted briefly: "that June night three months before", "five years since he'd seen her", "the funeral was on the third day"; separate several with semicolons; empty if none]
 TIME_SPAN: [when the scene summarizes a stretch of time ("all that summer"), how long; empty for a scene that plays out in one sitting]
-TIME_DATE: [only what this scene's own text states about the calendar date, in EDTF: "1922-07-04", "XXXX-07-04" when the year isn't given here, "1922" for a year, "1922-22" for summer 1922 (21 spring, 22 summer, 23 autumn, 24 winter), "1917~" for "around 1917", "1922-06/1922-09" for a stretch. Never fill in a part the text doesn't give; empty if the text gives no date]"""
+TIME_DATE: [only what this scene's own text states about the calendar date, in EDTF: "1922-07-04", "XXXX-07-04" when the year isn't given here, "1922" for a year, "1922-22" for summer 1922 (21 spring, 22 summer, 23 autumn, 24 winter), "1917~" for "around 1917", "1922-06/1922-09" for a stretch. A date the text fixes by a stated distance from a named calendar day counts as given, marked ~: "In two weeks it'll be the longest day in the year" → "XXXX-06-07~". Never fill in a part the text doesn't give; empty if the text gives no date]"""
 
 _CUE_LABELS = {
     'TIME_RELATION': 'relation',
@@ -370,11 +370,12 @@ Each scene's cues say how it relates to the scene before it. A provisional day w
 
 - earlier: a flashback or recollection; it gets the earlier day it depicts and does not move the present.
 - frame: narration from after the story; it gets the day it is narrated from (after the story's end, roughly) and does not move the present.
+- Fix the calendar first: from the dates, months, holidays and named days in the cues (including "refers" cues such as "that June night"), work out which calendar date day 1 falls on, and say so. Then turn every such anchor into a day by counting from day 1's date: with day 1 on June 7, "a few days before the Fourth of July" is about day 25 and "late in July" about day 45-55. Vague gaps give way to these.
 - A date anchor pins a scene: keep dates consistent with the days between them. Weekdays are weak evidence (characters misname days, and "Saturday" may be a day mentioned rather than the scene's own): use them where they agree, and where they conflict, drop them rather than work them out.
 - "refers" cues state how far apart two events are ("that June night three months before" puts this scene about 90 days after that night). They are the firmest evidence of distance: where vague gaps ("several weeks", "some time later") add up to something else, stretch or shrink the vague gaps to fit the stated durations, counting back as well as forward.
 - mode: scene (the action plays out on its day), summary (it covers a stretch of time; the day is where the stretch starts), or frame.
 
-{"Write a line CALENDAR: and nothing before it; after it" if terse else "First work out the calendar under a line REASONING: — list the anchors and every stated duration (refers), fix the days they pin, then fit the vague gaps between them; note any scene you are unsure of — in at most 600 words. Then write a line CALENDAR: and, after it,"} exactly one line per scene, in order:
+{"Write a line CALENDAR: and nothing before it; after it" if terse else "First work out the calendar under a line REASONING: — give day 1's calendar date, list the anchors and every stated duration (refers), fix the days they pin, then fit the vague gaps between them; note any scene you are unsure of — in at most 600 words. Then write a line CALENDAR: and, after it,"} exactly one line per scene, in order:
 
 scene_id | day | mode | basis
 
