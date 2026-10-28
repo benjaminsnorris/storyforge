@@ -13,7 +13,7 @@ import re
 from typing import Any
 
 from .enrich import load_registry_alias_maps, normalize_fields  # noqa: F401
-from .enrich import is_placeholder, normalize_aliases, strip_placeholders
+from .enrich import is_placeholder, normalize_aliases, reduce_boolean, strip_placeholders
 from .common import log
 from .prompts import read_yaml_field
 
@@ -676,7 +676,7 @@ Output each field on its own labeled line. Leave a field empty when there is not
 
 PHYSICAL_STATE_IN: [semicolon-separated state IDs active at START — carry forward from prior states for on-stage characters only]
 PHYSICAL_STATE_OUT: [semicolon-separated state IDs active at END — state_in plus new states acquired, minus states resolved]
-NEW_STATES: [one per line if any: id|character|description|category|action_gating — use kebab-case IDs]
+NEW_STATES: [one per line if any: id|character|description|category|action_gating — use kebab-case IDs; action_gating is the single word true (the state limits what the character can physically do) or false, with no explanation]
 RESOLVED_STATES: [semicolon-separated state IDs that resolve during this scene, or empty if none]
 
 IMPORTANT: Use EXACT state IDs for carry-forward. New states need new IDs in kebab-case (e.g., broken-arm-marcus, has-compass-elena)."""
@@ -717,7 +717,7 @@ def parse_physical_state_response(response: str, scene_id: str) -> dict:
                             'character': parts[1].strip(),
                             'description': parts[2].strip(),
                             'category': parts[3].strip(),
-                            'action_gating': parts[4].strip() if len(parts) > 4 else 'false',
+                            'action_gating': reduce_boolean(parts[4].strip()) if len(parts) > 4 else 'false',
                         })
                 # Check subsequent lines for more new states
                 i += 1
@@ -732,7 +732,7 @@ def parse_physical_state_response(response: str, scene_id: str) -> dict:
                             'character': nparts[1].strip(),
                             'description': nparts[2].strip(),
                             'category': nparts[3].strip(),
-                            'action_gating': nparts[4].strip() if len(nparts) > 4 else 'false',
+                            'action_gating': reduce_boolean(nparts[4].strip()) if len(nparts) > 4 else 'false',
                         })
                     i += 1
                 continue
@@ -1150,17 +1150,57 @@ def cleanup_mice_threads(ref_dir: str) -> list[dict]:
     return fixes
 
 
+def cleanup_answer_formats(ref_dir: str) -> list[dict]:
+    """Repair answers stored before their parsers reduced them: an
+    ``action_gating`` with an explanation (``Yes — ...``) and a placeholder
+    in ``continuity_deps`` (``(none)``), which a re-extraction that leaves
+    the field empty never overwrites. Returns a list of fixes applied."""
+    from .elaborate import _read_csv, _write_csv, _FILE_MAP
+
+    fixes = []
+    phys_path = os.path.join(ref_dir, 'physical-states.csv')
+    phys = _read_csv(phys_path)
+    for row in phys:
+        old = row.get('action_gating', '')
+        new = reduce_boolean(old)
+        if new != old:
+            row['action_gating'] = new
+            fixes.append({'scene_id': row.get('id', ''), 'field': 'action_gating',
+                          'old_value': old, 'new_value': new})
+    if any(f['field'] == 'action_gating' for f in fixes):
+        columns = list(phys[0].keys())
+        _write_csv(phys_path, phys, columns)
+
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+    briefs = _read_csv(briefs_path)
+    changed = False
+    for row in briefs:
+        old = row.get('continuity_deps', '')
+        new = strip_placeholders(old)
+        if new != old.strip():
+            row['continuity_deps'] = new
+            changed = True
+            fixes.append({'scene_id': row.get('id', ''), 'field': 'continuity_deps',
+                          'old_value': old, 'new_value': new})
+    if changed:
+        _write_csv(briefs_path, briefs, _FILE_MAP['scene-briefs.csv'])
+    return fixes
+
+
 def run_cleanup(ref_dir: str) -> dict:
     """Run all deterministic cleanup passes. Returns a summary dict."""
     timeline_fixes = cleanup_timeline(ref_dir)
     knowledge_fixes = cleanup_knowledge(ref_dir)
     mice_fixes = cleanup_mice_threads(ref_dir)
+    format_fixes = cleanup_answer_formats(ref_dir)
 
     return {
         'timeline': {'count': len(timeline_fixes), 'fixes': timeline_fixes},
         'knowledge': {'count': len(knowledge_fixes), 'fixes': knowledge_fixes},
         'mice_threads': {'count': len(mice_fixes), 'fixes': mice_fixes},
-        'total_fixes': len(timeline_fixes) + len(knowledge_fixes) + len(mice_fixes),
+        'answer_formats': {'count': len(format_fixes), 'fixes': format_fixes},
+        'total_fixes': (len(timeline_fixes) + len(knowledge_fixes) + len(mice_fixes)
+                        + len(format_fixes)),
     }
 
 

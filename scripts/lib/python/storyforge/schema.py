@@ -412,12 +412,12 @@ def _check_mice(value: str, alias_map: dict, type_map: dict) -> list[dict]:
         if not entry:
             continue
 
-        # Check format: must be +name, -name, +type:name, or -type:name
-        if len(entry) < 2 or entry[0] not in ('+', '-'):
-            problems.append({'entry': entry, 'reason': 'invalid format (expected +name or +type:name)'})
+        # +name opens, -name closes, a bare name is a mention (F-020); each
+        # may carry a type: +type:name
+        rest = entry[1:] if entry[0] in ('+', '-') else entry
+        if not rest.strip():
+            problems.append({'entry': entry, 'reason': 'invalid format (expected +name, -name or name)'})
             continue
-
-        rest = entry[1:]
 
         if ':' in rest:
             # Typed format: +type:name
