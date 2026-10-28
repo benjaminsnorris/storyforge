@@ -40,6 +40,17 @@ def _patch_interactive(monkeypatch):
     monkeypatch.setattr('storyforge.cmd_timeline.is_shutting_down', lambda: False)
 
 
+def _patch_pass(monkeypatch):
+    """Stub the timeline pass; returns the calls made to it."""
+    calls = {'cues': [], 'assign': []}
+    monkeypatch.setattr('storyforge.cmd_timeline.extract_cues',
+                        lambda project_dir, ids, model, log_dir: calls['cues'].append(ids) or {})
+    monkeypatch.setattr('storyforge.cmd_timeline.run_assignment',
+                        lambda project_dir, model, log_dir, force: calls['assign'].append(force) or
+                        {'assigned': 0, 'proposed': 0, 'unplaced': 0, 'findings': 0})
+    return calls
+
+
 # ============================================================================
 # parse_args
 # ============================================================================
@@ -188,18 +199,7 @@ class TestMainApiKeyCheck:
         _patch_interactive(monkeypatch)
         monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
         _ensure_scene_files(project_dir)
-        # Mock the timeline module functions
-        monkeypatch.setattr('storyforge.cmd_timeline.build_phase1_prompt',
-                            lambda sid, prose, prev: f'prompt for {sid}')
-        monkeypatch.setattr('storyforge.cmd_timeline.parse_indicators',
-                            lambda resp, sid: {'delta': 'same_day', 'evidence': 'test', 'anchor': 'none'})
-        monkeypatch.setattr('storyforge.cmd_timeline.build_phase2_prompt',
-                            lambda summaries, title: 'phase2 prompt')
-        monkeypatch.setattr('storyforge.cmd_timeline.parse_timeline_assignments',
-                            lambda resp: {})
-        # Use a mock runner that just calls the worker directly
-        monkeypatch.setattr('storyforge.runner.run_batched',
-                            lambda items, fn, batch_size=6, label='': [fn(i) for i in items])
+        _patch_pass(monkeypatch)
         # Should not exit with API key error
         main(['--interactive'])
         # Completed without SystemExit — interactive mode skipped API key check
@@ -211,16 +211,7 @@ class TestMainApiKeyCheck:
         _patch_interactive(monkeypatch)
         monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
         _ensure_scene_files(project_dir)
-        monkeypatch.setattr('storyforge.cmd_timeline.build_phase1_prompt',
-                            lambda sid, prose, prev: f'prompt for {sid}')
-        monkeypatch.setattr('storyforge.cmd_timeline.parse_indicators',
-                            lambda resp, sid: {'delta': 'same_day', 'evidence': 'test', 'anchor': 'none'})
-        monkeypatch.setattr('storyforge.cmd_timeline.build_phase2_prompt',
-                            lambda summaries, title: 'phase2 prompt')
-        monkeypatch.setattr('storyforge.cmd_timeline.parse_timeline_assignments',
-                            lambda resp: {})
-        monkeypatch.setattr('storyforge.runner.run_batched',
-                            lambda items, fn, batch_size=6, label='': [fn(i) for i in items])
+        calls = _patch_pass(monkeypatch)
         # Should not exit with API key error (embedded mode skips check)
         main(['--embedded', '--direct'])
         assert mock_api.call_count >= 0
@@ -256,16 +247,7 @@ class TestMainEmbedded:
         _patch_interactive(monkeypatch)
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         _ensure_scene_files(project_dir)
-        monkeypatch.setattr('storyforge.cmd_timeline.build_phase1_prompt',
-                            lambda sid, prose, prev: f'prompt for {sid}')
-        monkeypatch.setattr('storyforge.cmd_timeline.parse_indicators',
-                            lambda resp, sid: {'delta': 'same_day', 'evidence': 'test', 'anchor': 'none'})
-        monkeypatch.setattr('storyforge.cmd_timeline.build_phase2_prompt',
-                            lambda summaries, title: 'phase2 prompt')
-        monkeypatch.setattr('storyforge.cmd_timeline.parse_timeline_assignments',
-                            lambda resp: {})
-        monkeypatch.setattr('storyforge.runner.run_batched',
-                            lambda items, fn, batch_size=6, label='': [fn(i) for i in items])
+        calls = _patch_pass(monkeypatch)
         main(['--embedded', '--direct'])
         branch_calls = mock_git.calls_for('create_branch')
         pr_calls = mock_git.calls_for('create_draft_pr')
@@ -274,27 +256,14 @@ class TestMainEmbedded:
         assert len(pr_calls) == 0
         assert len(commit_calls) == 0
 
-    def test_embedded_cleans_up_temp_files(self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+    def test_embedded_runs_both_steps_without_force(self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
         monkeypatch.setattr('storyforge.cmd_timeline.detect_project_root', lambda: project_dir)
         _patch_interactive(monkeypatch)
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         _ensure_scene_files(project_dir)
-        monkeypatch.setattr('storyforge.cmd_timeline.build_phase1_prompt',
-                            lambda sid, prose, prev: f'prompt for {sid}')
-        monkeypatch.setattr('storyforge.cmd_timeline.parse_indicators',
-                            lambda resp, sid: {'delta': 'same_day', 'evidence': 'test', 'anchor': 'none'})
-        monkeypatch.setattr('storyforge.cmd_timeline.build_phase2_prompt',
-                            lambda summaries, title: 'phase2 prompt')
-        monkeypatch.setattr('storyforge.cmd_timeline.parse_timeline_assignments',
-                            lambda resp: {})
-        monkeypatch.setattr('storyforge.runner.run_batched',
-                            lambda items, fn, batch_size=6, label='': [fn(i) for i in items])
+        calls = _patch_pass(monkeypatch)
         main(['--embedded', '--direct'])
-        timeline_dir = os.path.join(project_dir, 'working', 'timeline')
-        # Indicator and status files should be cleaned up
-        remaining = [f for f in os.listdir(timeline_dir)
-                     if f.startswith('.indicators-') or f.startswith('.status-')]
-        assert len(remaining) == 0
+        assert len(calls['cues']) == 1 and calls['assign'] == [False]
 
 
 # ============================================================================
@@ -309,16 +278,7 @@ class TestMainStandalone:
         _patch_interactive(monkeypatch)
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         _ensure_scene_files(project_dir)
-        monkeypatch.setattr('storyforge.cmd_timeline.build_phase1_prompt',
-                            lambda sid, prose, prev: f'prompt for {sid}')
-        monkeypatch.setattr('storyforge.cmd_timeline.parse_indicators',
-                            lambda resp, sid: {'delta': 'same_day', 'evidence': 'test', 'anchor': 'none'})
-        monkeypatch.setattr('storyforge.cmd_timeline.build_phase2_prompt',
-                            lambda summaries, title: 'phase2 prompt')
-        monkeypatch.setattr('storyforge.cmd_timeline.parse_timeline_assignments',
-                            lambda resp: {})
-        monkeypatch.setattr('storyforge.runner.run_batched',
-                            lambda items, fn, batch_size=6, label='': [fn(i) for i in items])
+        calls = _patch_pass(monkeypatch)
         main(['--direct'])
         branch_calls = mock_git.calls_for('create_branch')
         pr_calls = mock_git.calls_for('create_draft_pr')
@@ -332,16 +292,7 @@ class TestMainStandalone:
         _patch_interactive(monkeypatch)
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         _ensure_scene_files(project_dir)
-        monkeypatch.setattr('storyforge.cmd_timeline.build_phase1_prompt',
-                            lambda sid, prose, prev: f'prompt for {sid}')
-        monkeypatch.setattr('storyforge.cmd_timeline.parse_indicators',
-                            lambda resp, sid: {'delta': 'same_day', 'evidence': 'test', 'anchor': 'none'})
-        monkeypatch.setattr('storyforge.cmd_timeline.build_phase2_prompt',
-                            lambda summaries, title: 'phase2 prompt')
-        monkeypatch.setattr('storyforge.cmd_timeline.parse_timeline_assignments',
-                            lambda resp: {})
-        monkeypatch.setattr('storyforge.runner.run_batched',
-                            lambda items, fn, batch_size=6, label='': [fn(i) for i in items])
+        calls = _patch_pass(monkeypatch)
         main(['--direct'])
         commit_calls = mock_git.calls_for('commit_and_push')
         assert len(commit_calls) == 1
@@ -361,33 +312,45 @@ class TestMainPhase1Only:
         _patch_interactive(monkeypatch)
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         _ensure_scene_files(project_dir)
-        monkeypatch.setattr('storyforge.cmd_timeline.build_phase1_prompt',
-                            lambda sid, prose, prev: f'prompt for {sid}')
-        monkeypatch.setattr('storyforge.cmd_timeline.parse_indicators',
-                            lambda resp, sid: {'delta': 'next_day', 'evidence': 'sunrise', 'anchor': 'none'})
-        monkeypatch.setattr('storyforge.runner.run_batched',
-                            lambda items, fn, batch_size=6, label='': [fn(i) for i in items])
+        calls = _patch_pass(monkeypatch)
         with pytest.raises(SystemExit) as exc_info:
             main(['--phase1-only', '--direct'])
         assert exc_info.value.code == 0
 
-    def test_phase1_only_saves_indicator_files(self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+    def test_phase1_only_reads_cues_and_assigns_nothing(self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
         monkeypatch.setattr('storyforge.cmd_timeline.detect_project_root', lambda: project_dir)
         _patch_interactive(monkeypatch)
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         _ensure_scene_files(project_dir)
-        monkeypatch.setattr('storyforge.cmd_timeline.build_phase1_prompt',
-                            lambda sid, prose, prev: f'prompt for {sid}')
-        monkeypatch.setattr('storyforge.cmd_timeline.parse_indicators',
-                            lambda resp, sid: {'delta': 'next_day', 'evidence': 'sunrise', 'anchor': 'none'})
-        monkeypatch.setattr('storyforge.runner.run_batched',
-                            lambda items, fn, batch_size=6, label='': [fn(i) for i in items])
+        calls = _patch_pass(monkeypatch)
         with pytest.raises(SystemExit):
             main(['--phase1-only', '--direct'])
-        timeline_dir = os.path.join(project_dir, 'working', 'timeline')
-        # Phase1-only should NOT clean up indicator files
-        indicator_files = [f for f in os.listdir(timeline_dir) if f.startswith('.indicators-')]
-        assert len(indicator_files) > 0
+        assert len(calls['cues']) == 1 and calls['assign'] == []
+
+
+class TestMainCheck:
+    """--check compares prose with the calendar and changes nothing."""
+
+    def test_check_reads_cues_and_never_assigns(self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        monkeypatch.setattr('storyforge.cmd_timeline.detect_project_root', lambda: project_dir)
+        _patch_interactive(monkeypatch)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        _ensure_scene_files(project_dir)
+        calls = _patch_pass(monkeypatch)
+        before = open(os.path.join(project_dir, 'reference', 'scenes.csv')).read()
+        main(['--check', '--scenes', 'act1-sc01'])
+        assert calls['cues'] == [['act1-sc01']] and calls['assign'] == []
+        assert mock_git.calls_for('create_branch') == []
+        assert open(os.path.join(project_dir, 'reference', 'scenes.csv')).read() == before
+
+    def test_force_is_passed_through(self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        monkeypatch.setattr('storyforge.cmd_timeline.detect_project_root', lambda: project_dir)
+        _patch_interactive(monkeypatch)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        _ensure_scene_files(project_dir)
+        calls = _patch_pass(monkeypatch)
+        main(['--embedded', '--direct', '--force'])
+        assert calls['assign'] == [True]
 
 
 # ============================================================================

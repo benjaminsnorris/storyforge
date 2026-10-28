@@ -212,6 +212,10 @@ def main(argv=None):
 
     if not args.dry_run and drafted_count > 0:
         print_summary(project_dir, 'draft', session_start=session_start_iso)
+        # Does the new prose agree with the calendar? Reported, never fixed.
+        from storyforge.timeline import drift_check
+        drift_check(project_dir, [sid for sid in pending_ids
+                                  if os.path.isfile(os.path.join(scenes_dir, f'{sid}.md'))])
         run_review_phase('drafting', project_dir)
 
 

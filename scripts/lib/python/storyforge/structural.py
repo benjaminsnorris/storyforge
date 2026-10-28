@@ -903,7 +903,8 @@ def assess_flashbacks(scenes_map, briefs_map):
 
     Reading order is seq; story time is timeline_day. The story's present is
     the latest day reached so far, and a run of consecutive scenes set before
-    it is one flashback passage (a crosscut when its POV differs from the
+    it is one flashback passage (frame scenes, narrated from after the story,
+    are skipped: they are neither) (a crosscut when its POV differs from the
     present's). For each passage: how far back it reaches, its share of the
     words, the facts it establishes (knowledge_out not in knowledge_in), and
     how many of those facts later present-time scenes take in. A flashback
@@ -934,6 +935,10 @@ def assess_flashbacks(scenes_map, briefs_map):
     present_day, present_pov = None, ''
     in_present = []   # scene ids at or after the present, in reading order
     for sid, scene in ordered:
+        # Frame narration (from after the story) is neither the present nor a
+        # flashback
+        if _s(scene.get('time_mode')).strip() == 'frame':
+            continue
         day = _int(scene.get('timeline_day'))
         pov = _s(scene.get('pov')).strip()
         if day is not None and present_day is not None and day < present_day:

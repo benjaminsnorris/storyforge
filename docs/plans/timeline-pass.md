@@ -171,10 +171,12 @@ extraction:
   them agree, since either may be the one that's wrong.
 - `storyforge timeline --check` runs the same comparison on demand, for
   the whole book or `--scenes`, without assigning anything.
-- In elaboration, the scene-map prompt asks for the relation and gap as
-  well as the day, so a planned flashback is recorded as one (`earlier`,
-  day ≤ 0) rather than looking like an error, and the drafting brief
-  carries "set N days after X" or "flashback to 1917" into the prose.
+- In elaboration, the scene map asks for `time_mode` and for each
+  scene's relation and gap in its summary ("the next morning", "flashback
+  to 1917"), so a planned flashback is recorded as one (day ≤ 0) rather
+  than looking like an error. The summary is where the timeline pass reads
+  cues for a scene not yet drafted, and the drafting brief carries it into
+  the prose; no separate cue columns are added to the CSVs.
 
 ## Verification
 

@@ -178,8 +178,16 @@ def parse_characterize_response(response: str) -> dict[str, str]:
 def build_skeleton_prompt(scene_id: str, scene_text: str,
                           profile: dict[str, str],
                           existing_metadata: dict[str, str] | None = None,
-                          registries_text: str = '') -> str:
-    """Build prompt for Phase 1: extract scenes.csv fields from a single scene."""
+                          registries_text: str = '',
+                          previous_tail: str = '') -> str:
+    """Build prompt for Phase 1: extract scenes.csv fields from a single scene.
+
+    The scene's day is not asked for: a scene read alone can't know where it
+    sits on the book's calendar. It gives time cues instead (relative to the
+    end of the previous scene, *previous_tail*), and the timeline pass places
+    every scene afterwards.
+    """
+    from .timeline import CUE_INSTRUCTIONS
     context = f"""POV characters in this manuscript: {profile.get('pov_characters', 'unknown')}
 Timeline: {profile.get('timeline', 'unknown')}
 Key locations: {profile.get('key_locations', 'unknown')}"""
@@ -192,13 +200,15 @@ Key locations: {profile.get('key_locations', 'unknown')}"""
                 f"  {k}: {v}" for k, v in known.items())
 
     registries_section = f'\n{registries_text}\n' if registries_text else ''
+    previous = (f'## End of the Previous Scene (for time cues only)\n\n{previous_tail}\n\n'
+                if previous_tail else '## Previous Scene\n\n(this is the first scene)\n\n')
 
     return f"""Extract structural metadata from this scene.
 
 ## Manuscript Context
 {context}
 
-## Scene: {scene_id}
+{previous}## Scene: {scene_id}
 
 {scene_text}
 
@@ -211,7 +221,7 @@ Output each field on its own labeled line. If a value cannot be determined, outp
 TITLE: [a short evocative title for this scene, 3-7 words]
 POV: [the POV character's full name]
 LOCATION: [the places where this scene's action happens on the page, in order, semicolon-separated — usually just one. Use consistent canonical names. Only places the action is in, not places mentioned or remembered; a journey lists the places it passes through, never "X to Y" as one place]
-TIMELINE_DAY: [integer day on which this scene's action happens, in story chronology: day 1 is the first day of the main story; a flashback gets the earlier day it depicts (0 or negative before day 1, roughly: five years earlier is about -1825)]
+{CUE_INSTRUCTIONS}
 TIME_OF_DAY: [morning / afternoon / evening / night / dawn / dusk]
 DURATION: [approximate in-story duration, e.g., "2 hours", "30 minutes", "an afternoon"]
 TYPE: [the scene's primary narrative purpose — one of: character, plot, world, action, transition, confrontation, dialogue, introspection, revelation]
@@ -251,7 +261,6 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
         'TITLE': 'title',
         'POV': 'pov',
         'LOCATION': 'location',
-        'TIMELINE_DAY': 'timeline_day',
         'TIME_OF_DAY': 'time_of_day',
         'DURATION': 'duration',
         'TYPE': 'type',
@@ -267,6 +276,12 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
             value = match.group(2).strip()
             if label in label_map and value and value.upper() != 'UNKNOWN':
                 result[label_map[label]] = value
+    # The date the scene's own text states; the other time cues go to the
+    # timeline pass (timeline.parse_cues), never straight into scenes.csv
+    from .timeline import parse_cues
+    date = parse_cues(response).get('date')
+    if date:
+        result['timeline_date'] = date
     return _reduce_enums(result)
 
 
@@ -824,7 +839,13 @@ def analyze_expansion_opportunities(ref_dir: str) -> list[dict]:
 # ============================================================================
 
 def cleanup_timeline(ref_dir: str) -> list[dict]:
-    """Fill empty timeline_day fields by interpolating from adjacent scenes.
+    """Fill empty timeline_day fields from the nearest scenes on the present
+    track.
+
+    A neighbour set before the story's present (a flashback) or a frame
+    scene never lends its day: filling a gap from a flashback would make the
+    empty scene a flashback too. Frame scenes are not filled. The timeline
+    pass, not this, is what places scenes; this only covers stray gaps.
 
     Returns a list of fixes applied: [{scene_id, field, old_value, new_value}]
     """
@@ -836,47 +857,36 @@ def cleanup_timeline(ref_dir: str) -> list[dict]:
 
     fixes = []
 
-    # Build list of (id, day_or_none)
+    # (id, day or None, on the present track)
     days = []
+    present = None
     for sid in sorted_ids:
-        day_str = scenes_map[sid].get('timeline_day', '').strip()
+        if (scenes_map[sid].get('time_mode') or '').strip() == 'frame':
+            days.append((sid, None, False))
+            continue
         try:
-            days.append((sid, int(day_str)))
+            day = int(scenes_map[sid].get('timeline_day', '').strip())
         except (ValueError, TypeError):
-            days.append((sid, None))
+            days.append((sid, None, True))
+            continue
+        on_track = present is None or day >= present
+        if on_track:
+            present = day
+        days.append((sid, day, on_track))
 
-    # Fill gaps by interpolation
-    for i, (sid, day) in enumerate(days):
-        if day is not None:
+    for i, (sid, day, on_track) in enumerate(days):
+        if day is not None or not on_track:
             continue
 
-        # Find nearest known day before and after
-        prev_day = None
-        for j in range(i - 1, -1, -1):
-            if days[j][1] is not None:
-                prev_day = days[j][1]
-                break
-
-        next_day = None
-        for j in range(i + 1, len(days)):
-            if days[j][1] is not None:
-                next_day = days[j][1]
-                break
-
-        # Infer
-        inferred = None
-        if prev_day is not None and next_day is not None:
-            # Between two known days — use the previous day (same day until proven otherwise)
-            inferred = prev_day
-        elif prev_day is not None:
-            inferred = prev_day  # Assume same day as previous
-        elif next_day is not None:
-            inferred = next_day  # Assume same day as next
+        prev_day = next((d for _, d, t in reversed(days[:i]) if d is not None and t), None)
+        next_day = next((d for _, d, t in days[i + 1:] if d is not None and t), None)
+        # Same day as the previous scene until something says otherwise
+        inferred = prev_day if prev_day is not None else next_day
 
         if inferred is not None:
             old_val = scenes_map[sid].get('timeline_day', '')
             scenes_map[sid]['timeline_day'] = str(inferred)
-            days[i] = (sid, inferred)
+            days[i] = (sid, inferred, True)
             fixes.append({
                 'scene_id': sid,
                 'field': 'timeline_day',
