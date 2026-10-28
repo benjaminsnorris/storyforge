@@ -247,3 +247,33 @@ class TestValueAtStakeIsBare:
         from storyforge.extract import build_intent_prompt
         prompt = build_intent_prompt('s1', 'Scene prose.', {}, {})
         assert 'Name only the value' in prompt
+
+
+class TestEnumAnswersReduced:
+    """Every action_sequel and turning_point from The Great Gatsby failed
+    validation because the answer carried an explanation."""
+
+    def _intent(self, **fields):
+        from storyforge.extract import parse_intent_response
+        text = ''.join(f'{k.upper()}: {v}\n' for k, v in fields.items())
+        return parse_intent_response(text, 's1')
+
+    def test_explanations_dropped(self):
+        r = self._intent(action_sequel='sequel — reaction: Nick broods',
+                         turning_point='Revelation — Owl Eyes understands',
+                         value_shift='+/- (the hope briefly sustained)')
+        assert (r['action_sequel'], r['turning_point'], r['value_shift']) == (
+            'sequel', 'revelation', '+/-')
+
+    def test_longest_allowed_value_wins(self):
+        assert self._intent(value_shift='-/-- worse')['value_shift'] == '-/--'
+        assert self._intent(value_shift='-/-')['value_shift'] == '-/-'
+
+    def test_unrecognized_answer_left_for_validation(self):
+        assert self._intent(action_sequel='actionable')['action_sequel'] == 'actionable'
+        assert self._intent(turning_point='a slow realization')['turning_point'] == 'a slow realization'
+
+    def test_skeleton_time_of_day(self):
+        from storyforge.extract import parse_skeleton_response
+        r = parse_skeleton_response('TIME_OF_DAY: Evening (after dinner)\n', 's1')
+        assert r['time_of_day'] == 'evening'

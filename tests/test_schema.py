@@ -236,3 +236,29 @@ class TestKnowledgeGranularity:
         assert len(long_names) == 1
         assert long_names[0]['id'] == 'wordy-fact'
         assert long_names[0]['word_count'] > 15
+
+
+class TestRegistryFileValidation:
+    """physical-states.csv columns are declared in COLUMN_SCHEMA but were never
+    validated, so display names in its character column went unreported."""
+
+    def _write(self, ref_dir, character, category='injury'):
+        with open(os.path.join(ref_dir, 'physical-states.csv'), 'w') as f:
+            f.write('id|character|description|category|acquired|resolves|action_gating\n'
+                    f'bruise|{character}|a bruise|{category}|act1-sc01|never|false\n')
+
+    def test_unknown_character_reported(self, project_dir):
+        from storyforge.schema import validate_schema
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._write(ref_dir, 'Somebody Unknown')
+        errors = validate_schema(ref_dir, project_dir)['errors']
+        assert any(e['file'] == 'physical-states.csv' and e['column'] == 'character'
+                   for e in errors)
+
+    def test_bad_category_reported(self, project_dir):
+        from storyforge.schema import validate_schema
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._write(ref_dir, '', category='bruising')
+        errors = validate_schema(ref_dir, project_dir)['errors']
+        assert any(e['file'] == 'physical-states.csv' and e['column'] == 'category'
+                   for e in errors)

@@ -579,3 +579,33 @@ class TestAliasCollisions:
         assert len(calls) == 2
         assert '- the office: cartography-office, other' in calls[1]
         assert find_alias_collisions('locations', ref_dir) == {}
+
+
+class TestPhysicalStateCharacters:
+    """Physical states named their character by display name ("Daisy
+    Buchanan") instead of the characters.csv id."""
+
+    def test_write_registry_stores_character_ids(self, project_dir):
+        from storyforge.hone import write_registry
+        import csv as _csv
+        ref_dir = os.path.join(project_dir, 'reference')
+        with open(os.path.join(ref_dir, 'characters.csv'), 'w') as f:
+            f.write('id|name|role|aliases\ndaisy-buchanan|Daisy Buchanan|supporting|Daisy\n')
+        write_registry(ref_dir, 'physical-states', [
+            {'id': 'bruised-knuckle-daisy', 'character': 'Daisy Buchanan',
+             'description': 'bruised knuckle', 'category': 'injury',
+             'acquired': 'act1-sc01', 'resolves': 'never', 'action_gating': 'false'},
+            {'id': 'has-medal', 'character': 'Daisy', 'description': 'medal',
+             'category': 'equipment', 'acquired': 'act1-sc01', 'resolves': 'never',
+             'action_gating': 'false'},
+        ])
+        with open(os.path.join(ref_dir, 'physical-states.csv')) as f:
+            chars = [r['character'] for r in _csv.DictReader(f, delimiter='|')]
+        assert chars == ['daisy-buchanan', 'daisy-buchanan']
+
+    def test_prompt_includes_character_registry(self, project_dir):
+        from storyforge.hone import build_registry_prompt
+        ref_dir = os.path.join(project_dir, 'reference')
+        prompt = build_registry_prompt('physical-states', ref_dir)
+        assert '## Character Registry' in prompt
+        assert "character's id from the Character Registry" in prompt

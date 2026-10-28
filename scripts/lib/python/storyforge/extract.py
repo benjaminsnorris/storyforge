@@ -218,6 +218,28 @@ TARGET_WORDS: [current word count is a reasonable target — output the approxim
 PART: [which act/part number this scene belongs to, based on its position in the story]"""
 
 
+def _reduce_enums(result: dict[str, str]) -> dict[str, str]:
+    """Reduce enum answers to their allowed value.
+
+    Models often explain an enum answer ("sequel — reaction: Nick ...",
+    "+/- (the hope that ...)"), which fails validation outright. When the
+    answer starts with an allowed value, keep just that value; otherwise
+    leave it for validation to report.
+    """
+    from .schema import COLUMN_SCHEMA
+    for field, value in result.items():
+        spec = COLUMN_SCHEMA.get(field)
+        if not value or not spec or spec.get('type') != 'enum':
+            continue
+        answer = value.strip().lower()
+        for allowed in sorted(spec['values'], key=len, reverse=True):
+            rest = answer[len(allowed):]
+            if answer.startswith(allowed) and (not rest or not (rest[0].isalnum() or rest[0] in '/+-')):
+                result[field] = allowed
+                break
+    return result
+
+
 def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
     """Parse Phase 1 response into scenes.csv field values."""
     result = {'id': scene_id}
@@ -239,7 +261,7 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
             value = match.group(2).strip()
             if label in label_map and value and value.upper() != 'UNKNOWN':
                 result[label_map[label]] = value
-    return result
+    return _reduce_enums(result)
 
 
 # ============================================================================
@@ -309,7 +331,7 @@ def parse_intent_response(response: str, scene_id: str) -> dict[str, str]:
                 value = _bare_value(value)
             if label in label_map and value and value.upper() != 'UNKNOWN':
                 result[label_map[label]] = value
-    return result
+    return _reduce_enums(result)
 
 
 def _bare_value(value: str) -> str:
@@ -390,7 +412,7 @@ def parse_brief_parallel_response(response: str, scene_id: str) -> dict[str, str
             value = match.group(2).strip()
             if label in label_map and value and value.upper() not in ('UNKNOWN', 'NONE'):
                 result[label_map[label]] = value
-    return result
+    return _reduce_enums(result)
 
 
 # ============================================================================

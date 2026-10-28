@@ -367,6 +367,7 @@ Output the registry CSV first, then a blank line, then "UPDATES" on its own line
 
     elif domain == 'physical-states':
         existing = _read_existing_registry(ref_dir, 'physical-states.csv')
+        characters = _read_existing_registry(ref_dir, 'characters.csv')
         chain = _collect_physical_state_chain(ref_dir)
         chain_text = '\n'.join(
             f'  Scene {sid} (seq {seq}):\n'
@@ -383,6 +384,8 @@ Output the registry CSV first, then a blank line, then "UPDATES" on its own line
 
 {f"## Existing Registry{chr(10)}{chr(10)}```{chr(10)}{existing}{chr(10)}```" if existing else ""}
 
+{f"## Character Registry{chr(10)}{chr(10)}```{chr(10)}{characters}{chr(10)}```" if characters else ""}
+
 ## Instructions
 
 ### Part 1: Registry
@@ -391,7 +394,7 @@ Produce a pipe-delimited CSV with columns: id|character|description|category|acq
 
 Rules:
 - id: kebab-case slug scoped to character (e.g., broken-arm-marcus, has-compass-elena)
-- character: canonical character name
+- character: the character's id from the Character Registry (e.g., marcus-hale, not Marcus Hale)
 - description: concise, prose-usable description (under 20 words)
 - category: injury, equipment, ability, appearance, or fatigue
 - acquired: scene ID where this state first appears in physical_state_out
@@ -547,6 +550,13 @@ def write_registry(ref_dir: str, domain: str, rows: list[dict[str, str]]) -> Non
             rid = row.get('id', '')
             if ':' in rid and row.get('type', ''):
                 row['id'] = rid.split(':', 1)[1]
+
+    # A physical state belongs to a character: store the character's id
+    if domain == 'physical-states':
+        char_map = load_alias_map(os.path.join(ref_dir, 'characters.csv'))
+        for row in rows:
+            if row.get('character'):
+                row['character'] = normalize_aliases(char_map, row['character'])
 
     filename = _DOMAIN_TO_REGISTRY[domain]
     columns = _REGISTRY_COLUMNS[domain]

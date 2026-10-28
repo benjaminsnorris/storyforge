@@ -311,12 +311,46 @@ def _merge_fields(row: dict, result: dict, force: bool) -> bool:
     return changed
 
 
-def _log_merge(csv_name: str, changed: int, total: int, skipped: list[str],
-               suffix: str = '') -> None:
+def _merge_batch_results(csv_path, csv_name, sorted_scene_ids, log_dir, parse,
+                         alias_maps, force, new_row=None,
+                         sort_key=lambda r: r.get('id', '')) -> int:
+    """Merge per-scene batch responses ({log_dir}/{scene_id}.txt) into a scene CSV.
+
+    Scenes with a row are merged per _merge_fields; scenes without one get a
+    new row (new_row(row, index, scene_id) can fill extra columns). Returns
+    the number of scenes added or changed.
+    """
+    from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+    from storyforge.enrich import normalize_fields
+
+    columns = _FILE_MAP[csv_name]
+    existing = _read_csv_as_map(csv_path)
+    count = 0
+    for i, sid in enumerate(sorted_scene_ids):
+        txt_file = os.path.join(log_dir, f'{sid}.txt')
+        if not os.path.isfile(txt_file):
+            continue
+        with open(txt_file) as f:
+            result = parse(f.read(), sid)
+        normalize_fields(result, alias_maps)
+
+        if sid in existing:
+            count += _merge_fields(existing[sid], result, force)
+        else:
+            row = {c: '' for c in columns}
+            _merge_fields(row, result, force=True)
+            row['id'] = sid
+            if new_row:
+                new_row(row, i, sid)
+            existing[sid] = row
+            count += 1
+
+    _write_csv(csv_path, sorted(existing.values(), key=sort_key), columns)
+    return count
+
+
+def _log_merge(csv_name: str, changed: int, total: int, suffix: str = '') -> None:
     log(f'  Updated {csv_name}: {changed} of {total} scenes changed{suffix}')
-    if skipped:
-        log(f'  WARNING: {len(skipped)} scene(s) have no row in {csv_name} and were '
-            f'not added: {", ".join(skipped)}')
 
 
 def _run_phase_0(project_dir, scenes_dir, log_dir, profile_file, dry_run,
@@ -419,40 +453,20 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     # Process results
     log('  Processing skeleton results...')
     alias_maps = load_registry_alias_maps(project_dir)
-    existing = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
 
-    count = 0
-    skipped = []
-    for i, sid in enumerate(sorted_scene_ids):
-        txt_file = os.path.join(log_dir, f'{sid}.txt')
-        if not os.path.isfile(txt_file):
-            continue
-        with open(txt_file) as f:
-            response_text = f.read()
-        result = parse_skeleton_response(response_text, sid)
-        normalize_fields(result, alias_maps)
+    def new_skeleton_row(row, i, sid):
+        row['seq'] = str(i + 1)
+        row['status'] = 'drafted'
+        scene_file = os.path.join(scenes_dir, f'{sid}.md')
+        if os.path.isfile(scene_file):
+            with open(scene_file) as f:
+                row['word_count'] = str(len(f.read().split()))
 
-        if sid in existing:
-            count += _merge_fields(existing[sid], result, force)
-            continue
-        elif not existing:
-            row = {c: '' for c in _FILE_MAP['scenes.csv']}
-            row.update(result)
-            row['seq'] = str(i + 1)
-            row['status'] = 'drafted'
-            scene_file = os.path.join(scenes_dir, f'{sid}.md')
-            if os.path.isfile(scene_file):
-                with open(scene_file) as f:
-                    row['word_count'] = str(len(f.read().split()))
-            existing[sid] = row
-        else:
-            skipped.append(sid)
-            continue
-        count += 1
-
-    ordered = sorted(existing.values(), key=lambda r: int(r.get('seq', 0)))
-    _write_csv(os.path.join(ref_dir, 'scenes.csv'), ordered, _FILE_MAP['scenes.csv'])
-    _log_merge('scenes.csv', count, len(sorted_scene_ids), skipped)
+    count = _merge_batch_results(
+        os.path.join(ref_dir, 'scenes.csv'), 'scenes.csv', sorted_scene_ids,
+        log_dir, parse_skeleton_response, alias_maps, force,
+        new_row=new_skeleton_row, sort_key=lambda r: int(r.get('seq') or 0))
+    _log_merge('scenes.csv', count, len(sorted_scene_ids))
 
     _safe_remove(batch_file)
     _safe_rmdir(skel_output)
@@ -511,35 +525,10 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     log('  Processing intent results...')
     alias_maps = load_registry_alias_maps(project_dir)
 
-    existing = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
-
-    count = 0
-    skipped = []
-    for sid in sorted_scene_ids:
-        txt_file = os.path.join(log_dir, f'{sid}.txt')
-        if not os.path.isfile(txt_file):
-            continue
-        with open(txt_file) as f:
-            response_text = f.read()
-        result = parse_intent_response(response_text, sid)
-        normalize_fields(result, alias_maps)
-
-        if sid in existing:
-            count += _merge_fields(existing[sid], result, force)
-            continue
-        elif not existing:
-            row = {c: '' for c in _FILE_MAP['scene-intent.csv']}
-            row.update({k: v for k, v in result.items() if not k.startswith('_')})
-            existing[sid] = row
-        else:
-            skipped.append(sid)
-            continue
-        count += 1
-
-    ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
-    _write_csv(os.path.join(ref_dir, 'scene-intent.csv'), ordered,
-               _FILE_MAP['scene-intent.csv'])
-    _log_merge('scene-intent.csv', count, len(sorted_scene_ids), skipped)
+    count = _merge_batch_results(
+        os.path.join(ref_dir, 'scene-intent.csv'), 'scene-intent.csv',
+        sorted_scene_ids, log_dir, parse_intent_response, alias_maps, force)
+    _log_merge('scene-intent.csv', count, len(sorted_scene_ids))
 
     _safe_remove(batch_file)
     _safe_rmdir(intent_output)
@@ -571,7 +560,8 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         get_scene, update_scene, _read_csv_as_map, _write_csv, _FILE_MAP,
     )
     from storyforge.enrich import (
-        format_registries_for_prompt, load_registry_alias_maps, normalize_fields,
+        format_registries_for_prompt, load_registry_alias_maps, normalize_aliases,
+        normalize_fields,
     )
 
     model = select_model('evaluation')
@@ -614,35 +604,10 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     # Process results
     log('  Processing brief results...')
-    existing = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
-
-    count = 0
-    skipped = []
-    for sid in sorted_scene_ids:
-        txt_file = os.path.join(log_dir, f'{sid}.txt')
-        if not os.path.isfile(txt_file):
-            continue
-        with open(txt_file) as f:
-            response_text = f.read()
-        result = parse_brief_parallel_response(response_text, sid)
-        normalize_fields(result, alias_maps)
-
-        if sid in existing:
-            count += _merge_fields(existing[sid], result, force)
-            continue
-        elif not existing:
-            row = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
-            row.update(result)
-            existing[sid] = row
-        else:
-            skipped.append(sid)
-            continue
-        count += 1
-
-    ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
-    _write_csv(os.path.join(ref_dir, 'scene-briefs.csv'), ordered,
-               _FILE_MAP['scene-briefs.csv'])
-    _log_merge('scene-briefs.csv', count, len(sorted_scene_ids), skipped,
+    count = _merge_batch_results(
+        os.path.join(ref_dir, 'scene-briefs.csv'), 'scene-briefs.csv',
+        sorted_scene_ids, log_dir, parse_brief_parallel_response, alias_maps, force)
+    _log_merge('scene-briefs.csv', count, len(sorted_scene_ids),
                ' (knowledge fields pending)')
 
     commit_and_push(project_dir,
@@ -774,7 +739,8 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                     continue
                 row = {c: '' for c in columns}
                 row['id'] = sid_key
-                row['character'] = ns.get('character', '')
+                row['character'] = normalize_aliases(
+                    alias_maps.get('characters', {}), ns.get('character', ''))
                 row['description'] = ns.get('description', '')
                 row['category'] = ns.get('category', '')
                 row['acquired'] = scene_id

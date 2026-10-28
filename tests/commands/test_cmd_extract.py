@@ -570,3 +570,50 @@ class TestPhase2Force:
         main(['--phase', '2', '--force'])
 
         assert seen['force'] is True
+
+
+class TestMergeBatchResults:
+    """Extracting The Great Gatsby wrote briefs for 1 of 39 scenes: the loop
+    asked "is the CSV empty?" per scene, so only the first scene was added."""
+
+    def _setup(self, tmp_path, ids):
+        from storyforge.elaborate import _FILE_MAP
+        csv_path = tmp_path / 'scene-briefs.csv'
+        csv_path.write_text('|'.join(_FILE_MAP['scene-briefs.csv']) + '\n')
+        log_dir = tmp_path / 'logs'
+        log_dir.mkdir()
+        for sid in ids:
+            (log_dir / f'{sid}.txt').write_text(f'GOAL: goal of {sid}\nOUTCOME: no\n')
+        return str(csv_path), str(log_dir)
+
+    def _rows(self, csv_path):
+        import csv as _csv
+        with open(csv_path) as f:
+            return {r['id']: r for r in _csv.DictReader(f, delimiter='|')}
+
+    def test_empty_csv_gets_every_scene(self, tmp_path):
+        from storyforge.cmd_extract import _merge_batch_results
+        from storyforge.extract import parse_brief_parallel_response
+        ids = ['s1', 's2', 's3']
+        csv_path, log_dir = self._setup(tmp_path, ids)
+
+        count = _merge_batch_results(csv_path, 'scene-briefs.csv', ids, log_dir,
+                                     parse_brief_parallel_response, {}, False)
+
+        rows = self._rows(csv_path)
+        assert count == 3
+        assert [rows[sid]['goal'] for sid in ids] == [
+            'goal of s1', 'goal of s2', 'goal of s3']
+
+    def test_missing_scene_added_to_partial_csv(self, tmp_path):
+        from storyforge.cmd_extract import _merge_batch_results
+        from storyforge.extract import parse_brief_parallel_response
+        csv_path, log_dir = self._setup(tmp_path, ['s1', 's2'])
+        _merge_batch_results(csv_path, 'scene-briefs.csv', ['s1'], log_dir,
+                             parse_brief_parallel_response, {}, False)
+
+        count = _merge_batch_results(csv_path, 'scene-briefs.csv', ['s1', 's2'],
+                                     log_dir, parse_brief_parallel_response, {}, False)
+
+        assert count == 1   # s2 added; s1 unchanged
+        assert set(self._rows(csv_path)) == {'s1', 's2'}

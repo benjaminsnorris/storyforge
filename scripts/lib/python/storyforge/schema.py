@@ -426,6 +426,24 @@ def _check_registry(value: str, alias_map: dict, is_array: bool) -> list[str]:
     return failures
 
 
+def _validated_files() -> list[tuple[str, list[str], str]]:
+    """(filename, columns, schema-key prefix) for every CSV the schema covers.
+
+    Scene CSVs key their columns directly. Registry files declare theirs with
+    a file-stem prefix (physical-states.csv's `character` column is
+    `physical_states_character`), and were previously never validated.
+    """
+    files = [(name, cols, '') for name, cols in _FILE_MAP.items()]
+    registry_files = sorted({spec['file'] for spec in COLUMN_SCHEMA.values()
+                             if spec.get('file', '').endswith('.csv')
+                             and spec['file'] not in _FILE_MAP})
+    for name in registry_files:
+        prefix = name.removesuffix('.csv').replace('-', '_') + '_'
+        cols = [key[len(prefix):] for key in COLUMN_SCHEMA if key.startswith(prefix)]
+        files.append((name, ['id'] + cols, prefix))
+    return files
+
+
 def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
     """Validate all scene CSV values against column schema.
 
@@ -477,7 +495,7 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
     skipped = 0
     errors: list[dict] = []
 
-    for filename, columns in _FILE_MAP.items():
+    for filename, columns, key_prefix in _validated_files():
         path = os.path.join(ref_dir, filename)
         if not os.path.isfile(path):
             continue
@@ -496,7 +514,7 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                     skipped += 1
                     continue
 
-                schema = COLUMN_SCHEMA.get(col)
+                schema = COLUMN_SCHEMA.get(key_prefix + col)
                 if not schema:
                     skipped += 1
                     continue
