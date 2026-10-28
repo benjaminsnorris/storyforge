@@ -138,6 +138,7 @@ class TestEdtf:
         assert describe_edtf('XXXX-07-04') == '4 July (year not stated)'
         assert describe_edtf('1917~') == '1917, approximately'
         assert describe_edtf('1922-06/1922-09') == 'from June 1922 to September 1922'
+        assert describe_edtf('XXXX-XX-04') == 'day 4 of an unstated month (year not stated)'
 
     def test_schema_validates_new_columns(self, project_dir):
         from storyforge.schema import validate_schema
@@ -224,6 +225,14 @@ class TestAssignment:
         result = parse_assignments('REASONING:\ns1 | 76 | scene | first try\n'
                                    'CALENDAR:\ns1 | 87 | scene | three months on\n', ['s1'])
         assert result == {'s1': (87, 'scene', 'three months on')}
+
+    def test_calendar_marker_on_the_answer_line(self):
+        """Second review of #324: "CALENDAR: a | 5 | ..." parsed the drafts."""
+        from storyforge.timeline import parse_assignments
+        for response in ('REASONING:\ns1 | 2 | scene | try\nCALENDAR: s1 | 5 | scene | x\n',
+                         'REASONING:\ns1 | 2 | scene | try\n**CALENDAR:**\ns1 | 5 | scene | x\n',
+                         'CALENDAR:\ns1 | 2 | scene | early\nCALENDAR:\ns1 | 5 | scene | x\n'):
+            assert parse_assignments(response, ['s1']) == {'s1': (5, 'scene', 'x')}, response
 
     def test_batches_carry_the_present(self, tmp_path, monkeypatch):
         import storyforge.timeline as tl
