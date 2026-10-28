@@ -1747,7 +1747,7 @@ def parse_args(argv):
         description='Clean up and migrate a Storyforge novel project.',
     )
     parser.add_argument('--dry-run', action='store_true',
-                        help='Report what would change without modifying anything')
+                        help='Show what cleanup would change without changing it (the report, working/cleanup-report.csv, is still written)')
     parser.add_argument('--verbose', action='store_true',
                         help='Detailed output for each step')
     parser.add_argument('--scenes', action='store_true',
@@ -2878,7 +2878,8 @@ def main(argv=None):
             log(msg)
 
     if args.dry_run:
-        log('=== DRY RUN — no changes will be made ===')
+        log('=== DRY RUN — no changes to the project; only the report '
+            '(working/cleanup-report.csv) is written ===')
     else:
         ensure_on_branch('cleanup', project_dir)
 
