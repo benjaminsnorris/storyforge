@@ -381,3 +381,22 @@ class TestOutcomes:
         intent = {'s1': {'value_shift': '+/-'}}
         briefs = {'s1': {'outcome': 'no-but'}}
         assert detect_value_shift_outcome_mismatch(intent, briefs) == []
+
+
+class TestOutcomePhrasing:
+    """Review #3: "No, but ..." was stored as `no`, "yes, but" as `yes`."""
+
+    @pytest.mark.parametrize('answer,expected', [
+        ('no, but she finds the letter', 'no-but'),
+        ('No but something goes right', 'no-but'),
+        ('yes, but at a cost', 'yes-but'),
+        ('no — and furthermore the judge knows', 'no-and'),
+        ('[No, and] worse', 'no-and'),
+        ('no', 'no'),
+        ('Yes.', 'yes'),
+    ])
+    def test_both_normalizers(self, answer, expected):
+        from storyforge.extract import parse_brief_parallel_response
+        from storyforge.hone import normalize_outcomes
+        assert parse_brief_parallel_response(f'OUTCOME: {answer}\n', 's1')['outcome'] == expected
+        assert normalize_outcomes(answer) == expected

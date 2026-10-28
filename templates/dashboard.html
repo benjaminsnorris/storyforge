@@ -1065,6 +1065,12 @@ const knowledgeAliasMap = buildAliasMap(KNOWLEDGE);
 
 // Combined registry map for general-purpose display name resolution
 const _allRegistryMaps = [charAliasMap, locationAliasMap, motifAliasMap, valueAliasMap, miceThreadAliasMap, knowledgeAliasMap];
+// A scene's location lists the places its action moves through, in order
+function placeNames(location) {
+    return (location || '').split(';').map(function (p) { return p.trim(); })
+        .filter(Boolean).map(displayName).join(' \u2192 ');
+}
+
 function displayName(id) {
     if (!id) return id;
     var key = id.toLowerCase().trim();
@@ -1208,13 +1214,13 @@ function attachSceneHandlers(el, sceneId) {
         const s = sceneById[sceneId];
         if (!s) return;
         const wc = getWordCount(s);
-        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${displayName(s.pov)} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${displayName(s.location || '').substring(0, 60)}</div>`);
+        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${displayName(s.pov)} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${placeNames(s.location).substring(0, 60)}</div>`);
     });
     el.addEventListener('mousemove', (e) => {
         const s = sceneById[sceneId];
         if (!s) return;
         const wc = getWordCount(s);
-        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${displayName(s.pov)} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${displayName(s.location || '').substring(0, 60)}</div>`);
+        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${displayName(s.pov)} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${placeNames(s.location).substring(0, 60)}</div>`);
     });
     el.addEventListener('mouseleave', hideTooltip);
 }
@@ -1262,7 +1268,7 @@ function updateDetailPanel(sceneId) {
     html += '<button class="close-btn" onclick="event.stopPropagation();selectScene(null)" title="Close">&times;</button>';
     html += '</span></h3>';
     html += detailRow('POV', displayName(s.pov));
-    html += detailRow('Location', displayName(s.location));
+    html += detailRow('Location', placeNames(s.location));
     html += detailRow('Part', s.part);
     html += detailRow('Act', s.act);
     html += detailRow('Type', s.type);
@@ -2101,14 +2107,17 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     const settingScenes = {};
 
     sortedScenes.forEach(s => {
-        const raw = (s.location || '').trim();
-        if (!raw) return;
-        const setting = normalizeLocation(raw);
-        const key = setting.toLowerCase();
-        settingFreq[key] = (settingFreq[key] || 0) + 1;
-        if (!(key in settingFirst)) settingFirst[key] = +s.seq;
-        if (!settingScenes[key]) settingScenes[key] = { label: setting, scenes: [] };
-        settingScenes[key].scenes.push({ id: s.id, seq: +s.seq });
+        // location lists the places a scene's action moves through; count
+        // each place once per scene rather than the list as one setting.
+        const places = new Set((s.location || '').split(';')
+            .map(p => p.trim()).filter(Boolean).map(normalizeLocation));
+        places.forEach(setting => {
+            const key = setting.toLowerCase();
+            settingFreq[key] = (settingFreq[key] || 0) + 1;
+            if (!(key in settingFirst)) settingFirst[key] = +s.seq;
+            if (!settingScenes[key]) settingScenes[key] = { label: setting, scenes: [] };
+            settingScenes[key].scenes.push({ id: s.id, seq: +s.seq });
+        });
     });
 
     const topSettings = Object.keys(settingFreq)

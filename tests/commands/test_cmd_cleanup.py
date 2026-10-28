@@ -1208,7 +1208,8 @@ class TestActColumnMigration:
     def test_part_is_kept_when_yaml_defines_parts(self, tmp_path):
         root = self._project(tmp_path, self.PARTS_YAML,
                              {'reference/scenes.csv': self.SCENES})
-        done = cmd_cleanup.plan_act_column(root).apply()
+        plan = cmd_cleanup.plan_act_column(root)
+        done = plan.apply()
 
         assert self._read(root, 'reference/scenes.csv') == (
             'id|seq|title|part|act|pov\n'
@@ -1216,6 +1217,36 @@ class TestActColumnMigration:
             's2|2|Two|2|2|Ann\n')
         assert [c.did for c in done] == [
             'Added act column to reference/scenes.csv, copied from part']
+        # The author is told the copied values may be book parts (review #6)
+        assert plan.summary.did.startswith('Check act in reference/scenes.csv')
+
+    def test_writer_before_cleanup_still_migrates(self, tmp_path):
+        # Review critical #1: a current writer adds an empty `act` column, and
+        # cleanup used to treat any `act` header as already migrated.
+        from storyforge.cmd_cleanup import plan_act_column
+        from storyforge.elaborate import update_scene
+        root = self._project(tmp_path, '', {
+            'reference/scenes.csv': 'id|seq|title|part|pov\ns1|1|One|1|Ann\ns2|2|Two|2|Ann\n'})
+        update_scene('s1', os.path.join(root, 'reference'), {'pov': 'Bea'})
+        assert 'act' in self._read(root, 'reference/scenes.csv').splitlines()[0].split('|')
+        plan = plan_act_column(root)
+        done = plan.apply()
+        import csv as _csv, io
+        rows = list(_csv.DictReader(io.StringIO(self._read(root, 'reference/scenes.csv')),
+                                    delimiter='|'))
+        assert [(r['act'], r['part']) for r in rows] == [('1', ''), ('2', '')]
+        assert any('Filled empty act column' in c.did for c in done)
+
+    def test_structural_tier_rewrite_keeps_acts(self, tmp_path):
+        # A pre-migration architecture.csv rewritten by a current writer
+        # (which emits `act`, not `part`) must not lose its acts.
+        from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP
+        root = self._project(tmp_path, '', {
+            'reference/architecture.csv': 'id|seq|title|part|pov\na1|1|T|2|Ann\n'})
+        path = os.path.join(root, 'reference', 'architecture.csv')
+        rows = _read_csv(path)
+        _write_csv(path, rows, _FILE_MAP['architecture.csv'])
+        assert _read_csv(path)[0]['act'] == '2'
 
     def test_structural_tiers_rename_part_to_act(self, tmp_path):
         root = self._project(tmp_path, self.PARTS_YAML, {

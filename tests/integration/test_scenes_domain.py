@@ -235,8 +235,16 @@ class TestGenerateScenesRows:
     def test_word_count(self):
         scenes = [{'title': 'Scene', 'word_count': 1500}]
         rows = generate_scenes_rows(scenes)
-        parts = rows[0].split('|')
-        assert parts[13] == '1500'  # word_count column (index 13 per header)
+        # Review #4: the hand-built row had one cell too many, putting
+        # word_count under target_words. Rows follow the header now.
+        header = scenes_header().split('|')
+        row = dict(zip(header, rows[0].split('|')))
+        assert len(rows[0].split('|')) == len(header)
+        assert row['word_count'] == '1500' and row['target_words'] == ''
+
+    def test_intent_row_matches_header(self):
+        rows = generate_intent_rows([{'title': 'Scene'}])
+        assert len(rows[0].split('|')) == len(intent_header().split('|'))
 
     def test_empty_title_gets_fallback_slug(self):
         scenes = [{'title': ''}]
@@ -266,7 +274,7 @@ class TestGenerateIntentRows:
         assert len(rows) == 1
         assert rows[0].startswith('finest-cartographer|')
         # All fields empty (10 pipes)
-        assert rows[0].count('|') == 10
+        assert rows[0].count('|') == len(intent_header().split('|')) - 1
 
     def test_empty_title_fallback(self):
         scenes = [{'title': ''}]

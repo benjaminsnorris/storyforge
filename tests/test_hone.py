@@ -790,3 +790,38 @@ class TestKnowledgeIdsAfterReconcile:
             'tom-affair-ny|Tom is having an affair|identity|s1\n', 'knowledge')
         assert rows == [{'id': 'tom-affair-ny', 'name': 'Tom is having an affair',
                          'aliases': '', 'category': 'identity', 'origin': 's1'}]
+
+
+class TestRegistryNotOverwrittenByBadOutput:
+    """Review #5: a truncated or empty reconcile response replaced the
+    registry, wiping entries."""
+
+    def _registry(self, ref_dir):
+        with open(os.path.join(ref_dir, 'locations.csv')) as f:
+            return f.read()
+
+    def _run(self, project_dir, monkeypatch, tmp_path, text, stop_reason='end_turn'):
+        from storyforge.hone import reconcile_domain
+
+        def fake_invoke(prompt, model, log_file, **kwargs):
+            with open(log_file, 'w') as f:
+                f.write(text)
+            return {'stop_reason': stop_reason}
+        monkeypatch.setattr('storyforge.api.invoke_to_file', fake_invoke)
+        monkeypatch.setattr('storyforge.api.extract_text_from_file',
+                            lambda path: open(path).read())
+        reconcile_domain('locations', os.path.join(project_dir, 'reference'),
+                         'test-model', str(tmp_path))
+
+    def test_truncated_response_keeps_registry(self, project_dir, monkeypatch, tmp_path):
+        ref_dir = os.path.join(project_dir, 'reference')
+        before = self._registry(ref_dir)
+        self._run(project_dir, monkeypatch, tmp_path,
+                  'id|name|aliases\ncartography-office|Office|', stop_reason='max_tokens')
+        assert self._registry(ref_dir) == before
+
+    def test_empty_response_keeps_registry(self, project_dir, monkeypatch, tmp_path):
+        ref_dir = os.path.join(project_dir, 'reference')
+        before = self._registry(ref_dir)
+        self._run(project_dir, monkeypatch, tmp_path, 'Sorry, I cannot do that.')
+        assert self._registry(ref_dir) == before

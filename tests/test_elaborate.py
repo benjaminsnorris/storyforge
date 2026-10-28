@@ -405,3 +405,22 @@ class TestMiceOps:
         prompt = build_intent_prompt('s1', 'Prose.', {}, {})
         assert 'only if this scene is where the thread begins' in prompt
         assert 'bare thread-name' in prompt
+
+
+class TestUnmigratedActReportedOnce:
+    """Dry run on a real project: before cleanup, every scene failed as
+    blocking 'missing required columns: [act]' (43 of 43 in one project)."""
+
+    def test_one_notice_not_one_per_scene(self, tmp_path):
+        from storyforge.elaborate import validate_structure
+        ref = str(tmp_path / 'reference')
+        os.makedirs(ref)
+        with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            for i in range(1, 4):
+                f.write(f's0{i}|{i}|S{i}|{i}|Ann|Room|{i}|morning|1h|action|mapped|100|100\n')
+        report = validate_structure(ref)
+        act_missing = [c for c in report['failures'] if "['act']" in c['message']]
+        notices = [c for c in report['failures'] if c['check'] == 'act-migration']
+        assert act_missing == []
+        assert len(notices) == 1 and 'storyforge cleanup' in notices[0]['message']

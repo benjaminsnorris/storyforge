@@ -93,8 +93,19 @@ def _read_csv(path: str) -> list[dict[str, str]]:
     with open(path, newline='', encoding='utf-8') as f:
         raw = f.read().replace('\r\n', '\n').replace('\r', '')
     reader = csv.DictReader(raw.splitlines(), delimiter=DELIMITER)
-    return [{k: (v if v is not None else '') for k, v in row.items()}
+    rows = [{k: (v if v is not None else '') for k, v in row.items()}
             for row in reader]
+    # spine.csv and architecture.csv renamed `part` to `act`. Their writers
+    # emit only the current columns, so reading a pre-migration file without
+    # this would drop the acts on the next rewrite.
+    if os.path.basename(path) in _ACT_RENAMED_FILES:
+        for row in rows:
+            if 'part' in row and not row.get('act', '').strip():
+                row['act'] = row.pop('part')
+    return rows
+
+
+_ACT_RENAMED_FILES = frozenset({'spine.csv', 'architecture.csv'})
 
 
 def _read_csv_as_map(path: str) -> dict[str, dict[str, str]]:
@@ -934,6 +945,17 @@ def validate_structure(ref_dir: str) -> dict:
     ))
 
     # --- Completeness: required columns for status ---
+    # A pre-migration project has its acts in `part` and `act` empty: report
+    # that once, rather than as a missing column on every scene.
+    unmigrated = (scenes_map
+                  and not any(s.get('act', '').strip() for s in scenes_map.values())
+                  and any(s.get('part', '').strip() for s in scenes_map.values()))
+    if unmigrated:
+        checks.append(_check(
+            'completeness', 'act-migration', False,
+            "Acts are still in the part column (act is empty on every scene). "
+            "Run `storyforge cleanup`, which moves them into act",
+        ))
     for sid, scene in scenes_map.items():
         status = scene.get('status', 'spine')
         if status not in _REQUIRED_BY_STATUS:
@@ -946,7 +968,8 @@ def validate_structure(ref_dir: str) -> dict:
         if sid in briefs_map:
             merged.update({k: v for k, v in briefs_map[sid].items() if k != 'id'})
 
-        missing = [col for col in required if not merged.get(col, '').strip()]
+        missing = [col for col in required if not merged.get(col, '').strip()
+                   and not (unmigrated and col == 'act')]
         checks.append(_check(
             'completeness', f'required-columns-{sid}',
             len(missing) == 0,

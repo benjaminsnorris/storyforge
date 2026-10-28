@@ -44,11 +44,13 @@ from storyforge.csv_cli import get_field, get_column, append_row
 
 
 # A part (or book) heading: "Part One", "PART II", "# Part 3: The Lighthouse",
-# "BOOK FIRST". Ordinal required, so prose such as "Part of me" never matches.
+# "BOOK FIRST". The whole line must be the heading (an ordinal, then at most a
+# separator and a short title), so prose such as "Part one of the plan was
+# simple." never matches.
 _PART_HEADING_RE = re.compile(
     r'^(?:#{1,2}\s+)?(?:part|book)\s+(?:[0-9]+|[ivxlc]+|one|two|three|four|five|'
     r'six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|'
-    r'eighth|ninth|tenth)\b',
+    r'eighth|ninth|tenth)\s*(?:[:.\-—–]\s*[^.!?]{0,60})?$',
     re.IGNORECASE,
 )
 
@@ -184,9 +186,12 @@ def main(argv=None):
         blank_count = 0
         prev_blank = False
 
-        for line_num, line in enumerate(text.splitlines(), 1):
+        lines = text.splitlines()
+        for line_num, line in enumerate(lines, 1):
             stripped = line.strip()
-            if is_break_marker(stripped):
+            # A marker follows a blank line; "---" or "___" directly under a
+            # line of text is a Markdown setext heading underline instead.
+            if is_break_marker(stripped) and (line_num == 1 or not lines[line_num - 2].strip()):
                 if line_num > 1:
                     breaks.append(line_num)
                 blank_count = 0
@@ -325,7 +330,9 @@ def main(argv=None):
                 opening = next((l for l in cleaned if l.strip()
                                 and not re.match(r'^#', l.strip())), '')
                 slug = scene_id_slug(opening) or 'scene'
-                log(f'  WARNING: no scene name from Claude; using "{slug}"')
+                log(f'  WARNING: no scene name from Claude; using "{slug}". Rename it '
+                    f'to a 3-5 word slug of the scene\'s event now, before anything '
+                    f'references it: scene ids are permanent once referenced')
             slug = unique_slug(slug, used_slugs)
 
             scene_file = os.path.join(scenes_dir, f'{slug}.md')
@@ -746,10 +753,14 @@ def main(argv=None):
         for line_num, line in enumerate(ms_lines, 1):
             stripped = line.strip()
 
-            # Part headings divide chapters into parts; they are not chapters
+            # Part headings divide chapters into parts; they are not chapters.
+            # A heading stands on its own line between blank lines.
             if _is_part_heading(stripped):
-                part_starts.append(line_num)
-                continue
+                before = line_num == 1 or not ms_lines[line_num - 2].strip()
+                after = line_num == total_lines or not ms_lines[line_num].strip()
+                if before and after:
+                    part_starts.append((line_num, stripped))
+                    continue
 
             # Markdown chapter headings
             if re.match(r'^#{1,2}\s+Chapter', stripped, re.IGNORECASE):
@@ -777,44 +788,71 @@ def main(argv=None):
                         chapter_starts.append(line_num)
                         chapter_names.append(f'Chapter {stripped}')
 
-        chapter_count = len(chapter_starts)
-
-        if chapter_count == 0:
-            log('No chapter headings found. Treating entire manuscript as one chapter.')
-            chapter_starts = [1]
-            chapter_names = ['Manuscript']
-            chapter_count = 1
+        if chapter_starts:
+            log(f'Found {len(chapter_starts)} chapter boundaries')
         else:
-            log(f'Found {chapter_count} chapter boundaries')
+            log('No chapter headings found.')
         if part_starts:
             log(f'Found {len(part_starts)} part headings')
-        boundaries = sorted(chapter_starts + part_starts)
 
-        # Step 2: Create temporary chapter files
+        # Step 2: Build chapters. A part heading only marks where a part
+        # begins; it never ends a chapter's text. Text between a part
+        # heading and the next chapter opens that chapter; a part with no
+        # chapter heading after it becomes a chapter of its own.
+        def has_text(lines):
+            return any(l.strip() for l in lines)
+
+        units = sorted([(n, 'chapter', name) for n, name in zip(chapter_starts, chapter_names)]
+                       + [(n, 'part', text) for n, text in part_starts])
+        chapters = []   # (name, lines, part number or '')
+        dropped_words = 0
+        leading = ms_lines[:units[0][0] - 1] if units else ms_lines
+        if has_text(leading):
+            if chapter_starts:
+                # As before: text ahead of the first chapter heading (title
+                # page, epigraph) is front matter, not a scene. Say so.
+                dropped_words = count_words('\n'.join(leading))
+                log(f'  NOTE: {dropped_words} words before the first chapter heading '
+                    f'are treated as front matter and not split into scenes')
+            else:
+                chapters.append(('Opening' if units else 'Manuscript', leading, ''))
+        preamble, parts_seen = [], 0
+        for i, (line_num, kind, name) in enumerate(units):
+            next_line = units[i + 1][0] if i + 1 < len(units) else total_lines + 1
+            if kind == 'chapter':
+                chapters.append((name, preamble + ms_lines[line_num - 1:next_line - 1],
+                                 parts_seen or ''))
+                preamble = []
+                continue
+            parts_seen += 1
+            body = ms_lines[line_num:next_line - 1]
+            if has_text(body):
+                if i + 1 < len(units) and units[i + 1][1] == 'chapter':
+                    preamble = body
+                else:
+                    chapters.append((name, body, parts_seen))
+
+        heading_words = sum(count_words(text) for _, text in part_starts)
+        split_words = sum(count_words('\n'.join(lines)) for _, lines, _ in chapters)
+        if split_words != total_words - heading_words - dropped_words:
+            log(f'  WARNING: chapters hold {split_words} words but the manuscript has '
+                f'{total_words - heading_words - dropped_words} outside headings and '
+                f'front matter; check the split before relying on it')
+
         tmp_chapters_dir = os.path.join(work_dir, 'chapters')
         os.makedirs(tmp_chapters_dir, exist_ok=True)
 
-        for c in range(chapter_count):
-            start_line = chapter_starts[c]
-            later = [b for b in boundaries if b > start_line]
-            end_line = later[0] - 1 if later else total_lines
-
-            ch_name = chapter_names[c]
-            ch_slug = generate_slug(ch_name)
-            if not ch_slug:
-                ch_slug = f'chapter-{c + 1}'
-
+        for c, (ch_name, lines, part_num) in enumerate(chapters):
+            ch_slug = generate_slug(ch_name) or f'chapter-{c + 1}'
             # Prefix with the manuscript position: split-chapters orders
             # files by name, and slugs like chapter-ix / chapter-v do not
             # sort into reading order.
             ch_file = os.path.join(tmp_chapters_dir, f'{c + 1:04d}-{ch_slug}.md')
-            parts_before = sum(1 for p in part_starts if p < start_line)
-            chapter_parts[os.path.basename(ch_file)] = parts_before or ''
-            ch_text = '\n'.join(ms_lines[start_line - 1:end_line])
+            chapter_parts[os.path.basename(ch_file)] = part_num
+            ch_text = '\n'.join(lines)
             with open(ch_file, 'w') as f:
                 f.write(ch_text + '\n')
-            ch_words = count_words(ch_text)
-            log(f'  Chapter {c + 1}: "{ch_name}" (lines {start_line}-{end_line}, {ch_words} words)')
+            log(f'  Chapter {c + 1}: "{ch_name}" ({count_words(ch_text)} words)')
 
         # Step 3: Override source and use split-chapters logic
         # Temporarily set args.source to the temp directory

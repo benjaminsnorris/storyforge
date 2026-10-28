@@ -799,3 +799,74 @@ class TestSceneIdSlug:
     def test_short_name_kept(self):
         from storyforge.scenes import scene_id_slug
         assert scene_id_slug('the-valley-of-ashes') == 'valley-of-ashes'
+
+
+class TestNoTextLost:
+    """Review critical #2: a part heading ended the chapter before it, so
+    prose that looked like a heading cut off the rest of its chapter, and a
+    book with parts but unrecognized chapter headings lost almost all text."""
+
+    def _scene_words(self, project_dir, rows):
+        total = 0
+        for r in rows:
+            with open(os.path.join(project_dir, 'scenes', r['id'] + '.md')) as f:
+                total += len(f.read().split())
+        return total
+
+    def _split(self, project_dir, monkeypatch, text):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        with open(os.path.join(project_dir, 'manuscript.md'), 'w') as f:
+            f.write(text)
+        main(['--split-manuscript', '--yes'])
+        _, rows = _new_rows(project_dir, 'scenes.csv')
+        return rows
+
+    def test_prose_that_starts_like_a_part_heading(self, mock_api, mock_git,
+                                                   mock_costs, project_dir, monkeypatch):
+        text = ('Chapter 1\n\nThe plan had three parts.\n\n'
+                'Part one of the plan was simple: wait for dark.\n\n'
+                'Part two was harder.\n\n***\n\nThey waited all night.\n')
+        rows = self._split(project_dir, monkeypatch, text)
+        assert {r['part'] for r in rows} == {''}
+        # Every word survives except the *** break marker
+        assert self._scene_words(project_dir, rows) == len(text.split()) - 1
+
+    def test_parts_with_unrecognized_chapter_headings(self, mock_api, mock_git,
+                                                      mock_costs, project_dir, monkeypatch):
+        text = ('PART ONE\n\nI\n\nFirst chapter prose here.\n\nII\n\nSecond chapter prose.\n\n'
+                'PART TWO\n\nIII\n\nThird chapter prose at the end.\n')
+        rows = self._split(project_dir, monkeypatch, text)
+        assert self._scene_words(project_dir, rows) == len(text.split()) - 4
+        assert sorted({r['part'] for r in rows}) == ['1', '2']
+
+    def test_part_preamble_opens_next_chapter(self, mock_api, mock_git, mock_costs,
+                                              project_dir, monkeypatch):
+        text = ('Chapter 1\n\nOne.\n\nPART TWO\n\nAn epigraph for part two.\n\n'
+                'Chapter 2\n\nTwo.\n')
+        rows = sorted(self._split(project_dir, monkeypatch, text), key=lambda r: int(r['seq']))
+        assert [r['part'] for r in rows] == ['', '1']
+        with open(os.path.join(project_dir, 'scenes', rows[1]['id'] + '.md')) as f:
+            assert 'An epigraph for part two.' in f.read()
+
+    def test_heading_regex_requires_whole_line(self):
+        from storyforge.cmd_scenes_setup import _is_part_heading
+        assert not _is_part_heading('Part one of the plan was simple: wait for dark.')
+        assert _is_part_heading('Part Two: The Return')
+        assert _is_part_heading('BOOK FIRST')
+
+
+class TestSetextUnderlineIsNotABreak:
+    def test_dash_under_text_is_heading_not_break(self, mock_api, mock_git, mock_costs,
+                                                  project_dir, monkeypatch):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        ch_dir = os.path.join(project_dir, 'chapters')
+        os.makedirs(ch_dir)
+        with open(os.path.join(ch_dir, 'ch01.md'), 'w') as f:
+            f.write('A Heading\n---\n\nProse.\n\n---\n\nMore prose.\n')
+        main(['--split-chapters', '--source', 'chapters', '--yes'])
+        _, rows = _new_rows(project_dir, 'scenes.csv')
+        assert len(rows) == 2   # split at the blank-preceded marker only

@@ -925,7 +925,9 @@ def assess_flashbacks(scenes_map, briefs_map):
         except ValueError:
             return None
 
-    ordered = sorted(scenes_map.items(), key=_seq)
+    # Cut and merged scenes are not part of the book's reading order
+    ordered = sorted(((sid, sc) for sid, sc in scenes_map.items()
+                      if _s(sc.get('status')).strip() not in ('cut', 'merged')), key=_seq)
     total_words = sum(_int(sc.get('word_count')) or 0 for _, sc in ordered)
 
     passages, current = [], None
@@ -1977,7 +1979,7 @@ _PRESCRIPTIONS_FULL = {
         'knowledge_out so they feel discovered rather than assumed.'
     ),
     'function_variety': (
-        'For dominant outcomes: change 3-5 yes-but outcomes to yes, no, or no-and '
+        'For dominant outcomes: change 3-5 yes-but outcomes to yes, no, no-and or no-but '
         'to increase unpredictability. For action/sequel imbalance: insert sequel '
         'scenes (reaction/dilemma/decision) between action sequences, or add an '
         'action scene in a run of sequels. For turning point monotony: convert '

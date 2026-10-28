@@ -598,3 +598,13 @@ class TestTimelineNeverBlocks:
         assert len(timeline) == 1
         assert timeline[0]['severity'] == 'advisory'
         assert timeline[0]['message'].startswith('Flashback: s03 (day -1825)')
+
+
+class TestFlashbacksIgnoreCutScenes:
+    def test_cut_scene_is_not_a_flashback(self):
+        from storyforge.structural import assess_flashbacks
+        scenes = {'a': {'seq': '1', 'timeline_day': '5', 'pov': 'x', 'word_count': '10'},
+                  'b': {'seq': '2', 'timeline_day': '1', 'pov': 'x', 'word_count': '10',
+                        'status': 'cut'},
+                  'c': {'seq': '3', 'timeline_day': '6', 'pov': 'x', 'word_count': '10'}}
+        assert assess_flashbacks(scenes, {}) == []

@@ -233,8 +233,9 @@ def generate_scenes_rows(scenes: list[dict],
         part = str(part_num) if part_num is not None else ''
         word_count = str(scene.get('word_count', ''))
 
-        row = f'{slug}|{seq}|{title}|{part}||||||||||{word_count}|'
-        rows.append(row)
+        values = {'id': slug, 'seq': str(seq), 'title': title, 'part': part,
+                  'word_count': word_count}
+        rows.append('|'.join(values.get(col, '') for col in _SCENES_HEADER.split('|')))
 
     return rows
 
@@ -262,8 +263,7 @@ def generate_intent_rows(scenes: list[dict]) -> list[str]:
             slug = f'scene-unknown'
         slug = unique_slug(slug, used_slugs)
 
-        row = f'{slug}||||||||||'
-        rows.append(row)
+        rows.append('|'.join([slug] + [''] * (len(_INTENT_HEADER.split('|')) - 1)))
 
     return rows
 

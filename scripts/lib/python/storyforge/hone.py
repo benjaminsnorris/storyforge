@@ -37,13 +37,14 @@ _OUTCOME_RE = re.compile(
 def normalize_outcomes(raw: str) -> str:
     """Extract enum value from a possibly-elaborated outcome string.
 
-    Handles: 'yes-but — long elaboration', '[no-and]', 'yes', etc.
+    Handles: 'yes-but — long elaboration', '[no-and]', 'No, but ...', 'yes', etc.
     Returns the raw string unchanged if no enum is recognized.
     """
     raw = raw.strip()
     if not raw:
         return raw
-    m = _OUTCOME_RE.match(raw)
+    from storyforge.schema import canonical_outcome_phrase
+    m = _OUTCOME_RE.match(canonical_outcome_phrase(raw))
     if m:
         return m.group(1).lower()
     return raw
@@ -821,11 +822,19 @@ def reconcile_domain(
         log_file = os.path.join(log_dir, log_name)
         raw = invoke_to_file(prompt, model, log_file, max_tokens=max_tokens,
                              label=f'hone registries/{domain}')
-        if isinstance(raw, dict) and raw.get('stop_reason') == 'max_tokens':
-            log(f'  WARNING: {domain} response hit the {max_tokens}-token limit; '
-                f'the registry and UPDATES that follow it are incomplete')
         response = extract_text_from_file(log_file)
         rows, updates = parse_registry_response(response, domain)
+        # Never replace a registry with output known to be incomplete: a
+        # truncated or empty response would wipe entries (phase 3b's
+        # knowledge registry, or a good first pass when the retry fails).
+        if isinstance(raw, dict) and raw.get('stop_reason') == 'max_tokens':
+            log(f'  WARNING: {domain} response hit the {max_tokens}-token limit; '
+                f'keeping the existing registry unchanged')
+            return _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain])), 0
+        if not rows:
+            log(f'  WARNING: {domain} response had no registry rows; '
+                f'keeping the existing registry unchanged')
+            return _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain])), 0
         write_registry(ref_dir, domain, rows)
         return rows, apply_updates(ref_dir, domain, updates)
 

@@ -83,9 +83,9 @@ def _read_manuscript(project_dir: str) -> str:
 
 # Phase 0 sends the whole manuscript alongside the shared project context.
 # Budget roughly 120k tokens (~4 chars/token) for the manuscript so the
-# request fits a 200k-token window with room for context and output. A
-# typical 100k-word novel (~560k chars) is trimmed only slightly; most are
-# sent whole.
+# request fits a 200k-token window with room for context and output. Novels
+# up to roughly 85k words (~480k chars) are sent whole; a 100k-word novel
+# (~560k chars) loses about a seventh of its middle.
 CHARACTERIZE_MAX_CHARS = 480_000
 
 
@@ -233,6 +233,9 @@ def _reduce_enums(result: dict[str, str]) -> dict[str, str]:
         if not value or not spec or spec.get('type') != 'enum':
             continue
         answer = value.strip().lower()
+        if field == 'outcome':
+            from .schema import canonical_outcome_phrase
+            answer = canonical_outcome_phrase(answer)
         for allowed in sorted(spec['values'], key=len, reverse=True):
             rest = answer[len(allowed):]
             if answer.startswith(allowed) and (not rest or not (rest[0].isalnum() or rest[0] in '/+-')):

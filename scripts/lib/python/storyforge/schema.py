@@ -28,6 +28,16 @@ VALID_ACTION_SEQUEL = frozenset({'action', 'sequel'})
 
 VALID_OUTCOMES = frozenset({'yes', 'no', 'yes-but', 'no-and', 'no-but'})
 
+_OUTCOME_PHRASE_RE = re.compile(r'^\s*\[?\s*(yes|no)[\s,;:—–-]+(but|and)\b', re.IGNORECASE)
+
+
+def canonical_outcome_phrase(answer: str) -> str:
+    """Rewrite "No, but ..." / "yes but" / "no — and furthermore" to the
+    hyphenated outcome ("no-but ...") so a matcher cannot stop at "no"."""
+    return _OUTCOME_PHRASE_RE.sub(lambda m: f'{m.group(1).lower()}-{m.group(2).lower()}',
+                                  answer, count=1)
+
+
 # How each scene outcome reads, used verbatim by every prompt that asks for
 # one. The disaster answers the scene's question (Swain's goal-conflict-
 # disaster; labels from Bickham, Scene & Structure, 1993). no-but is the

@@ -229,7 +229,7 @@ class PlannedChange(NamedTuple):
 #: which is the right moment and the right volume.
 _PAST_TENSE: Final = {
     'add': 'Added', 'clean': 'Cleaned', 'clear': 'Cleared',
-    'create': 'Created', 'delete': 'Deleted', 'migrate': 'Migrated',
+    'create': 'Created', 'delete': 'Deleted', 'fill': 'Filled', 'migrate': 'Migrated',
     'move': 'Moved', 'remove': 'Removed', 'rename': 'Renamed',
     'update': 'Updated',
 }
@@ -962,26 +962,58 @@ def _defines_book_parts(project_dir: str) -> bool:
         return True
 
 
+def _act_review_change(rel_path: str) -> PlannedChange:
+    """Report that copied act values may be book parts, for the author."""
+    return _note(f'Check act in {rel_path}: it comes from part, and '
+                 f'storyforge.yaml defines parts:, so part may have held book '
+                 f'parts rather than acts. Correct act where they differ.')
+
+
 def _act_migrated_text(text: str, rel_path: str, mode: str,
                        clear_part: bool
                        ) -> tuple[str, tuple[PlannedChange, ...]] | None:
     """The CSV with an `act` column made from `part`, or None if not needed.
 
-    Not needed when the header already has `act` (migrated, or written by a
-    current writer) or has no `part` to migrate from. `mode` is `'copy'`
-    (insert `act` right after `part`, copying its values, and empty `part`
-    when `clear_part`) or `'rename'` (the column is renamed in place).
+    Not needed when there is no `part` to migrate from, or `act` already
+    holds a value. An `act` column that is empty on every row still needs
+    it: current writers add `act` (empty) whenever they rewrite the file, so
+    a project touched by extract, elaborate, revise or hone before cleanup
+    has the header but its acts still in `part`. `mode` is `'copy'` (`act`
+    takes `part`'s values, and `part` is emptied when `clear_part`) or
+    `'rename'` (`part` becomes `act`).
     """
     lines = [line for line in text.splitlines() if line.strip()]
     if not lines:
         return None
     header = [c.strip() for c in lines[0].split('|')]
-    if 'act' in header or 'part' not in header:
+    if 'part' not in header:
         return None
     idx = header.index('part')
     rows = [line.split('|') for line in lines[1:]]
     for row in rows:
         row.extend([''] * (len(header) - len(row)))
+
+    if 'act' in header:
+        act_idx = header.index('act')
+        if any(row[act_idx].strip() for row in rows) or \
+                not any(row[idx].strip() for row in rows):
+            return None
+        for row in rows:
+            row[act_idx] = row[idx]
+            if clear_part or mode == 'rename':
+                row[idx] = ''
+        if mode == 'rename':
+            header.pop(idx)
+            for row in rows:
+                row.pop(idx)
+        changes = (_change('fill', f'empty act column in {rel_path} from part'),)
+        if clear_part and mode == 'copy':
+            changes += (_change('clear', f'part in {rel_path} (storyforge.yaml '
+                                         f'defines no parts:, so it held acts)'),)
+        elif mode == 'copy':
+            changes += (_act_review_change(rel_path),)
+        new_text = '\n'.join('|'.join(cells) for cells in [header, *rows]) + '\n'
+        return new_text, changes
 
     if mode == 'rename':
         header[idx] = 'act'
@@ -999,6 +1031,8 @@ def _act_migrated_text(text: str, rel_path: str, mode: str,
             changes += (_change('clear', f'part in {rel_path} (storyforge.yaml '
                                          f'defines no parts:, so it held '
                                          f'acts)'),)
+        elif had_parts:
+            changes += (_act_review_change(rel_path),)
 
     new_text = '\n'.join('|'.join(cells) for cells in [header, *rows]) + '\n'
     return new_text, changes
@@ -1007,14 +1041,16 @@ def _act_migrated_text(text: str, rel_path: str, mode: str,
 def plan_act_column(project_dir: str) -> StepPlan:
     """Plan the `part` → `act` migration for pre-act-column projects.
 
-    scenes.csv: `act` is always created from `part`; `part` is then emptied
-    only when storyforge.yaml defines no `parts:`, because with parts defined
-    the column may hold real part numbers the assembler relies on. spine.csv
-    and architecture.csv: `part` is renamed `act`. Writes LF, like every
-    other CSV writer.
+    scenes.csv: `act` is always created from `part`. `part` is then emptied
+    only when storyforge.yaml defines no `parts:`: Storyforge used `part` for
+    acts, so without book parts declared it held nothing else; with parts
+    declared the values may be book parts, so `part` is kept and the copy is
+    reported for the author to check. spine.csv and architecture.csv: `part`
+    is renamed `act`. Writes LF, like every other CSV writer.
     """
     title = 'Checking act column...'
     clear_part: bool | None = None
+    notes: list[PlannedChange] = []
     pending: list[tuple[str, str, tuple[PlannedChange, ...]]] = []
     for rel_path, mode in _ACT_MIGRATION_FILES:
         path = os.path.join(project_dir, rel_path)
@@ -1032,7 +1068,11 @@ def plan_act_column(project_dir: str) -> StepPlan:
             clear_part = not _defines_book_parts(project_dir)
         migrated = _act_migrated_text(text, rel_path, mode, bool(clear_part))
         if migrated is not None:
-            pending.append((path, *migrated))
+            new_text, file_changes = migrated
+            # The "check act" note is not a change; it rides in `summary`
+            notes += [c for c in file_changes if c.would == c.did]
+            pending.append((path, new_text,
+                            tuple(c for c in file_changes if c.would != c.did)))
 
     def apply() -> tuple[PlannedChange, ...]:
         done: tuple[PlannedChange, ...] = ()
@@ -1049,7 +1089,8 @@ def plan_act_column(project_dir: str) -> StepPlan:
 
     changes = tuple(c for _path, _text, file_changes in pending
                     for c in file_changes)
-    return StepPlan(title, changes, apply if changes else _no_op)
+    return StepPlan(title, changes, apply if changes else _no_op,
+                    summary=notes[0] if notes else None)
 
 
 # ============================================================================
