@@ -20,6 +20,8 @@ VALID_TYPES = frozenset({
     'plot', 'revelation', 'transition', 'world',
 })
 
+VALID_TIME_MODES = frozenset({'scene', 'summary', 'frame'})
+
 VALID_TIMES = frozenset({
     'morning', 'afternoon', 'evening', 'night', 'dawn', 'dusk',
 })
@@ -132,6 +134,21 @@ COLUMN_SCHEMA = {
                        'the first day of the main story; flashbacks keep the earlier day they '
                        'depict (0 or negative before day 1). Reading order is seq, so a scene '
                        'earlier in time than the story\'s present is a flashback.',
+    },
+    'time_mode': {
+        'type': 'enum', 'values': VALID_TIME_MODES,
+        'file': 'scenes.csv', 'stage': 'map',
+        'description': 'How the scene sits in time: scene (its action plays out on its day; '
+                       'the default when empty), summary (it covers a stretch of time; '
+                       'timeline_day is where the stretch starts), or frame (narration from '
+                       'after the story, looking back; never the story\'s present).',
+    },
+    'timeline_date': {
+        'type': 'edtf', 'file': 'scenes.csv', 'stage': 'map',
+        'description': 'The calendar date the scene\'s own text states, in EDTF; empty when '
+                       'it states none. Unknown digits are X and never filled in: '
+                       '"XXXX-07-04" (no year given), "1922-22" (summer 1922), "1917~" '
+                       '(around 1917), "1922-06/1922-09" (a stretch).',
     },
     'time_of_day': {
         'type': 'enum', 'values': VALID_TIMES,
@@ -575,6 +592,20 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                             'value': value,
                             'constraint': 'enum',
                             'allowed': sorted(schema['values']),
+                        })
+
+                elif constraint == 'edtf':
+                    from .timeline import is_valid_edtf
+                    if is_valid_edtf(value):
+                        passed += 1
+                    else:
+                        failed += 1
+                        errors.append({
+                            'file': filename,
+                            'row': scene_id,
+                            'column': col,
+                            'value': value,
+                            'constraint': 'edtf',
                         })
 
                 elif constraint == 'integer':

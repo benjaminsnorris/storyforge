@@ -350,22 +350,16 @@ class TestScenes:
 
 
 class TestTimeline:
-    def test_parse_indicators(self):
-        from storyforge.timeline import parse_indicators
-        response = 'DELTA: next_day\nEVIDENCE: "The sun rose over the archive"\nANCHOR: none\n'
-        result = parse_indicators(response, 'test-scene')
-        assert 'next_day' in json.dumps(result)
-        assert 'sun rose' in json.dumps(result)
+    def test_parse_cues(self):
+        from storyforge.timeline import parse_cues
+        result = parse_cues('TIME_RELATION: later\nTIME_GAP: the next morning\n')
+        assert result['relation'] == 'later' and result['gap'] == 'the next morning'
 
-    def test_parse_timeline_assignments(self):
-        from storyforge.timeline import parse_timeline_assignments
-        response = (
-            'Here is my analysis.\n\nTIMELINE:\nid|timeline_day\n'
-            'scene-1|1\nscene-2|1\nscene-3|2\nscene-4|5\n\nSummary text.\n'
-        )
-        result = parse_timeline_assignments(response)
-        assert result.get('scene-1') == 1
-        assert result.get('scene-4') == 5
+    def test_parse_assignments(self):
+        from storyforge.timeline import parse_assignments
+        result = parse_assignments('scene-1 | 1 | scene | start\nscene-4 | 5 | scene | x\n',
+                                   ['scene-1', 'scene-4'])
+        assert result['scene-1'][0] == 1 and result['scene-4'][0] == 5
 
 
 class TestCover:

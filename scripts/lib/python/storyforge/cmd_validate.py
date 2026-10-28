@@ -183,6 +183,9 @@ def _print_human_readable(combined):
                         print(f'    {e["row"]} | {e["column"]}: "{e["value"]}" — expected integer')
                     elif e['constraint'] == 'boolean':
                         print(f'    {e["row"]} | {e["column"]}: "{e["value"]}" — expected true/false')
+                    elif e['constraint'] == 'edtf':
+                        print(f'    {e["row"]} | {e["column"]}: "{e["value"]}" — expected an EDTF '
+                              f'date (e.g. 1922-07-04, XXXX-07-04, 1922-22, 1917~)')
                     elif e['constraint'] == 'mice':
                         for p in e.get('problems', []):
                             print(f'    {e["row"]} | {e["column"]}: "{p["entry"]}" — {p["reason"]}')

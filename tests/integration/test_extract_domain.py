@@ -219,7 +219,8 @@ class TestParseSkeletonResponse:
         response = """TITLE: The Finest Cartographer
 POV: Dorren Hayle
 LOCATION: Pressure Cartography Office
-TIMELINE_DAY: 1
+TIME_RELATION: later
+TIME_DATE: 1922-06
 TIME_OF_DAY: morning
 DURATION: 2 hours
 TYPE: character
@@ -231,7 +232,8 @@ ACT: 1"""
         assert result['title'] == 'The Finest Cartographer'
         assert result['pov'] == 'Dorren Hayle'
         assert result['location'] == 'Pressure Cartography Office'
-        assert result['timeline_day'] == '1'
+        assert 'timeline_day' not in result  # placed by the timeline pass
+        assert result['timeline_date'] == '1922-06'
         assert result['time_of_day'] == 'morning'
         assert result['type'] == 'character'
         assert result['target_words'] == '2500'

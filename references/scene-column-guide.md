@@ -34,7 +34,11 @@ This document explains **why** each column in the scene CSV files matters and **
 ### timeline_day — Chronological Position
 **Why it matters:** Validates that the story's internal clock is consistent. Characters can't reference Tuesday's events on Monday.
 **How to check:** Run `./storyforge validate` — it lists flashbacks and crosscuts (scenes set before the story's present) with how far back they reach and whether the facts they establish reach the present. These are devices, not errors. Check the Timeline scatter chart.
-**How to improve:** If validation finds gaps, determine whether the gap is intentional (time skip) or an extraction error.
+**How to improve:** Run `./storyforge timeline --check` to compare the prose with the calendar: it reports a "next morning" the days put a week on, a scene that steps back from the present without being told as a flashback, and dates or weekdays the days contradict. `write` and `revise` run the same check on the scenes they change. It never rewrites either side; decide which one is wrong. `./storyforge timeline` places every scene on one calendar (proposals go to `working/timeline-proposed.csv` where days are already set; `--force` replaces them).
+
+### time_mode and timeline_date — How a Scene Sits in Time
+**time_mode:** `scene` (default), `summary` (covers a stretch; the day is where it starts), or `frame` (narration from after the story, which is never treated as the present, so it can't make the whole book look like a flashback).
+**timeline_date:** the date the scene's own text states, in EDTF. Only what the text gives: "the Fourth of July" with no year is `XXXX-07-04`, never a guessed year.
 
 ### type — Narrative Purpose
 **Why it matters:** A balanced manuscript has a mix of types. Five consecutive plot scenes with no character development creates pace without depth. Five character scenes with no plot creates depth without momentum.
