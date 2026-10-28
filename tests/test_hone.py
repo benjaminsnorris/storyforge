@@ -607,29 +607,44 @@ class TestReconcileByDeltas:
         locs = _column(ref_dir, 'scenes.csv', 'location')
         assert locs['act1-sc01'] == locs['act1-sc02'] == 'plaza-hotel'
 
-    def test_skip_is_reported_and_left_alone(self, project_dir, monkeypatch, tmp_path, capsys):
+    def test_skip_is_removed_so_a_rerun_makes_no_call(self, project_dir, monkeypatch, tmp_path, capsys):
         from storyforge.hone import reconcile_domain
         ref_dir = os.path.join(project_dir, 'reference')
-        _set_column(ref_dir, 'scenes.csv', 'location', ['somewhere unspecified'])
-        _mock_api(monkeypatch, ['1 | SKIP\n'])
+        _set_column(ref_dir, 'scenes.csv', 'location',
+                    ['the office;somewhere unspecified', 'various rooms'])
+        calls = _mock_api(monkeypatch, ['1 | SKIP\n2 | skip (noise)\n'])
 
         result = reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
 
         out = capsys.readouterr().out
-        assert 'skipped as not a place: somewhere unspecified' in out
+        assert 'removed 2 reference(s) that are not a place: somewhere unspecified' in out
         assert 'still unresolved' not in out
-        assert result['unresolved'] == 1
-        assert _column(ref_dir, 'scenes.csv', 'location')['act1-sc01'] == 'somewhere unspecified'
+        assert result['unresolved'] == 0
+        locs = _column(ref_dir, 'scenes.csv', 'location')
+        assert locs['act1-sc01'] == 'cartography-office' and locs['act1-sc02'] == ''
+        reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
+        assert len(calls) == 1
 
     def test_unknown_id_is_ignored_and_reported(self, project_dir, monkeypatch, tmp_path, capsys):
         from storyforge.hone import reconcile_domain
         ref_dir = os.path.join(project_dir, 'reference')
         _set_column(ref_dir, 'scenes.csv', 'location', ['West Egg'])
-        _mock_api(monkeypatch, ['1 | not-a-registered-id\n'])
+        calls = _mock_api(monkeypatch, ['1 | not-a-registered-id\n', '1 | west-egg\n'])
 
         reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
 
+        # One retry round, which says why it is asking again
+        assert len(calls) == 2 and 'Answer again' in calls[1]
         assert 'still unresolved: West Egg' in capsys.readouterr().out
+
+    def test_retry_resolves_an_undeclared_id(self, project_dir, monkeypatch, tmp_path):
+        """Gatsby: `5 | the-chauffeur` named an id that was never declared."""
+        from storyforge.hone import reconcile_domain, find_unresolved
+        ref_dir = os.path.join(project_dir, 'reference')
+        _set_column(ref_dir, 'scenes.csv', 'location', ['the garage'])
+        _mock_api(monkeypatch, ['1 | the-garage\n', '1 | NEW | the-garage | The garage\n'])
+        reconcile_domain('locations', ref_dir, 'test-model', str(tmp_path))
+        assert find_unresolved('locations', ref_dir) == []
 
     def test_truncated_batch_is_not_applied(self, project_dir, monkeypatch, tmp_path, capsys):
         from storyforge.hone import reconcile_domain
@@ -652,7 +667,8 @@ class TestReconcileByDeltas:
         from storyforge.hone import reconcile_domain
         ref_dir = os.path.join(project_dir, 'reference')
         _set_column(ref_dir, 'scenes.csv', 'pov', ['Nick Carraway'])
-        _mock_api(monkeypatch, ['1 | NEW | nick-carraway | Nick Carraway | protagonist\n'])
+        _mock_api(monkeypatch, ['1 | NEW | nick-carraway | Nick Carraway | protagonist\n'
+                                '2 | NEW | council-members | Council Members | minor\n'])
 
         reconcile_domain('characters', ref_dir, 'test-model', str(tmp_path))
 
@@ -900,7 +916,7 @@ class TestParseMappingResponse:
             '6 | stranger\n'
             '9 | tom\n'
             'commentary\n',
-            batch_size=6, known_ids={'tom', 'daisy'})
+            batch_size=6, known={'tom', 'daisy'})
         assert mapping == {1: ['tom'], 2: ['tom', 'daisy'], 3: ['nick'], 4: ['nick']}
         assert new_rows == [{'id': 'nick', 'name': 'Nick Carraway', 'role': 'protagonist'}]
         assert skipped == {5}
@@ -1018,3 +1034,65 @@ class TestGatsbyFieldShapes:
         apply_registry_normalization('mice-threads', ref_dir)
         assert _column(ref_dir, 'scene-intent.csv', 'mice_threads')['act1-sc01'] == \
             '+map-anomaly;+archive-erasure;+new-thread'
+
+    def test_none_sentences_are_facts(self):
+        from storyforge.enrich import is_placeholder
+        for entry in ('None of the guests have met Gatsby',
+                      "None of Gatsby's money is legitimate",
+                      'Nick: none of this is real'):
+            assert not is_placeholder(entry), entry
+
+    def test_comma_inside_a_free_text_thread_name_stays(self):
+        from storyforge.enrich import split_mice_entries
+        assert split_mice_entries('+inquiry:what does Gatsby want, really;-a') == \
+            ['+inquiry:what does Gatsby want, really', '-a']
+        assert split_mice_entries('a,+b,-c, inquiry:d') == ['a', '+b', '-c', ' inquiry:d']
+
+
+class TestReviewFixes:
+    """Fresh-context review of #322."""
+
+    def test_pov_never_gets_a_composite(self, project_dir, monkeypatch, tmp_path):
+        from storyforge.hone import reconcile_domain
+        ref_dir = os.path.join(project_dir, 'reference')
+        _set_column(ref_dir, 'scenes.csv', 'pov', ['the Merrins'])
+        _set_column(ref_dir, 'scene-intent.csv', 'characters', {'act1-sc01': 'the Merrins'})
+        _mock_api(monkeypatch, ['1 | tessa-merrin;dorren-hayle\n2 | SKIP\n',
+                                '1 | tessa-merrin;dorren-hayle\n'])
+        reconcile_domain('characters', ref_dir, 'test-model', str(tmp_path))
+        assert _column(ref_dir, 'scenes.csv', 'pov')['act1-sc01'] == 'the Merrins'
+        assert _column(ref_dir, 'scene-intent.csv', 'characters')['act1-sc01'] == \
+            'tessa-merrin;dorren-hayle'
+
+    def test_new_ids_are_slugged_or_rejected(self):
+        from storyforge.hone import parse_mapping_response
+        mapping, new_rows, _ = parse_mapping_response(
+            'characters',
+            '1 | NEW | Myrtle Wilson | Myrtle Wilson | supporting\n'
+            '2 | NEW | east-egg;west-egg | East Egg | minor\n'
+            '3 | NEW | Tommy | Tom | minor\n',
+            3, {'tom': 'tom-buchanan', 'tommy': 'tom-buchanan', 'tom-buchanan': 'tom-buchanan'})
+        assert [r['id'] for r in new_rows] == ['myrtle-wilson']
+        assert mapping == {1: ['myrtle-wilson'], 3: ['tom-buchanan']}
+
+    def test_mapping_line_may_name_an_alias(self):
+        from storyforge.hone import parse_mapping_response
+        mapping, _, _ = parse_mapping_response(
+            'characters', '1 | Gatsby\n', 1, {'gatsby': 'jay-gatsby', 'jay-gatsby': 'jay-gatsby'})
+        assert mapping == {1: ['jay-gatsby']}
+
+    def test_origin_recomputed_across_batches(self, project_dir, monkeypatch, tmp_path):
+        import storyforge.hone as hone
+        from storyforge.elaborate import _read_csv_as_map
+        ref_dir = os.path.join(project_dir, 'reference')
+        monkeypatch.setattr(hone, '_BATCH_SIZE', 1)
+        # Scene order: act1-sc01's knowledge_in first, then act1-sc02's out
+        _set_column(ref_dir, 'scene-briefs.csv', 'knowledge_in',
+                    {'act1-sc01': 'Pell is a spy'})
+        _set_column(ref_dir, 'scene-briefs.csv', 'knowledge_out',
+                    {'act1-sc02': 'Pell spies for the council'})
+        _mock_api(monkeypatch, ['1 | NEW | pell-is-a-spy | Pell is a spy | identity\n',
+                                '1 | pell-is-a-spy\n'])
+        hone.reconcile_domain('knowledge', ref_dir, 'test-model', str(tmp_path))
+        k = _read_csv_as_map(os.path.join(ref_dir, 'knowledge.csv'))
+        assert k['pell-is-a-spy']['origin'] == 'act1-sc02'

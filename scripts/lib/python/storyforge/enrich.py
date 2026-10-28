@@ -239,7 +239,7 @@ _PLACEHOLDER_RE = re.compile(
 # nick-carraway]`, `[none — Nick carries no tracked states]`) or a labelled
 # one (`ewing-klipspringer: (none prior)`). Both seen on The Great Gatsby.
 _NOTE_PLACEHOLDER_RE = re.compile(
-    r'^(?:[\w.\'-]+(?:\s[\w.\'-]+)*:\s*)?[\[(]?\s*none(?![\w-])[^\])]*[\])]?\.?$',
+    r'^(?:[\w.\'-]+(?:\s[\w.\'-]+)*:\s*)?[\[(]\s*none(?![\w-])[^\])]*[\])]\.?$',
     re.IGNORECASE,
 )
 
@@ -378,6 +378,18 @@ def load_mice_registry(csv_file: str) -> tuple[dict[str, str], dict[str, str]]:
     return alias_map, type_map
 
 
+# The model sometimes joins MICE entries with commas despite the prompt
+# (`+a,+b`). A comma separates entries only when an operation or a type
+# follows it, so a comma inside a free-text name stays put.
+_MICE_SEPARATOR_RE = re.compile(
+    r';|,(?=\s*(?:[+-]|(?:milieu|inquiry|character|event)\s*:))', re.IGNORECASE)
+
+
+def split_mice_entries(mice_string: str) -> list[str]:
+    """Split a mice_threads value into its entries."""
+    return _MICE_SEPARATOR_RE.split(mice_string or '')
+
+
 def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
                            type_map: dict[str, str] | None = None) -> str:
     """Normalize a semicolon-separated mice_threads value.
@@ -401,9 +413,7 @@ def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
         return mice_string or ''
 
     result = []
-    # A thread name is a slug, so a comma only ever separates entries (the
-    # model sometimes joins them with commas despite the prompt)
-    for entry in re.split(r'[;,]', mice_string):
+    for entry in split_mice_entries(mice_string):
         entry = entry.strip()
         if not entry:
             continue

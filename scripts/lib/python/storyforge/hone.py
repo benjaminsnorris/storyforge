@@ -20,7 +20,8 @@ from storyforge.elaborate import (
 )
 from storyforge.enrich import (
     is_placeholder, load_alias_map, load_mice_registry, normalize_aliases,
-    normalize_mice_threads, strip_parentheticals, strip_placeholders,
+    normalize_mice_threads, split_mice_entries, strip_parentheticals,
+    strip_placeholders,
 )
 
 # ============================================================================
@@ -199,8 +200,10 @@ def _split_mice(entry: str) -> tuple[str, str, str]:
 
 def _split_entries(domain: str, value: str) -> list[str]:
     """A target field's entries. MICE entries may be comma-joined (see
-    :func:`normalize_mice_threads`)."""
-    return re.split(r'[;,]' if domain == 'mice-threads' else ';', value or '')
+    :func:`split_mice_entries`)."""
+    if domain == 'mice-threads':
+        return split_mice_entries(value)
+    return (value or '').split(';')
 
 
 def _reference_key(domain: str, part: str) -> tuple[str, str, str] | None:
@@ -472,7 +475,7 @@ def _registry_line(domain: str, row: dict[str, str]) -> str:
 
 
 def build_mapping_prompt(domain: str, ref_dir: str, batch: list[dict],
-                         context: str = '') -> str:
+                         context: str = '', retry: bool = False) -> str:
     """Prompt asking what each unresolved reference in *batch* denotes.
 
     References are numbered so the answer names them by number: echoing a
@@ -497,7 +500,11 @@ def build_mapping_prompt(domain: str, ref_dir: str, batch: list[dict],
                 f'- {r["id"]} — {r.get("name", "")}' for r in chars))
     if context:
         sections.append(f'## Additional Context\n\n{context}')
-    sections.append('## Unresolved References\n\n' + '\n'.join(refs))
+    sections.append('## Unresolved References\n\n'
+                    + ('These were asked before, and the answer named an id that is '
+                       'not in the registry and was not declared NEW, so it was '
+                       'discarded. Answer again.\n\n' if retry else '')
+                    + '\n'.join(refs))
 
     return f"""A novel's scene data refers to each {noun} by an id from its registry, but these references match no registry id, name, or alias. Decide what each one denotes.
 
@@ -520,25 +527,36 @@ N | SKIP
 
 Rules:
 {_domain_rules(domain)}
+- Every id you name must be in the registry above or declared on a NEW line of this answer; a line naming any other id is discarded
 - Map several references to one id when they denote the same {noun}; never declare a NEW id that is already in the registry
 
 Output only these lines, one per reference, no other commentary."""
 
 
+_SLUG_RE = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
+
+
+def _slugify(raw: str) -> str:
+    return re.sub(r'[^a-z0-9]+', '-', raw.strip().lower()).strip('-')
+
+
 def parse_mapping_response(
-    domain: str, response: str, batch_size: int, known_ids: set[str]
+    domain: str, response: str, batch_size: int, known: dict[str, str] | set[str]
 ) -> tuple[dict[int, list[str]], list[dict[str, str]], set[int]]:
     """Parse ``N | id``, ``N | id1;id2``, ``N | NEW | id | …`` and ``N | SKIP``.
 
-    Returns ``(mapping, new_rows, skipped)``: mapping is reference number →
-    ids, new_rows are registry rows with the NEW fields filled (derived
-    columns left to the caller), skipped the numbers answered SKIP. A line
-    naming an id that is neither registered nor declared NEW is ignored, as is
-    a number outside the batch. A NEW id that is already registered maps to
-    that entry.
+    *known* is the registry lookup (lowercased id, name or alias → id), or a
+    set of ids. Returns ``(mapping, new_rows, skipped)``: mapping is reference
+    number → ids, new_rows are registry rows with the NEW fields filled
+    (derived columns left to the caller), skipped the numbers answered SKIP.
+    A line naming an id that is neither known nor declared NEW is ignored, as
+    is a number outside the batch. A NEW id is slugged; one that already
+    resolves maps to that entry, and one holding ``;`` is ignored.
     """
     fields = _NEW_FIELDS[domain]
-    known = {i.lower(): i for i in known_ids}
+    if isinstance(known, set):
+        known = {i.lower(): i for i in known}
+    known = dict(known)
     lines = []
     for line in response.split('\n'):
         parts = [p.strip() for p in line.strip().lstrip('-* ').split('|')]
@@ -548,10 +566,10 @@ def parse_mapping_response(
 
     new_rows: list[dict[str, str]] = []
     for _num, parts in lines:
-        if parts[0].upper() != 'NEW' or len(parts) < 3:
+        if parts[0].upper() != 'NEW' or len(parts) < 3 or ';' in parts[1]:
             continue
-        rid = parts[1].strip().lower()
-        if not rid or not parts[2] or rid in known:
+        rid = _slugify(parts[1])
+        if not rid or not parts[2] or rid in known or parts[1].strip().lower() in known:
             continue
         values = parts[2:2 + len(fields)]
         row = {'id': rid, **{f: (values[i] if i < len(values) else '') for i, f in enumerate(fields)}}
@@ -562,19 +580,32 @@ def parse_mapping_response(
     skipped: set[int] = set()
     for num, parts in lines:
         head = parts[0]
-        if head.upper() == 'SKIP':
+        words = head.split()
+        if words and words[0].upper().rstrip('.:,') == 'SKIP':
             skipped.add(num)
             continue
-        ids = [parts[1].strip()] if head.upper() == 'NEW' and len(parts) > 1 else head.split(';')
-        ids = [i.strip().lower() for i in ids if i.strip()]
-        if ids and all(i in known for i in ids):
-            mapping[num] = [known[i] for i in ids]
+        if head.upper() == 'NEW':
+            if len(parts) < 2 or ';' in parts[1]:
+                continue
+            raw = parts[1].strip().lower()
+            ids = [known.get(raw) or known.get(_slugify(raw))]
+        else:
+            ids = [known.get(i.strip().lower()) for i in head.split(';') if i.strip()]
+        if ids and all(ids):
+            mapping[num] = list(dict.fromkeys(ids))
     return mapping, new_rows, skipped
+
+
+# Columns that hold one value, where a composite mapping is not applied
+_SINGLE_VALUE_COLUMNS = {'pov'}
 
 
 def _rewrite_targets(domain: str, ref_dir: str, mapping: dict[str, list[str]]) -> int:
     """Rewrite target fields through *mapping* (lookup key → ids), keeping
-    MICE ``+``/``-`` prefixes. Returns the number of fields changed."""
+    MICE ``+``/``-`` prefixes. An empty id list removes the entry (a
+    reference answered SKIP). A composite mapping is not applied to a
+    single-value column such as ``pov``; that reference stays unresolved and
+    is reported. Returns the number of fields changed."""
     changed = 0
     for filename, columns in _DOMAIN_TARGETS[domain]:
         path = os.path.join(ref_dir, filename)
@@ -591,7 +622,7 @@ def _rewrite_targets(domain: str, ref_dir: str, mapping: dict[str, list[str]]) -
                         continue
                     ref = _reference_key(domain, part)
                     ids = mapping.get(ref[0]) if ref else None
-                    if ids is None:
+                    if ids is None or (col in _SINGLE_VALUE_COLUMNS and len(ids) > 1):
                         out.append(part.strip())
                     elif domain == 'mice-threads':
                         prefix = _split_mice(part)[0]
@@ -616,23 +647,44 @@ def _first_scene_with(ref_dir: str, column: str, entry_id: str) -> str:
     return ''
 
 
+def _derive_columns(domain: str, ref_dir: str, row: dict[str, str]) -> None:
+    if domain == 'knowledge':
+        row.setdefault('aliases', '')
+        row['origin'] = _first_scene_with(ref_dir, 'knowledge_out', row['id']) or 'backstory'
+    elif domain == 'physical-states':
+        row['acquired'] = (_first_scene_with(ref_dir, 'physical_state_out', row['id'])
+                           or _first_scene_with(ref_dir, 'physical_state_in', row['id']))
+        row.setdefault('resolves', 'never')
+
+
+def rederive_columns(domain: str, ref_dir: str, ids: set[str]) -> None:
+    """Recompute derived columns (knowledge origin, physical-state acquired)
+    for the entries in *ids*, once every batch has rewritten its fields: a
+    fact declared from its knowledge_in wording in one batch may be mapped
+    from the knowledge_out wording that establishes it in a later one."""
+    if not ids or domain not in ('knowledge', 'physical-states'):
+        return
+    registry = _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
+    for row in registry:
+        if row.get('id') in ids:
+            _derive_columns(domain, ref_dir, row)
+    write_registry(ref_dir, domain, registry)
+
+
 def apply_mapping(domain: str, ref_dir: str, batch: list[dict],
-                  mapping: dict[int, list[str]], new_rows: list[dict[str, str]]) -> int:
+                  mapping: dict[int, list[str]], new_rows: list[dict[str, str]],
+                  skipped: set[int] = frozenset()) -> int:
     """Apply one parsed batch: add NEW rows (derived columns filled), record
-    single-id mappings as aliases, and rewrite the target fields. Returns the
-    number of fields changed."""
+    single-id mappings as aliases, rewrite the target fields, and remove the
+    references answered SKIP (so a re-run doesn't ask about them again).
+    Returns the number of fields changed."""
     by_key = {batch[n - 1]['key']: ids for n, ids in mapping.items()}
+    by_key.update({batch[n - 1]['key']: [] for n in skipped})
     changed = _rewrite_targets(domain, ref_dir, by_key)
 
     registry = _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
     for row in new_rows:
-        if domain == 'knowledge':
-            row['aliases'] = ''
-            row['origin'] = _first_scene_with(ref_dir, 'knowledge_out', row['id']) or 'backstory'
-        elif domain == 'physical-states':
-            row['acquired'] = (_first_scene_with(ref_dir, 'physical_state_out', row['id'])
-                               or _first_scene_with(ref_dir, 'physical_state_in', row['id']))
-            row['resolves'] = 'never'
+        _derive_columns(domain, ref_dir, row)
         registry.append(row)
 
     # A reference mapped to one entry becomes its alias, so the next
@@ -669,11 +721,9 @@ def _invoke_batch(prompt: str, model: str, log_file: str, label: str) -> str | N
 
 
 def _report_remaining(domain: str, ref_dir: str, skipped: list[str]) -> int:
-    remaining = find_unresolved(domain, ref_dir)
-    skipped_keys = {s.lower() for s in skipped}
-    left = [r for r in remaining if r.lower() not in skipped_keys]
+    left = find_unresolved(domain, ref_dir)
     if skipped:
-        log(f'  {domain}: {len(skipped)} reference(s) skipped as not a {_DOMAIN_NOUN[domain]}: '
+        log(f'  {domain}: removed {len(skipped)} reference(s) that are not a {_DOMAIN_NOUN[domain]}: '
             + '; '.join(skipped[:10]) + (f' (and {len(skipped) - 10} more)' if len(skipped) > 10 else ''))
     if left:
         log(f'  WARNING: {len(left)} {domain} reference(s) still unresolved: '
@@ -682,7 +732,7 @@ def _report_remaining(domain: str, ref_dir: str, skipped: list[str]) -> int:
     if shared:
         log(f'  WARNING: {len(shared)} {domain} alias(es) still shared: '
             + '; '.join(f'{a} ({", ".join(i)})' for a, i in shared.items()))
-    return len(remaining)
+    return len(left)
 
 
 # ============================================================================
@@ -861,30 +911,49 @@ def reconcile_domain(
     fields_normalized = apply_registry_normalization(domain, ref_dir)
 
     unresolved = list(_unresolved_references(domain, ref_dir).values())
-    batches = [unresolved[i:i + _BATCH_SIZE] for i in range(0, len(unresolved), _BATCH_SIZE)]
     if unresolved:
         log(f'  {domain}: {len(unresolved)} unresolved reference(s) in '
-            f'{len(batches)} batch(es)')
+            f'{-(-len(unresolved) // _BATCH_SIZE)} batch(es)')
     mapped = 0
     calls = 0
     skipped: list[str] = []
-    for n, batch in enumerate(batches, 1):
-        # An earlier batch's new entries or aliases may already resolve some
-        lookup = _registry_lookup(domain, ref_dir)
-        batch = [r for r in batch if r['key'] not in lookup]
-        if not batch:
-            continue
-        label = f'hone registries/{domain} (batch {n} of {len(batches)})'
-        text = _invoke_batch(build_mapping_prompt(domain, ref_dir, batch, context=context),
-                             model, os.path.join(log_dir, f'reconcile-{domain}-{n}.json'), label)
-        calls += 1
-        if text is None:
-            continue
-        known = set(lookup.values())
-        mapping, new_rows, skip = parse_mapping_response(domain, text, len(batch), known)
-        fields_normalized += apply_mapping(domain, ref_dir, batch, mapping, new_rows)
-        mapped += len(mapping)
-        skipped += [batch[i - 1]['text'] for i in sorted(skip)]
+    created: set[str] = set()
+    cut_off: set[str] = set()
+
+    def run_batches(refs: list[dict], retry: bool) -> None:
+        nonlocal mapped, calls, fields_normalized
+        batches = [refs[i:i + _BATCH_SIZE] for i in range(0, len(refs), _BATCH_SIZE)]
+        for n, batch in enumerate(batches, 1):
+            # An earlier batch's new entries or aliases may already resolve some
+            lookup = _registry_lookup(domain, ref_dir)
+            batch = [r for r in batch if r['key'] not in lookup]
+            if not batch:
+                continue
+            round_name = 'retry ' if retry else ''
+            label = f'hone registries/{domain} ({round_name}batch {n} of {len(batches)})'
+            log_name = f'reconcile-{domain}-{"retry-" if retry else ""}{n}.json'
+            text = _invoke_batch(
+                build_mapping_prompt(domain, ref_dir, batch, context=context, retry=retry),
+                model, os.path.join(log_dir, log_name), label)
+            calls += 1
+            if text is None:
+                cut_off.update(r['key'] for r in batch)
+                continue
+            mapping, new_rows, skip = parse_mapping_response(domain, text, len(batch), lookup)
+            fields_normalized += apply_mapping(domain, ref_dir, batch, mapping, new_rows, skip)
+            mapped += len(mapping)
+            created.update(r['id'] for r in new_rows)
+            skipped.extend(batch[i - 1]['text'] for i in sorted(skip))
+
+    run_batches(unresolved, retry=False)
+    # One more round for references whose answer named an unknown id; a
+    # batch cut off at the token limit is not retried
+    leftover = [r for r in _unresolved_references(domain, ref_dir).values()
+                if r['key'] not in cut_off]
+    if leftover:
+        log(f'  {domain}: asking again about {len(leftover)} reference(s)')
+        run_batches(leftover, retry=True)
+    rederive_columns(domain, ref_dir, created)
 
     fields_normalized += apply_registry_normalization(domain, ref_dir)
     if domain == 'mice-threads':
