@@ -13,6 +13,7 @@ Usage:
     storyforge score --direct --scenes ID   # Sonnet, one scene, real-time
     storyforge score --direct --deep --act 2
     storyforge score --dry-run              # Show what would be scored
+    storyforge score --no-apply             # Report proposals, never apply them (evals)
 """
 
 import argparse
@@ -71,6 +72,10 @@ def parse_args(argv):
     parser.add_argument('--parallel', type=int,
                         default=int(os.environ.get('STORYFORGE_SCORE_PARALLEL', '6')),
                         help='Parallel workers for direct mode (default: 6)')
+    parser.add_argument('--no-apply', action='store_true',
+                        help='Write the diagnosis and proposals but never apply '
+                             'them, whatever the coaching level (calibration and '
+                             'eval runs on a book that should not change)')
     parser.add_argument('--diagnosis-only', action='store_true',
                         help='Generate diagnosis and proposals from existing scores '
                              '(skip scoring, run improvement cycle only)')
@@ -617,7 +622,7 @@ def main(argv=None):
             sys.exit(1)
         _run_improvement_cycle(
             diag_cycle, diag_cycle_dir, project_dir, weights_file, plugin_dir,
-            intent_csv, title,
+            intent_csv, title, no_apply=args.no_apply,
         )
         _generate_report_and_comment(
             diag_cycle, diag_cycle_dir, project_dir, score_mode, scene_count,
@@ -832,7 +837,7 @@ def main(argv=None):
 
     _run_improvement_cycle(
         cycle, cycle_dir, project_dir, weights_file, plugin_dir,
-        intent_csv, title,
+        intent_csv, title, no_apply=args.no_apply,
     )
     update_pr_task('Diagnosis and proposals', project_dir)
     update_pr_task('Improvement cycle', project_dir)
@@ -1743,8 +1748,12 @@ def _count_high_priority(diagnosis_file: str) -> int:
 
 
 def _run_improvement_cycle(cycle, cycle_dir, project_dir, weights_file,
-                           plugin_dir, intent_csv, title):
-    """Run diagnosis, proposals, and apply approved changes."""
+                           plugin_dir, intent_csv, title, no_apply=False):
+    """Run diagnosis, proposals, and apply approved changes.
+
+    *no_apply* leaves every proposal pending and reports it, whatever the
+    coaching level: in full coaching a calibration run over a classic
+    otherwise rewrote its craft weights (evals F-037)."""
     from storyforge.scoring import generate_diagnosis, generate_proposals
     from storyforge.csv_cli import update_field as csv_update
 
@@ -1787,7 +1796,11 @@ def _run_improvement_cycle(cycle, cycle_dir, project_dir, weights_file,
 
     coaching = get_coaching_level(project_dir)
 
-    if coaching == 'full':
+    if no_apply:
+        log('--no-apply: proposals left pending, nothing applied')
+        _print_strict_report(diagnosis_file, proposals_file)
+        coaching = 'report-only'
+    elif coaching == 'full':
         log('Coaching level: full — auto-approving all proposals')
         _approve_all_proposals(proposals_file)
     elif coaching == 'coach':
