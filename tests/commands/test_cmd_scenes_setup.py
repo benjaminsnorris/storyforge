@@ -857,6 +857,55 @@ class TestNoTextLost:
         assert _is_part_heading('BOOK FIRST')
 
 
+class TestMarkdownHeadingsWithoutChapterWord:
+    """A Christmas Carol is divided into staves, not chapters. "# Stave I:
+    Marley's Ghost" matched no chapter pattern, so the whole book became one
+    28,000-word chapter called "Manuscript"."""
+
+    def _split(self, project_dir, monkeypatch, text):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        with open(os.path.join(project_dir, 'manuscript.md'), 'w') as f:
+            f.write(text)
+        main(['--split-manuscript', '--yes'])
+        _, rows = _new_rows(project_dir, 'scenes.csv')
+        return sorted(rows, key=lambda r: int(r['seq']))
+
+    @staticmethod
+    def _stave(n, title):
+        return f'# Stave {n}: {title}\n\nOpening of {n}.\n\n***\n\nClose of {n}.\n\n'
+
+    def test_staves_are_chapters(self, mock_api, mock_git, mock_costs,
+                                 project_dir, monkeypatch):
+        text = (self._stave('I', "MARLEY'S GHOST")
+                + self._stave('II', 'THE FIRST OF THE THREE SPIRITS')
+                + self._stave('III', 'THE SECOND OF THE THREE SPIRITS'))
+        rows = self._split(project_dir, monkeypatch, text)
+        assert len(rows) == 6
+        assert [_opening(project_dir, r['id']) for r in rows[::2]] == [
+            "# Stave I: MARLEY'S GHOST", '# Stave II: THE FIRST OF THE THREE SPIRITS',
+            '# Stave III: THE SECOND OF THE THREE SPIRITS']
+
+    def test_title_heading_with_no_prose_is_front_matter(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        text = ('# A Christmas Carol\n\n' + self._stave('I', 'One')
+                + self._stave('II', 'Two'))
+        rows = self._split(project_dir, monkeypatch, text)
+        assert len(rows) == 4
+        assert _opening(project_dir, rows[0]['id']) == '# Stave I: One'
+
+    def test_chapter_headings_still_win(self, mock_api, mock_git, mock_costs,
+                                        project_dir, monkeypatch):
+        # With real chapter headings, other markdown headings stay in the text.
+        text = ('# Chapter 1\n\nOne.\n\n## A letter\n\nDear sir.\n\n***\n\nLater.\n\n'
+                '# Chapter 2\n\nTwo.\n\n***\n\nEnd.\n')
+        rows = self._split(project_dir, monkeypatch, text)
+        assert len(rows) == 4
+        with open(os.path.join(project_dir, 'scenes', rows[0]['id'] + '.md')) as f:
+            assert '## A letter' in f.read()
+
+
 class TestSetextUnderlineIsNotABreak:
     def test_dash_under_text_is_heading_not_break(self, mock_api, mock_git, mock_costs,
                                                   project_dir, monkeypatch):
