@@ -20,8 +20,8 @@ from storyforge.elaborate import (
 )
 from storyforge.enrich import (
     is_placeholder, load_alias_map, load_mice_registry, normalize_aliases,
-    normalize_mice_threads, split_mice_entries, strip_parentheticals,
-    strip_placeholders,
+    normalize_mice_threads, reduce_boolean, split_mice_entries,
+    strip_parentheticals, strip_placeholders,
 )
 
 # ============================================================================
@@ -346,6 +346,8 @@ def write_registry(ref_dir: str, domain: str, rows: list[dict[str, str]]) -> Non
         for row in rows:
             if row.get('character'):
                 row['character'] = normalize_aliases(char_map, row['character'])
+            if row.get('action_gating'):
+                row['action_gating'] = reduce_boolean(row['action_gating'])
 
     columns = list(_REGISTRY_COLUMNS[domain])
     for row in rows:
