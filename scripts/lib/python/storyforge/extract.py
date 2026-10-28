@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 from .enrich import load_registry_alias_maps, normalize_fields  # noqa: F401
+from .common import log
 from .prompts import read_yaml_field
 
 
@@ -79,6 +80,35 @@ def _read_manuscript(project_dir: str) -> str:
 # Phase 0: Characterize
 # ============================================================================
 
+# Phase 0 sends the whole manuscript alongside the shared project context.
+# Budget roughly 120k tokens (~4 chars/token) for the manuscript so the
+# request fits a 200k-token window with room for context and output. A
+# typical 100k-word novel (~560k chars) is trimmed only slightly; most are
+# sent whole.
+CHARACTERIZE_MAX_CHARS = 480_000
+
+
+def _fit_manuscript(manuscript: str, limit: int = CHARACTERIZE_MAX_CHARS) -> str:
+    """Return the manuscript, or its opening and ending if it exceeds limit.
+
+    Characterization judges act structure, arcs and resolution, so an over-long
+    manuscript keeps both ends and drops the middle, with a marker saying how
+    much is missing. Cutting only the tail hid the climax and ending, and the
+    profile then reported the unseen resolution as a structural gap.
+    """
+    if len(manuscript) <= limit:
+        return manuscript
+    half = limit // 2
+    head = manuscript[:manuscript.rfind('\n', 0, half) + 1 or half]
+    tail_start = manuscript.find('\n', len(manuscript) - half) + 1 or len(manuscript) - half
+    tail = manuscript[tail_start:]
+    omitted = len(manuscript[len(head):tail_start].split())
+    log(f'WARNING: Manuscript exceeds {limit:,} chars; characterizing its opening '
+        f'and ending and omitting ~{omitted:,} words from the middle')
+    return (f'{head}\n[... {omitted:,} words from the middle of the manuscript are '
+            f'omitted here; the ending follows ...]\n\n{tail}')
+
+
 def build_characterize_prompt(project_dir: str) -> str:
     """Build prompt for Phase 0: manuscript characterization."""
     yaml_path = os.path.join(project_dir, 'storyforge.yaml')
@@ -89,9 +119,7 @@ def build_characterize_prompt(project_dir: str) -> str:
     if not manuscript:
         return ''
 
-    # Truncate if extremely long — Phase 0 needs the shape, not every word
-    if len(manuscript) > 200000:
-        manuscript = manuscript[:200000] + '\n\n[...truncated for characterization...]'
+    manuscript = _fit_manuscript(manuscript)
 
     return f"""You are analyzing a manuscript to characterize its structure before detailed extraction.
 

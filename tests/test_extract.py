@@ -192,3 +192,30 @@ class TestFidelityScoring:
         prompt = build_fidelity_prompt('act1-sc01', fixture_dir, plugin_dir)
         assert len(prompt) > 0
         assert 'goal' in prompt.lower() and 'conflict' in prompt.lower()
+
+
+class TestFitManuscript:
+    """Phase 0 keeps the ending of an over-long manuscript (a short novel
+    like The Great Gatsby, ~278k chars, used to lose its last chapters)."""
+
+    def test_short_novel_sent_whole(self):
+        from storyforge.extract import _fit_manuscript
+        text = 'paragraph of prose.\n' * 14_000  # ~280k chars
+        assert _fit_manuscript(text) == text
+
+    def test_long_manuscript_keeps_opening_and_ending(self):
+        from storyforge.extract import _fit_manuscript
+        lines = [f'line {n} of the book.' for n in range(10_000)]
+        text = '\n'.join(lines) + '\n'
+        fitted = _fit_manuscript(text, limit=20_000)
+        assert fitted.startswith('line 0 of the book.\n')
+        assert fitted.endswith('line 9999 of the book.\n')
+        assert len(fitted) < 21_000
+        assert 'words from the middle of the manuscript are omitted' in fitted
+
+    def test_trims_on_line_boundaries(self):
+        from storyforge.extract import _fit_manuscript
+        lines = [f'line {n} of the book.' for n in range(10_000)]
+        fitted = _fit_manuscript('\n'.join(lines) + '\n', limit=20_000)
+        kept = [l for l in fitted.splitlines() if l.startswith('line ')]
+        assert all(l in set(lines) for l in kept)
