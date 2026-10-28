@@ -1877,7 +1877,7 @@ def _print_strict_report(diagnosis_file: str, proposals_file: str) -> None:
                     scale = fields[d_col.get('scale', 1)] if d_col.get('scale', 1) < len(fields) else ''
                     avg_score = fields[d_col.get('avg_score', 2)] if d_col.get('avg_score', 2) < len(fields) else ''
                     print(f'  {principle} ({scale}): avg {avg_score}, priority {priority}')
-    print('\n=== Proposals (not applied in strict mode) ===')
+    print('\n=== Proposals (not applied) ===')
     if os.path.isfile(proposals_file):
         with open(proposals_file) as f:
             lines = f.readlines()
