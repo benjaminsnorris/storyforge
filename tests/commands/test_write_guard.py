@@ -6,6 +6,7 @@ stop_reason)."""
 
 import json
 import os
+import re
 
 import pytest
 
@@ -132,28 +133,85 @@ class TestBatchMode:
 
 
 class TestReviseRedraftFromBriefs:
-    def test_unwritten_redraft_halts_after_committing_the_rest(
-            self, mock_api, mock_git, project_dir, monkeypatch):
+    def _run(self, project_dir, monkeypatch, replies):
         from storyforge import cmd_revise
-        old = _scene(project_dir, 'act1-sc01')
-        replies = iter([_reply(CUT_OFF), _reply(GOOD)])
+        from storyforge.api import RefusalError
+        replies = iter(replies)
 
         def fake(prompt, model, log_file, max_tokens=4096, label='', timeout=600,
                  system=None, output_schema=None):
+            response = next(replies)
             with open(log_file, 'w') as f:
-                json.dump(next(replies), f)
+                json.dump(response, f)
+            if response.get('stop_reason') == 'refusal':
+                raise RefusalError(response)
         monkeypatch.setattr('storyforge.api.invoke_to_file', fake)
         monkeypatch.setattr('storyforge.cmd_write._build_prompt',
                             lambda *a, **k: 'prompt')
-        with pytest.raises(SystemExit) as exc:
-            cmd_revise._redraft_from_briefs(
-                project_dir, ['act1-sc01', 'act1-sc02'], 'm',
-                os.path.join(project_dir, 'working', 'logs'), system=[])
-        assert exc.value.code == 1
+        cmd_revise._redraft_from_briefs(
+            project_dir, ['act1-sc01', 'act1-sc02'], 'm',
+            os.path.join(project_dir, 'working', 'logs'), system=[])
+
+    @pytest.mark.parametrize('bad, reason', [
+        (_reply(CUT_OFF), 'mid-sentence'),
+        (_reply('', 'refusal', stop_details={'type': 'refusal', 'category': 'cyber'}),
+         'refused the request (cyber)'),
+    ])
+    def test_unwritten_redraft_raises_after_committing_the_rest(
+            self, mock_api, mock_git, project_dir, monkeypatch, bad, reason):
+        from storyforge.cmd_revise import RedraftError
+        old = _scene(project_dir, 'act1-sc01')
+        with pytest.raises(RedraftError, match=re.escape(reason)):
+            self._run(project_dir, monkeypatch, [bad, _reply(GOOD)])
         assert _scene(project_dir, 'act1-sc01') == old
         assert _scene(project_dir, 'act1-sc02').strip() == GOOD
-        commits = [c for c in mock_git.calls if c[0] == 'commit_and_push']
-        assert commits  # the good redraft is committed before the halt
+        commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']
+        assert commits == ['Revision: redraft 1 scenes from corrected briefs']
+
+    def test_scene_without_a_prompt_is_a_failure(self, mock_api, mock_git,
+                                                  project_dir, monkeypatch):
+        from storyforge.cmd_revise import RedraftError
+        monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda *a, **k: '')
+        with pytest.raises(RedraftError, match='no prompt'):
+            from storyforge import cmd_revise
+            cmd_revise._redraft_from_briefs(
+                project_dir, ['act1-sc01'], 'm',
+                os.path.join(project_dir, 'working', 'logs'), system=[])
+
+    def test_deferred_redraft_failure_finishes_the_run_then_exits_1(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """H3: the passes are already completed when the deferred redraft
+        runs, so revise reports the failure after its summary, exits 1, does
+        not advance the phase, and points at `write`, not at re-running revise."""
+        from storyforge import cmd_revise
+        from storyforge.cmd_revise import RedraftError, _write_csv_plan
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_revise.detect_project_root', lambda: project_dir)
+
+        def hone(**k):  # rewrite a brief, as hone would
+            with open(os.path.join(project_dir, 'reference', 'scene-briefs.csv'), 'a') as f:
+                f.write('\n')
+            return {'fields_rewritten': 1, 'scenes_rewritten': 1}
+        monkeypatch.setattr('storyforge.hone.hone_briefs', hone)
+
+        def failing(*a, **k):
+            raise RedraftError('1 scene(s) not re-drafted: act1-sc01 (no prompt)')
+        monkeypatch.setattr(cmd_revise, '_redraft_from_briefs', failing)
+        plans = os.path.join(project_dir, 'working', 'plans')
+        os.makedirs(plans, exist_ok=True)
+        _write_csv_plan(os.path.join(plans, 'revision-plan.csv'), [{
+            'pass': '1', 'name': 'brief-fix', 'purpose': 'p', 'scope': 'targeted',
+            'targets': 'act1-sc01', 'guidance': 'g', 'protection': '', 'findings': '',
+            'status': 'pending', 'model_tier': 'opus', 'fix_location': 'brief'}])
+
+        with pytest.raises(SystemExit) as exc:
+            cmd_revise.main([])
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert 'Batch Redraft' in out  # the deferred path, the one revise takes
+        assert 'Revision session complete' in out
+        assert 'write --force --coaching full --scenes' in out
+        assert 'All revision passes are done!' not in out
 
 
 class TestEveryUndraftedSceneIsListed:
