@@ -362,6 +362,119 @@ class TestAssignment:
         assert invoke('p', os.path.join(project_dir, 'x.json'), 'timeline (batch 1 of 1)') is None
 
 
+class TestMonthAnchors:
+    """F-071 (The Plastic Age): the model read "early in May" right and
+    counted days from it wrong; code pins month anchors after its pass."""
+
+    def test_anchor_windows(self):
+        from storyforge.timeline import anchor_window
+        assert anchor_window('early in May')[:3] == (120, 129, 'early May')
+        assert anchor_window('One evening in early spring')[2] == 'early spring'
+        assert anchor_window('late February')[:2] == (51, 58)
+        assert anchor_window("Fall's here")[2] == 'autumn'
+        winter = anchor_window('cold winter air')
+        assert winter[0] > winter[1]  # across the new year
+
+    def test_anchors_that_are_not_the_scenes_month(self):
+        from storyforge.timeline import anchor_window
+        assert anchor_window('golden haze of Indian summer') is None
+        assert anchor_window("I think I'll pray to-morrow; I may need it") is None
+        assert anchor_window('between March and May') is None
+        assert anchor_window('dawn; "that still October night" (in the flashback)') is None
+        assert anchor_window('Saturday morning') is None
+
+    def _book(self, rows):
+        """(id, day, mode, relation, gap, anchor) → items and placements."""
+        items = [{'id': sid, 'cues': {'relation': rel, 'gap': gap, 'anchor': anchor}}
+                 for sid, _day, _mode, rel, gap, anchor in rows]
+        placed = {sid: (day, mode, '') for sid, day, mode, *_ in rows}
+        return items, placed
+
+    def test_the_plastic_age_prom_is_pinned_to_may(self):
+        from storyforge.timeline import pin_month_anchors
+        items, placed = self._book([
+            ('stroll', 7, 'scene', 'continues', '', "Fall's here"),
+            ('carl', 395, 'scene', 'later', '', 'one night in October'),
+            ('bull', 440, 'scene', 'later', '', 'late November'),
+            ('tucker', 550, 'scene', 'later', '', 'In March'),
+            ('junior', 730, 'summary', 'later', '', ''),
+            ('winsor', 820, 'scene', 'later', '', 'One evening in early spring'),
+            ('poker', 820, 'scene', 'continues', '', ''),
+            ('anticipates', 840, 'scene', 'later', '', 'early in May'),
+            ('station', 848, 'scene', 'later', 'some days', ''),
+            ('prom', 848, 'scene', 'continues', '', ''),
+            ('morning', 849, 'scene', 'later', 'the next morning', ''),
+            ('memory', -30, 'scene', 'earlier', '', 'one night in August'),
+            ('race', 905, 'scene', 'later', '', ''),
+            ('senior', 1200, 'summary', 'later', '', ''),
+        ])
+        pinned, moves, day_one = pin_month_anchors(items, placed)
+        day = {sid: d for sid, (d, _m, _b) in pinned.items()}
+        # Day 1 in early September, from the anchors that agree
+        assert 235 <= day_one <= 275
+        # Early spring and early May, the runs joined to them moving along
+        assert 59 <= (day_one + day['winsor'] - 1) % 365 <= 66
+        assert day['poker'] == day['winsor']
+        assert 120 <= (day_one + day['anticipates'] - 1) % 365 <= 129
+        assert day['prom'] == day['station'] and day['morning'] == day['prom'] + 1
+        # The race moves only as far as order needs; a vague gap ahead of
+        # the senior year takes up the rest; nothing before or in the past moves
+        assert day['race'] == day['morning'] + 1
+        assert day['senior'] == 1200 and day['memory'] == -30
+        assert {sid for sid, *_ in moves} >= {'winsor', 'anticipates', 'race'}
+        assert not {'stroll', 'carl', 'bull', 'tucker', 'junior'} & {sid for sid, *_ in moves}
+
+    def test_a_calendar_that_keeps_its_anchors_is_left_alone(self):
+        from storyforge.timeline import pin_month_anchors
+        items, placed = self._book([
+            ('a', 1, 'scene', 'continues', '', 'early June'),
+            ('b', 30, 'scene', 'later', '', 'July'),
+            ('c', 90, 'scene', 'later', '', 'autumn flavour in the air'),
+        ])
+        assert pin_month_anchors(items, placed)[1] == []
+
+    def test_too_few_or_disagreeing_anchors_change_nothing(self):
+        from storyforge.timeline import pin_month_anchors
+        items, placed = self._book([('a', 1, 'scene', 'continues', '', 'May'),
+                                    ('b', 9, 'scene', 'later', '', '')])
+        assert pin_month_anchors(items, placed) == (placed, [], None)
+        # Every anchor a month off from the one before: no calendar keeps most
+        items, placed = self._book([
+            (f's{i}', 1 + i, 'scene', 'later', '', month)
+            for i, month in enumerate(['January', 'March', 'May', 'July', 'September'])])
+        assert pin_month_anchors(items, placed)[1] == []
+
+    def test_a_stated_gap_is_kept_when_its_run_moves(self):
+        from storyforge.timeline import pin_month_anchors
+        items, placed = self._book([
+            ('a', 1, 'scene', 'continues', '', 'early June'),
+            ('b', 20, 'scene', 'later', '', 'late June'),
+            ('c', 30, 'scene', 'later', '', 'early August'),
+            ('d', 33, 'scene', 'later', 'three days', ''),
+            ('e', 120, 'scene', 'later', '', 'early October'),
+        ])
+        pinned, moves, _ = pin_month_anchors(items, placed)
+        assert pinned['d'][0] - pinned['c'][0] == 3
+        assert pinned['c'][0] > 30
+
+    def test_the_pass_writes_pinned_days(self, project_dir, monkeypatch):
+        import storyforge.timeline as tl
+        _scenes(project_dir, [('a', '', ''), ('b', '', ''), ('c', '', ''), ('d', '', '')])
+        tl.write_cues(project_dir, {
+            'a': {'relation': 'later', 'anchor': 'early September'},
+            'b': {'relation': 'later', 'anchor': 'late October'},
+            'c': {'relation': 'later', 'anchor': 'In March'},
+            'd': {'relation': 'later', 'anchor': 'early in May'}})
+        monkeypatch.setattr(tl, '_invoke_assignment', lambda model: (
+            lambda prompt, log_file, label:
+                'CALENDAR:\na | 1 | scene | x\nb | 50 | scene | x\nc | 185 | scene | x\n'
+                'd | 200 | scene | x\n'))
+        tl.run_assignment(project_dir, 'm', os.path.join(project_dir, 'working', 'logs'), force=False)
+        days = {k: int(v) for k, v in _column(project_dir, 'timeline_day').items()}
+        assert days['a'] == 1 and days['b'] == 50 and days['c'] == 185
+        assert 230 <= days['d'] <= 250
+
+
 class TestChecks:
     def _rows(self, *rows):
         return [{'id': sid, 'timeline_day': day, 'time_mode': mode, 'timeline_date': date}
