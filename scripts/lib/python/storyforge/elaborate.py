@@ -815,6 +815,11 @@ def _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_di
                 # (a state was in state_in but not state_out means it was resolved)
                 for state_id in states_in - states_out:
                     active_action_gating.discard(state_id)
+                # ... and so does a state the registry says resolves here, which
+                # the briefs often drop without listing it in physical_state_in
+                # (Pride and Prejudice: a Hunsford headache gated 69 scenes).
+                active_action_gating -= {s for s in active_action_gating
+                                         if reg.get(s, {}).get('resolves', '').strip() == sid}
 
     if not any(c['category'] == 'physical_state' and not c['passed'] for c in checks):
         checks.append(_check('physical_state', 'state-availability', True,

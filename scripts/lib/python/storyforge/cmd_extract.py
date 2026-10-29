@@ -560,6 +560,43 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 # Phase 3: Briefs (scene-briefs.csv)
 # ============================================================================
 
+def _record_physical_states(phys_csv, scene_id, new_states, resolved, character_aliases):
+    """Add a scene's new physical states to the registry and record where
+    states resolve.
+
+    A state the scene resolves gets ``resolves`` set to the scene, unless an
+    earlier scene already resolved it. Without this every state stayed
+    ``never``, and validate flagged each one as vanishing in the scene the
+    text ends it (F-057).
+    """
+    from storyforge.elaborate import _read_csv_as_map, _write_csv
+    from storyforge.enrich import normalize_aliases
+
+    if not new_states and not resolved:
+        return
+    columns = ['id', 'character', 'description', 'category',
+               'acquired', 'resolves', 'action_gating']
+    existing_phys = _read_csv_as_map(phys_csv)
+    for ns in new_states:
+        sid_key = ns.get('id', '').strip()
+        if not sid_key or sid_key in existing_phys:
+            continue
+        row = {c: '' for c in columns}
+        row['id'] = sid_key
+        row['character'] = normalize_aliases(character_aliases, ns.get('character', ''))
+        row['description'] = ns.get('description', '')
+        row['category'] = ns.get('category', '')
+        row['acquired'] = scene_id
+        row['resolves'] = 'never'
+        row['action_gating'] = ns.get('action_gating', 'false')
+        existing_phys[sid_key] = row
+    for state_id in (r.strip() for r in resolved):
+        row = existing_phys.get(state_id)
+        if row is not None and row.get('resolves', '').strip() in ('', 'never'):
+            row['resolves'] = scene_id
+    _write_csv(phys_csv, list(existing_phys.values()), columns)
+
+
 def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                  profile_file, force, dry_run, system=None):
     """Run Phase 3a (parallel briefs) + 3b (knowledge chain) + 3c (physical state)."""
@@ -770,31 +807,13 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         if updates:
             update_scene(scene_id, ref_dir, updates)
 
-        # Append new physical states to registry
         new_states = result.get('_new_states', [])
-        if new_states:
-            phys_csv = os.path.join(ref_dir, 'physical-states.csv')
-            columns = ['id', 'character', 'description', 'category',
-                       'acquired', 'resolves', 'action_gating']
-            existing_phys = _read_csv_as_map(phys_csv)
-            for ns in new_states:
-                sid_key = ns.get('id', '').strip()
-                if not sid_key or sid_key in existing_phys:
-                    continue
-                row = {c: '' for c in columns}
-                row['id'] = sid_key
-                row['character'] = normalize_aliases(
-                    alias_maps.get('characters', {}), ns.get('character', ''))
-                row['description'] = ns.get('description', '')
-                row['category'] = ns.get('category', '')
-                row['acquired'] = scene_id
-                row['resolves'] = 'never'
-                row['action_gating'] = ns.get('action_gating', 'false')
-                existing_phys[sid_key] = row
-            _write_csv(phys_csv, list(existing_phys.values()), columns)
+        resolved = result.get('_resolved', [])
+        _record_physical_states(os.path.join(ref_dir, 'physical-states.csv'),
+                                scene_id, new_states, resolved,
+                                alias_maps.get('characters', {}))
 
         # Accumulate state
-        resolved = result.get('_resolved', [])
         for ns in new_states:
             sid_key = ns.get('id', '').strip()
             char = ns.get('character', '').strip()
