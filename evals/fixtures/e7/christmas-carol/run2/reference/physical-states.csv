@@ -1,0 +1,27 @@
+id|character|description|category|acquired|resolves|action_gating
+scrooge-cold-exterior|ebenezer-scrooge|Physical coldness that radiates from him — nipped nose, shrivelled cheek, red eyes, thin blue lips, stiffened gait, frosty rime on head and brows|appearance|marley-was-dead-narration|never|false
+fred-glowing-from-cold-walk|fred|Heated and flushed from rapid walking through fog and frost; ruddy face, sparkling eyes, visible breath|appearance|nephew-visits-scrooge|never|false
+scrooge-great-coat-buttoned|ebenezer-scrooge|Scrooge has buttoned his great-coat to the chin in preparation for going out into the cold|equipment|scrooge-dismisses-clerk|never|false
+cratchit-no-great-coat|bob-cratchit|Cratchit has no great-coat, only a white comforter with long dangling ends, leaving him less protected against the cold|equipment|scrooge-dismisses-clerk|never|false
+scrooge-has-cold-in-head|ebenezer-scrooge|Has a cold in his head (gruel and saucepan prepared on the hob)|injury|marley-face-on-knocker|never|false
+scrooge-dressing-gown-and-slippers|ebenezer-scrooge|Changed out of street clothes into dressing-gown and slippers|appearance|scrooge-settles-in-chambers|never|false
+scrooge-nightcap-on|ebenezer-scrooge|Wearing nightcap as part of settled-in-for-evening dress|appearance|scrooge-settles-in-chambers|never|false
+scrooge-on-knees|ebenezer-scrooge|Fell to his knees before the Ghost in terror after the jaw-drop revelation|appearance|scrooge-confronts-marley-ghost|never|false
+scrooge-fully-clothed-in-bed|ebenezer-scrooge|Went to bed without undressing, asleep instantly|appearance|ghost-departs-phantoms-appear|never|false
+scrooge-grasped-by-spirit|ebenezer-scrooge|Ghost of Christmas Past has clasped Scrooge gently but irresistibly by the arm and is leading him toward the window|equipment|scrooge-wakes-awaits-spirit|never|true
+scrooge-weeping|ebenezer-scrooge|Scrooge is openly sobbing, triggered by sight of his neglected childhood self|appearance|spirit-transports-scrooge-past|never|false
+scrooge-hand-in-pocket|ebenezer-scrooge|Scrooge puts his hand in his pocket, reaching instinctively for money to give the carol-singing boy he now regrets dismissing|appearance|scrooge-sees-boyhood-school|never|false
+scrooge-pinioned-by-spirit|ebenezer-scrooge|Ghost has seized both arms and physically forces Scrooge to watch; he cannot turn away or move freely|equipment|belle-releases-young-scrooge|never|true
+scrooge-exhausted-after-spirit-struggle|ebenezer-scrooge|Overcome by irresistible drowsiness after wrestling with the Ghost and pressing down the extinguisher-cap|fatigue|belle-family-happy-without-scrooge|never|false
+scrooge-in-own-bed|ebenezer-scrooge|Reeled to bed and sank into heavy sleep in his own bedroom|appearance|belle-family-happy-without-scrooge|never|false
+scrooge-out-of-bed-shuffling|ebenezer-scrooge|Has risen from bed and is moving on foot toward the adjoining room in his slippers|appearance|scrooge-awaits-second-spirit|never|false
+scrooge-holding-spirits-robe|ebenezer-scrooge|Scrooge has taken hold of the Ghost of Christmas Present's robe at the Spirit's instruction|equipment|ghost-of-christmas-present-revealed|never|false
+bob-cratchit-carrying-tiny-tim|bob-cratchit|Carried Tiny Tim on his shoulder from church|equipment|cratchit-family-christmas-dinner|never|false
+tiny-tim-on-crutch-with-iron-frame|tiny-tim|Uses a crutch and has limbs supported by an iron frame|equipment|cratchit-family-christmas-dinner|never|true
+bob-cratchit-wearing-comforter|bob-cratchit|Wearing at least three feet of comforter hanging down before him|appearance|cratchit-family-christmas-dinner|never|false
+scrooge-legs-trembling|ebenezer-scrooge|Legs trembling, barely able to stand when preparing to follow the Phantom|fatigue|scrooge-meets-final-phantom|never|true
+scrooge-clutching-spirits-robe|ebenezer-scrooge|Scrooge seizes the Ghost's hand and detains it in desperate entreaty before the figure collapses into his bedpost|equipment|scrooge-reads-his-own-gravestone|never|false
+scrooge-face-wet-with-tears|ebenezer-scrooge|Face wet with tears from sobbing during the conflict with the Spirit|appearance|scrooge-wakes-transformed|never|false
+scrooge-dressed-in-street-clothes|ebenezer-scrooge|Has scrambled into day clothes (put on inside out, upside down, in disarray) replacing dressing gown and nightcap|appearance|scrooge-wakes-transformed|never|false
+scrooge-hand-trembling|ebenezer-scrooge|Hand shaking persistently, making writing and shaving difficult|injury|scrooge-buys-prize-turkey|never|true
+scrooge-dressed-in-best-clothes|ebenezer-scrooge|Changed from street clothes into his best attire for going out|appearance|scrooge-buys-prize-turkey|never|false
