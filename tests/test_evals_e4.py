@@ -73,3 +73,21 @@ def test_length_drift_and_rate():
 def test_the_e4_suite_loads():
     names = {s.name for s in harness.discover(str(PLUGIN_DIR / 'evals' / 'suites'))}
     assert 'e4-generation' in names
+
+
+def test_a_refused_scene_is_recorded_and_drafting_goes_on(monkeypatch, tmp_path):
+    from storyforge import api
+    (tmp_path / 'scenes').mkdir()
+    (tmp_path / 'reference').mkdir()
+    (tmp_path / 'reference' / 'scenes.csv').write_text('id|seq|word_count|status\na|1||\nb|2||\n')
+    monkeypatch.setattr('storyforge.common.build_shared_context', lambda p, model='': [])
+    monkeypatch.setattr('storyforge.common.select_model', lambda t: 'm')
+    monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda sid, *a, **k: sid)
+
+    def fake_invoke(prompt, model, **kw):
+        if prompt == 'a':
+            raise api.RefusalError({'stop_reason': 'refusal', 'stop_details': {'category': 'cyber'}})
+        return {'content': [{'type': 'text', 'text': 'Prose. ' * 120}]}
+    monkeypatch.setattr('storyforge.api.invoke', fake_invoke)
+    drafts, refused = e4.draft(str(tmp_path), ['a', 'b'])
+    assert list(drafts) == ['b'] and 'cyber' in refused['a']

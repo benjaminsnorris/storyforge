@@ -12,17 +12,20 @@ def run(ctx):
     rows = e4.act_scenes(project)
     scene_ids = [r['id'] for r in rows]
     original = e4.clear_prose(project, scene_ids)
-    drafts = e4.draft(project, scene_ids)
+    drafts, refused = e4.draft(project, scene_ids)
     judged = e4.judge(project, scene_ids, drafts)
     flags = e4.checker_flags(project, scene_ids)
 
     words = sum(len(t.split()) for t in drafts.values())
-    target = sum(int(r['target_words']) for r in rows
-                 if (r.get('target_words') or '').strip().isdigit())
+    target = sum(int(r['target_words']) for r in rows if r['id'] in drafts
+                 and (r.get('target_words') or '').strip().isdigit())
     by_code: Counter = Counter()
     promises = 0
     notes = []
     for sid in scene_ids:
+        if sid in refused:
+            notes.append(f'{sid}: refused, not drafted — {refused[sid][:160]}')
+            continue
         found = judged[sid]
         by_code.update(c['code'] for c in found['contradictions'])
         promises += len(found['broken_promises'])
@@ -42,6 +45,7 @@ def run(ctx):
     return SuiteOutput(
         metrics={
             'scenes': len(drafts),
+            'refused': len(refused),
             'words': words,
             'target_words': target,
             'contradictions': contradictions,
@@ -52,7 +56,8 @@ def run(ctx):
             'bps': round(promises / len(drafts), 3) if drafts else 0.0,
             'length_drift': e4.length_drift(rows, drafts),
             'voi': e4.mean_voice(list(drafts.values())),
-            'voi_author': e4.mean_voice([original[s] for s in scene_ids if s in original]),
+            'voi_author': e4.mean_voice([original[s] for s in scene_ids
+                                         if s in original and s in drafts]),
         },
         by_code=code_counts,
         gates=[Gate('scenes', len(drafts), '>=', len(scene_ids))],
