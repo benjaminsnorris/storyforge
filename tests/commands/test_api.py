@@ -568,6 +568,7 @@ class TestDownloadBatchResults:
                     'message': {
                         'content': [{'type': 'text', 'text': 'Alpha prose'}],
                         'usage': {'input_tokens': 100, 'output_tokens': 50},
+                        'stop_reason': 'max_tokens',
                     },
                 },
             }),
@@ -597,6 +598,9 @@ class TestDownloadBatchResults:
 
         # Check text output
         assert open(os.path.join(log_dir, 'scene-alpha.txt')).read() == 'Alpha prose'
+        # stop_reason is kept so a caller can tell a cut-off reply (cmd_write)
+        saved = json.load(open(os.path.join(log_dir, 'scene-alpha.json')))
+        assert saved['stop_reason'] == 'max_tokens'
 
         # Check JSON log
         with open(os.path.join(log_dir, 'scene-alpha.json')) as f:

@@ -249,7 +249,7 @@ class TestMainDirect:
         self._setup_pending_scene(project_dir, 'act1-sc01')
 
         # Response must produce enough words to pass the 100-word threshold
-        prose = ' '.join(['word'] * 200)
+        prose = ' '.join(['word'] * 200) + '.'
         mock_api.set_response(prose)
 
         main(['--direct', '--scenes', 'act1-sc01'])
@@ -265,7 +265,7 @@ class TestMainDirect:
                             lambda: project_dir)
         self._setup_pending_scene(project_dir, 'act1-sc01')
 
-        prose = ' '.join(['word'] * 200)
+        prose = ' '.join(['word'] * 200) + '.'
         mock_api.set_response(prose)
 
         main(['--direct', '--scenes', 'act1-sc01'])
@@ -283,7 +283,7 @@ class TestMainDirect:
                             lambda: project_dir)
         self._setup_pending_scene(project_dir, 'act1-sc01')
 
-        prose = ' '.join(['word'] * 250)
+        prose = ' '.join(['word'] * 250) + '.'
         mock_api.set_response(prose)
 
         main(['--direct', '--scenes', 'act1-sc01'])
@@ -301,7 +301,7 @@ class TestMainDirect:
                             lambda: project_dir)
         self._setup_pending_scene(project_dir, 'act1-sc01')
 
-        prose = ' '.join(['word'] * 200)
+        prose = ' '.join(['word'] * 200) + '.'
         mock_api.set_response(prose)
 
         main(['--direct', '--scenes', 'act1-sc01'])
@@ -318,7 +318,7 @@ class TestMainDirect:
                             lambda: project_dir)
         self._setup_pending_scene(project_dir, 'act1-sc01')
 
-        prose = ' '.join(['word'] * 200)
+        prose = ' '.join(['word'] * 200) + '.'
         mock_api.set_response(prose)
 
         main(['--direct', '--scenes', 'act1-sc01'])
@@ -335,7 +335,7 @@ class TestMainDirect:
                             lambda: project_dir)
         self._setup_pending_scene(project_dir, 'act1-sc01')
 
-        prose = ' '.join(['word'] * 200)
+        prose = ' '.join(['word'] * 200) + '.'
         mock_api.set_response(prose)
 
         main(['--direct', '--scenes', 'act1-sc01'])
@@ -350,7 +350,7 @@ class TestMainDirect:
                             lambda: project_dir)
         self._setup_pending_scene(project_dir, 'act1-sc01')
 
-        prose = ' '.join(['word'] * 200)
+        prose = ' '.join(['word'] * 200) + '.'
         mock_api.set_response(prose)
 
         main(['--direct', '--scenes', 'act1-sc01'])
@@ -382,7 +382,7 @@ class TestSceneExtraction:
                             lambda: project_dir)
         self._setup_pending_scene(project_dir, 'act1-sc01')
 
-        inner_prose = ' '.join(['The'] * 50 + ['prose'] * 50 + ['content'] * 50)
+        inner_prose = ' '.join(['The'] * 50 + ['prose'] * 50 + ['content'] * 50) + '.'
         response_text = (
             f'=== SCENE: act1-sc01 ===\n'
             f'{inner_prose}\n'
@@ -410,7 +410,7 @@ class TestSceneExtraction:
                             lambda: project_dir)
         self._setup_pending_scene(project_dir, 'act1-sc01')
 
-        prose = ' '.join(['word'] * 200)
+        prose = ' '.join(['word'] * 200) + '.'
         mock_api.set_response(prose)
 
         main(['--direct', '--scenes', 'act1-sc01'])
@@ -443,7 +443,7 @@ class TestScopeFiltering:
         with open(act1_scene, 'w') as f:
             f.write('ORIGINAL_ACT1_CONTENT')
 
-        prose = ' '.join(['word'] * 200)
+        prose = ' '.join(['word'] * 200) + '.'
         mock_api.set_response(prose)
 
         main(['--direct', '--act', '2'])
@@ -483,7 +483,7 @@ class TestSkipDrafted:
         with open(scene_file, 'w') as f:
             f.write(' '.join(['word'] * 300))
 
-        prose = ' '.join(['new'] * 200)
+        prose = ' '.join(['new'] * 200) + '.'
         mock_api.set_response(prose)
 
         # Draft only act1-sc01 (all mode would include other scenes)
@@ -509,7 +509,7 @@ class TestSkipDrafted:
         with open(scene_file, 'w') as f:
             f.write(' '.join(['original'] * 300))
 
-        prose = ' '.join(['redrafted'] * 200)
+        prose = ' '.join(['redrafted'] * 200) + '.'
         mock_api.set_response(prose)
 
         main(['--direct', '--force', '--scenes', 'act1-sc01'])

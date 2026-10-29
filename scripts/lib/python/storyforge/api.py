@@ -480,9 +480,12 @@ def download_batch_results(results_url: str, output_dir: str, log_dir: str) -> l
                 if block.get('type') == 'text':
                     text = block.get('text', '')
 
-            # Write JSON response (for log_usage)
+            # Write JSON response (for log_usage). stop_reason/stop_details
+            # let a caller tell a refused or cut-off reply from a finished one.
             with open(os.path.join(log_dir, f'{cid}.json'), 'w') as f:
-                json.dump({'usage': usage, 'content': msg.get('content', [])}, f)
+                json.dump({'usage': usage, 'content': msg.get('content', []),
+                           'stop_reason': msg.get('stop_reason'),
+                           'stop_details': msg.get('stop_details')}, f)
 
             # Write text content
             with open(os.path.join(log_dir, f'{cid}.txt'), 'w') as f:

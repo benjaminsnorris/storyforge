@@ -252,9 +252,12 @@ def _resolve_targets_to_scene_ids(targets, valid_scene_ids, ref_dir):
 
 
 def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
-    """Re-draft scenes from their updated briefs."""
+    """Re-draft scenes from their updated briefs, then exit 1 naming any
+    scene whose reply was not written (refused, cut off, or unsafe per
+    ``cmd_write._extract_scene_from_response``): its brief changed but its
+    prose did not, so the pass must not be marked completed."""
     from storyforge.cmd_write import _build_prompt, _extract_scene_from_response
-    from storyforge.api import invoke_to_file as _invoke_to_file
+    from storyforge.api import invoke_to_file as _invoke_to_file, RefusalError
 
     # Build shared context for prompt caching if not provided
     if system is None:
@@ -263,6 +266,7 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
 
     log(f'  Redrafting {len(scene_ids)} scenes from updated briefs...')
     scenes_dir = os.path.join(project_dir, 'scenes')
+    failed: list[str] = []
 
     for i, sid in enumerate(scene_ids, 1):
         log(f'    [{i}/{len(scene_ids)}] Redrafting: {sid}')
@@ -272,15 +276,27 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
             log(f'    WARNING: Could not build prompt for {sid}, skipping')
             continue
         log_file = os.path.join(log_dir, f'redraft-{sid}.json')
-        _invoke_to_file(prompt, model, log_file, max_tokens=16384,
-                        label=f'redraft {sid}', system=system or None)
+        try:
+            _invoke_to_file(prompt, model, log_file, max_tokens=16384,
+                            label=f'redraft {sid}', system=system or None)
+        except RefusalError:
+            pass  # logged to log_file; the extract below names it
         scene_file = os.path.join(scenes_dir, f'{sid}.md')
-        _extract_scene_from_response(log_file, scene_file)
+        reason = _extract_scene_from_response(log_file, scene_file)
+        if reason:
+            log(f'    ERROR: Not writing the re-draft of {sid}: {reason}')
+            failed.append(f'{sid} ({reason})')
 
     commit_and_push(
         project_dir,
-        f'Revision: redraft {len(scene_ids)} scenes from corrected briefs',
+        f'Revision: redraft {len(scene_ids) - len(failed)} scenes from corrected briefs',
         ['scenes/', 'reference/', 'working/'])
+
+    if failed:
+        log(f'ERROR: {len(failed)} scene(s) not re-drafted: {"; ".join(failed)}')
+        log('Their briefs were rewritten but their prose was not. Re-draft them '
+            'with `storyforge write --force --scenes <id>`, then re-run revise.')
+        sys.exit(1)
 
 
 def _count_passes(rows):
