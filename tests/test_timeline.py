@@ -86,7 +86,7 @@ class TestCues:
         prompt = build_assignment_prompt([{'id': 's', 'cues': {}, 'provisional': None}],
                                          None, None, [])
         assert 'work out which calendar date day 1 falls on' in prompt
-        assert "give day 1's calendar date" in prompt
+        assert "DAY 1: with day 1's calendar date" in prompt
 
     def test_recollection_inside_a_present_scene_is_placed_by_weight(self):
         """Gatsby: Jordan's Louisville story and the reporter scene (Cody's
@@ -358,6 +358,30 @@ class TestAssignment:
         def boom(*a, **k):
             raise RuntimeError('HTTP 529')
         monkeypatch.setattr('storyforge.api.invoke_to_file', boom)
+        invoke = tl._invoke_assignment('m')
+        assert invoke('p', os.path.join(project_dir, 'x.json'), 'timeline (batch 1 of 1)') is None
+
+
+class TestRefusedAssignment:
+    """Sonnet 5.5 refused every assignment batch on Pride and Prejudice
+    (reasoning_extraction): the prompt asked it to write its reasoning out
+    under REASONING:, and the empty reply left 159 of 180 scenes unplaced."""
+
+    def test_prompt_does_not_ask_for_written_reasoning(self):
+        from storyforge.timeline import build_assignment_prompt
+        prompt = build_assignment_prompt([{'id': 's', 'cues': {}, 'provisional': None}],
+                                         None, None, [])
+        assert 'REASONING' not in prompt
+        assert 'CALENDAR:' in prompt
+
+    def test_refused_batch_counts_as_failed(self, project_dir, monkeypatch):
+        import storyforge.timeline as tl
+        from storyforge.api import RefusalError
+
+        def refuse(*a, **k):
+            raise RefusalError({'stop_reason': 'refusal',
+                                'stop_details': {'category': 'reasoning_extraction'}})
+        monkeypatch.setattr('storyforge.api.invoke_to_file', refuse)
         invoke = tl._invoke_assignment('m')
         assert invoke('p', os.path.join(project_dir, 'x.json'), 'timeline (batch 1 of 1)') is None
 

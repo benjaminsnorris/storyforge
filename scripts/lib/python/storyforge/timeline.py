@@ -34,9 +34,11 @@ CUES_FILE = os.path.join('working', 'timeline-cues.csv')
 PROPOSED_FILE = os.path.join('working', 'timeline-proposed.csv')
 
 _BATCH_SIZE = 40
-# Reasoning (capped in the prompt) plus one line per scene: bounded by the
-# batch size, never by the book. On Gatsby a 6,000-token budget was cut off
-# mid-answer once the model worked through its anchors.
+# One line per scene: bounded by the batch size, never by the book. On Gatsby
+# a 6,000-token budget was cut off mid-answer once the model worked through
+# its anchors in the reply. The prompt no longer asks for written reasoning
+# (the model thinks before answering, and current models refuse a request to
+# write their reasoning out: Pride and Prejudice, every batch refused).
 _BATCH_MAX_TOKENS = 16000
 
 
@@ -417,7 +419,7 @@ Each scene's cues say how it relates to the scene before it. A provisional day w
 - "refers" cues state how far apart two events are ("that June night three months before" puts this scene about 90 days after that night). They are the firmest evidence of distance: where vague gaps ("several weeks", "some time later") add up to something else, stretch or shrink the vague gaps to fit the stated durations, counting back as well as forward.
 - mode: scene (the action plays out on its day), summary (it covers a stretch of time; the day is where the stretch starts), frame, or vision.
 
-{"Write a line CALENDAR: and nothing before it; after it" if terse else "First work out the calendar under a line REASONING: — give day 1's calendar date, list the anchors and every stated duration (refers), fix the days they pin, then fit the vague gaps between them; note any scene you are unsure of — in at most 600 words. Then write a line CALENDAR: and, after it,"} exactly one line per scene, in order:
+{"Write a line CALENDAR: and nothing before it; after it" if terse else "Write a line DAY 1: with day 1's calendar date (or \"unknown\"). Then write a line CALENDAR: and, after it,"} exactly one line per scene, in order:
 
 scene_id | day | mode | basis
 
@@ -998,13 +1000,16 @@ def scene_items(project_dir: str, cues: dict[str, dict]) -> list[dict]:
 
 
 def _invoke_assignment(model: str):
-    from .api import invoke_to_file, extract_text_from_file, is_truncated
+    from .api import invoke_to_file, extract_text_from_file, is_truncated, RefusalError
 
     def invoke(prompt, log_file, label):
         try:
             # No temperature: current models reject sampling parameters
             response = invoke_to_file(prompt, model, log_file, max_tokens=_BATCH_MAX_TOKENS,
                                       label=label)
+        except RefusalError as e:
+            log(f'  WARNING: {label} was refused ({e})')
+            return None
         except Exception as e:  # noqa: BLE001 — one failed batch, not the pass
             log(f'  WARNING: {label} failed ({e})')
             return None
