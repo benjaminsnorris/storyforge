@@ -143,8 +143,27 @@ def _live_request(path: str, body: dict | None, method: str, timeout: int) -> di
             raise RuntimeError(f'API request failed after {API_RETRIES} attempts: {e}') from last_err
 
 
-def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
-           timeout: int = API_TIMEOUT, system: list[dict] | None = None) -> dict:
+class RefusalError(RuntimeError):
+    """The model declined the request (``stop_reason == 'refusal'``).
+
+    Its text is empty or cut off mid-sentence, never an answer, so it is
+    raised rather than returned: Sonnet 5.5 refused every timeline batch on
+    Pride and Prejudice, and the empty text was read as "no calendar"."""
+
+    def __init__(self, response: dict):
+        self.response = response
+        details = response.get('stop_details') or {}
+        self.category = details.get('category', '')
+        super().__init__(f"model refused the request ({self.category or 'no category'})")
+
+
+def _check_refusal(response) -> None:
+    if isinstance(response, dict) and response.get('stop_reason') == 'refusal':
+        raise RefusalError(response)
+
+
+def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
+          system: list[dict] | None) -> dict:
     """Call the Anthropic Messages API.
 
     Args:
@@ -174,6 +193,30 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
         heartbeat.stop()
 
 
+def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
+           timeout: int = API_TIMEOUT, system: list[dict] | None = None) -> dict:
+    """Call the Anthropic Messages API.
+
+    Args:
+        prompt: The user message text.
+        model: Model ID (from ``common.select_model`` or ``model_for_tier``).
+        max_tokens: Output tokens for the answer; THINKING_ALLOWANCE is added,
+            capped at the model's limit.
+        label: Optional label for heartbeat messages (e.g., 'revision pass 3').
+        timeout: Socket timeout in seconds (default API_TIMEOUT).
+        system: Optional list of system content blocks (supports cache_control).
+
+    Returns:
+        Full API response dict.
+
+    Raises:
+        RefusalError: the model refused the request.
+    """
+    response = _send(prompt, model, max_tokens, label, timeout, system)
+    _check_refusal(response)
+    return response
+
+
 def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 4096, label: str = '',
                    timeout: int = API_TIMEOUT, system: list[dict] | None = None) -> dict:
     """Call the API and write the response to a JSON file.
@@ -189,12 +232,23 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
 
     Returns:
         Full API response dict.
+
+    Raises:
+        RefusalError: the model refused the request (the log is written first).
     """
-    response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system)
+    try:
+        response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system)
+    except RefusalError as e:
+        _write_log(log_file, e.response)
+        raise
+    _write_log(log_file, response)
+    return response
+
+
+def _write_log(log_file: str, response: dict) -> None:
     os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
     with open(log_file, 'w') as f:
         json.dump(response, f)
-    return response
 
 
 def is_truncated(response) -> bool:
