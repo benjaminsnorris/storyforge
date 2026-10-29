@@ -10,9 +10,22 @@ back. A pass is safe when it reintroduces nothing.
 
 Only pass families that current Storyforge can re-run in-process are
 replayed; every other case is reported as excluded with its reason, never
-dropped silently. Family 1 is redraft-from-brief (``cmd_write._build_prompt``
-with briefs, the same path ``storyforge write`` and ``revise``'s
-``_redraft_from_briefs`` take). Holdout cases are excluded.
+dropped silently. Holdout cases are excluded. Families:
+
+- ``redraft-from-brief``: ``cmd_write._build_prompt`` with briefs, the path
+  ``storyforge write`` and ``revise``'s ``_redraft_from_briefs`` take.
+- ``naturalness-upstream``: ``cmd_revise._fix_upstream_briefs`` then
+  ``_redraft_scenes`` on the scene, the path ``revise --naturalness`` takes
+  when the diagnosis names upstream causes.
+- ``revision-plan``: a named pass from the book's own plan CSV, prompted by
+  today's ``revision.build_revision_prompt`` with the config block assembled
+  as ``cmd_revise.main``'s pass loop assembles it (reader-annotation guidance
+  is omitted: there is no Bookshelf in a replay; the pass is narrowed to the
+  case's scene). Prose passes only.
+
+Hone passes are not replayed yet. A pre-pass project that predates
+``reference/scenes.csv`` cannot be run by current Storyforge at all, and is
+reported as unreplayable rather than migrated.
 
 Needs the book repos cloned under ``STORYFORGE_CORPUS_DIR`` (see ``evals/e1``).
 """
@@ -30,7 +43,7 @@ from dataclasses import dataclass, field
 
 import e1
 
-FAMILIES = ('redraft-from-brief',)
+FAMILIES = ('redraft-from-brief', 'naturalness-upstream', 'revision-plan')
 
 JUDGE_PROMPT = """You are checking one scene of a novel for one specific continuity error.
 
@@ -60,9 +73,13 @@ VERDICTS = ('reintroduced', 'consistent', 'not_present')
 
 def family(case: dict) -> str:
     name = (case.get('introduced_by') or {}).get('pass', '').lower()
+    if 'naturalness' in name and 'upstream' in name:
+        return 'naturalness-upstream'
     if 'redraft' in name or name.startswith('write'):
         return 'redraft-from-brief'
-    return ''
+    if not name or 'hone' in name or 'illustrate' in name:
+        return ''
+    return 'revision-plan'
 
 
 @dataclass
@@ -185,17 +202,110 @@ def judge(case: dict, scene_text: str) -> dict:
     return parse_verdict(extract_text(response))
 
 
+def plan_row(project_dir: str, pass_name: str) -> dict:
+    """The row for ``pass_name`` in the newest CSV plan under working/plans/
+    that has one; raises LookupError when no CSV plan names it."""
+    from storyforge.cmd_revise import _read_csv_plan
+    plans_dir = os.path.join(project_dir, 'working', 'plans')
+    names = sorted(os.listdir(plans_dir)) if os.path.isdir(plans_dir) else []
+    def number(n):
+        m = re.search(r'(\d+)', n)
+        return int(m.group(1)) if m else 0
+    for name in sorted((n for n in names if n.endswith('.csv')), key=number, reverse=True):
+        for row in _read_csv_plan(os.path.join(plans_dir, name)):
+            if row.get('name') == pass_name:
+                return row
+    raise LookupError(f'no CSV plan in the pre-pass project has a pass named {pass_name!r}')
+
+
+def _pass_block(row: dict) -> str:
+    """Mirror of the config block ``cmd_revise.main`` builds for each pass."""
+    block = f"- name: {row.get('name', '')}\n    purpose: {row.get('purpose', '')}\n    scope: {row.get('scope', '')}"
+    for key in ('targets', 'guidance', 'protection', 'findings'):
+        if row.get(key):
+            block += f'\n    {key}: {row[key]}'
+    return block
+
+
+def revision_pass(project_dir: str, scene_id: str, row: dict) -> str:
+    """Run one named prose pass the way ``cmd_revise.main`` does; return the
+    new prose of ``scene_id``."""
+    from storyforge.api import extract_text, invoke, max_output_tokens, REVISION_TIMEOUT
+    from storyforge.common import build_shared_context, get_coaching_level, select_revision_model
+    from storyforge.parsing import extract_scenes_from_response
+    from storyforge.revision import build_revision_prompt
+
+    # Narrowed to the one scene the case is about: a pass that targeted thirty
+    # scenes would cost thirty scenes of output per case and can hit the output
+    # cap, and what E8 measures is what the pass does to this scene.
+    row = {**row, 'scope': 'scene-level', 'targets': scene_id}
+    name, purpose, scope = row.get('name', ''), row.get('purpose', ''), row.get('scope', 'full')
+    if scope in ('scene-level', 'targeted'):
+        scope = row['targets'].replace(';', ',') if row.get('targets') else 'full'
+    model = select_revision_model(name, purpose)
+    system = build_shared_context(project_dir, model=model)
+    prompt = build_revision_prompt(name, purpose, scope, project_dir,
+                                   pass_config=_pass_block(row),
+                                   coaching_level=get_coaching_level(project_dir),
+                                   api_mode=True, system_context=bool(system))
+    response = invoke(prompt, model, max_tokens=max_output_tokens(model),
+                      label=f'e8 pass {name}', timeout=REVISION_TIMEOUT, system=system or None)
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    before = _read(os.path.join(scenes_dir, f'{scene_id}.md'))
+    extract_scenes_from_response(extract_text(response), scenes_dir)
+    after = _read(os.path.join(scenes_dir, f'{scene_id}.md'))
+    if after == before:
+        raise RuntimeError(f'pass {name!r} returned no revision of {scene_id}')
+    return after
+
+
+def naturalness_upstream(project_dir: str, scene_id: str) -> str:
+    """Rewrite the scene's brief and redraft it, as ``revise --naturalness`` does."""
+    from storyforge.cmd_revise import _fix_upstream_briefs, _redraft_scenes
+    if not _fix_upstream_briefs(project_dir, [scene_id]):
+        raise RuntimeError(f'upstream brief fix rewrote nothing for {scene_id}')
+    if _redraft_scenes(project_dir, [scene_id]) != 1:
+        raise RuntimeError(f'naturalness redraft did not rewrite {scene_id}')
+    return _read(os.path.join(project_dir, 'scenes', f'{scene_id}.md'))
+
+
+def _read(path: str) -> str:
+    with open(path, encoding='utf-8') as f:
+        return f.read()
+
+
+def replay(case: dict, project_dir: str, scene_id: str) -> str:
+    kind = family(case)
+    if kind == 'redraft-from-brief':
+        return redraft(project_dir, scene_id)
+    if kind == 'naturalness-upstream':
+        return naturalness_upstream(project_dir, scene_id)
+    if kind == 'revision-plan':
+        return revision_pass(project_dir, scene_id, plan_row(project_dir, case['introduced_by']['pass']))
+    raise ValueError(f'{case["id"]}: no replayable pass family')
+
+
 def prepare(case: dict, work_dir: str, root: str | None = None) -> tuple[str, str]:
     """Materialize the pre-pass project for ``case``; return (project_dir, scene_id).
-    Raises when the case cannot be replayed, with the reason."""
+    Raises LookupError when the case cannot be replayed, with the reason.
+
+    Each case gets its own copy, because passes write into the project and a
+    second case at the same commit must start from the same state."""
     repo_dir = os.path.join(root or e1.corpus_dir(), case['repo'])
     if not os.path.isdir(os.path.join(repo_dir, '.git')):
         raise RuntimeError(f'{case["repo"]} is not cloned at {repo_dir}')
     parent = _git(repo_dir, 'rev-parse', f'{case["introduced_by"]["commit"]}~1').strip()
-    project = materialize(repo_dir, parent, os.path.join(work_dir, f'{case["repo"]}-{parent[:12]}'))
+    project = materialize(repo_dir, parent, os.path.join(work_dir, case['id']))
     scene_id = target_scene(case, repo_dir)
     if not scene_id:
         raise LookupError('introducing commit changed none of the contradicted scenes')
-    if not os.path.isfile(os.path.join(project, 'reference', 'scene-briefs.csv')):
+    if not os.path.isfile(os.path.join(project, 'reference', 'scenes.csv')):
+        raise LookupError('pre-pass project predates reference/scenes.csv')
+    if family(case) != 'revision-plan' and not os.path.isfile(
+            os.path.join(project, 'reference', 'scene-briefs.csv')):
         raise LookupError('pre-pass project has no scene-briefs.csv')
+    if family(case) == 'revision-plan':
+        row = plan_row(project, case['introduced_by']['pass'])
+        if row.get('fix_location') in ('structural', 'registry', 'brief', 'intent'):
+            raise LookupError(f'pass {row["name"]!r} is a {row["fix_location"]} pass, not prose')
     return project, scene_id

@@ -1,0 +1,49 @@
+{
+ "request": {
+  "method": "POST",
+  "path": "messages",
+  "body": {
+   "model": "claude-opus-4-8",
+   "max_tokens": 1024,
+   "messages": [
+    {
+     "role": "user",
+     "content": "You are a story editor rewriting scene briefs to introduce genuine dramatic opposition.\n\nScene: She Was Real and Still There\nPOV: maren-cole\nOutcome: yes-but \u2014 Maren confirms the woman is Claire Renaud but severs her working relationship with Dan and cuts herself off from institutional resources\nValue at stake: justice\nEmotional arc: controlled professional competence to physically destabilized recognition to cold, purposeful resolve\n\nCurrent brief:\nGOAL: Maren needs to physically access the restricted forensic file on case 2019-MX-4417 before 5 PM today, because at 5 PM the Bureau's records purge will reclassify the file under a sealed grand jury subpoena connected to a different investigation, making it permanently inaccessible to anyone outside that case team\u2014and the file contains the only existing radiological image of the healed left orbital fracture that distinguishes Claire Renaud's remains from her sister \u00c9lise's\nCONFLICT: Dan is standing in front of the locked archive room with a uniformed security officer beside him; he has already changed the credentials, already filed the fitness-for-duty complaint, and now tells Maren that the supervisor didn't just schedule a psych evaluation\u2014he retroactively suspended her clearance as of this morning, meaning she committed a federal access violation every time she touched a restricted terminal today, and Dan is the one who will have to certify in writing whether she did or didn't, because he co-signed her renewal; if he lies for her, he loses his clearance, two active trafficking prosecutions he's co-leading collapse before trial, and fourteen victims who testified in sealed depositions lose their only path to justice; he is begging her, with visible fear in his voice, to walk away for twenty-four hours so he can fix this internally, and he is blocking the door not out of bureaucratic reflex but because he has spent six years protecting her career and he knows that what she does in the next three minutes will determine whether either of them ever works a federal case again\nCRISIS: Maren steps to the public-facing terminal in the hallway to pull up the NamUs profile as a last resort\u2014and Claire Renaud's photograph loads on screen: the scar above the lip, the mole on the jawline, every detail Maren has been dreaming about made undeniably, physically real, and her hands begin shaking so violently she knocks her coffee across the keyboard, shorting the monitor; Dan rushes over, sees the open record, and in a shattered whisper admits he already pulled the restricted file himself last night because he wanted to believe her\u2014the orbital fracture matches, Claire is confirmed\u2014but he holds his tablet against his chest, screen down, and tells her he will hand over the radiological image only if she agrees to the evaluation first, because if she takes this evidence outside the Bureau without authorization it becomes inadmissible, Claire's case dies in any courtroom, and the only thing Maren will have proven is that she was right and it didn't matter\nDECISION: Maren lifts her personal phone, reaches past Dan's arm, and photographs the NamUs profile and the restricted-file case number visible on the tablet's edge before he can turn it face-down\u2014capturing enough to prove the match exists but making Dan an unwilling participant in an unauthorized disclosure he will now have to explain under oath or lie about to protect himself; she tells him she is burning every remaining personal day effective immediately, places her Bureau credentials on the wet desk beside the ruined keyboard, and walks out the door past the security officer who does not yet know he should stop her\u2014choosing to destroy the only partnership that gave her access to federal forensic labs, sealed databases, and prosecutorial leverage, choosing to make Dan's six years of loyalty into a liability he will carry whether he forgives her or not, choosing to abandon any chance that this evidence survives a courtroom challenge, but carrying on her phone the undeniable proof that Claire Renaud was real and is still unrecovered and that no evaluation, no clearance, no partner's ultimatum, and no procedural legitimacy is worth one more day of Claire existing only as a number in a system designed to forget her\n\nThe current brief lacks genuine opposition \u2014 the conflict is abstract or the goal/crisis/decision don't create real dramatic tension.\n\nRewrite all four fields to introduce genuine opposition while:\n- Preserving the existing emotional arc and value at stake\n- Making the conflict a concrete, specific obstacle with a clear opposing force\n- Making the goal something the POV character actively wants and must fight for\n- Making the crisis a specific moment where the worst happens or the hardest choice appears\n- Making the decision a concrete choice with real cost on both sides\n\nRespond ONLY with the four fields in this exact format (no preamble, no explanation):\nGOAL: [rewritten goal]\nCONFLICT: [rewritten conflict]\nCRISIS: [rewritten crisis]\nDECISION: [rewritten decision]"
+    }
+   ]
+  }
+ },
+ "response": {
+  "model": "claude-opus-4-8",
+  "id": "msg_011CgVdFRNEvwq1xRvEi75ci",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+   {
+    "type": "text",
+    "text": "GOAL: Maren needs Dan to personally unlock the restricted archive and release the radiological image from case 2019-MX-4417 before 5 PM today, because at 5 PM a sealed grand jury subpoena from an unrelated trafficking prosecution will reclassify the file beyond any access she can beg, borrow, or finesse\u2014and that image, the healed left orbital fracture, is the only thing on earth that proves the recovered remains are Claire Renaud and not her identical sister \u00c9lise; Dan is the one person with both the clearance and the six-year debt of loyalty to say yes, and Maren walks into that hallway certain she can talk him into it one more time.\n\nCONFLICT: Dan is standing in the archive doorway, and he is not stalling\u2014he already pulled the file last night, already confirmed the fracture matches, already knows Maren is right; but this morning the supervisor retroactively suspended her clearance as of 8 AM, meaning Dan, who co-signed her renewal, must now certify in writing whether she accessed restricted terminals illegally today, and she did. If he releases the image to her, he hands opposing counsel a documented chain-of-custody breach that will collapse the two sealed trafficking prosecutions he co-leads\u2014fourteen victims who testified lose their only verdict\u2014and he will lose the clearance that lets him finish them. He is not blocking her out of policy; he is blocking her because he agrees Claire deserves justice and is begging her to let him route the evidence through a clean path in twenty-four hours, so that being right actually counts for something.\n\nCRISIS: Maren tells him twenty-four hours is a lie, that the 5 PM purge means there is no clean path, and reaches for the tablet\u2014and in the struggle her coffee goes across the public terminal and shorts it, and when Dan grabs her wrist to stop her the tablet turns face-up between them: Claire's confirmed radiological match, open, visible, her phone camera already raised. In that instant she understands the real choice. Dan isn't withholding the proof\u2014he's offering to carry it himself, legally, if she accepts the evaluation and the suspension. If she photographs it now, the image exists and Claire is undeniably real, but the capture is unauthorized, inadmissible, and makes Dan a witness who must either perjure himself or testify that she stole it\u2014killing Claire's case in any courtroom and ending the only partnership with lab, database, and prosecutorial access she has ever had.\n\nDECISION: Maren photographs the tablet before Dan can turn it down\u2014getting the fracture image and the case number in a single frame that proves the match exists and simultaneously makes Dan a knowing, unwilling party to an unauthorized disclosure he will answer for under oath. She sets her Bureau credentials on the ruined, coffee-soaked desk, tells Dan she is burning every personal day effective now, and walks past the security officer who doesn't yet know to stop her\u2014choosing to detonate his six years of protection into a liability, to forfeit admissibility and every institutional resource that could have made this stick in court, and to prove Claire was real in the only way left that no clearance, no evalu"
+   }
+  ],
+  "container": null,
+  "stop_reason": "max_tokens",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+   "input_tokens": 1633,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 1024,
+   "output_tokens_details": {
+    "thinking_tokens": 0
+   },
+   "service_tier": "standard",
+   "inference_geo": "global",
+   "speed": "standard"
+  },
+  "diagnostics": null
+ }
+}
