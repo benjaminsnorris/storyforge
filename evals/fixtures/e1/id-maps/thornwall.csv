@@ -1,0 +1,24 @@
+old_path|slug|commit|method|notes
+scenes/s01-morning-hold.md|wick|0c3fd1f|content|s01 split with no rename edge; "not taught, not sanctioned" is in wick.md at 0c3fd1f
+scenes/s02-the-letter.md|four-at-table|0c3fd1f|content|git also pairs s02 -> four-at-table (30 deletions); confirmed by "We do what we've always done" and the Corvin letter
+scenes/s03-the-road.md|road-to-thornwall|0c3fd1f|rename|R100; "Fourteen years in" in road-to-thornwall.md
+scenes/s05-unsanctioned.md|dawn-courtyard|0c3fd1f|content|git rename with 52 deletions; "I'd rather we use names" in dawn-courtyard.md
+scenes/s06-the-inspection.md|warm-descent|0c3fd1f|content|git pairs s06 with he-knelt, but the gauge passage ("six other Holds", "eleven sessions at six other Holds", "I've observed eleven sessions at six Holds") is in warm-descent.md
+scenes/s07-the-stars.md|different-stars|0c3fd1f|content|git rename with 34 deletions; Hessal/Alder Creek passage in different-stars.md
+scenes/s09-garrens-watch.md|garrens-ledger|0c3fd1f|content|git rename with 66 deletions; complement history in garrens-ledger.md
+scenes/s11-the-truth-she-brought.md|evening-visit|0c3fd1f|rename|R100; "Good night, Kael" in evening-visit.md
+scenes/s12-three-patterns.md|evidence-room|0c3fd1f|rename|R100; Ves passage in evidence-room.md
+scenes/s17-through.md|through|0c3fd1f|rename|R100
+scenes/s18-what-she-saw.md|undefended-flame|0c3fd1f|rename|R100; "at six Holds across the network" in undefended-flame.md
+scenes/s20b-evening-light.md|two-cups|0c3fd1f|content|git rename with 16 deletions; "For fifteen years, I believed them" in two-cups.md
+scenes/s21-ivras-fire.md|ivra-at-the-fissure|0c3fd1f|rename|R100
+scenes/s24-the-writ.md|crowded-chamber|0c3fd1f|content|s24 split with no rename edge; "Kael led them down" and "not built for ten people" in crowded-chamber.md
+scenes/s24-the-writ.md|thessans-morning|0c3fd1f|content|s24 split; "Director Corvin's sigil" and "Corvin will call it treason" in thessans-morning.md
+scenes/s25b-the-answer.md|parapet-after-torren|0c3fd1f|rename|R100; the kiss
+scenes/s25c-the-hearth.md|confession-on-the-wall|0c3fd1f|rename|R100
+scenes/s26-rain-on-stone.md|fissure-closes|0c3fd1f|content|git pairs s26 with courtyard-after, but "fourteen days ago" and "Thirteen days of sessions" are in fissure-closes.md
+scenes/s28-the-torch.md|parapet|0c3fd1f|content|s28 split; "a woman named Hessal" in parapet.md, which was cut by 10267cd and moved to scenes/archive/parapet.md by eb2cb90 (no live slug at HEAD)
+scenes/s28-the-torch.md|decision-between-them|0c3fd1f|content|s28 split; "Bren had walked these corridors" in decision-between-them.md
+scenes/s29-the-departure.md|descent|0c3fd1f|content|git rename with 48 deletions; "Kael had climbed this road once" in descent.md
+scenes/s29-the-departure.md|departure|0c3fd1f|content|the Kael/Bren mentorship farewell moved to departure.md ("held a whole mentorship in its silence")
+scenes/s30-the-fire.md|weight-of-burning|0c3fd1f|rename|R100

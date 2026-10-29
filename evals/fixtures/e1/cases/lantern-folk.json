@@ -1,0 +1,2003 @@
+{
+  "repo": "lantern-folk",
+  "cases": [
+    {
+      "id": "lantern-folk-001",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [
+        "TIM"
+      ],
+      "summary": "In a11 (day 11) Nora finds Wick's lantern beside her in the dark and grieves him as newly dark, but Wick was snuffed at the creek in a07 (day 8) and a08 laid him on his own bed with his lantern beside him.",
+      "established": [
+        {
+          "scene": "a07-the-cold-sleep",
+          "path": "scenes/a07-the-cold-sleep.md",
+          "commit": "3b054ee",
+          "quote": "Far below, Wick's lantern lay on the stones, cold and lightless."
+        },
+        {
+          "scene": "a08-what-the-folk-fear",
+          "path": "scenes/a08-what-the-folk-fear.md",
+          "commit": "3b054ee",
+          "quote": "They had laid him on his own bed and set the lantern next to him where it belonged"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a11-in-the-dark",
+          "path": "scenes/a11-in-the-dark.md",
+          "commit": "3b054ee",
+          "quote": "She knew it by touch. She had held it before, when it was warm, when the glass still glowed the color of honey"
+        },
+        {
+          "scene": "a11-in-the-dark",
+          "path": "scenes/a11-in-the-dark.md",
+          "commit": "3b054ee",
+          "quote": "She pressed Wick's lantern against her shirt, right over her heart"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "1d40cae",
+        "after": [
+          {
+            "scene": "a11-in-the-dark",
+            "path": "scenes/a11-in-the-dark.md",
+            "commit": "1d40cae",
+            "quote": "Somebody's. She didn't know whose. It had been burning a minute ago."
+          },
+          {
+            "scene": "a11-in-the-dark",
+            "path": "scenes/a11-in-the-dark.md",
+            "commit": "1d40cae",
+            "quote": "Wick wasn't here. Wick was down in the roots in his own house, laid on his own bed with his mother sitting beside him"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "plan",
+        "pass": "",
+        "commit": "a819a29"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "The a11 brief carried the error (key action \"Nora cups Wick's cold lantern\"); the a11 draft a819a29 followed it. The a08 \"laid him on his own bed\" line arrived in 37bc78e, which sharpened the contradiction. The fix's new a11 location line later contradicts a14 (lantern-folk-028)."
+    },
+    {
+      "id": "lantern-folk-002",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "WLD",
+      "secondary_codes": [
+        "TRT"
+      ],
+      "summary": "a11 and a09 put Wick (and other Folk) inside their lanterns, but a03 has Wick carrying his lantern and setting it on Nora's fingertip: a Folk carries a lantern, not lives in it.",
+      "established": [
+        {
+          "scene": "a03-the-little-voices",
+          "path": "scenes/a03-the-little-voices.md",
+          "commit": "3b054ee",
+          "quote": "Wick looked at her. Then he reached out and set his lantern on the tip of her finger."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a11-in-the-dark",
+          "path": "scenes/a11-in-the-dark.md",
+          "commit": "3b054ee",
+          "quote": "Wick's face had peered out at her through the light."
+        },
+        {
+          "scene": "a11-in-the-dark",
+          "path": "scenes/a11-in-the-dark.md",
+          "commit": "3b054ee",
+          "quote": "there was no sound from inside at all. No tiny breathing. No small warm voice asking her what the world was like"
+        },
+        {
+          "scene": "a09-the-worst-night",
+          "path": "scenes/a09-the-worst-night.md",
+          "commit": "3b054ee",
+          "quote": "the one inside might wake"
+        },
+        {
+          "scene": "a09-the-worst-night",
+          "path": "scenes/a09-the-worst-night.md",
+          "commit": "3b054ee",
+          "quote": "the five Folk inside them lay still and cold in their small houses"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "1d40cae",
+        "after": [
+          {
+            "scene": "a11-in-the-dark",
+            "path": "scenes/a11-in-the-dark.md",
+            "commit": "1d40cae",
+            "quote": "The first night, he had set it on the tip of her finger"
+          },
+          {
+            "scene": "a09-the-worst-night",
+            "path": "scenes/a09-the-worst-night.md",
+            "commit": "1d40cae",
+            "quote": "the one who had carried it might wake"
+          },
+          {
+            "scene": "a09-the-worst-night",
+            "path": "scenes/a09-the-worst-night.md",
+            "commit": "1d40cae",
+            "quote": "the five Folk who had carried them lay still and cold"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "a819a29"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "No CSV recorded that Folk carry their lanterns; k-lanterns-are-lives (\"Each Lantern person's flame is his or her life\") is ambiguous. The a09 \"the one inside\" phrasing arrived in 37bc78e."
+    },
+    {
+      "id": "lantern-folk-003",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "a11 ends with the whole village gone silent and every root dark, but a12 opens on a Folk woman weeping and the Keeper breathing among frightened Folk, and a14 has four Folk plus Ember still lit.",
+      "established": [
+        {
+          "scene": "a12-the-remembering",
+          "path": "scenes/a12-the-remembering.md",
+          "commit": "3b054ee",
+          "quote": "Somewhere below them, in the roots, a Folk woman was weeping."
+        },
+        {
+          "scene": "a14-the-keepers-flame",
+          "path": "scenes/a14-the-keepers-flame.md",
+          "commit": "3b054ee",
+          "quote": "Four. Ember made five. Five small figures where there had been a whole village"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a11-in-the-dark",
+          "path": "scenes/a11-in-the-dark.md",
+          "commit": "3b054ee",
+          "quote": "The oak stood over them, enormous and bare, and all its roots were dark."
+        },
+        {
+          "scene": "a11-in-the-dark",
+          "path": "scenes/a11-in-the-dark.md",
+          "commit": "3b054ee",
+          "quote": "\"He's cold,\" she said. \"Leo, he's cold, his lantern's cold, they're all cold.\""
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "1d40cae",
+        "after": [
+          {
+            "scene": "a11-in-the-dark",
+            "path": "scenes/a11-in-the-dark.md",
+            "commit": "1d40cae",
+            "quote": "She counted them. Three. Four — and the fourth so low it was more the memory of a light than a light."
+          },
+          {
+            "scene": "a11-in-the-dark",
+            "path": "scenes/a11-in-the-dark.md",
+            "commit": "1d40cae",
+            "quote": "\"Not all of them, Leo. There's five.\""
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-005",
+        "lantern-folk-006"
+      ],
+      "introduced_by": {
+        "kind": "plan",
+        "pass": "",
+        "commit": "a819a29"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "The a10 brief ended \"the whole village goes cold and silent\". The survivor count was never recorded in knowledge.csv or the briefs; visual-state only gained it after ab240c6. The fix broke the a11/a12 seam (lantern-folk-005) and exposed the a11 rule statement (lantern-folk-006)."
+    },
+    {
+      "id": "lantern-folk-004",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "a12 says Leo cannot see the Keeper standing a few paces away, but a14 calls her lantern the steadiest light in the village.",
+      "established": [
+        {
+          "scene": "a14-the-keepers-flame",
+          "path": "scenes/a14-the-keepers-flame.md",
+          "commit": "3b054ee",
+          "quote": "It was the steadiest light in the village, the last strong flame, and it burned the color of late afternoon."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a12-the-remembering",
+          "path": "scenes/a12-the-remembering.md",
+          "commit": "3b054ee",
+          "quote": "The Keeper stood a few paces away. He couldn't see her, but he'd heard her settle there"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "1d40cae",
+        "after": [
+          {
+            "scene": "a12-the-remembering",
+            "path": "scenes/a12-the-remembering.md",
+            "commit": "1d40cae",
+            "quote": "He could see her lantern and nothing else of her — a bead of light the color of late afternoon, the steadiest thing left in the village"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "2fc5e9b"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "Medium: total darkness could hide the person, but not her lit lantern. The same a12 sentence also has Leo hearing the Keeper's breathing (see lantern-folk-008)."
+    },
+    {
+      "id": "lantern-folk-005",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [
+        "TIM"
+      ],
+      "summary": "After 1d40cae, a11 ends with the survivors far down in the roots and the Keeper still a moving light climbing toward the children, but a12 opens with her settled nearby \"a while ago\" among a crowd of breathing Folk.",
+      "established": [
+        {
+          "scene": "a11-in-the-dark",
+          "path": "scenes/a11-in-the-dark.md",
+          "commit": "771df26",
+          "quote": "Then a fifth, further off, steadier than the rest, moving slowly along the root-path toward the place where they knelt."
+        },
+        {
+          "scene": "a11-in-the-dark",
+          "path": "scenes/a11-in-the-dark.md",
+          "commit": "771df26",
+          "quote": "someone crying. A long way down among the roots."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a12-the-remembering",
+          "path": "scenes/a12-the-remembering.md",
+          "commit": "771df26",
+          "quote": "He had heard her settle there a while ago, her breathing slow and even among all the faster, frightened breathing of the Folk around them."
+        },
+        {
+          "scene": "a12-the-remembering",
+          "path": "scenes/a12-the-remembering.md",
+          "commit": "771df26",
+          "quote": "Four small lights were left down in the roots, and a fifth close by"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "c9cd9b3",
+        "after": [
+          {
+            "scene": "a12-the-remembering",
+            "path": "scenes/a12-the-remembering.md",
+            "commit": "c9cd9b3",
+            "quote": "Leo had watched it come the whole way up the root-path, so slowly that twice he was sure it had stopped for good"
+          },
+          {
+            "scene": "a12-the-remembering",
+            "path": "scenes/a12-the-remembering.md",
+            "commit": "c9cd9b3",
+            "quote": "She had stopped a few paces from his knee."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-003"
+      ],
+      "introduced_by": {
+        "kind": "author",
+        "pass": "",
+        "commit": "1d40cae"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Fix-induced: 1d40cae rewrote a11's ending (lantern-folk-003) without moving a12 to match; \"a while ago\" was itself added by 1d40cae. Both commits were Claude-assisted continuity edits, not Storyforge passes."
+    },
+    {
+      "id": "lantern-folk-006",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "WLD",
+      "secondary_codes": [],
+      "summary": "a11 has Nora state the rule that if the Lamp went dark the Folk would all go into the deep sleep at once, but a08 says the Lamp fails one lantern at a time and the same chapter ends with five Folk still lit.",
+      "established": [
+        {
+          "scene": "a08-what-the-folk-fear",
+          "path": "scenes/a08-what-the-folk-fear.md",
+          "commit": "c9cd9b3",
+          "quote": "That is the truth I have watched come true, one lantern at a time."
+        },
+        {
+          "scene": "a11-in-the-dark",
+          "path": "scenes/a11-in-the-dark.md",
+          "commit": "c9cd9b3",
+          "quote": "\"Not all of them, Leo. There's five.\""
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a11-in-the-dark",
+          "path": "scenes/a11-in-the-dark.md",
+          "commit": "c9cd9b3",
+          "quote": "\"The Keeper said if the Lamp went dark they'd all go into the deep sleep,\" Nora whispered."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "60f1186",
+        "after": [
+          {
+            "scene": "a11-in-the-dark",
+            "path": "scenes/a11-in-the-dark.md",
+            "commit": "60f1186",
+            "quote": "\"Not all at once. One lantern at a time, till there weren't any left, because there's nothing to feed them anymore."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-003"
+      ],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "a819a29"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Latent in the draft; it became a same-scene contradiction once 1d40cae added the five survivors to a11's ending."
+    },
+    {
+      "id": "lantern-folk-007",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [
+        "WLD"
+      ],
+      "summary": "a12 (Leo POV) has Leo converse directly with the Keeper and remember her voice, but Leo cannot hear the Folk: a03 and a04 route everything through Nora, and a14's payoff is a voice he has never heard.",
+      "established": [
+        {
+          "scene": "a03-the-little-voices",
+          "path": "scenes/a03-the-little-voices.md",
+          "commit": "c131e3d",
+          "quote": "Wick studied Leo for a while. Then he turned to Nora. \"His ears are too old?\""
+        },
+        {
+          "scene": "a04-the-great-lamp",
+          "path": "scenes/a04-the-great-lamp.md",
+          "commit": "c131e3d",
+          "quote": "The Keeper spoke again. Nora translated in a whisper."
+        },
+        {
+          "scene": "a14-the-keepers-flame",
+          "path": "scenes/a14-the-keepers-flame.md",
+          "commit": "c131e3d",
+          "quote": "Three words, clear as a bell, in a voice he had never heard and knew at once."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a12-the-remembering",
+          "path": "scenes/a12-the-remembering.md",
+          "commit": "c131e3d",
+          "quote": "A pause. Then the old voice, low and calm and close to the ground. \"I am here, child.\""
+        },
+        {
+          "scene": "a12-the-remembering",
+          "path": "scenes/a12-the-remembering.md",
+          "commit": "c131e3d",
+          "quote": "\"Any true flame,\" the Keeper said."
+        },
+        {
+          "scene": "a12-the-remembering",
+          "path": "scenes/a12-the-remembering.md",
+          "commit": "c131e3d",
+          "quote": "A tale for very small children, the Keeper had called it, and her voice had been gentle and sorry when she said it."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "2d4c323",
+        "after": [
+          {
+            "scene": "a12-the-remembering",
+            "path": "scenes/a12-the-remembering.md",
+            "commit": "2d4c323",
+            "quote": "\"She says she's here,\" Nora said."
+          },
+          {
+            "scene": "a12-the-remembering",
+            "path": "scenes/a12-the-remembering.md",
+            "commit": "2d4c323",
+            "quote": "\"She says any true flame,\" Nora said. \"Kindled by hands. Not by the Lamp.\""
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-008"
+      ],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "2fc5e9b"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Split from 2d4c323; the partial-hearing leaks in the same scene are lantern-folk-008. knowledge.csv's k-nora-can-speak (\"Nora alone can hear and speak with the Folk; Leo cannot\") covers the rule, yet the draft broke it."
+    },
+    {
+      "id": "lantern-folk-008",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [],
+      "summary": "a12 has Leo partly hear the Folk — weeping as a mosquito whine that resolves into a chorus, the mass snuffing as a sound he almost couldn't hear — though Leo cannot hear the Folk at all until a14.",
+      "established": [
+        {
+          "scene": "a03-the-little-voices",
+          "path": "scenes/a03-the-little-voices.md",
+          "commit": "c131e3d",
+          "quote": "Wick studied Leo for a while. Then he turned to Nora. \"His ears are too old?\""
+        },
+        {
+          "scene": "a14-the-keepers-flame",
+          "path": "scenes/a14-the-keepers-flame.md",
+          "commit": "c131e3d",
+          "quote": "Three words, clear as a bell, in a voice he had never heard and knew at once."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a12-the-remembering",
+          "path": "scenes/a12-the-remembering.md",
+          "commit": "c131e3d",
+          "quote": "It came to him as a thin, insistent whine, like a mosquito he couldn't find."
+        },
+        {
+          "scene": "a12-the-remembering",
+          "path": "scenes/a12-the-remembering.md",
+          "commit": "c131e3d",
+          "quote": "The thin whine he'd been hearing resolved, for just a moment, into something almost like a chorus."
+        },
+        {
+          "scene": "a12-the-remembering",
+          "path": "scenes/a12-the-remembering.md",
+          "commit": "c131e3d",
+          "quote": "a sound he almost couldn't hear but felt in his chest like a door slamming"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "2d4c323",
+        "after": [
+          {
+            "scene": "a12-the-remembering",
+            "path": "scenes/a12-the-remembering.md",
+            "commit": "2d4c323",
+            "quote": "Somebody down there was crying. Leo couldn't hear it."
+          },
+          {
+            "scene": "a12-the-remembering",
+            "path": "scenes/a12-the-remembering.md",
+            "commit": "2d4c323",
+            "quote": "a sound he never heard at all but felt in his chest like a door slamming"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-007"
+      ],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "2fc5e9b"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "Medium: hearing Folk sound as a whine could be read as a partial perception rather than a violation, but the author treated all three as leaks. Split from 2d4c323."
+    },
+    {
+      "id": "lantern-folk-009",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "WLD",
+      "secondary_codes": [
+        "PHY"
+      ],
+      "summary": "a10 says every lantern in the village died at once when the Lamp went out, but a11 has lanterns going out one by one and a13 counts four or five still lit.",
+      "established": [
+        {
+          "scene": "a11-in-the-dark",
+          "path": "scenes/a11-in-the-dark.md",
+          "commit": "5e93846",
+          "quote": "All around the village the little sounds were going out one by one, like the lanterns had"
+        },
+        {
+          "scene": "a13-through-the-woods",
+          "path": "scenes/a13-through-the-woods.md",
+          "commit": "5e93846",
+          "quote": "Now there were four. Maybe five."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a10-the-lamp-goes-dark",
+          "path": "scenes/a10-the-lamp-goes-dark.md",
+          "commit": "5e93846",
+          "quote": "Every lantern in the village died at once. Nora felt it."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "a947c04",
+        "after": [
+          {
+            "scene": "a10-the-lamp-goes-dark",
+            "path": "scenes/a10-the-lamp-goes-dark.md",
+            "commit": "a947c04",
+            "quote": "All across the village, lanterns began to go out. Nora felt it."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-033"
+      ],
+      "introduced_by": {
+        "kind": "plan",
+        "pass": "",
+        "commit": "e6c3cad"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Found by the LLM contradiction audit (illustrate --audit, run per scene). The a10 brief said \"the whole village goes cold and silent\". The same error reached the LF-13 image prompt twice (lantern-folk-033). The same audit accepted a14's \"dozens\" of awake Folk as consistent (lantern-folk-010)."
+    },
+    {
+      "id": "lantern-folk-010",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "a13 counts four or five lit lanterns in the village, but minutes later a14 has dozens of awake Folk drawn close around the Lamp.",
+      "established": [
+        {
+          "scene": "a13-through-the-woods",
+          "path": "scenes/a13-through-the-woods.md",
+          "commit": "2dd0ea2",
+          "quote": "Now there were four. Maybe five."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a14-the-keepers-flame",
+          "path": "scenes/a14-the-keepers-flame.md",
+          "commit": "2dd0ea2",
+          "quote": "The Folk who were still awake had drawn close, dozens of them, their own lanterns held tight against their chests."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "ab240c6",
+        "after": [
+          {
+            "scene": "a14-the-keepers-flame",
+            "path": "scenes/a14-the-keepers-flame.md",
+            "commit": "ab240c6",
+            "quote": "Four. Ember made five. Five small figures where there had been a whole village"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "cf630f7"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "ab240c6 commit message: \"Ben caught this from the art side and it turned out to be a prose error.\"",
+      "confidence": "high",
+      "notes": "The a947c04 LLM contradiction audit read a14 and listed \"dozens of awake Folk\" as consistent, so this is a detection miss. No CSV recorded the survivor count before this fix."
+    },
+    {
+      "id": "lantern-folk-011",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "a10 (day 11) says Nora sat at Wick's house \"yesterday\" listening to him laugh, but Wick was snuffed at the creek in a07 (day 8) and has been in the cold sleep since.",
+      "established": [
+        {
+          "scene": "a07-the-cold-sleep",
+          "path": "scenes/a07-the-cold-sleep.md",
+          "commit": "6c7fa1a",
+          "quote": "He hit the stones by the creek and didn't move."
+        },
+        {
+          "scene": "a10-the-lamp-goes-dark",
+          "path": "scenes/a10-the-lamp-goes-dark.md",
+          "commit": "6c7fa1a",
+          "quote": "The night the five went dark, the circle of gold had still covered the outer root-houses. Last night it had shrunk back to the inner ring."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a10-the-lamp-goes-dark",
+          "path": "scenes/a10-the-lamp-goes-dark.md",
+          "commit": "6c7fa1a",
+          "quote": "Wick's house with its green door where she'd sat yesterday and listened to him laugh."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "2dd0ea2",
+        "after": [
+          {
+            "scene": "a10-the-lamp-goes-dark",
+            "path": "scenes/a10-the-lamp-goes-dark.md",
+            "commit": "2dd0ea2",
+            "quote": "Wick's house with its green door, where she used to sit and listen to him laugh."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "e6c3cad"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Day numbers live only in scenes.csv timeline_day (a07=8, a10=11); relative cues like \"yesterday\" are tracked nowhere. Found on a re-audit of a10."
+    },
+    {
+      "id": "lantern-folk-012",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "a13 arrives at a stone hearth of coals \"where the Great Lamp had burned\", but a04 established the Great Lamp as a lamp the size of a cooking pot in a bowl of living wood.",
+      "established": [
+        {
+          "scene": "a04-the-great-lamp",
+          "path": "scenes/a04-the-great-lamp.md",
+          "commit": "37bc78e",
+          "quote": "The Great Lamp sat in a hollow at the base of the Oak, cradled in a bowl of living wood that the tree had grown around it. It was the size of a cooking pot"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a13-through-the-woods",
+          "path": "scenes/a13-through-the-woods.md",
+          "commit": "37bc78e",
+          "quote": "And at the center, where the Great Lamp had burned, a thin curl of smoke rising from coals that were almost gray."
+        },
+        {
+          "scene": "a13-through-the-woods",
+          "path": "scenes/a13-through-the-woods.md",
+          "commit": "37bc78e",
+          "quote": "He lowered the matchstick toward the Lamp's hearth."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "81517bd",
+        "after": [
+          {
+            "scene": "a13-through-the-woods",
+            "path": "scenes/a13-through-the-woods.md",
+            "commit": "81517bd",
+            "quote": "And at the center, in its bowl of living wood, the Great Lamp. Its glass had gone cold and grey."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "b90229c"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "No CSV recorded the Lamp's form before reference/canon/locations/the-great-lamp.md (07-28). The fix's \"the size of a saucepan\" vs a04's \"cooking pot\" is still at HEAD; judged too close to be a contradiction and not labeled."
+    },
+    {
+      "id": "lantern-folk-013",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "a14 says the lanterns had been burning down for days without the Lamp and its wicks were stiff with weeks of frost, but the Lamp died only hours earlier the same night (a10-a14 are all day 11).",
+      "established": [
+        {
+          "scene": "a12-the-remembering",
+          "path": "scenes/a12-the-remembering.md",
+          "commit": "37bc78e",
+          "quote": "Leo sat on the cold root where he'd been sitting when it happened, and he did not move."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a14-the-keepers-flame",
+          "path": "scenes/a14-the-keepers-flame.md",
+          "commit": "37bc78e",
+          "quote": "Without the Great Lamp to feed them, they had been burning down for days."
+        },
+        {
+          "scene": "a14-the-keepers-flame",
+          "path": "scenes/a14-the-keepers-flame.md",
+          "commit": "37bc78e",
+          "quote": "The wicks were stiff with weeks of frost."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "81517bd",
+        "after": [
+          {
+            "scene": "a14-the-keepers-flame",
+            "path": "scenes/a14-the-keepers-flame.md",
+            "commit": "81517bd",
+            "quote": "They had been burning down for days, all the while the Lamp was failing, and since it died a few hours ago there had been nothing at all to feed them."
+          },
+          {
+            "scene": "a14-the-keepers-flame",
+            "path": "scenes/a14-the-keepers-flame.md",
+            "commit": "81517bd",
+            "quote": "and a thing that size, once it went cold, stayed cold."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "cf630f7"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "Medium: the establishing side is the scene sequence (a12 picks up where the Lamp died) plus scenes.csv timeline_day 11 for a10-a14, not a single sentence giving the hour."
+    },
+    {
+      "id": "lantern-folk-014",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [
+        "VOI"
+      ],
+      "summary": "a09 is Leo's POV and Leo cannot hear the Folk, yet it reports that Nora heard Pip from across the square and gives Pip's spoken count as heard.",
+      "established": [
+        {
+          "scene": "a03-the-little-voices",
+          "path": "scenes/a03-the-little-voices.md",
+          "commit": "37bc78e",
+          "quote": "Wick studied Leo for a while. Then he turned to Nora. \"His ears are too old?\""
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a09-the-worst-night",
+          "path": "scenes/a09-the-worst-night.md",
+          "commit": "37bc78e",
+          "quote": "Nora heard him from across the square, small and clear in the grey light. He counted the lanterns still lit, the way he did every night."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "81517bd",
+        "after": [
+          {
+            "scene": "a09-the-worst-night",
+            "path": "scenes/a09-the-worst-night.md",
+            "commit": "81517bd",
+            "quote": "Leo couldn't hear it. He never had. But he had watched Pip do this every night since the first night"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-015"
+      ],
+      "introduced_by": {
+        "kind": "author",
+        "pass": "",
+        "commit": "9331d19"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Introduced by 9331d19 \"individualize Pip — felt-beat pass\", an ad-hoc revision with no row in any revision plan (so not labeled tool). POV head-hop plus a hearing-rule leak."
+    },
+    {
+      "id": "lantern-folk-015",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [],
+      "summary": "a09 (Leo POV) has Leo react to Tallow's shouted warning and his dry aside as if he heard them, though Leo cannot hear the Folk.",
+      "established": [
+        {
+          "scene": "a03-the-little-voices",
+          "path": "scenes/a03-the-little-voices.md",
+          "commit": "37bc78e",
+          "quote": "Wick studied Leo for a while. Then he turned to Nora. \"His ears are too old?\""
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a09-the-worst-night",
+          "path": "scenes/a09-the-worst-night.md",
+          "commit": "37bc78e",
+          "quote": "\"Third one circling! Coming round your left, giants!\""
+        },
+        {
+          "scene": "a09-the-worst-night",
+          "path": "scenes/a09-the-worst-night.md",
+          "commit": "37bc78e",
+          "quote": "\"Could one of the giants please decide which way to face before the next rush?\" Tallow said, not looking up."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "81517bd",
+        "after": [
+          {
+            "scene": "a09-the-worst-night",
+            "path": "scenes/a09-the-worst-night.md",
+            "commit": "81517bd",
+            "quote": "Leo heard none of it. What he saw was Tallow's arm go out straight, pointing"
+          },
+          {
+            "scene": "a09-the-worst-night",
+            "path": "scenes/a09-the-worst-night.md",
+            "commit": "81517bd",
+            "quote": "The one piece of sense anybody said all night, and it went straight past the ears it was meant for."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-014"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-brief",
+        "commit": "e5c6d4c"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "Medium: the pre-fix text never says \"Leo heard\"; the leak is that he turns on Tallow's cue and reacts to the aside. Both lines came from the e5c6d4c \"redraft 3 scenes from corrected briefs\" pass."
+    },
+    {
+      "id": "lantern-folk-016",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "WLD",
+      "secondary_codes": [
+        "KNO"
+      ],
+      "summary": "a04 says the Keeper couldn't hear Leo any more than he could hear her, but a05 says every one of the Folk could hear him perfectly well; the barrier is one-way.",
+      "established": [
+        {
+          "scene": "a05-the-pledge",
+          "path": "scenes/a05-the-pledge.md",
+          "commit": "37bc78e",
+          "quote": "every one of them could hear him perfectly well. It was only ever the other direction that failed."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a04-the-great-lamp",
+          "path": "scenes/a04-the-great-lamp.md",
+          "commit": "37bc78e",
+          "quote": "She couldn't hear him any more than he could hear her, but her eyes were clear and steady"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "81517bd",
+        "after": [
+          {
+            "scene": "a04-the-great-lamp",
+            "path": "scenes/a04-the-great-lamp.md",
+            "commit": "81517bd",
+            "quote": "She could hear him well enough — it was only ever the other direction that failed"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "65dca23"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "The a05 line was added in 37bc78e, which made the a04 draft line a direct contradiction; a07-a09 already showed Folk hearing the children. knowledge.csv's k-nora-can-speak wrongly implies the barrier runs both ways."
+    },
+    {
+      "id": "lantern-folk-017",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "a04 ends with Leo saying they'll come back tomorrow night and walking Nora home, but a05 opens the same night on the ledge with the Keeper.",
+      "established": [
+        {
+          "scene": "a05-the-pledge",
+          "path": "scenes/a05-the-pledge.md",
+          "commit": "17f3311",
+          "quote": "She'd been talking since the Keeper brought them to this ledge above the Great Lamp's hollow"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a04-the-great-lamp",
+          "path": "scenes/a04-the-great-lamp.md",
+          "commit": "17f3311",
+          "quote": "\"Tell her we'll come back tomorrow night,\" he said."
+        },
+        {
+          "scene": "a04-the-great-lamp",
+          "path": "scenes/a04-the-great-lamp.md",
+          "commit": "17f3311",
+          "quote": "Leo walked Nora back up the path between the roots."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "28b945f",
+        "after": [
+          {
+            "scene": "a04-the-great-lamp",
+            "path": "scenes/a04-the-great-lamp.md",
+            "commit": "28b945f",
+            "quote": "She lifted one of her candles and beckoned them away from the Lamp, up out of the hollow to a flat stone that looked down over it"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "65dca23"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "scenes.csv has a04 and a05 both on day 3."
+    },
+    {
+      "id": "lantern-folk-018",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "a01 ends with Nora slipping out the back door while the family is still awake and unpacking, but a02 opens with Leo woken by the latch, his parents asleep behind their door.",
+      "established": [
+        {
+          "scene": "a01-moving-night",
+          "path": "scenes/a01-moving-night.md",
+          "commit": "17f3311",
+          "quote": "She thought about the kitchen. The bare bulb. The mugs in a row."
+        },
+        {
+          "scene": "a01-moving-night",
+          "path": "scenes/a01-moving-night.md",
+          "commit": "17f3311",
+          "quote": "She pulled the door shut behind her."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a02-into-the-trees",
+          "path": "scenes/a02-into-the-trees.md",
+          "commit": "17f3311",
+          "quote": "Leo heard the back door click and was out of bed before the sound finished."
+        },
+        {
+          "scene": "a02-into-the-trees",
+          "path": "scenes/a02-into-the-trees.md",
+          "commit": "17f3311",
+          "quote": "His parents' door was shut, and behind it his father's slow, steady breathing."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "28b945f",
+        "after": [
+          {
+            "scene": "a02-into-the-trees",
+            "path": "scenes/a02-into-the-trees.md",
+            "commit": "28b945f",
+            "quote": "Last night he'd caught her at the edge of the wet grass and walked her back and locked the door"
+          },
+          {
+            "scene": "a02-into-the-trees",
+            "path": "scenes/a02-into-the-trees.md",
+            "commit": "89e7146",
+            "quote": "Leo saw the back door close behind her."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "bd85ce3"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "Fixed twice: 28b945f added a night-1 near-miss to a01; 89e7146 (on author direction) moved the near-miss and a day transition into a02 instead. scenes.csv has a01 day 1, a02 day 2."
+    },
+    {
+      "id": "lantern-folk-019",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "In a02, \"She was barefoot too\" says Leo is barefoot, a few paragraphs after he goes down the stairs in his socks (socks that later soak and tear).",
+      "established": [
+        {
+          "scene": "a02-into-the-trees",
+          "path": "scenes/a02-into-the-trees.md",
+          "commit": "4728ec1",
+          "quote": "Leo went down the stairs in his socks, hand on the banister"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a02-into-the-trees",
+          "path": "scenes/a02-into-the-trees.md",
+          "commit": "4728ec1",
+          "quote": "She was barefoot too, still in her pajamas"
+        },
+        {
+          "scene": "a02-into-the-trees",
+          "path": "scenes/a02-into-the-trees.md",
+          "commit": "4728ec1",
+          "quote": "The boards were cold and gritty under his feet."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "070ffab",
+        "after": [
+          {
+            "scene": "a02-into-the-trees",
+            "path": "scenes/a02-into-the-trees.md",
+            "commit": "070ffab",
+            "quote": "She was barefoot, still in her pajamas"
+          },
+          {
+            "scene": "a02-into-the-trees",
+            "path": "scenes/a02-into-the-trees.md",
+            "commit": "070ffab",
+            "quote": "The boards were cold and gritty under his socks."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "bd85ce3"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "070ffab commit message: \"Two reader notes from the live Bookshelf book ... The socks note was still live\"",
+      "confidence": "high",
+      "notes": "66be820 had already fixed the barefoot transition in the illustration prompts only. Within-scene error."
+    },
+    {
+      "id": "lantern-folk-020",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "a06 makes Tallow an old Folk woman (she/her), but a08 and a09 have Tallow as he/him.",
+      "established": [
+        {
+          "scene": "a08-what-the-folk-fear",
+          "path": "scenes/a08-what-the-folk-fear.md",
+          "commit": "c0022da",
+          "quote": "Tallow's lantern swung from a hook on his belt, throwing their shadows long and strange against the bark. He had not spoken since they left Wick's darkened house."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a06-standing-guard",
+          "path": "scenes/a06-standing-guard.md",
+          "commit": "c0022da",
+          "quote": "The old Folk woman worked without speaking, her hands quick and sure"
+        },
+        {
+          "scene": "a06-standing-guard",
+          "path": "scenes/a06-standing-guard.md",
+          "commit": "c0022da",
+          "quote": "Tallow stood beside her with her arms folded and her small lined face sharp."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "0004351",
+        "after": [
+          {
+            "scene": "a06-standing-guard",
+            "path": "scenes/a06-standing-guard.md",
+            "commit": "0004351",
+            "quote": "The old Folk man worked without speaking, his hands quick and sure"
+          },
+          {
+            "scene": "a06-standing-guard",
+            "path": "scenes/a06-standing-guard.md",
+            "commit": "396ee8d",
+            "quote": "Tallow stood beside her with his arms folded and his small lined face sharp."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-021"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-brief",
+        "commit": "e5c6d4c"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "The e5c6d4c redraft-from-brief pass introduced the pronouns. 0004351 missed one sentence; 396ee8d (\"fix Tallow gender regen slip\") finished it. No CSV or bible recorded Tallow's gender until reference/canon/characters/tallow.md (07-28)."
+    },
+    {
+      "id": "lantern-folk-021",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "a06 makes Pip a Folk girl (she/her), but a09 has Pip as he/him.",
+      "established": [
+        {
+          "scene": "a09-the-worst-night",
+          "path": "scenes/a09-the-worst-night.md",
+          "commit": "c0022da",
+          "quote": "He carried no messages between them."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a06-standing-guard",
+          "path": "scenes/a06-standing-guard.md",
+          "commit": "c0022da",
+          "quote": "Pip landed on Nora's shoulder. The Folk girl weighed almost nothing"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "0004351",
+        "after": [
+          {
+            "scene": "a06-standing-guard",
+            "path": "scenes/a06-standing-guard.md",
+            "commit": "0004351",
+            "quote": "The Folk boy weighed almost nothing"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-020"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-brief",
+        "commit": "e5c6d4c"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Same redraft and fix as lantern-folk-020. The a09 span's \"He\" is Pip (the preceding sentence: \"Pip ran back and forth across the square\")."
+    },
+    {
+      "id": "lantern-folk-022",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "WLD",
+      "secondary_codes": [
+        "PHY"
+      ],
+      "summary": "a09 has Tallow relight two snuffed lanterns in the field with a flint, but only the Great Lamp can rekindle a darkened Folk, and the same scene's count ignores the relit two (four dark, two relit, one more lost, yet \"five\" dark).",
+      "established": [
+        {
+          "scene": "a09-the-worst-night",
+          "path": "scenes/a09-the-worst-night.md",
+          "commit": "73076e8",
+          "quote": "Four lanterns now. Four Folk in the cold sleep."
+        },
+        {
+          "scene": "a09-the-worst-night",
+          "path": "scenes/a09-the-worst-night.md",
+          "commit": "73076e8",
+          "quote": "But the five that had gone dark stayed dark"
+        },
+        {
+          "scene": "a09-the-worst-night",
+          "path": "reference/systems-bible.md",
+          "commit": "73076e8",
+          "quote": "A darkened Folk can be rekindled **only at the Great Lamp**"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a09-the-worst-night",
+          "path": "scenes/a09-the-worst-night.md",
+          "commit": "73076e8",
+          "quote": "He wedged the wax-cake against a stone, struck his flint, and coaxed the stub-end of a wick to catch."
+        },
+        {
+          "scene": "a09-the-worst-night",
+          "path": "scenes/a09-the-worst-night.md",
+          "commit": "73076e8",
+          "quote": "He moved to the next dark lantern and did it again. Two relit. Two still dark."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "37bc78e",
+        "after": [
+          {
+            "scene": "a09-the-worst-night",
+            "path": "scenes/a09-the-worst-night.md",
+            "commit": "37bc78e",
+            "quote": "Not the dark ones. Tallow did not so much as look at the dark ones."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-032"
+      ],
+      "introduced_by": {
+        "kind": "plan",
+        "pass": "",
+        "commit": "e5c6d4c"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "The commit says the relight originated in the a09 brief; the e5c6d4c redraft-from-brief pass wrote it. The rule lives in systems-bible rule 4; the prose-internal half is the lantern count. The error resurfaced in visual-state (lantern-folk-032)."
+    },
+    {
+      "id": "lantern-folk-023",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [
+        "WLD"
+      ],
+      "summary": "In a10 Nora cites \"the old words you taught me, the ones from the legend\", but no scene shows the Keeper teaching her any words; a08's legend is only a disbelieved tale.",
+      "established": [],
+      "established_by_absence": "a08 is the only scene where the Keeper tells the legend, and in both drafts of a08 she teaches no words; the parley also contradicts systems-bible rule 8 (murkwolves are elemental and cannot be reasoned with).",
+      "contradicted": [
+        {
+          "scene": "a10-the-lamp-goes-dark",
+          "path": "scenes/a10-the-lamp-goes-dark.md",
+          "commit": "73076e8",
+          "quote": "If I go to the border and speak the old words you taught me, the ones from the legend, I can—"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "37bc78e",
+        "after": [
+          {
+            "scene": "a10-the-lamp-goes-dark",
+            "path": "scenes/a10-the-lamp-goes-dark.md",
+            "commit": "37bc78e",
+            "quote": "\"Let me go out past the light,\" Nora said."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "e6c3cad"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "a10 was drafted against an earlier plan and was left out of the e5c6d4c redraft that changed a08/a09."
+    },
+    {
+      "id": "lantern-folk-024",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [],
+      "summary": "a07 says \"Ember had told her\" about the cold sleep, but the Keeper's name Ember is never introduced in a01-a06; she is only ever \"the Keeper\".",
+      "established": [],
+      "established_by_absence": "The string \"Ember\" does not occur in a01-a06 at the parent commit; characters.csv lists it only as an alias.",
+      "contradicted": [
+        {
+          "scene": "a07-the-cold-sleep",
+          "path": "scenes/a07-the-cold-sleep.md",
+          "commit": "73076e8",
+          "quote": "The cold sleep. Ember had told her about it, careful and plain."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "37bc78e",
+        "after": [
+          {
+            "scene": "a05-the-pledge",
+            "path": "scenes/a05-the-pledge.md",
+            "commit": "37bc78e",
+            "quote": "\"She says we should have her name now. She says Keeper is only what she does.\""
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "ba0b819"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "Fixed by introducing the name at the a05 pledge rather than editing a07."
+    },
+    {
+      "id": "lantern-folk-025",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "a13 overran into a14's beat: the Lamp's coals catch and hold at the end of a13, then a14 reopens on a black, frost-dead bowl with dead wicks.",
+      "established": [
+        {
+          "scene": "a13-through-the-woods",
+          "path": "scenes/a13-through-the-woods.md",
+          "commit": "73076e8",
+          "quote": "The coals held. The glow steadied. It was no bonfire. It was barely a candle."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a14-the-keepers-flame",
+          "path": "scenes/a14-the-keepers-flame.md",
+          "commit": "73076e8",
+          "quote": "The Great Lamp stood before them, tall as Leo's chest, its bowl black and cold and filmed with frost. The wicks inside it were stiff. Dead."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "37bc78e",
+        "after": [
+          {
+            "scene": "a13-through-the-woods",
+            "path": "scenes/a13-through-the-woods.md",
+            "commit": "37bc78e",
+            "quote": "Nora was whispering. He could see her lips moving but the words were in the high, silvery register he couldn't reach"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "b90229c"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Fixed by deleting a13's coals-catch ending; the after span is a13's new final paragraph."
+    },
+    {
+      "id": "lantern-folk-026",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "a10 says Leo hasn't spoken to Nora since the path home in a08, but in the intervening a09 he orders her behind him and argues with her on the line.",
+      "established": [
+        {
+          "scene": "a08-what-the-folk-fear",
+          "path": "scenes/a08-what-the-folk-fear.md",
+          "commit": "73076e8",
+          "quote": "Nora went in first, and Leo followed, and they did not speak."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a10-the-lamp-goes-dark",
+          "path": "scenes/a10-the-lamp-goes-dark.md",
+          "commit": "73076e8",
+          "quote": "He hadn't spoken to her since the path. Since she'd told him she could fix this and he'd said no."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "37bc78e",
+        "after": [
+          {
+            "scene": "a10-the-lamp-goes-dark",
+            "path": "scenes/a10-the-lamp-goes-dark.md",
+            "commit": "37bc78e",
+            "quote": "He hadn't spoken to her since the grey morning after, when Pip had sat down in the middle of the empty square"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-brief",
+        "commit": "e5c6d4c"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "The contradicting a09 dialogue (\"Get behind me. Now.\" / \"You were in the open.\") is at the same parent. The commit says a10 \"was never included in the redraft 3 scenes from corrected briefs pass (e5c6d4c), so it still ran on the pre-redraft version of chapter 9\": the redraft made a10 stale. The established span is a08's ending; the contradiction proper is with a09."
+    },
+    {
+      "id": "lantern-folk-027",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "PRM",
+      "secondary_codes": [],
+      "summary": "a11 has a voice calling Tallow's name over and over with no answer, but when the sleepers wake in a14 Tallow is never mentioned: the thread is dropped.",
+      "established": [
+        {
+          "scene": "a11-in-the-dark",
+          "path": "scenes/a11-in-the-dark.md",
+          "commit": "ff141ad",
+          "quote": "a voice she recognized was calling for Tallow, calling and calling, and each time the name came back unanswered the voice got thinner"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a14-the-keepers-flame",
+          "path": "scenes/a14-the-keepers-flame.md",
+          "commit": "ff141ad",
+          "quote": "Around the Great Lamp, one by one, the sleepers woke."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "33732d7",
+        "after": [
+          {
+            "scene": "a14-the-keepers-flame",
+            "path": "scenes/a14-the-keepers-flame.md",
+            "commit": "33732d7",
+            "quote": "remarked to nobody in particular that somebody had let the woodpile go damp"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "nora-close-and-grounding",
+        "commit": "7496410"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "Dropped resolution rather than a contradiction. The Tallow call came from revision-plan-1 pass 5 (nora-close-and-grounding: \"name a darkened Tallow or Pip among the lost\"), which added the setup without a payoff."
+    },
+    {
+      "id": "lantern-folk-028",
+      "repo": "lantern-folk",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "a11 places Wick in his own house on his own bed with his lantern by his hand, but later the same night a14 has Wick wrapped in cloth beside the Lamp's base and his lantern carried by an old man; no scene moves him.",
+      "established": [
+        {
+          "scene": "a11-in-the-dark",
+          "path": "scenes/a11-in-the-dark.md",
+          "commit": "1d3f552",
+          "quote": "Wick was down in the roots in his own house, laid on his own bed with his mother sitting beside him, and his lantern stood on the boards by his hand"
+        },
+        {
+          "scene": "a08-what-the-folk-fear",
+          "path": "scenes/a08-what-the-folk-fear.md",
+          "commit": "1d3f552",
+          "quote": "They had laid him on his own bed and set the lantern next to him where it belonged"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a14-the-keepers-flame",
+          "path": "scenes/a14-the-keepers-flame.md",
+          "commit": "1d3f552",
+          "quote": "Nora could see Wick's among them, carried by an old man whose own light was the color of a coal about to go out. Wick lay wrapped in cloth beside the Lamp's base"
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-001"
+      ],
+      "introduced_by": {
+        "kind": "author",
+        "pass": "",
+        "commit": "1d40cae"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "Created by the 1d40cae fix for lantern-folk-001, which pinned Wick at home in a11 while a14 already had him at the Lamp. Plausible offstage (a09 shows dark lanterns carried to the Lamp) but unstated. Wick's location was never recorded in any CSV; visual-state has wick-state only at a07 and a14."
+    },
+    {
+      "id": "lantern-folk-029",
+      "repo": "lantern-folk",
+      "level": "csv",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "The visual-state log put the Lamp's death and the village's darkness at a12, so a11 (entirely in the dark after a10's close) resolved to a10's lit, shrinking-flame state.",
+      "established": [
+        {
+          "scene": "a11-in-the-dark",
+          "path": "scenes/a11-in-the-dark.md",
+          "commit": "5e93846",
+          "quote": "the dark was the same whether they were open or shut"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a10-the-lamp-goes-dark",
+          "path": "reference/visual-state.csv",
+          "commit": "5e93846",
+          "quote": "the-great-lamp-state|a10-the-lamp-goes-dark|wardlight pulled in to just the square, flame shrinking"
+        },
+        {
+          "scene": "a12-the-remembering",
+          "path": "reference/visual-state.csv",
+          "commit": "5e93846",
+          "quote": "the-great-lamp-state|a12-the-remembering|gone out, dark and cold"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "a947c04",
+        "after": [
+          {
+            "scene": "a11-in-the-dark",
+            "path": "reference/visual-state.csv",
+            "commit": "a947c04",
+            "quote": "the-great-lamp-state|a11-in-the-dark|gone out, dark and cold, its ward gone with it"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "illustrate --state",
+        "commit": "7c5e031"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Illustration modality. Scene-granularity: the Lamp dies at a10's close, so a per-scene log cannot place it. Five audit findings shared this root cause; the village-lights track had the same a12 placement."
+    },
+    {
+      "id": "lantern-folk-030",
+      "repo": "lantern-folk",
+      "level": "csv",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "The visual-state log carried the Keeper's a04 state (walking with her stick, tall gold flame) through a08, where the prose has her seated at home over a thumbnail-sized flame.",
+      "established": [
+        {
+          "scene": "a08-what-the-folk-fear",
+          "path": "scenes/a08-what-the-folk-fear.md",
+          "commit": "5e93846",
+          "quote": "In the center, on a flat stone, burned a flame no bigger than Leo's thumbnail."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a04-the-great-lamp",
+          "path": "reference/visual-state.csv",
+          "commit": "5e93846",
+          "quote": "keeper-state|a04-the-great-lamp|walking with her stick, her own lantern lit with a tall steady gold flame, calm and unhurried"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "a947c04",
+        "after": [
+          {
+            "scene": "a08-what-the-folk-fear",
+            "path": "reference/visual-state.csv",
+            "commit": "a947c04",
+            "quote": "keeper-state|a08-what-the-folk-fear|seated on a low stool in her own round earth-walled home"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "illustrate --state",
+        "commit": "7c5e031"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Illustration modality. The stale state reached the LF-10 prompt (Ember walking with a lit lantern), regenerated in the same commit."
+    },
+    {
+      "id": "lantern-folk-031",
+      "repo": "lantern-folk",
+      "level": "csv",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "The visual-state log kept Nora in socks from a01 onward, but a02 has her barefoot.",
+      "established": [
+        {
+          "scene": "a02-into-the-trees",
+          "path": "scenes/a02-into-the-trees.md",
+          "commit": "5e93846",
+          "quote": "She was barefoot too, still in her pajamas"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a01-moving-night",
+          "path": "reference/visual-state.csv",
+          "commit": "5e93846",
+          "quote": "nora-clothing|a01-moving-night|mustard-yellow cotton pajamas with a hood, socks, no shoes"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "a947c04",
+        "after": [
+          {
+            "scene": "a02-into-the-trees",
+            "path": "reference/visual-state.csv",
+            "commit": "a947c04",
+            "quote": "nora-clothing|a02-into-the-trees|mustard-yellow cotton pajamas with a hood, barefoot"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-019"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "illustrate --state",
+        "commit": "7c5e031"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Illustration modality (costume continuity). 66be820 then re-prompted LF-02/03/04 off the new transition. The establishing a02 sentence is the same one that wrongly implied Leo was barefoot (lantern-folk-019)."
+    },
+    {
+      "id": "lantern-folk-032",
+      "repo": "lantern-folk",
+      "level": "csv",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "After the prose stopped Tallow relighting lanterns in the field, the visual-state log still described two relit lanterns burning low at a09, and the LF-11 prompt was built from it.",
+      "established": [
+        {
+          "scene": "a09-the-worst-night",
+          "path": "scenes/a09-the-worst-night.md",
+          "commit": "18ad1d9",
+          "quote": "Not the dark ones. Tallow did not so much as look at the dark ones."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a09-the-worst-night",
+          "path": "reference/visual-state.csv",
+          "commit": "18ad1d9",
+          "quote": "five Folk lanterns dark and staying dark, two relit ones burning low, the rest still lit"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "a06ce61",
+        "after": [
+          {
+            "scene": "a09-the-worst-night",
+            "path": "reference/visual-state.csv",
+            "commit": "a06ce61",
+            "quote": "five Folk lanterns dark and staying dark (none can be relit away from the Great Lamp)"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-022"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "illustrate --state",
+        "commit": "7c5e031"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Illustration modality. Regression of lantern-folk-022: the --state pass faithfully logged the then-current prose on 07-29; 37bc78e fixed the prose on 08-01 and did not touch the log. Caught when regenerating LF-11's prompt (\"the relight bug a third time\")."
+    },
+    {
+      "id": "lantern-folk-033",
+      "repo": "lantern-folk",
+      "level": "csv",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "The LF-13 image prompt (at a10's close) showed every lantern out with no warm light anywhere, but a13 later the same night counts four or five still lit.",
+      "established": [
+        {
+          "scene": "a13-through-the-woods",
+          "path": "scenes/a13-through-the-woods.md",
+          "commit": "ab240c6",
+          "quote": "Now there were four. Maybe five."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a10-the-lamp-goes-dark",
+          "path": "reference/illustration-prompts/LF-13.md",
+          "commit": "ab240c6",
+          "quote": "every lantern gone out, no warm light anywhere"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "fdd329e",
+        "after": [
+          {
+            "scene": "a10-the-lamp-goes-dark",
+            "path": "reference/illustration-prompts/LF-13.md",
+            "commit": "fdd329e",
+            "quote": "five faint pinpricks of dying lantern-glow among the root-homes"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "lantern-folk-009"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "illustrate --prompts",
+        "commit": "2dd0ea2"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Illustration modality. The a10 extinction error (lantern-folk-009) a third time, after the prose fix. Cause: LF-13 sits at a10's close but resolves to a10's pre-death state; the first fix attempt also failed because state_override was written as prose."
+    },
+    {
+      "id": "lantern-folk-034",
+      "repo": "lantern-folk",
+      "level": "csv",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "The LF-04 prompt (a03, night one) dressed Nora in her moss-green coat and Leo in his rust-red jacket, but on night one both are still in pajamas; the coat and jacket arrive in a04.",
+      "established": [
+        {
+          "scene": "a02-into-the-trees",
+          "path": "scenes/a02-into-the-trees.md",
+          "commit": "643527a",
+          "quote": "She was barefoot too, still in her pajamas"
+        },
+        {
+          "scene": "a04-the-great-lamp",
+          "path": "scenes/a04-the-great-lamp.md",
+          "commit": "643527a",
+          "quote": "Nora was standing at his door with her jacket zipped"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "a03-the-little-voices",
+          "path": "manuscript/assets/illustrations/prompts/LF-04.md",
+          "commit": "643527a",
+          "quote": "long dark-brown hair in a loose, untidy braid; moss-green coat"
+        },
+        {
+          "scene": "a03-the-little-voices",
+          "path": "reference/canon/characters/nora.md",
+          "commit": "643527a",
+          "quote": "mustard-yellow pajamas on the first two nights"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "43c228c",
+        "after": [
+          {
+            "scene": "a03-the-little-voices",
+            "path": "manuscript/assets/illustrations/prompts/LF-04.md",
+            "commit": "43c228c",
+            "quote": "still in mustard-yellow cotton pajamas and socks, no coat and no boots, because this is still the first night"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "illustrate --prompts",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Illustration modality. Two causes: the canon anchors said \"first two nights\" (it is the first night only), and build_art_direction_request never passed the resolved visual state to the model. LF-04 was hand-corrected after two failed re-prompts."
+    }
+  ]
+}

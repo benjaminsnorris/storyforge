@@ -1,0 +1,16 @@
+old_path|slug|commit|method|notes
+scenes/new-h1.md|haddons-junction|1672588|rename|R100 at 1672588
+scenes/new-h2.md|order|1672588|rename|R100 at 1672588
+scenes/ch01-sc01.md|finest-cartographer|1672588|rename|R100 at 1672588
+scenes/merged-ch12-sc02-03.md|blackout|1672588|rename|R100 at 1672588
+scenes/ch10-sc01.md|doreens-footnote|1672588|rename|-> scenes/dorrens-footnote.md at 1672588 (R100), then -> scenes/doreens-footnote.md at b18364a (R100)
+scenes/ch14-sc01.md|nineteen-year-sequence|1672588|rename|R100 at 1672588
+scenes/new-s1.md|sorayas-fifteen-years|1672588|rename|R100 at 1672588
+scenes/ch16-sc01.md|someone-you-need-to-meet|1672588|rename|R100 at 1672588
+scenes/merged-ch06-sc04-05.md|rock-network|1672588|rename|R100 at 1672588
+scenes/ch08-sc02.md|deliberate-collapse|df1c96b|content|ch08-sc02 merged into merged-ch08-sc02-03 at df1c96b (part-one-compression); that file -> deliberate-collapse at 1672588 (R100). HEAD deliberate-collapse carries the 29e9f63 fix text ("turned back two nights ago")
+scenes/ch13-sc02.md|confrontation-at-stairwell-nine|1672588|rename|R100 at 1672588
+scenes/ch11-sc03.md|pulled-off-the-column|1672588|rename|R100 at 1672588
+scenes/new-elias-part1.md|twenty-two-years|1672588|rename|R100 at 1672588
+scenes/new-v2.md|governors-response|1672588|rename|R100 at 1672588; only the intro commit 5bf89eb (governor-012) predates the slug
+scenes/new-s3.md||0ab2499|content|cut (deleted at 0ab2499); no slug at HEAD. governor-005 uses scene "new-s3"
