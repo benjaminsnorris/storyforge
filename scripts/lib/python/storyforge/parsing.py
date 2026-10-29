@@ -139,6 +139,24 @@ _SENTENCE_ENDINGS = frozenset('.!?\u2019\u201d\u2014)\'"')
 _WORD_COUNT_COLLAPSE_THRESHOLD = 0.6  # reject if new < 60% of original
 
 
+def unsafe_scene_reason(content: str, old_text: str | None = None) -> str:
+    """Why ``content`` must not replace a scene file ('' when it may): it ends
+    mid-sentence (a truncated reply), or its word count collapsed below the
+    threshold against ``old_text``, the scene's current prose."""
+    stripped = content.rstrip()
+    if not stripped:
+        return 'the new text is empty'
+    if stripped[-1] not in _SENTENCE_ENDINGS:
+        return f'appears to end mid-sentence (last char: {stripped[-1]!r})'
+    if old_text is not None:
+        old_wc = len(old_text.split())
+        new_wc = len(content.split())
+        if old_wc > 100 and new_wc < old_wc * _WORD_COUNT_COLLAPSE_THRESHOLD:
+            return (f'word count collapsed {old_wc} -> {new_wc} ({new_wc / old_wc:.0%}). '
+                    f'Threshold is {_WORD_COUNT_COLLAPSE_THRESHOLD:.0%}.')
+    return ''
+
+
 def _write_scene(scene_id: str, lines: list[str], scene_dir: str, written: list[str]):
     """Write a scene's content to its file, with pre-write safety checks."""
     content = _trim_blank_lines('\n'.join(lines))
@@ -147,23 +165,14 @@ def _write_scene(scene_id: str, lines: list[str], scene_dir: str, written: list[
 
     path = os.path.join(scene_dir, f'{scene_id}.md')
 
-    # Safety: reject if content appears to end mid-sentence
-    last_char = content.rstrip()[-1] if content.rstrip() else ''
-    if last_char and last_char not in _SENTENCE_ENDINGS:
-        _log(f'WARNING: Skipping "{scene_id}" -- appears to end mid-sentence '
-             f'(last char: {last_char!r})')
-        return
-
-    # Safety: reject if word count collapsed >40% vs existing file
+    old_text = None
     if os.path.isfile(path):
         with open(path) as f:
-            old_wc = len(f.read().split())
-        new_wc = len(content.split())
-        if old_wc > 100 and new_wc < old_wc * _WORD_COUNT_COLLAPSE_THRESHOLD:
-            _log(f'WARNING: Skipping "{scene_id}" -- word count collapsed '
-                 f'{old_wc} -> {new_wc} ({new_wc / old_wc:.0%}). '
-                 f'Threshold is {_WORD_COUNT_COLLAPSE_THRESHOLD:.0%}.')
-            return
+            old_text = f.read()
+    reason = unsafe_scene_reason(content, old_text)
+    if reason:
+        _log(f'WARNING: Skipping "{scene_id}" -- {reason}')
+        return
 
     with open(path, 'w') as f:
         f.write(content)

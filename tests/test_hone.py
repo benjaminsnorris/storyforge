@@ -715,16 +715,44 @@ class TestAliasCollisions:
         assert _read_csv_as_map(os.path.join(ref_dir, 'values.csv'))['power']['aliases'] == 'control'
         assert 'alias "love" kept on love, removed from power' in capsys.readouterr().out
 
-    def test_otherwise_first_entry_keeps_it(self, project_dir):
-        from storyforge.hone import resolve_alias_collisions
+    def test_with_no_named_owner_the_alias_is_left_shared(self, project_dir):
+        """meridian-line 5433d3f: "Tonkawa guide" moved from Naseka to Thomas
+        because Thomas came first in the file. File order names no owner."""
+        from storyforge.hone import resolve_alias_collisions, find_alias_collisions
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._write_registry(ref_dir, 'thomas|Thomas|Tonkawa guide',
+                             'naseka|Naseka|Tonkawa guide')
+        assert resolve_alias_collisions('values', ref_dir) == 0
+        assert find_alias_collisions('values', ref_dir) == {'tonkawa guide': ['naseka', 'thomas']}
+
+    def test_normalization_does_not_route_through_a_shared_alias(self, project_dir):
+        from storyforge.hone import apply_registry_normalization
         from storyforge.elaborate import _read_csv_as_map
         ref_dir = os.path.join(project_dir, 'reference')
-        self._write_registry(ref_dir, 'love|Love|desire', 'lust|Lust|desire;want')
-        resolve_alias_collisions('values', ref_dir)
-        reg = _read_csv_as_map(os.path.join(ref_dir, 'values.csv'))
-        assert reg['love']['aliases'] == 'desire' and reg['lust']['aliases'] == 'want'
+        self._write_registry(ref_dir, 'thomas|Thomas|guide', 'naseka|Naseka|guide')
+        intent = os.path.join(ref_dir, 'scene-intent.csv')
+        rows = _read_csv_as_map(intent)
+        sid = next(iter(rows))
+        from storyforge.csv_cli import update_field
+        update_field(intent, sid, 'value_at_stake', 'guide')
+        apply_registry_normalization('values', ref_dir)
+        assert _read_csv_as_map(intent)[sid]['value_at_stake'] == 'guide'
 
-    def test_reconcile_resolves_collisions_without_a_call(self, project_dir, monkeypatch, tmp_path):
+    def test_a_mapping_never_takes_an_alias_from_its_owner(self, project_dir, capsys):
+        from storyforge.hone import apply_mapping, find_alias_collisions
+        from storyforge.elaborate import _read_csv_as_map
+        ref_dir = os.path.join(project_dir, 'reference')
+        self._write_registry(ref_dir, 'thomas|Thomas|', 'naseka|Naseka|Tonkawa guide')
+        batch = [{'key': 'tonkawa guide', 'text': 'Tonkawa guide', 'type': '', 'scenes': []}]
+        apply_mapping('values', ref_dir, batch, {1: ['thomas']}, [])
+        reg = _read_csv_as_map(os.path.join(ref_dir, 'values.csv'))
+        assert reg['naseka']['aliases'] == 'Tonkawa guide'
+        assert reg['thomas']['aliases'] == ''
+        assert find_alias_collisions('values', ref_dir) == {}
+        assert 'not adding it to thomas' in capsys.readouterr().out
+
+    def test_reconcile_leaves_unowned_collisions_and_reports_them(
+            self, project_dir, monkeypatch, tmp_path, capsys):
         from storyforge.hone import reconcile_domain, find_alias_collisions
         ref_dir = os.path.join(project_dir, 'reference')
         self._write_registry(ref_dir, 'truth|Truth|honesty', 'safety|Safety|honesty',
@@ -732,7 +760,8 @@ class TestAliasCollisions:
         calls = _mock_api(monkeypatch, [])
         reconcile_domain('values', ref_dir, 'test-model', str(tmp_path))
         assert calls == []
-        assert find_alias_collisions('values', ref_dir) == {}
+        assert find_alias_collisions('values', ref_dir) == {'honesty': ['safety', 'truth']}
+        assert 'still shared: honesty (safety, truth)' in capsys.readouterr().out
 
 
 class TestPhysicalStateCharacters:
