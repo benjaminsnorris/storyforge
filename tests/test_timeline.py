@@ -423,6 +423,35 @@ class TestChecks:
         rows = self._rows(('a', '1', 'scene', 'XXXX-12-30'), ('b', '3', 'scene', 'XXXX-01-02'))
         assert check_timeline(rows, {}) == []
 
+    def test_month_and_season_dates_are_checked_against_the_days(self):
+        """The Plastic Age: junior year opened in September on day 730, and
+        the prom "early in May" (XXXX-05) landed on day 840, about January.
+        Month-only and season dates were never compared, so nothing said so."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('tucker', '550', 'scene', 'XXXX-03'),
+                          ('prom', '840', 'scene', 'XXXX-05'))
+        found = check_timeline(rows, {})
+        assert [f['check'] for f in found] == ['date_mismatch']
+        assert 'May' in found[0]['message'] and 'March' in found[0]['message']
+
+    def test_a_season_the_days_contradict_is_found(self):
+        """F-070: "early spring" coded autumn (XXXX-23) 90 days after a
+        March scene."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('march', '550', 'scene', 'XXXX-03'),
+                          ('poker', '640', 'scene', 'XXXX-23~'))
+        assert [f['check'] for f in check_timeline(rows, {})] == ['date_mismatch']
+
+    def test_month_and_season_dates_years_apart_still_agree(self):
+        """With the year unstated a month recurs every year: October of the
+        second year and May of the fourth fit the days between them."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('a', '395', 'scene', 'XXXX-10'), ('b', '455', 'scene', 'XXXX-11'),
+                          ('c', '550', 'scene', 'XXXX-03'), ('d', '965', 'scene', 'XXXX-21'),
+                          ('e', '1335', 'scene', 'XXXX-05'),
+                          ('f', '1369', 'scene', 'XXXX-06-20~'))
+        assert check_timeline(rows, {}) == []
+
     def test_weekdays_far_apart_are_not_compared(self):
         """F-067 (The Plastic Age): a Thursday 884 days after a Saturday was
         flagged; over years the calendar is too rough for weekday math."""
