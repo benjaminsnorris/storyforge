@@ -1,0 +1,49 @@
+{
+ "request": {
+  "method": "POST",
+  "path": "messages",
+  "body": {
+   "model": "claude-opus-4-8",
+   "max_tokens": 1024,
+   "messages": [
+    {
+     "role": "user",
+     "content": "You are checking one scene of a novel for one specific continuity error.\n\nThe book had already established this, earlier or elsewhere:\n- (haddons-reckoning) \"Tam Erdel. Seven. Ground floor, same building.\"\n\nA past rewrite of this scene contradicted it. The error looked like this:\n- (acceptable-losses) \"An elderly woman, seventy-three. A child, nine.\"\n- (acceptable-losses) \"Tam Erdel. Nine years old.\"\n(Summary: Tam Erdel is seven in haddons-reckoning but nine in acceptable-losses.)\n\nHere is a NEW draft of the same scene:\n<scene>\nThe casualty report had been typed on the Gallery Authority's second-grade paper, the kind that took ink unevenly, and the two names sat near the bottom where a clerk had added them by hand after the body count came in.\n\nVoss read them with his coat still on. He had come up the private stair without stopping to hang it, and the wet wool pulled at his shoulders, and somewhere behind him a slow drip had started on the stone. He did not turn to find it. The lamp on the desk burned straight up, untroubled, the way it always did in this sealed room where no draft reached.\n\n*Sera Holdt's daughter, age four.* The clerk had written it small to fit.\n\nHe set the report flat and reached for the cause-of-failure entry, which Greaves's office had filled in with the usual timidity. *Junction infrastructure failure, origin undetermined.* That would not do. Undetermined invited inquiry, and inquiry was precisely the current that the Foundry's filing had already set running toward him. He uncapped his pen.\n\nThe amendment came easily, because he had the vocabulary for it, because he had spent fourteen years building the vocabulary for it. He wrote in his even hand, each word spaced as though ruled: *Compensatory redistribution from sealed eastern quadrant exceeding rated thermal and pressure tolerances at aging junction infrastructure.*\n\nHe read it back. Accurate. That was the thing people never understood about him, the thing the Foundry in its indignation would never grant: he did not lie in the record. The eastern network, cut again and again across two decades, now healing faster than the knife could work, had shunted its load west and south into pipe that was sixty years into a sixty-year life. The junction had failed under that load. A child had died. Every clause was true. The truth simply had to be read at the right distance, and from the right distance it carried the weight evenly, the way a long span carries a load no single beam could bear.\n\nHe drew a second sheet to him. The recommendation. This was the load-bearing document, the one that would travel to the Council and set the terms of what came next, and he wrote it without hesitation: *Thermal cycling beyond rated tolerances. Infrastructure aging consistent with 60-year service life. Recommend junction replacement program, southern Basin priority.*\n\nA replacement program. Capital. Contracts. The problem relocated into the comfortable future tense, where it could be funded and scheduled and never quite reached. Sarel Davan's petition was somewhere in the stack at his left elbow, pressed into the paper so hard the writing had bled through to the second page, and he moved it aside with one finger without reading it again.\n\nThen he made the error of looking back at the clerk's small hand. *Age four.*\n\nHe had, three winters ago, stood in the rim gardens during the lamp festival and watched a child that age refuse to let go of her mother's skirt, and he had thought, with the detachment he brought to everything, that this was what the whole apparatus was for. The vents. The pipe. The redistribution. The sealing of the east so that the west could have stable ground to build on, so that the block-fifteen foundations could go down into rezoned land and the city could grow, so that children of four could cling to skirts in lit gardens and grow old in a solvent city. Sixteen lives at Fenwick, the engineer had preserved. Sixteen. He had the number in front of him, in the next document waiting for his signature. Sixteen saved against one lost, and the one lost here, written small, and the arithmetic\u2014\n\nThe arithmetic would not hold.\n\nFor a moment it simply would not. He sat with the pen above the page and the two children stood in the same frame, the one clinging to the skirt in the lit garden and the one the clerk had reduced to *age four*, and he could not make them trade against each other, could not find the distance at which the loss read as acceptable, because at this distance it did not read as a figure at all. It read as a girl. His hand was not steady. The lamp held its straight flame and the drip from his coat found the floor again, once, and the sound of it was very loud.\n\nHe put the pen down flat on the blotter.\n\nHe did not pray and he did not weep. He sat in the airless room and let the vertigo run its course, because he had learned long ago that the only thing to do with it was wait, the way one waited out a pressure spike, hand on the valve, counting. The spike crested. It always crested. On the far side of it the frame reassembled itself, piece settling against piece, and the girl became a figure again, a loss, a cost entered against a larger ledger that he alone was positioned to read in full. Block fifteen. The western grade. The two hundred thousand. The eastern quadrant that healed faster than the cut, which meant the cuts had to continue, which meant Haddon's crew was already moving down Stairwell Nine toward the core with the order he had given off the record, and that order could not be unmade now without unmaking all of it, every clause back to the first winter. He had chosen the arithmetic once. To refuse it now was not mercy. It was only waste piled on waste.\n\nHe picked up the pen.\n\nHe signed the amended casualty report. He signed the replacement recommendation beneath his own correction, where the ruled hand ran straight across the clerk's cramped one. The pen rested a half-second at the end of his name and lifted, leaving a single round dot of ink.\n\nThe third document was the commendation. He had drafted it that afternoon, before the order to Haddon, and he read it over now in the same light by the same hand. *E. Vael, Senior Gallery Engineer. For exceptional technical response during the Fenwick Row South junction failure of Day 12. His decisive action preserved sixteen lives and contained a cascade that, unchecked, would have compromised the full residential block.*\n\nTrue, again. Every word. The man had been exceptional. The man had, by some stubborn competence, held the block together while the city's foundation came apart beneath it, and he deserved the commendation, and Voss would see that he received it, and the same crew that answered to the same chain of command was descending toward the thing the man had spent two years trying to make them read. Both were his signature. The same pen, the same ink, the same hand across all three sheets, and no instrument in the city could have told them apart.\n\nHe signed the commendation.\n\nHe squared the three documents against the edge of the blotter, turned them face down together, and set them in the dispatch tray for the morning runner. The whole sort took him under a minute, the way it always did, each page to its place.\n\nFrom the hem of his coat, a last drop gathered and fell to the stone, and spread, and stopped.\n\n</scene>\n\nDoes the new draft make the same error \u2014 does it assert something that contradicts what was established, in the way described? A draft that simply leaves the fact out does not make the error.\n\nAnswer with one JSON object and nothing else:\n{\"verdict\": \"reintroduced\" | \"consistent\" | \"not_present\", \"evidence\": \"<verbatim sentence from the new draft that decides it, or empty for not_present>\"}\n\n\"reintroduced\": the new draft contradicts the established fact.\n\"consistent\": the new draft states the fact and agrees with what was established.\n\"not_present\": the new draft does not touch the fact either way."
+    }
+   ]
+  }
+ },
+ "response": {
+  "model": "claude-opus-4-8",
+  "id": "msg_011CgVbQnrqUZY2ZrFrKjuMd",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"verdict\": \"not_present\", \"evidence\": \"\"}"
+   }
+  ],
+  "container": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+   "input_tokens": 2521,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 21,
+   "output_tokens_details": {
+    "thinking_tokens": 0
+   },
+   "service_tier": "standard",
+   "inference_geo": "global",
+   "speed": "standard"
+  },
+  "diagnostics": null
+ }
+}
