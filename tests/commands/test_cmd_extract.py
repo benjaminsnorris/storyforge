@@ -617,3 +617,46 @@ class TestMergeBatchResults:
 
         assert count == 1   # s2 added; s1 unchanged
         assert set(self._rows(csv_path)) == {'s1', 's2'}
+
+
+class TestRecordPhysicalStates:
+    """Phase 3c parsed the states a scene resolves but never wrote them to
+    the registry, so every state stayed resolves=never (F-057). On Pride and
+    Prejudice all 16 state-disappearance flags fell on the scene the model
+    had said resolves the state, and Elizabeth's Hunsford headache gated 69
+    later scenes."""
+
+    def _rows(self, path):
+        from storyforge.elaborate import _read_csv_as_map
+        return _read_csv_as_map(str(path))
+
+    def test_resolution_written_to_registry(self, tmp_path):
+        from storyforge.cmd_extract import _record_physical_states
+        phys = tmp_path / 'physical-states.csv'
+        _record_physical_states(str(phys), 'proposal', [
+            {'id': 'elizabeth-headache', 'character': 'elizabeth-bennet',
+             'description': 'a headache', 'category': 'fatigue',
+             'action_gating': 'true'}], [], {})
+        assert self._rows(phys)['elizabeth-headache']['resolves'] == 'never'
+        _record_physical_states(str(phys), 'arrival-in-london', [], ['elizabeth-headache'], {})
+        row = self._rows(phys)['elizabeth-headache']
+        assert row['acquired'] == 'proposal'
+        assert row['resolves'] == 'arrival-in-london'
+
+    def test_state_resolved_in_scene_that_acquires_it(self, tmp_path):
+        from storyforge.cmd_extract import _record_physical_states
+        phys = tmp_path / 'physical-states.csv'
+        _record_physical_states(str(phys), 'lambton-news',
+                                [{'id': 'trembling', 'character': 'elizabeth-bennet'}],
+                                ['trembling'], {})
+        assert self._rows(phys)['trembling']['resolves'] == 'lambton-news'
+
+    def test_first_resolution_kept_and_unknown_ignored(self, tmp_path):
+        from storyforge.cmd_extract import _record_physical_states
+        phys = tmp_path / 'physical-states.csv'
+        _record_physical_states(str(phys), 'a', [{'id': 'cough', 'character': 'kitty'}], [], {})
+        _record_physical_states(str(phys), 'b', [], ['cough', 'not-a-state'], {})
+        _record_physical_states(str(phys), 'c', [], ['cough'], {})
+        rows = self._rows(phys)
+        assert rows['cough']['resolves'] == 'b'
+        assert 'not-a-state' not in rows
