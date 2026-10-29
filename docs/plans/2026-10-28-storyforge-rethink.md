@@ -156,6 +156,25 @@ The real corpus is heavy on TIM (counts, durations, day math) and TRT (names, pr
 - Success: E2 recall improves over baseline; zero silent failures in a full run, including regression tests for the survey's three silent-failure cases (a pass that changes nothing cannot report complete; a pass cannot overwrite a reference doc; an alias cannot move between characters without a ledger supersede).
 - Rebuild: `extract.py`, parser consumers in `prompts.py`. Delete: obsolete parsers.
 
+#### Model selection: no pinned versions (Ben, 2026-10-28)
+
+Code names a tier (`opus`, `sonnet`, `haiku`), never a version. Today three tables pin versions (`common.LATEST_MODELS`, `costs.PRICING_VERIFIED_FOR`, and `api.MODEL_MAX_OUTPUT` through the first), at `claude-opus-4-8` / `claude-sonnet-4-6` / `claude-haiku-4-5-20251001`, two generations behind. The API has no floating family alias, so:
+
+- Resolve each tier to the newest model in that family through the Models API (`GET /v1/models`), once per run, and read `max_tokens` from the same response instead of `MODEL_MAX_OUTPUT`. `STORYFORGE_MODEL` stays as an override.
+- Recordings store the resolved id; replay resolves from the recording, so a new release never turns a replay into a miss. Re-recording a suite is what picks up a new model, and the eval delta is what says whether to keep it.
+- Pricing becomes per resolved model, not per tier (Haiku 5.5 is a tenth of Haiku 4.5's price). A model with no known price is reported in the cost estimate, never priced at a guess.
+- Request shape for the current models: no `temperature` (`timeline.py:657` sends 0; the current Opus and Sonnet reject sampling parameters), no thinking-disable or `budget_tokens`, `effort` set explicitly (Opus 5.5 defaults to `medium`).
+
+A cheaper tier is used only where an eval shows it holds quality. Starting assignments, each to be measured, not assumed:
+
+| Work | Today | Proposed | Measured by |
+|---|---|---|---|
+| Fact work: extraction, continuity, timeline, fact-check | haiku / sonnet | opus, high effort | E3 recall, E2 recall/precision; try sonnet and haiku on the same cases and keep the cheapest that matches opus |
+| Drafting, revision, synthesis, creative | opus | opus | E4, E8 |
+| Evaluation, review, mechanical | sonnet | sonnet | E7 noise; opus only if it cuts noise materially |
+
+Cost check before switching fact work to opus: E3 live is $2.50 on today's mix, so the three-tier comparison on E3 is a few dollars; the real cost is extraction on a full book, estimated per run by `costs.estimate_cost` and reported to Ben with the eval result.
+
 #### Phase 1 bug checklist (survey bugs, checked against v1.71.0 on 2026-10-28)
 
 Each needs a fix and a regression test. Line numbers are as of v1.71.0.
