@@ -46,6 +46,16 @@ def max_output_tokens(model: str) -> int:
     return _DEFAULT_MAX_OUTPUT
 
 
+def max_input_tokens(model: str) -> int:
+    """The model's context window in tokens, from the Models API catalog;
+    200k for a model the catalog does not list."""
+    from storyforge.common import model_catalog
+    for m in model_catalog():
+        if m.get('id') == model and m.get('max_input_tokens'):
+            return int(m['max_input_tokens'])
+    return 200_000
+
+
 def request_max_tokens(model: str, answer_tokens: int) -> int:
     """The max_tokens to send: the answer budget plus THINKING_ALLOWANCE,
     capped at the model's limit."""
