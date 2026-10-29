@@ -284,13 +284,14 @@ def find_alias_collisions(domain: str, ref_dir: str) -> dict[str, list[str]]:
 
 
 def resolve_alias_collisions(domain: str, ref_dir: str) -> int:
-    """Give each shared alias to one entry, deterministically.
+    """Give a shared alias to the entry whose id or name equals it.
 
-    The alias stays with the entry whose id or name equals it, otherwise with
-    the first entry listing it, and is removed from the others' aliases. Each
-    move is logged. A clash between two ids or names can't be fixed by moving
-    aliases and is left for :func:`find_alias_collisions` to report. Returns
-    the number of aliases removed.
+    The alias is removed from the other entries' aliases, and each move is
+    logged. When no entry is named by it, nothing in the registry says which
+    entry owns it (file order does not: meridian-line's "Tonkawa guide" moved
+    from Naseka to Thomas that way), so it is left shared for the author;
+    :func:`_report_remaining` reports it and normalization does not route
+    references through it. Returns the number of aliases removed.
     """
     collisions = find_alias_collisions(domain, ref_dir)
     if not collisions:
@@ -299,9 +300,11 @@ def resolve_alias_collisions(domain: str, ref_dir: str) -> int:
     removed = 0
     for alias, _ids in collisions.items():
         named = [r for r in rows if alias in (r.get('id', '').lower(), r.get('name', '').strip().lower())]
+        if len(named) != 1:
+            continue
+        owner = named[0]
         listing = [r for r in rows if alias in
                    (a.strip().lower() for a in (r.get('aliases') or '').split(';'))]
-        owner = (named or listing)[0]
         for row in listing:
             if row is owner:
                 continue
@@ -378,6 +381,10 @@ def apply_registry_normalization(
     else:
         alias_map = _registry_lookup(domain, ref_dir)
         type_map = None
+        # A shared alias names no single entry: never normalize through it
+        if domain != 'physical-states':
+            for alias in find_alias_collisions(domain, ref_dir):
+                alias_map.pop(alias, None)
 
     if not alias_map and domain not in _PLACEHOLDER_DOMAINS:
         return 0
@@ -706,6 +713,13 @@ def apply_mapping(domain: str, ref_dir: str, batch: list[dict],
                 continue
             existing = {a.strip().lower() for a in (row.get('aliases') or '').split(';')}
             if text.lower() in existing | {row['id'].lower(), row.get('name', '').lower()}:
+                continue
+            # Never take an alias another entry already holds
+            if any(text.lower() in {o['id'].lower(), o.get('name', '').strip().lower()}
+                   | {a.strip().lower() for a in (o.get('aliases') or '').split(';')}
+                   for o in registry if o is not row and o.get('id')):
+                log(f'  {domain}: "{text}" is already another entry\'s name or alias; '
+                    f'not adding it to {row["id"]}')
                 continue
             row['aliases'] = ';'.join(a for a in [row.get('aliases', ''), text] if a)
 
