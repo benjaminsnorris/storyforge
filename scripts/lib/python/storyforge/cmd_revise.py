@@ -1709,17 +1709,27 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
                        timeout=REVISION_TIMEOUT,
                        system=system or None, fallback=True)
     except Exception as e:
-        log(f'  API call failed: {e}')
-        return
+        log(f'ERROR: Polish pass \'{pass_name}\' failed: {e}. The pass is not marked completed.')
+        sys.exit(1)
 
-    # Extract scenes from response
+    # Extract scenes from response. This once passed --project-dir/--log-file
+    # flags extract-scenes does not take, so nothing was ever written and the
+    # pass was still marked completed.
     log(f'  Extracting revised scenes...')
-    parsing_module = os.path.join(plugin_dir, 'scripts', 'lib', 'python', 'storyforge', 'parsing.py')
-    subprocess.run(
-        [sys.executable, parsing_module, 'extract-scenes',
-         '--project-dir', project_dir, '--log-file', step_log],
+    python_lib = os.path.join(plugin_dir, 'scripts', 'lib', 'python')
+    result = subprocess.run(
+        [sys.executable, '-m', 'storyforge.parsing', 'extract-scenes',
+         step_log, os.path.join(project_dir, 'scenes')],
         capture_output=True, text=True,
+        env={**os.environ, 'PYTHONPATH': python_lib},
     )
+    if result.returncode != 0:
+        log(f'ERROR: Could not extract scenes from polish pass \'{pass_name}\': '
+            f'{result.stderr.strip()[:500]}')
+        log(f'The pass is not marked completed. See {step_log}')
+        sys.exit(1)
+    for line in result.stdout.strip().splitlines():
+        log(f'  {line}')
 
     # Update word counts
     _update_word_counts_from_dir(project_dir)

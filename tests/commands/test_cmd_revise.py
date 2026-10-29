@@ -972,3 +972,68 @@ class TestApplyUpstreamBlocks:
         update_field(scenes_csv, 'act2-sc01', 'seq', '3')  # duplicates new-x1
         reply = '```scenes-csv\nid|seq|title\nact1-sc01|1|New Title\n```'
         assert _apply_upstream_blocks(project_dir, reply)[1] == {'act1-sc01'}
+
+
+class TestPolishLoopPass:
+    """H3: the polish loop called extract-scenes with flags it does not take,
+    so its reply was never written and the pass was still marked completed."""
+
+    def _run(self, project_dir, monkeypatch, reply_text, plan_dir=None):
+        import json
+        import subprocess as sp
+        from storyforge import cmd_revise
+        real_run = sp.run
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            if 'build-prompt' in [str(c) for c in cmd]:
+                return sp.CompletedProcess(cmd, 0, stdout='Prompt text', stderr='')
+            if "extract-scenes" in [str(c) for c in cmd]:
+                return real_run(cmd, **kwargs)  # the real one
+            raise AssertionError(f"unexpected subprocess: {cmd}")
+
+        def fake_invoke(prompt, model, log_file, max_tokens=4096, label='', timeout=600,
+                        system=None, output_schema=None, fallback=False):
+            calls.append(fallback)
+            response = {'content': [{'type': 'text', 'text': reply_text}],
+                        'stop_reason': 'end_turn', 'usage': {}}
+            os.makedirs(os.path.dirname(log_file), exist_ok=True)
+            with open(log_file, 'w') as f:
+                json.dump(response, f)
+            return response
+
+        monkeypatch.setattr('subprocess.run', fake_run)
+        monkeypatch.setattr('storyforge.api.invoke_to_file', fake_invoke)
+        monkeypatch.setattr('storyforge.common.build_shared_context', lambda *a, **k: [])
+        monkeypatch.setattr('storyforge.common.select_revision_model', lambda *a, **k: 'm')
+        monkeypatch.setattr('storyforge.cmd_revise.max_output_tokens', lambda m: 1000)
+        monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+        commits = []
+        monkeypatch.setattr('storyforge.git.commit_and_push',
+                            lambda d, msg, paths: commits.append(msg))
+        # scripts/lib/python/storyforge/cmd_revise.py -> the plugin root
+        plugin_dir = os.path.abspath(os.path.join(
+            os.path.dirname(cmd_revise.__file__), '..', '..', '..', '..'))
+        monkeypatch.setattr('storyforge.cmd_revise.get_plugin_dir', lambda: plugin_dir)
+        rows = _make_plan_rows()
+        plan_file = _write_plan(project_dir, rows)
+        cmd_revise._execute_single_pass(project_dir, plan_file, rows, 1)
+        return rows, commits, calls
+
+    def test_reply_is_written_and_opts_into_the_fallback(self, project_dir, monkeypatch):
+        prose = 'The rain kept on. ' * 50
+        rows, commits, calls = self._run(
+            project_dir, monkeypatch,
+            f'=== SCENE: act1-sc01 ===\n{prose}\n=== END SCENE: act1-sc01 ===')
+        with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md')) as f:
+            assert f.read().strip() == prose.strip()
+        assert rows[0]['status'] == 'completed' and commits
+        assert calls == [True]
+
+    def test_failed_extraction_is_not_marked_completed(self, project_dir, monkeypatch):
+        with pytest.raises(SystemExit) as exc:
+            self._run(project_dir, monkeypatch, '')
+        assert exc.value.code == 1
+        rows = _read_csv_plan(os.path.join(project_dir, 'working', 'plans',
+                                           'revision-plan.csv'))
+        assert rows[0]['status'] == 'in_progress'
