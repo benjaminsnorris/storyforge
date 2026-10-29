@@ -1,0 +1,2107 @@
+{
+  "repo": "thornwall",
+  "cases": [
+    {
+      "id": "thornwall-001",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Garrens-ledger: the complement held at five, Bren arrived, and the ledger says \"Still five\" instead of six.",
+      "established": [
+        {
+          "scene": "garrens-ledger",
+          "path": "scenes/s09-garrens-watch.md",
+          "commit": "71b8181",
+          "quote": "Four years ago: 74%. Complement held at five."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "garrens-ledger",
+          "path": "scenes/s09-garrens-watch.md",
+          "commit": "71b8181",
+          "quote": "Bren arrived — bright, nervous, hadn't yet learned what the cost looked like up close. Still five."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "36fe27a",
+        "after": [
+          {
+            "scene": "garrens-ledger",
+            "path": "scenes/s09-garrens-watch.md",
+            "commit": "36fe27a",
+            "quote": "hadn't yet learned what the cost looked like up close. Six."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-002"
+      ],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "ee7aa42"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "56abeb1:working/author-review.yaml: tweak-02 \"Still five.\"",
+      "confidence": "high",
+      "notes": "The fix left \"Complement: five. Net change: minus one.\" in place; see the residual case."
+    },
+    {
+      "id": "thornwall-002",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "After the \"Still five\" fix the ledger runs five, Bren in (six), Dreya out (five), yet still reports \"Net change: minus one\".",
+      "established": [
+        {
+          "scene": "garrens-ledger",
+          "path": "scenes/garrens-ledger.md",
+          "commit": "e058986",
+          "quote": "Four years ago: 74%. Complement held at five."
+        },
+        {
+          "scene": "garrens-ledger",
+          "path": "scenes/garrens-ledger.md",
+          "commit": "e058986",
+          "quote": "hadn't yet learned what the cost looked like up close. Six. But Holder Dreya had been declining for a year"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "garrens-ledger",
+          "path": "scenes/garrens-ledger.md",
+          "commit": "e058986",
+          "quote": "Complement: five. Net change: minus one."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "97cbd27",
+        "after": [],
+        "rewrite": true
+      },
+      "related_cases": [
+        "thornwall-001"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "quick-fixes",
+        "commit": "36fe27a"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "36fe27a changed \"Still five\" to \"Six\" and \"five, then four\" to \"five\" but kept \"Net change: minus one\", which had been right for the old numbers. Lived Mar 8 - Apr 7; the whole complement history left in the storyforge-write redraft 97cbd27. Not labeled by anyone; survey residual #32."
+    },
+    {
+      "id": "thornwall-003",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "REL",
+      "secondary_codes": [
+        "VOI"
+      ],
+      "summary": "Sera sets a first-names rule at the dawn session, then says \"Good night, Warden\" in evening-visit with no beat marking a retreat to formality.",
+      "established": [
+        {
+          "scene": "dawn-courtyard",
+          "path": "scenes/s05-unsanctioned.md",
+          "commit": "36fe27a",
+          "quote": "I'd rather we use names."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "evening-visit",
+          "path": "scenes/s11-the-truth-she-brought.md",
+          "commit": "36fe27a",
+          "quote": "\"Good night, Warden.\""
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "aba3ca8",
+        "after": [
+          {
+            "scene": "evening-visit",
+            "path": "scenes/s11-the-truth-she-brought.md",
+            "commit": "aba3ca8",
+            "quote": "\"Good night, Kael.\""
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "9241784"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "56abeb1:working/author-review.yaml: tweak-03 \"Good night, Warden.\"",
+      "confidence": "medium",
+      "notes": "The author allowed it could be a deliberate retreat to formality, so medium."
+    },
+    {
+      "id": "thornwall-004",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [
+        "TIM"
+      ],
+      "summary": "Kael's voice \"quieted panicking villagers\", but he has not left the Hold in twenty-three years.",
+      "established": [
+        {
+          "scene": "descent",
+          "path": "scenes/s29-the-departure.md",
+          "commit": "05c216f",
+          "quote": "Kael had climbed this road once, twenty-three years ago, a young man with an unshaved head and a flame so bright it burned without knowing it could be consumed. He had not descended it since."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "four-at-table",
+          "path": "scenes/s02-the-letter.md",
+          "commit": "05c216f",
+          "quote": "the voice that settled rooms, that steadied frightened Holders and quieted panicking villagers."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "2fedfaa",
+        "after": [
+          {
+            "scene": "four-at-table",
+            "path": "scenes/s02-the-letter.md",
+            "commit": "2fedfaa",
+            "quote": "\"We do what we've always done,\" Kael said. \"We hold. If someone from the capital wants to watch us do it, we let them watch.\""
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "6863e4c"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "56abeb1:working/author-review.yaml: question-18 (with tweak-01)",
+      "confidence": "high",
+      "notes": "Resolved by cutting the clause."
+    },
+    {
+      "id": "thornwall-005",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Hessal is \"he\" in different-stars but \"a woman named Hessal\" in the torch scene.",
+      "established": [
+        {
+          "scene": "parapet",
+          "path": "scenes/s28-the-torch.md",
+          "commit": "ccb2a04",
+          "quote": "a woman named Hessal, quiet, steady, she'd served seventeen years"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "different-stars",
+          "path": "scenes/s07-the-stars.md",
+          "commit": "ccb2a04",
+          "quote": "My Warden — Hessal — he told me this on my third day."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "9c24f36",
+        "after": [
+          {
+            "scene": "different-stars",
+            "path": "scenes/s07-the-stars.md",
+            "commit": "9c24f36",
+            "quote": "My Warden — Hessal — she told me this on my third day."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "stakes-and-history",
+        "commit": "2fedfaa"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "9c24f36 commit body: \"s07: Hessal pronoun he → she\"",
+      "confidence": "high",
+      "notes": "Separate from the Hessal retcon (tenure/burnout timing, key-decisions.md, Mar 9), which is not an error. s28 text moved to parapet at 0c3fd1f, which was cut and archived (scenes/archive/parapet.md). 10267cd (structural-scene-changes) later wrote \"He had seventeen years\" for Hessal in parapet, in the commit that also marked it cut, so that regression never reached a live scene and is not labeled."
+    },
+    {
+      "id": "thornwall-006",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Ves \"served sixteen years, longer than anyone except Torren\", but Hessal served seventeen and Kael twenty-three.",
+      "established": [
+        {
+          "scene": "parapet",
+          "path": "scenes/s28-the-torch.md",
+          "commit": "ccb2a04",
+          "quote": "a woman named Hessal, quiet, steady, she'd served seventeen years"
+        },
+        {
+          "scene": "descent",
+          "path": "scenes/s29-the-departure.md",
+          "commit": "ccb2a04",
+          "quote": "Kael had climbed this road once, twenty-three years ago"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "evidence-room",
+          "path": "scenes/s12-three-patterns.md",
+          "commit": "ccb2a04",
+          "quote": "Ves had served sixteen years, longer than anyone except Torren."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "9c24f36",
+        "after": [
+          {
+            "scene": "evidence-room",
+            "path": "scenes/s12-three-patterns.md",
+            "commit": "9c24f36",
+            "quote": "Ves had served sixteen years."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "720c13e"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "fb1fe11:working/plans/revision-plan-3.yaml: pass hessal-and-personnel-timeline: s12 \"Drop longer than anyone except Torren\"",
+      "confidence": "medium",
+      "notes": "Medium: \"anyone\" could be read as \"anyone serving when Ves left\". reference/personnel-timeline.md names the phrasing as known-bad."
+    },
+    {
+      "id": "thornwall-007",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Through says Kael searched for anger \"weeks ago\" after Sera showed him the supply records; that was the previous evening, and Sera had been at Thornwall under a week.",
+      "established": [
+        {
+          "scene": "evening-visit",
+          "path": "scenes/s11-the-truth-she-brought.md",
+          "commit": "ccb2a04",
+          "quote": "She came to him in the evening, after the meal."
+        },
+        {
+          "scene": "evening-visit",
+          "path": "scenes/s11-the-truth-she-brought.md",
+          "commit": "ccb2a04",
+          "quote": "He searched for anger."
+        },
+        {
+          "scene": "undefended-flame",
+          "path": "scenes/s18-what-she-saw.md",
+          "commit": "ccb2a04",
+          "quote": "Several more here over the past six days"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "through",
+          "path": "scenes/s17-through.md",
+          "commit": "ccb2a04",
+          "quote": "He had searched for anger weeks ago, after Sera showed him the supply records"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "9c24f36",
+        "after": [
+          {
+            "scene": "through",
+            "path": "scenes/s17-through.md",
+            "commit": "9c24f36",
+            "quote": "He had searched for anger last night, after Sera showed him the supply records"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "ca94700"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "fb1fe11:working/plans/revision-plan-3.yaml: pass hessal-and-personnel-timeline: s17 \"searched for anger weeks ago\"",
+      "confidence": "high",
+      "notes": ""
+    },
+    {
+      "id": "thornwall-008",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Sera says she believed the academy \"for nine years\" and \"had spent nine years measuring Holders\"; elsewhere she has fourteen years in the field and twenty of training and field work.",
+      "established": [
+        {
+          "scene": "road-to-thornwall",
+          "path": "scenes/s03-the-road.md",
+          "commit": "ccb2a04",
+          "quote": "Fourteen years in, and the record had only sharpened."
+        },
+        {
+          "scene": "undefended-flame",
+          "path": "scenes/s18-what-she-saw.md",
+          "commit": "ccb2a04",
+          "quote": "Nothing in twenty years of training and field work"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "two-cups",
+          "path": "scenes/s20b-evening-light.md",
+          "commit": "ccb2a04",
+          "quote": "\"I believed them. For nine years, I believed them.\""
+        },
+        {
+          "scene": "two-cups",
+          "path": "scenes/s20b-evening-light.md",
+          "commit": "ccb2a04",
+          "quote": "She had spent nine years measuring Holders."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "9c24f36",
+        "after": [
+          {
+            "scene": "two-cups",
+            "path": "scenes/s20b-evening-light.md",
+            "commit": "9c24f36",
+            "quote": "For fifteen years, I believed them."
+          },
+          {
+            "scene": "two-cups",
+            "path": "scenes/s20b-evening-light.md",
+            "commit": "9c24f36",
+            "quote": "She had spent fifteen years measuring Holders."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-031"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "healing-period-texture",
+        "commit": "efef1c7"
+      },
+      "regressed_by": [
+        "aa8e066"
+      ],
+      "subsets": [
+        "author-labeled",
+        "tool-introduced"
+      ],
+      "label_source": "fb1fe11:working/plans/revision-plan-3.yaml: pass hessal-and-personnel-timeline: s20b \"Both instances of nine years\"",
+      "confidence": "high",
+      "notes": "efef1c7 ran on Mar 8, the day after the author flagged Sera's year counts (tweak-04/05) and aba3ca8 anchored them with \"Fourteen years in\". A revision pass broke the fact that had just been locked. The career-length conflict came back in open-gate (aa8e066); see thornwall-031."
+    },
+    {
+      "id": "thornwall-009",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Ivra's knees carry \"six years of service\", but she served at Garren's Watch before her six years at Thornwall.",
+      "established": [
+        {
+          "scene": "ivra-at-the-fissure",
+          "path": "scenes/s21-ivras-fire.md",
+          "commit": "ccb2a04",
+          "quote": "the clear, precise script she had used for fourteen years of supply ledgers and six years of Thornwall's logs"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "ivra-at-the-fissure",
+          "path": "scenes/s21-ivras-fire.md",
+          "commit": "ccb2a04",
+          "quote": "Her knees protested — six years of service in every joint."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "9c24f36",
+        "after": [
+          {
+            "scene": "ivra-at-the-fissure",
+            "path": "scenes/s21-ivras-fire.md",
+            "commit": "9c24f36",
+            "quote": "Her knees protested — eleven years of service in every joint."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "b079620"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "fb1fe11:working/plans/revision-plan-3.yaml: pass hessal-and-personnel-timeline: s21 \"six years of service in every joint\"",
+      "confidence": "medium",
+      "notes": "The establishing line is in the same scene; the Garren's Watch tenure is otherwise only in personnel-timeline.md."
+    },
+    {
+      "id": "thornwall-010",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "The chamber \"was not built for nine people\", but the procession just listed is ten.",
+      "established": [
+        {
+          "scene": "crowded-chamber",
+          "path": "scenes/s24-the-writ.md",
+          "commit": "ccb2a04",
+          "quote": "Kael led them down — Thessan, four of her officers, the rest left above to guard the gate. Sera walked beside Thessan. Bren and Ivra and Torren followed on the stairs behind the officers"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "crowded-chamber",
+          "path": "scenes/s24-the-writ.md",
+          "commit": "ccb2a04",
+          "quote": "The chamber was not built for nine people."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "9c24f36",
+        "after": [
+          {
+            "scene": "crowded-chamber",
+            "path": "scenes/s24-the-writ.md",
+            "commit": "9c24f36",
+            "quote": "The chamber was not built for ten people."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "31b2474"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "fb1fe11:working/plans/revision-plan-3.yaml: pass hessal-and-personnel-timeline: s24 \"not built for nine → ten (four officers)\"",
+      "confidence": "high",
+      "notes": "The fix also added beats for the third and fourth officers."
+    },
+    {
+      "id": "thornwall-011",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Thessan says \"Vellen will call it treason\"; the director is Corvin, whose sigil she broke a few lines earlier.",
+      "established": [
+        {
+          "scene": "thessans-morning",
+          "path": "scenes/s24-the-writ.md",
+          "commit": "ccb2a04",
+          "quote": "sealed with Director Corvin's sigil"
+        },
+        {
+          "scene": "four-at-table",
+          "path": "scenes/s02-the-letter.md",
+          "commit": "ccb2a04",
+          "quote": "*Director Corvin*"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "thessans-morning",
+          "path": "scenes/s24-the-writ.md",
+          "commit": "ccb2a04",
+          "quote": "\"Vellen will call it treason."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "9c24f36",
+        "after": [
+          {
+            "scene": "thessans-morning",
+            "path": "scenes/s24-the-writ.md",
+            "commit": "9c24f36",
+            "quote": "\"Corvin will call it treason."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "earn-thessan",
+        "commit": "ce9eeed"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled",
+        "tool-introduced"
+      ],
+      "label_source": "fb1fe11:working/plans/revision-plan-3.yaml: pass hessal-and-personnel-timeline: s24 \"Vellen → establish or change to Corvin\"",
+      "confidence": "high",
+      "notes": "Survived the 93dfede continuity audit, whose body says \"Corvin letter / decommission order / Thessan dialogue fully consistent\". b03f901 fixed the same name in continuity-tracker.md."
+    },
+    {
+      "id": "thornwall-012",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Rain-on-stone says \"Five days of sessions\" while the same scene puts Kael's first opening fourteen days ago.",
+      "established": [
+        {
+          "scene": "fissure-closes",
+          "path": "scenes/s26-rain-on-stone.md",
+          "commit": "ccb2a04",
+          "quote": "When Kael had first opened — fourteen days ago"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "fissure-closes",
+          "path": "scenes/s26-rain-on-stone.md",
+          "commit": "ccb2a04",
+          "quote": "Five days of sessions had taught her what the fissure sounded like when it was healing."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "9c24f36",
+        "after": [
+          {
+            "scene": "fissure-closes",
+            "path": "scenes/s26-rain-on-stone.md",
+            "commit": "9c24f36",
+            "quote": "Thirteen days of sessions had taught her what the fissure sounded like when it was healing."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "3aa9ec0"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "fb1fe11:working/plans/revision-plan-3.yaml: pass hessal-and-personnel-timeline: s26 \"Five days of sessions → ~13 days\"",
+      "confidence": "high",
+      "notes": "Present since the first draft; four audits missed it."
+    },
+    {
+      "id": "thornwall-013",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Kael and Bren share \"twenty-five days of mentorship\"; Bren arrived three years ago.",
+      "established": [
+        {
+          "scene": "garrens-ledger",
+          "path": "scenes/s09-garrens-watch.md",
+          "commit": "ccb2a04",
+          "quote": "Three years ago: 71%. Bren arrived"
+        },
+        {
+          "scene": "decision-between-them",
+          "path": "scenes/s28-the-torch.md",
+          "commit": "ccb2a04",
+          "quote": "Bren had walked these corridors a thousand times in three years."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "departure",
+          "path": "scenes/s29-the-departure.md",
+          "commit": "ccb2a04",
+          "quote": "twenty-five days of mentorship compressed into a look."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "9c24f36",
+        "after": [
+          {
+            "scene": "departure",
+            "path": "scenes/s29-the-departure.md",
+            "commit": "9c24f36",
+            "quote": "three years of mentorship compressed into a look."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "part-four-expansion",
+        "commit": "112fd01"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled",
+        "tool-introduced"
+      ],
+      "label_source": "fb1fe11:working/plans/revision-plan-3.yaml: pass hessal-and-personnel-timeline: s29 \"Twenty-five days of mentorship → three years\"",
+      "confidence": "high",
+      "notes": "Story-days (the action spans about 25 days) confused with the length of the relationship."
+    },
+    {
+      "id": "thornwall-014",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "WLD",
+      "secondary_codes": [],
+      "summary": "Sera's letter to all Holders lists \"the compression\" as the taught technique; compression is Kael's own unsanctioned method.",
+      "established": [
+        {
+          "scene": "wick",
+          "path": "scenes/s01-morning-hold.md",
+          "commit": "ccb2a04",
+          "quote": "not taught, not sanctioned, arrived at through two decades of kneeling at this crack in the world."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "weight-of-burning",
+          "path": "scenes/s30-the-fire.md",
+          "commit": "ccb2a04",
+          "quote": "*You were taught a technique. The wall, the compression, the resistance."
+        },
+        {
+          "scene": "weight-of-burning",
+          "path": "scenes/s30-the-fire.md",
+          "commit": "ccb2a04",
+          "quote": "The compression lets you survive it."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "9c24f36",
+        "after": [
+          {
+            "scene": "weight-of-burning",
+            "path": "scenes/s30-the-fire.md",
+            "commit": "9c24f36",
+            "quote": "*You were taught a technique. The wall, the resistance, the containment."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-015"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "part-four-expansion",
+        "commit": "112fd01"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled",
+        "tool-introduced"
+      ],
+      "label_source": "fb1fe11:working/plans/revision-plan-3.yaml: pass hessal-and-personnel-timeline: s30 \"The compression lets you survive it\"",
+      "confidence": "high",
+      "notes": ""
+    },
+    {
+      "id": "thornwall-015",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "WLD",
+      "secondary_codes": [],
+      "summary": "New-technique gives Bren \"three years of compression\" and has the Accord drill compression into him; compression is Kael's own unsanctioned method.",
+      "established": [
+        {
+          "scene": "wick",
+          "path": "scenes/wick.md",
+          "commit": "1d4d4df",
+          "quote": "not taught, not sanctioned, arrived at through two decades of kneeling at this crack in the world."
+        },
+        {
+          "scene": "before-dawn-below",
+          "path": "scenes/before-dawn-below.md",
+          "commit": "1d4d4df",
+          "quote": "The compression technique he'd developed over years — not the Accord's wall, never the wall anymore, but the quieter method he had no name for."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "new-technique",
+          "path": "scenes/new-technique.md",
+          "commit": "1d4d4df",
+          "quote": "Three years of compression against Kael's lifetime of it."
+        },
+        {
+          "scene": "new-technique",
+          "path": "scenes/new-technique.md",
+          "commit": "1d4d4df",
+          "quote": "Something that had nothing to do with walls or compression or the five-step sequence the Accord had drilled into him since the day he arrived."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "9b1f507",
+        "after": [],
+        "rewrite": true
+      },
+      "related_cases": [
+        "thornwall-014"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "pattern-thinning",
+        "commit": "ea71b4e"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "9c24f36 named \"Compression technique incorrectly attributed to others\" as a target and fixed s30, but missed this line in s20 (present in its own parent tree ccb2a04). Removed silently in the scene-architecture rewrite 9b1f507. Introducing commit is for the first span; survey #34."
+    },
+    {
+      "id": "thornwall-016",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "REL",
+      "secondary_codes": [],
+      "summary": "Seven days after the kiss the couple's bedrolls are \"on opposite sides of the fire\", while the same scene says the distance between them is \"no distance at all\".",
+      "established": [
+        {
+          "scene": "parapet-after-torren",
+          "path": "scenes/s25b-the-answer.md",
+          "commit": "9c24f36",
+          "quote": "What survived was the warmth of her mouth against his"
+        },
+        {
+          "scene": "weight-of-burning",
+          "path": "scenes/s30-the-fire.md",
+          "commit": "9c24f36",
+          "quote": "Now the distance was measured in the space between her shoulder and his arm, which was no distance at all."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "weight-of-burning",
+          "path": "scenes/s30-the-fire.md",
+          "commit": "9c24f36",
+          "quote": "Their bedrolls spread on opposite sides of the fire with the easy distance of two people who did not need to negotiate proximity."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "d89578e",
+        "after": [
+          {
+            "scene": "weight-of-burning",
+            "path": "scenes/s30-the-fire.md",
+            "commit": "d89578e",
+            "quote": "Their bedrolls spread side by side near the fire, close enough that the edges overlapped"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "87fb209"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "fb1fe11:working/plans/revision-plan-3.yaml: pass romance-arc-calibration \"Bedrolls on opposite sides of fire\"",
+      "confidence": "high",
+      "notes": "Drafted before the kiss existed in its later form; the contradiction appeared once s25b had the kiss."
+    },
+    {
+      "id": "thornwall-017",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Undefended-flame: Sera observed sessions \"at seven Holds\", then \"Eleven sessions at six other Holds\" in the same paragraph.",
+      "established": [
+        {
+          "scene": "undefended-flame",
+          "path": "scenes/s18-what-she-saw.md",
+          "commit": "d876b90",
+          "quote": "Eleven sessions at six other Holds before Thornwall."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "undefended-flame",
+          "path": "scenes/s18-what-she-saw.md",
+          "commit": "d876b90",
+          "quote": "She had observed Holding sessions at seven Holds across the network."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "fced67a",
+        "after": [
+          {
+            "scene": "undefended-flame",
+            "path": "scenes/s18-what-she-saw.md",
+            "commit": "fced67a",
+            "quote": "She had observed Holding sessions at six Holds across the network."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-018"
+      ],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "b772cf8"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "fced67a (continuity-audit) diff",
+      "confidence": "high",
+      "notes": "\"Seven including Thornwall\" is a possible reading, but the paragraph counts Thornwall separately."
+    },
+    {
+      "id": "thornwall-018",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Warm-descent: the gauge never misbehaved \"in eleven sessions at seven Holds\"; the same scene twice says six Holds.",
+      "established": [
+        {
+          "scene": "warm-descent",
+          "path": "scenes/s06-the-inspection.md",
+          "commit": "85a9939",
+          "quote": "the same model she'd used at six other Holds, at eleven previous sessions"
+        },
+        {
+          "scene": "warm-descent",
+          "path": "scenes/s06-the-inspection.md",
+          "commit": "85a9939",
+          "quote": "\"I've observed eleven sessions at six Holds.\""
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "warm-descent",
+          "path": "scenes/s06-the-inspection.md",
+          "commit": "85a9939",
+          "quote": "in eleven sessions at seven Holds."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "4d9e698",
+        "after": [
+          {
+            "scene": "warm-descent",
+            "path": "scenes/s06-the-inspection.md",
+            "commit": "4d9e698",
+            "quote": "in eleven sessions at six other Holds."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-017"
+      ],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "200fb23"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "4d9e698 (continuity-audit-final) diff and tracker note",
+      "confidence": "high",
+      "notes": "This \"seven\" coexisted with the s18 one fixed by fced67a four days earlier; that audit missed it. git pairs s06-the-inspection with he-knelt at 0c3fd1f; by content this passage went to warm-descent."
+    },
+    {
+      "id": "thornwall-019",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Confession scene: the Cord was named on the wall \"twelve nights ago\"; the naming was Day 5 and this scene is Day 19.",
+      "established": [
+        {
+          "scene": "confession-on-the-wall",
+          "path": "scenes/s25c-the-hearth.md",
+          "commit": "85a9939",
+          "quote": "\"About the wall,\" she said. \"Day five. The first night you told me about the stars.\""
+        },
+        {
+          "scene": "fissure-closes",
+          "path": "scenes/s26-rain-on-stone.md",
+          "commit": "85a9939",
+          "quote": "three nights ago, at this same wall"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "confession-on-the-wall",
+          "path": "scenes/s25c-the-hearth.md",
+          "commit": "85a9939",
+          "quote": "the seven stars she had named for him on this wall twelve nights ago"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "4d9e698",
+        "after": [
+          {
+            "scene": "confession-on-the-wall",
+            "path": "scenes/s25c-the-hearth.md",
+            "commit": "4d9e698",
+            "quote": "the seven stars she had named for him on this wall fourteen nights ago"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-020"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "new-scene-intimacy",
+        "commit": "1d995c4"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "4d9e698 (continuity-audit-final) diff and continuity-tracker note",
+      "confidence": "medium",
+      "notes": "Medium: the scene day (19) is in scene-index/tracker; prose gives Day 5 and places the confession three nights before rain-on-stone, but no prose sentence says Day 19. Introduced the same day by the pass that wrote the scene."
+    },
+    {
+      "id": "thornwall-020",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Confession scene: Sera has been looking for Kael \"since the evening she sat in the dark... Ten days\"; that evening was Day 5 and the scene is Day 19.",
+      "established": [
+        {
+          "scene": "confession-on-the-wall",
+          "path": "scenes/confession-on-the-wall.md",
+          "commit": "a521fb2",
+          "quote": "\"About the wall,\" she said. \"Day five. The first night you told me about the stars.\""
+        },
+        {
+          "scene": "confession-on-the-wall",
+          "path": "scenes/confession-on-the-wall.md",
+          "commit": "a521fb2",
+          "quote": "\"I sat in my room without a lamp for two hours."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "confession-on-the-wall",
+          "path": "scenes/confession-on-the-wall.md",
+          "commit": "a521fb2",
+          "quote": "the way she had been looking since the evening she sat in the dark and could not light a lamp. Ten days."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "61941e2",
+        "after": [
+          {
+            "scene": "confession-on-the-wall",
+            "path": "scenes/confession-on-the-wall.md",
+            "commit": "61941e2",
+            "quote": "the way she had been looking since the evening she sat in the dark and could not light a lamp. Fourteen days."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-019"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "confession-repositioning-sera-reclosure",
+        "commit": "5ae0605"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "61941e2 (continuity-audit) diff",
+      "confidence": "medium",
+      "notes": "Same interval as the \"twelve nights\" case, broken again by a later pass. Scene day 19 from scene-metadata.csv. 61941e2 also changed \"His hand had been around hers an hour ago\" to \"Last night he had kissed her\"; not labeled, since the prose alone does not rule out an hour-old touch."
+    },
+    {
+      "id": "thornwall-021",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "The Rend surge \"six years ago\" says Dreya declined \"within the year\" and Sorrel lasted two years more; the ledger has Dreya declining for a year before her transfer three years ago.",
+      "established": [
+        {
+          "scene": "garrens-ledger",
+          "path": "scenes/garrens-ledger.md",
+          "commit": "f1cd686",
+          "quote": "But Holder Dreya had been declining for a year, her sessions growing shorter, her conversation growing thinner, and three months after Bren's arrival she was transferred to a care facility in the lowlands."
+        },
+        {
+          "scene": "garrens-ledger",
+          "path": "scenes/garrens-ledger.md",
+          "commit": "f1cd686",
+          "quote": "Three years ago: 71%. Bren arrived"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "four-at-table",
+          "path": "scenes/four-at-table.md",
+          "commit": "f1cd686",
+          "quote": "Six years ago, the fissure had surged."
+        },
+        {
+          "scene": "four-at-table",
+          "path": "scenes/four-at-table.md",
+          "commit": "f1cd686",
+          "quote": "Dreya had declined within the year."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "57c2e02",
+        "after": [],
+        "rewrite": true
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "stakes-and-history",
+        "commit": "2fedfaa"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "Backstory added by 2fedfaa to answer tweak-01 (show Kael steadying people). Left when four-at-table was redrafted by storyforge write (57c2e02). \"Declined\" might be read as \"began to decline\", hence medium. Not labeled by anyone."
+    },
+    {
+      "id": "thornwall-022",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Undefended-flame makes \"Voss\" the official who requires Sera's report and dispatched the enforcement detail; Voss is the courier in lone-rider, and the order came from Corvin.",
+      "established": [
+        {
+          "scene": "lone-rider",
+          "path": "scenes/lone-rider.md",
+          "commit": "1ee11e0",
+          "quote": "\"Voss,\" the rider said, when Kael raised his eyes. \"Courier Second, assigned Kethren Ford.\""
+        },
+        {
+          "scene": "evening-visit",
+          "path": "scenes/evening-visit.md",
+          "commit": "1ee11e0",
+          "quote": "\"Corvin sent the decommission order before I've written a line of assessment."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "undefended-flame",
+          "path": "scenes/undefended-flame.md",
+          "commit": "1ee11e0",
+          "quote": "write the report Voss required."
+        },
+        {
+          "scene": "undefended-flame",
+          "path": "scenes/undefended-flame.md",
+          "commit": "1ee11e0",
+          "quote": "she knew Voss had dispatched an enforcement detail already"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "3e82fb5",
+        "after": [
+          {
+            "scene": "undefended-flame",
+            "path": "scenes/undefended-flame.md",
+            "commit": "3e82fb5",
+            "quote": "she knew the enforcement detail had already been dispatched"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-036"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-corrected-briefs",
+        "commit": "edc8705"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "no label; reference/key-decisions.md forbids Voss (\"Vosk → Thessan (Governor uses Voss — too similar)\")",
+      "confidence": "high",
+      "notes": "The name came from a hallucinated brief: score-driven-briefs (3fea681) wrote \"Voss orders Sera to classify Kael's fracture\" into scene-briefs.csv, and the redraft from that brief put Voss in both scenes. naturalness-polish (3e82fb5) dropped Voss from undefended-flame, apparently incidentally. The courier Voss is still in lone-rider at HEAD (a key-decisions violation, not a prose contradiction), and the brief is the unfixed csv case."
+    },
+    {
+      "id": "thornwall-023",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Bren says Ryn showed him the Hold's routines in his first weeks three years ago; the same scene says Ryn left eleven years ago.",
+      "established": [
+        {
+          "scene": "journals-of-the-east-wing",
+          "path": "scenes/journals-of-the-east-wing.md",
+          "commit": "2e7d14d",
+          "quote": "Eleven years since Ryn left."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "journals-of-the-east-wing",
+          "path": "scenes/journals-of-the-east-wing.md",
+          "commit": "2e7d14d",
+          "quote": "Ryn had initiated him into the Hold's daily rhythms during his own first weeks, three years ago."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-029"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-corrected-briefs",
+        "commit": "edc8705"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Both sentences entered in the same redraft."
+    },
+    {
+      "id": "thornwall-024",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Ves's targeting entry is dated sixteen years ago in not-alone, forty years ago in evening-visit, and thirty-seven years ago in ivra-seals-archive.",
+      "established": [
+        {
+          "scene": "not-alone",
+          "path": "scenes/not-alone.md",
+          "commit": "2e7d14d",
+          "quote": "\"Ves wrote this sixteen years ago,\" he said."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "evening-visit",
+          "path": "scenes/evening-visit.md",
+          "commit": "2e7d14d",
+          "quote": "She wrote about the targeting pattern forty years ago, and it stayed in a crate."
+        },
+        {
+          "scene": "ivra-seals-archive",
+          "path": "scenes/ivra-seals-archive.md",
+          "commit": "2e7d14d",
+          "quote": "the journals, open to Ves's entry from thirty-seven years ago"
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-corrected-briefs",
+        "commit": "edc8705"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "All three sentences entered in edc8705. Ves served sixteen years and built the theory in her last four journals, so at most one date can hold."
+    },
+    {
+      "id": "thornwall-025",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [
+        "WLD"
+      ],
+      "summary": "Thessan's four closed Holds are named three different ways: Greenhollow/Ashward Station/Kethren East/Vell's Reach, Greenhollow/Ashward/Dunmere/Garren's Watch, and (by Ivra) Harrowgate.",
+      "established": [
+        {
+          "scene": "thessan-resistance",
+          "path": "scenes/thessan-resistance.md",
+          "commit": "2e7d14d",
+          "quote": "\"Greenhollow. Ashward Station. Kethren East. Vell's Reach.\""
+        },
+        {
+          "scene": "thessan-resistance",
+          "path": "scenes/thessan-resistance.md",
+          "commit": "2e7d14d",
+          "quote": "\"Four closures."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "thessan-vigil",
+          "path": "scenes/thessan-vigil.md",
+          "commit": "2e7d14d",
+          "quote": "the Greenhollow transfer, the Ashward closure, the Dunmere reassignment, the Garren's Watch decommission. Four Holds."
+        },
+        {
+          "scene": "morning-after",
+          "path": "scenes/morning-after.md",
+          "commit": "2e7d14d",
+          "quote": "\"Thessan ran Harrowgate with ten.\""
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-corrected-briefs",
+        "commit": "7919d1a"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "The thessan-resistance list dates from the storyforge-write draft c3a3836; the thessan-vigil list came in the 7919d1a redraft. Before the April redrafts the canon list was Harrowgate, Dunmere Reach, Ashfeld, Kellan's Rest (reference/personnel-timeline.md); \"Thessan ran Harrowgate\" survives from efef1c7."
+    },
+    {
+      "id": "thornwall-026",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Greenhollow's Warden opened a fissure that killed four people and would not leave his post, yet in the Thessan scenes he signed every form, thanked her, and drowned six months after a routine closure.",
+      "established": [
+        {
+          "scene": "crowded-chamber",
+          "path": "scenes/crowded-chamber.md",
+          "commit": "2e7d14d",
+          "quote": "And Davin Hale opened a fissure in Greenhollow's eastern wall that killed four people and burned the resonance capacity out of eleven more."
+        },
+        {
+          "scene": "corvins-dispatch",
+          "path": "scenes/corvins-dispatch.md",
+          "commit": "2e7d14d",
+          "quote": "thinking about the Greenhollow Warden who would not leave his post."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "thessan-rides",
+          "path": "scenes/thessan-rides.md",
+          "commit": "2e7d14d",
+          "quote": "The Greenhollow Warden had signed every form she'd put in front of him. Had thanked her for her service."
+        },
+        {
+          "scene": "thessan-resistance",
+          "path": "scenes/thessan-resistance.md",
+          "commit": "2e7d14d",
+          "quote": "The Hold had been operating below capacity with a Class 1 fissure and a Warden who'd submitted three reclassification requests, each denied. Standard trajectory. Standard closure."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-027",
+        "thornwall-028"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-corrected-briefs",
+        "commit": "7919d1a"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "crowded-chamber's account is from the storyforge-write draft c84df44; corvins-dispatch's line from 749a82b; the cooperative-Warden version from 7919d1a."
+    },
+    {
+      "id": "thornwall-027",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "The Greenhollow Warden is Davin (Davin Hale) everywhere except the closure file Thessan pulls in Verath, which names him Warden Aldren Moss.",
+      "established": [
+        {
+          "scene": "thessan-vigil",
+          "path": "scenes/thessan-vigil.md",
+          "commit": "2e7d14d",
+          "quote": "Greenhollow's Warden had signed the papers and thanked her for her service. Davin. His name was Davin."
+        },
+        {
+          "scene": "crowded-chamber",
+          "path": "scenes/crowded-chamber.md",
+          "commit": "2e7d14d",
+          "quote": "\"Davin Hale thought he'd found a new technique."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "thessan-at-verath",
+          "path": "scenes/thessan-at-verath.md",
+          "commit": "2e7d14d",
+          "quote": "Greenhollow was in the fourth row, second shelf, a thin folder in a thicker box."
+        },
+        {
+          "scene": "thessan-at-verath",
+          "path": "scenes/thessan-at-verath.md",
+          "commit": "2e7d14d",
+          "quote": "Warden Aldren Moss, nineteen years of service, separated with full honors. Deceased, six months post-separation."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-026",
+        "thornwall-028"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-corrected-briefs",
+        "commit": "7919d1a"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Both names entered in the same 7919d1a redraft."
+    },
+    {
+      "id": "thornwall-028",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Greenhollow is six years past in thessan-resistance, nine in corvins-dispatch, and Thessan has carried it \"for fifteen years\" in crowded-chamber.",
+      "established": [
+        {
+          "scene": "thessan-resistance",
+          "path": "scenes/thessan-resistance.md",
+          "commit": "2e7d14d",
+          "quote": "She'd told herself for six years that Greenhollow's closure was correct."
+        },
+        {
+          "scene": "thessan-resistance",
+          "path": "scenes/thessan-resistance.md",
+          "commit": "2e7d14d",
+          "quote": "its pages still crisp after six years."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "corvins-dispatch",
+          "path": "scenes/corvins-dispatch.md",
+          "commit": "2e7d14d",
+          "quote": "She had designed it nine years ago, after Greenhollow."
+        },
+        {
+          "scene": "crowded-chamber",
+          "path": "scenes/crowded-chamber.md",
+          "commit": "2e7d14d",
+          "quote": "\"I have carried Greenhollow in my kit for fifteen years.\""
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-026",
+        "thornwall-027"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-corrected-briefs",
+        "commit": "7919d1a"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "Medium because \"carried in my kit\" is loose; six vs nine is the hard pair. \"six years\" from 7919d1a, \"nine years\" from 749a82b, \"fifteen years\" from 1561e9b. Before the April redrafts Greenhollow was \"forty years past\" (s24)."
+    },
+    {
+      "id": "thornwall-029",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "The \"Kael is staying\" journal entry that Bren first read in the east wing is Ryn's there and \"Holder Thessic\"'s, with different wording, when he rereads it in the evidence room.",
+      "established": [
+        {
+          "scene": "journals-of-the-east-wing",
+          "path": "scenes/journals-of-the-east-wing.md",
+          "commit": "2e7d14d",
+          "quote": "The first journal he pulled was Ryn's."
+        },
+        {
+          "scene": "journals-of-the-east-wing",
+          "path": "scenes/journals-of-the-east-wing.md",
+          "commit": "2e7d14d",
+          "quote": "*Kael is staying. He'll hold this place together or it will break him.*"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "evidence-room",
+          "path": "scenes/evidence-room.md",
+          "commit": "2e7d14d",
+          "quote": "The entry was from eleven years ago, written by Holder Thessic"
+        },
+        {
+          "scene": "evidence-room",
+          "path": "scenes/evidence-room.md",
+          "commit": "2e7d14d",
+          "quote": "Bren had read that before, in the east wing."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-023"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-corrected-briefs",
+        "commit": "edc8705"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Both scenes redrafted in edc8705."
+    },
+    {
+      "id": "thornwall-030",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Garren's Watch's supply decline runs twelve years in ivra-visits-sera but nine in ivra-seals-archive.",
+      "established": [
+        {
+          "scene": "ivra-visits-sera",
+          "path": "scenes/ivra-visits-sera.md",
+          "commit": "2e7d14d",
+          "quote": "Garren's Watch over twelve years, Thornwall over nine."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "ivra-seals-archive",
+          "path": "scenes/ivra-seals-archive.md",
+          "commit": "2e7d14d",
+          "quote": "At Garren's Watch, the supply records had told the same story. Declining allotments over nine years"
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "naturalness-craft-polish",
+        "commit": "48a7d28"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "\"twelve years\" from edc8705, \"nine years\" from 48a7d28. Medium: Ivra-seals-archive could mean a sub-span."
+    },
+    {
+      "id": "thornwall-031",
+      "repo": "thornwall",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Sera \"assessed nine Holds in six years\" and spent \"six years training herself\" in open-gate; elsewhere she believed the academy for fifteen years and spent twenty years calling her gift assessment.",
+      "established": [
+        {
+          "scene": "two-cups",
+          "path": "scenes/two-cups.md",
+          "commit": "2e7d14d",
+          "quote": "\"I believed them,\" she said. \"For fifteen years.\""
+        },
+        {
+          "scene": "shell-breaks-open",
+          "path": "scenes/shell-breaks-open.md",
+          "commit": "2e7d14d",
+          "quote": "she'd spent the next twenty years learning to call that feeling *assessment.*"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "open-gate",
+          "path": "scenes/open-gate.md",
+          "commit": "2e7d14d",
+          "quote": "She'd assessed nine Holds in six years and she knew the weight of a Class Three."
+        },
+        {
+          "scene": "open-gate",
+          "path": "scenes/open-gate.md",
+          "commit": "2e7d14d",
+          "quote": "she'd spent six years training herself to read exactly this."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-008"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-corrected-briefs",
+        "commit": "aa8e066"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "The same fact the author flagged on first read (tweak-04/05) and the second-read \"nine years\" fix addressed. Medium: \"nine Holds in six years\" need not be her whole career, but \"six years training herself\" reads as it. The previous redraft (edc8705) had \"She'd assessed seven Holds in her career\", against \"six other Holds\"."
+    },
+    {
+      "id": "thornwall-032",
+      "repo": "thornwall",
+      "level": "csv",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "The kael-wakes-to-color brief has a \"Warden Edris\" come to Kael's cell; Kael is Thornwall's Warden.",
+      "established": [
+        {
+          "scene": "lone-rider",
+          "path": "scenes/lone-rider.md",
+          "commit": "4f040ed",
+          "quote": "\"Warden Davreth.\" He didn't dismount."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "kael-wakes-to-color",
+          "path": "reference/scene-briefs.csv",
+          "commit": "4f040ed",
+          "quote": "Warden Edris arrives early and stands in the doorway of Kael's cell"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "db81bae",
+        "after": [],
+        "rewrite": true
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "upstream-brief-fixes",
+        "commit": "1912c69"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "db81bae:working/plans/hone-findings-upstream-briefs-tier-1.csv: kael-wakes-to-color invents \"Warden Edris\"",
+      "confidence": "high",
+      "notes": ""
+    },
+    {
+      "id": "thornwall-033",
+      "repo": "thornwall",
+      "level": "csv",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "The shell-breaks-open brief puts \"Director Tessamine\", Sera's mentor, on the relay; the director is Corvin.",
+      "established": [
+        {
+          "scene": "road-to-thornwall",
+          "path": "scenes/road-to-thornwall.md",
+          "commit": "4f040ed",
+          "quote": "which was how long Director Corvin had given her."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "shell-breaks-open",
+          "path": "reference/scene-briefs.csv",
+          "commit": "4f040ed",
+          "quote": "Director Tessamine — Sera's former mentor"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "db81bae",
+        "after": [],
+        "rewrite": true
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "upstream-brief-fixes",
+        "commit": "5265888"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "db81bae:working/plans/hone-findings-upstream-briefs-tier-1.csv: shell-breaks-open invents \"Director Tessamine\"",
+      "confidence": "high",
+      "notes": "The same polish pass wrote a \"senior Assessor ... named Tessamine\" into shell-breaks-open prose, but there she does not contradict anything."
+    },
+    {
+      "id": "thornwall-034",
+      "repo": "thornwall",
+      "level": "csv",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "The warm-descent brief has \"Director Almeda\" physically present at the fissure; Corvin is director, in Verath, and only Kael and Sera descend.",
+      "established": [
+        {
+          "scene": "road-to-thornwall",
+          "path": "scenes/road-to-thornwall.md",
+          "commit": "db81bae",
+          "quote": "which was how long Director Corvin had given her."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "warm-descent",
+          "path": "reference/scene-briefs.csv",
+          "commit": "db81bae",
+          "quote": "Director Almeda is physically present at the fissure site"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "0d936c2",
+        "after": [],
+        "rewrite": true
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "upstream-brief-fixes",
+        "commit": "5265888"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "0d936c2:working/plans/hone-findings-upstream-briefs-tier-2.csv: warm-descent invents \"Director Almeda\"",
+      "confidence": "high",
+      "notes": ""
+    },
+    {
+      "id": "thornwall-035",
+      "repo": "thornwall",
+      "level": "csv",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "The riders-approach brief has \"Closer Demara Voss\" lead the riders and claims bones of \"Warden Edis, his own mentor\"; the prose has Thessan leading.",
+      "established": [
+        {
+          "scene": "riders-approach",
+          "path": "scenes/riders-approach.md",
+          "commit": "db81bae",
+          "quote": "The lead rider was a woman."
+        },
+        {
+          "scene": "riders-approach",
+          "path": "scenes/riders-approach.md",
+          "commit": "db81bae",
+          "quote": "Thessan. She'd closed Harrowgate, Dunmere Reach, Ashfeld, Kellan's Rest."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "riders-approach",
+          "path": "reference/scene-briefs.csv",
+          "commit": "db81bae",
+          "quote": "legally strip Closer Demara Voss of jurisdiction"
+        },
+        {
+          "scene": "riders-approach",
+          "path": "reference/scene-briefs.csv",
+          "commit": "db81bae",
+          "quote": "bones Kael recognizes as belonging to Warden Edis, his own mentor"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "0d936c2",
+        "after": [],
+        "rewrite": true
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "upstream-brief-fixes",
+        "commit": "cf6cee0"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "0d936c2:working/plans/hone-findings-upstream-briefs-tier-2.csv: riders-approach invents \"Demara\" and \"Warden Edis\"",
+      "confidence": "high",
+      "notes": ""
+    },
+    {
+      "id": "thornwall-036",
+      "repo": "thornwall",
+      "level": "csv",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "The undefended-flame brief at HEAD still has \"Voss\" order Sera to classify Kael's fracture; Voss is the courier in lone-rider and Corvin directs the Accord.",
+      "established": [
+        {
+          "scene": "lone-rider",
+          "path": "scenes/lone-rider.md",
+          "commit": "2e7d14d",
+          "quote": "\"Voss,\" the rider said, when Kael raised his eyes. \"Courier Second, assigned Kethren Ford.\""
+        },
+        {
+          "scene": "evening-visit",
+          "path": "scenes/evening-visit.md",
+          "commit": "2e7d14d",
+          "quote": "\"Corvin sent the decommission order before I've written a line of assessment."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "undefended-flame",
+          "path": "reference/scene-briefs.csv",
+          "commit": "2e7d14d",
+          "quote": "Voss orders Sera to classify Kael's fracture as destabilization or forfeit session authority"
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [
+        "thornwall-022"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "score-driven-briefs",
+        "commit": "3fea681"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Source of the prose Voss error (undefended-flame, fixed in 3e82fb5). The breaking-camp brief also has a \"Voss\" at HEAD."
+    },
+    {
+      "id": "thornwall-037",
+      "repo": "thornwall",
+      "level": "csv",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "physical-states.csv gives Kael a loosened braid and loose hair; Kael's head is shaved close.",
+      "established": [
+        {
+          "scene": "wardens-welcome",
+          "path": "scenes/wardens-welcome.md",
+          "commit": "2e7d14d",
+          "quote": "head shaved close enough to show the retreated hairline"
+        },
+        {
+          "scene": "shell-breaks-open",
+          "path": "scenes/shell-breaks-open.md",
+          "commit": "2e7d14d",
+          "quote": "The shaved head with its shadow of dark hair."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "evening-visit",
+          "path": "reference/physical-states.csv",
+          "commit": "2e7d14d",
+          "quote": "loosened-braid-kael|Kael|Hair loosened from braid; off-duty appearance"
+        },
+        {
+          "scene": "shell-breaks-open",
+          "path": "reference/physical-states.csv",
+          "commit": "2e7d14d",
+          "quote": "hair-loose-kael|Kael|Hair loose and unbound"
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "hone-registries-physical-states",
+        "commit": "5b1eec6"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Extraction misattribution: the braid is Sera's (\"Her braid was loose at the tail\" in evening-visit; she unties it in shell-breaks-open). The same file has stubble-scalp-kael. Rows are keyed to the scene where the state is acquired."
+    },
+    {
+      "id": "thornwall-038",
+      "repo": "thornwall",
+      "level": "csv",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "physical-states.csv has 16 rows for a character \"Garren\"; Garren's Watch is a closed Hold, and the rows describe Torren (thirty-one years) and Kael (twenty-three years of kneeling).",
+      "established": [
+        {
+          "scene": "four-at-table",
+          "path": "scenes/four-at-table.md",
+          "commit": "2e7d14d",
+          "quote": "Torren had worn his for thirty-one years."
+        },
+        {
+          "scene": "ivra-visits-sera",
+          "path": "scenes/ivra-visits-sera.md",
+          "commit": "2e7d14d",
+          "quote": "\"Garren's Watch operated for a hundred and forty years."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "rend-came",
+          "path": "reference/physical-states.csv",
+          "commit": "2e7d14d",
+          "quote": "chronic-rend-depletion-garren|Garren|Physically depleted after thirty-one years of Rend exposure"
+        },
+        {
+          "scene": "chamber-farewell",
+          "path": "reference/physical-states.csv",
+          "commit": "2e7d14d",
+          "quote": "chronic-knee-damage-garren|Garren|Chronic knee damage from twenty-three years of kneeling"
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "hone-registries-physical-states",
+        "commit": "5b1eec6"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Garren is absent from characters.csv. The rows mix Torren (cold-stone, rend-came, seven-minutes) and Kael (chamber-farewell)."
+    }
+  ]
+}
