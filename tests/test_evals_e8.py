@@ -152,10 +152,20 @@ def test_prepare_refuses_a_project_older_than_scenes_csv(book, tmp_path):
 
 def test_a_naturalness_redraft_that_halts_is_pass_halted(monkeypatch):
     from storyforge import cmd_revise
-    monkeypatch.setattr(cmd_revise, '_fix_upstream_briefs', lambda p, ids: 1)
+    monkeypatch.setattr(cmd_revise, '_fix_upstream_briefs', lambda p, ids: (['s'], {}))
 
     def halt(p, ids):
         raise cmd_revise.RedraftError('1 scene(s) not re-drafted: s (cut off)')
     monkeypatch.setattr(cmd_revise, '_redraft_scenes', halt)
     with pytest.raises(e8.PassHalted, match='cut off'):
+        e8.naturalness_upstream('/nowhere', 's')
+
+
+def test_a_naturalness_fix_that_rewrites_nothing_is_pass_halted_with_why(monkeypatch):
+    from storyforge import cmd_revise
+    monkeypatch.setattr(cmd_revise, '_fix_upstream_briefs',
+                        lambda p, ids: ([], {'s': 'named Mallen'}))
+    monkeypatch.setattr(cmd_revise, '_redraft_scenes',
+                        lambda p, ids: pytest.fail('nothing to redraft'))
+    with pytest.raises(e8.PassHalted, match='rewrote nothing for s: named Mallen'):
         e8.naturalness_upstream('/nowhere', 's')

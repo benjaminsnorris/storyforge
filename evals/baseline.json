@@ -1,15 +1,15 @@
 {
   "cost": {
-    "calls": 2172,
-    "input_tokens": 8179367,
-    "output_tokens": 2341129,
-    "replayed_calls": 2172,
+    "calls": 2173,
+    "input_tokens": 8198598,
+    "output_tokens": 2326554,
+    "replayed_calls": 2173,
     "unpriced_calls": 0,
-    "usd_if_live": 16.5218,
+    "usd_if_live": 15.6232,
     "usd_spent": 0.0
   },
-  "git_dirty": false,
-  "git_sha": "ca8b4c265beecf6e1b64ac8dc16ef6183db848ed",
+  "git_dirty": true,
+  "git_sha": "9618069b32c6d0e09c28a39b5739560bb76e6844",
   "mode": "replay",
   "results": [
     {
@@ -46,7 +46,7 @@
         "usd_spent": 0.0
       },
       "description": "E1 gold-set health: format, 100+ prose cases, 20% holdout",
-      "duration_s": 0.02,
+      "duration_s": 0.03,
       "error": null,
       "gates": [
         {
@@ -82,7 +82,7 @@
       },
       "mode": "replay",
       "notes": [],
-      "started_at": "2026-10-29T06:22:20+00:00",
+      "started_at": "2026-10-29T21:37:22+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -140,7 +140,7 @@
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 4.62,
+      "duration_s": 7.84,
       "error": null,
       "gates": [
         {
@@ -204,7 +204,7 @@
         "missed 37 of 37: e2-carol-001, e2-carol-002, e2-carol-003, e2-carol-004, e2-carol-005, e2-carol-006, e2-carol-007, e2-carol-008, e2-carol-009, e2-carol-010, e2-carol-011, e2-carol-012, e2-carol-013, e2-carol-014, e2-carol-015, e2-carol-016, e2-carol-017, e2-carol-018, e2-carol-019, e2-carol-020, e2-carol-021, e2-carol-022, e2-carol-023, e2-carol-024, e2-carol-025, e2-carol-026, e2-carol-027, e2-carol-028, e2-carol-029, e2-carol-030, e2-carol-031, e2-carol-032, e2-carol-033, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
-      "started_at": "2026-10-29T06:22:20+00:00",
+      "started_at": "2026-10-29T21:37:22+00:00",
       "status": "fail",
       "suite": "e2-carol"
     },
@@ -252,7 +252,7 @@
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 122.81,
+      "duration_s": 271.66,
       "error": null,
       "gates": [
         {
@@ -316,7 +316,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-29T06:22:25+00:00",
+      "started_at": "2026-10-29T21:37:30+00:00",
       "status": "fail",
       "suite": "e2-corpus-drift"
     },
@@ -366,7 +366,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 107.3,
+      "duration_s": 162.76,
       "error": null,
       "gates": [
         {
@@ -430,7 +430,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-29T06:24:28+00:00",
+      "started_at": "2026-10-29T21:42:01+00:00",
       "status": "fail",
       "suite": "e2-corpus-validate"
     },
@@ -471,7 +471,7 @@
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 31.17,
+      "duration_s": 34.86,
       "error": null,
       "gates": [
         {
@@ -552,131 +552,125 @@
         "thornwall-029 (journals-of-the-east-wing): partial",
         "thornwall-030 (ivra-visits-sera): partial"
       ],
-      "started_at": "2026-10-29T06:26:15+00:00",
+      "started_at": "2026-10-29T21:44:44+00:00",
       "status": "fail",
       "suite": "e3-extraction"
     },
     {
       "by_code": {
         "KNO": {
-          "contradictions": 4
+          "contradictions": 7
         },
         "PHY": {
           "contradictions": 18
         },
         "PRM": {
-          "broken_promises": 63
+          "broken_promises": 6
         },
         "REL": {
-          "contradictions": 2
+          "contradictions": 4
         },
         "TIM": {
-          "contradictions": 8
-        },
-        "TRT": {
-          "contradictions": 1
-        },
-        "WLD": {
-          "contradictions": 4
+          "contradictions": 6
         }
       },
       "cost": {
-        "calls": 68,
-        "input_tokens": 672186,
-        "output_tokens": 134626,
-        "replayed_calls": 68,
+        "calls": 69,
+        "input_tokens": 693226,
+        "output_tokens": 123685,
+        "replayed_calls": 69,
         "unpriced_calls": 0,
-        "usd_if_live": 5.7742,
+        "usd_if_live": 5.2449,
         "usd_spent": 0.0
       },
       "description": "Draft shared-dark Act 1 with write; CP10k, BPS, length, voice",
-      "duration_s": 5.91,
+      "duration_s": 5.82,
       "error": null,
       "gates": [
         {
-          "actual": 22,
+          "actual": 23,
           "name": "scenes",
           "op": ">=",
-          "passed": false,
+          "passed": true,
           "threshold": 23
         }
       ],
       "metrics": {
-        "bps": 2.864,
-        "broken_promises": 63,
+        "bps": 0.261,
+        "broken_promises": 6,
         "checker_flags": 1,
-        "contradictions": 37,
-        "cp10k": 18.199,
-        "cp10k_checker": 0.492,
-        "length_drift": 0.054,
-        "refused": 1,
-        "scenes": 22,
-        "target_words": 20420,
-        "voi": 4.693,
-        "voi_author": 4.75,
-        "words": 20331
+        "contradictions": 35,
+        "cp10k": 16.072,
+        "cp10k_checker": 0.459,
+        "length_drift": 0.046,
+        "refused": 0,
+        "scenes": 23,
+        "target_words": 21370,
+        "voi": 4.804,
+        "voi_author": 4.652,
+        "words": 21777
       },
       "mode": "replay",
       "notes": [
-        "claires-cold: 930 words, 1 contradiction(s), 4 broken promise(s)\n    PHY: Claire is held kneeling on the concrete slab with only a secondary tie running to a chair leg, whereas the reference has her zip-tied to a metal chair.\n    PRM crisis: None of this happens: there is no camera, no Yael, no mimicry, no near-strike and no empathy-anchor reveal, only Claire alone with an unnamed captor.\n    PRM decision: Yael is absent and Claire never makes this accusation; the scene ends with her whispering her own name.\n    PRM key_dialogue: The line is spoken by Claire herself, not by Yael, who never appears in the scene.\n    PRM physical_state_out: The scene gashes the left wrist but establishes no injury or abrasion on the right wrist.",
-        "harmons-hands: 750 words, 2 contradiction(s), 3 broken promise(s)\n    PHY: The scene has Claire seated in the metal chair with her hands resting on the chair arm, but the earlier scene has her kneeling on the gravel-strewn slab, her wr\n    PHY: The monitoring disc is still taped to Claire's sternum, but in the earlier scene she tore it off, smashed it against her wrist tie, and left it in pieces on the\n    PRM goal: The scene is a passive dream-inhabitation of Harmon tending Claire; there is no Elena, Marisol, reconstruction, or oxygen timer.\n    PRM crisis: None of these events, characters, or the dilemma appear in the scene.\n    PRM decision: No such decision or action occurs; Hank remains a passive passenger who cannot move.",
-        "waking-maren: 928 words, 1 contradiction(s), 3 broken promise(s)\n    PHY: The scene describes the captive woman's hood as black, but the reference material establishes it as a white pillowcase.\n    PRM goal: The scene contains no sleep journal, no custody hearing, no Dr. Shin and no Exhibit D; Maren writes on a legal pad pulled from her case files.\n    PRM crisis: None of these beats occur: there is no grounding exercise, no automatic writing of plate, street or clinical note, no Cora, no Glenn and no microwave clock.\n    PRM decision: The scene deliberately keeps the overhead light off, has no Cora or Glenn, and ends with her writing only the word 'concrete' on a legal pad, with none of the s",
-        "waking-hank: refused, not drafted \u2014 model refused the request (cyber)",
-        "the-school: 881 words, 1 contradiction(s), 4 broken promise(s)\n    TIM: The scene says Hank's palm is raw from the morning's water, which implies his compulsive scalding hand-washing during the first (Coos Bay) case, but the bible s\n    PRM goal: The scene has no 7 PM deadline, subpoena, Monday hearing, Meszaros family or licensing-board stakes; it shows a routine district filing completed at 10:12.\n    PRM crisis: Lena, Terrell, the affidavit, Paul's graph-paper calculations, the scheduled email and the 6:49 clock are all absent; Hank is alone with Rook.\n    PRM decision: Hank signs and submits alone, and no co-author, co-signature or dual-name confirmation appears.\n    PRM outcome: The filing succeeds with no attached cost or complication, so the 'but' never lands.",
-        "advocate: 1067 words, 0 contradiction(s), 2 broken promise(s)\n    PRM physical_state_out: The scene never says the left-hand tremor has quieted or that her hands are buzzing; the last mention of the tremor is that it is still present from 2:47.\n    PRM physical_state_out: Nothing in the bathroom-stall ending or elsewhere establishes that Maren's legs are unsteady.",
-        "maren-runs: 870 words, 0 contradiction(s), 0 broken promise(s)",
-        "engineer: 952 words, 0 contradiction(s), 1 broken promise(s)\n    PRM physical_state_out: The tremor and Hank's effortful functioning are both shown, but nothing in the scene establishes his jaw tightening.",
-        "name-surfaces: 820 words, 2 contradiction(s), 5 broken promise(s)\n    TIM: Hank has been awake long enough to scrub his hands an hour earlier and work through the missing persons search, yet the stove clock reads 2:47, the minute the d\n    KNO: Hank's close POV calls the perpetrator by the name Harmon, though in his dream the man is unnamed and nothing yet has identified him.\n    PRM goal: The scene has no FBI deadline, no unit and no back-channel; Hank identifies Claire alone at his kitchen table.\n    PRM crisis: Neither Danny Olinsky nor Maryanne appears, and the name that surfaces is Claire through a public missing persons listing.\n    PRM decision: No one is lied to and no Maryanne is present; Hank simply pockets the page with Claire's name.\n    PRM key_actions: Hank performs every one of these actions, not Maren, and the folded page goes into a coat hanging on a hook rather than one being worn.\n    PRM physical_state_out: Only Hank's thirty-six hours are noted; no female character's visible pulse at the wrist or somatic alertness is established.",
-        "voicemail: 759 words, 2 contradiction(s), 3 broken promise(s)\n    REL: Marie Renaud calls Claire her daughter, but the reference material and an earlier scene establish Marie as Claire's sister.\n    TIM: Marie's first voicemail reporting Claire missing is eleven days old, which is earlier than Claire's disappearance nine days ago.\n    PRM outcome: Dahl, the subpoena, the carrier purge and the forty-nine-minute deadline never appear, so the scene does not dramatize the failed outcome.\n    PRM crisis: Maren finds the voicemails alone in her kitchen archive; there is no driveway, no call from Claire, and no man's voice saying \"Quiet.\"\n    PRM decision: Maren never leaves her apartment and Claire is not present.",
-        "missing-persons: 1153 words, 2 contradiction(s), 6 broken promise(s)\n    KNO: The scene treats Claire Renaud's name as a new discovery made through a NamUs search, but in the previous scene Maren had already searched the name, listened to\n    PHY: Maren's kitchen counter is described as granite, but an earlier scene establishes it as laminate.\n    PRM goal: Maren is home alone running a NamUs search; there is no scan, no Vasquez, no deadline and no indictment motion.\n    PRM crisis: Dan never appears in person, Pettigrew is absent, and there is no excavation timeline or confrontation.\n    PRM decision: None of this happens; Maren simply packs a bag at home and leaves.\n    PRM outcome: Deleting Dan's voicemail is not an act that burns the alliance; no break with Dan or with institutional resources actually occurs.\n    PRM key_actions: Dan is never physically present; he only calls her phone, so she never watches his hand.\n    PRM knowledge_out: Nothing in the scene burns the alliance with Dan; she only avoids his call.",
-        "driving-west: 780 words, 2 contradiction(s), 4 broken promise(s)\n    REL: Danny Vasquez is presented as Hank's supervisor of six years, but earlier he is the school district's facilities contact who threatens to report Hank to his bos\n    KNO: Hank recalls seeing rusting anchor bolts in the dream building. Those rusted bolts were actually in the 1957 masonry school's east wall, and the dream building \n    PRM goal: The scene ends in the valley below the pass, with no Yachats, no rented house, no wiretap recording and no rescue.\n    PRM outcome: Claire is never reached or removed, so the goal's success is not delivered.\n    PRM crisis: Dawson, the Tahoe, the referral and the confrontation are entirely absent.\n    PRM decision: None of this happens; Hank simply drives west uninterrupted.",
-        "pewter-town: 1242 words, 1 contradiction(s), 4 broken promise(s)\n    WLD: The intake form here classifies Claire's disappearance as 'Adult, Voluntary', but the earlier NamUs listing and the world bible both say it was classified as su\n    PRM goal: The scene takes place in Marie's apartment and on the hospital road; there is no DSS records room, no Terri Bascom, no purge, and no deadline.\n    PRM crisis: None of this happens; Terri, Whelan, the seventeen families and the caseworker promise are all absent.\n    PRM decision: Maren records the timeline alone with Marie and then tells Marie to tear up the copy afterward; no witness is named, Whelan is never mentioned, and no shredding\n    PRM physical_state_out: The scene states thirty-six hours without sleep and never establishes salt ground into her jacket.",
-        "diner: 1063 words, 3 contradiction(s), 1 broken promise(s)\n    TRT: Hank says he never sees anything in the dreams and only feels them, but his earlier dream scenes are full of visual observation through the perpetrator's eyes.\n    PHY: Maren says Claire's right wrist is worse, but in her own dream the left wrist was the worse one, and Claire cut her left wrist open.\n    KNO: Maren says the police classified Claire's case as suspicious circumstances, though she has just read and memorized the intake form, which classified it as Adult\n    PRM physical_state_out: The scene never establishes how long Maren has gone without sleep; the only reference is to being up 'long enough to stop sleeping.'",
-        "two-hours: 1104 words, 1 contradiction(s), 5 broken promise(s)\n    PHY: The scene has Maren say the left wrist is the worse one, but at the diner she told Hank the bruising was deeper on the right.\n    PRM goal: The scene has no dead-man's-switch email, no surveillance photo, no Kowalski, no warehouse and no state's attorney deadline; it is a dream-comparison scene that\n    PRM crisis: No audio is played and no judge or second account appears; the crisis beat never happens.\n    PRM decision: Hank confesses nothing of the kind, there is no call to a judge and nothing is deleted; instead the two of them identify Harmon's property through a parcel sear\n    PRM outcome: The scene does not deliver the brief's failure plus complication around the photo; it ends with the pair aligned on not going to the police.\n    PRM physical_state_out: The tremor and both characters standing are shown, but no jaw tightness is established for either of them.",
-        "plan: 935 words, 2 contradiction(s), 1 broken promise(s)\n    TIM: Maren says she listened to Marie for forty minutes 'yesterday', but she first reached and met Marie in person earlier the same day, on the trip she made after h\n    WLD: Harmon's property is reached by the 'north road' in this scene, but earlier it lies south of town on 101, between Coos Bay and Bandon.\n    PRM physical_state_out: The scene never mentions Maren's clothes being damp or wet; the only wetness is rain on the windshield and the asphalt.",
-        "dark-road: 843 words, 3 contradiction(s), 0 broken promise(s)\n    PHY: The scene says Hank has been counting since Maren got into the truck in a motel parking lot, but in the previous scene they were already in the truck together i\n    PHY: Maren's clothes are said to be damp from a payphone, but she made the impersonation call on a prepaid cell phone while sitting dry inside the truck.\n    WLD: Driving south on 101, Hank turns left onto the gravel track toward the water, but his earlier reconstruction of Harmon's route was a right turn onto gravel.",
-        "building: 1017 words, 3 contradiction(s), 1 broken promise(s)\n    PHY: Maren's echo of Claire's body puts the captive's shoulder wrenched behind her, but Claire's wrists were tied in front of her.\n    WLD: The scene implies they drove past Bandon, but the turnoff is about sixteen miles south of Coos Bay, on the stretch between Coos Bay and Bandon, so they never re\n    TIM: The impersonation call is placed two hours before arrival, but the plan scene ends with the truck setting off right after the call to cover a twelve-mile drive.\n    PRM physical_state_out: The scene never establishes Maren's jaw locking or clenching.",
-        "twelve-minutes: 841 words, 1 contradiction(s), 2 broken promise(s)\n    PHY: The scene says Rook has not sat since they left the truck, but in the immediately preceding scene Rook sat at Hank's boot by the building.\n    PRM crisis: The pin shears and the door groans, but no Ruzek, radio, ultimatum or threat of an unauthorized-entry report appears; the only tension is a shape crossing Harmo\n    PRM decision: There is no exchange with Ruzek and no technique learned from a man Hank buried; Hank simply resumes work drawing on Harmon's remembered patience, so the decisi",
-        "claire: 1016 words, 5 contradiction(s), 3 broken promise(s)\n    PHY: Rook is placed outside with Hank at the end of her leash, but the previous scene ends with Rook following Maren into the building.\n    PHY: The space heater is described as never plugged in, but on the approach Maren felt its fan humming through the wall and concluded someone had turned it on.\n    PHY: Claire's scrubs are green here, but Hank's dream notes recorded them as ceil blue.\n    PHY: The chair is in the middle of the floor, but the dream placed it against the north wall.\n    TIM: Maren is said to have felt the draft for nine nights, but she has dreamed Claire for only about four nights.\n    PRM goal: The scene has no condemned third floor, no demolition, no cordon, and no revelation that Claire asked to keep Maren away; it is a single-story metal building wi\n    PRM crisis: None of these elements appear: Lun, the alarm, the cable lock, the bolt cutters, the IV line, the letter, the accusation, the buckling floor, and Harwick are al\n    PRM decision: Maren does briefly ground herself aloud and waits for Claire, but the required line is never spoken, there are no bolt cutters or IV site, and there is no life-",
-        "drive: 861 words, 4 contradiction(s), 3 broken promise(s)\n    TIM: Claire is said to have been held eleven days, but earlier scenes consistently put her captivity at nine days.\n    PHY: Hank cuts Claire's wrist and ankle ties and Maren lifts off the pillowcase, though in the previous scene Maren had already removed the hood, cut all the ties he\n    PHY: Claire is said to be still in the chair, drawing back into it, though the previous scene ended with her upright and leaning on Maren as they turned toward the d\n    PHY: Harmon's house is described as dark the whole time, but earlier scenes have one window lit by a television that was still on during the rescue.\n    PRM goal: The scene takes place at Harmon's coastal building and a truck; there is no Kedzie apartment, cab, 2 a.m. deadline, or promise to Claire's mother.\n    PRM crisis: None of this occurs; Claire consents with a nod and there is no approaching captor or dilemma.\n    PRM decision: Hank kneels beside the chair and shows open hands, but there is no linoleum, no bite wound, and Maren, not Hank, tells Claire he will carry her.",
-        "bench: 1020 words, 1 contradiction(s), 0 broken promise(s)\n    TIM: The scene says Maren had been clenched for eleven nights. Earlier scenes establish she has had the dreams for only about four nights.",
-        "eleven-days: 499 words, 0 contradiction(s), 8 broken promise(s)\n    PRM goal: The brief puts Maren's routine at the centre, but the scene is told from Hank's POV in Bend and covers his routine, not hers.\n    PRM crisis: Hank wakes, not Maren, on the twelfth night rather than the eleventh, and no stranger's face appears.\n    PRM decision: Hank counts breaths and it is the taste that sharpens; there is no face to sharpen.\n    PRM key_actions: Hank walks Rook along the Deschutes in Bend; there is no Belmont walk by Maren.\n    PRM key_actions: Hank sits up on night twelve and never presses a fist to his mouth; Maren does not appear.\n    PRM key_actions: These actions are done by Hank, not the brief's POV character Maren.\n    PRM physical_state_out: The ending state belongs to Hank and lacks the fist pressed to the mouth.\n    PRM knowledge_out: Only Hank registers the new pull; the brief's POV character Maren never reaches this knowledge, and no unknown person's face is established.",
-        "checker eleven-days: the text says \"three nights\" (about 3 day(s)), but the calendar puts it 0 day(s) on",
+        "claires-cold: 886 words, 0 contradiction(s), 1 broken promise(s)\n    PRM physical_state_out: The scene mentions only sand-gritted concrete under her bare feet; it never establishes any abrasions, let alone worsening ones.",
+        "harmons-hands: 727 words, 1 contradiction(s), 0 broken promise(s)\n    PHY: This scene has Harmon take the radial pulse with two fingers, but the earlier scene establishes, as a pointed detail, that he takes it with his thumb, an amateu",
+        "waking-maren: 993 words, 1 contradiction(s), 0 broken promise(s)\n    PHY: Maren feels the captive's left wrist as worse than the right, but the earlier scene establishes the right wrist as the more damaged one, split and bloodied at t",
+        "waking-hank: 975 words, 0 contradiction(s), 0 broken promise(s)",
+        "the-school: 979 words, 0 contradiction(s), 0 broken promise(s)",
+        "advocate: 1051 words, 0 contradiction(s), 0 broken promise(s)",
+        "maren-runs: 891 words, 1 contradiction(s), 0 broken promise(s)\n    PHY: This scene says Maren pressed her knuckles into the bathroom tile until the tremor stopped, but the earlier scene says the tremor kept going while she pressed.",
+        "engineer: 896 words, 1 contradiction(s), 0 broken promise(s)\n    KNO: Hank places the remembered tremor of Harmon's hands at a door, but in the dream the hand jumped while Harmon was checking the woman's pulse at her wrist beside ",
+        "name-surfaces: 803 words, 2 contradiction(s), 1 broken promise(s)\n    KNO: Hank's close-third narration names the captor 'Harmon' even though no earlier scene has Hank learn the man's name; he has only ever known him as 'the man', and \n    PHY: The page Hank rereads on the pad says the hasp and padlock are one exterior fitting, and he recalls the weight of a keyed brass lock. His earlier notes put a co\n    PRM physical_state_out: The scene never establishes that Hank has gone without sleep or is exhausted; it notes only the hour and that the pad was left before dawn, without conveying a ",
+        "voicemail: 933 words, 3 contradiction(s), 1 broken promise(s)\n    REL: Marie Renaud is presented as Claire's mother, but the reference material establishes her as Claire's sister.\n    PHY: Maren recalls waking against a motel mattress at 2:47 that morning, but she is living at and waking in her Portland apartment above the bookstore, not a motel.\n    TIM: The latest voicemail, already reporting Claire missing, is eleven days old, which means Claire has been missing longer than the nine days of captivity establish\n    PRM outcome: The scene resolves the goal affirmatively, with Maren concluding \"So it was real\" after matching the hinge sound, rather than leaving the corroboration unachiev",
+        "missing-persons: 1268 words, 4 contradiction(s), 0 broken promise(s)\n    PHY: The scene has Claire's wrists bound in front of her, resting in her lap, but earlier her hands are tied behind her.\n    REL: Marie Renaud is called Claire's sister here, but in the voicemail scene Marie calls Claire her daughter.\n    TIM: Claire's last contact is nine days ago, yet Marie's voicemails about her disappearance were already eleven days old in the previous scene.\n    KNO: Maren searches NamUs as if she doesn't know the captive's identity, but in the previous scene she had already identified Claire Renaud, opened a case under that",
+        "driving-west: 795 words, 2 contradiction(s), 0 broken promise(s)\n    REL: Danny Vasquez is treated as Hank's supervisor, granting him leave and offering to cover his walkthrough, but earlier he is the crew lead who takes Hank's orders\n    KNO: The scene says Hank's notes and knowledge come to only a building type and a first name, but earlier he had written much more, including the padlock, zip-tie ro",
+        "pewter-town: 1228 words, 3 contradiction(s), 0 broken promise(s)\n    TIM: The scene says three weeks have passed since Claire went missing, but she has been missing nine days (about ten here), and the 11/2 date clashes with the Januar\n    KNO: Marie says nobody from Portland has called her, but Maren already phoned her from Portland, and the reference says Maren called her and listened for forty minut\n    REL: Carolyn is made a night-desk nurse at Claire's hospital, but Carolyn is established as Maren's supervisor at the DA's office, and the character list has only on",
+        "diner: 1075 words, 1 contradiction(s), 0 broken promise(s)\n    TIM: Maren recalls nine nights of the captor's hands in her dreams, but the dreams began only four nights earlier, a figure this same scene repeats.",
+        "two-hours: 1082 words, 1 contradiction(s), 1 broken promise(s)\n    PHY: Maren describes Claire's wrists as tied behind her, but in Maren's own earlier dream and research notes the wrists were bound in front and resting in her lap.\n    PRM physical_state_out: The scene never establishes Maren's or Hank's sleep deprivation; it mentions neither sleep nor exhaustion beyond Maren's face looking older in the screen light.",
+        "plan: 1012 words, 3 contradiction(s), 0 broken promise(s)\n    PHY: The scene seats Hank with his back to the wall and has Maren noticing it as she came in, but Maren was already seated when Hank arrived, and she was the one wit\n    PHY: A radio is playing a game in the diner kitchen, but the waitress had already switched the diner's radio off.\n    PHY: Maren pays with a ten, but Hank had already paid the check with a twenty and both of them had got up to leave.",
+        "dark-road: 833 words, 2 contradiction(s), 0 broken promise(s)\n    PHY: The scene says Maren got wet at a payphone, but in the previous scene she made the impersonation call on her own cell phone under the diner overhang.\n    PHY: Rook is placed on a bench seat between Hank and Maren, but she had moved over the console into the back when Maren got in, and the truck has a center console ra",
+        "building: 1084 words, 0 contradiction(s), 0 broken promise(s)",
+        "twelve-minutes: 860 words, 1 contradiction(s), 0 broken promise(s)\n    KNO: The scene says Maren spoke only the two words \"She's alive\" when she came off the wall, but in the previous scene she said two sentences.",
+        "claire: 1019 words, 3 contradiction(s), 1 broken promise(s)\n    TIM: The scene places Maren's impersonation of Marie to the dispatcher two nights earlier, but she made that call the same night, minutes before they drove to the pr\n    PHY: The space heater sits three feet from the chair at the center of the slab, but earlier it stood by the door.\n    PHY: In the previous scene Hank held the door open on its padlocked hasp while Maren walked past him into the building; here the door comes free, he sets it against \n    PRM goal: The scene ends with Claire collapsed in Maren's arms inside the building, so the extraction and walking out never happen.",
+        "drive: 925 words, 5 contradiction(s), 1 broken promise(s)\n    TIM: Claire is said to have been held eleven days, but the earlier scenes consistently put her captivity at nine days.\n    PHY: Hank cuts Claire's wrist and ankle zip ties here, but the previous scene already showed him cutting all of them.\n    PHY: Hank catches Claire when her legs fold, but in the previous scene Maren caught her and was holding her full weight.\n    PHY: The hinge pins are said to be in Hank's jacket pocket, but he had laid them on the gravel beside the door.\n    KNO: The scene says Hank and Maren planned the rescue and the 911 call in a motel room, but they planned only in the diner and drove straight to the property, and no\n    PRM physical_state_out: The scene establishes the hand tremor and the contamination residue, but it never conveys sleeplessness or fatigue.",
+        "bench: 985 words, 1 contradiction(s), 0 broken promise(s)\n    PHY: The scene says Hank angled the heater vents toward the back seat for Claire, but in the drive Claire rode up front on the bench seat between Maren and Hank, and",
+        "eleven-days: 477 words, 0 contradiction(s), 0 broken promise(s)",
+        "checker eleven-days: the text says \"eleven days\" (about 11 day(s)), but the calendar puts it 0 day(s) on",
         "Judge stands in for the plan's human spot-check (still owed). Drafted in direct mode; batch mode is refused under a cassette."
       ],
-      "started_at": "2026-10-29T06:26:46+00:00",
-      "status": "fail",
+      "started_at": "2026-10-29T21:45:19+00:00",
+      "status": "pass",
       "suite": "e4-generation"
     },
     {
       "by_code": {
         "KNO": {
-          "mismatches": 2
+          "mismatches": 5
         },
         "PHY": {
-          "mismatches": 19
+          "mismatches": 43
         },
         "TIM": {
-          "mismatches": 6
+          "mismatches": 12
         },
         "TRT": {
           "mismatches": 3
         },
         "WLD": {
-          "mismatches": 2
+          "mismatches": 1
         }
       },
       "cost": {
         "calls": 20,
-        "input_tokens": 87571,
-        "output_tokens": 49194,
+        "input_tokens": 79494,
+        "output_tokens": 46002,
         "replayed_calls": 20,
         "unpriced_calls": 0,
-        "usd_if_live": 2.0737,
+        "usd_if_live": 1.6881,
         "usd_spent": 0.0
       },
       "description": "Redraft from plan + ledger; facts the redraft changes",
-      "duration_s": 2.68,
+      "duration_s": 4.7,
       "error": null,
       "gates": [
         {
@@ -688,24 +682,24 @@
         }
       ],
       "metrics": {
-        "mismatches": 32,
-        "mismatches_per_scene": 3.2,
+        "mismatches": 64,
+        "mismatches_per_scene": 6.4,
         "scenes": 10
       },
       "mode": "replay",
       "notes": [
-        "claires-cold: 2 mismatch(es)\n    PHY: Her wrists are zip-tied behind her back in the original, but in front of her in the redraft.\n    PHY: In the original the space heater switches on and gives off heat; in the redraft it has never been on.",
-        "harmons-hands: 2 mismatch(es)\n    PHY: The original has the space heater running with its cord in the outlet; the redraft has it sitting unplugged.\n    PHY: The original has the captive kneeling on gravel deliberately laid over the concrete; the redraft has her bound to a chair, with her knees op",
-        "waking-maren: 1 mismatch(es)\n    PHY: The surface the captive woman is kept on: in the original it is gravel deliberately chosen over bare concrete; in the redraft it is a concre",
-        "waking-hank: 4 mismatch(es)\n    PHY: In the original he wakes standing at the bathroom sink; in the redraft he is at the kitchen sink.\n    TRT: In the original Rook did not whine this time; in the redraft she makes a whining sound.\n    PHY: In the original Rook settles by the door with her head on his boots; in the redraft she lies across his bare feet at the table with her chin\n    PHY: In the original the apartment floors are cold; in the redraft the floor feels too warm.",
-        "the-school: 1 mismatch(es)\n    PHY: Rook's location during the inspection differs: in the original she waits outside in the truck cab, while in the redraft she is inside the sc",
-        "advocate: 5 mismatch(es)\n    TIM: The original has the petition already filed by Maren that morning, while the redraft has it only drafted and filed at the clerk's window at \n    TIM: The original puts the hearing within seventy-two hours of filing, while the redraft sets a same-day hearing at 1:30.\n    WLD: The original sets the meeting in a windowless interview room, while the redraft sets it in a courthouse corridor waiting area.\n    PHY: In the original Sofia's injury is from strangulation two weeks earlier (burst eye capillaries), while in the redraft her face is freshly swo\n    PHY: In the original Maren's hands are steady during the meeting, while in the redraft her left hand is trembling throughout.",
-        "maren-runs: 5 mismatch(es)\n    TIM: The time of day she is on the bridge differs: before dawn just before 6 a.m. in the original, daylight around seven in the morning in the re\n    PHY: Her breathing pattern is a four-count in and four-count out in the original but a three-count in the redraft.\n    PHY: The homeless camp is on the east bank in the original but on the west bank in the redraft.\n    TRT: The number ninety counts consecutive mornings of crossing the bridge once on a loop route in the original, but ninety lamp-to-lamp intervals\n    PHY: In the original she crosses the bridge without stopping, turns north on Naito and loops back toward Hawthorne, and her body is fine; in the ",
-        "engineer: 4 mismatch(es)\n    PHY: The original school is a single-story building, but the redraft gives it a stairwell, a second floor and a second-floor diaphragm.\n    PHY: In the original Rook stays in the truck during the inspection, but in the redraft she is inside the building at Hank's side.\n    TIM: In the original Hank arrives early and Danny pulls up later while Hank is studying the drawings, but in the redraft Danny is already in the \n    WLD: In the original Hank's own hands restrained the captive woman the night before, but in the redraft the night work was done by hands that wer",
-        "name-surfaces: 5 mismatch(es)\n    TIM: The time on the kitchen clock differs, and so does which appliance shows it.\n    PHY: Rook's position differs: in the original she lies at his feet with her chin on his boot; in the redraft she lies across the hall threshold w\n    KNO: In the original Hank knows the name Claire from the dream before he searches; in the redraft the name comes to him only after he finds the n\n    PHY: He searches on his phone in the original but on a laptop in the redraft.\n    TIM: The driving time to Coos Bay/the coast differs.",
-        "voicemail: 3 mismatch(es)\n    KNO: How Maren obtained Marie's contact number differs: in the original a charge nurse at the hospital ER gave it to her over the phone, while in\n    TRT: Claire's habit of contacting Marie differs: in the original she texted every night on getting home, while in the redraft Marie says Claire a\n    PHY: The circumstances of the disappearance differ: in the original Claire's last nightly text (sent on getting home) arrived, implying she left "
+        "claires-cold: 4 mismatch(es)\n    PHY: In the original she kneels on the concrete floor with her hands tied behind her back; in the redraft she is bound to a chair.\n    PHY: In the original the captor turns on the space heater and moves it closer to her; in the redraft he never turns it on.\n    PHY: In the original the door is a hinged door that creaks; in the redraft it is a sliding door that rolls on a track.\n    PHY: In the original he gives her water from a plastic bottle through the hood; in the redraft he uses a plastic cup after lifting the hood's hem",
+        "harmons-hands: 2 mismatch(es)\n    PHY: In the original he cuts off the too-tight left-wrist zip tie with a folding knife and puts on a new one; in the redraft he does not cut it b\n    PHY: The original says the hands he's wearing stay steady all night, but in the redraft his right hand twitches and makes the lantern rock.",
+        "waking-maren: 5 mismatch(es)\n    PHY: When the clock reads 2:47, the original has Maren sitting up in bed; the redraft has her already standing at the kitchen counter.\n    PHY: The 2:47 reading comes from the bedroom alarm clock in the original but from the stove clock in the redraft.\n    PHY: The surface she presses her palms onto is linoleum in the original but butcher block in the redraft.\n    PHY: The hood in the dream is made of tight synthetic fabric in the original but is a cotton pillowcase in the redraft.\n    TRT: The work stress behind the first-night excuse is the Hoffman deposition in the original but three trials and the Petrakis sentencing in the ",
+        "waking-hank: 8 mismatch(es)\n    PHY: The legal pad sits in a different place: on the counter in the original, on the kitchen table in the redraft.\n    TIM: He set out the legal pad after the second night in the original, but on the first night in the redraft.\n    PHY: He writes with a pencil in the original but with a pen in the redraft.\n    PHY: The 2:47 time is shown on the stove clock in the original but on the microwave clock in the redraft.\n    PHY: Rook does not whine in the original, but in the redraft she makes a high, thin sound.\n    PHY: Rook stays in the doorway in the original, but in the redraft she comes over and lies against his feet.\n    TIM: On the second night he sat at the kitchen table cataloging what he'd carried back in the original, but the redraft says both previous nights\n    PHY: The pad was lying facedown in the original, whereas in the redraft a pen lay across it, implying it was open on the table.",
+        "the-school: 9 mismatch(es)\n    PHY: The gymnasium lights are off in the original but were left on in the redraft.\n    PHY: In the original Rook is told to stay in the truck and only later appears at the gym entrance; in the redraft she enters the gym with Hank fr\n    TIM: The original has the assessment take forty minutes after a 7:15 arrival; the redraft has him finishing at quarter to ten.\n    PHY: The original places the worst cracking at the southeast corner; the redraft has the cracks at the southeast end as hairline and widening tow\n    PHY: The hand-spreading episode happens halfway along the wall in the original but near the corner in the redraft.\n    PHY: In the original Hank installs crack monitor cards along the wall himself; in the redraft his report recommends that crack monitors be instal\n    PHY: The troubling sentence is handwritten on the clipboard elevation drawing and crossed out in the original, but typed on a laptop in the truck\n    TIM: In the original he plans to write up the report that afternoon; in the redraft he types the report in the truck right away.\n    PHY: In the truck afterward, the heater is running in the original, while the engine is off in the redraft.",
+        "advocate: 9 mismatch(es)\n    TRT: Sofia's age differs: twenty-six on the intake form versus about nineteen.\n    PHY: The palm Sofia presses her thumb into differs: her left palm versus her right palm.\n    PHY: Maren's hands rest on the table palms up in the original but palms down in the redraft.\n    TIM: What Sofia was doing when the abuser arrived differs: washing dishes as he came in through the kitchen door versus already in bed when he ca\n    PHY: The assault happened on the kitchen floor in the original but on the hallway floor in the redraft.\n    PHY: How he grabbed Sofia differs: he pulled her hair versus he pulled her by the ankle.\n    PHY: The location of Sofia's bruise differs: high on her left cheekbone versus on her jaw.\n    PHY: The finger that twitches with Maren's tremor differs: her left ring finger versus her left index finger.\n    TIM: The filing deadline differs: motions are still due by close of business Wednesday versus the deadline having already passed at noon yesterda",
+        "maren-runs: 7 mismatch(es)\n    PHY: The run's direction differs: the original starts at the west approach and finishes at the east, while the redraft starts at the east end and\n    TIM: In the original she had already crossed the bridge ninety times before this run; in the redraft this run is the ninetieth crossing.\n    TRT: Her breathing pattern differs: three strides in and three out in the original, in for three and out for two in the redraft.\n    TIM: The left-hand tremor began this morning in the original but has been going since yesterday in the redraft.\n    PHY: Her posture during the flinch differs: in the original her arms come up and her hands splay wide open, while in the redraft her arms are pul\n    KNO: The number of times she has watched this response across an interview table differs: about a hundred in the original, about two hundred in t\n    PHY: In the original her hands have stopped shaking by the time she reaches the end of the bridge; in the redraft both hands are shaking at the e",
+        "engineer: 6 mismatch(es)\n    PHY: In the original the east-wall stucco Hank inspects and has removed is on the interior of the gymnasium; in the redraft it is exterior stucco\n    KNO: In the original Danny removes the stucco himself from a ladder with a masonry hammer; in the redraft two crew members do it from a lift, so \n    PHY: In the original the diaphragm anchor bolts are entirely absent, cut or sheared during a previous renovation; in the redraft most anchors are\n    KNO: In the original Danny says \"Hell\" on seeing the exposed connections; in the redraft Hank says it and Danny asks if it's bad.\n    WLD: In the original the school has been closed and empty since 2019; the redraft treats it as an operating school with a custodian and a seasona\n    TIM: In the original the 1957 building's components have been in place about sixty-five years; the redraft says fifty years.",
+        "name-surfaces: 7 mismatch(es)\n    PHY: The number of pages of notes on the legal pad differs.\n    TIM: When the notes were written differs: the original has him writing them at 11:40 p.m. and 12:15, with 2:47 the moment the name surfaces; the \n    PHY: The building's door and lock differ: a steel personnel door with a padlock hasp welded to the frame and a Master 6271 tubular-key padlock, v\n    PHY: The water ration differs: eight ounces every six hours versus water by the capful.\n    PHY: The space heater is placed two meters from the chair to keep the subject alive in the original, but sits against the east wall unplugged in \n    KNO: How Hank learns the name Claire differs: a coworker calling it out in a parking lot versus the captor's thumb reading it off a laminated lan\n    KNO: In the original Hank has location clues (driving directions, Oregon plates, a Coos Bay receipt), while in the redraft he says the site could",
+        "voicemail: 7 mismatch(es)\n    TIM: When Marie first called the office: two days ago in the original, eleven days ago in the redraft.\n    PHY: Where Claire's car was found: her apartment lot in the original, the hospital lot in the redraft.\n    PHY: The sixth message is an angry spoken complaint in the original but only twelve seconds of breathing in the redraft.\n    PHY: The fifth message lists different details: license plate, shift schedule and coworker Jennifer in the original; height, hair and a gap in he\n    PHY: Where Marie was during the seventh message: indoors in Claire's apartment on the landline in the original, outside in the wind in the redraf\n    PHY: The seventh message is cut off by the time limit right after the hinge in the original, but runs nine more seconds after the hinge in the re\n    TIM: When Maren heard the hinge in her vision: two nights ago in the original, at four that morning in the redraft."
       ],
-      "started_at": "2026-10-29T06:26:52+00:00",
+      "started_at": "2026-10-29T21:45:25+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -733,7 +727,7 @@
         "usd_spent": 0.0
       },
       "description": "Continuity flags raised on classics with no known errors",
-      "duration_s": 0.05,
+      "duration_s": 0.08,
       "error": null,
       "gates": [
         {
@@ -767,7 +761,7 @@
         "christmas-carol/run2: 35 flag(s)",
         "christmas-carol/run1: 25 flag(s)"
       ],
-      "started_at": "2026-10-29T06:26:55+00:00",
+      "started_at": "2026-10-29T21:45:30+00:00",
       "status": "fail",
       "suite": "e7-classics"
     },
@@ -796,15 +790,15 @@
       },
       "cost": {
         "calls": 47,
-        "input_tokens": 212965,
-        "output_tokens": 107151,
+        "input_tokens": 219233,
+        "output_tokens": 106709,
         "replayed_calls": 47,
         "unpriced_calls": 0,
-        "usd_if_live": 4.5694,
+        "usd_if_live": 4.5857,
         "usd_spent": 0.0
       },
       "description": "Current revision passes vs the E1 errors past passes introduced",
-      "duration_s": 57.4,
+      "duration_s": 80.39,
       "error": null,
       "gates": [
         {
@@ -865,13 +859,13 @@
         "thornwall-029 (evidence-room): not_present",
         "thornwall-030 (ivra-seals-archive): reintroduced \u2014 \"At Garren's Watch the figures had told the same story over nine years, each reduction justified by a different administr\""
       ],
-      "started_at": "2026-10-29T06:26:55+00:00",
+      "started_at": "2026-10-29T21:45:30+00:00",
       "status": "fail",
       "suite": "e8-revision-safety"
     }
   ],
   "schema_version": 1,
   "status": "fail",
-  "storyforge_version": "1.83.0",
+  "storyforge_version": "1.84.0",
   "suite_count": 9
 }

@@ -432,6 +432,34 @@ class TestMainDryRun:
         assert 'tricolon-parallelism' in captured.out
         assert mock_api.call_count == 0
 
+    @pytest.mark.parametrize('fixed, commits', [
+        ([], []),
+        (['act1-sc01'], ['Naturalness: upstream brief fixes for 1 scenes']),
+    ])
+    def test_naturalness_commits_brief_fixes_only_when_made(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, fixed, commits):
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_revise.detect_project_root', lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_revise.get_plugin_dir',
+                            lambda: os.path.dirname(os.path.dirname(
+                                os.path.dirname(os.path.dirname(
+                                    os.path.dirname(__file__))))))
+        latest = os.path.join(project_dir, 'working', 'scores', 'latest')
+        os.makedirs(latest, exist_ok=True)
+        open(os.path.join(latest, 'diagnosis.csv'), 'w').close()
+        monkeypatch.setattr('storyforge.cmd_revise._read_diagnosis', lambda d: [{}])
+        monkeypatch.setattr('storyforge.cmd_revise._detect_upstream_scenes',
+                            lambda p, rows: ['act1-sc01'])
+        monkeypatch.setattr('storyforge.cmd_revise._fix_and_redraft',
+                            lambda p, ids: (fixed, {} if fixed else {'act1-sc01': 'no reply'}))
+        made = []
+        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push',
+                            lambda p, msg, *a, **kw: made.append(msg))
+
+        main(['--naturalness', '--dry-run'])
+
+        assert [m for m in made if 'upstream' in m] == commits
+
 
 # ============================================================================
 # main() -- validation errors

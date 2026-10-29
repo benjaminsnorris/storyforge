@@ -1184,11 +1184,139 @@ def _detect_upstream_scenes(project_dir: str, diag_rows: list[dict]) -> list[str
     return sorted(upstream)
 
 
-def _fix_upstream_briefs(project_dir: str, scene_ids: list[str]) -> int:
-    """Rewrite conflict/goal/crisis/decision for scenes with upstream issues.
+# A capitalized word: a candidate proper name. Title case only ("Mallen",
+# "McKenzie", "Jean-Luc"); all-caps acronyms, accented names and O'Brien-style
+# names are not checked.
+_NAME_RE = re.compile(r"(?<![\w'’-])([A-Z][a-z][A-Za-z]*(?:[-'’][A-Za-z]+)*)")
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'’-]*")
+# After these, or at a field's start, a capitalized word may only open a sentence.
+_SENTENCE_START = '.!?:;"\u201c\u2014(|'
+# Capitalized words no book invents: calendar words, titles, and sentence
+# openers a short reference set might not contain.
+_COMMON_CAPITALIZED = frozenset('''
+monday tuesday wednesday thursday friday saturday sunday january february
+march april may june july august september october november december
+mr mrs ms dr st he she it we they you his her its their our your this that
+these those there then when while if as at in on of to for from with by
+after before but and or so not no yes the an
+'''.split())
+_PROSE_CONTEXT_WORDS = 6000  # of the scene's prose shown to the brief fix
 
-    Uses API to generate briefs with genuine dramatic opposition.
-    Returns number of fields rewritten.
+
+def _strip_possessive(word: str) -> str:
+    return re.sub(r"['’]s$", '', word)
+
+
+def _name_parts(word: str) -> list[str]:
+    """``Jean-Luc`` -> jean, luc; ``McKenzie`` -> mc, kenzie."""
+    return [p.lower() for p in re.findall(r'[A-Z]?[a-z]+', word)]
+
+
+def _stem(word: str) -> str:
+    for suffix in ('ing', 'ed', 'es', 'e', 's', 'ly'):
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+            return word[:-len(suffix)]
+    return word
+
+
+def _invented_names(fields: list[str], known_text: str) -> list[str]:
+    """Capitalized words in ``fields`` that ``known_text`` never uses, in any
+    case. A word that opens a field or a sentence is checked too, but also
+    passes when the known text uses another form of it ("Refuses" against
+    "refused"), since it may be an ordinary word. Used to reject brief
+    rewrites that bring in people, places or institutions (shared-dark, April
+    2026: upstream brief fixes brought in Mallen, Danny Olinsky, Detective
+    Ruzek and a prison facility, none of them in the book). It cannot catch
+    a known name given a new role (the book's Hank Voigt recast as a police
+    sergeant)."""
+    known: set[str] = set()
+    for token in _WORD_RE.findall(known_text):
+        token = _strip_possessive(token)
+        known.add(token.lower())
+        known.update(_name_parts(token))
+    stems = {_stem(w) for w in known}
+    found = set()
+    for text in fields:
+        for m in _NAME_RE.finditer(text or ''):
+            name = _strip_possessive(m.group(1))
+            lower = name.lower()
+            if lower in known or lower in _COMMON_CAPITALIZED:
+                continue
+            parts = _name_parts(name)
+            if len(parts) > 1 and all(p in known for p in parts):
+                continue
+            before = text[:m.start()].rstrip()
+            opener = not before or before[-1] in _SENTENCE_START
+            if opener and _stem(lower) in stems:
+                continue
+            found.add(name)
+    return sorted(found)
+
+
+# The fields the brief fix rewrites; their current text does not vouch for a
+# name (an earlier fix may have invented it).
+_BRIEF_FIX_FIELDS = ('goal', 'conflict', 'crisis', 'decision')
+
+
+def _read_text(path: str) -> str:
+    with open(path, encoding='utf-8', errors='replace') as f:
+        return f.read()
+
+
+def _reference_text(project_dir: str) -> str:
+    """The reference docs and registries, which make a name the book's own.
+    ``scene-briefs.csv`` is left out on purpose: names an earlier fix invented
+    live there."""
+    ref_dir = os.path.join(project_dir, 'reference')
+    return '\n'.join(
+        _read_text(os.path.join(ref_dir, name))
+        for name in (sorted(os.listdir(ref_dir)) if os.path.isdir(ref_dir) else [])
+        if name != 'scene-briefs.csv' and name.endswith(('.md', '.csv')))
+
+
+def _book_text(reference_text: str, prose: str, brief: dict) -> str:
+    """What a rewrite of one scene's brief may name: the reference text, the
+    scene's prose, and the brief fields the fix leaves alone."""
+    kept = ' '.join(str(v) for k, v in brief.items() if k not in _BRIEF_FIX_FIELDS)
+    return '\n'.join((reference_text, prose, kept))
+
+
+def _scene_prose_excerpt(scene_id: str, prose: str | None) -> str:
+    if prose is None:
+        return '(not drafted yet)'
+    words = prose.split()
+    if len(words) <= _PROSE_CONTEXT_WORDS:
+        return ' '.join(words)
+    log(f'  Note: the brief fix for {scene_id} sees the first {_PROSE_CONTEXT_WORDS} '
+        f'of its {len(words)} words')
+    return ' '.join(words[:_PROSE_CONTEXT_WORDS]) + ' [...]'
+
+
+_BRIEF_FIELD_RE = re.compile(
+    r'^[\s*_#>-]*(GOAL|CONFLICT|CRISIS|DECISION)[*_]*\s*:[*_]*\s*(.*?)\s*$')
+
+
+def _parse_brief_fix(response: str) -> dict[str, str]:
+    """The four fields of a brief-fix reply, tolerating markdown bold."""
+    fields = {}
+    for line in response.splitlines():
+        m = _BRIEF_FIELD_RE.match(line)
+        if m and m.group(2):
+            fields[m.group(1).lower()] = m.group(2)
+    return fields
+
+
+def _fix_upstream_briefs(project_dir: str,
+                         scene_ids: list[str]) -> tuple[list[str], dict[str, str]]:
+    """Rewrite goal/conflict/crisis/decision for scenes with upstream issues.
+
+    Uses API to generate briefs with genuine dramatic opposition, from the
+    scene's own characters, place, plan and prose. A rewrite is rejected with
+    a WARNING, and the brief left as it was, when it lacks one of the four
+    fields or names a capitalized word found nowhere in the reference files,
+    this scene's prose or the brief fields the fix keeps. Returns the ids of
+    the scenes whose briefs were rewritten (only those need a redraft) and,
+    for each scene left unchanged, why.
     """
     from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP, _read_csv
 
@@ -1201,10 +1329,14 @@ def _fix_upstream_briefs(project_dir: str, scene_ids: list[str]) -> int:
     scenes_map = _read_csv_as_map(scenes_path)
     intent_map = _read_csv_as_map(intent_path)
 
-    total_rewrites = 0
+    reference_text = _reference_text(project_dir)
+    rewritten: list[str] = []
+    skipped: dict[str, str] = {}
 
     for scene_id in scene_ids:
         brief = briefs_map.get(scene_id, {})
+        prose_path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
+        prose = _read_text(prose_path) if os.path.isfile(prose_path) else None
         scene = scenes_map.get(scene_id, {})
         intent = intent_map.get(scene_id, {})
 
@@ -1222,15 +1354,25 @@ def _fix_upstream_briefs(project_dir: str, scene_ids: list[str]) -> int:
 
 Scene: {title}
 POV: {pov}
+Location: {scene.get('location', '')}
+Characters: {intent.get('characters', '')}
+On stage: {intent.get('on_stage', '')}
+Function: {intent.get('function', '')}
 Outcome: {outcome}
 Value at stake: {value_at_stake}
 Emotional arc: {emotional_arc}
+Key actions: {brief.get('key_actions', '')}
 
 Current brief:
 GOAL: {current_goal}
 CONFLICT: {current_conflict}
 CRISIS: {current_crisis}
 DECISION: {current_decision}
+
+The scene as written:
+<scene>
+{_scene_prose_excerpt(scene_id, prose)}
+</scene>
 
 The current brief lacks genuine opposition — the conflict is abstract or the goal/crisis/decision don't create real dramatic tension.
 
@@ -1240,6 +1382,8 @@ Rewrite all four fields to introduce genuine opposition while:
 - Making the goal something the POV character actively wants and must fight for
 - Making the crisis a specific moment where the worst happens or the hardest choice appears
 - Making the decision a concrete choice with real cost on both sides
+
+Find the opposition inside this scene: its characters, its place, and what already happens in it. Do not introduce any person, place, organization or event that is not named above; the brief must still describe this book's scene.
 
 Respond ONLY with the four fields in this exact format (no preamble, no explanation):
 GOAL: [rewritten goal]
@@ -1252,38 +1396,54 @@ DECISION: [rewritten decision]"""
         response = invoke_api(prompt, model, max_tokens=1024)
 
         if not response:
-            log(f'  WARNING: No response for {scene_id} upstream fix — skipping')
+            skipped[scene_id] = 'no reply'
+            log(f'  WARNING: No response for {scene_id} upstream fix. Its brief is unchanged.')
             continue
 
-        # Parse response lines
-        fields = {}
-        for line in response.splitlines():
-            for key in ('GOAL', 'CONFLICT', 'CRISIS', 'DECISION'):
-                prefix = f'{key}: '
-                if line.startswith(prefix):
-                    fields[key.lower()] = line[len(prefix):].strip()
-
-        if not fields:
-            log(f'  WARNING: Could not parse upstream fix response for {scene_id}')
+        fields = _parse_brief_fix(response)
+        missing = [k.upper() for k in _BRIEF_FIX_FIELDS if k not in fields]
+        if missing:
+            skipped[scene_id] = f'reply lacked {", ".join(missing)}'
+            log(f'  WARNING: Not rewriting the brief of {scene_id}: the reply has no '
+                f'{", ".join(missing)}. Its brief is unchanged.')
             continue
 
-        updated = False
-        for field_name, new_value in fields.items():
-            if new_value:
-                briefs_map.setdefault(scene_id, {'id': scene_id})
-                briefs_map[scene_id][field_name] = new_value
-                total_rewrites += 1
-                updated = True
+        invented = _invented_names(list(fields.values()),
+                                   _book_text(reference_text, prose or '', brief))
+        if invented:
+            skipped[scene_id] = f'named {", ".join(invented)}'
+            log(f'  WARNING: Not rewriting the brief of {scene_id}: the rewrite names '
+                f'{", ".join(invented)}, which appear nowhere in the reference files '
+                f'or this scene. Its brief is unchanged.')
+            continue
 
-        if updated:
-            log(f'  Updated {len(fields)} fields for {scene_id}')
+        briefs_map.setdefault(scene_id, {'id': scene_id})
+        briefs_map[scene_id].update(fields)
+        rewritten.append(scene_id)
+        log(f'  Updated {len(fields)} fields for {scene_id}')
 
     # Write back updated briefs
-    if total_rewrites > 0:
+    if rewritten:
         all_briefs = list(briefs_map.values())
         _write_csv(briefs_path, all_briefs, _FILE_MAP['scene-briefs.csv'])
 
-    return total_rewrites
+    return rewritten, skipped
+
+
+def _fix_and_redraft(project_dir: str,
+                     scene_ids: list[str]) -> tuple[list[str], dict[str, str]]:
+    """Rewrite the scenes' briefs, then redraft only the scenes whose brief
+    changed (a rejected or failed rewrite leaves its prose alone), and say
+    which scenes were left unchanged and why. Returns what
+    ``_fix_upstream_briefs`` returns."""
+    fixed, skipped = _fix_upstream_briefs(project_dir, scene_ids)
+    if skipped:
+        log(f'  Brief fix left {len(skipped)} of {len(scene_ids)} scenes unchanged:')
+        for sid, why in skipped.items():
+            log(f'    {sid}: {why}')
+    if fixed:
+        _redraft_or_halt(project_dir, fixed)
+    return fixed, skipped
 
 
 def _redraft_or_halt(project_dir: str, scene_ids: list[str]) -> int:
@@ -1464,6 +1624,7 @@ def _run_polish_loop(project_dir: str, max_loops: int,
     prev_avg = baseline_summary['overall_avg']
     summary = baseline_summary
     latest_diag = baseline_diag
+    brief_fix_skipped: dict[str, str] = {}
 
     for iteration in range(1, max_loops + 1):
         # Convergence check: no actionable issues
@@ -1474,14 +1635,18 @@ def _run_polish_loop(project_dir: str, max_loops: int,
             break
 
         # Check for upstream causes before craft polish
-        upstream_scenes = _detect_upstream_scenes(project_dir, latest_diag)
+        # A scene whose brief fix was turned down is not sent again: the
+        # same request would cost the same and likely meet the same fate.
+        upstream_scenes = [s for s in _detect_upstream_scenes(project_dir, latest_diag)
+                           if s not in brief_fix_skipped]
         if upstream_scenes:
             log(f'  Upstream issues in {len(upstream_scenes)} scenes — fixing briefs first')
-            _fix_upstream_briefs(project_dir, upstream_scenes)
-            _redraft_or_halt(project_dir, upstream_scenes)
-            commit_and_push(project_dir,
-                            f'Polish: upstream brief fixes for {len(upstream_scenes)} scenes',
-                            ['reference/', 'scenes/', 'working/'])
+            fixed, skipped = _fix_and_redraft(project_dir, upstream_scenes)
+            brief_fix_skipped.update(skipped)
+            if fixed:
+                commit_and_push(project_dir,
+                                f'Polish: upstream brief fixes for {len(fixed)} scenes',
+                                ['reference/', 'scenes/', 'working/'])
 
         # Generate targeted plan from diagnosis and execute
         log(f'\n=== Iteration {iteration}/{max_loops}: Polish (Sonnet) ===')
@@ -2083,10 +2248,11 @@ def main(argv=None):
         upstream_scenes = _detect_upstream_scenes(project_dir, _naturalness_diag_rows) if _naturalness_diag_rows else []
         if upstream_scenes:
             log(f'Upstream issues in {len(upstream_scenes)} scenes — fixing briefs')
-            _fix_upstream_briefs(project_dir, upstream_scenes)
-            _redraft_or_halt(project_dir, upstream_scenes)
-            commit_and_push(project_dir, 'Naturalness: upstream brief fixes',
-                            ['reference/', 'scenes/', 'working/'])
+            fixed, _ = _fix_and_redraft(project_dir, upstream_scenes)
+            if fixed:
+                commit_and_push(project_dir,
+                                f'Naturalness: upstream brief fixes for {len(fixed)} scenes',
+                                ['reference/', 'scenes/', 'working/'])
         plan_rows = _generate_naturalness_plan(csv_plan_file, project_dir)
     elif args.scores:
         log('Scores mode -- generating revision plan from diagnosis data...')

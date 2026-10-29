@@ -25,7 +25,12 @@ import e1
 from e8 import materialize, redraft
 
 REPO = 'shared-dark'
-COMMIT = '0eaa3867'  # shared-dark HEAD when E5 was recorded; pinned so replays hit
+# Pinned so replays hit. 5e9bdf39 (2026-04-07) is the last commit before
+# revise's upstream brief fix ran on shared-dark: from ac569274 on it rewrote
+# 21 of the 23 Act 1 briefs, 17 of them naming people the book never
+# mentions, so E4's BPS measured the corrupt briefs (the previous pin,
+# 0eaa3867, was after it).
+COMMIT = '5e9bdf39'
 SAMPLE = 10
 FACT_CODES = ('PHY', 'TIM', 'KNO', 'REL', 'TRT', 'WLD')
 

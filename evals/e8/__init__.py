@@ -275,8 +275,14 @@ class PassHalted(Exception):
 def naturalness_upstream(project_dir: str, scene_id: str) -> str:
     """Rewrite the scene's brief and redraft it, as ``revise --naturalness`` does."""
     from storyforge.cmd_revise import RedraftError, _fix_upstream_briefs, _redraft_scenes
-    if not _fix_upstream_briefs(project_dir, [scene_id]):
-        raise RuntimeError(f'upstream brief fix rewrote nothing for {scene_id}')
+    fixed, skipped = _fix_upstream_briefs(project_dir, [scene_id])
+    if not fixed:
+        # no reply, a reply missing a field, or a rewrite naming a word the
+        # book never uses: revise leaves the brief and prose alone, so nothing
+        # can be reintroduced. The reason goes in the halted note, so a guard
+        # that rejects everything shows up there rather than as safety.
+        raise PassHalted(f'upstream brief fix rewrote nothing for {scene_id}: '
+                         f'{skipped.get(scene_id, "unknown")}')
     try:
         count = _redraft_scenes(project_dir, [scene_id])
     except RedraftError as e:  # revise halts and writes nothing: safe, not an error
