@@ -89,25 +89,33 @@ def _read_manuscript(project_dir: str) -> str:
 CHARACTERIZE_MAX_CHARS = 480_000
 
 
-def _fit_manuscript(manuscript: str, limit: int = CHARACTERIZE_MAX_CHARS) -> str:
+def _fit_manuscript(manuscript: str, limit: int | None = None) -> str:
     """Return the manuscript, or its opening and ending if it exceeds limit.
 
     Characterization judges act structure, arcs and resolution, so an over-long
     manuscript keeps both ends and drops the middle, with a marker saying how
     much is missing. Cutting only the tail hid the climax and ending, and the
-    profile then reported the unseen resolution as a structural gap.
+    profile then reported the unseen resolution as a structural gap. The
+    marker names the omitted scenes, whose ids are slugs of their events.
     """
+    if limit is None:
+        limit = CHARACTERIZE_MAX_CHARS
     if len(manuscript) <= limit:
         return manuscript
     half = limit // 2
     head = manuscript[:manuscript.rfind('\n', 0, half) + 1 or half]
     tail_start = manuscript.find('\n', len(manuscript) - half) + 1 or len(manuscript) - half
     tail = manuscript[tail_start:]
-    omitted = len(manuscript[len(head):tail_start].split())
+    middle = manuscript[len(head):tail_start]
+    omitted = len(middle.split())
+    omitted_scenes = re.findall(r'^=== SCENE: (.+?) ===$', middle, re.MULTILINE)
     log(f'WARNING: Manuscript exceeds {limit:,} chars; characterizing its opening '
         f'and ending and omitting ~{omitted:,} words from the middle')
+    scenes_note = (f' The omitted scenes, in order: {", ".join(omitted_scenes)}.'
+                   if omitted_scenes else '')
     return (f'{head}\n[... {omitted:,} words from the middle of the manuscript are '
-            f'omitted here; the ending follows ...]\n\n{tail}')
+            f'omitted here to fit this request.{scenes_note} The ending follows ...]'
+            f'\n\n{tail}')
 
 
 def build_characterize_prompt(project_dir: str) -> str:
@@ -120,7 +128,14 @@ def build_characterize_prompt(project_dir: str) -> str:
     if not manuscript:
         return ''
 
-    manuscript = _fit_manuscript(manuscript)
+    fitted = _fit_manuscript(manuscript)
+    cut_note = ('' if fitted == manuscript else
+                '\n\nPart of the middle is cut from this request (marked in the text, with '
+                'the omitted scenes named). The cut is a limit of this request, not a gap '
+                'in the book: count the omitted scenes in ESTIMATED_SCENES and '
+                'ACT_STRUCTURE, and never report the cut as a compression point or '
+                'structural concern.')
+    manuscript = fitted
 
     return f"""You are analyzing a manuscript to characterize its structure before detailed extraction.
 
@@ -152,7 +167,7 @@ KEY_LOCATIONS: [semicolon-separated list of major locations]
 COMPRESSION_POINTS: [semicolon-separated list of moments that feel compressed or rushed — these are expansion opportunities if the work is being developed into a longer form]
 STRUCTURAL_CONCERNS: [semicolon-separated list of any structural issues visible at this level — dropped threads, pacing problems, arc gaps]
 
-Be precise. Base every field on what's actually in the text, not what you'd expect from the genre."""
+Be precise. Base every field on what's actually in the text, not what you'd expect from the genre.{cut_note}"""
 
 
 def parse_characterize_response(response: str) -> dict[str, str]:
