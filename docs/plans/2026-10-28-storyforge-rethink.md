@@ -232,6 +232,8 @@ None. Ben can reopen any of the above.
 
 Each chunk is independently verifiable. Do them in order.
 
+**Progress (2026-10-28):** chunks 0–4 done and merged; E4 and E6 not started; Phase 1 (chunk 5) next. Current state, baseline numbers, open decisions and how to resume: `docs/plans/2026-10-28-rethink-status.md`.
+
 0. **Corpus survey.** Done; see `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Read its per-repo data-quality notes before touching any repo.
 1. `evals/harness` — runner, fixture recording, result schema, baseline command. Verify: runs on an empty suite.
 2. `evals/e1-corpus` — labeling template with the fields in 4.2 E1; per-repo scene-id maps (slipform's full map is already in the survey; build the others, thornwall by content); exclude author retcons; split bundled fix commits; restrict `git log -S` to `-- scenes/`. Label shared-dark, then thornwall, then lantern-folk, then governor until 100+ prose cases; tag the three subsets; hold out 20% stratified by repo. Verify: counts per code and per subset, holdout file.
