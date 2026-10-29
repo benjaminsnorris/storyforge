@@ -126,6 +126,13 @@ class TestCues:
 
 
 class TestGaps:
+    def test_an_explained_gap_is_not_a_gap(self):
+        """F-066 (The Plastic Age): 'three days" (vacation between terms)'
+        was the length of a vacation, read as the gap."""
+        from storyforge.timeline import gap_to_days
+        assert gap_to_days('three days" (vacation between terms)') is None
+        assert gap_to_days('three days (the vacation)') is None
+
     def test_gap_to_days(self):
         from storyforge.timeline import gap_to_days
         cases = {
@@ -415,6 +422,30 @@ class TestChecks:
         from storyforge.timeline import check_timeline
         rows = self._rows(('a', '1', 'scene', 'XXXX-12-30'), ('b', '3', 'scene', 'XXXX-01-02'))
         assert check_timeline(rows, {}) == []
+
+    def test_weekdays_far_apart_are_not_compared(self):
+        """F-067 (The Plastic Age): a Thursday 884 days after a Saturday was
+        flagged; over years the calendar is too rough for weekday math."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('game', '81', 'scene', ''), ('station', '965', 'scene', ''))
+        cues = {'game': {'anchor': 'Saturday morning'}, 'station': {'anchor': 'Thursday'}}
+        assert check_timeline(rows, cues) == []
+
+    def test_a_weekday_of_another_day_is_not_the_scenes_own(self):
+        """F-068 (The Plastic Age): the smoker's anchor named the game's
+        "Saturday afternoon", "the day after to-morrow", and the smoker was
+        taken for a Saturday."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('smoker', '80', 'scene', ''), ('fever', '81', 'scene', ''))
+        cues = {'smoker': {'anchor': 'the big game "Saturday afternoon"; "day after to-morrow"'},
+                'fever': {'anchor': 'Friday night'}}
+        assert check_timeline(rows, cues) == []
+
+    def test_weekdays_close_together_are_still_compared(self):
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('a', '80', 'scene', ''), ('b', '80', 'scene', ''))
+        cues = {'a': {'anchor': 'Saturday'}, 'b': {'anchor': 'Friday night'}}
+        assert [f['check'] for f in check_timeline(rows, cues)] == ['weekday_mismatch']
 
     def test_a_flashback_may_move_on_through_the_past(self):
         """F-059: Carol's Stave II, each memory cued "earlier" but later than
