@@ -1756,6 +1756,99 @@ def _estimate_avg_words(project_dir):
 # Scene registration for new scenes created during revision
 # ============================================================================
 
+def _content_snapshot(project_dir: str) -> dict[str, str]:
+    """Hash of every file a revision pass may change, by relative path."""
+    import hashlib
+    snapshot = {}
+    for sub in ('scenes', 'reference', os.path.join('working', 'coaching')):
+        root = os.path.join(project_dir, sub)
+        for dirpath, _, files in os.walk(root):
+            for name in files:
+                path = os.path.join(dirpath, name)
+                with open(path, 'rb') as f:
+                    snapshot[os.path.relpath(path, project_dir)] = hashlib.sha1(f.read()).hexdigest()
+    return snapshot
+
+
+class UpstreamApplyError(Exception):
+    """A structural/registry pass reply that cannot be applied as written."""
+
+
+def _seq_key(row: dict) -> float:
+    try:
+        return float(row.get('seq') or 0)
+    except ValueError:
+        return 0.0
+
+
+def _apply_upstream_blocks(project_dir: str, response_text: str) -> tuple[list[str], set]:
+    """Apply a structural/registry pass's CSV blocks to the reference CSVs.
+
+    Every block is merged and checked before anything is written, so a reply
+    that fails a check changes nothing. Raises UpstreamApplyError when the
+    reply has no usable CSV block, when a new scenes.csv row has no ``seq`` or
+    ``pov``, or when a scene the reply touches would share its ``seq`` in the
+    merged scenes.csv. A blank
+    value in the reply leaves the existing field as it is (models omit what
+    they don't change). Returns (files written, scene ids touched).
+    """
+    from storyforge.prompts_elaborate import parse_stage_response, csv_block_to_rows
+    from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+
+    csv_file_map = {
+        'scenes-csv': 'scenes.csv',
+        'scenes-csv-update': 'scenes.csv',
+        'intent-csv': 'scene-intent.csv',
+        'briefs-csv': 'scene-briefs.csv',
+    }
+    ref_dir = os.path.join(project_dir, 'reference')
+    merged: dict[str, dict] = {}
+    affected = set()
+    for label, content in parse_stage_response(response_text).items():
+        fname = csv_file_map.get(label)
+        if not fname:
+            continue
+        rows = [r for r in csv_block_to_rows(content) if r.get('id', '')]
+        if not rows:
+            continue
+        existing = merged.setdefault(fname, _read_csv_as_map(os.path.join(ref_dir, fname)))
+        for row in rows:
+            sid = row['id']
+            affected.add(sid)
+            if sid in existing:
+                existing[sid].update({k: v for k, v in row.items() if v and k != 'id'})
+            else:
+                if fname == 'scenes.csv':
+                    missing = [c for c in ('seq', 'pov') if not (row.get(c) or '').strip()]
+                    if missing:
+                        raise UpstreamApplyError(
+                            f'new scene {sid} has no {" or ".join(missing)}')
+                new = {c: '' for c in _FILE_MAP[fname]}
+                new.update(row)
+                existing[sid] = new
+    if not merged:
+        raise UpstreamApplyError('the reply has no CSV block to apply')
+
+    scenes = merged.get('scenes.csv')
+    if scenes:
+        by_seq: dict[str, list[str]] = {}
+        for sid, row in scenes.items():
+            seq = (row.get('seq') or '').strip()
+            if seq:
+                by_seq.setdefault(seq, []).append(sid)
+        for seq, ids in by_seq.items():
+            if len(ids) > 1 and affected.intersection(ids):
+                raise UpstreamApplyError(f'scenes {", ".join(ids)} would share seq {seq}')
+
+    for fname, rows in merged.items():
+        if fname == 'scenes.csv':
+            ordered = sorted(rows.values(), key=_seq_key)
+        else:
+            ordered = sorted(rows.values(), key=lambda r: r.get('id', ''))
+        _write_csv(os.path.join(ref_dir, fname), ordered, _FILE_MAP[fname])
+    return sorted(merged), affected
+
+
 def _register_new_scenes(project_dir, targets, pass_name):
     """Register new scenes (NEW: prefix in targets) in metadata CSVs."""
     meta_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
@@ -2320,6 +2413,7 @@ Rules:
         head_before = _git(project_dir, 'rev-parse', 'HEAD', check=False).stdout.strip()
 
         step_log = os.path.join(log_dir, f'revision-pass-{pass_num}-{pass_name}.log')
+        snapshot_before = _content_snapshot(project_dir)
         start_time = time.time()
 
         # Select model
@@ -2361,57 +2455,14 @@ Rules:
                     # Upstream revision -- apply CSV updates
                     log(f'  Upstream revision (fix_location: {fix_location}) -- applying CSV updates...')
                     try:
-                        from storyforge.prompts_elaborate import parse_stage_response, csv_block_to_rows
-                        from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
-
-                        response_text = extract_text(response)
-
-                        blocks = parse_stage_response(response_text)
-                        updated_files = []
-                        affected_scenes = set()
-
-                        csv_file_map = {
-                            'scenes-csv': ('scenes.csv', _FILE_MAP['scenes.csv']),
-                            'scenes-csv-update': ('scenes.csv', _FILE_MAP['scenes.csv']),
-                            'intent-csv': ('scene-intent.csv', _FILE_MAP['scene-intent.csv']),
-                            'briefs-csv': ('scene-briefs.csv', _FILE_MAP['scene-briefs.csv']),
-                        }
-
-                        ref_dir = os.path.join(project_dir, 'reference')
-                        for label, content in blocks.items():
-                            if label not in csv_file_map:
-                                continue
-                            rows = csv_block_to_rows(content)
-                            if not rows:
-                                continue
-
-                            fname, cols = csv_file_map[label]
-                            path = os.path.join(ref_dir, fname)
-                            existing = _read_csv_as_map(path)
-
-                            for row in rows:
-                                sid = row.get('id', '')
-                                if not sid:
-                                    continue
-                                affected_scenes.add(sid)
-                                if sid in existing:
-                                    existing[sid].update({k: v for k, v in row.items() if v and k != 'id'})
-                                else:
-                                    new = {c: '' for c in cols}
-                                    new.update(row)
-                                    existing[sid] = new
-
-                            if label.startswith('scenes-csv'):
-                                ordered = sorted(existing.values(), key=lambda r: int(r.get('seq', 0)))
-                            else:
-                                ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
-                            _write_csv(path, ordered, cols)
-                            updated_files.append(fname)
-
-                        log(f'  Updated: {", ".join(updated_files) if updated_files else "no CSV blocks found"}')
-                        log(f'  Affected scenes: {", ".join(sorted(affected_scenes)) if affected_scenes else "none"}')
-                    except Exception as e:
-                        log(f'  WARNING: Failed to apply upstream changes: {e}')
+                        updated_files, affected_scenes = _apply_upstream_blocks(
+                            project_dir, extract_text(response))
+                    except UpstreamApplyError as e:
+                        log(f'ERROR: Pass \'{pass_name}\' could not be applied: {e}')
+                        log(f'Nothing was written; the pass is not marked completed. See {step_log}')
+                        sys.exit(1)
+                    log(f'  Updated: {", ".join(updated_files)}')
+                    log(f'  Affected scenes: {", ".join(sorted(affected_scenes))}')
                 else:
                     # Standard prose revision -- extract scenes from response
                     try:
@@ -2445,6 +2496,12 @@ Rules:
             log(f'ERROR: API call failed for pass \'{pass_name}\' after {minutes}m{secs}s')
             log(f'See full output: {step_log}')
             log(f'Fix the issue and re-run: storyforge revise {pass_num}')
+            sys.exit(1)
+
+        # A pass that changed nothing did not do its job: never mark it completed
+        if _content_snapshot(project_dir) == snapshot_before:
+            log(f'ERROR: Pass \'{pass_name}\' changed no scene, reference or coaching file.')
+            log(f'The pass is not marked completed. See the reply: {step_log}')
             sys.exit(1)
 
         # Update word counts
