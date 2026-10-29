@@ -250,6 +250,26 @@ class TestAssignment:
         assert result == {'s1': (3, 'scene', 'next day'), 's2': (-1825, 'summary', '1917'),
                           's3': (90, '', 'x')}
 
+    def test_id_extended_or_cut_at_a_hyphen(self):
+        """Self-Control: the reply named "de-courcy-pines-and-sets-out" for
+        the scene "de-courcy-pines-and-sets", which was left unplaced."""
+        from storyforge.timeline import parse_assignments
+        ids = ['de-courcy-pines-and-sets', 'hargrave-finds-laura-gone',
+               'laura-visits-lady-pelham', 'laura-visits-lady']
+        result = parse_assignments(
+            'de-courcy-pines-and-sets-out | 146 | summary | earlier\n'
+            'hargrave-finds-laura | 195 | scene | cut short\n'
+            # Matches two ids: ambiguous, ignored
+            'laura-visits | 9 | scene | y\n'
+            # Not at a hyphen: a different id
+            'laura-visits-ladyship | 3 | scene | w\n', ids)
+        assert result == {'de-courcy-pines-and-sets': (146, 'summary', 'earlier'),
+                          'hargrave-finds-laura-gone': (195, 'scene', 'cut short')}
+        # An exact line wins over a loose one, whichever comes first
+        for response in ('s1-out | 7 | scene | loose\ns1 | 5 | scene | exact\n',
+                         's1 | 5 | scene | exact\ns1-out | 7 | scene | loose\n'):
+            assert parse_assignments(response, ['s1']) == {'s1': (5, 'scene', 'exact')}
+
     def test_only_lines_after_calendar_count(self):
         from storyforge.timeline import parse_assignments
         result = parse_assignments('REASONING:\ns1 | 76 | scene | first try\n'

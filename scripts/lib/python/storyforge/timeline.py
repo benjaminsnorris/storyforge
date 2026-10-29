@@ -431,11 +431,21 @@ def parse_assignments(response: str, ids: list[str]) -> dict[str, tuple[int, str
 
     Days may be zero or negative. ``earlier`` given as the mode means
     ``scene``; a missing or unknown mode comes back as ``''`` for the
-    caller to decide. Lines for other ids or with a
-    non-integer day are ignored.
+    caller to decide. An id the reply extends or cuts short at a hyphen
+    counts for the one scene it matches, unless that scene has its own
+    line. Lines for other ids or with a non-integer day are ignored.
     """
     wanted = set(ids)
     result: dict[str, tuple[int, str, str]] = {}
+    exact: set[str] = set()
+
+    def resolve(reply_id):
+        if reply_id in wanted:
+            return reply_id
+        # Self-Control: "de-courcy-pines-and-sets-out" for
+        # "de-courcy-pines-and-sets" left the scene unplaced
+        matches = [w for w in wanted if reply_id.startswith(w + '-') or w.startswith(reply_id + '-')]
+        return matches[0] if len(matches) == 1 else None
     # Only the answer after CALENDAR: counts; reasoning above it may try out
     # days it then revises
     text = response or ''
@@ -446,7 +456,8 @@ def parse_assignments(response: str, ids: list[str]) -> dict[str, tuple[int, str
         text = text[markers[-1].end():]
     for line in text.split('\n'):
         parts = [p.strip() for p in line.strip().lstrip('-* ').split('|')]
-        if len(parts) < 2 or parts[0] not in wanted:
+        sid = resolve(parts[0]) if len(parts) >= 2 else None
+        if sid is None or (sid != parts[0] and sid in exact):
             continue
         try:
             day = int(parts[1].lstrip('+'))
@@ -459,7 +470,9 @@ def parse_assignments(response: str, ids: list[str]) -> dict[str, tuple[int, str
         # "later" could be a frame or vision line that lost its mode
         mode = raw if raw in TIME_MODES else 'scene' if raw == 'earlier' else ''
         basis = parts[3] if len(parts) > 3 else ''
-        result[parts[0]] = (day, mode, basis)
+        result[sid] = (day, mode, basis)
+        if sid == parts[0]:
+            exact.add(sid)
     return result
 
 
