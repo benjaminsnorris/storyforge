@@ -1,3 +1,4 @@
+import gzip
 import json
 import os
 
@@ -104,13 +105,13 @@ def test_every_failure_is_logged_for_the_harness(tape, monkeypatch, live_calls):
     assert [e['error'].split(':')[0] for e in _log(tape)] == ['CassetteMiss', 'CassetteError']
 
 
-@pytest.mark.parametrize('content', ['{truncated', '{"request": {}}', '[]'])
+@pytest.mark.parametrize('content', [b'{truncated', b'not gzip at all', gzip.compress(b'{"request": {}}'), gzip.compress(b'[]'), gzip.compress(b'{"x": 1')[:-6]])
 def test_unreadable_recording_is_an_error_not_an_answer(tape, monkeypatch, live_calls, content):
     monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'replay')
     target = cassette.recording_path(os.environ['STORYFORGE_CASSETTE'],
                                      cassette.request_key('POST', 'messages', BODY))
     os.makedirs(os.path.dirname(target))
-    with open(target, 'w') as f:
+    with open(target, 'wb') as f:
         f.write(content)
     with pytest.raises(cassette.CassetteError, match='Unreadable recording'):
         api.invoke_api('hi', BODY['model'], max_tokens=10)
@@ -127,8 +128,40 @@ def test_recording_holds_request_for_debugging(tape, monkeypatch, live_calls):
     monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'record')
     api._api_request('messages', BODY, method='POST')
     key = cassette.request_key('POST', 'messages', BODY)
-    with open(cassette.recording_path(os.environ['STORYFORGE_CASSETTE'], key)) as f:
+    with gzip.open(cassette.recording_path(os.environ['STORYFORGE_CASSETTE'], key), 'rt') as f:
         assert json.load(f)['request']['body'] == BODY
+
+
+def test_a_plain_json_recording_from_before_compression_still_replays(tape, monkeypatch, live_calls):
+    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'replay')
+    gz = cassette.recording_path(os.environ['STORYFORGE_CASSETTE'],
+                                 cassette.request_key('POST', 'messages', BODY))
+    os.makedirs(os.path.dirname(gz))
+    with open(gz[:-3], 'w') as f:
+        json.dump({'request': {}, 'response': RESPONSE}, f)
+    assert api._api_request('messages', BODY, method='POST') == RESPONSE
+    assert live_calls == []
+
+
+def test_re_recording_replaces_the_plain_original(tape, monkeypatch, live_calls):
+    gz = cassette.recording_path(os.environ['STORYFORGE_CASSETTE'],
+                                 cassette.request_key('POST', 'messages', BODY))
+    os.makedirs(os.path.dirname(gz))
+    with open(gz[:-3], 'w') as f:
+        json.dump({'request': {}, 'response': {}}, f)
+    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'record')
+    api._api_request('messages', BODY, method='POST')
+    assert os.path.isfile(gz) and not os.path.exists(gz[:-3])
+
+
+def test_recordings_are_byte_stable(tape, monkeypatch, live_calls):
+    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'record')
+    path = cassette.recording_path(os.environ['STORYFORGE_CASSETTE'],
+                                   cassette.request_key('POST', 'messages', BODY))
+    api._api_request('messages', BODY, method='POST')
+    first = open(path, 'rb').read()
+    api._api_request('messages', BODY, method='POST')
+    assert open(path, 'rb').read() == first  # gzip mtime pinned: no churn on re-record
 
 
 def test_a_failed_live_call_is_logged_for_the_harness(tape, monkeypatch):

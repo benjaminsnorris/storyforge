@@ -27,6 +27,7 @@ The Batch API is refused under a cassette: its ids and polling sequence are
 not reproducible, so a recording of one could never replay.
 """
 
+import gzip
 import hashlib
 import json
 import os
@@ -62,7 +63,17 @@ def request_key(method: str, path: str, body: dict | None) -> str:
 
 
 def recording_path(cassette_dir: str, key: str) -> str:
-    return os.path.join(cassette_dir, key[:2], f'{key}.json')
+    """Where a recording is written: gzipped JSON, since a recording keeps the
+    full request (often a whole scene plus its references) for debugging."""
+    return os.path.join(cassette_dir, key[:2], f'{key}.json.gz')
+
+
+def _existing_recording(cassette_dir: str, key: str) -> str:
+    """The recording for ``key`` if one exists — gzipped, or plain JSON from
+    before recordings were compressed — else ''."""
+    gz = recording_path(cassette_dir, key)
+    plain = gz[:-len('.gz')]
+    return gz if os.path.isfile(gz) else plain if os.path.isfile(plain) else ''
 
 
 def _append_log(entry: dict) -> None:
@@ -116,12 +127,14 @@ def request(method: str, path: str, body: dict | None, live) -> dict:
     key = request_key(method, path, body)
     target = recording_path(cassette_dir, key)
 
-    if current != 'record' and os.path.isfile(target):
+    existing = _existing_recording(cassette_dir, key)
+    if current != 'record' and existing:
         try:
-            with open(target) as f:
+            opener = gzip.open if existing.endswith('.gz') else open
+            with opener(existing, 'rt', encoding='utf-8') as f:
                 response = json.load(f)['response']
-        except (OSError, ValueError, KeyError, TypeError) as e:
-            raise _fail(CassetteError(f'Unreadable recording {target}: {e}')) from e
+        except (OSError, EOFError, ValueError, KeyError, TypeError) as e:
+            raise _fail(CassetteError(f'Unreadable recording {existing}: {e}')) from e
         _log_call(key, body, response, replayed=True)
         return response
 
@@ -145,8 +158,11 @@ def request(method: str, path: str, body: dict | None, live) -> dict:
     _log_call(key, body, response, replayed=False)
     os.makedirs(os.path.dirname(target), exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), suffix='.tmp')
-    with os.fdopen(fd, 'w') as f:
-        json.dump({'request': {'method': method, 'path': path, 'body': body},
-                   'response': response}, f, indent=1)
+    with os.fdopen(fd, 'wb') as raw, gzip.GzipFile(fileobj=raw, mode='wb', mtime=0) as f:
+        f.write(json.dumps({'request': {'method': method, 'path': path, 'body': body},
+                            'response': response}, indent=1).encode('utf-8'))
     os.replace(tmp, target)
+    plain = target[:-len('.gz')]
+    if os.path.isfile(plain):
+        os.remove(plain)  # a re-record supersedes the uncompressed original
     return response
