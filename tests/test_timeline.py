@@ -860,6 +860,10 @@ class TestChecks:
         found = check_timeline(rows, {'memory': {'relation': 'earlier'},
                                       'more': {'relation': 'earlier'}})
         assert [f['check'] for f in found] == ['flashback_not_earlier']
+        # It was compared with the present, so the message names the present,
+        # not the memory's day (Self-Control: "the previous scene's (-3650)")
+        assert 'present (day 10)' in found[0]['message']
+        assert '-1825' not in found[0]['message']
 
     def test_a_flashback_that_does_not_go_back_is_found(self):
         from storyforge.timeline import check_timeline
