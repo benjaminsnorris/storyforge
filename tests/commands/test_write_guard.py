@@ -2,7 +2,8 @@
 becomes a scene: `write` skips that scene, drafts the rest, and exits 1 naming
 it. Before this a cut-off draft passed the 100-word floor and was committed as
 drafted, and batch mode could not tell at all (its saved response had no
-stop_reason)."""
+stop_reason). Also covers coach/strict replies (saved to working/coaching/,
+never over prose) and revise's redraft from briefs, which shares the guard."""
 
 import json
 import os

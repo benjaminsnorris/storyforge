@@ -170,7 +170,9 @@ class RefusalError(RuntimeError):
 def stop_problem(response) -> str:
     """Why ``response``'s text is not a complete answer ('' when it is): the
     model refused, or the reply was cut off at ``max_tokens``. Works on a live
-    response and on a saved log, from ``invoke_to_file`` or batch results."""
+    response and on a saved log, from ``invoke_to_file`` or batch results.
+    Only those two stop reasons are known to leave an incomplete answer;
+    ``parsing.unsafe_scene_reason`` catches prose cut off any other way."""
     if not isinstance(response, dict):
         return ''
     if response.get('stop_reason') == 'refusal':
