@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 
 import pytest
@@ -158,6 +159,23 @@ class TestBuildPrompts:
                                      {'major_threads': 'thread-a'},
                                      {'title': 'Test', 'pov': 'Alice'})
         assert 'FUNCTION' in prompt and 'VALUE_SHIFT' in prompt and 'MICE_THREADS' in prompt
+
+    def test_intent_prompt_offers_only_valid_value_shifts(self):
+        """The prompt asks for exactly one shift, and every shift it names
+        is one the schema allows.
+
+        Without "exactly one", models invented shifts such as +/-- that
+        validation rejects (Self-Control, Pride and Prejudice, The Plastic
+        Age). The flat shifts (+/+, -/-) stay unoffered: offering them
+        turned 45 of Self-Control's 247 scenes flat, a craft call (F-042).
+        """
+        from storyforge.extract import build_intent_prompt
+        from storyforge.schema import VALID_VALUE_SHIFTS
+        prompt = build_intent_prompt('s1', 'Prose.', {}, {'title': 'T'})
+        line = next(l for l in prompt.splitlines() if l.startswith('VALUE_SHIFT:'))
+        named = set(re.findall(r'[+-]{1,2}/[+-]{1,2}', line))
+        assert named == {'+/-', '-/+', '+/++', '-/--'} and named <= VALID_VALUE_SHIFTS
+        assert 'exactly one' in line
 
 
 class TestCleanupTimeline:
