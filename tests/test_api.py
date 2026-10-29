@@ -173,3 +173,40 @@ class TestLogApiUsage:
         assert 'test-op' in lines[-1]
         assert 'claude-sonnet-4-6' in lines[-1]
         assert '1000' in lines[-1]
+
+
+class TestRefusal:
+    """A refusal's text is empty or cut off, never an answer (Sonnet 5.5
+    refused every timeline batch on Pride and Prejudice, category
+    reasoning_extraction, and the empty text was read as no calendar)."""
+
+    REFUSAL = {'stop_reason': 'refusal', 'content': [],
+               'stop_details': {'type': 'refusal', 'category': 'reasoning_extraction'}}
+
+    @patch('storyforge.api._api_request')
+    @patch('storyforge.api.get_api_key', return_value='test-key')
+    def test_invoke_raises(self, mock_key, mock_req):
+        import pytest
+        from storyforge.api import invoke, RefusalError
+        mock_req.return_value = self.REFUSAL
+        with pytest.raises(RefusalError, match='reasoning_extraction'):
+            invoke('p', 'claude-sonnet-5-5')
+
+    @patch('storyforge.api._api_request')
+    @patch('storyforge.api.get_api_key', return_value='test-key')
+    def test_invoke_to_file_logs_then_raises(self, mock_key, mock_req, tmp_path):
+        import json
+        import pytest
+        from storyforge.api import invoke_to_file, RefusalError
+        mock_req.return_value = self.REFUSAL
+        log = tmp_path / 'r.json'
+        with pytest.raises(RefusalError):
+            invoke_to_file('p', 'claude-sonnet-5-5', str(log))
+        assert json.loads(log.read_text())['stop_reason'] == 'refusal'
+
+    @patch('storyforge.api._api_request')
+    @patch('storyforge.api.get_api_key', return_value='test-key')
+    def test_normal_reply_returned(self, mock_key, mock_req):
+        from storyforge.api import invoke
+        mock_req.return_value = {'stop_reason': 'end_turn', 'content': [{'type': 'text', 'text': 'ok'}]}
+        assert invoke('p', 'm')['stop_reason'] == 'end_turn'
