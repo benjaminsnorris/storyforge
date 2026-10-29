@@ -22,6 +22,12 @@ API_TIMEOUT = 600  # seconds before giving up on an API call (10 min)
 REVISION_TIMEOUT = 3600  # seconds for large revision calls (60 min)
 API_RETRIES = 2  # retry transient failures (timeouts, 5xx)
 
+# Server-side refusal fallback: on a policy decline the API re-runs the
+# request on the model Anthropic recommends for that refusal category (Opus 5
+# or 4.8 today). Prose calls opt in (``fallback=True``) so a false-positive
+# refusal does not leave a scene undrafted; the Batches API rejects it.
+FALLBACK_BETA = 'server-side-fallback-2026-07-01'
+
 # Current models think before answering (Opus can't turn it off), and
 # thinking counts against max_tokens, so a budget sized for the answer alone
 # can end in thinking with no text. invoke adds this much on top of the
@@ -109,22 +115,26 @@ def get_api_key() -> str:
 
 
 def _api_request(path: str, body: dict | None = None, method: str = 'GET',
-                 timeout: int = API_TIMEOUT) -> dict:
+                 timeout: int = API_TIMEOUT, betas: list[str] | None = None) -> dict:
     """Make an authenticated API request, through the eval cassette if one is set."""
     from storyforge import cassette
+    extra ={'betas': betas} if betas else {}
     if cassette.active_dir():
         return cassette.request(method, path, body,
-                                lambda: _live_request(path, body, method, timeout))
-    return _live_request(path, body, method, timeout)
+                                lambda: _live_request(path, body, method, timeout, **extra))
+    return _live_request(path, body, method, timeout, **extra)
 
 
-def _live_request(path: str, body: dict | None, method: str, timeout: int) -> dict:
+def _live_request(path: str, body: dict | None, method: str, timeout: int,
+                  betas: list[str] | None = None) -> dict:
     url = f'{API_BASE}/{path}'
     headers = {
         'x-api-key': get_api_key(),
         'anthropic-version': API_VERSION,
         'content-type': 'application/json',
     }
+    if betas:
+        headers['anthropic-beta'] = ','.join(betas)
 
     data = json.dumps(body).encode() if body else None
     req = Request(url, data=data, headers=headers, method=method)
@@ -182,13 +192,26 @@ def stop_problem(response) -> str:
     return ''
 
 
+def fallback_model(response) -> str:
+    """The model that wrote ``response`` when the refusal fallback served it
+    in place of the requested model, else ''. A fallback that also refused
+    returns '' (the response is a refusal)."""
+    if not isinstance(response, dict) or response.get('stop_reason') == 'refusal':
+        return ''
+    iterations = (response.get('usage') or {}).get('iterations') or []
+    if any(it.get('type') == 'fallback_message' for it in iterations):
+        return response.get('model') or 'another model'
+    return ''
+
+
 def _check_refusal(response) -> None:
     if isinstance(response, dict) and response.get('stop_reason') == 'refusal':
         raise RefusalError(response)
 
 
 def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
-          system: list[dict] | None, output_schema: dict | None = None) -> dict:
+          system: list[dict] | None, output_schema: dict | None = None,
+          fallback: bool = False) -> dict:
     """Call the Anthropic Messages API.
 
     Args:
@@ -201,6 +224,9 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
         system: Optional list of system content blocks (supports cache_control).
         output_schema: Optional JSON schema; the reply's text is then one JSON
             object matching it (structured outputs).
+        fallback: Opt into the server-side refusal fallback (FALLBACK_BETA).
+            A reply written by the fallback model is logged as a WARNING
+            naming ``label`` and that model.
 
     Returns:
         Full API response dict.
@@ -214,17 +240,27 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
         body['system'] = system
     if output_schema:
         body['output_config'] = {'format': {'type': 'json_schema', 'schema': output_schema}}
+    extra = {}
+    if fallback:
+        body['fallbacks'] = 'default'
+        extra['betas'] = [FALLBACK_BETA]
     heartbeat = _Heartbeat(label or model)
     heartbeat.start()
     try:
-        return _api_request('messages', body, method='POST', timeout=timeout)
+        response = _api_request('messages', body, method='POST', timeout=timeout, **extra)
     finally:
         heartbeat.stop()
+    served = fallback_model(response)
+    if served:
+        from storyforge.common import log
+        log(f'WARNING: {model} refused {label or "the request"}; '
+            f'{served} wrote this reply instead')
+    return response
 
 
 def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
            timeout: int = API_TIMEOUT, system: list[dict] | None = None,
-           output_schema: dict | None = None) -> dict:
+           output_schema: dict | None = None, fallback: bool = False) -> dict:
     """Call the Anthropic Messages API.
 
     Args:
@@ -236,21 +272,24 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
         timeout: Socket timeout in seconds (default API_TIMEOUT).
         system: Optional list of system content blocks (supports cache_control).
         output_schema: Optional JSON schema for a structured reply (see _send).
+        fallback: Opt into the server-side refusal fallback (see _send).
 
     Returns:
         Full API response dict.
 
     Raises:
-        RefusalError: the model refused the request.
+        RefusalError: the model refused the request (with ``fallback``, the
+            fallback model refused too).
     """
-    response = _send(prompt, model, max_tokens, label, timeout, system, output_schema)
+    response = _send(prompt, model, max_tokens, label, timeout, system, output_schema,
+                     fallback)
     _check_refusal(response)
     return response
 
 
 def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 4096, label: str = '',
                    timeout: int = API_TIMEOUT, system: list[dict] | None = None,
-                   output_schema: dict | None = None) -> dict:
+                   output_schema: dict | None = None, fallback: bool = False) -> dict:
     """Call the API and write the response to a JSON file.
 
     Args:
@@ -262,6 +301,7 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
         timeout: Socket timeout in seconds (default API_TIMEOUT).
         system: Optional list of system content blocks (supports cache_control).
         output_schema: Optional JSON schema for a structured reply (see _send).
+        fallback: Opt into the server-side refusal fallback (see _send).
 
     Returns:
         Full API response dict.
@@ -271,7 +311,7 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
     """
     try:
         response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system,
-                          output_schema=output_schema)
+                          output_schema=output_schema, fallback=fallback)
     except RefusalError as e:
         _write_log(log_file, e.response)
         raise
@@ -297,7 +337,8 @@ _INVOKE_API_FAILURE_THRESHOLD = 5
 
 
 def invoke_api(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
-               timeout: int = API_TIMEOUT, system: list[dict] | None = None) -> str:
+               timeout: int = API_TIMEOUT, system: list[dict] | None = None,
+               fallback: bool = False) -> str:
     """High-level convenience: invoke API and return text response.
 
     Returns empty string on failure (logs warning but doesn't raise).
@@ -306,7 +347,8 @@ def invoke_api(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
     """
     global _invoke_api_consecutive_failures
     try:
-        response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system)
+        response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system,
+                          fallback=fallback)
         _invoke_api_consecutive_failures = 0
         return extract_text(response)
     except Exception as e:
@@ -332,10 +374,14 @@ def extract_response(log_file: str) -> str:
 
 
 def extract_text(response: dict) -> str:
-    """Extract text content from an API response dict."""
+    """Extract text content from an API response dict. After a refusal
+    fallback, only the text after the last ``fallback`` block is the reply
+    (a streamed decline keeps the refused model's partial before it)."""
     texts = []
     for block in response.get('content', []):
-        if block.get('type') == 'text':
+        if block.get('type') == 'fallback':
+            texts = []
+        elif block.get('type') == 'text':
             texts.append(block.get('text', ''))
     return '\n'.join(texts)
 

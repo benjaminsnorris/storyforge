@@ -176,18 +176,18 @@ def mock_api(monkeypatch):
             }
 
         def _invoke(self, prompt, model, max_tokens=4096, label='', timeout=600,
-                    system=None):
+                    system=None, fallback=False):
             self.calls.append({
-                'fn': 'invoke', 'prompt': prompt, 'model': model,
+                'fn': 'invoke', 'fallback': fallback, 'prompt': prompt, 'model': model,
                 'max_tokens': max_tokens, 'label': label, 'timeout': timeout,
                 'system': system,
             })
             return self._get_response_dict(prompt)
 
         def _invoke_to_file(self, prompt, model, log_file, max_tokens=4096,
-                           label='', timeout=600, system=None):
+                           label='', timeout=600, system=None, fallback=False):
             self.calls.append({
-                'fn': 'invoke_to_file', 'prompt': prompt, 'model': model,
+                'fn': 'invoke_to_file', 'fallback': fallback, 'prompt': prompt, 'model': model,
                 'log_file': log_file, 'max_tokens': max_tokens,
                 'system': system,
             })
@@ -198,9 +198,9 @@ def mock_api(monkeypatch):
             return response
 
         def _invoke_api(self, prompt, model, max_tokens=4096, label='',
-                       timeout=600, system=None):
+                       timeout=600, system=None, fallback=False):
             self.calls.append({
-                'fn': 'invoke_api', 'prompt': prompt, 'model': model,
+                'fn': 'invoke_api', 'fallback': fallback, 'prompt': prompt, 'model': model,
                 'system': system,
             })
             return self._get_response_text(prompt)
@@ -322,9 +322,9 @@ def mock_api_rich(monkeypatch):
             return self.default
 
         def _invoke(self, prompt, model, max_tokens=4096, label='', timeout=600,
-                    system=None):
+                    system=None, fallback=False):
             self.calls.append({
-                'fn': 'invoke', 'prompt': prompt, 'model': model,
+                'fn': 'invoke', 'fallback': fallback, 'prompt': prompt, 'model': model,
                 'max_tokens': max_tokens, 'system': system,
             })
             text = self._resolve(prompt)
@@ -334,9 +334,9 @@ def mock_api_rich(monkeypatch):
             }
 
         def _invoke_to_file(self, prompt, model, log_file, max_tokens=4096,
-                           label='', timeout=600, system=None):
+                           label='', timeout=600, system=None, fallback=False):
             self.calls.append({
-                'fn': 'invoke_to_file', 'prompt': prompt, 'model': model,
+                'fn': 'invoke_to_file', 'fallback': fallback, 'prompt': prompt, 'model': model,
                 'log_file': log_file, 'max_tokens': max_tokens,
                 'system': system,
             })
@@ -352,9 +352,9 @@ def mock_api_rich(monkeypatch):
             return response
 
         def _invoke_api(self, prompt, model, max_tokens=4096, label='',
-                       timeout=600, system=None):
+                       timeout=600, system=None, fallback=False):
             self.calls.append({
-                'fn': 'invoke_api', 'prompt': prompt, 'model': model,
+                'fn': 'invoke_api', 'fallback': fallback, 'prompt': prompt, 'model': model,
                 'system': system,
             })
             return self._resolve(prompt)

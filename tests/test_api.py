@@ -237,3 +237,88 @@ class TestRefusal:
         from storyforge.api import invoke
         mock_req.return_value = {'stop_reason': 'end_turn', 'content': [{'type': 'text', 'text': 'ok'}]}
         assert invoke('p', 'm')['stop_reason'] == 'end_turn'
+
+
+class TestRefusalFallback:
+    """Prose calls opt into the server-side refusal fallback (Ben, 2026-10-29):
+    a false-positive refusal should not leave a scene undrafted, and a reply
+    another model wrote is named in a WARNING."""
+
+    SERVED = {'model': 'claude-opus-5', 'stop_reason': 'end_turn',
+              'content': [{'type': 'text', 'text': 'prose'}],
+              'usage': {'input_tokens': 1, 'output_tokens': 1,
+                        'iterations': [{'type': 'message', 'model': None},
+                                       {'type': 'fallback_message', 'model': 'claude-opus-5'}]}}
+
+    @patch('storyforge.api._api_request')
+    def test_opt_in_sends_the_parameter_and_beta(self, mock_req):
+        from storyforge.api import invoke, FALLBACK_BETA
+        mock_req.return_value = {'stop_reason': 'end_turn', 'content': []}
+        invoke('p', 'claude-opus-5-5', fallback=True)
+        assert mock_req.call_args[0][1]['fallbacks'] == 'default'
+        assert mock_req.call_args[1]['betas'] == [FALLBACK_BETA]
+
+    @patch('storyforge.api._api_request')
+    def test_off_by_default(self, mock_req):
+        from storyforge.api import invoke
+        mock_req.return_value = {'stop_reason': 'end_turn', 'content': []}
+        invoke('p', 'claude-opus-5-5')
+        assert 'fallbacks' not in mock_req.call_args[0][1]
+        assert 'betas' not in mock_req.call_args[1]
+
+    def test_beta_becomes_a_header(self, monkeypatch):
+        from storyforge import api
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'k')
+        sent = {}
+
+        class Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b'{}'
+
+        def fake_urlopen(req, timeout):
+            sent.update({k.lower(): v for k, v in req.header_items()})
+            return Resp()
+        monkeypatch.setattr(api, 'urlopen', fake_urlopen)
+        api._live_request('messages', {}, 'POST', 5, betas=['a', 'b'])
+        assert sent['anthropic-beta'] == 'a,b'
+
+    def test_fallback_model(self):
+        from storyforge.api import fallback_model
+        assert fallback_model(self.SERVED) == 'claude-opus-5'
+        assert fallback_model({'model': 'claude-opus-5-5', 'stop_reason': 'end_turn',
+                               'usage': {'iterations': [{'type': 'message'}]}}) == ''
+        refused = dict(self.SERVED, stop_reason='refusal')
+        assert fallback_model(refused) == ''  # the fallback refused too
+        assert fallback_model(None) == ''
+
+    @patch('storyforge.api._api_request')
+    def test_served_reply_warns_naming_label_and_model(self, mock_req, capsys):
+        from storyforge.api import invoke
+        mock_req.return_value = self.SERVED
+        invoke('p', 'claude-opus-5-5', label='drafting waking-hank', fallback=True)
+        out = capsys.readouterr()
+        text = out.out + out.err
+        assert 'WARNING' in text and 'drafting waking-hank' in text
+        assert 'claude-opus-5 wrote this reply' in text
+
+    def test_text_after_the_fallback_block_only(self):
+        from storyforge.api import extract_text
+        response = {'content': [
+            {'type': 'text', 'text': 'partial from the refused model'},
+            {'type': 'fallback', 'from': {'model': 'a'}, 'to': {'model': 'b'}},
+            {'type': 'text', 'text': 'the reply'}]}
+        assert extract_text(response) == 'the reply'
+
+    def test_cassette_key_ignores_the_fallback(self):
+        """Recordings made without it still replay; evals measure the
+        requested model."""
+        from storyforge.cassette import request_key
+        body = {'model': 'm', 'messages': []}
+        assert request_key('POST', 'messages', dict(body, fallbacks='default')) == \
+            request_key('POST', 'messages', body)
