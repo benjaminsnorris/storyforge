@@ -244,6 +244,28 @@ class TestFitManuscript:
         kept = [l for l in fitted.splitlines() if l.startswith('line ')]
         assert all(l in set(lines) for l in kept)
 
+    def test_marker_names_omitted_scenes(self):
+        # Pride and Prejudice lost Hunsford and both halves of the first
+        # proposal, and the profile called the cut "the excerpt omits the
+        # structural heart". Naming the omitted scenes keeps their events
+        # (scene ids are event slugs) in view.
+        from storyforge.extract import _fit_manuscript
+        scenes = [f'=== SCENE: scene-{n} ===\n\n' + 'prose line.\n' * 200
+                  for n in range(40)]
+        fitted = _fit_manuscript('\n\n'.join(scenes), limit=20_000)
+        assert '=== SCENE: scene-0 ===' in fitted
+        assert '=== SCENE: scene-39 ===' in fitted
+        assert '=== SCENE: scene-20 ===' not in fitted
+        assert 'scene-20' in fitted
+
+    def test_prompt_says_the_cut_is_not_the_book(self, tmp_path, monkeypatch):
+        from storyforge import extract
+        (tmp_path / 'storyforge.yaml').write_text('project:\n  title: "T"\n')
+        monkeypatch.setattr(extract, '_read_manuscript', lambda d: 'x\n' * 10)
+        assert 'not a gap in the book' not in extract.build_characterize_prompt(str(tmp_path))
+        monkeypatch.setattr(extract, 'CHARACTERIZE_MAX_CHARS', 8)
+        assert 'not a gap in the book' in extract.build_characterize_prompt(str(tmp_path))
+
 
 class TestValueAtStakeIsBare:
     """value_at_stake must be the value alone so the values registry can
