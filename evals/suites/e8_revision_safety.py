@@ -4,7 +4,7 @@ See evals/e8/__init__.py. Gate (plan §5, Phase 4): zero errors reintroduced.
 """
 
 from e1 import load_cases, load_holdout
-from e8 import family, judge, prepare, replay, select
+from e8 import PassHalted, family, judge, prepare, replay, select
 from harness import Gate, Suite, SuiteOutput
 
 MIN_REPLAYED = 15  # below this the rate is too noisy to gate on
@@ -15,14 +15,19 @@ def run(ctx):
     notes = [f'excluded {len(ids)}: {reason}' for reason, ids in sorted(sel.excluded.items())]
     by_code: dict[str, dict[str, float]] = {}
     by_family: dict[str, list[int]] = {}
-    reintroduced = replayed = words = 0
+    reintroduced = replayed = words = halted = 0
     for case in sel.cases:
         try:
             project, scene_id = prepare(case, ctx.work_dir)
         except LookupError as e:
             sel.exclude(f'unreplayable: {e}', case['id'])
             continue
-        prose = replay(case, project, scene_id)
+        try:
+            prose = replay(case, project, scene_id)
+        except PassHalted as e:
+            halted += 1
+            notes.append(f'{case["id"]} ({scene_id}): halted, nothing written — {str(e)[:160]}')
+            continue
         verdict = judge(case, prose)
         replayed += 1
         words += len(prose.split())
@@ -41,7 +46,7 @@ def run(ctx):
         metrics={'replayed': replayed, 'reintroduced': reintroduced,
                  'reintroduction_rate': round(reintroduced / replayed, 3) if replayed else 0.0,
                  'errors_per_10k_words': round(reintroduced / words * 10000, 3) if words else 0.0,
-                 'unreplayable': unreplayable,
+                 'unreplayable': unreplayable, 'halted': halted,
                  **{f'family.{k}.replayed': v[0] for k, v in by_family.items()},
                  **{f'family.{k}.reintroduced': v[1] for k, v in by_family.items()}},
         by_code=by_code,

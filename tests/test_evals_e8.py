@@ -148,3 +148,14 @@ def test_prepare_refuses_a_project_older_than_scenes_csv(book, tmp_path):
     case = _tool_case(introduced_by={'kind': 'tool', 'pass': 'redraft', 'commit': sha})
     with pytest.raises(LookupError, match='predates reference/scenes.csv'):
         e8.prepare(case, str(tmp_path / 'work'), str(root))
+
+
+def test_a_naturalness_redraft_that_halts_is_pass_halted(monkeypatch):
+    from storyforge import cmd_revise
+    monkeypatch.setattr(cmd_revise, '_fix_upstream_briefs', lambda p, ids: 1)
+
+    def halt(p, ids):
+        raise cmd_revise.RedraftError('1 scene(s) not re-drafted: s (cut off)')
+    monkeypatch.setattr(cmd_revise, '_redraft_scenes', halt)
+    with pytest.raises(e8.PassHalted, match='cut off'):
+        e8.naturalness_upstream('/nowhere', 's')
