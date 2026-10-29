@@ -582,7 +582,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
             continue
         year = 2001 if 'X' in y1 else int(y1)
         try:
-            between = (date(year, m2, dd2) - date(year, m1, dd1)).days
+            between = same_year = (date(year, m2, dd2) - date(year, m1, dd1)).days
             # With the year unstated, December 30 then January 2 may
             # simply cross into the next year
             if 'X' in y1 and between < 0:
@@ -590,9 +590,17 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         except ValueError:
             continue
         if abs(between - (d2 - d1)) > 1:
-            findings.append({'scene_id': s2, 'check': 'date_mismatch',
-                             'message': f'its date is {between} day(s) after {s1}\'s, '
-                                        f'but its day is {d2 - d1} day(s) after'})
+            # A year-less date that steps back reads as going back, with the
+            # turn of the year as the other reading: Carol's Christmas Eve
+            # after Christmas Day isn't "364 days after" (F-059)
+            if between != same_year:
+                message = (f'its date ({dd2} {_MONTHS[m2 - 1]}) is {-same_year} day(s) before '
+                           f'{s1}\'s ({dd1} {_MONTHS[m1 - 1]}), or {between} day(s) after if the '
+                           f'year turned, but its day is {d2 - d1} day(s) after')
+            else:
+                message = (f'its date is {between} day(s) after {s1}\'s, '
+                           f'but its day is {d2 - d1} day(s) after')
+            findings.append({'scene_id': s2, 'check': 'date_mismatch', 'message': message})
     for (s1, d1, w1), (s2, d2, w2) in zip(weekdays, weekdays[1:]):
         if (d2 - d1 - (w2 - w1)) % 7:
             findings.append({'scene_id': s2, 'check': 'weekday_mismatch',
