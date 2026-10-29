@@ -301,10 +301,11 @@ def _extract_cues_batch(project_dir, scene_ids, model, log_dir):
 
 
 def _run_check(project_dir, scene_ids, model, log_dir):
-    """--check: read cues from the current prose, compare with the calendar."""
+    """--check: read cues from the current prose, compare with the calendar.
+    The stored cues, which the calendar was built from, are left alone."""
     from storyforge.elaborate import _read_csv
-    extract_cues(project_dir, scene_ids, model, log_dir)
+    cues = {**read_cues(project_dir), **extract_cues(project_dir, scene_ids, model, log_dir, store=False)}
     order = reading_order(project_dir)
     rows = {r['id']: r for r in _read_csv(os.path.join(project_dir, 'reference', 'scenes.csv'))}
-    findings = check_timeline([rows[s] for s in order if s in rows], read_cues(project_dir))
+    findings = check_timeline([rows[s] for s in order if s in rows], cues)
     report_findings(findings, limit=100)

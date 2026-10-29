@@ -44,7 +44,7 @@ def _patch_pass(monkeypatch):
     """Stub the timeline pass; returns the calls made to it."""
     calls = {'cues': [], 'assign': []}
     monkeypatch.setattr('storyforge.cmd_timeline.extract_cues',
-                        lambda project_dir, ids, model, log_dir: calls['cues'].append(ids) or {})
+                        lambda project_dir, ids, model, log_dir, **kw: calls['cues'].append(ids) or {})
     monkeypatch.setattr('storyforge.cmd_timeline.run_assignment',
                         lambda project_dir, model, log_dir, force: calls['assign'].append(force) or
                         {'assigned': 0, 'proposed': 0, 'unplaced': 0, 'findings': 0})
@@ -340,6 +340,24 @@ class TestMainCheck:
         assert calls['cues'] == [['act1-sc01']] and calls['assign'] == []
         assert mock_git.calls_for('create_branch') == []
         assert open(os.path.join(project_dir, 'reference', 'scenes.csv')).read() == before
+
+    def test_check_leaves_stored_cues_alone(self, mock_api, mock_git, mock_costs, project_dir,
+                                             monkeypatch, capsys):
+        """The Age of Innocence: --check logged "read-only" but overwrote
+        working/timeline-cues.csv, the cues the calendar was built from."""
+        import storyforge.timeline as tl
+        monkeypatch.setattr('storyforge.cmd_timeline.detect_project_root', lambda: project_dir)
+        _patch_interactive(monkeypatch)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        _ensure_scene_files(project_dir)
+        tl.write_cues(project_dir, {'act1-sc01': {'relation': 'later', 'gap': 'a week'}})
+        cues_file = os.path.join(project_dir, tl.CUES_FILE)
+        before = open(cues_file).read()
+        monkeypatch.setattr('storyforge.api.invoke_to_file', lambda *a, **k: {})
+        monkeypatch.setattr('storyforge.api.extract_text',
+                            lambda r: 'TIME_RELATION: earlier\nTIME_GAP: three days\n')
+        main(['--check', '--scenes', 'act1-sc01'])
+        assert open(cues_file).read() == before
 
     def test_force_is_passed_through(self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
         monkeypatch.setattr('storyforge.cmd_timeline.detect_project_root', lambda: project_dir)
