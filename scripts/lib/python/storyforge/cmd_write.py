@@ -32,7 +32,7 @@ from storyforge.cli import apply_coaching_override
 from storyforge.api import (
     invoke_to_file, extract_text, extract_text_from_file, extract_usage,
     calculate_cost_from_usage, submit_batch, poll_batch, download_batch_results,
-    stop_problem, RefusalError,
+    stop_problem, fallback_model, RefusalError,
 )
 from storyforge.costs import estimate_cost, check_threshold, log_operation, print_summary
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
@@ -484,12 +484,15 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
                     metadata_csv, coaching, use_briefs, force, filter_mode):
     """Run batch API mode. Returns (drafted_count, total_words, failed),
     ``failed`` naming each scene not drafted and why. A bad reply skips only
-    its scene; its response is kept in ``log_dir``."""
+    its scene; its response is kept in ``log_dir``. A refused scene is
+    retried once directly with the refusal fallback, which the Batches API
+    does not accept."""
     log('Building prompts for batch submission...')
 
     batch_file = os.path.join(log_dir, f'drafting-batch-{os.getpid()}.jsonl')
     model = select_model('drafting')
     batch_scene_ids = []
+    prompts: dict[str, str] = {}
 
     # Build shared context once for prompt caching across all scenes
     from storyforge.common import build_shared_context
@@ -516,6 +519,7 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
         # Build JSONL line using batch request helper (includes system blocks)
         request = build_batch_request(scene_id, prompt, model, 8192,
                                       system=system or None)
+        prompts[scene_id] = prompt
         with open(batch_file, 'a') as f:
             f.write(json.dumps(request) + '\n')
         batch_scene_ids.append(scene_id)
@@ -573,13 +577,31 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
         _log_api_usage(scene_json, 'draft', scene_id, model, project_dir,
                        batch=True)
 
+        if _is_refusal(scene_json):
+            retry_log = os.path.join(log_dir, f'drafting-{scene_id}.json')
+            log(f'Scene {scene_id} was refused in the batch; retrying it directly '
+                f'with the refusal fallback...')
+            try:
+                invoke_to_file(prompts[scene_id], model, retry_log, 8192,
+                               label=f'drafting {scene_id}', system=system or None,
+                               fallback=True)
+            except RefusalError:
+                pass  # logged to retry_log; the extract below names it
+            except Exception as e:
+                log(f'ERROR: The retry of scene {scene_id} failed: {e}. Skipping.')
+                failed.append(f'{scene_id} (refused in the batch; the retry failed: {e})')
+                continue
+            _log_api_usage(retry_log, 'draft', scene_id, model, project_dir)
+            scene_json = retry_log
+
         reason = _extract_scene_from_response(
             scene_json, _output_file(project_dir, scene_id, coaching),
             prose=coaching == 'full')
         if reason:
             # Keep the paid reply: the batch directory is removed below.
             kept = os.path.join(log_dir, f'drafting-{scene_id}.json')
-            shutil.copyfile(scene_json, kept)
+            if scene_json != kept:
+                shutil.copyfile(scene_json, kept)
             log(f'ERROR: Not writing scene {scene_id}: {reason.rstrip(".")}. Skipping.')
             log(f'See full output: {kept}')
             failed.append(f'{scene_id} ({reason.rstrip(".")})')
@@ -675,7 +697,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             try:
                 invoke_to_file(prompt, model, scene_log, max_tokens,
                                label=f'drafting {scene_id}',
-                               system=system or None)
+                               system=system or None, fallback=True)
                 exit_code = 0
             except RefusalError:
                 exit_code = 0  # logged to scene_log; the extract below names it
@@ -741,15 +763,25 @@ def _invoke_interactive(prompt: str, model: str, project_dir: str) -> int:
         return 1
 
 
+def _is_refusal(log_file: str) -> bool:
+    try:
+        with open(log_file) as f:
+            return json.load(f).get('stop_reason') == 'refusal'
+    except (OSError, ValueError, AttributeError):
+        return False  # the extract step reports an unreadable log
+
+
 def _log_api_usage(log_file: str, operation: str, target: str, model: str,
                    project_dir: str, batch: bool = False) -> None:
     """Log API usage/cost from a JSON response file.
 
     If batch=True, applies the Anthropic Batch API 50% discount to cost.
+    A reply the refusal fallback wrote is priced and logged as that model's.
     """
     try:
         with open(log_file) as f:
             response = json.load(f)
+        model = fallback_model(response) or model
         usage = extract_usage(response)
         cost = calculate_cost_from_usage(usage, model, batch=batch)
         log_operation(

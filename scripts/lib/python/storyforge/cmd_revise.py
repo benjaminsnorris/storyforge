@@ -37,7 +37,7 @@ from storyforge.git import (
 )
 from storyforge.api import (
     invoke_api, invoke_to_file, extract_text, extract_text_from_file,
-    extract_usage, calculate_cost_from_usage, get_api_key,
+    extract_usage, calculate_cost_from_usage, get_api_key, fallback_model,
     REVISION_TIMEOUT, max_output_tokens,
 )
 from storyforge.cli import apply_coaching_override
@@ -282,7 +282,8 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
         log_file = os.path.join(log_dir, f'redraft-{sid}.json')
         try:
             _invoke_to_file(prompt, model, log_file, max_tokens=16384,
-                            label=f'redraft {sid}', system=system or None)
+                            label=f'redraft {sid}', system=system or None,
+                            fallback=True)
         except RefusalError:
             pass  # logged to log_file; the extract below names it
         scene_file = os.path.join(scenes_dir, f'{sid}.md')
@@ -1337,7 +1338,8 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
             continue
 
         response = invoke_api(prompt, model, max_tokens=16384,
-                              system=system or None)
+                              label=f'redraft {scene_id}', system=system or None,
+                              fallback=True)
         if not response:
             log(f'  ERROR: No response for {scene_id} re-draft')
             failed.append(f'{scene_id} (no response)')
@@ -1705,7 +1707,7 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
                        max_tokens=max_output_tokens(pass_model),
                        label=f'polish loop {iteration} ({pass_name})',
                        timeout=REVISION_TIMEOUT,
-                       system=system or None)
+                       system=system or None, fallback=True)
     except Exception as e:
         log(f'  API call failed: {e}')
         return
@@ -1757,12 +1759,14 @@ def _update_word_counts_from_dir(project_dir: str) -> None:
 # ============================================================================
 
 def _log_usage(project_dir, log_file, operation, target, model, duration_s=0):
-    """Log API usage from a response file."""
+    """Log API usage from a response file; a reply the refusal fallback
+    wrote is priced and logged as that model's."""
     if not os.path.isfile(log_file):
         return
     try:
         with open(log_file) as f:
             response = json.load(f)
+        model = fallback_model(response) or model
         usage = extract_usage(response)
         cost = calculate_cost_from_usage(usage, model)
         log_operation(
@@ -2533,7 +2537,9 @@ Rules:
                                          max_tokens=max_output_tokens(pass_model),
                                          label=f'pass {pass_num}/{total_passes} ({pass_name})',
                                          timeout=REVISION_TIMEOUT,
-                                         system=system or None)
+                                         system=system or None,
+                                         # prose passes only; upstream ones write CSV
+                                         fallback=fix_location not in ('structural', 'registry'))
                 exit_code = 0
             except Exception as e:
                 log(f'  API call failed: {e}')

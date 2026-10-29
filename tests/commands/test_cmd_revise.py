@@ -615,6 +615,8 @@ class TestMainPassExecution:
         # Only one API call (for pass 2)
         api_calls = mock_api.calls_for('invoke_to_file')
         assert len(api_calls) >= 1
+        # a craft pass rewrites prose, so it opts into the refusal fallback
+        assert all(c['fallback'] for c in api_calls)
 
 
 # ============================================================================
