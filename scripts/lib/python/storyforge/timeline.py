@@ -549,6 +549,11 @@ SEASON_SLACK = 21
 # A month the anchor says belongs to a memory is not the scene's own:
 # Gatsby's dawn scene, "that still October night (in the flashback)"
 _REMEMBERED = re.compile(r'flashback|memory|recall|remember', re.I)
+# A month the anchor places at another time than the scene's: "planning to
+# marry next June", "last spring", "since March"
+_OTHER_TIME = re.compile(r'\b(next|last|previous|since|ago|until|till)\b', re.I)
+# A name, not a month: "Aunt May", "Miss June"
+_NAMED = re.compile(r'\b(Aunt|Uncle|Miss|Mrs?|Ms|Lady|Sir|Dr)\.?\s+$')
 
 
 def anchor_window(anchor: str) -> tuple[int, int, str, int] | None:
@@ -558,9 +563,10 @@ def anchor_window(anchor: str) -> tuple[int, int, str, int] | None:
     "late", and how far outside them still counts. None when it names none,
     or more than one (a month wins over a season), or says it is remembered."""
     text = anchor or ''
-    if _REMEMBERED.search(text):
+    if _REMEMBERED.search(text) or _OTHER_TIME.search(text):
         return None
-    found = {(m.group('q') or '', m.group('m')) for m in _ANCHOR_MONTH.finditer(text)}
+    found = {(m.group('q') or '', m.group('m')) for m in _ANCHOR_MONTH.finditer(text)
+             if not _NAMED.search(text[:m.start('m')])}
     if found:
         if len({m for _q, m in found}) != 1 or len(found) != 1:
             return None
@@ -601,15 +607,19 @@ def pin_month_anchors(items: list[dict], placed: dict[str, tuple[int, str, str]]
     ``(scene id, old day, new day, anchor words)`` per scene moved, and day
     1's day of the year (None when there are too few anchors to tell).
 
-    *items* are in reading order. Only the story's present moves: frames,
-    visions and flashbacks keep their days. Scenes joined by "continues" or
+    *items* are in reading order. Only the story's present anchors; a
+    flashback moves with the present scene before it, and frames and
+    visions keep their days. Scenes joined by "continues" or
     a stated gap move together; a scene after a vague gap is where a run
     starts, and the vague gap takes up the move. A later run moves only as
     far as it must to stay after the one before. Only a scene shown as it
     happens (mode scene, not a summary) anchors.
     """
     entries = []
-    present = None
+    # Flashback scenes (and what continues them) ride along with the present
+    # scene before them: a memory "three weeks earlier" keeps its distance
+    riders: dict[str, list[str]] = {}
+    in_flashback = False
     for it in items:
         sid = it['id']
         if sid not in placed:
@@ -617,9 +627,15 @@ def pin_month_anchors(items: list[dict], placed: dict[str, tuple[int, str, str]]
         day, mode, _basis = placed[sid]
         cue = it.get('cues', {})
         relation = cue.get('relation') or 'unclear'
-        if mode in OFF_PRESENT_MODES or relation == 'earlier' or (present is not None and day < present):
+        if mode in OFF_PRESENT_MODES:
             continue
-        present = day if present is None else max(present, day)
+        # By relation, as walk() reads it, not by day: one overshoot (the
+        # prom on day 848) must not make every scene after it a flashback
+        in_flashback = relation == 'earlier' or (in_flashback and relation == 'continues')
+        if in_flashback:
+            if entries:
+                riders.setdefault(entries[-1]['id'], []).append(sid)
+            continue
         stated = relation == 'continues' or (relation == 'later' and gap_to_days(cue.get('gap', '')) is not None)
         window = anchor_window(cue.get('anchor', '')) if mode == 'scene' else None
         entries.append({'id': sid, 'day': day, 'stated': stated and bool(entries), 'window': window})
@@ -630,16 +646,23 @@ def pin_month_anchors(items: list[dict], placed: dict[str, tuple[int, str, str]]
     # Day 1's day of the year: the one that keeps the most anchors, a month
     # counting as three seasons (a season's loose edges let a wrong calendar
     # keep as many: The Plastic Age fitted November with equal weights), then
-    # the one nearest them all
+    # the one nearest their middles, so a run of equally good days resolves
+    # to its centre rather than its first
     def weight(window):
         return 1 if window[3] == SEASON_SLACK else 3
+
+    def from_middle(doy, window):
+        first, last = window[0], window[1]
+        middle = (first + ((last - first) % 365) // 2) % 365
+        return min((doy - middle) % 365, (middle - doy) % 365)
 
     def fit(day_one):
         kept = total = 0
         for e in anchored:
-            gap = min(_distance((day_one + e['day'] - 1) % 365, e['window']))
-            kept += weight(e['window']) if gap <= e['window'][3] else 0
-            total += gap
+            doy = (day_one + e['day'] - 1) % 365
+            if min(_distance(doy, e['window'])) <= e['window'][3]:
+                kept += weight(e['window'])
+            total += from_middle(doy, e['window'])
         return kept, -total
     day_one = max(range(365), key=fit)
     if fit(day_one)[0] * 2 < sum(weight(e['window']) for e in anchored):
@@ -655,15 +678,19 @@ def pin_month_anchors(items: list[dict], placed: dict[str, tuple[int, str, str]]
             runs.append([e])
     moves = []
     new_day = {}
-    prev_end = None
+    prev_end = prev_old_end = None
+    prev_shift = 0
+    floor = min(1, min(e['day'] for e in entries))
     for run in runs:
         # A run the move pushed into goes on only as far as order needs: the
         # gaps after a misplaced anchor were sized against the wrong
         # calendar too, so keeping them would carry the error on (The
         # Plastic Age's track meet went from June to July)
+        # Only a push this code caused: where the model itself put a later
+        # scene on an earlier day, a push would carry its error a year on
         shift = 0
-        if prev_end is not None and run[0]['day'] < prev_end:
-            shift = prev_end + 1 - run[0]['day']
+        if prev_end is not None and run[0]['day'] < prev_end and prev_shift > 0:
+            shift = min(prev_end + 1 - run[0]['day'], prev_shift)
         for e in run:
             if not e['window']:
                 continue
@@ -671,20 +698,30 @@ def pin_month_anchors(items: list[dict], placed: dict[str, tuple[int, str, str]]
             forward, back = _distance(doy, e['window'])
             if min(forward, back) <= e['window'][3]:
                 continue
-            # Back only as far as the run before it allows
-            can_back = prev_end is None or run[0]['day'] + shift - back > prev_end
-            step = -back if can_back and back < forward else forward
+            if back < forward:
+                # Back only as far as the run before it (or day 1) allows;
+                # never the long way round instead, which adds a year
+                lowest = prev_end if prev_end is not None else floor
+                step = -back if run[0]['day'] + shift - back >= lowest else 0
+            else:
+                step = forward
             # Every other anchor in the run must still hold
-            if all(min(_distance((day_one + o['day'] + shift + step - 1) % 365, o['window']))
-                   <= o['window'][3] for o in run if o['window'] and o is not e):
+            if step and all(min(_distance((day_one + o['day'] + shift + step - 1) % 365, o['window']))
+                            <= o['window'][3] for o in run if o['window'] and o is not e):
                 shift += step
             break
+        # A flashback inside the stretch that moved goes with it; one to
+        # before it (freshman year recalled in junior year) stays
+        since = prev_old_end if prev_old_end is not None else run[0]['day']
         for e in run:
-            new_day[e['id']] = e['day'] + shift
-            if shift:
-                moves.append((e['id'], e['day'], e['day'] + shift,
-                              e['window'][2] if e['window'] else ''))
-        prev_end = run[-1]['day'] + shift
+            near = [r for r in riders.get(e['id'], []) if placed[r][0] > since]
+            for sid in [e['id']] + near:
+                old = placed[sid][0]
+                new_day[sid] = old + shift
+                if shift:
+                    moves.append((sid, old, old + shift,
+                                  e['window'][2] if e['window'] and sid == e['id'] else ''))
+        prev_end, prev_old_end, prev_shift = run[-1]['day'] + shift, run[-1]['day'], shift
     pinned = {sid: (new_day.get(sid, day), mode, basis) for sid, (day, mode, basis) in placed.items()}
     return pinned, moves, day_one
 

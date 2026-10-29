@@ -457,6 +457,80 @@ class TestMonthAnchors:
         assert pinned['d'][0] - pinned['c'][0] == 3
         assert pinned['c'][0] > 30
 
+    def test_a_first_run_never_moves_before_day_one(self):
+        """Review of #350: the first run had no lower bound going back."""
+        from storyforge.timeline import pin_month_anchors
+        items, placed = self._book([
+            ('a', 1, 'scene', 'continues', '', 'early in May'),
+            ('b', 10, 'scene', 'later', '', 'August'),
+            ('c', 40, 'scene', 'later', '', 'September'),
+            ('d', 70, 'scene', 'later', '', 'October')])
+        pinned, _moves, _ = pin_month_anchors(items, placed)
+        assert min(d for d, _m, _b in pinned.values()) >= 1
+
+    def test_a_blocked_move_back_is_not_a_year_forward(self):
+        """Review of #350: a run a month past its window, with no room to go
+        back, jumped most of a year forward."""
+        from storyforge.timeline import pin_month_anchors
+        items, placed = self._book([
+            ('a', 1, 'scene', 'continues', '', 'early June'),
+            ('b', 30, 'scene', 'later', '', 'early July'),
+            ('c', 65, 'scene', 'later', '', 'early August'),
+            ('d', 70, 'scene', 'later', '', 'early July')])
+        pinned, moves, _ = pin_month_anchors(items, placed)
+        assert pinned['d'][0] == 70 and not moves
+
+    def test_a_near_flashback_moves_with_its_present(self):
+        """Review of #350: a memory three weeks back stayed put while the
+        present moved months away from it."""
+        from storyforge.timeline import pin_month_anchors
+        items, placed = self._book([
+            ('stroll', 7, 'scene', 'continues', '', "Fall's here"),
+            ('carl', 395, 'scene', 'later', '', 'one night in October'),
+            ('tucker', 550, 'scene', 'later', '', 'In March'),
+            ('junior', 730, 'summary', 'later', '', ''),
+            ('anticipates', 840, 'scene', 'later', '', 'early in May'),
+            ('recalled', 825, 'scene', 'earlier', 'two weeks', ''),
+            ('freshman', 100, 'scene', 'earlier', '', ''),
+            ('next', 850, 'scene', 'later', '', '')])
+        pinned, _moves, _ = pin_month_anchors(items, placed)
+        shift = pinned['anticipates'][0] - 840
+        assert shift > 0
+        assert pinned['recalled'][0] == 825 + shift
+        assert pinned['freshman'][0] == 100
+
+    def test_an_overshoot_does_not_make_later_scenes_flashbacks(self):
+        """Review of #350: one scene far ahead made every later scene look
+        like a flashback by its day, so none of them anchored; and the model's
+        own step back must not set off a push a year long."""
+        from storyforge.timeline import pin_month_anchors
+        items, placed = self._book([
+            ('a', 1, 'scene', 'continues', '', 'early September'),
+            ('b', 420, 'scene', 'later', '', 'late October'),
+            ('c', 60, 'scene', 'later', '', 'November'),
+            ('d', 150, 'scene', 'later', '', 'early January')])
+        pinned, moves, _ = pin_month_anchors(items, placed)
+        assert pinned['c'][0] == 60
+        assert pinned['d'][0] < 150 and 'd' in {m[0] for m in moves}
+
+    def test_names_and_other_times_are_not_anchors(self):
+        from storyforge.timeline import anchor_window
+        assert anchor_window('Aunt May arrives') is None
+        assert anchor_window('Miss June at tea') is None
+        assert anchor_window('planning to marry next June') is None
+        assert anchor_window('last spring') is None
+        assert anchor_window('in May, with Aunt May')[2] == 'May'
+
+    def test_the_fit_picks_the_middle_of_a_tie(self):
+        """Review of #350: with every anchor kept, the lowest day of the
+        year won; moves were then measured from an edge."""
+        from storyforge.timeline import pin_month_anchors
+        items, placed = self._book([('a', 10, 'scene', 'continues', '', 'May'),
+                                    ('b', 40, 'scene', 'later', '', 'June')])
+        _pinned, _moves, day_one = pin_month_anchors(items, placed)
+        # Day 10 in mid-May and day 40 in mid-June: day 1 about May 5
+        assert 118 <= day_one <= 132
+
     def test_the_pass_writes_pinned_days(self, project_dir, monkeypatch):
         import storyforge.timeline as tl
         _scenes(project_dir, [('a', '', ''), ('b', '', ''), ('c', '', ''), ('d', '', '')])
