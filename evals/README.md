@@ -45,6 +45,9 @@ are keyed by a hash of the request, so any prompt change is a miss — re-record
 that suite with `--mode auto`. A prompt that embeds a temp path, date, or id
 changes every run and can never replay; keep those out of what a suite sends.
 The Batch API is refused under a cassette; run commands in direct mode.
+Under a cassette the refusal fallback (`fallbacks`) is stripped from every
+request, recording and replay alike, so a recording is always the requested
+model's reply or its refusal: evals measure the requested model.
 
 A suite reports `error`, whatever it returned, when the cassette logged any
 failure during it (command code often catches API errors and skips the scene,

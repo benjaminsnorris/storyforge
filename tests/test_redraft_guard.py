@@ -104,3 +104,14 @@ def test_finished_prose_with_a_literary_ending_is_safe(ending):
 def test_markup_does_not_hide_a_cut_off(cut_off):
     from storyforge.parsing import unsafe_scene_reason
     assert 'mid-sentence' in unsafe_scene_reason(cut_off)
+
+
+def test_a_redraft_opts_into_the_refusal_fallback(project_dir):
+    from storyforge.cmd_revise import _redraft_scenes
+    _scene(project_dir, 'a', LONG)
+    with patch('storyforge.cmd_revise.invoke_api', return_value=LONG + ' New.') as api, \
+         patch('storyforge.cmd_revise.select_model', return_value='claude-sonnet-5-5'), \
+         patch('storyforge.prompts.build_scene_prompt', return_value='fake prompt'), \
+         patch('storyforge.common.get_coaching_level', return_value='full'):
+        _redraft_scenes(project_dir, ['a'])
+    assert api.call_args.kwargs['fallback'] is True

@@ -117,6 +117,8 @@ def draft(project_dir: str, scene_ids: list[str]) -> tuple[dict[str, str], dict[
     """Draft the scenes in order as ``write --direct`` does. Returns (prose by
     id, refusal reason by id). Like ``write``, E4 records a refused scene and
     drafts on; a refused scene has no prose and is not judged. Unlike
+    ``write``, E4 sends no refusal fallback, so every refusal by the requested
+    model counts as ``refused`` (a cassette strips the fallback anyway). Unlike
     ``write``, E4 does not apply the cut-off guard
     (``cmd_write._extract_scene_from_response``), so it can judge a draft that
     ``write`` would refuse to save; no recorded draft has been cut off."""

@@ -61,12 +61,15 @@ def setup(mock_api, mock_git, mock_costs, project_dir, monkeypatch):
 
 def _direct_replies(monkeypatch, replies):
     """Serve ``replies[scene_id]`` from invoke_to_file, raising RefusalError
-    after logging a refusal, as api.invoke_to_file does."""
+    after logging a refusal, as api.invoke_to_file does. Returns the list of
+    (scene_id, fallback) calls."""
     from storyforge.api import RefusalError
+    calls = []
 
     def fake(prompt, model, log_file, max_tokens=4096, label='', timeout=600,
-             system=None, output_schema=None):
+             system=None, output_schema=None, fallback=False):
         sid = label.split()[-1]
+        calls.append((sid, fallback))
         response = replies[sid]
         with open(log_file, 'w') as f:
             json.dump(response, f)
@@ -74,6 +77,15 @@ def _direct_replies(monkeypatch, replies):
             raise RefusalError(response)
         return response
     monkeypatch.setattr('storyforge.cmd_write.invoke_to_file', fake)
+    return calls
+
+
+# What the API returns when the refusal fallback wrote the reply.
+def _fallback_reply(text, model='claude-opus-5'):
+    reply = _reply(text, model=model)
+    reply['usage']['iterations'] = [{'type': 'message', 'model': None},
+                                    {'type': 'fallback_message', 'model': model}]
+    return reply
 
 
 class TestDirectMode:
@@ -137,6 +149,36 @@ class TestDirectMode:
             main(['--direct', '--scenes', 'act1-sc01'])
         assert [op['target'] for op in mock_costs.operations] == ['act1-sc01']
 
+    def test_drafts_opt_into_the_refusal_fallback(self, setup, monkeypatch):
+        calls = _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        main(['--direct', '--scenes', 'act1-sc01'])
+        assert calls == [('act1-sc01', True)]
+
+    def test_fallback_draft_is_costed_as_the_model_that_wrote_it(
+            self, setup, monkeypatch, mock_costs):
+        _direct_replies(monkeypatch, {'act1-sc01': _fallback_reply(GOOD)})
+        main(['--direct', '--scenes', 'act1-sc01'])
+        assert _status(setup, 'act1-sc01') == 'drafted'
+        assert [op['model'] for op in mock_costs.operations if 'model' in op
+                and op['operation'] == 'draft'] == ['claude-opus-5']
+
+    def test_fallback_draft_is_named_in_commit_and_summary(
+            self, setup, monkeypatch, mock_git, capsys):
+        """H1: a scene another model wrote is recorded, not just warned about
+        mid-run."""
+        from storyforge import api
+        calls = _direct_replies(monkeypatch, {'act1-sc01': _fallback_reply(GOOD)})
+        # the fake bypasses api._send, which records each fallback reply
+        api._fallback_replies.append(('drafting act1-sc01', 'claude-opus-5-5',
+                                      'claude-opus-5'))
+        main(['--direct', '--scenes', 'act1-sc01'])
+        assert calls
+        commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']
+        assert 'Draft scene act1-sc01 (refusal fallback: written by claude-opus-5)' in commits
+        out = capsys.readouterr().out
+        assert 'WARNING: 1 reply was written by another model' in out
+        assert 'drafting act1-sc01: claude-opus-5 in place of claude-opus-5-5' in out
+
     def test_clean_run_does_not_exit(self, setup, monkeypatch):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
         main(['--direct', '--scenes', 'act1-sc01,act1-sc02'])
@@ -146,7 +188,9 @@ class TestDirectMode:
 class TestBatchMode:
     """Batch results now carry stop_reason, so batch mode is guarded too."""
 
-    def _run(self, monkeypatch, results):
+    REFUSAL = _reply('', 'refusal', stop_details={'type': 'refusal', 'category': 'cyber'})
+
+    def _run(self, monkeypatch, results, code=1):
         """``results[scene_id]`` is a reply dict, 'errored' (the batch request
         failed) or None (status ok but no response file)."""
         def fake_download(results_url, output_dir, log_dir):
@@ -158,14 +202,15 @@ class TestBatchMode:
                         json.dump(response, f)
             return [sid for sid, r in results.items() if r != 'errored']
         monkeypatch.setattr('storyforge.cmd_write.download_batch_results', fake_download)
+        if code is None:
+            main(['--scenes', ','.join(results)])
+            return
         with pytest.raises(SystemExit) as exc:
             main(['--scenes', ','.join(results)])
-        assert exc.value.code == 1
+        assert exc.value.code == code
 
     @pytest.mark.parametrize('bad, reason', [
         (_reply(GOOD, 'max_tokens'), 'cut off at max_tokens'),
-        (_reply('', 'refusal', stop_details={'type': 'refusal', 'category': 'cyber'}),
-         'refused the request (cyber)'),
         ('errored', 'batch request failed'),
         (None, 'no response'),
     ])
@@ -183,6 +228,42 @@ class TestBatchMode:
             assert json.load(f)['content'][0]['text'] == CUT_OFF
         assert kept in capsys.readouterr().out
 
+    def test_refused_scene_is_retried_directly_with_the_fallback(
+            self, setup, monkeypatch, capsys, mock_costs, mock_git):
+        """The Batches API rejects the fallback, so a refused scene gets one
+        direct call with it. Both calls are paid for and costed."""
+        calls = _direct_replies(monkeypatch, {'act1-sc01': _fallback_reply(GOOD)})
+        self._run(monkeypatch, {'act1-sc01': self.REFUSAL, 'act1-sc02': _reply(GOOD)},
+                  code=None)
+        assert calls == [('act1-sc01', True)]
+        assert _scene(setup, 'act1-sc01').strip() == GOOD
+        assert _status(setup, 'act1-sc01') == 'drafted'
+        assert 'retrying it directly' in capsys.readouterr().out
+        models = [op['model'] for op in mock_costs.operations
+                  if op.get('target') == 'act1-sc01']
+        assert len(models) == 2 and models[1] == 'claude-opus-5'
+        commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']
+        assert 'Draft scene act1-sc01 (refusal fallback: written by claude-opus-5)' in commits
+
+    def test_refused_again_skips_the_scene(self, setup, monkeypatch, capsys):
+        retry = dict(self.REFUSAL, id='the-retry')
+        _direct_replies(monkeypatch, {'act1-sc01': retry})
+        self._run(monkeypatch, {'act1-sc01': self.REFUSAL, 'act1-sc02': _reply(GOOD)})
+        assert _scene(setup, 'act1-sc01') is None
+        assert _scene(setup, 'act1-sc02').strip() == GOOD
+        assert 'refused the request (cyber)' in capsys.readouterr().out
+        with open(os.path.join(setup, 'working', 'logs', 'drafting-act1-sc01.json')) as f:
+            assert json.load(f)['id'] == 'the-retry'  # the kept log is the retry's
+
+    def test_failed_retry_skips_the_scene(self, setup, monkeypatch, capsys):
+        def boom(*a, **k):
+            raise RuntimeError('HTTP 529')
+        monkeypatch.setattr('storyforge.cmd_write.invoke_to_file', boom)
+        self._run(monkeypatch, {'act1-sc01': self.REFUSAL, 'act1-sc02': _reply(GOOD)})
+        assert _scene(setup, 'act1-sc01') is None
+        assert _scene(setup, 'act1-sc02').strip() == GOOD
+        assert 'the retry failed: HTTP 529' in capsys.readouterr().out
+
 
 class TestReviseRedraftFromBriefs:
     def _run(self, project_dir, monkeypatch, replies):
@@ -191,7 +272,8 @@ class TestReviseRedraftFromBriefs:
         replies = iter(replies)
 
         def fake(prompt, model, log_file, max_tokens=4096, label='', timeout=600,
-                 system=None, output_schema=None):
+                 system=None, output_schema=None, fallback=False):
+            assert fallback, 'a redraft is prose; it opts into the refusal fallback'
             response = next(replies)
             with open(log_file, 'w') as f:
                 json.dump(response, f)

@@ -37,7 +37,8 @@ from storyforge.git import (
 )
 from storyforge.api import (
     invoke_api, invoke_to_file, extract_text, extract_text_from_file,
-    extract_usage, calculate_cost_from_usage, get_api_key,
+    extract_usage, calculate_cost_from_usage, get_api_key, fallback_model,
+    fallback_replies, fallback_note, report_fallback_replies,
     REVISION_TIMEOUT, max_output_tokens,
 )
 from storyforge.cli import apply_coaching_override
@@ -267,6 +268,7 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
         system = build_shared_context(project_dir, model=model)
 
     log(f'  Redrafting {len(scene_ids)} scenes from updated briefs...')
+    served_before = len(fallback_replies())
     scenes_dir = os.path.join(project_dir, 'scenes')
     failed: list[str] = []
     written = 0
@@ -282,7 +284,8 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
         log_file = os.path.join(log_dir, f'redraft-{sid}.json')
         try:
             _invoke_to_file(prompt, model, log_file, max_tokens=16384,
-                            label=f'redraft {sid}', system=system or None)
+                            label=f'redraft {sid}', system=system or None,
+                            fallback=True)
         except RefusalError:
             pass  # logged to log_file; the extract below names it
         scene_file = os.path.join(scenes_dir, f'{sid}.md')
@@ -296,7 +299,8 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
 
     commit_and_push(
         project_dir,
-        f'Revision: redraft {written} scenes from corrected briefs',
+        f'Revision: redraft {written} scenes from corrected briefs'
+        + fallback_note(served_before),
         ['scenes/', 'reference/', 'working/'])
 
     if failed:
@@ -1337,7 +1341,8 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
             continue
 
         response = invoke_api(prompt, model, max_tokens=16384,
-                              system=system or None)
+                              label=f'redraft {scene_id}', system=system or None,
+                              fallback=True)
         if not response:
             log(f'  ERROR: No response for {scene_id} re-draft')
             failed.append(f'{scene_id} (no response)')
@@ -1534,6 +1539,7 @@ def _run_polish_loop(project_dir: str, max_loops: int,
                                  final_llm_diag=final_llm_diag)
 
     log('\n============================================')
+    report_fallback_replies()
     log('Polish loop complete')
     log(f'  Deterministic baseline: avg {baseline_summary["overall_avg"]:.2f}, '
         f'{baseline_summary["high_count"]} high / {baseline_summary["medium_count"]} medium priority')
@@ -1627,9 +1633,10 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
     """Execute a single revision pass from a plan. Subset of main pass loop."""
     from storyforge.common import select_revision_model, get_coaching_level, build_shared_context
     from storyforge.git import commit_and_push
-    from storyforge.api import invoke_to_file, extract_text
+    from storyforge.api import invoke_to_file, extract_text, fallback_replies, fallback_note
 
     pass_name = plan_rows[0].get('name', 'polish')
+    served_before = len(fallback_replies())
     pass_purpose = plan_rows[0].get('purpose', '')
     pass_scope = plan_rows[0].get('scope', 'full')
     guidance = plan_rows[0].get('guidance', '')
@@ -1705,19 +1712,29 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
                        max_tokens=max_output_tokens(pass_model),
                        label=f'polish loop {iteration} ({pass_name})',
                        timeout=REVISION_TIMEOUT,
-                       system=system or None)
+                       system=system or None, fallback=True)
     except Exception as e:
-        log(f'  API call failed: {e}')
-        return
+        log(f'ERROR: Polish pass \'{pass_name}\' failed: {e}. The pass is not marked completed.')
+        sys.exit(1)
 
-    # Extract scenes from response
+    # Extract scenes from response. This once passed --project-dir/--log-file
+    # flags extract-scenes does not take, so nothing was ever written and the
+    # pass was still marked completed.
     log(f'  Extracting revised scenes...')
-    parsing_module = os.path.join(plugin_dir, 'scripts', 'lib', 'python', 'storyforge', 'parsing.py')
-    subprocess.run(
-        [sys.executable, parsing_module, 'extract-scenes',
-         '--project-dir', project_dir, '--log-file', step_log],
+    python_lib = os.path.join(plugin_dir, 'scripts', 'lib', 'python')
+    result = subprocess.run(
+        [sys.executable, '-m', 'storyforge.parsing', 'extract-scenes',
+         step_log, os.path.join(project_dir, 'scenes')],
         capture_output=True, text=True,
+        env={**os.environ, 'PYTHONPATH': python_lib},
     )
+    if result.returncode != 0:
+        log(f'ERROR: Could not extract scenes from polish pass \'{pass_name}\': '
+            f'{result.stderr.strip()[:500]}')
+        log(f'The pass is not marked completed. See {step_log}')
+        sys.exit(1)
+    for line in result.stdout.strip().splitlines():
+        log(f'  {line}')
 
     # Update word counts
     _update_word_counts_from_dir(project_dir)
@@ -1730,7 +1747,7 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
     elapsed = 0  # We don't track per-pass time in loop mode
     commit_and_push(
         project_dir,
-        f'Polish: loop iteration {iteration} — {pass_name}',
+        f'Polish: loop iteration {iteration} — {pass_name}' + fallback_note(served_before),
         ['scenes/', 'reference/', 'working/'],
     )
 
@@ -1757,12 +1774,14 @@ def _update_word_counts_from_dir(project_dir: str) -> None:
 # ============================================================================
 
 def _log_usage(project_dir, log_file, operation, target, model, duration_s=0):
-    """Log API usage from a response file."""
+    """Log API usage from a response file; a reply the refusal fallback
+    wrote is priced and logged as that model's."""
     if not os.path.isfile(log_file):
         return
     try:
         with open(log_file) as f:
             response = json.load(f)
+        model = fallback_model(response) or model
         usage = extract_usage(response)
         cost = calculate_cost_from_usage(usage, model)
         log_operation(
@@ -1772,8 +1791,8 @@ def _log_usage(project_dir, log_file, operation, target, model, duration_s=0):
             cache_read=usage.get('cache_read', 0),
             cache_create=usage.get('cache_create', 0),
         )
-    except (json.JSONDecodeError, FileNotFoundError, KeyError):
-        pass
+    except Exception as e:
+        log(f'WARNING: could not log the cost of {operation} {target}: {e}')
 
 
 # ============================================================================
@@ -2499,6 +2518,7 @@ Rules:
 
         # Record git HEAD before invocation
         head_before = _git(project_dir, 'rev-parse', 'HEAD', check=False).stdout.strip()
+        served_before = len(fallback_replies())
 
         step_log = os.path.join(log_dir, f'revision-pass-{pass_num}-{pass_name}.log')
         snapshot_before = _content_snapshot(project_dir)
@@ -2533,7 +2553,9 @@ Rules:
                                          max_tokens=max_output_tokens(pass_model),
                                          label=f'pass {pass_num}/{total_passes} ({pass_name})',
                                          timeout=REVISION_TIMEOUT,
-                                         system=system or None)
+                                         system=system or None,
+                                         # prose passes only; upstream ones write CSV
+                                         fallback=fix_location not in ('structural', 'registry'))
                 exit_code = 0
             except Exception as e:
                 log(f'  API call failed: {e}')
@@ -2649,7 +2671,8 @@ Rules:
                     ['working/coaching/', 'working/logs/', 'working/costs/', 'working/pipeline.csv'],
                 )
             else:
-                commit_and_push(project_dir, f'Revision: {pass_name}', ['.'])
+                commit_and_push(project_dir,
+                                f'Revision: {pass_name}' + fallback_note(served_before), ['.'])
 
         # Does the revised prose still agree with the calendar? Reported in
         # the log, never fixed: the prose or the calendar may be wrong.
@@ -2732,6 +2755,7 @@ Rules:
     # Cost summary
     if not args.dry_run:
         print_summary(project_dir, 'revise', session_start=session_start)
+    report_fallback_replies()
 
     if redraft_error:
         _report_redraft_error(redraft_error)
