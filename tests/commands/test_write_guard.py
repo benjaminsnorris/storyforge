@@ -104,6 +104,38 @@ class TestDirectMode:
             main(['--direct', '--force', '--scenes', 'act1-sc01'])
         assert _scene(setup, 'act1-sc01') == old
 
+    def test_empty_reply_is_not_written(self, setup, monkeypatch, capsys):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply('')})
+        with pytest.raises(SystemExit):
+            main(['--direct', '--scenes', 'act1-sc01'])
+        assert _scene(setup, 'act1-sc01') is None
+        assert 'the API response is empty' in capsys.readouterr().out
+
+    def test_collapsed_redraft_keeps_existing_prose(self, setup, monkeypatch, capsys):
+        """Before this guard, --force replaced a scene with any reply over
+        100 words."""
+        old = ' '.join(['original'] * 1000) + '.'
+        with open(os.path.join(setup, 'scenes', 'act1-sc01.md'), 'w') as f:
+            f.write(old)
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        with pytest.raises(SystemExit):
+            main(['--direct', '--force', '--scenes', 'act1-sc01'])
+        assert _scene(setup, 'act1-sc01') == old
+        assert 'collapsed' in capsys.readouterr().out
+
+    def test_literary_ending_is_written(self, setup, monkeypatch):
+        ending = ' '.join(['word'] * 200) + ', and she was gone\u2026\n\n* * *'
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(ending)})
+        main(['--direct', '--scenes', 'act1-sc01'])
+        assert _status(setup, 'act1-sc01') == 'drafted'
+
+    def test_unwritten_reply_is_still_costed(self, setup, monkeypatch, mock_costs):
+        """A refused or cut-off reply is paid for, so it is logged."""
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD, 'max_tokens')})
+        with pytest.raises(SystemExit):
+            main(['--direct', '--scenes', 'act1-sc01'])
+        assert [op['target'] for op in mock_costs.operations] == ['act1-sc01']
+
     def test_clean_run_does_not_exit(self, setup, monkeypatch):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
         main(['--direct', '--scenes', 'act1-sc01,act1-sc02'])
@@ -111,25 +143,44 @@ class TestDirectMode:
 
 
 class TestBatchMode:
-    def test_cut_off_batch_reply_is_not_written(self, setup, mock_api, monkeypatch, capsys):
-        """Batch results now carry stop_reason, so a cut-off reply is caught."""
-        replies = {'act1-sc01': _reply(GOOD, 'max_tokens'), 'act1-sc02': _reply(GOOD)}
+    """Batch results now carry stop_reason, so batch mode is guarded too."""
 
+    def _run(self, monkeypatch, results):
+        """``results[scene_id]`` is a reply dict, 'errored' (the batch request
+        failed) or None (status ok but no response file)."""
         def fake_download(results_url, output_dir, log_dir):
-            for sid, response in replies.items():
+            for sid, response in results.items():
                 with open(os.path.join(output_dir, f'.status-{sid}'), 'w') as f:
-                    f.write('ok')
-                with open(os.path.join(log_dir, f'{sid}.json'), 'w') as f:
-                    json.dump(response, f)
-            return list(replies)
+                    f.write('fail' if response == 'errored' else 'ok')
+                if isinstance(response, dict):
+                    with open(os.path.join(log_dir, f'{sid}.json'), 'w') as f:
+                        json.dump(response, f)
+            return [sid for sid, r in results.items() if r != 'errored']
         monkeypatch.setattr('storyforge.cmd_write.download_batch_results', fake_download)
-
         with pytest.raises(SystemExit) as exc:
-            main(['--scenes', 'act1-sc01,act1-sc02'])
+            main(['--scenes', ','.join(results)])
         assert exc.value.code == 1
+
+    @pytest.mark.parametrize('bad, reason', [
+        (_reply(GOOD, 'max_tokens'), 'cut off at max_tokens'),
+        (_reply('', 'refusal', stop_details={'type': 'refusal', 'category': 'cyber'}),
+         'refused the request (cyber)'),
+        ('errored', 'batch request failed'),
+        (None, 'no response'),
+    ])
+    def test_bad_result_skips_scene(self, setup, monkeypatch, capsys, bad, reason):
+        self._run(monkeypatch, {'act1-sc01': bad, 'act1-sc02': _reply(GOOD)})
         assert _scene(setup, 'act1-sc01') is None
         assert _scene(setup, 'act1-sc02').strip() == GOOD
-        assert 'cut off at max_tokens' in capsys.readouterr().out
+        assert reason in capsys.readouterr().out
+
+    def test_failed_reply_is_kept_for_the_author(self, setup, monkeypatch, capsys):
+        """I2: the batch directory is removed; the paid reply is not."""
+        self._run(monkeypatch, {'act1-sc01': _reply(CUT_OFF), 'act1-sc02': _reply(GOOD)})
+        kept = os.path.join(setup, 'working', 'logs', 'drafting-act1-sc01.json')
+        with open(kept) as f:
+            assert json.load(f)['content'][0]['text'] == CUT_OFF
+        assert kept in capsys.readouterr().out
 
 
 class TestReviseRedraftFromBriefs:

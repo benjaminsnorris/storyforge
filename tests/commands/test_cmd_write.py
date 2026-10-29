@@ -509,7 +509,8 @@ class TestSkipDrafted:
         with open(scene_file, 'w') as f:
             f.write(' '.join(['original'] * 300))
 
-        prose = ' '.join(['redrafted'] * 200) + '.'
+        # Same length as the original: clear of the word-count collapse guard
+        prose = ' '.join(['redrafted'] * 300) + '.'
         mock_api.set_response(prose)
 
         main(['--direct', '--force', '--scenes', 'act1-sc01'])
