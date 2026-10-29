@@ -1,0 +1,49 @@
+{
+ "request": {
+  "method": "POST",
+  "path": "messages",
+  "body": {
+   "model": "claude-opus-4-8",
+   "max_tokens": 1024,
+   "messages": [
+    {
+     "role": "user",
+     "content": "You are a story editor rewriting scene briefs to introduce genuine dramatic opposition.\n\nScene: Last Hands in This Building\nPOV: maren-cole\nOutcome: yes\nValue at stake: safety\nEmotional arc: Controlled dread (entering a space the body already knows as a place of captivity) giving way to hard-won, grief-adjacent relief \u2014 not triumph, but the quiet devastation of something that almost didn't happen and did.\n\nCurrent brief:\nGOAL: Reach Claire and carry her out before the building's condemned third floor gives way \u2014 the fire marshal has ordered demolition charges set on a ninety-minute timer, and Maren has already burned fifty of those minutes talking her way past the cordon\nCONFLICT: Claire is chained by a cable lock to a radiator pipe in a back room, conscious but non-verbal and flinching violently at every approach \u2014 and the only person who has the bolt cutters is Sergeant Harwick, who refuses to let Maren go back in alone and insists on a tactical entry that will take another twenty minutes to stage\nCRISIS: Maren gets the bolt cutters from Harwick's vehicle herself and reaches Claire, but cutting the cable requires bracing her hand against Claire's chest to hold the lock steady \u2014 and the instant Maren touches her, Claire thrashes so hard she reopens a wound on her wrist, bleeding freely, meaning Maren must either pin Claire down to stop the bleeding and cut the cable (replicating exactly the kind of force Claire's captor used) or back off, apply no pressure, and risk Claire bleeding out while they wait for the tactical team\nDECISION: Maren sets down the bolt cutters, kneels to Claire's eye level, and narrates every single thing she is about to do \u2014 \"I'm going to press my hand here, it will hurt, I'm not him\" \u2014 then holds Claire's gaze and applies pressure to the wound with one hand while cutting the cable with the other, accepting that Claire is screaming and that this will look, to Claire's body, indistinguishable from harm\n\nThe current brief lacks genuine opposition \u2014 the conflict is abstract or the goal/crisis/decision don't create real dramatic tension.\n\nRewrite all four fields to introduce genuine opposition while:\n- Preserving the existing emotional arc and value at stake\n- Making the conflict a concrete, specific obstacle with a clear opposing force\n- Making the goal something the POV character actively wants and must fight for\n- Making the crisis a specific moment where the worst happens or the hardest choice appears\n- Making the decision a concrete choice with real cost on both sides\n\nRespond ONLY with the four fields in this exact format (no preamble, no explanation):\nGOAL: [rewritten goal]\nCONFLICT: [rewritten conflict]\nCRISIS: [rewritten crisis]\nDECISION: [rewritten decision]"
+    }
+   ]
+  }
+ },
+ "response": {
+  "model": "claude-opus-4-8",
+  "id": "msg_011CgVdA3bfk6AVMmcqCDz4S",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+   {
+    "type": "text",
+    "text": "GOAL: Reach Claire and carry her out of the condemned third floor before the demolition charges blow \u2014 Maren has forty minutes left on the fire marshal's timer and a daughter she's spent eight weeks searching for chained somewhere in these back rooms.\n\nCONFLICT: Sergeant Harwick stands between Maren and the stairwell with the only bolt cutters on the scene, and he isn't being cautious for its own sake \u2014 his last team lost two officers to a secondary trap in a captor's lair, and he will not clear Maren to enter until his tactical unit sweeps for booby-traps, a stage-up that eats twenty-five of her forty minutes. He's not wrong, and that's what makes him immovable: every argument Maren has is emotion against a man whose job is to discount emotion.\n\nCRISIS: Maren takes the bolt cutters from Harwick's unlocked vehicle and reaches Claire herself, but cutting the cable means bracing a hand against Claire's chest to hold the lock steady \u2014 and the instant Maren touches her, Claire thrashes and reopens a wrist wound that begins bleeding freely, while over the radio Harwick's voice announces the sweep found a pressure trigger and orders everyone out NOW, with twelve minutes left; Maren must either pin her bleeding, screaming daughter down and cut \u2014 replicating exactly the force Claire's captor used \u2014 or release her, obey the evacuation, and leave Claire chained to bleed in a building about to fall.\n\nDECISION: Maren keys the radio and tells Harwick she's not coming out, then sets the cutters down, drops to Claire's eye level, and narrates every move before she makes it \u2014 \"I'm going to press here, it will hurt, I'm not him, I'm staying\" \u2014 and holds her daughter's gaze while she pins the wound with one hand and cuts with the other, accepting that Claire will scream, that to Claire's body this is indistinguishable from the man who did this, and that she is spending the last trust she might ever earn to buy the minutes that get them both out."
+   }
+  ],
+  "container": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+   "input_tokens": 959,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 670,
+   "output_tokens_details": {
+    "thinking_tokens": 0
+   },
+   "service_tier": "standard",
+   "inference_geo": "global",
+   "speed": "standard"
+  },
+  "diagnostics": null
+ }
+}
