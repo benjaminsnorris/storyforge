@@ -135,7 +135,10 @@ def extract_api_response(log_file: str) -> str:
         return ''
 
 
-_SENTENCE_ENDINGS = frozenset('.!?\u2019\u201d\u2014)\'"')
+_SENTENCE_ENDINGS = frozenset('.!?\u2019\u201d\u2014\u2026)\'"')
+# Markup that can follow the last sentence: closing emphasis (`*Run.*`) and
+# trailing scene-break lines (`---`, `* * *`).
+_TRAILING_MARKUP = re.compile(r'(?:\n[ \t]*(?:[-*_][ \t]*){3,})+$|[*_]+$')
 _WORD_COUNT_COLLAPSE_THRESHOLD = 0.6  # reject if new < 60% of original
 
 
@@ -146,6 +149,7 @@ def unsafe_scene_reason(content: str, old_text: str | None = None) -> str:
     stripped = content.rstrip()
     if not stripped:
         return 'the new text is empty'
+    stripped = _TRAILING_MARKUP.sub('', stripped).rstrip() or stripped
     if stripped[-1] not in _SENTENCE_ENDINGS:
         return f'appears to end mid-sentence (last char: {stripped[-1]!r})'
     if old_text is not None:
