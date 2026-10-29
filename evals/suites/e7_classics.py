@@ -8,9 +8,10 @@ every flag that is not ``real`` is noise; the target is none. A flag with no
 verdict is ``unreviewed`` — a new kind of noise, or a real find — and needs the
 author before it can be counted either way, so it fails the suite too.
 
-v1 covers A Christmas Carol's two extraction runs and the deterministic
-validator only. ``timeline --check`` flags (8 of the 68 labeled) need API calls
-and are not replayed yet; Gatsby has no labeled flag set yet.
+Covers A Christmas Carol's two extraction runs and The Plastic Age's one, and
+the deterministic validator only. ``timeline --check`` flags (8 of Carol's 68
+labeled, 5 of The Plastic Age's 60) need API calls and are not replayed yet;
+Gatsby has no labeled flag set yet.
 """
 
 import csv
