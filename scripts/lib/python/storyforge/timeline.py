@@ -601,19 +601,15 @@ def _distance(doy: int, window: tuple[int, int, str, int]) -> tuple[int, int]:
     return (first - doy) % 365, (doy - last) % 365
 
 
-def pin_month_anchors(items: list[dict], placed: dict[str, tuple[int, str, str]]):
-    """Move scenes whose anchor names a month or season the calendar puts
-    them out of. Returns ``(placed, moves, day_one)``: the new placements,
-    ``(scene id, old day, new day, anchor words)`` per scene moved, and day
-    1's day of the year (None when there are too few anchors to tell).
+def _present_entries(items: list[dict], placed: dict[str, tuple[int, str, str]]):
+    """The story's present in reading order, as ``(entries, riders)``.
 
-    *items* are in reading order. Only the story's present anchors; a
-    flashback moves with the present scene before it, and frames and
-    visions keep their days. Scenes joined by "continues" or
-    a stated gap move together; a scene after a vague gap is where a run
-    starts, and the vague gap takes up the move. A later run moves only as
-    far as it must to stay after the one before. Only a scene shown as it
-    happens (mode scene, not a summary) anchors.
+    Each entry: id, day, stated (joined to the entry before it by
+    "continues" or a stated gap) and window (its month or season anchor, on
+    a scene shown as it happens). *riders* maps an entry to the flashback
+    scenes told after it. Frames and visions are left out; flashbacks are
+    read by relation, as walk() reads them, not by day: one overshoot (the
+    prom on day 848) must not make every scene after it a flashback.
     """
     entries = []
     # Flashback scenes (and what continues them) ride along with the present
@@ -629,8 +625,6 @@ def pin_month_anchors(items: list[dict], placed: dict[str, tuple[int, str, str]]
         relation = cue.get('relation') or 'unclear'
         if mode in OFF_PRESENT_MODES:
             continue
-        # By relation, as walk() reads it, not by day: one overshoot (the
-        # prom on day 848) must not make every scene after it a flashback
         in_flashback = relation == 'earlier' or (in_flashback and relation == 'continues')
         if in_flashback:
             if entries:
@@ -639,6 +633,36 @@ def pin_month_anchors(items: list[dict], placed: dict[str, tuple[int, str, str]]
         stated = relation == 'continues' or (relation == 'later' and gap_to_days(cue.get('gap', '')) is not None)
         window = anchor_window(cue.get('anchor', '')) if mode == 'scene' else None
         entries.append({'id': sid, 'day': day, 'stated': stated and bool(entries), 'window': window})
+    return entries, riders
+
+
+def _runs(entries: list[dict]) -> list[list[dict]]:
+    """Entries grouped into runs: scenes joined by "continues" or a stated
+    gap move together; a vague gap starts a new run."""
+    runs: list[list[dict]] = []
+    for e in entries:
+        if e['stated'] and runs:
+            runs[-1].append(e)
+        else:
+            runs.append([e])
+    return runs
+
+
+def pin_month_anchors(items: list[dict], placed: dict[str, tuple[int, str, str]]):
+    """Move scenes whose anchor names a month or season the calendar puts
+    them out of. Returns ``(placed, moves, day_one)``: the new placements,
+    ``(scene id, old day, new day, anchor words)`` per scene moved, and day
+    1's day of the year (None when there are too few anchors to tell).
+
+    *items* are in reading order. Only the story's present anchors; a
+    flashback moves with the present scene before it, and frames and
+    visions keep their days. Scenes joined by "continues" or
+    a stated gap move together; a scene after a vague gap is where a run
+    starts, and the vague gap takes up the move. A later run moves only as
+    far as it must to stay after the one before. Only a scene shown as it
+    happens (mode scene, not a summary) anchors.
+    """
+    entries, riders = _present_entries(items, placed)
     anchored = [e for e in entries if e['window']]
     if len(anchored) < 2:
         return placed, [], None
@@ -670,12 +694,7 @@ def pin_month_anchors(items: list[dict], placed: dict[str, tuple[int, str, str]]
         # days, are what's wrong
         return placed, [], None
 
-    runs: list[list[dict]] = []
-    for e in entries:
-        if e['stated'] and runs:
-            runs[-1].append(e)
-        else:
-            runs.append([e])
+    runs = _runs(entries)
     moves = []
     new_day = {}
     prev_end = prev_old_end = None
@@ -724,6 +743,54 @@ def pin_month_anchors(items: list[dict], placed: dict[str, tuple[int, str, str]]
         prev_end, prev_old_end, prev_shift = run[-1]['day'] + shift, run[-1]['day'], shift
     pinned = {sid: (new_day.get(sid, day), mode, basis) for sid, (day, mode, basis) in placed.items()}
     return pinned, moves, day_one
+
+
+# A run this far ahead of both runs around it, which agree with each other,
+# is out of reading order (F-072)
+SPIKE_DAYS = 30
+
+
+def repair_spikes(items: list[dict], placed: dict[str, tuple[int, str, str]]):
+    """Put back a run the model placed far ahead of both its neighbours.
+    Returns ``(placed, moves)``, moves as ``(scene id, old day, new day)``.
+
+    The story's present runs in reading order, so a run more than
+    SPIKE_DAYS after the run before it *and* the run after it, where those
+    two agree, is a miscount (The Plastic Age's freshman exams on day 900,
+    between days 180 and 270). It goes between them: a stated gap from the
+    run before, else halfway. Only forward spikes: a scene far behind both
+    may be a flashback its cue missed, and is left to the checks. A
+    flashback told inside the run moves with it if it remembers a day after
+    the run before.
+    """
+    entries, riders = _present_entries(items, placed)
+    runs = _runs(entries)
+    cues = {it['id']: it.get('cues', {}) for it in items}
+    moves = []
+    new_day: dict[str, int] = {}
+    for i in range(1, len(runs) - 1):
+        before, run, after = runs[i - 1], runs[i], runs[i + 1]
+        lo = new_day.get(before[-1]['id'], before[-1]['day'])
+        hi = after[0]['day']
+        start = run[0]['day']
+        if not (start > lo + SPIKE_DAYS and min(e['day'] for e in run) > hi + SPIKE_DAYS
+                and hi >= lo):
+            continue
+        gap = gap_to_days(cues[run[0]['id']].get('gap', ''))
+        target = min(lo + gap, hi) if gap is not None else (lo + hi) // 2
+        span = run[-1]['day'] - start
+        target = max(lo, min(target, hi - span))
+        shift = target - start
+        for e in run:
+            # A memory of the stretch the run sits in moves with it; one to
+            # before the run before it stays
+            near = [r for r in riders.get(e['id'], []) if placed[r][0] > lo]
+            for sid in [e['id']] + near:
+                old = placed[sid][0]
+                new_day[sid] = old + shift
+                moves.append((sid, old, old + shift))
+    repaired = {sid: (new_day.get(sid, day), mode, basis) for sid, (day, mode, basis) in placed.items()}
+    return repaired, moves
 
 
 # ============================================================================
@@ -942,6 +1009,11 @@ def run_assignment(project_dir: str, model: str, log_dir: str, force: bool) -> d
     if not items:
         return {'assigned': 0, 'proposed': 0, 'unplaced': 0, 'findings': 0}
     placed = assign_calendar(items, _invoke_assignment(model), log_dir)
+    placed, spikes = repair_spikes(items, placed)
+    if spikes:
+        log(f'  Timeline: {len(spikes)} scene(s) far ahead of the scenes around them put back:')
+        for sid, old, new in spikes:
+            log(f'    {sid}: day {old} -> {new}')
     placed, moves, _day_one = pin_month_anchors(items, placed)
     if moves:
         anchors = [m for m in moves if m[3]]

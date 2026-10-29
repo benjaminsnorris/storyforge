@@ -549,6 +549,95 @@ class TestMonthAnchors:
         assert 230 <= days['d'] <= 250
 
 
+class TestSpikes:
+    """F-072 (The Plastic Age): the model put the freshman exams on day 900,
+    between scenes on days 180 and 270."""
+
+    def _book(self, rows):
+        """(id, day, mode, relation, gap) → items and placements."""
+        items = [{'id': sid, 'cues': {'relation': rel, 'gap': gap}}
+                 for sid, _day, _mode, rel, gap in rows]
+        placed = {sid: (day, mode, '') for sid, day, mode, *_ in rows}
+        return items, placed
+
+    def test_the_freshman_exams_go_back_between_their_neighbours(self):
+        from storyforge.timeline import repair_spikes
+        items, placed = self._book([
+            ('track', 230, 'summary', 'later', ''),
+            ('sings', 180, 'summary', 'later', 'several months'),
+            ('exams', 900, 'summary', 'later', 'some time after'),
+            ('part', 270, 'scene', 'later', ''),
+            ('summer', 275, 'summary', 'later', '')])
+        repaired, moves = repair_spikes(items, placed)
+        assert moves == [('exams', 900, 225)]
+        assert repaired['sings'][0] == 180 and repaired['part'][0] == 270
+
+    def test_a_stated_gap_places_the_run_and_its_run_moves_whole(self):
+        from storyforge.timeline import repair_spikes
+        items, placed = self._book([
+            ('a', 10, 'scene', 'later', ''),
+            ('b', 500, 'scene', 'later', 'three days'),
+            ('c', 501, 'scene', 'later', 'the next morning'),
+            ('d', 40, 'scene', 'later', '')])
+        # b's "three days" is stated, so a and b are one run: nothing
+        # before it to measure from; the repair needs a run on each side
+        assert repair_spikes(items, placed)[1] == []
+        items, placed = self._book([
+            ('a', 10, 'scene', 'later', ''),
+            ('b', 500, 'scene', 'later', 'some weeks'),
+            ('c', 501, 'scene', 'later', 'the next morning'),
+            ('d', 40, 'scene', 'later', '')])
+        repaired, _moves = repair_spikes(items, placed)
+        assert repaired['b'][0] == 25 and repaired['c'][0] == 26
+
+    def test_what_is_not_a_spike_is_left_alone(self):
+        from storyforge.timeline import repair_spikes
+        for rows in (
+            # Far behind both: maybe a flashback its cue missed
+            [('a', 300, 'scene', 'later', ''), ('b', 5, 'scene', 'later', ''),
+             ('c', 310, 'scene', 'later', '')],
+            # Ahead of the scene before, not of the one after: a time jump
+            [('a', 10, 'scene', 'later', ''), ('b', 400, 'scene', 'later', ''),
+             ('c', 405, 'scene', 'later', '')],
+            # Neighbours that disagree with each other
+            [('a', 300, 'scene', 'later', ''), ('b', 900, 'scene', 'later', ''),
+             ('c', 100, 'scene', 'later', '')],
+            # Within SPIKE_DAYS
+            [('a', 10, 'scene', 'later', ''), ('b', 35, 'scene', 'later', ''),
+             ('c', 20, 'scene', 'later', '')],
+            # The last run has no neighbour after it
+            [('a', 10, 'scene', 'later', ''), ('b', 900, 'scene', 'later', '')],
+        ):
+            items, placed = self._book(rows)
+            assert repair_spikes(items, placed)[1] == [], rows
+
+    def test_frames_visions_and_flashbacks_are_not_neighbours(self):
+        from storyforge.timeline import repair_spikes
+        items, placed = self._book([
+            ('a', 10, 'scene', 'later', ''),
+            ('frame', 5000, 'frame', 'frame', ''),
+            ('b', 900, 'scene', 'later', ''),
+            ('memory', 870, 'scene', 'earlier', 'a month'),
+            ('old', -2000, 'scene', 'continues', ''),
+            ('c', 40, 'scene', 'later', '')])
+        repaired, _moves = repair_spikes(items, placed)
+        assert repaired['b'][0] == 25 and repaired['frame'][0] == 5000
+        # The memory of the spike's own stretch moves with it; the memory
+        # carried on into the distant past stays
+        assert repaired['memory'][0] == 870 - 875 and repaired['old'][0] == -2000
+
+    def test_the_pass_puts_a_spike_back(self, project_dir, monkeypatch):
+        import storyforge.timeline as tl
+        _scenes(project_dir, [('a', '', ''), ('b', '', ''), ('c', '', '')])
+        tl.write_cues(project_dir, {'a': {'relation': 'later'}, 'b': {'relation': 'later'},
+                                    'c': {'relation': 'later'}})
+        monkeypatch.setattr(tl, '_invoke_assignment', lambda model: (
+            lambda prompt, log_file, label:
+                'CALENDAR:\na | 180 | summary | x\nb | 900 | summary | x\nc | 270 | scene | x\n'))
+        tl.run_assignment(project_dir, 'm', os.path.join(project_dir, 'working', 'logs'), force=False)
+        assert _column(project_dir, 'timeline_day') == {'a': '180', 'b': '225', 'c': '270'}
+
+
 class TestChecks:
     def _rows(self, *rows):
         return [{'id': sid, 'timeline_day': day, 'time_mode': mode, 'timeline_date': date}
