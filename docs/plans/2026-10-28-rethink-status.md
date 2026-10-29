@@ -79,6 +79,7 @@ Spend so far: $0 of $20 (E4), $0 of $25 (other). (The v1.80.0 re-record before t
 
 ## Next steps, in order
 
+0. **Verify main first.** v1.80.0 merged right after main moved to 1.79.3 (evals-56's timeline spike repair, post-processing only), and the post-merge checks didn't finish. Run `python -m pytest tests/` and `python3 evals/run.py`; every suite should replay with no errors and match `baseline.json`. If the drift suite's numbers moved because of the spike repair, refresh the baseline with `--baseline` and note it here. Fix anything broken before step 1.
 1. **E4** (plan §4.2, decision 7): draft shared-dark Act 1 (23 scenes) end to end with today's `write`, judge it (CP10k, BPS), record under a cassette, add to `baseline.json`. Earlier estimate was ~$14 at old prices; re-estimate first. This is the "before" picture for Phase 3, so build it before Phase 1 changes the drafting prompts.
 2. **Phase 1 bug checklist** (plan, Phase 1): the five unchecked items. Deterministic, no spend; each gets a regression test.
 3. **Fact-work tier comparison on E3** (plan, "Model selection"): run E3 with fact work on opus, sonnet and haiku (`STORYFORGE_MODEL` or the `_TASK_TIER` map) and keep the cheapest that matches opus. Then route `_TASK_TIER['extraction']` and `select_revision_model`'s continuity branch accordingly.
