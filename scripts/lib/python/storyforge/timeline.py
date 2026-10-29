@@ -233,6 +233,15 @@ _MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'Augu
 _SEASONS = {21: 'spring', 22: 'summer', 23: 'autumn', 24: 'winter'}
 
 
+def _day_of_year(month: int, day: int) -> int:
+    """Day of the year on 2001's calendar (February 29 counts as the 28th)."""
+    from datetime import date
+    try:
+        return date(2001, month, day).timetuple().tm_yday
+    except ValueError:
+        return date(2001, month, 28).timetuple().tm_yday
+
+
 def describe_edtf(value: str) -> str:
     """An EDTF date in words, for prompts: models read ``1922-22`` (summer
     1922) as June 22. ``XXXX-07-04`` → "4 July (year not stated)"."""
@@ -271,6 +280,31 @@ def _month_day(value: str) -> tuple[str, int, int] | None:
     if 'X' in month or 'X' in day or int(month) > 12:
         return None
     return m.group('year'), int(month), int(day)
+
+
+# Where in the year a month or season falls: (day of year at its middle,
+# half its length), on 2001's calendar
+_SEASON_SPANS = {21: (105, 46), 22: (197, 46), 23: (289, 45), 24: (15, 45)}
+# Slack on top of the two spans: "early in May" on the 2nd is still May
+_ROUGH_SLACK = 7
+
+
+def _rough_date(value: str) -> tuple[int, int, str] | None:
+    """``(day of year, half-width, words)`` for a single date with a known
+    month or season but no known day (``XXXX-05``, ``1922-22~``), else None.
+    Its year doesn't count: only where in the year it falls."""
+    m = _EDTF_DATE.match((value or '').strip())
+    if not m or not m.group('month') or 'X' in m.group('month'):
+        return None
+    if m.group('day') and 'X' not in m.group('day'):
+        return None
+    month = int(m.group('month'))
+    if month in _SEASON_SPANS:
+        middle, half = _SEASON_SPANS[month]
+        return middle, half, _SEASONS[month]
+    if not 1 <= month <= 12:
+        return None
+    return _day_of_year(month, 15), 15, _MONTHS[month - 1]
 
 
 # ============================================================================
@@ -489,6 +523,210 @@ def assign_calendar(items: list[dict], invoke, log_dir: str) -> dict[str, tuple[
 
 
 # ============================================================================
+# Month anchors: code pins what the model miscounts
+# ============================================================================
+
+# The model reads "early in May" right but counts days from it wrong (The
+# Plastic Age: junior year opened on day 730 in September, and the prom
+# "early in May" came out day 848, about January; F-071). Code finds where
+# day 1 falls in the year from the anchors that agree, then moves each run
+# of scenes whose anchor disagrees into its month, taking up the difference
+# in a vague gap ("some weeks later") and never in a stated one.
+
+_MONTH_NAMES = r'January|February|March|April|May|June|July|August|September|October|November|December'
+_QUALIFIER = r'(?:(?P<q>[Ee]arly|[Ll]ate|[Mm]id(?:dle)?)(?:-|\s+)(?:(?:in|of)\s+)?(?:the\s+)?)?'
+# Case matters: "may" is a verb, and a capital Fall is the season
+_ANCHOR_MONTH = re.compile(_QUALIFIER + r'\b(?P<m>' + _MONTH_NAMES + r')\b')
+# "Indian summer" is autumn weather, not summer
+_ANCHOR_SEASON = re.compile(_QUALIFIER + r'(?<![Ii]ndian )\b(?P<s>[Ss]pring|[Ss]ummer|[Aa]utumn|Fall|[Ww]inter)\b')
+# First day (0 = January 1) and length of each season
+_SEASON_RANGES = {'spring': (59, 92), 'summer': (151, 92), 'autumn': (243, 91), 'winter': (334, 90)}
+_MONTH_LENGTHS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+# An anchor within a week of its month counts as kept; a season's edges are
+# looser ("autumn flavour in the air" in Gatsby's mid-August)
+PIN_SLACK = 7
+SEASON_SLACK = 21
+# A month the anchor says belongs to a memory is not the scene's own:
+# Gatsby's dawn scene, "that still October night (in the flashback)"
+_REMEMBERED = re.compile(r'flashback|memory|recall|remember', re.I)
+# A month the anchor places at another time than the scene's: "planning to
+# marry next June", "last spring", "since March"
+_OTHER_TIME = re.compile(r'\b(next|last|previous|since|ago|until|till)\b', re.I)
+# A name, not a month: "Aunt May", "Miss June"
+_NAMED = re.compile(r'\b(Aunt|Uncle|Miss|Mrs?|Ms|Lady|Sir|Dr)\.?\s+$')
+
+
+def anchor_window(anchor: str) -> tuple[int, int, str, int] | None:
+    """``(first, last, words, slack)``: the days of the year (0 = January 1;
+    ``last`` may be below ``first`` across the new year) that a cue's anchor
+    puts the scene in, from one month or one season, with "early", "mid" or
+    "late", and how far outside them still counts. None when it names none,
+    or more than one (a month wins over a season), or says it is remembered."""
+    text = anchor or ''
+    if _REMEMBERED.search(text) or _OTHER_TIME.search(text):
+        return None
+    found = {(m.group('q') or '', m.group('m')) for m in _ANCHOR_MONTH.finditer(text)
+             if not _NAMED.search(text[:m.start('m')])}
+    if found:
+        if len({m for _q, m in found}) != 1 or len(found) != 1:
+            return None
+        qual, name = found.pop()
+        month = _MONTH_NAMES.split('|').index(name)
+        start, length = sum(_MONTH_LENGTHS[:month]), _MONTH_LENGTHS[month]
+        part = {'early': (0, 10), 'mid': (10, 10), 'middle': (10, 10), 'late': (20, length - 20)}
+        slack = PIN_SLACK
+    else:
+        found = {(m.group('q') or '', m.group('s').lower().replace('fall', 'autumn'))
+                 for m in _ANCHOR_SEASON.finditer(text)}
+        if len(found) != 1:
+            return None
+        qual, name = found.pop()
+        start, length = _SEASON_RANGES[name]
+        third = length // 3
+        part = {'early': (0, third), 'mid': (third, third), 'middle': (third, third),
+                'late': (length - third, third)}
+        slack = SEASON_SLACK
+    offset, span = part.get(qual.lower(), (0, length))
+    words = f'{qual.lower()} {name}'.strip()
+    return (start + offset) % 365, (start + offset + span - 1) % 365, words, slack
+
+
+def _distance(doy: int, window: tuple[int, int, str, int]) -> tuple[int, int]:
+    """Days forward to *window*'s first day and back to its last; (0, 0)
+    when *doy* is inside it."""
+    first, last, _words, _slack = window
+    inside = first <= doy <= last if first <= last else (doy >= first or doy <= last)
+    if inside:
+        return 0, 0
+    return (first - doy) % 365, (doy - last) % 365
+
+
+def pin_month_anchors(items: list[dict], placed: dict[str, tuple[int, str, str]]):
+    """Move scenes whose anchor names a month or season the calendar puts
+    them out of. Returns ``(placed, moves, day_one)``: the new placements,
+    ``(scene id, old day, new day, anchor words)`` per scene moved, and day
+    1's day of the year (None when there are too few anchors to tell).
+
+    *items* are in reading order. Only the story's present anchors; a
+    flashback moves with the present scene before it, and frames and
+    visions keep their days. Scenes joined by "continues" or
+    a stated gap move together; a scene after a vague gap is where a run
+    starts, and the vague gap takes up the move. A later run moves only as
+    far as it must to stay after the one before. Only a scene shown as it
+    happens (mode scene, not a summary) anchors.
+    """
+    entries = []
+    # Flashback scenes (and what continues them) ride along with the present
+    # scene before them: a memory "three weeks earlier" keeps its distance
+    riders: dict[str, list[str]] = {}
+    in_flashback = False
+    for it in items:
+        sid = it['id']
+        if sid not in placed:
+            continue
+        day, mode, _basis = placed[sid]
+        cue = it.get('cues', {})
+        relation = cue.get('relation') or 'unclear'
+        if mode in OFF_PRESENT_MODES:
+            continue
+        # By relation, as walk() reads it, not by day: one overshoot (the
+        # prom on day 848) must not make every scene after it a flashback
+        in_flashback = relation == 'earlier' or (in_flashback and relation == 'continues')
+        if in_flashback:
+            if entries:
+                riders.setdefault(entries[-1]['id'], []).append(sid)
+            continue
+        stated = relation == 'continues' or (relation == 'later' and gap_to_days(cue.get('gap', '')) is not None)
+        window = anchor_window(cue.get('anchor', '')) if mode == 'scene' else None
+        entries.append({'id': sid, 'day': day, 'stated': stated and bool(entries), 'window': window})
+    anchored = [e for e in entries if e['window']]
+    if len(anchored) < 2:
+        return placed, [], None
+
+    # Day 1's day of the year: the one that keeps the most anchors, a month
+    # counting as three seasons (a season's loose edges let a wrong calendar
+    # keep as many: The Plastic Age fitted November with equal weights), then
+    # the one nearest their middles, so a run of equally good days resolves
+    # to its centre rather than its first
+    def weight(window):
+        return 1 if window[3] == SEASON_SLACK else 3
+
+    def from_middle(doy, window):
+        first, last = window[0], window[1]
+        middle = (first + ((last - first) % 365) // 2) % 365
+        return min((doy - middle) % 365, (middle - doy) % 365)
+
+    def fit(day_one):
+        kept = total = 0
+        for e in anchored:
+            doy = (day_one + e['day'] - 1) % 365
+            if min(_distance(doy, e['window'])) <= e['window'][3]:
+                kept += weight(e['window'])
+            total += from_middle(doy, e['window'])
+        return kept, -total
+    day_one = max(range(365), key=fit)
+    if fit(day_one)[0] * 2 < sum(weight(e['window']) for e in anchored):
+        # Most anchors disagree with any one calendar: the anchors, not the
+        # days, are what's wrong
+        return placed, [], None
+
+    runs: list[list[dict]] = []
+    for e in entries:
+        if e['stated'] and runs:
+            runs[-1].append(e)
+        else:
+            runs.append([e])
+    moves = []
+    new_day = {}
+    prev_end = prev_old_end = None
+    prev_shift = 0
+    floor = min(1, min(e['day'] for e in entries))
+    for run in runs:
+        # A run the move pushed into goes on only as far as order needs: the
+        # gaps after a misplaced anchor were sized against the wrong
+        # calendar too, so keeping them would carry the error on (The
+        # Plastic Age's track meet went from June to July)
+        # Only a push this code caused: where the model itself put a later
+        # scene on an earlier day, a push would carry its error a year on
+        shift = 0
+        if prev_end is not None and run[0]['day'] < prev_end and prev_shift > 0:
+            shift = min(prev_end + 1 - run[0]['day'], prev_shift)
+        for e in run:
+            if not e['window']:
+                continue
+            doy = (day_one + e['day'] + shift - 1) % 365
+            forward, back = _distance(doy, e['window'])
+            if min(forward, back) <= e['window'][3]:
+                continue
+            if back < forward:
+                # Back only as far as the run before it (or day 1) allows;
+                # never the long way round instead, which adds a year
+                lowest = prev_end if prev_end is not None else floor
+                step = -back if run[0]['day'] + shift - back >= lowest else 0
+            else:
+                step = forward
+            # Every other anchor in the run must still hold
+            if step and all(min(_distance((day_one + o['day'] + shift + step - 1) % 365, o['window']))
+                            <= o['window'][3] for o in run if o['window'] and o is not e):
+                shift += step
+            break
+        # A flashback inside the stretch that moved goes with it; one to
+        # before it (freshman year recalled in junior year) stays
+        since = prev_old_end if prev_old_end is not None else run[0]['day']
+        for e in run:
+            near = [r for r in riders.get(e['id'], []) if placed[r][0] > since]
+            for sid in [e['id']] + near:
+                old = placed[sid][0]
+                new_day[sid] = old + shift
+                if shift:
+                    moves.append((sid, old, old + shift,
+                                  e['window'][2] if e['window'] and sid == e['id'] else ''))
+        prev_end, prev_old_end, prev_shift = run[-1]['day'] + shift, run[-1]['day'], shift
+    pinned = {sid: (new_day.get(sid, day), mode, basis) for sid, (day, mode, basis) in placed.items()}
+    return pinned, moves, day_one
+
+
+# ============================================================================
 # Checks (deterministic; reported, never applied)
 # ============================================================================
 
@@ -514,7 +752,8 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     *scenes*: scenes.csv rows in reading order. Returns findings
     ``{'scene_id', 'check', 'message'}``. Checks: the present going
     backwards on a scene not told as earlier and not a frame or vision; a stated gap
-    the days disagree with; two dates, or two weekdays, the days contradict.
+    the days disagree with; two dates, two months or seasons, or two weekdays,
+    the days contradict.
     """
     findings = []
     present = None
@@ -522,6 +761,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     last_mode = ''
     after_frame = False
     dated: list[tuple[str, int, tuple]] = []
+    rough: list[tuple[str, int, tuple]] = []
     weekdays: list[tuple[str, int, int]] = []
     for row in scenes:
         sid = row.get('id', '')
@@ -570,6 +810,11 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         md = _month_day(row.get('timeline_date', ''))
         if md:
             dated.append((sid, day, md))
+            rough.append((sid, day, (_day_of_year(md[1], md[2]), 0, f'{md[2]} {_MONTHS[md[1] - 1]}')))
+        elif mode == 'scene' and _rough_date(row.get('timeline_date', '')):
+            # A month or season, on a scene that happens on one day: a
+            # summary's date may be the end of its stretch, not its start
+            rough.append((sid, day, _rough_date(row['timeline_date'])))
         anchor = (cue.get('anchor') or '').lower()
         named = [i for i, w in enumerate(_WEEKDAYS) if re.search(rf'\b{w}s?\b', anchor)]
         # One weekday, on a scene that happens on one day: a summary's
@@ -614,6 +859,22 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
                 message = (f'its date is {between} day(s) after {s1}\'s, '
                            f'but its day is {d2 - d1} day(s) after')
             findings.append({'scene_id': s2, 'check': 'date_mismatch', 'message': message})
+    # A month or a season against the dated scene before it: the year is
+    # unstated or too rough to count, so any whole number of years may lie
+    # between, but the days must land in the right part of the year (The
+    # Plastic Age's prom "early in May", 290 days after a March, F-070)
+    for (s1, d1, (y1, h1, w1)), (s2, d2, (y2, h2, w2)) in zip(rough, rough[1:]):
+        if not (h1 or h2):
+            continue
+        actual = d2 - d1
+        years = round((actual - (y2 - y1)) / 365)
+        expected = y2 - y1 + 365 * years
+        if abs(actual - expected) > h1 + h2 + _ROUGH_SLACK:
+            ahead = (y2 - y1) % 365
+            findings.append({'scene_id': s2, 'check': 'date_mismatch',
+                             'message': f'its date ({w2}) falls about {ahead} day(s) after '
+                                        f'{s1}\'s ({w1}) in the year, or a whole number of years '
+                                        f'more, but its day is {actual} day(s) after'})
     for (s1, d1, w1), (s2, d2, w2) in zip(weekdays, weekdays[1:]):
         # Over months the days are too rough for weekday arithmetic: a
         # Thursday 884 days after a Saturday says nothing (F-067)
@@ -681,6 +942,12 @@ def run_assignment(project_dir: str, model: str, log_dir: str, force: bool) -> d
     if not items:
         return {'assigned': 0, 'proposed': 0, 'unplaced': 0, 'findings': 0}
     placed = assign_calendar(items, _invoke_assignment(model), log_dir)
+    placed, moves, _day_one = pin_month_anchors(items, placed)
+    if moves:
+        anchors = [m for m in moves if m[3]]
+        log(f'  Timeline: {len(moves)} scene(s) moved so {len(anchors)} month anchor(s) hold:')
+        for sid, old, new, words in moves:
+            log(f'    {sid}: day {old} -> {new}' + (f' ({words})' if words else ''))
 
     scenes_path = os.path.join(project_dir, 'reference', 'scenes.csv')
     rows = _read_csv(scenes_path)
