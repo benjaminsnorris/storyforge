@@ -5,6 +5,7 @@ Focuses on library functions that don't require API calls: parsers, prompt
 builders, similarity helpers, and deterministic cleanup operations.
 """
 
+import json
 import os
 
 import pytest
@@ -331,30 +332,51 @@ CONFLICT: Something real"""
         assert result['conflict'] == 'Something real'
 
 
+def _knowledge_reply(**fields):
+    """A structured Phase 3b reply holding every required field."""
+    reply = {'knowledge_in': [], 'knowledge_out': [], 'new_facts': [],
+             'continuity_deps': [], 'scene_summary': ''}
+    reply.update(fields)
+    return json.dumps(reply)
+
+
+def _physical_reply(**fields):
+    """A structured Phase 3c reply holding every required field."""
+    reply = {'physical_state_in': [], 'physical_state_out': [], 'new_states': [],
+             'resolved_states': []}
+    reply.update(fields)
+    return json.dumps(reply)
+
+
+def _state(sid, character, description, category, action_gating):
+    return {'id': sid, 'character': character, 'description': description,
+            'category': category, 'action_gating': action_gating}
+
+
 class TestParseKnowledgeResponse:
     """Tests for parse_knowledge_response."""
 
     def test_parses_knowledge_fields(self):
-        response = """KNOWLEDGE_IN: map-anomaly-exists; village-vanished
-KNOWLEDGE_OUT: map-anomaly-exists; village-vanished; archive-erasure
-CONTINUITY_DEPS: act1-sc01; act1-sc02
-SCENE_SUMMARY: Kael reveals the archive has been systematically altered."""
+        response = _knowledge_reply(
+            knowledge_in=['map-anomaly-exists', 'village-vanished'],
+            knowledge_out=['map-anomaly-exists', 'village-vanished', 'archive-erasure'],
+            continuity_deps=['act1-sc01', 'act1-sc02'],
+            scene_summary='Kael reveals the archive has been systematically altered.')
 
         result = parse_knowledge_response(response, 'new-x1')
         assert result['id'] == 'new-x1'
         assert 'map-anomaly-exists' in result['knowledge_in']
         assert 'archive-erasure' in result['knowledge_out']
-        assert result['continuity_deps'] == 'act1-sc01; act1-sc02'
+        assert result['continuity_deps'] == 'act1-sc01;act1-sc02'
         assert result['_summary'] == 'Kael reveals the archive has been systematically altered.'
 
     def test_empty_knowledge_in_kept(self):
-        # Unlike other parsers, knowledge allows empty-looking values
-        response = """KNOWLEDGE_IN:
-KNOWLEDGE_OUT: some-fact
-SCENE_SUMMARY: First scene."""
+        # An empty list is a valid answer, not a missing field
+        response = _knowledge_reply(knowledge_in=[], knowledge_out=['some-fact'],
+                                    scene_summary='First scene.')
 
         result = parse_knowledge_response(response, 's1')
-        # Empty value after colon -> not stored
+        # Empty list -> not stored
         assert 'knowledge_in' not in result
         assert result['knowledge_out'] == 'some-fact'
 
@@ -363,10 +385,11 @@ class TestParsePhysicalStateResponse:
     """Tests for parse_physical_state_response."""
 
     def test_parses_simple_response(self):
-        response = """PHYSICAL_STATE_IN: broken-arm-marcus; has-compass-elena
-PHYSICAL_STATE_OUT: broken-arm-marcus; has-compass-elena; exhaustion-tessa
-NEW_STATES: exhaustion-tessa|Tessa|Exhausted after climbing|fatigue|false
-RESOLVED_STATES:"""
+        response = _physical_reply(
+            physical_state_in=['broken-arm-marcus', 'has-compass-elena'],
+            physical_state_out=['broken-arm-marcus', 'has-compass-elena', 'exhaustion-tessa'],
+            new_states=[_state('exhaustion-tessa', 'Tessa', 'Exhausted after climbing',
+                               'fatigue', False)])
 
         result = parse_physical_state_response(response, 'act2-sc01')
         assert result['id'] == 'act2-sc01'
@@ -379,11 +402,14 @@ RESOLVED_STATES:"""
         assert result['_resolved'] == []
 
     def test_parses_multiple_new_states(self):
-        response = """PHYSICAL_STATE_IN:
-PHYSICAL_STATE_OUT: broken-arm-marcus; has-compass-elena
-NEW_STATES: broken-arm-marcus|Marcus|Left arm broken|injury|true
-has-compass-elena|Elena|Carrying stolen compass|equipment|false
-RESOLVED_STATES: old-wound-marcus"""
+        response = _physical_reply(
+            physical_state_out=['broken-arm-marcus', 'has-compass-elena'],
+            new_states=[
+                _state('broken-arm-marcus', 'Marcus', 'Left arm broken', 'injury', True),
+                _state('has-compass-elena', 'Elena', 'Carrying stolen compass',
+                       'equipment', False),
+            ],
+            resolved_states=['old-wound-marcus'])
 
         result = parse_physical_state_response(response, 's1')
         assert len(result['_new_states']) == 2
@@ -392,18 +418,16 @@ RESOLVED_STATES: old-wound-marcus"""
         assert result['_resolved'] == ['old-wound-marcus']
 
     def test_parses_resolved_states(self):
-        response = """PHYSICAL_STATE_IN: broken-arm-marcus
-PHYSICAL_STATE_OUT:
-RESOLVED_STATES: broken-arm-marcus; old-wound"""
+        response = _physical_reply(physical_state_in=['broken-arm-marcus'],
+                                   resolved_states=['broken-arm-marcus', 'old-wound'])
 
         result = parse_physical_state_response(response, 's2')
         assert result['_resolved'] == ['broken-arm-marcus', 'old-wound']
 
     def test_empty_response(self):
-        result = parse_physical_state_response('', 's3')
-        assert result['id'] == 's3'
-        assert result['_new_states'] == []
-        assert result['_resolved'] == []
+        # An empty reply is unreadable, not "nothing changed": it must stop the chain
+        with pytest.raises(ValueError):
+            parse_physical_state_response('', 's3')
 
 
 # ============================================================================
