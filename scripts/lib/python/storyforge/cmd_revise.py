@@ -1254,20 +1254,38 @@ DECISION: [rewritten decision]"""
     return total_rewrites
 
 
+def _redraft_or_halt(project_dir: str, scene_ids: list[str]) -> int:
+    try:
+        return _redraft_scenes(project_dir, scene_ids)
+    except RedraftError as e:
+        log(f'ERROR: {e}')
+        log('Their briefs were rewritten; nothing is committed. Inspect with '
+            '`git diff`, then re-run or restore with `git checkout -- reference/ scenes/`.')
+        sys.exit(1)
+
+
+class RedraftError(Exception):
+    """Scenes whose briefs were rewritten but whose prose could not be re-drafted."""
+
+
 def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     """Re-draft scenes after brief rewrites using brief-aware drafting.
 
-    Only re-drafts scenes that already have a scene file.
-    Returns number of scenes re-drafted.
+    Only re-drafts scenes that already have a scene file. A reply that fails
+    ``parsing.unsafe_scene_reason`` (truncated, or a collapsed word count) is
+    never written. Every scene that could not be re-drafted is collected and
+    RedraftError is raised after the rest are written, since its rewritten
+    brief and its prose now disagree. Returns number of scenes re-drafted.
     """
     from storyforge.prompts import build_scene_prompt
     from storyforge.common import get_coaching_level, build_shared_context
-    from storyforge.parsing import extract_single_scene
+    from storyforge.parsing import extract_single_scene, unsafe_scene_reason
 
     scenes_dir = os.path.join(project_dir, 'scenes')
     coaching_level = get_coaching_level(project_dir)
     model = select_model('creative')
     count = 0
+    failed: list[str] = []
 
     # Build shared context for prompt caching across all re-drafts
     system = build_shared_context(project_dir, model=model)
@@ -1286,17 +1304,24 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
                                         coaching_level=coaching_level, api_mode=True,
                                         system_context=bool(system))
         except Exception as e:
-            log(f'  WARNING: Could not build prompt for {scene_id}: {e} — skipping')
+            log(f'  ERROR: Could not build prompt for {scene_id}: {e}')
+            failed.append(f'{scene_id} (no prompt: {e})')
             continue
 
         response = invoke_api(prompt, model, max_tokens=16384,
                               system=system or None)
         if not response:
-            log(f'  WARNING: No response for {scene_id} re-draft — skipping')
+            log(f'  ERROR: No response for {scene_id} re-draft')
+            failed.append(f'{scene_id} (no response)')
             continue
 
         extracted = extract_single_scene(response)
         revised = extracted if extracted else response
+        reason = unsafe_scene_reason(revised, original_prose)
+        if reason:
+            log(f'  ERROR: Not writing the re-draft of {scene_id}: {reason}')
+            failed.append(f'{scene_id} ({reason})')
+            continue
 
         # A model has no reason to reproduce an illustration marker, and losing
         # one silently costs the author an illustration that nothing downstream
@@ -1319,6 +1344,8 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
         count += 1
         log(f'  Re-drafted {scene_id}')
 
+    if failed:
+        raise RedraftError(f'{len(failed)} scene(s) not re-drafted: {"; ".join(failed)}')
     return count
 
 
@@ -1418,7 +1445,7 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         if upstream_scenes:
             log(f'  Upstream issues in {len(upstream_scenes)} scenes — fixing briefs first')
             _fix_upstream_briefs(project_dir, upstream_scenes)
-            _redraft_scenes(project_dir, upstream_scenes)
+            _redraft_or_halt(project_dir, upstream_scenes)
             commit_and_push(project_dir,
                             f'Polish: upstream brief fixes for {len(upstream_scenes)} scenes',
                             ['reference/', 'scenes/', 'working/'])
@@ -1756,6 +1783,31 @@ def _estimate_avg_words(project_dir):
 # Scene registration for new scenes created during revision
 # ============================================================================
 
+def _scene_texts(project_dir: str) -> dict[str, str]:
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    texts = {}
+    if os.path.isdir(scenes_dir):
+        for name in os.listdir(scenes_dir):
+            if name.endswith('.md'):
+                with open(os.path.join(scenes_dir, name), encoding='utf-8') as f:
+                    texts[name[:-3]] = f.read()
+    return texts
+
+
+def _unsafe_scene_writes(project_dir: str, before: dict[str, str]) -> list[str]:
+    """Scenes changed since ``before`` whose new text fails
+    ``parsing.unsafe_scene_reason``, one line each."""
+    from storyforge.parsing import unsafe_scene_reason
+    problems = []
+    for sid, text in sorted(_scene_texts(project_dir).items()):
+        if before.get(sid) == text:
+            continue
+        reason = unsafe_scene_reason(text, before.get(sid))
+        if reason:
+            problems.append(f'scene {sid} was rewritten unsafely: {reason}')
+    return problems
+
+
 def _content_snapshot(project_dir: str) -> dict[str, str]:
     """Hash of every file a revision pass may change, by relative path."""
     import hashlib
@@ -1985,7 +2037,7 @@ def main(argv=None):
         if upstream_scenes:
             log(f'Upstream issues in {len(upstream_scenes)} scenes — fixing briefs')
             _fix_upstream_briefs(project_dir, upstream_scenes)
-            _redraft_scenes(project_dir, upstream_scenes)
+            _redraft_or_halt(project_dir, upstream_scenes)
             commit_and_push(project_dir, 'Naturalness: upstream brief fixes',
                             ['reference/', 'scenes/', 'working/'])
         plan_rows = _generate_naturalness_plan(csv_plan_file, project_dir)
@@ -2420,13 +2472,22 @@ Rules:
         pass_model = select_revision_model(pass_name, pass_purpose)
 
         if args.interactive:
-            # Interactive mode
+            # Interactive mode: claude writes scene files itself, so check
+            # what it wrote the way extracted replies are checked
+            scenes_before = _scene_texts(project_dir)
             subprocess.run(
                 ['claude', prompt,
                  '--model', pass_model,
                  '--dangerously-skip-permissions'],
                 cwd=project_dir,
             )
+            unsafe = _unsafe_scene_writes(project_dir, scenes_before)
+            if unsafe:
+                for problem in unsafe:
+                    log(f'ERROR: {problem}')
+                log(f'Pass \'{pass_name}\' is not marked completed. Inspect with `git diff` '
+                    f'(and `git log`, if the session committed) and restore what is wrong.')
+                sys.exit(1)
             exit_code = 0
         else:
             # Direct API mode
