@@ -730,6 +730,21 @@ class TestParts:
         assert _is_part_heading('BOOK FIRST')
         assert _is_part_heading('Part 3')
 
+    def test_volume_headings_assign_parts(self, mock_api, mock_git, mock_costs,
+                                          project_dir, monkeypatch):
+        # Pride and Prejudice was published in three volumes, each numbering
+        # its chapters from I; the volumes are the book's real parts.
+        text = ('# Volume I\n\n' + self._chapter(1) + self._chapter(2)
+                + '# Volume II\n\n' + self._chapter(1))
+        rows = self._split(project_dir, monkeypatch, text)
+        assert [r['part'] for r in rows[::2]] == ['1', '1', '2']
+
+    def test_volume_heading_forms(self):
+        from storyforge.cmd_scenes_setup import _is_part_heading
+        assert _is_part_heading('VOL. II.')
+        assert _is_part_heading('Volume Three')
+        assert not _is_part_heading('Volume one of the encyclopaedia lay open.')
+
 
 class TestSceneIds:
     """Scene ids are 3-5 word slugs of the scene's event, never positional:
