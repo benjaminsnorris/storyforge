@@ -1,152 +1,30 @@
 # Storyforge Plugin Development
 
-Design rationale and bug history live in `docs/history.md`. Read the matching section there before changing cleanup's planner, the YAML helpers, graphic-novel mode, or interior illustrations.
+Read before working in an area:
+- `docs/agent-reference.md` — shared-module table, project data files, commands and skills, skill standards, graphic-novel mode, **interior-illustration invariants (must not break)**, commit prefixes, and the **5-agent PR review workflow** (follow it when asked for "the 5-agent review" or after creating a PR).
+- `docs/history.md` — rationale and bug history. Read the matching section before changing cleanup's planner, the YAML helpers, graphic-novel mode, or interior illustrations.
+- `docs/plans/2026-10-28-rethink-status.md` — current rethink status and how to resume; read first when working on the rethink.
 
 ## Git Rules — MANDATORY
 - **Never commit to main.** On `main`, create a `storyforge/{command}-{timestamp}` branch first. On any other branch, stay on it.
 - **Commit and push after every change.** Never call something done before it is committed and pushed.
 - Commit related changes in logical groups, immediately. Commit uncommitted files before creating branches or PRs.
 - Merge PRs with `gh pr merge N --merge --delete-branch` (regular merge, never squash).
-
-## Version File
-`.claude-plugin/plugin.json` — bump `version` on every release commit. Minor (0.X.0) for features, patch (0.0.X) for fixes.
+- Bump `version` in `.claude-plugin/plugin.json` on every release commit: minor for features, patch for fixes. Commit prefixes: `Add` / `Update` / `Fix` / `Remove`, `Bump version to X.Y.Z`.
 
 ## Code Standards
-
-Commands are Python modules at `scripts/lib/python/storyforge/cmd_*.py`, dispatched by `./storyforge` through `storyforge/__main__.py` (`COMMANDS`). Supported Python: 3.10–3.13.
-
-```python
-def parse_args(argv):
-    parser = argparse.ArgumentParser(prog='storyforge <name>')  # or cli.base_parser
-    return parser.parse_args(argv)
-
-def main(argv=None):
-    args = parse_args(argv or [])
-    install_signal_handlers()
-    project_dir = detect_project_root()
-```
-
-- Use `argparse`. Use `storyforge.api` for every Claude call. Use `storyforge.runner` for parallelism (don't roll your own pool or name the executor type).
-- **Check the shared modules before writing new code:**
-
-| Module | Use for |
-|---|---|
-| `common` | `detect_project_root`, `log`, `read_yaml_field(field, project_dir)`, `parse_yaml_scalar`, `yaml_single_quote`, `yaml_scalar_issue`, `detect_newline`, `update_artifact_entry`, `select_model`, `select_revision_model`, `get_coaching_level`, `check_chapter_map_freshness`, `get_plugin_dir`, `extract_craft_sections`, `install_signal_handlers`, `csv_safe`, pipeline manifest (`get_current_cycle`, `start_new_cycle`, `update_cycle_field`) |
-| `git` | `create_branch`, `ensure_branch_pushed`, `create_draft_pr`, `update_pr_task`, `commit_and_push`, `run_review_phase` |
-| `cli` | `base_parser`, `add_scene_filter_args`, `resolve_filter_args` |
-| `runner` | `run_parallel(items, fn, max_workers, label)` returns `{item: result-or-Exception}` — check for exceptions; `run_batched`; `HealingZone` |
-| `api` | `invoke_api` (text, `''` on failure), `invoke`, `invoke_to_file`, `extract_text`, `submit_batch` / `poll_batch` / `download_batch_results` |
-| `costs` | `calculate_cost`, `estimate_cost`, `check_threshold`, `log_operation`, `print_summary` |
-| `scene_filter` | `build_scene_list`, `apply_scene_filter` |
-| `csv_cli` | `get_field`, `get_row`, `get_column`, `list_ids`, `update_field`, `append_row` |
-| `history` | `append_cycle`, `get_scene_history`, `detect_stalls`, `detect_regressions` |
+- Commands are `scripts/lib/python/storyforge/cmd_*.py`, registered in `storyforge/__main__.py` (`COMMANDS`), shaped `parse_args(argv)` + `main(argv=None)` with `argparse` (or `cli.base_parser`), `install_signal_handlers()`, `detect_project_root()`. Python 3.10–3.13.
+- Every Claude call goes through `storyforge.api`; parallelism through `storyforge.runner` (`run_parallel` returns exceptions as values — check them). Check the shared modules in `docs/agent-reference.md` before writing helpers.
+- Report author-owned problems; don't silently repair or delete. Every path that can't check something says so (a finding or WARNING), so silence means "checked and clean". Never warn-and-continue past a failure that makes output wrong.
 
 ### Gotchas that have caused real bugs
-- `prompts.read_yaml_field(yaml_file, field)` has the **opposite** argument order from `common.read_yaml_field`.
-- `parse_yaml_scalar` is the only YAML scalar parser. Don't write another quote/comment stripper.
-- Edit `storyforge.yaml` entries with `update_artifact_entry`, never a regex over the whole file.
-- `storyforge.yaml` line endings are **preserved** (open with `newline=''`, use `detect_newline`, write only on change, `\r?\n` patterns). CSVs we write are **forced to LF** (`lineterminator='\n'` on `csv.DictWriter`).
-- Pass author prose interpolated into a finding `detail` through `common.csv_safe` — a `|` corrupts the report CSV.
-- Report author-owned problems; don't silently repair or delete. Every path that can't check something says so (a finding or WARNING), so silence always means "checked and clean". Never warn-and-continue past a failure that makes output wrong.
+- `prompts.read_yaml_field(yaml_file, field)` has the **opposite** argument order from `common.read_yaml_field(field, project_dir)`.
+- `parse_yaml_scalar` is the only YAML scalar parser. Edit `storyforge.yaml` entries with `update_artifact_entry`, never a regex over the whole file.
+- `storyforge.yaml` line endings are **preserved** (`newline=''`, `detect_newline`, write only on change, `\r?\n` patterns). CSVs we write are **forced to LF** (`lineterminator='\n'`).
+- Author prose interpolated into a finding `detail` goes through `common.csv_safe` — a `|` corrupts the report CSV.
+- Scene files (`scenes/{id}.md`) are pure prose, no frontmatter; metadata lives in `reference/*.csv` (pipe-delimited, `;` for arrays, no quoting). Scene `id` is a permanent event slug, never positional.
+- New cleanup step: a `plan_*` function registered in `cmd_cleanup.plan_cleanup` (no `if args.dry_run:` branch; read disk through `DiskFacts`), plus rows in `ARRANGEMENTS` and `TRANSCRIPTS` in `tests/commands/test_cmd_cleanup_dry_run.py`.
 
-### Cleanup steps
-`cmd_cleanup.plan_cleanup` returns one `StepPlan` per step; `--dry-run` prints `plan.changes`, the real run prints what `plan.apply` returns. To add a step: write a `plan_*` function (no `if args.dry_run:` branch), register it in `plan_cleanup`, read the filesystem through `DiskFacts` if an earlier step could affect it, and add a row to `ARRANGEMENTS` and `TRANSCRIPTS` in `tests/commands/test_cmd_cleanup_dry_run.py`.
-
-## Skill Standards
-
-Skills live in `skills/{name}/SKILL.md` with `name` + `description` frontmatter. Required sections: **Locating the Storyforge Plugin**, **Read Project State**, **Determine Mode**, **Commit After Every Deliverable** (`git add -A && git commit -m "..." && git push`), **Coaching Level Behavior**.
-
-When a skill delegates to a command, offer two options and wait for the author's choice:
-- **Option A: Run it here** (note that commands invoking Claude require unsetting `CLAUDECODE`).
-- **Option B: Run it yourself** — give `cd [project_dir] && [plugin_path]/storyforge thing [flags]` and stop.
-
-Coaching levels: **full** — creative partner, recommends and offers to run. **coach** — asks guiding questions, does no creative work. **strict** — reports data and commands only; the author decides everything.
-
-## Project Data
-
-CSVs are pipe-delimited (`|`), arrays use `;`, header row first, no quoting, empty field = nothing between delimiters. Semicolons inside content become commas or `\;`.
-
-| File | Holds |
-|---|---|
-| `reference/story-summary.md` | `## Logline` (canonical; `storyforge.yaml:project.logline` is deprecated), `## Synopsis`, `## Act-shape` (`### Act N`), `## Theme` |
-| `reference/outline.md` | Read-only render of spine/architecture/scenes `summary` columns; regenerated by sync |
-| `reference/spine.csv` | 5–10 irreducible events (id, seq, title, summary, function, act) |
-| `reference/architecture.csv` | 15–25 anchor scenes; `spine_event` required, refs `spine.csv:id` |
-| `reference/scenes.csv` | Scene identity. `id` is a permanent 3–5 word event slug, never positional. `act` structural, `part` physical. Optional `architecture_scene` |
-| `reference/scene-intent.csv` | Function, value shift, characters, MICE threads, `theme_threads` (refs `themes.csv`) |
-| `reference/scene-briefs.csv` | Drafting contracts (goal, conflict, outcome, crisis, decision, knowledge in/out, key actions/dialogue, continuity_deps, …) |
-| `reference/voice-profile.csv` | `_project` row + per-character voice rows |
-| `reference/themes.csv`, `characters.csv`, `locations.csv`, `motif-taxonomy.csv` | Registries |
-| `reference/chapter-map.csv` | Chapter-to-scene mapping |
-| `reference/illustration-plan.csv`, `reference/visual-state.csv`, `reference/canon/` | Interior illustrations (see below) |
-| `working/scores/score-history.csv` | Per-scene, per-principle scores by cycle |
-| `working/scoring-overrides.csv`, `working/scoring-verdicts.csv` | Author-accepted findings; boundary-diff verdicts |
-| `working/annotations.csv` | Bookshelf reader annotations |
-| `working/craft-weights.csv` | Principle weights (keyed by `principle`) |
-| `working/costs/ledger.csv` | Per-invocation costs |
-
-Scene files (`scenes/{id}.md`) are pure prose — **no frontmatter**. Filename is the scene ID; all metadata lives in CSVs.
-
-## Testing
-
-pytest; files `tests/test_*.py` and `tests/commands/`. Run `./tests/run-tests.sh` or `python3 -m pytest tests/`. Fixtures in `tests/conftest.py`: `fixture_dir` (read-only `tests/fixtures/test-project`), `project_dir` (writable copy), `plugin_dir`, `ref_dir`, `meta_csv`, `intent_csv`, `briefs_csv`. Every fix gets a regression test.
-
-## Evals
-
-`python3 evals/run.py` runs the eval suites (`evals/suites/*.py`) with API calls replayed from `evals/fixtures/cassettes/`; exit 0/1/2 = pass/gate failed/errored. See `evals/README.md`. Plan: `docs/plans/2026-10-28-storyforge-rethink.md`; **current status and how to resume: `docs/plans/2026-10-28-rethink-status.md`** (read it first when working on the rethink). Book repos for the E1-based suites must be cloned under `STORYFORGE_CORPUS_DIR` (default `~/Developer`).
-
-## Architecture
-
-- `evals/` — eval harness and suites
-- `scripts/lib/python/storyforge/` — commands (`cmd_*.py`), shared infrastructure, domain modules (scoring, prompts, extraction, illustrations, …)
-- `skills/` — interactive skills; `scripts/prompts/` — prompt templates; `references/` — craft engine, rubrics, schemas; `templates/` — project scaffolding; `docs/` — GitHub Pages + design docs
-
-Commands (`storyforge <name>`; full flag notes in `docs/history.md`):
-
-| Command | Purpose |
-|---|---|
-| `status` | Deterministic next-step verdict; `--json` for tooling (forge routes on `next.stage`) |
-| `elaborate` | Stages: spine / architecture / map / briefs / page-architecture / prompts |
-| `propose-summaries` | Draft `summary` cells from the level above (`--level 3/4/5`) |
-| `write` | Draft scenes (brief-aware, parallel waves) |
-| `evaluate` | 6-evaluator panel + synthesis |
-| `score` | 25-principle craft + fidelity scoring; also elaboration checks (`--level`, `--compare`, `--drift`, `--boundary`, `--bible-consistency`, `--story-power`) |
-| `revise` | Revision passes; `--polish`, `--polish --loop`, `--naturalness` |
-| `hone` (`reconcile` alias) | CSV data quality; `--diagnose`, `--loop`, `--findings` |
-| `validate` | Structural/schema/illustration/canon validation; exits 1 on failures |
-| `extract` | Structural data from prose |
-| `enrich`, `timeline`, `repetition` | Metadata enrichment, timeline, cross-chapter repetition |
-| `cleanup` | Project health; `--scenes`, `--csv`, `--dry-run` |
-| `assemble` | Chapters + epub/PDF/HTML (GN: artist handoff bundle) |
-| `publish`, `annotations`, `visualize` | Bookshelf publish, reader annotations, dashboard |
-| `cover`, `illustrate` | Cover; interior illustrations (prose only) |
-| `scenes-setup` (`scenes`), `scenes-export`, `scenes-import`, `sync` | Scene files and CSV ↔ `scenes-review.md` round-trip |
-| `migrate`, `migrate-medium` | Idempotent project migrations; novel ↔ graphic-novel conversion |
-| `review` | Pipeline review |
-
-Skills: `forge` (hub), `elaborate`, `extract`, `revise`, `score`, `hone`, `cleanup`, `publish`, `produce`, `init`, `cover`, `illustrate`, `title`, `press-kit`, `migrate-medium`, `script-package`. `forge`, `elaborate`, `hone`, `init` adapt to `project.medium`.
-
-Pipeline: Seed → Pitch (Logline → Synopsis → Act-shape) → Spine → Architecture → Scene Map → Briefs → Validate → Draft → Evaluate → Polish → Produce. Evaluation findings route upstream to a `fix_location` (brief/intent/structural/craft) — fix in CSVs before prose.
-
-## Graphic Novel Mode
-
-`project.medium: graphic-novel`. Most commands route to `*_gn` modules (`write`, `score`, `evaluate`, `revise`, `extract`); `assemble` routes to `cmd_script_package`. `publish` and `annotations` are not yet supported (#215). Per-page files live in `pages/<prefix>-pN.md`; renders in `manuscript/pages/<page_id>.png`. Image prompts target GPT Image 2: one 5-section prompt per page, identical character-anchor strings, positive framing, explicit portrait orientation. Spec: `docs/superpowers/specs/2026-05-20-graphic-novel-mode-design.md`.
-
-## Interior Illustrations (prose books)
-
-`storyforge illustrate` (refuses GN projects). Invariants that must not break:
-- **Never add anything to `content_html`.** Bookshelf derives highlight offsets from visible text; the marker is stripped and emitted as `illustrations: [{key, after_paragraph}]`. `tests/test_illustrate_cmd.py` asserts byte-identity — don't weaken it. `after_paragraph` counts top-level `<p>` only.
-- **Markers (`![[illus:id]]`) are never prose** — strip them (`illustrations.strip_markers`) before scoring, word counts, or analysis.
-- **Canon anchors are verbatim strings** (`## Embeddable block` in `reference/canon/**`), reused identically in every prompt; never revise one a rendered image used.
-- **Plan `status` only moves forward**; staleness is a stated reason (`stale_render_reason`), never a demotion.
-- **The packet (`manuscript/illustration-packet/`) is a render** — regenerated wholesale, never hand-edited. Prompt bodies live in `reference/illustration-prompts/`.
-- **No other illustration id ever reaches the image model** (`packet.RowContrast.for_model`).
-- Publishing assets must always include the cover (`assembly.require_cover_asset`).
-- Declare `IllustrationFindingKind` names bare; `cmd_cleanup` adds the `illus_` prefix.
-
-## PR Review Workflow — MANDATORY
-
-When asked for "the 5-agent review", or after creating a PR, launch all five in parallel in the background: `pr-review-toolkit:code-reviewer`, `pr-test-analyzer`, `silent-failure-hunter`, `type-design-analyzer`, `comment-analyzer`. Give each a substantive prompt naming the PR's risk areas and relevant conventions. When all report, consolidate one deduplicated punch list (CRITICAL / HIGH / IMPORTANT / SUGGESTIONS), verify each finding against the code, note false positives, and wait for "fix all of them in logical commits". Fix in ~4–6 commits (critical bugs, types, silent failures + comments, test gaps, version bump), each with regression tests, finding IDs (CR-/SF-/TD-/T-/C-N) in the message, and an immediate push.
-
-## Commit Message Prefixes
-Plugin work: `Add` / `Update` / `Fix` / `Remove`, and `Bump version to X.Y.Z`. Book work: `Draft scene:`, `Develop:`, `Voice:`, `Evaluate:`, `Revision:`, `Produce:`, `Review:`, `Title:`, `Press kit:`, `Cover:`, `Elaborate:`, `Extract:`, `Score:`, `Polish:`, `Enrich:`, `Visualize:`.
+## Testing and evals
+- `python3 -m pytest tests/` (or `./tests/run-tests.sh`). Fixtures in `tests/conftest.py` (`project_dir` is a writable copy of `tests/fixtures/test-project`). Every fix gets a regression test.
+- `python3 evals/run.py` replays the eval suites from recorded API calls (exit 0 pass / 1 gate failed / 2 errored); see `evals/README.md`. A prompt change is a recording miss: re-record that suite.
