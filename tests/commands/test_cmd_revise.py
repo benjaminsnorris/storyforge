@@ -61,6 +61,20 @@ def _make_plan_rows(names=('prose-polish',), fix_location='craft', status='pendi
     return rows
 
 
+def _rewrites_a_scene(run, project_dir):
+    """Wrap a fake subprocess.run so scene extraction changes a scene file,
+    as a real pass does (a pass that changes nothing halts; see
+    TestPassThatChangesNothing)."""
+    def wrapped(cmd, **kwargs):
+        if 'extract-scenes' in ' '.join(str(c) for c in cmd):
+            scenes = os.path.join(project_dir, 'scenes')
+            name = sorted(f for f in os.listdir(scenes) if f.endswith('.md'))[0]
+            with open(os.path.join(scenes, name), 'a') as f:
+                f.write('\nRevised.\n')
+        return run(cmd, **kwargs)
+    return wrapped
+
+
 def _ensure_scene_files(project_dir, scene_ids=None):
     """Ensure scene files exist for testing."""
     if scene_ids is None:
@@ -551,7 +565,7 @@ class TestMainPassExecution:
                 return sp.CompletedProcess(cmd, 0, stdout='Extracted 2 scenes', stderr='')
             return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
 
-        monkeypatch.setattr('subprocess.run', mock_subprocess_run)
+        monkeypatch.setattr('subprocess.run', _rewrites_a_scene(mock_subprocess_run, project_dir))
 
         # Set up the API response
         mock_api.set_response(
@@ -592,7 +606,7 @@ class TestMainPassExecution:
                 return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
             return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
 
-        monkeypatch.setattr('subprocess.run', mock_subprocess_run)
+        monkeypatch.setattr('subprocess.run', _rewrites_a_scene(mock_subprocess_run, project_dir))
         mock_api.set_response('Revised content')
 
         # Start from pass 2 explicitly
@@ -634,7 +648,7 @@ class TestMainPolishMode:
                 return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
             return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
 
-        monkeypatch.setattr('subprocess.run', mock_subprocess_run)
+        monkeypatch.setattr('subprocess.run', _rewrites_a_scene(mock_subprocess_run, project_dir))
         mock_api.set_response('Polished prose')
 
         main(['--polish'])
@@ -726,7 +740,7 @@ class TestMainCostEstimation:
                 return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
             return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
 
-        monkeypatch.setattr('subprocess.run', mock_subprocess_run)
+        monkeypatch.setattr('subprocess.run', _rewrites_a_scene(mock_subprocess_run, project_dir))
         mock_api.set_response('Result')
 
         main([])
@@ -767,7 +781,7 @@ class TestMainGitWorkflow:
                 return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
             return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
 
-        monkeypatch.setattr('subprocess.run', mock_subprocess_run)
+        monkeypatch.setattr('subprocess.run', _rewrites_a_scene(mock_subprocess_run, project_dir))
         mock_api.set_response('Result')
 
         main([])
@@ -860,3 +874,99 @@ class TestRegisterNewScenes:
         from storyforge.cmd_revise import _register_new_scenes
         _register_new_scenes(project_dir, 'act1-sc01;act1-sc02', 'test-pass')
         # Should not error and not change anything significant
+
+
+# ============================================================================
+# Regressions: a pass that changes nothing (understory 5ac1c26) and a
+# structural pass that writes duplicate seq / blank pov (understory bbfc945)
+# ============================================================================
+
+def _run_pass_setup(project_dir, monkeypatch, fix_location):
+    import subprocess as sp
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr('storyforge.cmd_revise.detect_project_root', lambda: project_dir)
+    plugin_dir = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.dirname(__file__)))))
+    monkeypatch.setattr('storyforge.cmd_revise.get_plugin_dir', lambda: plugin_dir)
+    plan_file = _write_plan(project_dir, _make_plan_rows(('the-pass',), fix_location=fix_location))
+    _ensure_scene_files(project_dir)
+
+    def run(cmd, **kwargs):  # extraction finds nothing to write
+        if 'build-prompt' in ' '.join(str(c) for c in cmd):
+            return sp.CompletedProcess(cmd, 0, stdout='Revision prompt.', stderr='')
+        return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
+    monkeypatch.setattr('subprocess.run', run)
+    return plan_file
+
+
+class TestPassThatChangesNothing:
+
+    def _status(self, plan_file):
+        return _read_csv_plan(plan_file)[0]['status']
+
+    def test_prose_pass_with_no_scene_changes_halts_pending(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        plan_file = _run_pass_setup(project_dir, monkeypatch, 'craft')
+        mock_api.set_response('I reviewed the scenes and they read well.')
+        with pytest.raises(SystemExit):
+            main([])
+        assert self._status(plan_file) != 'completed'
+        assert not mock_git.calls_for('commit_and_push')
+
+    def test_structural_pass_with_no_csv_block_halts_pending(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        plan_file = _run_pass_setup(project_dir, monkeypatch, 'structural')
+        mock_api.set_response('The structure is sound; no changes needed.')
+        with pytest.raises(SystemExit):
+            main([])
+        assert self._status(plan_file) != 'completed'
+        assert not mock_git.calls_for('commit_and_push')
+
+    def test_structural_pass_that_applies_is_completed(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        plan_file = _run_pass_setup(project_dir, monkeypatch, 'structural')
+        mock_api.set_response('```briefs-csv\nid|goal\nact1-sc01|A sharper goal\n```')
+        main([])
+        assert self._status(plan_file) == 'completed'
+
+
+class TestApplyUpstreamBlocks:
+
+    def _ref(self, project_dir, name):
+        with open(os.path.join(project_dir, 'reference', name)) as f:
+            return f.read()
+
+    def test_new_scene_without_pov_writes_nothing(self, project_dir):
+        from storyforge.cmd_revise import UpstreamApplyError, _apply_upstream_blocks
+        before = (self._ref(project_dir, 'scenes.csv'), self._ref(project_dir, 'scene-briefs.csv'))
+        reply = ('```briefs-csv\nid|goal\nact1-sc01|Changed\n```\n'
+                 '```scenes-csv\nid|seq|title|pov\nbridge|99|Bridge|\n```')
+        with pytest.raises(UpstreamApplyError, match='pov'):
+            _apply_upstream_blocks(project_dir, reply)
+        assert (self._ref(project_dir, 'scenes.csv'),
+                self._ref(project_dir, 'scene-briefs.csv')) == before
+
+    def test_duplicate_seq_writes_nothing(self, project_dir):
+        from storyforge.cmd_revise import UpstreamApplyError, _apply_upstream_blocks
+        before = self._ref(project_dir, 'scenes.csv')
+        reply = '```scenes-csv\nid|seq|title|pov\nbridge|2|Bridge|Dorren Hayle\n```'
+        with pytest.raises(UpstreamApplyError, match='seq 2'):
+            _apply_upstream_blocks(project_dir, reply)
+        assert self._ref(project_dir, 'scenes.csv') == before
+
+    def test_a_valid_new_scene_is_added_in_seq_order(self, project_dir):
+        from storyforge.cmd_revise import _apply_upstream_blocks
+        from storyforge.elaborate import _read_csv
+        reply = '```scenes-csv\nid|seq|title|pov\nbridge|2.5|Bridge|Dorren Hayle\n```'
+        files, affected = _apply_upstream_blocks(project_dir, reply)
+        assert files == ['scenes.csv'] and affected == {'bridge'}
+        ids = [r['id'] for r in _read_csv(os.path.join(project_dir, 'reference', 'scenes.csv'))]
+        assert ids.index('bridge') == ids.index('act1-sc02') + 1
+
+    def test_an_old_duplicate_elsewhere_does_not_block(self, project_dir):
+        from storyforge.cmd_revise import _apply_upstream_blocks
+        from storyforge.csv_cli import update_field
+        scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+        update_field(scenes_csv, 'act2-sc01', 'seq', '3')  # duplicates new-x1
+        reply = '```scenes-csv\nid|seq|title\nact1-sc01|1|New Title\n```'
+        assert _apply_upstream_blocks(project_dir, reply)[1] == {'act1-sc01'}

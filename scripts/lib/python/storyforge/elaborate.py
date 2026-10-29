@@ -705,6 +705,30 @@ def _validate_knowledge(scenes_map, briefs_map, checks):
                              'Knowledge flow is consistent'))
 
 
+def present_in_scene(scene: dict, intent: dict) -> set[str]:
+    """Lowercased ids of the characters present in a scene: its ``on_stage``
+    (``characters`` when that is empty) plus its POV. Empty when the scene
+    records neither, which means "unknown", not "nobody"."""
+    raw = intent.get('on_stage', '') or intent.get('characters', '')
+    present = {c.strip().lower() for c in raw.split(';') if c.strip()}
+    pov = (scene.get('pov') or '').strip().lower()
+    if pov:
+        present.add(pov)
+    return present
+
+
+def state_owner_absent(state: dict, scenes_map: dict, intent_map: dict) -> bool:
+    """True when a physical state's character is known not to be present in
+    the scene that acquires it (governor d7e98f3: Elias's burns given to
+    Tessa). Unknown presence is not absence."""
+    character = (state.get('character') or '').strip().lower()
+    acquired = (state.get('acquired') or '').strip()
+    if not character or acquired not in scenes_map:
+        return False
+    present = present_in_scene(scenes_map[acquired], intent_map.get(acquired, {}))
+    return bool(present) and character not in present
+
+
 def _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_dir: str = ''):
     """Check physical state flow: physical_state_in must come from prior scenes' physical_state_out."""
     sorted_ids = sorted(scenes_map.keys(),
@@ -815,6 +839,11 @@ def _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_di
                 # (a state was in state_in but not state_out means it was resolved)
                 for state_id in states_in - states_out:
                     active_action_gating.discard(state_id)
+                # ... and so does a state the registry says resolves here, which
+                # the briefs often drop without listing it in physical_state_in
+                # (Pride and Prejudice: a Hunsford headache gated 69 scenes).
+                active_action_gating -= {s for s in active_action_gating
+                                         if reg.get(s, {}).get('resolves', '').strip() == sid}
 
     if not any(c['category'] == 'physical_state' and not c['passed'] for c in checks):
         checks.append(_check('physical_state', 'state-availability', True,

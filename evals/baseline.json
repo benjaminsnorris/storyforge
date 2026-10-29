@@ -1,15 +1,15 @@
 {
   "cost": {
-    "calls": 2106,
-    "input_tokens": 7473930,
-    "output_tokens": 2215437,
-    "replayed_calls": 2106,
+    "calls": 2105,
+    "input_tokens": 7473114,
+    "output_tokens": 2215416,
+    "replayed_calls": 2105,
     "unpriced_calls": 0,
-    "usd_if_live": 10.7967,
+    "usd_if_live": 10.793,
     "usd_spent": 0.0
   },
-  "git_dirty": true,
-  "git_sha": "f68ecfa62f611e8e1fc273d38a9c40dd4c6886fc",
+  "git_dirty": false,
+  "git_sha": "4546adc96f22484aca03488ddffe595cac9404f9",
   "mode": "replay",
   "results": [
     {
@@ -82,7 +82,7 @@
       },
       "mode": "replay",
       "notes": [],
-      "started_at": "2026-10-29T04:13:33+00:00",
+      "started_at": "2026-10-29T05:13:15+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -140,7 +140,7 @@
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 9.74,
+      "duration_s": 4.58,
       "error": null,
       "gates": [
         {
@@ -204,7 +204,7 @@
         "missed 37 of 37: e2-carol-001, e2-carol-002, e2-carol-003, e2-carol-004, e2-carol-005, e2-carol-006, e2-carol-007, e2-carol-008, e2-carol-009, e2-carol-010, e2-carol-011, e2-carol-012, e2-carol-013, e2-carol-014, e2-carol-015, e2-carol-016, e2-carol-017, e2-carol-018, e2-carol-019, e2-carol-020, e2-carol-021, e2-carol-022, e2-carol-023, e2-carol-024, e2-carol-025, e2-carol-026, e2-carol-027, e2-carol-028, e2-carol-029, e2-carol-030, e2-carol-031, e2-carol-032, e2-carol-033, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
-      "started_at": "2026-10-29T04:13:33+00:00",
+      "started_at": "2026-10-29T05:13:15+00:00",
       "status": "fail",
       "suite": "e2-carol"
     },
@@ -252,7 +252,7 @@
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 179.91,
+      "duration_s": 126.88,
       "error": null,
       "gates": [
         {
@@ -316,7 +316,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-29T04:13:43+00:00",
+      "started_at": "2026-10-29T05:13:20+00:00",
       "status": "fail",
       "suite": "e2-corpus-drift"
     },
@@ -366,7 +366,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 126.95,
+      "duration_s": 113.59,
       "error": null,
       "gates": [
         {
@@ -430,7 +430,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-29T04:16:43+00:00",
+      "started_at": "2026-10-29T05:15:27+00:00",
       "status": "fail",
       "suite": "e2-corpus-validate"
     },
@@ -471,7 +471,7 @@
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 44.47,
+      "duration_s": 30.13,
       "error": null,
       "gates": [
         {
@@ -552,7 +552,7 @@
         "thornwall-029 (journals-of-the-east-wing): partial",
         "thornwall-030 (ivra-visits-sera): partial"
       ],
-      "started_at": "2026-10-29T04:18:50+00:00",
+      "started_at": "2026-10-29T05:17:20+00:00",
       "status": "fail",
       "suite": "e3-extraction"
     },
@@ -584,7 +584,7 @@
         "usd_spent": 0.0
       },
       "description": "Redraft from plan + ledger; facts the redraft changes",
-      "duration_s": 5.18,
+      "duration_s": 2.51,
       "error": null,
       "gates": [
         {
@@ -613,7 +613,7 @@
         "name-surfaces: 5 mismatch(es)\n    TIM: The time on the kitchen clock differs, and so does which appliance shows it.\n    PHY: Rook's position differs: in the original she lies at his feet with her chin on his boot; in the redraft she lies across the hall threshold w\n    KNO: In the original Hank knows the name Claire from the dream before he searches; in the redraft the name comes to him only after he finds the n\n    PHY: He searches on his phone in the original but on a laptop in the redraft.\n    TIM: The driving time to Coos Bay/the coast differs.",
         "voicemail: 3 mismatch(es)\n    KNO: How Maren obtained Marie's contact number differs: in the original a charge nurse at the hospital ER gave it to her over the phone, while in\n    TRT: Claire's habit of contacting Marie differs: in the original she texted every night on getting home, while in the redraft Marie says Claire a\n    PHY: The circumstances of the disappearance differ: in the original Claire's last nightly text (sent on getting home) arrived, implying she left "
       ],
-      "started_at": "2026-10-29T04:19:34+00:00",
+      "started_at": "2026-10-29T05:17:50+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -641,7 +641,7 @@
         "usd_spent": 0.0
       },
       "description": "Continuity flags raised on classics with no known errors",
-      "duration_s": 0.09,
+      "duration_s": 0.04,
       "error": null,
       "gates": [
         {
@@ -675,7 +675,7 @@
         "christmas-carol/run2: 35 flag(s)",
         "christmas-carol/run1: 25 flag(s)"
       ],
-      "started_at": "2026-10-29T04:19:39+00:00",
+      "started_at": "2026-10-29T05:17:53+00:00",
       "status": "fail",
       "suite": "e7-classics"
     },
@@ -695,7 +695,7 @@
         },
         "TRT": {
           "reintroduced": 2,
-          "replayed": 11
+          "replayed": 10
         },
         "WLD": {
           "reintroduced": 1,
@@ -703,20 +703,20 @@
         }
       },
       "cost": {
-        "calls": 49,
-        "input_tokens": 215804,
-        "output_tokens": 107340,
-        "replayed_calls": 49,
+        "calls": 48,
+        "input_tokens": 214988,
+        "output_tokens": 107319,
+        "replayed_calls": 48,
         "unpriced_calls": 0,
-        "usd_if_live": 4.5846,
+        "usd_if_live": 4.5809,
         "usd_spent": 0.0
       },
       "description": "Current revision passes vs the E1 errors past passes introduced",
-      "duration_s": 94.38,
+      "duration_s": 56.96,
       "error": null,
       "gates": [
         {
-          "actual": 23,
+          "actual": 22,
           "name": "replayed",
           "op": ">=",
           "passed": true,
@@ -731,16 +731,17 @@
         }
       ],
       "metrics": {
-        "errors_per_10k_words": 1.743,
+        "errors_per_10k_words": 1.755,
         "family.naturalness-upstream.reintroduced": 1,
-        "family.naturalness-upstream.replayed": 3,
+        "family.naturalness-upstream.replayed": 2,
         "family.redraft-from-brief.reintroduced": 3,
         "family.redraft-from-brief.replayed": 19,
         "family.revision-plan.reintroduced": 1,
         "family.revision-plan.replayed": 1,
+        "halted": 1,
         "reintroduced": 5,
-        "reintroduction_rate": 0.217,
-        "replayed": 23,
+        "reintroduction_rate": 0.227,
+        "replayed": 22,
         "unreplayable": 20
       },
       "mode": "replay",
@@ -756,7 +757,7 @@
         "governor-025 (haddons-reckoning): not_present",
         "governor-026 (the-governors-vigil): not_present",
         "governor-027 (elias-agrees-to-the-terms): not_present",
-        "governor-028 (order): not_present",
+        "governor-028 (order): halted, nothing written \u2014 1 scene(s) not re-drafted: order (appears to end mid-sentence (last char: 'a'))",
         "lantern-folk-015 (a09-the-worst-night): consistent",
         "lantern-folk-020 (a06-standing-guard): consistent",
         "shared-dark-034 (call): consistent",
@@ -772,13 +773,13 @@
         "thornwall-029 (evidence-room): not_present",
         "thornwall-030 (ivra-seals-archive): reintroduced \u2014 \"At Garren's Watch the figures had told the same story over nine years, each reduction justified by a different administr\""
       ],
-      "started_at": "2026-10-29T04:19:39+00:00",
+      "started_at": "2026-10-29T05:17:53+00:00",
       "status": "fail",
       "suite": "e8-revision-safety"
     }
   ],
   "schema_version": 1,
   "status": "fail",
-  "storyforge_version": "1.80.0",
+  "storyforge_version": "1.80.2",
   "suite_count": 8
 }

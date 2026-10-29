@@ -320,6 +320,39 @@ class TestValidatePhysicalStates:
         assert 'Alice' in relevance[0]['message']
         assert 'limp-alice' in relevance[0]['message']
 
+    def test_on_stage_relevance_stops_at_registry_resolution(self, tmp_path):
+        """A state ends at the scene the registry says resolves it, even when
+        the briefs drop it without listing it in that scene's
+        physical_state_in (Pride and Prejudice: a Hunsford headache gated
+        every later scene with Elizabeth on stage)."""
+        ref = str(tmp_path / 'reference')
+        os.makedirs(ref)
+
+        with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            for n in (1, 2, 3):
+                f.write(f's0{n}|{n}|Scene {n}|1|A|Room|{n}|morning|1h|action|briefed|1000|2000\n')
+
+        with open(os.path.join(ref, 'scene-intent.csv'), 'w') as f:
+            f.write('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n')
+            for n in (1, 2, 3):
+                f.write(f's0{n}|test|action|flat|truth|+/-|revelation|Alice|Alice|\n')
+
+        with open(os.path.join(ref, 'scene-briefs.csv'), 'w') as f:
+            f.write('id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|subtext|continuity_deps|has_overflow|physical_state_in|physical_state_out\n')
+            f.write('s01|g|c|o|cr|d|||a|d|e|m|||false||headache-alice\n')
+            f.write('s02|g|c|o|cr|d|||a|d|e|m|||false||\n')
+            f.write('s03|g|c|o|cr|d|||a|d|e|m|||false||\n')
+
+        with open(os.path.join(ref, 'physical-states.csv'), 'w') as f:
+            f.write('id|character|description|category|acquired|resolves|action_gating\n')
+            f.write('headache-alice|Alice|a headache|fatigue|s01|s02|true\n')
+
+        report = validate_structure(ref)
+        relevance = [c for c in report['checks'] if c.get('check') == 'on-stage-relevance'
+                     and not c['passed']]
+        assert [c['scene_id'] for c in relevance] == ['s02']
+
     def test_clean_physical_state_flow_passes(self, fixture_dir):
         """Fixture data with physical states should produce checks (advisory or passing)."""
         report = validate_structure(os.path.join(fixture_dir, 'reference'))

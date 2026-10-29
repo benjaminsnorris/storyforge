@@ -259,12 +259,22 @@ def revision_pass(project_dir: str, scene_id: str, row: dict) -> str:
     return after
 
 
+class PassHalted(Exception):
+    """The current pass refused to write the scene (e.g. a cut-off reply) and
+    halted. Nothing was written, so nothing can be reintroduced; counted as
+    ``halted``, separately from the replayed cases."""
+
+
 def naturalness_upstream(project_dir: str, scene_id: str) -> str:
     """Rewrite the scene's brief and redraft it, as ``revise --naturalness`` does."""
-    from storyforge.cmd_revise import _fix_upstream_briefs, _redraft_scenes
+    from storyforge.cmd_revise import RedraftError, _fix_upstream_briefs, _redraft_scenes
     if not _fix_upstream_briefs(project_dir, [scene_id]):
         raise RuntimeError(f'upstream brief fix rewrote nothing for {scene_id}')
-    if _redraft_scenes(project_dir, [scene_id]) != 1:
+    try:
+        count = _redraft_scenes(project_dir, [scene_id])
+    except RedraftError as e:  # revise halts and writes nothing: safe, not an error
+        raise PassHalted(str(e)) from e
+    if count != 1:
         raise RuntimeError(f'naturalness redraft did not rewrite {scene_id}')
     return _read(os.path.join(project_dir, 'scenes', f'{scene_id}.md'))
 

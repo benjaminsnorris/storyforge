@@ -284,13 +284,14 @@ def find_alias_collisions(domain: str, ref_dir: str) -> dict[str, list[str]]:
 
 
 def resolve_alias_collisions(domain: str, ref_dir: str) -> int:
-    """Give each shared alias to one entry, deterministically.
+    """Give a shared alias to the entry whose id or name equals it.
 
-    The alias stays with the entry whose id or name equals it, otherwise with
-    the first entry listing it, and is removed from the others' aliases. Each
-    move is logged. A clash between two ids or names can't be fixed by moving
-    aliases and is left for :func:`find_alias_collisions` to report. Returns
-    the number of aliases removed.
+    The alias is removed from the other entries' aliases, and each move is
+    logged. When no entry is named by it, nothing in the registry says which
+    entry owns it (file order does not: meridian-line's "Tonkawa guide" moved
+    from Naseka to Thomas that way), so it is left shared for the author;
+    :func:`_report_remaining` reports it and normalization does not route
+    references through it. Returns the number of aliases removed.
     """
     collisions = find_alias_collisions(domain, ref_dir)
     if not collisions:
@@ -299,9 +300,11 @@ def resolve_alias_collisions(domain: str, ref_dir: str) -> int:
     removed = 0
     for alias, _ids in collisions.items():
         named = [r for r in rows if alias in (r.get('id', '').lower(), r.get('name', '').strip().lower())]
+        if len(named) != 1:
+            continue
+        owner = named[0]
         listing = [r for r in rows if alias in
                    (a.strip().lower() for a in (r.get('aliases') or '').split(';'))]
-        owner = (named or listing)[0]
         for row in listing:
             if row is owner:
                 continue
@@ -378,6 +381,10 @@ def apply_registry_normalization(
     else:
         alias_map = _registry_lookup(domain, ref_dir)
         type_map = None
+        # A shared alias names no single entry: never normalize through it
+        if domain != 'physical-states':
+            for alias in find_alias_collisions(domain, ref_dir):
+                alias_map.pop(alias, None)
 
     if not alias_map and domain not in _PLACEHOLDER_DOMAINS:
         return 0
@@ -455,7 +462,7 @@ def _domain_rules(domain: str) -> str:
 - A rewording of a fact already in the registry maps to its id; a reference stating two facts maps to both (`N | id1;id2`)""",
         'physical-states': """- NEW fields: `N | NEW | id | character | description | category | action_gating`
 - id: kebab-case slug scoped to the character (e.g., broken-arm-marcus, has-compass-elena)
-- character: the character's id from the Character Registry (e.g., marcus-hale, not Marcus Hale)
+- character: the character's id from the Character Registry (e.g., marcus-hale, not Marcus Hale): the one the state happens to, who is normally among those present in the scene where it begins
 - description: concise, prose-usable description (under 20 words)
 - category: injury, equipment, ability, appearance, or fatigue
 - action_gating: true if this state constrains what the character can physically do, false otherwise
@@ -488,11 +495,21 @@ def build_mapping_prompt(domain: str, ref_dir: str, batch: list[dict],
     registry = [r for r in _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
                 if r.get('id')]
     registry_text = '\n'.join(_registry_line(domain, r) for r in registry) or '(empty)'
+    present = {}
+    if domain == 'physical-states':  # who could own the state (governor d7e98f3)
+        from storyforge.elaborate import present_in_scene
+        scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+        intent = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+        present = {sid: sorted(present_in_scene(scenes[sid], intent.get(sid, {})))
+                   for sid in scenes}
     refs = []
     for i, ref in enumerate(batch, 1):
         text = f'{ref["type"]}:{ref["text"]}' if ref.get('type') else ref['text']
         used = ref['scenes'][:3]
-        refs.append(f'{i}. {text}' + (f'  [scenes: {", ".join(used)}]' if used else ''))
+        line = f'{i}. {text}' + (f'  [scenes: {", ".join(used)}]' if used else '')
+        if used and present.get(used[0]):
+            line += f'  [present in {used[0]}: {", ".join(present[used[0]])}]'
+        refs.append(line)
 
     sections = [f'## {noun[0].upper() + noun[1:]} Registry\n\n{registry_text}']
     if domain == 'physical-states':
@@ -706,6 +723,13 @@ def apply_mapping(domain: str, ref_dir: str, batch: list[dict],
                 continue
             existing = {a.strip().lower() for a in (row.get('aliases') or '').split(';')}
             if text.lower() in existing | {row['id'].lower(), row.get('name', '').lower()}:
+                continue
+            # Never take an alias another entry already holds
+            if any(text.lower() in {o['id'].lower(), o.get('name', '').strip().lower()}
+                   | {a.strip().lower() for a in (o.get('aliases') or '').split(';')}
+                   for o in registry if o is not row and o.get('id')):
+                log(f'  {domain}: "{text}" is already another entry\'s name or alias; '
+                    f'not adding it to {row["id"]}')
                 continue
             row['aliases'] = ';'.join(a for a in [row.get('aliases', ''), text] if a)
 
@@ -2692,9 +2716,13 @@ def propagate_physical_states(ref_dir: str, dry_run: bool = False) -> dict:
         ref_dir: Path to the reference/ directory.
         dry_run: If True, report what would change without writing.
 
+    A state whose character is known not to be present in its acquired scene
+    is not propagated; its id is listed in ``refused`` for the caller to report.
+
     Returns:
-        Dict with states_propagated, scenes_updated, changes.
+        Dict with states_propagated, scenes_updated, changes, refused.
     """
+    from storyforge.elaborate import state_owner_absent
     registry_path = os.path.join(ref_dir, 'physical-states.csv')
     scenes_path = os.path.join(ref_dir, 'scenes.csv')
     intent_path = os.path.join(ref_dir, 'scene-intent.csv')
@@ -2717,6 +2745,7 @@ def propagate_physical_states(ref_dir: str, dry_run: bool = False) -> dict:
 
     changes = []
     states_propagated = set()
+    refused = []
 
     for state in registry:
         state_id = state.get('id', '').strip()
@@ -2725,6 +2754,11 @@ def propagate_physical_states(ref_dir: str, dry_run: bool = False) -> dict:
         resolves = state.get('resolves', '').strip()
 
         if not state_id or not acquired or acquired not in seq_index:
+            continue
+        # Spreading a state its owner isn't present to acquire would carry a
+        # misattribution into every later scene (governor d7e98f3)
+        if state_owner_absent(state, scenes_map, intent_map):
+            refused.append(state_id)
             continue
 
         start_idx = seq_index[acquired]
@@ -2789,6 +2823,7 @@ def propagate_physical_states(ref_dir: str, dry_run: bool = False) -> dict:
         'states_propagated': len(states_propagated),
         'scenes_updated': scenes_updated,
         'changes': changes,
+        'refused': refused,
     }
 
 
