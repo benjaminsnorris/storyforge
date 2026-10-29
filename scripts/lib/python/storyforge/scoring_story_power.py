@@ -1647,8 +1647,7 @@ def _read_response_text(log_file: str) -> str:
 # counts the 8K ceiling truncates the response mid-JSON, producing
 # parse failures (issue #245). 32K leaves substantial headroom over
 # the observed wall and remains well under the per-model output cap
-# (see api.MODEL_MAX_OUTPUT for the source of truth — Opus 4.6 caps
-# at 128K, Sonnet at 64K).
+# (``api.max_output_tokens`` reads each model's cap from the Models API).
 _PITCH_MAX_TOKENS = 4096
 _FIXED_PAYLOAD_TIER_MAX_TOKENS = 8192
 _PER_ROW_TIER_MAX_TOKENS = 32768

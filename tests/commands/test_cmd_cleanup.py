@@ -700,6 +700,28 @@ class TestReportCsvIntegrity:
         renumber = [i for i in issues if i.startswith('SEQ_NEEDS_RENUMBER')]
         assert len(renumber) == 1
 
+    def test_reports_duplicate_seq(self, tmp_path):
+        """Two scenes sharing a seq are reported, not renumbered (thornwall
+        seq 58): a contiguous 1, 2, 2, 3 has no gap, so the renumber check
+        alone stayed silent."""
+        ref_dir = tmp_path / 'reference'
+        ref_dir.mkdir()
+        (tmp_path / 'scenes').mkdir()
+        (ref_dir / 'scenes.csv').write_text(
+            'id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n'
+            'sc-a|1|A|1|X|Y|1|morning|1h|plot|done|100|100\n'
+            'sc-b|2|B|1|X|Y|1|morning|1h|plot|done|100|100\n'
+            'sc-c|2|C|1|X|Y|1|morning|1h|plot|done|100|100\n'
+            'sc-d|3|D|1|X|Y|1|morning|1h|plot|done|100|100\n'
+        )
+        issues = report_csv_integrity(str(tmp_path))
+        assert 'DUPLICATE_SEQ:2' in issues
+        assert not any(i.startswith('SEQ_NEEDS_RENUMBER') for i in issues)
+        finding = _classify_issue('DUPLICATE_SEQ:2', {})
+        assert finding['type'] == 'duplicate_seq'
+        assert finding['severity'] == 'error'
+        assert 'command' not in finding
+
     def test_no_issues_for_clean_project(self, project_dir):
         """The fixture project should have mostly clean integrity."""
         issues = report_csv_integrity(project_dir)

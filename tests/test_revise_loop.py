@@ -509,7 +509,8 @@ class TestPolishLoopOrchestration:
         _run_polish_loop(project_dir, 3, None)
 
         assert len(captured_overrides) == 1
-        assert captured_overrides[0] == 'claude-sonnet-4-6'
+        from storyforge.common import model_for_tier
+        assert captured_overrides[0] == model_for_tier('sonnet')
 
     def test_convergence_stops_loop(self, tmp_path, monkeypatch):
         """Loop should stop when avg doesn't improve between iterations."""

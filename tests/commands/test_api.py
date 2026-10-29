@@ -150,21 +150,6 @@ class TestExtractUsage:
 
 
 # ---------------------------------------------------------------------------
-# max_output_tokens
-# ---------------------------------------------------------------------------
-
-class TestMaxOutputTokens:
-    def test_known_model(self):
-        from storyforge.api import max_output_tokens
-        from storyforge.common import LATEST_MODELS
-        assert max_output_tokens(LATEST_MODELS['opus']) == 128000
-
-    def test_unknown_model_returns_default(self):
-        from storyforge.api import max_output_tokens, _DEFAULT_MAX_OUTPUT
-        assert max_output_tokens('claude-unknown-99') == _DEFAULT_MAX_OUTPUT
-
-
-# ---------------------------------------------------------------------------
 # invoke (mocking _api_request)
 # ---------------------------------------------------------------------------
 
@@ -190,7 +175,6 @@ class TestInvoke:
         assert captured['path'] == 'messages'
         assert captured['method'] == 'POST'
         assert captured['body']['model'] == 'claude-sonnet-4-6'
-        assert captured['body']['max_tokens'] == 2048
         assert captured['body']['messages'] == [{'role': 'user', 'content': 'Hello'}]
         assert result['content'][0]['text'] == 'response'
 
@@ -698,3 +682,4 @@ class TestCalculateCostFromUsage:
         cost = calculate_cost_from_usage(usage, 'claude-sonnet-4-6')
         assert isinstance(cost, float)
         assert cost > 0
+

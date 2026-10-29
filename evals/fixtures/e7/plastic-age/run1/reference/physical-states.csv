@@ -1,0 +1,22 @@
+id|character|description|category|acquired|resolves|action_gating
+carrying-two-suitcases-hugh|hugh-carver|Carrying two suit-cases that bang his legs and impede his movement|equipment|hugh-arrives-climbs-hill|never|true
+wearing-freshman-cap-hugh|hugh-carver|Wearing the freshman blue cap with orange button|appearance|upperclassmen-arrive-freshmen-hazed|never|false
+wearing-freshman-cap-carl|carl-peters|Wearing the freshman blue cap with orange button|appearance|upperclassmen-arrive-freshmen-hazed|never|false
+caps-pocketed-hugh|hugh-carver|Cap removed and tucked into coat pocket to avoid peanut bombardment|appearance|freshmen-peanut-fight-at-cinema|never|false
+caps-pocketed-carl|carl-peters|Cap removed and tucked into coat pocket to avoid peanut bombardment|appearance|freshmen-peanut-fight-at-cinema|never|false
+black-eye-dodge|dodge|Black eye from the class rush fight with Carver|injury|adams-dodge-discuss-carver|never|false
+welt-chin-adams|adams|Welt on chin from the class rush fight with Carver|injury|adams-dodge-discuss-carver|never|false
+cap-removed-hugh|hugh-carver|Hugh removes his cap at the girl's insistence before dancing|appearance|football-fever-grips-campus|never|false
+pledge-button-hugh|hugh-carver|Wearing Nu Delta pledge button in lapel|appearance|fraternity-rushing-pledging-season|never|false
+pledge-button-carl|carl-peters|Wearing Nu Delta pledge button in lapel|appearance|fraternity-rushing-pledging-season|never|false
+nu-delta-pin-hugh|hugh-carver|Jeweled Nu Delta fraternity pin pinned to vest|appearance|fraternity-initiation-rituals-completed|never|false
+nu-delta-pin-carl|carl-peters|Jeweled Nu Delta fraternity pin pinned to vest|appearance|fraternity-initiation-rituals-completed|never|false
+grippe-illness-hugh|hugh-carver|Hugh is bedridden with grippe, confining him to bed during the house dance|fatigue|grippe-prevents-house-dance|never|true
+class-numerals-hugh|hugh-carver|Earned class numerals for winning the hundred in the sophomore-freshman meet and the Raleigh freshman meet|equipment|track-consumes-hugh|never|false
+drunk-hugh|hugh-carver|Intoxicated after three highballs at Pete's, unsteady on his feet and slurring speech; sobers fully during the five-mile walk back to campus|ability|hugh-disillusionment-fraternity-slade-rescue|never|true
+drunk-carl|carl-peters|Intoxicated after drinking at Pete's; sober enough to respond to Slade's threat but impaired judgment|ability|hugh-disillusionment-fraternity-slade-rescue|never|true
+drunk-cynthia|cynthia-day|Drunk to the point of impaired speech and judgment, whispering huskily|condition|drunken-prom-carnival|never|true
+wet-face-hugh|hugh-carver|Face doused twice with cold water by Norry|appearance|norry-interrupts-in-room|never|false
+hungover-hugh|hugh-carver|Severely hungover — splitting headache, weakness, dizziness, dry mouth; spent most of scene in bed needing assistance|fatigue|hugh-wakes-hungover|never|true
+exhausted-hugh|hugh-carver|Physically spent after a maximal 220-yard race effort — lungs aching, heart pounding, vision blurred red|fatigue|two-twenty-yard-race|never|false
+exhausted-calvert|calvert|Physically spent after winning the 220 immediately following his earlier hundred-yard effort|fatigue|two-twenty-yard-race|never|false
