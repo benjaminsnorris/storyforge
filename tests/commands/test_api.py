@@ -600,7 +600,8 @@ class TestDownloadBatchResults:
         mock_resp.__exit__ = MagicMock(return_value=False)
 
         with patch('storyforge.api.urlopen', return_value=mock_resp):
-            succeeded = api.download_batch_results('https://example.com/results', output_dir, log_dir)
+            succeeded = api.download_batch_results('https://example.com/results', output_dir,
+                                                   log_dir, keep_incomplete=True)
 
         assert succeeded == ['scene-alpha', 'scene-gamma']
 
@@ -640,6 +641,48 @@ class TestDownloadBatchResults:
         assert succeeded == []
         assert os.path.isdir(output_dir)
         assert os.path.isdir(log_dir)
+
+    def test_refused_and_cut_off_items_are_failed_and_named(self, tmp_path, monkeypatch,
+                                                             capsys):
+        from storyforge import api
+
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        output_dir = str(tmp_path / 'output')
+        log_dir = str(tmp_path / 'logs')
+        os.makedirs(log_dir)
+        for cid in ('cut', 'refused', 'errored'):  # stale answers from an earlier run
+            with open(os.path.join(log_dir, f'{cid}.txt'), 'w') as f:
+                f.write('stale')
+
+        def item(cid, stop_reason, text='partial'):
+            return json.dumps({'custom_id': cid, 'result': {'type': 'succeeded', 'message': {
+                'content': [{'type': 'text', 'text': text}],
+                'usage': {'input_tokens': 10, 'output_tokens': 5},
+                'stop_reason': stop_reason,
+                'stop_details': {'type': 'refusal', 'category': 'cyber'}
+                if stop_reason == 'refusal' else None}}})
+        body = '\n'.join([
+            item('done', 'end_turn', 'whole'), item('cut', 'max_tokens'),
+            item('refused', 'refusal', ''),
+            json.dumps({'custom_id': 'errored', 'result': {'type': 'errored'}}),
+        ]).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = body
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch('storyforge.api.urlopen', return_value=mock_resp):
+            succeeded = api.download_batch_results('https://example.com/r', output_dir, log_dir)
+
+        assert succeeded == ['done']
+        for cid in ('cut', 'refused', 'errored'):
+            assert open(os.path.join(output_dir, f'.status-{cid}')).read() == 'fail'
+            assert not os.path.exists(os.path.join(log_dir, f'{cid}.txt'))
+        # paid for, so the usage record stays
+        assert json.load(open(os.path.join(log_dir, 'cut.json')))['usage']['output_tokens'] == 5
+        out = capsys.readouterr().out
+        assert 'WARNING: batch item cut: the reply was cut off at max_tokens' in out
+        assert 'WARNING: batch item refused: model refused the request (cyber)' in out
 
     def test_skips_malformed_lines(self, tmp_path, monkeypatch):
         from storyforge import api

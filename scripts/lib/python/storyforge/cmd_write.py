@@ -548,7 +548,9 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
     batch_output_dir = os.path.join(log_dir, f'batch-{os.getpid()}')
     os.makedirs(batch_output_dir, exist_ok=True)
-    download_batch_results(results_url, batch_output_dir, batch_output_dir)
+    # Refused and cut-off replies are kept: each is retried or refused below.
+    download_batch_results(results_url, batch_output_dir, batch_output_dir,
+                           keep_incomplete=True)
 
     # Process each scene result
     drafted_count = 0

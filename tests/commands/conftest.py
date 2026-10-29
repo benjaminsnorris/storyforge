@@ -278,7 +278,8 @@ def mock_api(monkeypatch):
             self.calls.append({'fn': 'poll_batch', 'batch_id': batch_id})
             return 'https://example.com/batch-results'
 
-        def _download_batch_results(self, results_url, output_dir, log_dir):
+        def _download_batch_results(self, results_url, output_dir, log_dir,
+                                    keep_incomplete=False):
             self.calls.append({
                 'fn': 'download_batch_results',
                 'results_url': results_url,

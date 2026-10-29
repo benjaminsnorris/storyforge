@@ -843,3 +843,37 @@ class TestMultiSceneScoring:
         main(['--dry-run', '--scenes', 'act1-sc01,act1-sc02'])
         # Should succeed without errors
         assert mock_api.call_count == 0
+
+
+class TestFidelityIncompleteReply:
+    """A cut-off fidelity reply (direct mode keeps it in the .json log, and
+    the batch download writes only that) was parsed as a score."""
+
+    def test_cut_off_reply_is_named_and_not_scored(self, project_dir, tmp_path,
+                                                   monkeypatch, capsys):
+        from storyforge import cmd_score
+        reply = ('SCORES\nid|goal|conflict|outcome|crisis|decision|key_actions|'
+                 'key_dialogue|emotions|knowledge\n{sid}|4|3|4|3|4|5|4|3|4\n')
+
+        def fake_invoke(prompt, model, log_file, max_tokens, system=None):
+            sid = os.path.basename(log_file)[len('fidelity-'):-len('.json')]
+            with open(log_file, 'w') as f:
+                json.dump({'content': [{'type': 'text', 'text': reply.format(sid=sid)}],
+                           'usage': {'input_tokens': 1, 'output_tokens': 1},
+                           'stop_reason': 'max_tokens' if sid == 'act1-sc01'
+                           else 'end_turn'}, f)
+        monkeypatch.setattr(cmd_score, 'invoke_to_file', fake_invoke)
+        monkeypatch.setattr(cmd_score, '_log_api_usage', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.scoring.build_fidelity_prompt', lambda *a: 'p')
+        log_dir = str(tmp_path / 'logs')
+        os.makedirs(log_dir)
+
+        cmd_score._run_fidelity_scoring(
+            ['act1-sc01', 'act1-sc02'], project_dir, os.path.join(project_dir, 'scenes'),
+            log_dir, str(tmp_path), os.path.join(project_dir, 'reference', 'scene-briefs.csv'),
+            'direct', 'm', '')
+
+        out = capsys.readouterr().out
+        assert ('WARNING: Fidelity scoring of act1-sc01 not used: '
+                'the reply was cut off at max_tokens') in out
+        assert 'Fidelity: 1 scenes scored' in out

@@ -38,6 +38,7 @@ from storyforge.illustrations import strip_markers
 from storyforge.api import (
     invoke_to_file, extract_text, extract_text_from_file, extract_usage,
     calculate_cost_from_usage, submit_batch, poll_batch, download_batch_results,
+    stop_problem,
     build_batch_request,
 )
 from storyforge.costs import estimate_cost, check_threshold, log_operation, print_summary
@@ -1471,11 +1472,18 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
             text = open(path).read()
             try:
                 data = json.loads(text)
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, dict):
+                # A refused or cut-off reply holds no complete scores. (The
+                # batch download already named it and wrote no .txt.)
+                problem = stop_problem(data)
+                if problem:
+                    log(f'  WARNING: Fidelity scoring of {sid} not used: {problem}')
+                    break
                 text = ''.join(item.get('text', '')
                                for item in data.get('content', [])
                                if item.get('type') == 'text')
-            except (json.JSONDecodeError, KeyError):
-                pass
             if text:
                 result = parse_fidelity_response(text, sid)
                 if result.get('scores'):

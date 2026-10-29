@@ -542,13 +542,21 @@ def poll_batch(batch_id: str, log_fn=None) -> str:
             interval += 5
 
 
-def download_batch_results(results_url: str, output_dir: str, log_dir: str) -> list[str]:
+def download_batch_results(results_url: str, output_dir: str, log_dir: str,
+                           keep_incomplete: bool = False) -> list[str]:
     """Download and parse batch results into per-item files.
 
     Creates for each item:
         output_dir/.status-{custom_id}  — "ok" or "fail"
         log_dir/{custom_id}.json        — API response (for log_usage)
-        log_dir/{custom_id}.txt         — text content
+        log_dir/{custom_id}.txt         — text content, only when "ok"
+
+    A reply the model refused or that was cut off at ``max_tokens``
+    (``stop_problem``) is not an answer: it is marked "fail", gets no .txt
+    (a stale one from an earlier run is removed, as for an errored item) and
+    is named in a WARNING. Its .json is still written, since it was paid
+    for. ``keep_incomplete=True`` treats such replies as "ok", for a caller
+    that checks ``stop_problem`` itself (``write`` retries refusals).
 
     Returns:
         List of custom_ids that succeeded.
@@ -576,8 +584,11 @@ def download_batch_results(results_url: str, output_dir: str, log_dir: str) -> l
             cid = obj.get('custom_id', '')
             result = obj.get('result', {})
             rtype = result.get('type', '')
+            txt_path = os.path.join(log_dir, f'{cid}.txt')
 
             if rtype != 'succeeded':
+                if os.path.isfile(txt_path):
+                    os.remove(txt_path)
                 with open(os.path.join(output_dir, f'.status-{cid}'), 'w') as f:
                     f.write('fail')
                 continue
@@ -593,13 +604,24 @@ def download_batch_results(results_url: str, output_dir: str, log_dir: str) -> l
 
             # Write JSON response (for log_usage). stop_reason/stop_details
             # let a caller tell a refused or cut-off reply from a finished one.
+            record = {'usage': usage, 'content': msg.get('content', []),
+                      'stop_reason': msg.get('stop_reason'),
+                      'stop_details': msg.get('stop_details')}
             with open(os.path.join(log_dir, f'{cid}.json'), 'w') as f:
-                json.dump({'usage': usage, 'content': msg.get('content', []),
-                           'stop_reason': msg.get('stop_reason'),
-                           'stop_details': msg.get('stop_details')}, f)
+                json.dump(record, f)
+
+            problem = '' if keep_incomplete else stop_problem(record)
+            if problem:
+                from storyforge.common import log
+                log(f'WARNING: batch item {cid}: {problem}; its reply is not used.')
+                if os.path.isfile(txt_path):
+                    os.remove(txt_path)
+                with open(os.path.join(output_dir, f'.status-{cid}'), 'w') as f:
+                    f.write('fail')
+                continue
 
             # Write text content
-            with open(os.path.join(log_dir, f'{cid}.txt'), 'w') as f:
+            with open(txt_path, 'w') as f:
                 f.write(text)
 
             # Write status
