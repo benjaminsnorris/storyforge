@@ -82,11 +82,19 @@ def _read_manuscript(project_dir: str) -> str:
 # ============================================================================
 
 # Phase 0 sends the whole manuscript alongside the shared project context.
-# Budget roughly 120k tokens (~4 chars/token) for the manuscript so the
-# request fits a 200k-token window with room for context and output. Novels
-# up to roughly 85k words (~480k chars) are sent whole; a 100k-word novel
-# (~560k chars) loses about a seventh of its middle.
-CHARACTERIZE_MAX_CHARS = 480_000
+# The manuscript gets the model's context window less a reserve for that
+# context and the output, at ~4 chars/token. A 200k-token window leaves 480k
+# chars (about 85k words); a 1M window takes Middlemarch (~1.8M chars) whole.
+# CHARACTERIZE_MAX_CHARS is the budget when no model is given.
+_CHARACTERIZE_RESERVE_TOKENS = 80_000
+_CHARS_PER_TOKEN = 4
+CHARACTERIZE_MAX_CHARS = (200_000 - _CHARACTERIZE_RESERVE_TOKENS) * _CHARS_PER_TOKEN
+
+
+def characterize_budget(model: str) -> int:
+    """Manuscript chars Phase 0 can send to *model* in one request."""
+    from .api import max_input_tokens
+    return (max_input_tokens(model) - _CHARACTERIZE_RESERVE_TOKENS) * _CHARS_PER_TOKEN
 
 
 def _fit_manuscript(manuscript: str, limit: int | None = None) -> str:
@@ -118,8 +126,13 @@ def _fit_manuscript(manuscript: str, limit: int | None = None) -> str:
             f'\n\n{tail}')
 
 
-def build_characterize_prompt(project_dir: str) -> str:
-    """Build prompt for Phase 0: manuscript characterization."""
+def build_characterize_prompt(project_dir: str, model: str | None = None) -> str:
+    """Build prompt for Phase 0: manuscript characterization.
+
+    With *model*, the manuscript may fill that model's context window
+    (Pride and Prejudice, 122k words, lost its middle 37.6k to a budget sized
+    for a 200k window); without, CHARACTERIZE_MAX_CHARS applies.
+    """
     yaml_path = os.path.join(project_dir, 'storyforge.yaml')
     title = read_yaml_field(yaml_path, 'project.title') or 'Untitled'
     genre = read_yaml_field(yaml_path, 'project.genre') or ''
@@ -128,7 +141,7 @@ def build_characterize_prompt(project_dir: str) -> str:
     if not manuscript:
         return ''
 
-    fitted = _fit_manuscript(manuscript)
+    fitted = _fit_manuscript(manuscript, characterize_budget(model) if model else None)
     cut_note = ('' if fitted == manuscript else
                 '\n\nPart of the middle is cut from this request (marked in the text, with '
                 'the omitted scenes named). The cut is a limit of this request, not a gap '
@@ -171,18 +184,36 @@ Be precise. Base every field on what's actually in the text, not what you'd expe
 
 
 def parse_characterize_response(response: str) -> dict[str, str]:
-    """Parse the Phase 0 characterization response into a dict."""
-    result = {}
+    """Parse the Phase 0 characterization response into a dict.
+
+    A field may run on over bullet lines (Opus 5.5 answers ACT_STRUCTURE and
+    STRUCTURAL_CONCERNS as lists); bullet lines, or lines under an empty
+    field or one ending in a colon, join the field with semicolons (a space
+    after the colon). Other unlabeled lines are commentary and skipped.
+    """
+    parts: dict[str, list[str]] = {}
+    key = None
     for line in response.split('\n'):
         line = line.strip()
-        if ':' not in line:
-            continue
         match = re.match(r'^([A-Z_]+):\s*(.*)', line)
         if match:
             key = match.group(1).lower()
-            value = match.group(2).strip()
-            if value and value not in ('[]', '()', 'N/A', 'none'):
-                result[key] = value
+            parts[key] = [match.group(2).strip()] if match.group(2).strip() else []
+        elif key and line:
+            bullet = re.match(r'^(?:[-*•]|\d+[.)])\s+(.*)', line)
+            if bullet:
+                parts[key].append(bullet.group(1))
+            elif not parts[key] or parts[key][-1].endswith(':'):
+                parts[key].append(line)
+    result = {}
+    for key, items in parts.items():
+        if not items:
+            continue
+        value = items[0]
+        for item in items[1:]:
+            value += (' ' if value.endswith(':') else '; ') + item
+        if value not in ('[]', '()', 'N/A', 'none'):
+            result[key] = value
     return result
 
 
