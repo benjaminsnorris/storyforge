@@ -75,22 +75,22 @@ class TestCalculateCost:
     def test_opus_cost(self):
         cost = calculate_cost('claude-opus-4-6-20250514',
                               input_tokens=1_000_000, output_tokens=0)
-        assert cost == pytest.approx(PRICING['opus']['input'])
+        assert cost == pytest.approx(PRICING['claude-opus-4-6']['input'])
 
     def test_sonnet_cost(self):
         cost = calculate_cost('claude-sonnet-4-6-20250514',
                               input_tokens=1_000_000, output_tokens=0)
-        assert cost == pytest.approx(PRICING['sonnet']['input'])
+        assert cost == pytest.approx(PRICING['claude-sonnet-4-6']['input'])
 
     def test_haiku_cost(self):
         cost = calculate_cost('claude-haiku-4-5-20251001',
                               input_tokens=1_000_000, output_tokens=0)
-        assert cost == pytest.approx(PRICING['haiku']['input'])
+        assert cost == pytest.approx(PRICING['claude-haiku-4-5']['input'])
 
     def test_output_tokens_cost(self):
         cost = calculate_cost('claude-opus-4-6-20250514',
                               input_tokens=0, output_tokens=1_000_000)
-        assert cost == pytest.approx(PRICING['opus']['output'])
+        assert cost == pytest.approx(PRICING['claude-opus-4-6']['output'])
 
     def test_combined_input_output(self):
         cost = calculate_cost('claude-sonnet-4-6-20250514',
@@ -107,13 +107,13 @@ class TestCalculateCost:
         cost = calculate_cost('claude-opus-4-6-20250514',
                               input_tokens=0, output_tokens=0,
                               cache_read=1_000_000)
-        assert cost == pytest.approx(PRICING['opus']['cache_read'])
+        assert cost == pytest.approx(PRICING['claude-opus-4-6']['cache_read'])
 
     def test_cache_create_tokens(self):
         cost = calculate_cost('claude-opus-4-6-20250514',
                               input_tokens=0, output_tokens=0,
                               cache_create=1_000_000)
-        assert cost == pytest.approx(PRICING['opus']['cache_create'])
+        assert cost == pytest.approx(PRICING['claude-opus-4-6']['cache_create'])
 
     def test_all_token_types(self):
         cost = calculate_cost('claude-sonnet-4-6-20250514',
@@ -380,7 +380,7 @@ class TestGetPrice:
 
     def test_default_opus_input_price(self):
         price = _get_price('claude-opus-4-6', 'input')
-        assert price == PRICING['opus']['input']
+        assert price == PRICING['claude-opus-4-6']['input']
 
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv('PRICING_HAIKU_OUTPUT', '10.0')
@@ -390,21 +390,41 @@ class TestGetPrice:
     def test_env_not_set_uses_default(self, monkeypatch):
         monkeypatch.delenv('PRICING_SONNET_INPUT', raising=False)
         price = _get_price('claude-sonnet-4-6', 'input')
-        assert price == PRICING['sonnet']['input']
+        assert price == PRICING['claude-sonnet-4-6']['input']
 
 
-class TestPricingVerifiedForCurrentModels:
-    """Guard: pricing must be re-verified whenever a model version changes."""
+class TestPricingForResolvedModels:
+    """Code never pins a model, so pricing has to cope with whatever the
+    Models API resolves a tier to."""
 
-    def test_pricing_verified_for_matches_latest_models(self):
-        from storyforge.common import LATEST_MODELS
-        from storyforge.costs import PRICING_VERIFIED_FOR
-        # If this fails after a LATEST_MODELS bump: re-check the rates at
-        # platform.claude.com/pricing, update PRICING if they changed, then
-        # bump PRICING_VERIFIED_FOR to the new model ID(s).
-        assert PRICING_VERIFIED_FOR == LATEST_MODELS
+    def test_every_tier_resolves_to_a_priced_model(self):
+        from storyforge.common import MODEL_TIERS, model_for_tier
+        from storyforge.costs import _price_key
+        for tier in MODEL_TIERS:
+            assert _price_key(model_for_tier(tier)) == model_for_tier(tier)
 
-    def test_every_tier_has_pricing(self):
-        from storyforge.common import LATEST_MODELS
-        for tier in LATEST_MODELS:
-            assert tier in PRICING
+    def test_dated_id_uses_its_undated_row(self):
+        assert _get_price('claude-haiku-4-5-20251001', 'input') == 1.00
+
+    def test_longest_prefix_wins(self):
+        # claude-opus-5 is a prefix of claude-opus-5-5's family name, not its row
+        assert _get_price('claude-opus-5-5', 'input') == 4.00
+        assert _get_price('claude-opus-5', 'input') == 5.00
+
+    def test_unlisted_release_uses_tier_rates_and_warns_once(self, capsys):
+        import storyforge.costs as costs
+        costs._warned_unpriced.discard('claude-opus-9')
+        assert _get_price('claude-opus-9', 'input') == PRICING['claude-opus-5-5']['input']
+        _get_price('claude-opus-9', 'output')
+        err = capsys.readouterr().err
+        assert err.count('no price listed for claude-opus-9') == 1
+
+    def test_haiku_5_5_long_prompt_rate(self):
+        short = calculate_cost('claude-haiku-5-5', 100_000, 1_000_000)
+        long = calculate_cost('claude-haiku-5-5', 100_001, 1_000_000)
+        assert short == pytest.approx(100_000 * 0.10 / 1e6 + 0.50)
+        assert long == pytest.approx(100_001 * 0.50 / 1e6 + 2.50)
+
+    def test_cached_tokens_count_toward_the_long_prompt_threshold(self):
+        cost = calculate_cost('claude-haiku-5-5', 1_000, 0, cache_read=150_000)
+        assert cost == pytest.approx(1_000 * 0.50 / 1e6 + 150_000 * 0.05 / 1e6)

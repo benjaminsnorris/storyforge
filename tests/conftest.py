@@ -21,6 +21,24 @@ FIXTURE_DIR = TESTS_DIR / 'fixtures' / 'test-project'
 FIXTURE_DIR_GN = TESTS_DIR / 'fixtures' / 'test-project-gn'
 
 
+# A fixed Models API catalog, so model resolution never reaches the network in
+# tests. Tests of resolution itself monkeypatch ``storyforge.common._catalog``.
+STUB_MODEL_CATALOG = [
+    {'id': 'claude-opus-5-5', 'created_at': '2026-09-21T16:24:00Z', 'max_tokens': 128000},
+    {'id': 'claude-sonnet-5-5', 'created_at': '2026-09-28T00:00:00Z', 'max_tokens': 128000},
+    {'id': 'claude-haiku-5-5', 'created_at': '2026-10-07T18:00:00Z', 'max_tokens': 128000},
+    {'id': 'claude-opus-4-8', 'created_at': '2026-05-28T00:00:00Z', 'max_tokens': 128000},
+    {'id': 'claude-sonnet-4-6', 'created_at': '2026-02-17T00:00:00Z', 'max_tokens': 128000},
+    {'id': 'claude-haiku-4-5-20251001', 'created_at': '2025-10-15T00:00:00Z', 'max_tokens': 64000},
+]
+
+
+@pytest.fixture(autouse=True)
+def _stub_model_catalog(monkeypatch):
+    import storyforge.common as common
+    monkeypatch.setattr(common, '_catalog', [dict(m) for m in STUB_MODEL_CATALOG])
+
+
 @pytest.fixture
 def fixture_dir_gn():
     """Path to the graphic-novel test-project fixture."""

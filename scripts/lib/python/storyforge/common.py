@@ -10,6 +10,7 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -802,16 +803,27 @@ def check_file_exists(filepath: str, label: str | None = None,
 # Model selection
 # ============================================================================
 
-# Single source of truth: the concrete model ID currently used for each
-# capability tier. The Anthropic API requires an exact model ID (there is no
-# floating "latest"/"opus" alias — a bare tier name 404s), so when a newer
-# model ships, bump the ID here — in this one place — and every dispatch site
-# below follows, because they all refer to the tier, never a version string.
-LATEST_MODELS = {
-    'opus':   'claude-opus-4-8',
-    'sonnet': 'claude-sonnet-4-6',
-    'haiku':  'claude-haiku-4-5-20251001',
-}
+# Code names a capability tier, never a model version. Each process resolves a
+# tier to the newest model in that family from the Models API (the API has no
+# floating family alias), so a new release is picked up without a code change.
+# Under an eval cassette the catalog request is recorded like any other, so a
+# replay resolves to the model its recording used.
+MODEL_TIERS: Final = ('opus', 'sonnet', 'haiku')
+
+_catalog: list[dict] | None = None
+_catalog_lock = threading.Lock()
+
+
+def model_catalog() -> list[dict]:
+    """Every model the API offers (``id``, ``created_at``, ``max_tokens``),
+    fetched once per process."""
+    global _catalog
+    with _catalog_lock:
+        if _catalog is None:
+            from storyforge.api import list_models
+            _catalog = list_models()
+        return _catalog
+
 
 # Which capability tier each task type dispatches to.
 _TASK_TIER = {
@@ -829,20 +841,30 @@ _TASK_TIER = {
 
 
 def model_for_tier(tier: str) -> str:
-    """Return the current concrete model ID for a capability tier."""
-    return LATEST_MODELS[tier]
+    """The newest model in a capability tier's family, by ``created_at``.
+
+    Raises if the catalog has none: guessing an id would fail later, on the
+    first real call, with a less useful error.
+    """
+    if tier not in MODEL_TIERS:
+        raise ValueError(f'unknown model tier {tier!r}; expected one of {MODEL_TIERS}')
+    family = [m for m in model_catalog() if m.get('id', '').startswith(f'claude-{tier}-')]
+    if not family:
+        raise RuntimeError(f'The Models API lists no {tier} model; '
+                           f'set STORYFORGE_MODEL to choose one')
+    return max(family, key=lambda m: m.get('created_at', ''))['id']
 
 
 def select_model(task_type: str) -> str:
     """Select the appropriate model for a task type.
 
-    Resolves the task's tier through LATEST_MODELS; unknown tasks default to
+    Resolves the task's tier with ``model_for_tier``; unknown tasks default to
     the opus tier. STORYFORGE_MODEL env var overrides all.
     """
     override = os.environ.get('STORYFORGE_MODEL')
     if override:
         return override
-    return LATEST_MODELS[_TASK_TIER.get(task_type, 'opus')]
+    return model_for_tier(_TASK_TIER.get(task_type, 'opus'))
 
 
 def select_revision_model(pass_name: str, purpose: str = '') -> str:
@@ -856,8 +878,8 @@ def select_revision_model(pass_name: str, purpose: str = '') -> str:
 
     key = f'{pass_name} {purpose}'.lower()
     if re.search(r'continuity|timeline|fact.check|thread.track', key):
-        return LATEST_MODELS['sonnet']
-    return LATEST_MODELS['opus']
+        return model_for_tier('sonnet')
+    return model_for_tier('opus')
 
 
 # ============================================================================

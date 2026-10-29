@@ -652,9 +652,9 @@ def _invoke_assignment(model: str):
 
     def invoke(prompt, log_file, label):
         try:
-            # Temperature 0: the same cues should give the same calendar
+            # No temperature: current models reject sampling parameters
             response = invoke_to_file(prompt, model, log_file, max_tokens=_BATCH_MAX_TOKENS,
-                                      label=label, temperature=0)
+                                      label=label)
         except Exception as e:  # noqa: BLE001 — one failed batch, not the pass
             log(f'  WARNING: {label} failed ({e})')
             return None

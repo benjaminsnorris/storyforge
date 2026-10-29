@@ -5990,22 +5990,14 @@ def test_per_row_tier_max_tokens_constant_above_8k():
 
 def test_per_row_tier_max_tokens_under_creative_model_cap():
     """The per-row ceiling must fit under the creative model's output
-    cap (api.MODEL_MAX_OUTPUT is the source of truth). PR #247 review
-    caught a factual claim of '64K Opus output cap' — Opus 4.6
-    actually caps at 128K, but the lesson is that constants drift
-    from documentation. This test grounds the claim in the API
-    config so a future model change can't silently break it."""
-    from storyforge.scoring_story_power import (
-        _PER_ROW_TIER_MAX_TOKENS,
-    )
-    from storyforge.api import MODEL_MAX_OUTPUT
+    cap, which the Models API reports. PR #247 review caught a factual
+    claim of '64K Opus output cap'; the lesson is that constants drift
+    from documentation, so this grounds the claim in the catalog."""
+    from storyforge.scoring_story_power import _PER_ROW_TIER_MAX_TOKENS
+    from storyforge.api import max_output_tokens
     from storyforge.common import select_model
     creative_model = select_model('creative')
-    model_cap = MODEL_MAX_OUTPUT.get(creative_model)
-    assert model_cap is not None, (
-        f'creative model {creative_model!r} is not in MODEL_MAX_OUTPUT; '
-        'add an entry or update select_model'
-    )
+    model_cap = max_output_tokens(creative_model)
     assert _PER_ROW_TIER_MAX_TOKENS <= model_cap, (
         f'_PER_ROW_TIER_MAX_TOKENS={_PER_ROW_TIER_MAX_TOKENS} exceeds '
         f'the creative model {creative_model!r} cap of {model_cap}; '

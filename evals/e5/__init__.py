@@ -85,9 +85,9 @@ def parse_mismatches(text: str) -> list[dict]:
 
 def judge(original: str, redrafted: str, scene_id: str) -> list[dict]:
     from storyforge.api import extract_text, invoke
-    from storyforge.common import LATEST_MODELS
+    from storyforge.common import model_for_tier
     return parse_mismatches(extract_text(invoke(
-        JUDGE_PROMPT.format(original=original, redraft=redrafted), LATEST_MODELS['opus'],
+        JUDGE_PROMPT.format(original=original, redraft=redrafted), model_for_tier('opus'),
         max_tokens=4096, label=f'e5 judge {scene_id}')))
 
 

@@ -14,20 +14,11 @@ import os
 # ============================================================================
 
 class TestMaxOutputTokens:
-    def test_opus_returns_128k(self):
+    def test_reads_each_models_cap_from_the_catalog(self):
         from storyforge.api import max_output_tokens
-        from storyforge.common import LATEST_MODELS
-        assert max_output_tokens(LATEST_MODELS['opus']) == 128000
-
-    def test_sonnet_returns_64k(self):
-        from storyforge.api import max_output_tokens
-        from storyforge.common import LATEST_MODELS
-        assert max_output_tokens(LATEST_MODELS['sonnet']) == 64000
-
-    def test_haiku_returns_16k(self):
-        from storyforge.api import max_output_tokens
-        from storyforge.common import LATEST_MODELS
-        assert max_output_tokens(LATEST_MODELS['haiku']) == 16384
+        from storyforge.common import model_for_tier
+        assert max_output_tokens(model_for_tier('opus')) == 128000
+        assert max_output_tokens('claude-haiku-4-5-20251001') == 64000
 
     def test_unknown_model_returns_default(self):
         from storyforge.api import max_output_tokens

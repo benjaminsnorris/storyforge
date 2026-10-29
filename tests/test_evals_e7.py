@@ -73,9 +73,12 @@ def test_no_snapshots_is_an_error(fixtures, tmp_path):
         e7.run(_ctx(tmp_path))
 
 
-def test_the_carol_snapshots_reproduce_every_labeled_validate_flag():
-    labels = e7.load_labels('christmas-carol')
+@pytest.mark.parametrize('book', ['christmas-carol', 'plastic-age'])
+def test_each_book_reproduces_every_labeled_validate_flag(book):
+    labels = e7.load_labels(book)
     raised = set()
-    for book, run, ref in e7.book_snapshots():
-        raised |= {(run, f.get('scene_id', ''), f['message']) for f in e7.continuity_flags(ref)}
+    for snap_book, run, ref in e7.book_snapshots():
+        if snap_book == book:
+            raised |= {(run, f.get('scene_id', ''), f['message'])
+                       for f in e7.continuity_flags(ref)}
     assert raised == set(labels)
