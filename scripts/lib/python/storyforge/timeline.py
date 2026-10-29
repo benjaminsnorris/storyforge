@@ -233,6 +233,15 @@ _MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'Augu
 _SEASONS = {21: 'spring', 22: 'summer', 23: 'autumn', 24: 'winter'}
 
 
+def _day_of_year(month: int, day: int) -> int:
+    """Day of the year on 2001's calendar (February 29 counts as the 28th)."""
+    from datetime import date
+    try:
+        return date(2001, month, day).timetuple().tm_yday
+    except ValueError:
+        return date(2001, month, 28).timetuple().tm_yday
+
+
 def describe_edtf(value: str) -> str:
     """An EDTF date in words, for prompts: models read ``1922-22`` (summer
     1922) as June 22. ``XXXX-07-04`` → "4 July (year not stated)"."""
@@ -271,6 +280,31 @@ def _month_day(value: str) -> tuple[str, int, int] | None:
     if 'X' in month or 'X' in day or int(month) > 12:
         return None
     return m.group('year'), int(month), int(day)
+
+
+# Where in the year a month or season falls: (day of year at its middle,
+# half its length), on 2001's calendar
+_SEASON_SPANS = {21: (105, 46), 22: (197, 46), 23: (289, 45), 24: (15, 45)}
+# Slack on top of the two spans: "early in May" on the 2nd is still May
+_ROUGH_SLACK = 7
+
+
+def _rough_date(value: str) -> tuple[int, int, str] | None:
+    """``(day of year, half-width, words)`` for a single date with a known
+    month or season but no known day (``XXXX-05``, ``1922-22~``), else None.
+    Its year doesn't count: only where in the year it falls."""
+    m = _EDTF_DATE.match((value or '').strip())
+    if not m or not m.group('month') or 'X' in m.group('month'):
+        return None
+    if m.group('day') and 'X' not in m.group('day'):
+        return None
+    month = int(m.group('month'))
+    if month in _SEASON_SPANS:
+        middle, half = _SEASON_SPANS[month]
+        return middle, half, _SEASONS[month]
+    if not 1 <= month <= 12:
+        return None
+    return _day_of_year(month, 15), 15, _MONTHS[month - 1]
 
 
 # ============================================================================
@@ -514,7 +548,8 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     *scenes*: scenes.csv rows in reading order. Returns findings
     ``{'scene_id', 'check', 'message'}``. Checks: the present going
     backwards on a scene not told as earlier and not a frame or vision; a stated gap
-    the days disagree with; two dates, or two weekdays, the days contradict.
+    the days disagree with; two dates, two months or seasons, or two weekdays,
+    the days contradict.
     """
     findings = []
     present = None
@@ -522,6 +557,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     last_mode = ''
     after_frame = False
     dated: list[tuple[str, int, tuple]] = []
+    rough: list[tuple[str, int, tuple]] = []
     weekdays: list[tuple[str, int, int]] = []
     for row in scenes:
         sid = row.get('id', '')
@@ -570,6 +606,11 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         md = _month_day(row.get('timeline_date', ''))
         if md:
             dated.append((sid, day, md))
+            rough.append((sid, day, (_day_of_year(md[1], md[2]), 0, f'{md[2]} {_MONTHS[md[1] - 1]}')))
+        elif mode == 'scene' and _rough_date(row.get('timeline_date', '')):
+            # A month or season, on a scene that happens on one day: a
+            # summary's date may be the end of its stretch, not its start
+            rough.append((sid, day, _rough_date(row['timeline_date'])))
         anchor = (cue.get('anchor') or '').lower()
         named = [i for i, w in enumerate(_WEEKDAYS) if re.search(rf'\b{w}s?\b', anchor)]
         # One weekday, on a scene that happens on one day: a summary's
@@ -614,6 +655,22 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
                 message = (f'its date is {between} day(s) after {s1}\'s, '
                            f'but its day is {d2 - d1} day(s) after')
             findings.append({'scene_id': s2, 'check': 'date_mismatch', 'message': message})
+    # A month or a season against the dated scene before it: the year is
+    # unstated or too rough to count, so any whole number of years may lie
+    # between, but the days must land in the right part of the year (The
+    # Plastic Age's prom "early in May", 290 days after a March, F-070)
+    for (s1, d1, (y1, h1, w1)), (s2, d2, (y2, h2, w2)) in zip(rough, rough[1:]):
+        if not (h1 or h2):
+            continue
+        actual = d2 - d1
+        years = round((actual - (y2 - y1)) / 365)
+        expected = y2 - y1 + 365 * years
+        if abs(actual - expected) > h1 + h2 + _ROUGH_SLACK:
+            ahead = (y2 - y1) % 365
+            findings.append({'scene_id': s2, 'check': 'date_mismatch',
+                             'message': f'its date ({w2}) falls about {ahead} day(s) after '
+                                        f'{s1}\'s ({w1}) in the year, or a whole number of years '
+                                        f'more, but its day is {actual} day(s) after'})
     for (s1, d1, w1), (s2, d2, w2) in zip(weekdays, weekdays[1:]):
         # Over months the days are too rough for weekday arithmetic: a
         # Thursday 884 days after a Saturday says nothing (F-067)
