@@ -1,0 +1,1558 @@
+{
+  "repo": "governor",
+  "cases": [
+    {
+      "id": "governor-001",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Haddon's father is Marek Breck in order but Pol Breck in haddons-junction.",
+      "established": [
+        {
+          "scene": "order",
+          "path": "scenes/new-h2.md",
+          "commit": "3c3e7e4",
+          "quote": "His father. Marek Breck. Gallery engineer, thirty-one years."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "haddons-junction",
+          "path": "scenes/new-h1.md",
+          "commit": "3c3e7e4",
+          "quote": "Pol Breck would have looked. Pol Breck would have knelt beside this manifold housing"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "f399507",
+        "after": [
+          {
+            "scene": "haddons-junction",
+            "path": "scenes/new-h1.md",
+            "commit": "f399507",
+            "quote": "Marek Breck would have looked. Marek Breck would have knelt beside this manifold housing"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "4df2140"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "f399507:working/plans/continuity-report.md: Issues Found, Critical #1",
+      "confidence": "high",
+      "notes": "Both Haddon scenes were drafted together in 4df2140 and disagreed from the start; the audit harmonized to new-h2. Label source is an AI continuity-verification pass, not the author. \"Pol Breck\" appears 3x in new-h1."
+    },
+    {
+      "id": "governor-002",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [
+        "PHY"
+      ],
+      "summary": "Haddon's father dies in a junction-coupling steam breach in order, but of a chronic steam-worker's cough in haddons-junction.",
+      "established": [
+        {
+          "scene": "order",
+          "path": "scenes/new-h2.md",
+          "commit": "3c3e7e4",
+          "quote": "Died in the tunnels when a junction coupling failed in the Ashward loop and the steam did what steam did to a man standing within six feet of a full-pressure breach."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "haddons-junction",
+          "path": "scenes/new-h1.md",
+          "commit": "3c3e7e4",
+          "quote": "thirty-one years in the deep sections before the cough took him"
+        },
+        {
+          "scene": "haddons-junction",
+          "path": "scenes/new-h1.md",
+          "commit": "3c3e7e4",
+          "quote": "The cough had taken his lungs, and the institution had taken his reports"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "f399507",
+        "after": [
+          {
+            "scene": "haddons-junction",
+            "path": "scenes/new-h1.md",
+            "commit": "f399507",
+            "quote": "thirty-one years in the deep sections before a junction coupling failed in the Ashward loop and the steam found him"
+          },
+          {
+            "scene": "haddons-junction",
+            "path": "scenes/new-h1.md",
+            "commit": "f399507",
+            "quote": "The coupling had taken him in the Ashward loop"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "4df2140"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "f399507:working/plans/continuity-report.md: Issues Found, Critical #2",
+      "confidence": "high",
+      "notes": "Same draft commit as the father-name case; split because the name and the cause of death are separate facts."
+    },
+    {
+      "id": "governor-003",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Haddon's wife is Lenna in order but Maren in haddons-junction.",
+      "established": [
+        {
+          "scene": "order",
+          "path": "scenes/new-h2.md",
+          "commit": "3c3e7e4",
+          "quote": "his wife, Lenna, had been sick for eight months in the fourth year of their marriage."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "haddons-junction",
+          "path": "scenes/new-h1.md",
+          "commit": "3c3e7e4",
+          "quote": "the gap between what the fund covered and what Maren needed was a number"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "f399507",
+        "after": [
+          {
+            "scene": "haddons-junction",
+            "path": "scenes/new-h1.md",
+            "commit": "f399507",
+            "quote": "the gap between what the fund covered and what Lenna needed was a number"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "4df2140"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "f399507:working/plans/continuity-report.md: Issues Found, Critical #3",
+      "confidence": "high",
+      "notes": "\"Maren\" appears 3x in new-h1."
+    },
+    {
+      "id": "governor-004",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [
+        "REL"
+      ],
+      "summary": "Haddon's wife survives her illness in order but dies fourteen months later in haddons-junction.",
+      "established": [
+        {
+          "scene": "order",
+          "path": "scenes/new-h2.md",
+          "commit": "3c3e7e4",
+          "quote": "Lenna lived. The blood condition resolved. The debt did not."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "haddons-junction",
+          "path": "scenes/new-h1.md",
+          "commit": "3c3e7e4",
+          "quote": "Maren had lived another fourteen months before the condition took her anyway"
+        },
+        {
+          "scene": "haddons-junction",
+          "path": "scenes/new-h1.md",
+          "commit": "3c3e7e4",
+          "quote": "Fourteen months. She had lived fourteen more months."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "f399507",
+        "after": [
+          {
+            "scene": "haddons-junction",
+            "path": "scenes/new-h1.md",
+            "commit": "f399507",
+            "quote": "Lenna had lived. The condition resolved. The debt did not."
+          },
+          {
+            "scene": "haddons-junction",
+            "path": "scenes/new-h1.md",
+            "commit": "f399507",
+            "quote": "She was alive. She did not know what the money cost. Haddon carried both."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "4df2140"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "f399507:working/plans/continuity-report.md: Issues Found, Critical #4",
+      "confidence": "high",
+      "notes": "Fate of the wife is a separate fact from her name; same draft commit."
+    },
+    {
+      "id": "governor-005",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Calla is small in new-s3 but tall in finest-cartographer.",
+      "established": [
+        {
+          "scene": "new-s3",
+          "path": "scenes/new-s3.md",
+          "commit": "39edf8a",
+          "quote": "She was small, dark-haired, with the quietness of a woman who had learned to take up exactly as much space as her work required and no more."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "finest-cartographer",
+          "path": "scenes/ch01-sc01.md",
+          "commit": "39edf8a",
+          "quote": "Calla was first. Tall, composed, her survey journal already open."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "f481ca8",
+        "after": [
+          {
+            "scene": "finest-cartographer",
+            "path": "scenes/ch01-sc01.md",
+            "commit": "f481ca8",
+            "quote": "Calla was first. Small, composed, her survey journal already open."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "feb670e"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "f481ca8:reference/continuity-tracker.md: Continuity Audit (Pass 5) Fixes Applied #1",
+      "confidence": "high",
+      "notes": "new-s3 was cut in 0ab2499 and has no slug at HEAD, so its span uses the old id as scene. \"Tall\" dates from the decomposition commit feb670e; new-s3 was added in 4df2140."
+    },
+    {
+      "id": "governor-006",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "blackout says the protocol was refined over eight descents, but the same scene calls this the seventh descent.",
+      "established": [
+        {
+          "scene": "blackout",
+          "path": "scenes/merged-ch12-sc02-03.md",
+          "commit": "39edf8a",
+          "quote": "The seventh descent was the last one she would complete intact."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "blackout",
+          "path": "scenes/merged-ch12-sc02-03.md",
+          "commit": "39edf8a",
+          "quote": "Their protocol, refined over eight descents into something that felt less like procedure and more like a language."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "f481ca8",
+        "after": [
+          {
+            "scene": "blackout",
+            "path": "scenes/merged-ch12-sc02-03.md",
+            "commit": "f481ca8",
+            "quote": "Their protocol, refined over seven descents into something that felt less like procedure and more like a language."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": "d5a34c2"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "f481ca8:reference/continuity-tracker.md: Continuity Audit (Pass 5) Fixes Applied #3",
+      "confidence": "high",
+      "notes": "Introduced in d5a34c2 (\"Execute scene-level revisions\", the merge that created merged-ch12-sc02-03); not clearly a named Storyforge pass, so kind is unknown."
+    },
+    {
+      "id": "governor-007",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "The eastern galleries were sealed fourteen years ago, but doreens-footnote says the pre-sealing surveys had been waiting twelve years.",
+      "established": [
+        {
+          "scene": "nineteen-year-sequence",
+          "path": "scenes/ch14-sc01.md",
+          "commit": "39edf8a",
+          "quote": "The galleries had been sealed fourteen years ago."
+        },
+        {
+          "scene": "finest-cartographer",
+          "path": "scenes/ch01-sc01.md",
+          "commit": "39edf8a",
+          "quote": "The eastern vents had been classified as dormant for fourteen years."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "doreens-footnote",
+          "path": "scenes/ch10-sc01.md",
+          "commit": "39edf8a",
+          "quote": "The surveys had been waiting for twelve years."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "f481ca8",
+        "after": [
+          {
+            "scene": "doreens-footnote",
+            "path": "scenes/ch10-sc01.md",
+            "commit": "f481ca8",
+            "quote": "The surveys had been waiting for fourteen years."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "feb670e"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "f481ca8:reference/continuity-tracker.md: Continuity Audit (Pass 5) Fixes Applied #5",
+      "confidence": "medium",
+      "notes": "Medium: \"waiting\" for twelve years is not strictly impossible, but the surveys are the pre-sealing archive and \"fourteen years\" is used in 15+ scenes."
+    },
+    {
+      "id": "governor-008",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "In order, Haddon has worked for the arrangement for sixteen years, but the arrangement's notes have come for nineteen.",
+      "established": [
+        {
+          "scene": "order",
+          "path": "scenes/new-h2.md",
+          "commit": "39edf8a",
+          "quote": "He had been doing work for the arrangement for sixteen years."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "order",
+          "path": "scenes/new-h2.md",
+          "commit": "39edf8a",
+          "quote": "the same absence of identifying mark that all the notes had carried for nineteen years."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "f481ca8",
+        "after": [
+          {
+            "scene": "order",
+            "path": "scenes/new-h2.md",
+            "commit": "f481ca8",
+            "quote": "the same absence of identifying mark that all the notes had carried for sixteen years."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "4df2140"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "f481ca8:reference/continuity-tracker.md: Continuity Audit (Pass 5) Fixes Applied #6",
+      "confidence": "high",
+      "notes": "Nineteen years is the sabotage span (the same scene: \"The corridor the cutting teams had used for nineteen years\"); the two spans were conflated."
+    },
+    {
+      "id": "governor-009",
+      "repo": "governor",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "sorayas-fifteen-years has Elias waiting at Soraya's house for Tessa to arrive, but someone-you-need-to-meet has Tessa find him at the Ashward Reach access point and walk him there.",
+      "established": [
+        {
+          "scene": "someone-you-need-to-meet",
+          "path": "scenes/ch16-sc01.md",
+          "commit": "39edf8a",
+          "quote": "She found Elias at the Ashward Reach access point three hours after leaving the survey office"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "sorayas-fifteen-years",
+          "path": "scenes/new-s1.md",
+          "commit": "39edf8a",
+          "quote": "When Tessa arrived, they would open the box."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "f481ca8",
+        "after": [
+          {
+            "scene": "sorayas-fifteen-years",
+            "path": "scenes/new-s1.md",
+            "commit": "f481ca8",
+            "quote": "He would go to meet her soon — the Ashward Reach access point, where she would find him, and they would walk here together."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "4df2140"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "f481ca8:reference/continuity-tracker.md: Continuity Audit (Pass 5) Fixes Applied #2",
+      "confidence": "medium",
+      "notes": "Medium: the contradicted side is an expectation (\"would\"), not a narrated event."
+    },
+    {
+      "id": "governor-010",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "After the Day 3 descent was cut, deliberate-collapse (Day 4) still says the last descent was \"last night\"; the previous descent is now on Day 2.",
+      "established": [
+        {
+          "scene": "rock-network",
+          "path": "scenes/merged-ch06-sc04-05.md",
+          "commit": "7990997",
+          "quote": "They turned back without discussion."
+        },
+        {
+          "scene": "rock-network",
+          "path": "scenes/merged-ch06-sc04-05.md",
+          "commit": "7990997",
+          "quote": "timeline_day: 2"
+        },
+        {
+          "scene": "deliberate-collapse",
+          "path": "scenes/ch08-sc02.md",
+          "commit": "7990997",
+          "quote": "timeline_day: 4"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "deliberate-collapse",
+          "path": "scenes/ch08-sc02.md",
+          "commit": "7990997",
+          "quote": "They moved faster now. Last night had taught her the sealed galleries' rhythms"
+        },
+        {
+          "scene": "deliberate-collapse",
+          "path": "scenes/ch08-sc02.md",
+          "commit": "7990997",
+          "quote": "The polished stone began where they had turned back the night before"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "29e9f63",
+        "after": [
+          {
+            "scene": "deliberate-collapse",
+            "path": "scenes/ch08-sc02.md",
+            "commit": "29e9f63",
+            "quote": "They moved faster now. That first descent had taught her the sealed galleries' rhythms"
+          },
+          {
+            "scene": "deliberate-collapse",
+            "path": "scenes/ch08-sc02.md",
+            "commit": "29e9f63",
+            "quote": "The polished stone began where they had turned back two nights ago"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "part-one-pacing",
+        "commit": "7990997"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "29e9f63:scenes/scene-index.yaml: Part-one-continuity pass fixes (ch08-sc02 \"Last night\", \"the night before\")",
+      "confidence": "high",
+      "notes": "The part-one-pacing pass (7990997) cut ch07-sc05 (Descent 2, Day 3 night), folded its polished-stone sighting into merged-ch06-sc04-05 (Day 2), and in the same commit wrote \"Last night had taught her\" and \"turned back the night before\" into ch08-sc02. Two of the timeline anchors are frontmatter lines. The bundled \"three nights' depletion\" fix was dropped as too weak."
+    },
+    {
+      "id": "governor-011",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [
+        "KNO"
+      ],
+      "summary": "twenty-two-years (Day 6) has Elias remember holding Tessa's face three hours ago; he first cups her face on Day 10.",
+      "established": [
+        {
+          "scene": "confrontation-at-stairwell-nine",
+          "path": "scenes/ch13-sc02.md",
+          "commit": "dbe838f",
+          "quote": "He cupped her face. Both hands. Palms against her jaw, fingers along her cheekbones"
+        },
+        {
+          "scene": "confrontation-at-stairwell-nine",
+          "path": "scenes/ch13-sc02.md",
+          "commit": "dbe838f",
+          "quote": "timeline_day: 10"
+        },
+        {
+          "scene": "pulled-off-the-column",
+          "path": "scenes/ch11-sc03.md",
+          "commit": "dbe838f",
+          "quote": "Elias took her hand in both of his."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "twenty-two-years",
+          "path": "scenes/new-elias-part1.md",
+          "commit": "dbe838f",
+          "quote": "These hands had held her face three hours ago."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "965a488",
+        "after": [
+          {
+            "scene": "twenty-two-years",
+            "path": "scenes/new-elias-part1.md",
+            "commit": "965a488",
+            "quote": "These hands had pressed into her depleted palms three hours ago."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "character-deepening",
+        "commit": "8b8a07a"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "965a488:reference/continuity-tracker.md (continuity-audit pass)",
+      "confidence": "high",
+      "notes": "new-elias-part1 was written by the character-deepening revision pass (8b8a07a) and was then on Day 6, after the Day 5 hand-tending in ch11-sc03."
+    },
+    {
+      "id": "governor-012",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Cassiel is an alderman in weight-of-the-rim but the Governor's senior secretary in governors-response.",
+      "established": [
+        {
+          "scene": "weight-of-the-rim",
+          "path": "scenes/weight-of-the-rim.md",
+          "commit": "3bf3072",
+          "quote": "Alderman Cassiel was watching, spectacles low on his nose, the quarterly projections spread before him."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "governors-response",
+          "path": "scenes/governors-response.md",
+          "commit": "3bf3072",
+          "quote": "Cassiel, his senior secretary — twenty years managing the Governor's correspondence"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "1ae8ab0",
+        "after": [
+          {
+            "scene": "governors-response",
+            "path": "scenes/governors-response.md",
+            "commit": "1ae8ab0",
+            "quote": "Cassiel, his senior alderman — twenty years managing the eastern development accounts"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "character-scene-polish",
+        "commit": "5bf89eb"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "The character-scene-polish pass (5bf89eb, on new-v2.md before the slug rename) expanded a bare \"Cassiel.\" into the secretary description. Fixed by the integration-pacing-continuity pass."
+    },
+    {
+      "id": "governor-013",
+      "repo": "governor",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [],
+      "summary": "In walking-the-eastern-development (Day 11 morning) Tessa thinks of Dorren's complicity; she first learns Dorren is implicated that evening in archivists-box.",
+      "established": [
+        {
+          "scene": "archivists-box",
+          "path": "scenes/archivists-box.md",
+          "commit": "2962d2e",
+          "quote": "Dorren Hayle. Pressure Cartography. Eastern quadrant classification management."
+        },
+        {
+          "scene": "archivists-box",
+          "path": "scenes/archivists-box.md",
+          "commit": "2962d2e",
+          "quote": "Eleven years. Tessa had worked under Dorren for five of those eleven years."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "walking-the-eastern-development",
+          "path": "scenes/walking-the-eastern-development.md",
+          "commit": "2962d2e",
+          "quote": "That made her complicit. Different from Voss's complicity, different from Dorren's — but complicit."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "0f4a99a",
+        "after": [
+          {
+            "scene": "walking-the-eastern-development",
+            "path": "scenes/walking-the-eastern-development.md",
+            "commit": "0f4a99a",
+            "quote": "She climbed toward the rim overlook. The eastern district spread below, rooftops catching morning light"
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "eastern-development-scene",
+        "commit": "ed304d5"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled",
+        "tool-introduced"
+      ],
+      "label_source": "cc0b5f0:working/annotations/2026-03-31-annotations.json: chapter-13 scene 1 \"Different from Voss’s complicity, different from Dorren’s\" (\"does she even know that Dorren is complicit yet?\")",
+      "confidence": "high",
+      "notes": "Order from reference/scene-metadata.csv at 2962d2e: walking-the-eastern-development seq 35 (Day 11 morning), archivists-box seq 42 (Day 11 evening). The fix deleted the sentence; fix.after quotes the paragraph that now follows it."
+    },
+    {
+      "id": "governor-014",
+      "repo": "governor",
+      "level": "prose",
+      "code": "REL",
+      "secondary_codes": [
+        "TRT"
+      ],
+      "summary": "Haddon has a wife, Lenna, and no daughter, but elias-disarms twice gives him a daughter who needs the clinic.",
+      "established": [
+        {
+          "scene": "elias-disarms",
+          "path": "scenes/elias-disarms.md",
+          "commit": "4f1b062",
+          "quote": "He'd built the whole arrangement around Lenna."
+        },
+        {
+          "scene": "order",
+          "path": "scenes/order.md",
+          "commit": "4f1b062",
+          "quote": "Lenna sick in the fourth year of their marriage."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "elias-disarms",
+          "path": "scenes/elias-disarms.md",
+          "commit": "4f1b062",
+          "quote": "Days she could breathe. His daughter could breathe."
+        },
+        {
+          "scene": "elias-disarms",
+          "path": "scenes/elias-disarms.md",
+          "commit": "4f1b062",
+          "quote": "and he could not take it back, and his daughter still needed the clinic, and the pistol was on the floor."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "c28f7f0",
+        "after": [
+          {
+            "scene": "elias-disarms",
+            "path": "scenes/elias-disarms.md",
+            "commit": "c28f7f0",
+            "quote": "and he could not take it back, and Lenna still needed the clinic, and the pistol was on the floor."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "haddon-climax-expansion",
+        "commit": "e500877"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Introduced and fixed the same morning (haddon-climax-expansion, then continuity-integration-sweep). \"His daughter could breathe.\" was deleted. Residue: \"Lenna still needed the clinic\" sits uneasily with order's \"Lenna lived. The debt did not resolve.\""
+    },
+    {
+      "id": "governor-015",
+      "repo": "governor",
+      "level": "prose",
+      "code": "WLD",
+      "secondary_codes": [],
+      "summary": "routine-maintenance has a Block Fifteen foundation crew but puts the stone-cutters outside Voss's window on Block Fourteen; Block Fifteen is the active construction site.",
+      "established": [
+        {
+          "scene": "routine-maintenance",
+          "path": "scenes/routine-maintenance.md",
+          "commit": "0c45145",
+          "quote": "a progress summary from Block Fifteen's foundation crew"
+        },
+        {
+          "scene": "routine-maintenance",
+          "path": "scenes/routine-maintenance.md",
+          "commit": "0c45145",
+          "quote": "Block Fifteen's foundation work was proceeding on schedule."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "routine-maintenance",
+          "path": "scenes/routine-maintenance.md",
+          "commit": "0c45145",
+          "quote": "On Block Fourteen, visible through his office window, the stone-cutters were working the afternoon shift."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "6c74d09",
+        "after": [
+          {
+            "scene": "routine-maintenance",
+            "path": "scenes/routine-maintenance.md",
+            "commit": "6c74d09",
+            "quote": "On Block Fifteen, visible through his office window, the stone-cutters were working the afternoon shift."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "governor-016"
+      ],
+      "introduced_by": {
+        "kind": "plan",
+        "pass": "",
+        "commit": "f82ffe0"
+      },
+      "regressed_by": [
+        "f74aa12"
+      ],
+      "subsets": [],
+      "label_source": "6c74d09 commit body: \"Block Fourteen→Fifteen in routine-maintenance\"",
+      "confidence": "medium",
+      "notes": "The brief for routine-maintenance (extracted in f82ffe0) asks for \"stone-cutters on Block Fourteen audible through the window\", inherited from the voss-strengthening pass (8c18ae3), which first wrote stone-cutters on Block Fourteen into governors-response. The 6c74d09 fix left the brief unchanged and the f74aa12 redraft from briefs put Block Fourteen back. Medium: two blocks under construction is not impossible, but the fix commit treats it as an error."
+    },
+    {
+      "id": "governor-016",
+      "repo": "governor",
+      "level": "prose",
+      "code": "WLD",
+      "secondary_codes": [],
+      "summary": "At HEAD routine-maintenance again puts the stone-cutters on Block Fourteen, beside Block Fifteen foundation correspondence; Block Fifteen is the construction site everywhere else.",
+      "established": [
+        {
+          "scene": "routine-maintenance",
+          "path": "scenes/routine-maintenance.md",
+          "commit": "77c6bce",
+          "quote": "Correspondence from the Survey Council regarding the Block Fifteen foundation specifications."
+        },
+        {
+          "scene": "terrace-row",
+          "path": "scenes/terrace-row.md",
+          "commit": "77c6bce",
+          "quote": "The eastern crews would keep preparing Block Fifteen's foundations."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "routine-maintenance",
+          "path": "scenes/routine-maintenance.md",
+          "commit": "77c6bce",
+          "quote": "Outside the window, the stone-cutters on Block Fourteen were working."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [
+        "governor-015"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-briefs",
+        "commit": "f74aa12"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "Regression of governor-block-fourteen: the brief still carried \"stone-cutters on Block Fourteen\", and the redraft from corrected briefs (f74aa12) wrote it back, along with brief-checklist lines that naturalness-cleanup (fd45c62) later stripped."
+    },
+    {
+      "id": "governor-017",
+      "repo": "governor",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [
+        "TIM"
+      ],
+      "summary": "The blackout progression is four, eleven, thirty seconds, but confrontation-at-stairwell-nine gives eleven seconds then seventeen.",
+      "established": [
+        {
+          "scene": "blackout",
+          "path": "scenes/blackout.md",
+          "commit": "57dc5db",
+          "quote": "Four seconds. Then eleven. Then thirty."
+        },
+        {
+          "scene": "elias-agrees-to-the-terms",
+          "path": "scenes/elias-agrees-to-the-terms.md",
+          "commit": "57dc5db",
+          "quote": "Four seconds. Eleven. Thirty."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "confrontation-at-stairwell-nine",
+          "path": "scenes/confrontation-at-stairwell-nine.md",
+          "commit": "57dc5db",
+          "quote": "\"Eleven seconds, four days ago. You lost motor control in your left hand for six seconds after you came back. You didn't report it.\""
+        },
+        {
+          "scene": "confrontation-at-stairwell-nine",
+          "path": "scenes/confrontation-at-stairwell-nine.md",
+          "commit": "57dc5db",
+          "quote": "\"Seventeen seconds. Two days ago. Your breathing stopped for three of them. I counted.\""
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "240f2e5",
+        "after": [
+          {
+            "scene": "confrontation-at-stairwell-nine",
+            "path": "scenes/confrontation-at-stairwell-nine.md",
+            "commit": "240f2e5",
+            "quote": "\"Four seconds, three days ago. You were standing at the column access. You didn't report it.\""
+          },
+          {
+            "scene": "confrontation-at-stairwell-nine",
+            "path": "scenes/confrontation-at-stairwell-nine.md",
+            "commit": "240f2e5",
+            "quote": "\"Eleven seconds. Two days ago. Your breathing stopped for three of them. I counted.\""
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-briefs",
+        "commit": "f74aa12"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Introduced by \"Revision: redraft 39 scenes from corrected briefs\" and caught the same evening by the integration-sweep pass."
+    },
+    {
+      "id": "governor-018",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Tam Erdel is seven in haddons-reckoning but nine in acceptable-losses.",
+      "established": [
+        {
+          "scene": "haddons-reckoning",
+          "path": "scenes/haddons-reckoning.md",
+          "commit": "57dc5db",
+          "quote": "Tam Erdel. Seven. Ground floor, same building."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "acceptable-losses",
+          "path": "scenes/acceptable-losses.md",
+          "commit": "57dc5db",
+          "quote": "An elderly woman, seventy-three. A child, nine."
+        },
+        {
+          "scene": "acceptable-losses",
+          "path": "scenes/acceptable-losses.md",
+          "commit": "57dc5db",
+          "quote": "Tam Erdel. Nine years old."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "240f2e5",
+        "after": [
+          {
+            "scene": "acceptable-losses",
+            "path": "scenes/acceptable-losses.md",
+            "commit": "240f2e5",
+            "quote": "An elderly woman, seventy-three. A child, seven."
+          },
+          {
+            "scene": "acceptable-losses",
+            "path": "scenes/acceptable-losses.md",
+            "commit": "240f2e5",
+            "quote": "Tam Erdel. Seven years old."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [
+        "governor-024"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "write (redraft from briefs)",
+        "commit": "58df81e"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "acceptable-losses existed before the 2026-04-07 redraft from briefs; that run's first draft (a1782ad) had \"Tam Erdel, age seventy-one\" and its second (58df81e) wrote \"nine\". The same fix left the woman's age (seventy-three) against haddons-reckoning's sixty-eight; see governor-victim-age. \"Nine years old\" appears twice."
+    },
+    {
+      "id": "governor-019",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "commission-testimony calls Tessa Merrin 'Cartographer Vael' and 'Tessa Vael'; Vael is Elias's surname.",
+      "established": [
+        {
+          "scene": "finest-cartographer",
+          "path": "scenes/finest-cartographer.md",
+          "commit": "0ac31c3",
+          "quote": "Tessa Merrin was unassigned."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "commission-testimony",
+          "path": "scenes/commission-testimony.md",
+          "commit": "0ac31c3",
+          "quote": "I received Cartographer Vael's report on the eastern pressure anomaly."
+        },
+        {
+          "scene": "commission-testimony",
+          "path": "scenes/commission-testimony.md",
+          "commit": "0ac31c3",
+          "quote": "I selected Tessa Vael for the eastern survey because her Calibration sensitivity would confirm what I already knew."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "ae7eb72",
+        "after": [
+          {
+            "scene": "commission-testimony",
+            "path": "scenes/commission-testimony.md",
+            "commit": "ae7eb72",
+            "quote": "I received Cartographer Merrin's report on the eastern pressure anomaly."
+          },
+          {
+            "scene": "commission-testimony",
+            "path": "scenes/commission-testimony.md",
+            "commit": "ae7eb72",
+            "quote": "I selected Tessa Merrin for the eastern survey because her Calibration sensitivity would confirm what I already knew."
+          }
+        ],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "draft",
+        "pass": "",
+        "commit": "018066b"
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "commission-testimony was a new scene first drafted by storyforge write on 2026-04-07 (018066b); \"Cartographer Vael's\" appears twice."
+    },
+    {
+      "id": "governor-020",
+      "repo": "governor",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Tessa carries second-degree burns on her left forearm from junction-fourteen onward, but the burns are Elias's from the Ashward Breach; Tessa is never burned on the page and is not in ashward-breach.",
+      "established": [
+        {
+          "scene": "ashward-breach",
+          "path": "scenes/ashward-breach.md",
+          "commit": "77c6bce",
+          "quote": "His left forearm had blistered where the steam had found the gap between his glove and his sleeve."
+        },
+        {
+          "scene": "eastern-galleries-alive",
+          "path": "scenes/eastern-galleries-alive.md",
+          "commit": "77c6bce",
+          "quote": "Beneath the rolled sleeve, the burn scars began."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "junction-fourteen",
+          "path": "scenes/junction-fourteen.md",
+          "commit": "77c6bce",
+          "quote": "The burns on her left forearm still pulled when she flexed her fingers, the linen stiff with dried ointment."
+        },
+        {
+          "scene": "footnote",
+          "path": "scenes/footnote.md",
+          "commit": "77c6bce",
+          "quote": "Beneath the wrapping on her left forearm, the burns pulled when she flexed."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [
+        "governor-021"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "hone (registries/physical-states)",
+        "commit": "d7e98f3"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "The hone pass d7e98f3 created burns-left-arm-tessa (acquired in ashward-breach) in physical-states.csv; 4befb51 (hone gaps) propagated it into physical_state_in on 80 briefs; the 2026-04-07 write redraft from briefs then wrote it into prose (first in 5a32223, footnote). Also in archivists-box, aftermath, everything-she-found, doreens-letter, counting-breaths and others. junction-fourteen is seq 7; ashward-breach (seq 4) is Elias's POV and does not mention Tessa."
+    },
+    {
+      "id": "governor-021",
+      "repo": "governor",
+      "level": "csv",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "physical-states.csv records the Ashward Breach burns as Tessa's, but ashward-breach gives them to Elias.",
+      "established": [
+        {
+          "scene": "ashward-breach",
+          "path": "scenes/ashward-breach.md",
+          "commit": "77c6bce",
+          "quote": "His left forearm had blistered where the steam had found the gap between his glove and his sleeve."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "ashward-breach",
+          "path": "reference/physical-states.csv",
+          "commit": "77c6bce",
+          "quote": "burns-left-arm-tessa|tessa-merrin|Second-degree burns left forearm to shoulder with linen wrapping|injury|ashward-breach|never|true"
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [
+        "governor-020"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "hone (registries/physical-states)",
+        "commit": "d7e98f3"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "At d7e98f3~1 ashward-breach read \"Elias Vael, senior gallery engineer (reporting). Second-degree burns, left forearm to shoulder.\" The CSV row is the cause of governor-tessa-burns. physical-states.csv attributes 73 of 98 states to tessa-merrin; dust-on-knees-and-sleeves-tessa (acquired in weight-of-the-rim, a Voss scene) looks like the same misattribution but was not labeled."
+    },
+    {
+      "id": "governor-022",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [
+        "WLD"
+      ],
+      "summary": "article-twelve says the sabotage, nineteen years old, began before Block Fifteen's foundations were poured; terrace-row has crews still preparing those foundations now.",
+      "established": [
+        {
+          "scene": "terrace-row",
+          "path": "scenes/terrace-row.md",
+          "commit": "77c6bce",
+          "quote": "The eastern crews would keep preparing Block Fifteen's foundations."
+        },
+        {
+          "scene": "terrace-row",
+          "path": "scenes/terrace-row.md",
+          "commit": "77c6bce",
+          "quote": "Eastern pre-construction survey teams to remain on Block Fifteen foundation work per existing schedule."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "article-twelve",
+          "path": "scenes/article-twelve.md",
+          "commit": "77c6bce",
+          "quote": "Nineteen years. The sabotage had begun before Block Fifteen's foundations were poured."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "write (redraft from briefs)",
+        "commit": "f563ccf"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "article-twelve (new-v4) was redrafted from briefs on 2026-04-07; f563ccf wrote this line. Block Fifteen has been the upcoming foundation work since the March Voss scenes."
+    },
+    {
+      "id": "governor-023",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Sera Holdt is one of the two Fenwick Row dead in haddons-reckoning and the-governors-vigil, but in acceptable-losses she is alive and working in Voss's office.",
+      "established": [
+        {
+          "scene": "haddons-reckoning",
+          "path": "scenes/haddons-reckoning.md",
+          "commit": "77c6bce",
+          "quote": "Sera Holdt. Sixty-eight. Upper floors, the building adjacent to the junction housing. The pressure wave took out her wall."
+        },
+        {
+          "scene": "the-governors-vigil",
+          "path": "scenes/the-governors-vigil.md",
+          "commit": "77c6bce",
+          "quote": "Sera Holdt. First floor, nine years."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "acceptable-losses",
+          "path": "scenes/acceptable-losses.md",
+          "commit": "77c6bce",
+          "quote": "The casualty report was waiting on his desk when he returned, centered on the blotter where Sera Holdt had placed it."
+        },
+        {
+          "scene": "acceptable-losses",
+          "path": "scenes/acceptable-losses.md",
+          "commit": "77c6bce",
+          "quote": "Sera Holdt finished her count and turned from the cabinet."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "write (redraft from briefs)",
+        "commit": "a1782ad"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Sera Holdt was the dead woman from her first appearance (965ba73, crisis-sequence). The 2026-04-07 redraft of acceptable-losses (a1782ad) reused her name for Voss's clerk; the same scene's casualty list leaves the dead woman unnamed."
+    },
+    {
+      "id": "governor-024",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "The elderly Fenwick Row victim is seventy-three in acceptable-losses but Sera Holdt, sixty-eight, in haddons-reckoning.",
+      "established": [
+        {
+          "scene": "haddons-reckoning",
+          "path": "scenes/haddons-reckoning.md",
+          "commit": "77c6bce",
+          "quote": "Sera Holdt, sixty-eight. Upper floors."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "acceptable-losses",
+          "path": "scenes/acceptable-losses.md",
+          "commit": "77c6bce",
+          "quote": "An elderly woman, seventy-three. A child, seven."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [
+        "governor-018"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "write (redraft from briefs)",
+        "commit": "58df81e"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "240f2e5 fixed the child's age in the same sentence and left the woman's. Medium only because acceptable-losses does not name her; both scenes list the same two dead (an elderly woman and the child Tam Erdel)."
+    },
+    {
+      "id": "governor-025",
+      "repo": "governor",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Sera Holdt lived on the first floor in the-governors-vigil but on the upper floors in haddons-reckoning.",
+      "established": [
+        {
+          "scene": "the-governors-vigil",
+          "path": "scenes/the-governors-vigil.md",
+          "commit": "77c6bce",
+          "quote": "Sera Holdt. First floor, nine years."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "haddons-reckoning",
+          "path": "scenes/haddons-reckoning.md",
+          "commit": "77c6bce",
+          "quote": "Sera Holdt, sixty-eight. Upper floors."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [
+        "governor-026"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "write (redraft from briefs)",
+        "commit": "abd762e"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "The original canon (965ba73) put her in unit 1 on the ground floor; the 2026-04-07 redraft of haddons-reckoning (abd762e) moved her upstairs. Medium because \"first floor\" can mean the ground floor; either way it is not \"upper floors\"."
+    },
+    {
+      "id": "governor-026",
+      "repo": "governor",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Tam Erdel was on the ground floor in haddons-reckoning but the second floor in the-governors-vigil.",
+      "established": [
+        {
+          "scene": "haddons-reckoning",
+          "path": "scenes/haddons-reckoning.md",
+          "commit": "77c6bce",
+          "quote": "Tam Erdel. Seven. Ground floor, same building. He was in the corridor when the floor buckled."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "the-governors-vigil",
+          "path": "scenes/the-governors-vigil.md",
+          "commit": "77c6bce",
+          "quote": "Tam Erdel. Second floor, fourteen years."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [
+        "governor-025"
+      ],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "redraft-from-briefs",
+        "commit": "f74aa12"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "The vigil list came from the redraft from corrected briefs (f74aa12); before it, the vigil named Devra Erdel on the fourth floor. Original canon (965ba73) had Tam in unit 2 on the ground floor. \"Fourteen years\" for a seven-year-old is probably the family's tenancy and was not labeled."
+    },
+    {
+      "id": "governor-027",
+      "repo": "governor",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [
+        "TIM"
+      ],
+      "summary": "The thirty-second blackout happens at the column in blackout and confrontation-at-stairwell-nine, but elias-agrees-to-the-terms places it at Fenwick Row.",
+      "established": [
+        {
+          "scene": "confrontation-at-stairwell-nine",
+          "path": "scenes/confrontation-at-stairwell-nine.md",
+          "commit": "77c6bce",
+          "quote": "Thirty seconds. The one from last night, in the eastern gallery, when she'd gone down to the column interface"
+        },
+        {
+          "scene": "blackout",
+          "path": "scenes/blackout.md",
+          "commit": "77c6bce",
+          "quote": "\"You went rigid. Eyes open. No response. Thirty seconds.\""
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "elias-agrees-to-the-terms",
+          "path": "scenes/elias-agrees-to-the-terms.md",
+          "commit": "77c6bce",
+          "quote": "Thirty at Fenwick Row, when she'd gone so still he'd reached for the gauge on her wrist before she came back."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "write (redraft from briefs)",
+        "commit": "147387a"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Fenwick Row South is the residential block of the rupture, not a descent site. Introduced by the 2026-04-07 redraft of elias-agrees-to-the-terms."
+    },
+    {
+      "id": "governor-028",
+      "repo": "governor",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "order gives Marek Breck thirty years in the galleries and, a page later, forty-eight years of work on the junction collars.",
+      "established": [
+        {
+          "scene": "order",
+          "path": "scenes/order.md",
+          "commit": "77c6bce",
+          "quote": "the way a man walked who'd spent thirty years in galleries"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "order",
+          "path": "scenes/order.md",
+          "commit": "77c6bce",
+          "quote": "Marek Breck had learned his tools on the Ashward junction collars. Forty-eight years of honest work."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": [],
+        "rewrite": false
+      },
+      "related_cases": [],
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "naturalness (upstream brief fixes)",
+        "commit": "a3ca495"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "low",
+      "notes": "Both phrases arrived in the same rewrite (a3ca495). Low: forty-eight years of work and thirty in the galleries can be reconciled; the earlier canon was \"thirty-one years\". The related age drift (Haddon nineteen at his father's death in new-h2, twenty-three at HEAD) has no HEAD counterpart and was not labeled."
+    }
+  ]
+}

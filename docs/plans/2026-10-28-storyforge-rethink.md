@@ -156,6 +156,19 @@ The real corpus is heavy on TIM (counts, durations, day math) and TRT (names, pr
 - Success: E2 recall improves over baseline; zero silent failures in a full run, including regression tests for the survey's three silent-failure cases (a pass that changes nothing cannot report complete; a pass cannot overwrite a reference doc; an alias cannot move between characters without a ledger supersede).
 - Rebuild: `extract.py`, parser consumers in `prompts.py`. Delete: obsolete parsers.
 
+#### Phase 1 bug checklist (survey bugs, checked against v1.71.0 on 2026-10-28)
+
+Each needs a fix and a regression test. Line numbers are as of v1.71.0.
+
+- [ ] **Physical state assigned to the wrong character** (governor `d7e98f3`: Elias's burns given to Tessa, then propagated to 80 scenes). hone picks a new state's `character` from reference text, scene ids, and the character list only (`hone.py:487-499`), never the prose or the scene's `on_stage`; nothing checks `character` against `on_stage` at the `acquired` scene (`elaborate._validate_physical_states`), and `propagate_physical_states` (`hone.py:2682`) spreads the error.
+- [ ] **A pass that changes nothing is marked complete** (understory `5ac1c26`). `3c0dfba` added a no-change check only for hone-routed passes. The structural/registry path (`cmd_revise.py:2360-2414`) logs "no CSV blocks found" or turns an apply error into a WARNING, then commits and marks `completed` (`:2512-2513`); a prose reply with no scene markers is also marked completed (`:2428`).
+- [ ] **Structural pass writes duplicate `seq` and blank `pov`** (understory `bbfc945`). New rows are built from the model's fields unchecked (`cmd_revise.py:2399-2401`); `existing[sid].update(... if v ...)` (`:2398`) can never clear a field.
+- [ ] **Duplicate `seq` is never reported** (thornwall `seq` 58). `cleanup`'s seq check (`cmd_cleanup.py:1586-1599`) flags gaps and decimals only; no uniqueness check exists in `cleanup` or `validate`.
+- [ ] **Scene file overwritten with the model's raw reply** (thornwall `19530d5`). `parsing._write_scene` guards against truncation and big word-count drops, but `_redraft_scenes` writes `extracted if extracted else response` with no guard (`cmd_revise.py:1299,1316`), and `revise --interactive` runs `claude --dangerously-skip-permissions`, which writes scene files directly (`cmd_revise.py:2330-2335`).
+- [ ] **Alias collision leftover** (meridian-line `5433d3f`; the main bug was fixed by `3486915`). `resolve_alias_collisions` (`hone.py:286-313`) gives a shared alias to whichever entry comes first in the file; add a test that a mapping pass never takes an alias away from its current owner.
+
+Revision passes that wrote errors in shared-dark (E1 `tool-introduced` cases; E8 material): `prose-craft-tightening`, `continuity-audit`, `continuity-fixes`, `theory-as-dialogue`, `somatic-vocabulary-diversification`, `naturalness`.
+
 ### Phase 2 — Ledger and export
 - Add `commitments.csv` and the rubric-driven extraction prompt. Migrate `knowledge.csv` and `physical-states.csv`. Derive per-character state. Audit entries and digest command (decision 2). `export` command with `schema_version`.
 - Success: E3 recall ≥ 0.85 on E1-derived facts; E5 mismatches drop vs baseline; export round-trips in tests.
