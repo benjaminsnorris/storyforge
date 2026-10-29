@@ -550,6 +550,46 @@ class TestPolishLoopOrchestration:
         # Iteration 1 polished + iteration 2 polished before convergence detected
         assert polish_count[0] == 2
 
+    def test_brief_fix_skips_turned_down_scenes_and_empty_commits(self, tmp_path, monkeypatch):
+        """A scene whose brief fix was turned down is not sent again, and an
+        iteration that fixed nothing commits nothing."""
+        from storyforge.cmd_revise import _run_polish_loop
+
+        project_dir = self._setup_project(tmp_path)
+
+        call_count = [0]
+        def fake_deterministic(proj, scene_ids):
+            call_count[0] += 1
+            cycle_dir = os.path.join(proj, 'working', 'scores', f'cycle-{call_count[0]}')
+            os.makedirs(cycle_dir, exist_ok=True)
+            return cycle_dir, self._make_diag(high=1, avg=3.0)
+
+        sent = []
+        def fake_fix(proj, ids):
+            sent.append(list(ids))
+            return [], {sid: 'named Mallen' for sid in ids}
+
+        commits = []
+        monkeypatch.setattr('storyforge.cmd_revise._run_deterministic_score', fake_deterministic)
+        monkeypatch.setattr('storyforge.cmd_revise._detect_upstream_scenes',
+                            lambda p, diag: ['s01'] if len(sent) == 0 else ['s01', 's02'])
+        monkeypatch.setattr('storyforge.cmd_revise._fix_and_redraft', fake_fix)
+        monkeypatch.setattr('storyforge.cmd_revise._execute_single_pass', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push',
+                            lambda p, msg, *a, **kw: commits.append(msg))
+        monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
+                            lambda title, body, pd, work_type='': '')
+        monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
+        monkeypatch.setattr('storyforge.cmd_revise.set_pr_body', lambda pd, pr, b: None)
+        monkeypatch.setattr('storyforge.cmd_revise.add_pr_comment', lambda pd, pr, body: None)
+
+        _run_polish_loop(project_dir, 5, None, skip_final_score=True)
+
+        assert sent == [['s01'], ['s02']]
+        assert not any('upstream' in m for m in commits)
+
     def test_zero_max_loops_no_crash(self, tmp_path, monkeypatch):
         """max_loops=0 should not crash even with skip_final_score=True."""
         from storyforge.cmd_revise import _run_polish_loop
