@@ -130,7 +130,6 @@ def discover(suites_dir: str) -> list[Suite]:
 
 COST_KEYS = ('calls', 'replayed_calls', 'unpriced_calls', 'input_tokens',
              'output_tokens', 'usd_if_live', 'usd_spent')
-_PRICED_FAMILIES = ('opus', 'sonnet', 'haiku')
 
 
 def _tokens(usage: dict, key: str) -> int:
@@ -144,7 +143,7 @@ def read_cassette_log(log_file: str) -> tuple[dict, list[str]]:
     An unreadable line is itself reported as a failure rather than skipped,
     since it most likely belongs to a call that was then not counted.
     """
-    from storyforge.costs import calculate_cost
+    from storyforge.costs import PRICING, calculate_cost
     totals = dict.fromkeys(COST_KEYS, 0)
     totals['usd_if_live'] = totals['usd_spent'] = 0.0
     failures = []
@@ -167,8 +166,13 @@ def read_cassette_log(log_file: str) -> tuple[dict, list[str]]:
                 continue
             usage = entry.get('usage') if isinstance(entry.get('usage'), dict) else {}
             model = str(entry.get('model') or '')
-            if not any(family in model.lower() for family in _PRICED_FAMILIES):
-                totals['unpriced_calls'] += 1  # costs.py would silently price it as sonnet
+            if not model and not usage:
+                # A request with no model (the Models API catalog) is free
+                totals['calls'] += 1
+                totals['replayed_calls'] += 1 if entry.get('replayed') else 0
+                continue
+            if not any(model == k or model.startswith(k + '-') for k in PRICING):
+                totals['unpriced_calls'] += 1  # costs.py prices it at its tier's newest rates
             usd = calculate_cost(
                 model, _tokens(usage, 'input_tokens'), _tokens(usage, 'output_tokens'),
                 cache_read=_tokens(usage, 'cache_read_input_tokens'),

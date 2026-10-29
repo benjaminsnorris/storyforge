@@ -290,3 +290,17 @@ def test_suite_module_without_suite_is_an_error(tmp_path):
     (tmp_path / 'x.py').write_text('X = 1\n')
     with pytest.raises(RuntimeError, match='no SUITE'):
         harness.discover(str(tmp_path))
+
+
+def test_a_catalog_call_is_free_and_not_unpriced(tmp_path):
+    """Model resolution's GET /v1/models has no model and no usage; it costs
+    nothing and must not be counted as an unpriced call."""
+    import harness
+    log = tmp_path / 'log.jsonl'
+    log.write_text('{"key": "k", "model": "", "usage": {}, "replayed": false}\n'
+                   '{"key": "k2", "model": "claude-haiku-5-5", '
+                   '"usage": {"input_tokens": 1000000, "output_tokens": 0}, "replayed": false}\n')
+    totals, failures = harness.read_cassette_log(str(log))
+    assert failures == []
+    assert totals['calls'] == 2 and totals['unpriced_calls'] == 0
+    assert totals['usd_spent'] == 0.5  # over 100K prompt tokens: Haiku 5.5's higher rate
