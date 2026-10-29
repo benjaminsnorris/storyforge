@@ -60,6 +60,9 @@ def test_valid_case_has_no_problems():
     ({'fix': {'status': 'fixed', 'commit': 'def5678', 'after': []}}, 'must set fix.rewrite'),
     ({'fix': {'status': 'fixed', 'commit': 'def5678', 'after': [], 'rewrite': 'yes'}}, 'true or false'),
     ({'related_cases': 'book-002'}, 'related_cases must be'),
+    ({'contradicted': [{**SPAN, 'source': 'bible'}]}, 'source must be'),
+    ({'contradicted': [{**SPAN, 'source': 'reference'}]}, 'prose span on its contradicted'),
+    ({'missed_by': [{'commit': 'abc1234'}]}, 'missed_by must be'),
 ])
 def test_each_rule(changes, fragment):
     problems = e1.validate_case(_case(**changes))
@@ -68,6 +71,13 @@ def test_each_rule(changes, fragment):
 
 def test_absence_case_is_valid():
     assert e1.validate_case(_case(established=[], established_by_absence='never told')) == []
+
+
+def test_non_prose_sources_allowed_on_the_established_side():
+    case = _case(established=[{**SPAN, 'source': 'reference'}],
+                 missed_by=[{'pass': 'continuity-audit', 'commit': 'abc1234'}])
+    assert e1.validate_case(case) == []
+    assert e1.validate_case(_case(level='csv', contradicted=[{**SPAN, 'source': 'csv'}])) == []
 
 
 def test_rewrite_fix_needs_no_after_spans():

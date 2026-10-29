@@ -20,6 +20,7 @@ A case (see ``evals/e1/FORMAT.md`` for the labeling guide)::
       "fix": {"status": "fixed", "commit": "<sha>", "after": [<span>, ...],
               "rewrite": false},             # true: the error left in a wholesale rewrite, no targeted edit
       "related_cases": [],                 # e.g. the regression case of this error, and back
+      "missed_by": [],                     # checks that read this and passed it: {"pass", "commit"}
       "introduced_by": {"kind": "plan", "pass": "", "commit": ""},
       "regressed_by": [],                  # commits that later reintroduced the error
       "subsets": ["author-labeled"],
@@ -29,7 +30,12 @@ A case (see ``evals/e1/FORMAT.md`` for the labeling guide)::
     }
 
 A span is ``{"scene": <slug at HEAD>, "path": <path at commit>, "commit": <sha>,
-"quote": <verbatim prose>}``. ``commit`` is the tree the quote was read from:
+"quote": <verbatim text>, "source": "prose"}``. ``source`` (default ``prose``)
+says what kind of text the quote is from: ``prose`` (a scene), ``metadata``
+(frontmatter or a CSV column of the scene, e.g. ``timeline_day``), ``csv`` (a
+reference CSV row; ``scene`` is the row's scene id), or ``reference`` (a
+bible, tracker, or rules document). A ``prose``-level case needs prose on its
+contradicted side; its established side may be any source. ``commit`` is the tree the quote was read from:
 for ``established`` and ``contradicted`` that is the fix's parent, for
 ``fix.after`` the fix itself. ``scene`` is the HEAD slug even when ``path`` is a
 pre-rename numeric file, so cases join across id eras.
@@ -55,6 +61,7 @@ ERROR_CODES = ('PHY', 'TIM', 'KNO', 'REL', 'TRT', 'WLD', 'PRM', 'VOI')
 LEVELS = ('prose', 'csv')
 FIX_STATUSES = ('fixed', 'incomplete', 'unfixed')
 INTRODUCED_KINDS = ('draft', 'author', 'plan', 'tool', 'unknown')
+SPAN_SOURCES = ('prose', 'metadata', 'csv', 'reference')
 SUBSETS = ('author-labeled', 'tool-introduced', 'unfixed-at-head')
 CONFIDENCES = ('high', 'medium', 'low')
 _SHA = re.compile(r'^[0-9a-f]{7,40}$')
@@ -93,6 +100,8 @@ def _span_problems(where: str, span, require_quote: bool = True) -> list[str]:
         problems.append(f'{where}: commit {span["commit"]!r} is not a sha')
     if require_quote and not (isinstance(span.get('quote'), str) and span['quote'].strip()):
         problems.append(f'{where}: missing quote')
+    if span.get('source', 'prose') not in SPAN_SOURCES:
+        problems.append(f'{where}: source must be one of {SPAN_SOURCES}')
     return problems
 
 
@@ -135,6 +144,10 @@ def validate_case(case: dict) -> list[str]:
     for i, span in enumerate(contradicted):
         p.extend(f'{cid}: {m}' for m in _span_problems(f'contradicted[{i}]', span))
 
+    if case.get('level') == 'prose' and contradicted and not any(
+            isinstance(s, dict) and s.get('source', 'prose') == 'prose' for s in contradicted):
+        bad('a prose-level case needs a prose span on its contradicted side')
+
     fix = case.get('fix')
     if not isinstance(fix, dict) or fix.get('status') not in FIX_STATUSES:
         bad(f'fix.status must be one of {FIX_STATUSES}')
@@ -148,6 +161,10 @@ def validate_case(case: dict) -> list[str]:
             bad('a fix with no fix.after spans must set fix.rewrite (the error left in a rewrite)')
     if 'rewrite' in fix and not isinstance(fix['rewrite'], bool):
         bad('fix.rewrite must be true or false')
+    missed = case.get('missed_by', [])
+    if not isinstance(missed, list) or not all(
+            isinstance(m, dict) and m.get('pass') for m in missed):
+        bad('missed_by must be a list of {"pass", "commit"} objects')
     related = case.get('related_cases', [])
     if not isinstance(related, list) or not all(isinstance(r, str) for r in related):
         bad('related_cases must be a list of case ids')

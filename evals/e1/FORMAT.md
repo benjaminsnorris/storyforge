@@ -47,6 +47,16 @@ second code only when two genuinely break.
   through a merge.
 - Restrict history searches to scene prose (`git log -S'...' -- scenes/`):
   `manuscript/`, builds, and backups duplicate the text and bury the signal.
+- Give a span `"source": "metadata"`, `"csv"`, or `"reference"` when its
+  quote is not scene prose (a `timeline_day` line, a CSV row, a bible or
+  `key-decisions.md` rule). A prose-level case still needs prose on the
+  contradicted side.
+- A scene that was later cut has no slug at HEAD: use its last slug (or its
+  old path's stem) as `scene` and say "cut" in `notes`.
+- A fix that deletes a sentence has nothing to quote: quote the text that now
+  stands where it was, and say "deleted" in `notes`.
+- A dropped promise (PRM): `established` quotes the promise, `contradicted`
+  quotes the scene where it should have been paid off (usually its close).
 - A knowledge case whose "established" side is an absence (nothing earlier
   told the character) has `established: []` and says why in
   `established_by_absence`.
@@ -66,6 +76,11 @@ second code only when two genuinely break.
   brief/bible/tracker that the prose followed), `tool` (a Storyforge pass
   wrote it — set `pass` to the pass name and `commit`), or `unknown`.
 - `regressed_by`: commits that reintroduced an error after it was fixed.
+- `missed_by`: checks that read the error and passed it — an LLM audit, a
+  continuity pass, an evaluator — as `{"pass": ..., "commit": ...}`. These are
+  the cases a detector most needs to catch.
+- `introduced_by.brief`: for a tool-introduced error that followed a wrong
+  brief or bible line, the span-less pointer to it (`reference/scene-briefs.csv:<id>`).
 - `subsets`: `author-labeled` when the author flagged it (annotation, read
   notes; put the pointer in `label_source`), `tool-introduced` iff
   `introduced_by.kind == "tool"`, `unfixed-at-head` iff `fix.status == "unfixed"`.
