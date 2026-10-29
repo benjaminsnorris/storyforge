@@ -366,7 +366,7 @@ FUNCTION: [one sentence: why this scene exists — what it accomplishes in the s
 ACTION_SEQUEL: [action or sequel — action scenes have goal/conflict/outcome; sequel scenes have reaction/dilemma/decision]
 EMOTIONAL_ARC: [starting emotion giving way to ending emotion, e.g., "controlled competence to buried unease"]
 VALUE_AT_STAKE: [the single abstract value being tested, in one or two words: safety, love, justice, truth, freedom, honor, etc. Name only the value, with no explanation; the specifics belong in FUNCTION]
-VALUE_SHIFT: [polarity change using +/- notation: +/- means positive to negative, -/+ means negative to positive, +/++ means good to better, -/-- means bad to worse]
+VALUE_SHIFT: [polarity change, exactly one of these four: +/- means positive to negative, -/+ means negative to positive, +/++ means good to better, -/-- means bad to worse]
 TURNING_POINT: [action or revelation — action means a character does something that changes the situation; revelation means new information changes the situation]
 CHARACTERS: [semicolon-separated list of ALL characters present or referenced by name]
 ON_STAGE: [semicolon-separated list of characters physically present in the scene — subset of CHARACTERS]
