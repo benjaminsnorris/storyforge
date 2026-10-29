@@ -144,6 +144,28 @@ class TestValidateStructure:
         identity = [c for c in report['checks'] if c['category'] == 'identity' and not c['passed']]
         assert len(identity) > 0
 
+    def test_detects_duplicate_seq(self, fixture_dir, tmp_path):
+        """Thornwall shipped two scenes at seq 58; nothing reported it."""
+        from storyforge.elaborate import validate_structure
+        ref = str(tmp_path / 'reference')
+        shutil.copytree(os.path.join(fixture_dir, 'reference'), ref)
+        path = os.path.join(ref, 'scenes.csv')
+        with open(path) as f:
+            lines = f.read().splitlines()
+        header = lines[0].split('|')
+        seq_i = header.index('seq')
+        first, second = lines[1].split('|'), lines[2].split('|')
+        second[seq_i] = first[seq_i]
+        lines[2] = '|'.join(second)
+        with open(path, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+
+        report = validate_structure(ref)
+        dup = [c for c in report['checks'] if c['check'] == 'duplicate-seq']
+        assert len(dup) == 1 and not dup[0]['passed']
+        assert first[0] in dup[0]['message'] and second[0] in dup[0]['message']
+        assert not report['passed']
+
     def test_mice_nesting(self, fixture_dir):
         from storyforge.elaborate import validate_structure
         report = validate_structure(os.path.join(fixture_dir, 'reference'))
