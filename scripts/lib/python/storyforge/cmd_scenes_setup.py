@@ -43,12 +43,12 @@ from storyforge.scenes import (
 from storyforge.csv_cli import get_field, get_column, append_row
 
 
-# A part (or book) heading: "Part One", "PART II", "# Part 3: The Lighthouse",
-# "BOOK FIRST". The whole line must be the heading (an ordinal, then at most a
+# A part (or book, or volume) heading: "Part One", "PART II",
+# "# Part 3: The Lighthouse", "BOOK FIRST", "VOL. II.". The whole line must be the heading (an ordinal, then at most a
 # separator and a short title), so prose such as "Part one of the plan was
 # simple." never matches.
 _PART_HEADING_RE = re.compile(
-    r'^(?:#{1,2}\s+)?(?:part|book)\s+(?:[0-9]+|[ivxlc]+|one|two|three|four|five|'
+    r'^(?:#{1,2}\s+)?(?:part|book|volume|vol\.)\s+(?:[0-9]+|[ivxlc]+|one|two|three|four|five|'
     r'six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|'
     r'eighth|ninth|tenth)\s*(?:[:.\-—–]\s*[^.!?]{0,60})?$',
     re.IGNORECASE,
