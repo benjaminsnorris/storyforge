@@ -162,8 +162,10 @@ def gap_to_days(gap: str) -> int | None:
     later", "a few weeks") or absent. Years count as 365 days, months as 30:
     order and rough depth are what matter."""
     text = (gap or '').strip().lower()
-    # An explanation, not a gap: a phrase picked out of it would be a guess
-    if not text or len(text.split()) > 8:
+    # An explanation, not a gap: a phrase picked out of it would be a guess.
+    # A bracketed or quoted aside marks one too: 'three days" (vacation
+    # between terms)' was a vacation's length, not the gap (F-066)
+    if not text or len(text.split()) > 8 or re.search(r'[()"]', text):
         return None
     if _SAME_DAY.search(text) and not re.search(r'\b(days?|weeks?|months?|years?)\b', text):
         return 0
@@ -500,6 +502,12 @@ def _int(value) -> int | None:
         return None
 
 
+# Weekdays are compared only between scenes at most this many days apart
+WEEKDAY_SPAN = 31
+# Narrow on purpose: "Saturday, the day after the party" is still Saturday
+_OTHER_DAY = re.compile(r'\b(to-?morrow|yesterday)\b')
+
+
 def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     """Inconsistencies between days, modes, cues and dates.
 
@@ -567,6 +575,11 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         # One weekday, on a scene that happens on one day: a summary's
         # "Sunday mornings" is a habit, not a date
         weekday = named[0] if len(named) == 1 and mode == 'scene' else None
+        # A weekday beside "to-morrow" or "yesterday" is another day's: the
+        # smoker "the day after to-morrow" before "Saturday afternoon"'s game
+        # is not on Saturday (F-068)
+        if weekday is not None and _OTHER_DAY.search(anchor):
+            weekday = None
         if weekday is not None:
             weekdays.append((sid, day, weekday))
         last_day = day
@@ -602,6 +615,10 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
                            f'but its day is {d2 - d1} day(s) after')
             findings.append({'scene_id': s2, 'check': 'date_mismatch', 'message': message})
     for (s1, d1, w1), (s2, d2, w2) in zip(weekdays, weekdays[1:]):
+        # Over months the days are too rough for weekday arithmetic: a
+        # Thursday 884 days after a Saturday says nothing (F-067)
+        if abs(d2 - d1) > WEEKDAY_SPAN:
+            continue
         if (d2 - d1 - (w2 - w1)) % 7:
             findings.append({'scene_id': s2, 'check': 'weekday_mismatch',
                              'message': f'a {_WEEKDAYS[w2].title()} {d2 - d1} day(s) after '
