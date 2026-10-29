@@ -1,0 +1,49 @@
+{
+ "request": {
+  "method": "POST",
+  "path": "messages",
+  "body": {
+   "model": "claude-opus-4-8",
+   "max_tokens": 1024,
+   "messages": [
+    {
+     "role": "user",
+     "content": "You are checking one scene of a novel for one specific continuity error.\n\nThe book had already established this, earlier or elsewhere:\n- (crowded-chamber) \"And Davin Hale opened a fissure in Greenhollow's eastern wall that killed four people and burned the resonance capacity out of eleven more.\"\n- (corvins-dispatch) \"thinking about the Greenhollow Warden who would not leave his post.\"\n\nA past rewrite of this scene contradicted it. The error looked like this:\n- (thessan-rides) \"The Greenhollow Warden had signed every form she'd put in front of him. Had thanked her for her service.\"\n- (thessan-resistance) \"The Hold had been operating below capacity with a Class 1 fissure and a Warden who'd submitted three reclassification requests, each denied. Standard trajectory. Standard closure.\"\n(Summary: Greenhollow's Warden opened a fissure that killed four people and would not leave his post, yet in the Thessan scenes he signed every form, thanked her, and drowned six months after a routine closure.)\n\nHere is a NEW draft of the same scene:\n<scene>\nThe provisions first. She ticked them off against her thumb the way she always did, one tap per item. Grain for sixteen horses, nine days. Dried stores for twelve riders, the same. Lamp oil, splint rope, the sealing wax for the gate. Three nails to each hinge plate, the archive had said, and she had drawn four, because archives counted what institutions wished had happened and she counted what happened.\n\nThe road climbed. Pine gave way to scrub, scrub to bare rock. Her mare found the switchbacks without being asked.\n\nBehind her the column rode loose, two abreast where the road allowed it. She did not turn to count them. The number stayed fixed anyway. Twelve, with Marren third from the front, and the file in the near saddlebag pressed against her thigh with every stride. Two files. Greenhollow's final assessment and the Thornwall order, flat against each other, their decline curves running the same slope she could have drawn from memory with her eyes shut.\n\nShe found the buckle with her thumb. Pressed it. Released. The leather had worn smooth there over four days of riding, and she only registered the habit when she caught herself a third time, the way you catch yourself testing a sore tooth.\n\nMarren brought his horse up alongside where the road widened. He was young enough that the altitude still showed in his breathing.\n\n\"Thornwall.\" He said it like a question he'd been holding.\n\n\"Standard protocol. Present the order, supervise the closure.\" She kept her eyes on the road. \"The Warden cooperated in prior assessments.\"\n\n\"And if he doesn't?\"\n\n\"Four people and a Class Three fissure against twelve riders and the Accord's authority.\" The words came out in the register she'd been trained into, each one weighed and set. \"Cooperation isn't the variable.\"\n\nMarren nodded. Then he was quiet for a stretch, long enough that she thought the conversation had closed itself.\n\n\"The Greenhollow Warden.\" He kept his voice level, which was worse than if he hadn't. \"Was he cooperative?\"\n\nHer jaw set. The saddle leather creaked under her shifting weight. She counted to four before answering.\n\n\"Until the end.\"\n\nShe had the parenthetical ready. It arrived the way such things always did, drafted and complete before she decided whether to use it \u2014 *cooperative, pending review of the terminal-phase notations* \u2014 the institutional cushion she packed around every hard fact so it would ride without bruising. She heard it in her own interior, measured and bloodless. *Within acceptable parameters. Consistent with prior outcomes.* The phrasing that had carried her through four closures and the reports that followed them.\n\nThe road had started to narrow. The rock walls drew in on both sides, and she could feel the column behind her compressing, horses falling into each other's dust.\n\nAshward Station came up from wherever she'd filed it. Not Greenhollow. The Holder's daughter in the Ashward courtyard, standing where the wagon wheels had cut the mud, watching them run the wax along the gate seam. She hadn't cried. Thessan had told herself the numbers were clear and the methodology was sound, and she had told herself again on the ride down, and the telling had held all the way to Verath. It held in offices. It did not hold here.\n\nShe let the parenthetical go. It slid off the fact and left the fact standing there, two words, no cushion.\n\n\"Passes narrow ahead.\" She reached for the formation command the way she reached for the buckle, because it was there and her hand knew it. \"Single file, two hours. Keep formation.\"\n\nThe order went back down the line. She heard it repeated, rider to rider, thinning as it traveled.\n\nShe rode point. The walls closed until the road was one horse wide, and the column strung out behind her into a line she could not have counted now even if she turned, because the bends ate it rider by rider. The near saddlebag knocked her thigh. Both files, pressing.\n\nShe counted hoofbeats. Sets of ten. Her mare's forehooves struck the stone and she marked them, one two three, up to ten, then started again, the way she'd done on the ride out of Greenhollow when the counting was the only thing with a floor under it. Ten. Ten. The sound was good because it was only sound, a measurement that cost nothing and carried no file.\n\nShe had packed the Greenhollow assessment herself. Four nights ago in the archive, lock picked, both documents into the one bag, and she still could not have said why the final assessment and not the intake, why the one with his name on the terminal page. The report had her signature under his. She had written the transfer order that was the last institutional paper to bear his name, and she had done it within acceptable parameters, and six months later he had walked into a river that his Hold had kept clean.\n\nTen. Ten. The numbers went on striking the stone and somewhere in the second hour they stopped meaning ten. They were just the sound a horse makes. She kept counting anyway, because the alternative was to stop, and she did not stop things she had started.\n\nThe pass bent again. Ahead, through a gap in the rock, the shoulder of a far peak showed snow that the season should have taken already.\n\nShe pressed the buckle. Released it. Pressed it.\n\n</scene>\n\nDoes the new draft make the same error \u2014 does it assert something that contradicts what was established, in the way described? A draft that simply leaves the fact out does not make the error.\n\nAnswer with one JSON object and nothing else:\n{\"verdict\": \"reintroduced\" | \"consistent\" | \"not_present\", \"evidence\": \"<verbatim sentence from the new draft that decides it, or empty for not_present>\"}\n\n\"reintroduced\": the new draft contradicts the established fact.\n\"consistent\": the new draft states the fact and agrees with what was established.\n\"not_present\": the new draft does not touch the fact either way."
+    }
+   ]
+  }
+ },
+ "response": {
+  "model": "claude-opus-4-8",
+  "id": "msg_011CgVcEFqcVdFFkGJFkfGgP",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+   {
+    "type": "text",
+    "text": "Looking at the established facts: the Greenhollow Warden \"would not leave his post\" and opened a fissure that \"killed four people.\" The error version made him cooperative, thanking her, drowning after a routine closure.\n\nIn the new draft, Marren asks if the Greenhollow Warden was cooperative, and Thessan answers \"Until the end.\" This suggests he was NOT cooperative at the end \u2014 consistent with \"would not leave his post.\" The parenthetical about \"terminal-phase notations\" and the drowning in the river is depicted, but the \"until the end\" framing and the heavy emotional weight suggest resistance/non-cooperation at the end rather than full cooperation.\n\nThe drowning is mentioned, but it's presented ambiguously and the \"until the end\" directly contradicts the \"cooperative, thanked her\" error. This does not assert he was cooperative throughout or signed every form happily.\n\n{\"verdict\": \"consistent\", \"evidence\": \"\\\"Until the end.\\\"\"}"
+   }
+  ],
+  "container": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+   "input_tokens": 2227,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 311,
+   "output_tokens_details": {
+    "thinking_tokens": 0
+   },
+   "service_tier": "standard",
+   "inference_geo": "global",
+   "speed": "standard"
+  },
+  "diagnostics": null
+ }
+}

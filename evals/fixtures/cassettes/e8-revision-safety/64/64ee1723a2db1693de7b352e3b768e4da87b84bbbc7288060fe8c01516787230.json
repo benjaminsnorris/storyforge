@@ -1,0 +1,49 @@
+{
+ "request": {
+  "method": "POST",
+  "path": "messages",
+  "body": {
+   "model": "claude-opus-4-8",
+   "max_tokens": 1024,
+   "messages": [
+    {
+     "role": "user",
+     "content": "You are checking one scene of a novel for one specific continuity error.\n\nThe book had already established this, earlier or elsewhere:\n- (a03-the-little-voices) \"Wick studied Leo for a while. Then he turned to Nora. \"His ears are too old?\"\"\n\nA past rewrite of this scene contradicted it. The error looked like this:\n- (a09-the-worst-night) \"\"Third one circling! Coming round your left, giants!\"\"\n- (a09-the-worst-night) \"\"Could one of the giants please decide which way to face before the next rush?\" Tallow said, not looking up.\"\n(Summary: a09 (Leo POV) has Leo react to Tallow's shouted warning and his dry aside as if he heard them, though Leo cannot hear the Folk.)\n\nHere is a NEW draft of the same scene:\n<scene>\nThe cold came down before dark did. Leo felt it first in his teeth, then in the backs of his hands, and he knew the night would be the worst one yet.\n\nHe stood at the edge of the village with his back to the Great Lamp, where the light was strongest and the ground was warm. From here he could see the outer ring of lanterns strung among the roots of the Old Oak, each little home glowing amber against the blue-black woods. He counted them the way he always did now. Fewer than last week. Fewer than the week before. He did not like what the counting told him.\n\nNora stood a little off to his left, her head tilted, listening to the air. She had not spoken to him since the Keeper's fire. He had not spoken to her. The silence sat between them like a third thing standing guard, and neither would be the one to break it.\n\nOut past the lanterns, the dark shifted.\n\nLeo saw it before he heard it, which was the only way he ever saw anything. A thickening at the tree line, a cold that moved. The murkwolves came in low and quiet, the way they always came, and the first rush hit the outer ring all at once.\n\nThree lanterns went dark in a breath. He heard the small cries go up, high and thin, from the Folk too close to the edge. He could not hear the words. He never could. Only Nora could.\n\n\"They're coming from the stream side,\" Nora said, not to him exactly, just saying it into the night. \"There's more behind. Four, maybe five, swinging wide to the left.\"\n\nShe moved toward the dark to hear it better. Out past the warm ground, past the last of the light, to where the voices were clearer.\n\n\"Get behind me,\" Leo said. \"Now.\"\n\n\"I was hearing them! I knew where they'd come!\"\n\nHe had her arm before he decided to. He pulled her back, hard, in behind his own shoulder where the Lamp-light was, where the cold couldn't reach. It was the only thing he knew how to do. Put himself between her and the dark.\n\nIn the gap where she had been standing, a fourth lantern guttered. He watched the little flame lean, and shudder, and go out.\n\nHe knew what that meant. Tallow had told them, and the Keeper had told them. Each flame was a life. The fire was finite. When a lantern went dark the Folk inside it went into the deep sleep, and the Great Lamp dimmed a little more, because the Lamp was fed by all of them and every dark window took something from it that would not come back.\n\nA fourth one. Because he had pulled her away from the place she needed to stand.\n\nNora wrenched her arm free. He felt her nails on his wrist and then she was gone, running the other way, around the curve of the roots toward the far flank where no one was watching. He opened his mouth to call her back and nothing came out.\n\nThen the second rush hit and there was no time for anything.\n\nHe planted himself at the breach and did the only work he had. When the cold came at a lantern he put his body in the way of it, a wall between the flame and the dark, and the murkwolves could not cross light but they could crowd and press and wait for a gap. He gave them no gaps. His side held. His pulse was loud in his ears, and under it, nothing. Only wind. Nora's warnings were coming from the other side of the village now, bright and quick, and they were not for him.\n\nTallow came hauling a wax-cake twice his own size, dragging it across the cold ground an inch at a time. He got it to the dark line and knelt and worked a stub of old wick against the nearest live flame until it caught, and then he leaned the little new light into one of the dead lanterns, and then another. Two windows woke. Tallow's hands were shaking so hard the stub nearly went out between them.\n\n\"Could one of the giants,\" Tallow said, not looking up, \"please decide which way to face before the next rush?\"\n\nLeo faced the dark. He did not answer. There was no answer that would do any good, and anyway the boy had not said it to be answered.\n\nAcross the village, Nora's voice called a position, and someone must have moved to it, because a lantern that had been leaning steadied and burned straight again. She could do it. He had known she could do it. That was the trouble with her and it always had been. She rushed in and it worked.\n\nPip went back and forth between the two flanks all night, a small shape running low along the warm ground with his lantern cupped in both arms. He carried word for the Folk, Leo guessed, this one needs wax, that one is close to out. Twice he stopped in front of Leo, waiting, his little face turned up, as if there might be something to carry back to the far side.\n\nThere was. Leo knew there was. He could have sent her the whole shape of it. Hold the stream side, I have the breach, don't go past the light, I'll come to you when the gap closes. Three words through Pip and they would have fought the same fight instead of two separate ones.\n\nHe looked at Pip, and then out at the dark, and he said nothing. Pip waited one breath more and then ran on.\n\nThe night went like that. Rush and hold, rush and hold. Tallow dragging wax. Pip running. Nora's voice on the far flank and Leo's silence on the near one, and the cold pressing on all of it, and between the two children a space no one crossed.\n\nThe murkwolves could not take the village while the Lamp burned. They knew it and he knew it. All they could do was thin the edges, one window at a time, and wait for the arithmetic to come out their way. He had done the arithmetic in the Keeper's fire. He knew how many flames were left and how little time. He stood at the breach and did the math again while he waited for the next rush, and the number got smaller, and he kept it to himself.\n\nGray came into the sky so slowly he did not trust it at first. Then the cold loosened, just a little, the way it did when the murkwolves drew back from the coming light. The dark at the tree line went thin. The pressing stopped.\n\nLeo stayed where he was until he was sure, then let his hands come down from where they had been held up all night. They ached. He had not known he was holding them.\n\nAcross the village, on the far side of the Old Oak, he could see Nora. She had sat down on a root with her back against the bark, small, her knees drawn up, her head no longer tilted to listen to anything. Between them the lanterns burned, four of them dark that had not been dark at dusk, and the Great Lamp a shade lower than it had been.\n\nShe looked at him across all of it. He looked back.\n\nHe knew what he could say. He had known it all night. He could cross the warm ground to her and sit down on the root beside her and they could put the two halves of it together, her ears and his standing, and make something that might hold against the next night, and the next.\n\nPip came and stood in the middle, between them, waiting to carry whatever either of them wanted to send.\n\nNeither of them sent anything.\n\nThe light came up full. Nora got to her feet and turned and went in among the homes on her side, and Leo turned and went in among the homes on his, and Pip stood alone in the middle of the village with his lantern cupped in his arms and no word to carry anywhere.\n\n</scene>\n\nDoes the new draft make the same error \u2014 does it assert something that contradicts what was established, in the way described? A draft that simply leaves the fact out does not make the error.\n\nAnswer with one JSON object and nothing else:\n{\"verdict\": \"reintroduced\" | \"consistent\" | \"not_present\", \"evidence\": \"<verbatim sentence from the new draft that decides it, or empty for not_present>\"}\n\n\"reintroduced\": the new draft contradicts the established fact.\n\"consistent\": the new draft states the fact and agrees with what was established.\n\"not_present\": the new draft does not touch the fact either way."
+    }
+   ]
+  }
+ },
+ "response": {
+  "model": "claude-opus-4-8",
+  "id": "msg_011CgVbmi3CRBXSuM1w1mW3i",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"verdict\": \"consistent\", \"evidence\": \"He could not hear the words. He never could. Only Nora could.\"}"
+   }
+  ],
+  "container": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+   "input_tokens": 2706,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 39,
+   "output_tokens_details": {
+    "thinking_tokens": 0
+   },
+   "service_tier": "standard",
+   "inference_geo": "global",
+   "speed": "standard"
+  },
+  "diagnostics": null
+ }
+}
