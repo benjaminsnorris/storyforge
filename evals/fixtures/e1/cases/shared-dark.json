@@ -1,0 +1,2440 @@
+{
+  "repo": "shared-dark",
+  "cases": [
+    {
+      "id": "shared-dark-001",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [
+        "WLD"
+      ],
+      "summary": "Bend to Portland is three hours (driven in two and a half) in no-response, but five hours (driven in four and a half) in phone-call and your-turn.",
+      "established": [
+        {
+          "scene": "no-response",
+          "path": "scenes/44.md",
+          "commit": "787b8908",
+          "quote": "Three hours. Bend to Portland. He drove it in two and a half."
+        },
+        {
+          "scene": "nineteen-days-2",
+          "path": "scenes/56.md",
+          "commit": "787b8908",
+          "quote": "The three hours between Portland and Bend sat in a different register now."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "phone-call",
+          "path": "scenes/90.md",
+          "commit": "787b8908",
+          "quote": "\"Five hours,\" he said."
+        },
+        {
+          "scene": "your-turn",
+          "path": "scenes/91.md",
+          "commit": "787b8908",
+          "quote": "Five hours. He drove them in four and a half, Rook in the passenger seat"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "c6190fb9",
+        "after": [
+          {
+            "scene": "phone-call",
+            "path": "scenes/90.md",
+            "commit": "c6190fb9",
+            "quote": "\"Two and a half hours,\" he said."
+          },
+          {
+            "scene": "your-turn",
+            "path": "scenes/91.md",
+            "commit": "c6190fb9",
+            "quote": "Three hours. He drove them in two and a half, Rook in the passenger seat"
+          },
+          {
+            "scene": "phone-call",
+            "path": "scenes/090.md",
+            "commit": "80d05441",
+            "quote": "\"Three hours,\" he said."
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "plan",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [
+        "a78ccf25"
+      ],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: continuity-audit \"Drive time\" (author notes pp. 235, 237)",
+      "confidence": "high",
+      "notes": "Root cause was scenes/scene-index.yaml (\"Hank drives to Portland. Five hours from Bend.\"). 80d0544 refined phone-call to \"Three hours\". prose-craft-tightening (a78ccf25) put \"Five hours\" back in phone-call; see the next case."
+    },
+    {
+      "id": "shared-dark-002",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [
+        "WLD"
+      ],
+      "summary": "A polish pass restored \"Five hours\" to phone-call after the drive had been fixed to three hours; no-response still says three.",
+      "established": [
+        {
+          "scene": "no-response",
+          "path": "scenes/no-response.md",
+          "commit": "2d176767",
+          "quote": "Three hours. Bend to Portland. He drove it in two and a half."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "phone-call",
+          "path": "scenes/phone-call.md",
+          "commit": "2d176767",
+          "quote": "\"Five hours,\" he said."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "40829ba5",
+        "after": [
+          {
+            "scene": "phone-call",
+            "path": "scenes/phone-call.md",
+            "commit": "40829ba5",
+            "quote": "\"Three hours,\" he said."
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "prose-craft-tightening",
+        "commit": "a78ccf25"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled",
+        "tool-introduced"
+      ],
+      "label_source": "166c6cc:working/annotations.json: phone-call \"Five hours\" -> \"Three hours\"",
+      "confidence": "high",
+      "notes": "Regression of shared-dark-001: a78ccf25 changed \"Three hours,\" back to \"Five hours,\". The author caught it in Bookshelf and fixed it by hand in 40829ba5."
+    },
+    {
+      "id": "shared-dark-003",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Hank writes the name \"Claire\" and the narration calls it four letters; Claire has six.",
+      "established": [
+        {
+          "scene": "driving-west",
+          "path": "scenes/9.md",
+          "commit": "787b8908",
+          "quote": "Claire. Four letters in careful print below the catalogue"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "name-surfaces",
+          "path": "scenes/7.md",
+          "commit": "787b8908",
+          "quote": "He wrote it on the legal pad, below the catalogue. Four letters in careful print."
+        },
+        {
+          "scene": "driving-west",
+          "path": "scenes/9.md",
+          "commit": "787b8908",
+          "quote": "Claire. Four letters in careful print below the catalogue"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "c6190fb9",
+        "after": [
+          {
+            "scene": "name-surfaces",
+            "path": "scenes/7.md",
+            "commit": "c6190fb9",
+            "quote": "He wrote it on the legal pad, below the catalogue. Six letters in careful print."
+          },
+          {
+            "scene": "driving-west",
+            "path": "scenes/9.md",
+            "commit": "c6190fb9",
+            "quote": "Claire. Six letters in careful print below the catalogue"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Letter count\" (author notes pp. 22, 26)",
+      "confidence": "high",
+      "notes": "The established fact is the name itself, quoted in the same sentence. Error present since the 03-10 initial draft."
+    },
+    {
+      "id": "shared-dark-004",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Building says Maren had four nights of dreams before the rescue; missing-persons and driving-west say three.",
+      "established": [
+        {
+          "scene": "building",
+          "path": "scenes/15.md",
+          "commit": "787b8908",
+          "quote": "The same concrete that had been under her knees in four nights of dreaming"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "missing-persons",
+          "path": "scenes/8.md",
+          "commit": "787b8908",
+          "quote": "Three nights of dreams had given her more than she wanted and less than she needed."
+        },
+        {
+          "scene": "missing-persons",
+          "path": "scenes/8.md",
+          "commit": "787b8908",
+          "quote": "The woman whose body Maren had been wearing for three nights at 2:47 in the morning."
+        },
+        {
+          "scene": "driving-west",
+          "path": "scenes/9.md",
+          "commit": "787b8908",
+          "quote": "the fine tremor of a man running on no sleep and three nights of someone else's memories"
+        },
+        {
+          "scene": "driving-west",
+          "path": "scenes/9.md",
+          "commit": "787b8908",
+          "quote": "he knew this because three nights ago he had checked her restraints"
+        }
+      ],
+      "fix": {
+        "status": "incomplete",
+        "commit": "c6190fb9",
+        "after": [
+          {
+            "scene": "missing-persons",
+            "path": "scenes/8.md",
+            "commit": "c6190fb9",
+            "quote": "Four nights of dreams had given her more than she wanted and less than she needed."
+          },
+          {
+            "scene": "driving-west",
+            "path": "scenes/9.md",
+            "commit": "c6190fb9",
+            "quote": "he knew this because four nights ago he had checked her restraints"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [
+        "f56db284"
+      ],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Dream-night count\" (author notes pp. 23, 27)",
+      "confidence": "high",
+      "notes": "Incomplete: twelve-minutes (scenes/16.md) kept \"Three nights, his hands had done someone else's work\" until the 04-07 redraft (b532b184). Regressed at HEAD by f56db284 (driving-west \"three nights of notes\"); see the unfixed driving-west case."
+    },
+    {
+      "id": "shared-dark-005",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "\"I want to go home\" is five words; the narration counts four.",
+      "established": [
+        {
+          "scene": "girl",
+          "path": "scenes/77.md",
+          "commit": "787b8908",
+          "quote": "\"I want to go home,\" the girl said."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "girl",
+          "path": "scenes/77.md",
+          "commit": "787b8908",
+          "quote": "Four words. The same four words Maren had heard"
+        }
+      ],
+      "fix": {
+        "status": "incomplete",
+        "commit": "c6190fb9",
+        "after": [
+          {
+            "scene": "girl",
+            "path": "scenes/77.md",
+            "commit": "c6190fb9",
+            "quote": "Five words. The same four words Maren had heard"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Word count\" (author note p. 203); 166c6cc:working/annotations.json: girl \"Four\" -> \"Five\" (twice)",
+      "confidence": "high",
+      "notes": "Incomplete: the fix changed only the first \"Four\"; \"The same four words\" survived. The author annotated both \"Four\"s again on 03-21; the scene was later rewritten."
+    },
+    {
+      "id": "shared-dark-006",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Four children were rescued (the chapter is \"Four Children\"); twenty-three-days-ii says the recovery saved six.",
+      "established": [
+        {
+          "scene": "four-children",
+          "path": "scenes/79.md",
+          "commit": "787b8908",
+          "quote": "Four children. The number settled into Maren's chest like a stone dropped into still water."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "twenty-three-days-ii",
+          "path": "scenes/83.md",
+          "commit": "787b8908",
+          "quote": "cannot say so because the recklessness saved six children."
+        },
+        {
+          "scene": "twenty-three-days-ii",
+          "path": "scenes/83.md",
+          "commit": "787b8908",
+          "quote": "a system that had recovered six children and needed the recovery to be clean"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "c6190fb9",
+        "after": [
+          {
+            "scene": "twenty-three-days-ii",
+            "path": "scenes/83.md",
+            "commit": "c6190fb9",
+            "quote": "cannot say so because the recklessness saved four children."
+          },
+          {
+            "scene": "twenty-three-days-ii",
+            "path": "scenes/83.md",
+            "commit": "c6190fb9",
+            "quote": "a system that had recovered four children and needed the recovery to be clean"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Child count\" (author note p. 216)",
+      "confidence": "high",
+      "notes": ""
+    },
+    {
+      "id": "shared-dark-007",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Maren bought insulated gloves in Duluth, but in property her hands are bare and she only has leather Portland gloves.",
+      "established": [
+        {
+          "scene": "iron-cold",
+          "path": "scenes/62.md",
+          "commit": "787b8908",
+          "quote": "Insulated gloves that would make her hands useless for anything precise."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "property",
+          "path": "scenes/72.md",
+          "commit": "787b8908",
+          "quote": "Maren's hands on the wheel were bare. She'd brought Portland gloves — leather, lined, fine for forty degrees and rain."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "c6190fb9",
+        "after": [
+          {
+            "scene": "property",
+            "path": "scenes/72.md",
+            "commit": "c6190fb9",
+            "quote": "She'd bought insulated gloves in Duluth — rated to minus twenty, the clerk had said"
+          },
+          {
+            "scene": "property",
+            "path": "scenes/072.md",
+            "commit": "80d05441",
+            "quote": "Maren's hands on the wheel wore the insulated gloves she'd bought in Duluth"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [
+        "6a323429"
+      ],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Gloves\" (author note p. 185)",
+      "confidence": "high",
+      "notes": "c6190fb kept the hands bare (gloves in the back seat); 80d0544 (author) put them on. The continuity-fixes pass 6a32342 reintroduced \"Portland leather\" in woodpile; see the tool-introduced gloves case."
+    },
+    {
+      "id": "shared-dark-008",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [
+        "PRM"
+      ],
+      "summary": "The Benitez motion was denied this week, yet the same scene has Maren planning to cite \"the Benitez precedent\", and arithmetic lists Benitez as winnable.",
+      "established": [
+        {
+          "scene": "deena",
+          "path": "scenes/88.md",
+          "commit": "787b8908",
+          "quote": "The Benitez motion denied on procedural grounds."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "deena",
+          "path": "scenes/88.md",
+          "commit": "787b8908",
+          "quote": "She could cite the Benitez precedent, challenge the evidentiary threshold"
+        },
+        {
+          "scene": "arithmetic",
+          "path": "scenes/92.md",
+          "commit": "787b8908",
+          "quote": "Benitez had a shot. Morrison had a shot."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "c6190fb9",
+        "after": [
+          {
+            "scene": "deena",
+            "path": "scenes/88.md",
+            "commit": "c6190fb9",
+            "quote": "She could cite the Thornton ruling, challenge the evidentiary threshold"
+          },
+          {
+            "scene": "arithmetic",
+            "path": "scenes/92.md",
+            "commit": "c6190fb9",
+            "quote": "Whitfield had a shot. Morrison had a shot."
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Case names\" (author notes pp. 230, 242)",
+      "confidence": "high",
+      "notes": ""
+    },
+    {
+      "id": "shared-dark-009",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Hank is waking in Baltimore, but the narration says he has not washed his hands \"since Baltimore\".",
+      "established": [
+        {
+          "scene": "next-target",
+          "path": "scenes/31.md",
+          "commit": "787b8908",
+          "quote": "clearing the mist that Baltimore breathes onto everything it touches"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "next-target",
+          "path": "scenes/31.md",
+          "commit": "787b8908",
+          "quote": "He did not wash his hands. He had not washed his hands since Baltimore."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "c6190fb9",
+        "after": [
+          {
+            "scene": "next-target",
+            "path": "scenes/31.md",
+            "commit": "c6190fb9",
+            "quote": "He had not washed his hands since before he'd slept — and he could not make himself do it now."
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Baltimore reference\" (author note p. 81)",
+      "confidence": "high",
+      "notes": ""
+    },
+    {
+      "id": "shared-dark-010",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [],
+      "summary": "In the interrogation Hank says \"I told you about her in Baltimore\" about Laura (and is surprised Maren knows the name), but no earlier scene has him mention Laura.",
+      "established": [],
+      "established_by_absence": "No Baltimore scene before the interrogation mentions Laura or an ex-wife (author note p. 119: \"no on-page conversation\"). The fix planted the line in keisha-argument.",
+      "contradicted": [
+        {
+          "scene": "interrogation-part-1",
+          "path": "scenes/47.md",
+          "commit": "787b8908",
+          "quote": "His brows lifted a fraction. Not evasion. Surprise that she knew the name."
+        },
+        {
+          "scene": "interrogation-part-1",
+          "path": "scenes/47.md",
+          "commit": "787b8908",
+          "quote": "\"I told you about her in Baltimore,\" he said."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "c6190fb9",
+        "after": [
+          {
+            "scene": "keisha-argument",
+            "path": "scenes/32.md",
+            "commit": "c6190fb9",
+            "quote": "Said nothing for a moment. Then: \"My ex-wife told me loving me was like loving a wall.\""
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Laura conversation\" (author note p. 119)",
+      "confidence": "high",
+      "notes": "The plant later made \"loving a wall\" appear three times; the author annotated pasta-and-wine with \"Third time. Seems almost like a mistake.\""
+    },
+    {
+      "id": "shared-dark-011",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [],
+      "summary": "Maren \"noted the past tense\" in Hank's answer about his sister, but his answer is in the present tense.",
+      "established": [
+        {
+          "scene": "interrogation-part-1",
+          "path": "scenes/47.md",
+          "commit": "787b8908",
+          "quote": "\"One sister. Rachel.\""
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "interrogation-part-1",
+          "path": "scenes/47.md",
+          "commit": "787b8908",
+          "quote": "She noted the past tense. Filed it. Did not follow it yet."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "c6190fb9",
+        "after": [
+          {
+            "scene": "interrogation-part-1",
+            "path": "scenes/47.md",
+            "commit": "c6190fb9",
+            "quote": "\"Had a sister. Rachel.\""
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Past tense\" (author note p. 118)",
+      "confidence": "high",
+      "notes": "Same-scene contradiction between dialogue and the POV character's observation of it."
+    },
+    {
+      "id": "shared-dark-012",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [],
+      "summary": "Hank told Maren about Laura in the interrogation, but the laura dream says Maren knows her name \"not told but deposited\" by the dream.",
+      "established": [
+        {
+          "scene": "interrogation-part-1",
+          "path": "scenes/47.md",
+          "commit": "787b8908",
+          "quote": "\"We married when I was twenty-eight. Divorced at thirty. Two years.\""
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "laura",
+          "path": "scenes/85.md",
+          "commit": "787b8908",
+          "quote": "Maren knows her name the way she knew Rachel's — not told but deposited"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "c6190fb9",
+        "after": [
+          {
+            "scene": "laura",
+            "path": "scenes/85.md",
+            "commit": "c6190fb9",
+            "quote": "Hank had mentioned her once, Baltimore"
+          },
+          {
+            "scene": "laura",
+            "path": "scenes/085.md",
+            "commit": "80d05441",
+            "quote": "Maren knows her from the interrogation"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Knowledge violations\", scene 85 (author note p. 229)",
+      "confidence": "high",
+      "notes": "80d0544 (author) replaced the c6190fb wording with an explicit reference to the interrogation."
+    },
+    {
+      "id": "shared-dark-013",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [],
+      "summary": "Hank has seen Maren's handwriting on her legal pad, but in deena it is \"handwriting he has never seen\".",
+      "established": [
+        {
+          "scene": "fells-point",
+          "path": "scenes/27.md",
+          "commit": "787b8908",
+          "quote": "A laptop open on the desk beside a legal pad — her handwriting, small and fast, filling half the page."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "deena",
+          "path": "scenes/88.md",
+          "commit": "787b8908",
+          "quote": "in handwriting he has never seen but recognizes — fast, angular"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "c6190fb9",
+        "after": [
+          {
+            "scene": "deena",
+            "path": "scenes/88.md",
+            "commit": "c6190fb9",
+            "quote": "the same handwriting from a dozen margin notes and case folders"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Knowledge violations\", scene 88 (author note p. 223)",
+      "confidence": "medium",
+      "notes": "Medium: the establishing quote is one of several places Hank sees her notes; it describes the handwriting as \"small and fast\" rather than \"angular\"."
+    },
+    {
+      "id": "shared-dark-014",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [
+        "WLD"
+      ],
+      "summary": "At the diner, before Hank has told her anything, Maren recognizes his hands as ones \"worn by the same man he'd been dreaming\", i.e. she knows he dreams the perpetrator.",
+      "established": [],
+      "established_by_absence": "This is the first meeting; no earlier scene tells Maren that Hank dreams from the perpetrator's side.",
+      "contradicted": [
+        {
+          "scene": "diner",
+          "path": "scenes/11.md",
+          "commit": "787b8908",
+          "quote": "Hands she'd felt on her shoulders in the dark, patient and steady and horrifying."
+        },
+        {
+          "scene": "diner",
+          "path": "scenes/11.md",
+          "commit": "787b8908",
+          "quote": "No. Not his. But worn by the same man he'd been dreaming."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "c6190fb9",
+        "after": [
+          {
+            "scene": "diner",
+            "path": "scenes/11.md",
+            "commit": "c6190fb9",
+            "quote": "But wrong — the wrongness was physical, a current of nausea under the recognition"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Knowledge violations\", scene 11 (author notes pp. 31, 32)",
+      "confidence": "medium",
+      "notes": ""
+    },
+    {
+      "id": "shared-dark-015",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [],
+      "summary": "Hank cooked carbonara in Maren's kitchen with her eggs, but later asks for eggs \"if you've got them\" as if he did not know.",
+      "established": [
+        {
+          "scene": "carbonara",
+          "path": "scenes/94.md",
+          "commit": "787b8908",
+          "quote": "\"I have eggs,\" she said."
+        },
+        {
+          "scene": "carbonara",
+          "path": "scenes/94.md",
+          "commit": "787b8908",
+          "quote": "He separated the eggs. Four yolks into a bowl"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "open-the-windows",
+          "path": "scenes/100.md",
+          "commit": "787b8908",
+          "quote": "\"If you've got them.\""
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "c6190fb9",
+        "after": [
+          {
+            "scene": "open-the-windows",
+            "path": "scenes/100.md",
+            "commit": "c6190fb9",
+            "quote": "\"You've got three left.\""
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Eggs\" (author note p. 263)",
+      "confidence": "medium",
+      "notes": "Medium: the line is a missed-knowledge beat rather than a hard contradiction."
+    },
+    {
+      "id": "shared-dark-016",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Hank wakes at 1:40 in friday-afternoon-the-leak and calls Maren at once, but her clock reads 2:47 when the phone rings in decision.",
+      "established": [
+        {
+          "scene": "friday-afternoon-the-leak",
+          "path": "scenes/070.md",
+          "commit": "42308917",
+          "quote": "The digital clock on the nightstand: 1:40."
+        },
+        {
+          "scene": "friday-afternoon-the-leak",
+          "path": "scenes/070.md",
+          "commit": "42308917",
+          "quote": "Hank reached for the phone and called Maren."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "decision",
+          "path": "scenes/071.md",
+          "commit": "42308917",
+          "quote": "The phone rang once and she was already on her feet."
+        },
+        {
+          "scene": "decision",
+          "path": "scenes/071.md",
+          "commit": "42308917",
+          "quote": "The digital clock on the nightstand read 2:47."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "0a598b25",
+        "after": [
+          {
+            "scene": "friday-afternoon-the-leak",
+            "path": "scenes/070.md",
+            "commit": "0a598b25",
+            "quote": "The digital clock on the nightstand: 2:47."
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "continuity-audit",
+        "commit": "c6190fb9"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled",
+        "tool-introduced"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Clock alignment\" (author note p. 183); 166c6cc:working/annotations.json: decision \"1:40 or 3:07? We already fixed this once.\"",
+      "confidence": "low",
+      "notes": "The continuity-audit pass c6190fb moved decision from 3:07 to 2:47 without touching scene 70. Part of the oscillating clock cluster: d10e04a later moved both back (1:07/1:40 and 3:07), so the correct clock churned; low confidence."
+    },
+    {
+      "id": "shared-dark-017",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Steen sets a 4:00 deadline (\"I want the property clean by four\") and in the same scene orders \"Everything out by three\".",
+      "established": [
+        {
+          "scene": "friday-afternoon-the-leak",
+          "path": "scenes/70.md",
+          "commit": "861317c1",
+          "quote": "We have until four. I want the property clean by four."
+        },
+        {
+          "scene": "decision",
+          "path": "scenes/71.md",
+          "commit": "861317c1",
+          "quote": "The property will be clean by four."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "friday-afternoon-the-leak",
+          "path": "scenes/70.md",
+          "commit": "861317c1",
+          "quote": "Today. Everything out by three."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "9bb01578",
+        "after": [
+          {
+            "scene": "friday-afternoon-the-leak",
+            "path": "scenes/70.md",
+            "commit": "9bb01578",
+            "quote": "Today. Everything out by four."
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [
+        "a8572fe2"
+      ],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"Deadline\" (author note p. 181)",
+      "confidence": "high",
+      "notes": "Fixed in the plan-6 pacing-overhaul pass. The Branch B Duluth redraft brought \"out by three\" back; see the next case."
+    },
+    {
+      "id": "shared-dark-018",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "After the fresh Duluth redraft, Steen again orders \"Everything out by three\" in the scene that says the property must be clean by four.",
+      "established": [
+        {
+          "scene": "friday-afternoon-the-leak",
+          "path": "scenes/friday-afternoon-the-leak.md",
+          "commit": "39e3e3de",
+          "quote": "The property must be clean by four."
+        },
+        {
+          "scene": "decision",
+          "path": "scenes/decision.md",
+          "commit": "39e3e3de",
+          "quote": "The property will be clean by four."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "friday-afternoon-the-leak",
+          "path": "scenes/friday-afternoon-the-leak.md",
+          "commit": "39e3e3de",
+          "quote": "\"Everything out by three,\" he says."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "fd3e02b4",
+        "after": [
+          {
+            "scene": "friday-afternoon-the-leak",
+            "path": "scenes/friday-afternoon-the-leak.md",
+            "commit": "fd3e02b4",
+            "quote": "\"Everything out by four,\" he says."
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "fresh Part 4 redraft from outline (Branch B)",
+        "commit": "a8572fe2"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Regression of the previous case. a8572fe2 merged 26 freshly generated Part 4 scenes (Claude co-authored); the per-scene Branch B commits are not on main."
+    },
+    {
+      "id": "shared-dark-019",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [
+        "PRM"
+      ],
+      "summary": "Hank finished the school assessment during the eleven days after Coos Bay, but in twenty-three-days-ii (months later) he reports finishing it now.",
+      "established": [
+        {
+          "scene": "eleven-days",
+          "path": "scenes/020.md",
+          "commit": "0118448e",
+          "quote": "Wednesday through Friday he finished the school assessment, submitted the retrofit recommendation"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "twenty-three-days-ii",
+          "path": "scenes/083.md",
+          "commit": "0118448e",
+          "quote": "\"Finished the assessment. Recommended retrofit."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "80d05441",
+        "after": [
+          {
+            "scene": "twenty-three-days-ii",
+            "path": "scenes/083.md",
+            "commit": "80d05441",
+            "quote": "\"Water treatment plant in La Pine. Foundation work's solid but the seismic bracing is forty years past code."
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [
+        "9fb9d307"
+      ],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "18c93cc:working/plans/revision-plan-6.yaml: \"School assessment\" (author note p. 217)",
+      "confidence": "high",
+      "notes": "part5-structural-compression (9fb9d307) reintroduced \"Hank finished the school retrofit assessment\" in twenty-three-days-ii; the Branch B merge (a8572fe2) rewrote it away."
+    },
+    {
+      "id": "shared-dark-020",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Maren and Hank share one motel room in Duluth, but in childrens-dreams he phones her from elsewhere.",
+      "established": [
+        {
+          "scene": "decision",
+          "path": "scenes/decision.md",
+          "commit": "ac921f6e",
+          "quote": "Hank had been on the other bed, boots still laced"
+        },
+        {
+          "scene": "friday-afternoon-the-leak",
+          "path": "scenes/friday-afternoon-the-leak.md",
+          "commit": "ac921f6e",
+          "quote": "Rook was on the floor between the beds"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "childrens-dreams",
+          "path": "scenes/childrens-dreams.md",
+          "commit": "ac921f6e",
+          "quote": "The phone was already lit on the nightstand. Hank's name on the screen."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "6a323429",
+        "after": [
+          {
+            "scene": "childrens-dreams",
+            "path": "scenes/childrens-dreams.md",
+            "commit": "6a323429",
+            "quote": "He turned toward her in the shared dark"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [
+        "a8572fe2"
+      ],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "166c6cc:working/annotations.json: childrens-dreams \"They're in the same motel room.\"",
+      "confidence": "high",
+      "notes": "6a32342 is on origin/storyforge/revise-20260323-2230; squash-merged to main as 166c6cc (PR #40). One of four room-sharing cases (author: \"either they are sharing a room or not. So far it's been both.\")."
+    },
+    {
+      "id": "shared-dark-021",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Maren and Hank share one motel room in Duluth, but in friday-scheduled she hears him \"from the next room\".",
+      "established": [
+        {
+          "scene": "decision",
+          "path": "scenes/decision.md",
+          "commit": "ac921f6e",
+          "quote": "Hank had been on the other bed, boots still laced"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "friday-scheduled",
+          "path": "scenes/friday-scheduled.md",
+          "commit": "ac921f6e",
+          "quote": "From the next room she could hear Hank's voice, low and indistinct"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "6a323429",
+        "after": [
+          {
+            "scene": "friday-scheduled",
+            "path": "scenes/friday-scheduled.md",
+            "commit": "6a323429",
+            "quote": "From the other bed she could hear Hank shift"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "166c6cc:working/annotations.json: friday-scheduled \"We have to make it clear—either they are sharing a room or not. So far it's been both.\"",
+      "confidence": "high",
+      "notes": "6a32342 is on the PR #40 branch (squash 166c6cc on main)."
+    },
+    {
+      "id": "shared-dark-022",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Maren and Hank have shared a motel room all week, but come-inside stands her between \"his room, her room\".",
+      "established": [
+        {
+          "scene": "decision",
+          "path": "scenes/decision.md",
+          "commit": "ac921f6e",
+          "quote": "Hank had been on the other bed, boots still laced"
+        },
+        {
+          "scene": "come-inside",
+          "path": "scenes/come-inside.md",
+          "commit": "ac921f6e",
+          "quote": "Eyes on the ceiling's water stain, the one shaped like a hand she'd been staring at for a week."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "come-inside",
+          "path": "scenes/come-inside.md",
+          "commit": "ac921f6e",
+          "quote": "She stood between the two motel doors — his room, her room, side by side."
+        },
+        {
+          "scene": "come-inside",
+          "path": "scenes/come-inside.md",
+          "commit": "ac921f6e",
+          "quote": "\"Come inside,\" she said. Her room, not his."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "6a323429",
+        "after": [
+          {
+            "scene": "come-inside",
+            "path": "scenes/come-inside.md",
+            "commit": "6a323429",
+            "quote": "the one they'd shared for a week"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [
+        "a8572fe2"
+      ],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "166c6cc:working/annotations.json: come-inside \"They've already been staying in the same room.\"",
+      "confidence": "high",
+      "notes": "Reintroduced by the Branch B Duluth redraft (a8572fe2) and fixed again in 10eaecc; see the connecting-door case."
+    },
+    {
+      "id": "shared-dark-023",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "After the fresh Duluth redraft, inside-riedel has them in the same bed, while same-architecture, decision and come-inside give them adjoining rooms with a connecting door.",
+      "established": [
+        {
+          "scene": "inside-riedel",
+          "path": "scenes/inside-riedel.md",
+          "commit": "acd884d4",
+          "quote": "Same bed — they've shared the room since the second night."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "same-architecture",
+          "path": "scenes/same-architecture.md",
+          "commit": "acd884d4",
+          "quote": "Maren was asleep in the next room, or wasn't. The connecting door was closed."
+        },
+        {
+          "scene": "decision",
+          "path": "scenes/decision.md",
+          "commit": "acd884d4",
+          "quote": "when Hank came through the connecting door with his phone still in his hand"
+        },
+        {
+          "scene": "come-inside",
+          "path": "scenes/come-inside.md",
+          "commit": "acd884d4",
+          "quote": "Side by side, the connecting door between them that they'd left unlocked all week."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "10eaeccf",
+        "after": [
+          {
+            "scene": "same-architecture",
+            "path": "scenes/same-architecture.md",
+            "commit": "10eaeccf",
+            "quote": "Maren was asleep behind him, or wasn't."
+          },
+          {
+            "scene": "decision",
+            "path": "scenes/decision.md",
+            "commit": "10eaeccf",
+            "quote": "when Hank sat up beside her with his phone still in his hand"
+          },
+          {
+            "scene": "iron-cold",
+            "path": "scenes/iron-cold.md",
+            "commit": "10eaeccf",
+            "quote": "far bed — two doubles"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "fresh Part 4 redraft from outline (Branch B)",
+        "commit": "a8572fe2"
+      },
+      "regressed_by": [
+        "7be8a1b3"
+      ],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Reintroduces the error the author annotated and 6a32342 fixed. The 04-15 \"redraft 51 scenes from corrected briefs\" pass (7be8a1b3) brought \"connecting door\" back again."
+    },
+    {
+      "id": "shared-dark-024",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "They drove to the property in Maren's rented Malibu, but come-inside has Hank driving his truck back.",
+      "established": [
+        {
+          "scene": "property",
+          "path": "scenes/property.md",
+          "commit": "ac921f6e",
+          "quote": "two people in a rented Malibu with a German shepherd and a gun they'd argued about"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "come-inside",
+          "path": "scenes/come-inside.md",
+          "commit": "ac921f6e",
+          "quote": "Hank drove. Hands at ten and two."
+        },
+        {
+          "scene": "come-inside",
+          "path": "scenes/come-inside.md",
+          "commit": "ac921f6e",
+          "quote": "The truck's engine ticked as it cooled."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "6a323429",
+        "after": [
+          {
+            "scene": "come-inside",
+            "path": "scenes/come-inside.md",
+            "commit": "6a323429",
+            "quote": "Maren drove. The Malibu's heater had died hours ago"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "166c6cc:working/annotations.json: come-inside \"They went in her car.\"",
+      "confidence": "high",
+      "notes": "6a32342 is on the PR #40 branch (squash 166c6cc on main)."
+    },
+    {
+      "id": "shared-dark-025",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Ostrowski is alive (Hank spoke to him that morning), but collision calls his voice \"a dead man's grammar\".",
+      "established": [
+        {
+          "scene": "call",
+          "path": "scenes/call.md",
+          "commit": "ac921f6e",
+          "quote": "He listened to Ostrowski breathe. Six breaths. Seven."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "collision",
+          "path": "scenes/collision.md",
+          "commit": "ac921f6e",
+          "quote": "nothing to catalogue that wouldn't come out in a dead man's grammar."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "6a323429",
+        "after": [
+          {
+            "scene": "collision",
+            "path": "scenes/collision.md",
+            "commit": "6a323429",
+            "quote": "a man's grammar that was not his own."
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "166c6cc:working/annotations.json: collision \"He's not dead\"",
+      "confidence": "high",
+      "notes": ""
+    },
+    {
+      "id": "shared-dark-026",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Hank has a full beard, but three scenes describe the scar along his jaw as visible.",
+      "established": [
+        {
+          "scene": "still-you",
+          "path": "scenes/still-you.md",
+          "commit": "ac921f6e",
+          "quote": "Close enough to see the silver threading his beard at the temples"
+        },
+        {
+          "scene": "room",
+          "path": "scenes/room.md",
+          "commit": "ac921f6e",
+          "quote": "The silver in the beard at the temples."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "after",
+          "path": "scenes/after.md",
+          "commit": "ac921f6e",
+          "quote": "The thin white line along his jaw that could have been shrapnel or a fall or a fight"
+        },
+        {
+          "scene": "still-you",
+          "path": "scenes/still-you.md",
+          "commit": "ac921f6e",
+          "quote": "the thin scar along his jaw she'd traced with her thumb in the dark."
+        },
+        {
+          "scene": "room",
+          "path": "scenes/room.md",
+          "commit": "ac921f6e",
+          "quote": "The thin scar along his jaw — she still does not know its origin."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "6a323429",
+        "after": [
+          {
+            "scene": "room",
+            "path": "scenes/room.md",
+            "commit": "6a323429",
+            "quote": "hidden under the beard but there, always there."
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "166c6cc:working/annotations.json: after \"Beard?\"; still-you \"Through his beard?\"; room \"Again, under the beard?\"",
+      "confidence": "medium",
+      "notes": "Medium: \"full dark beard\" is stated outright only in reference/character-bible.md; in prose the beard is mentioned without its extent."
+    },
+    {
+      "id": "shared-dark-027",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Maren is already standing at the table (she walked over in condiments), but relief opens with \"She stood.\"",
+      "established": [
+        {
+          "scene": "condiments",
+          "path": "scenes/condiments.md",
+          "commit": "ac921f6e",
+          "quote": "Walked to the table. Reached past him and moved the olive oil three inches to the left"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "relief",
+          "path": "scenes/relief.md",
+          "commit": "ac921f6e",
+          "quote": "She stood. Didn't let go."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "6a323429",
+        "after": [
+          {
+            "scene": "relief",
+            "path": "scenes/relief.md",
+            "commit": "6a323429",
+            "quote": "The distance between them collapsed from the width of the table to nothing"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "166c6cc:working/annotations.json: relief \"She was already standing—had walked over.\"",
+      "confidence": "medium",
+      "notes": "Medium: condiments never says she stays standing; the positional fact is implied."
+    },
+    {
+      "id": "shared-dark-028",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Steen walks off the porch to the van in woodpile, but in my-name-is he is still on the porch with his hands on the railing.",
+      "established": [
+        {
+          "scene": "woodpile",
+          "path": "scenes/woodpile.md",
+          "commit": "ac921f6e",
+          "quote": "Then Steen stepped off the porch and walked toward the van."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "my-name-is",
+          "path": "scenes/my-name-is.md",
+          "commit": "ac921f6e",
+          "quote": "He stood on the porch with his hands out of his vest pockets now, resting on the railing"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "6a323429",
+        "after": [
+          {
+            "scene": "woodpile",
+            "path": "scenes/woodpile.md",
+            "commit": "6a323429",
+            "quote": "Steen stood on the porch with his hands still in his vest pockets"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "166c6cc:working/annotations.json: woodpile \"But he hasn't left the porch yet\"; my-name-is \"we need to have him stay there and not walk off earlier\"",
+      "confidence": "high",
+      "notes": ""
+    },
+    {
+      "id": "shared-dark-029",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Maren is wearing her insulated gloves, but in woodpile and child she feels denim and bark \"under her palms\".",
+      "established": [
+        {
+          "scene": "property",
+          "path": "scenes/property.md",
+          "commit": "ac921f6e",
+          "quote": "Maren's hands on the wheel wore the insulated gloves she'd bought in Duluth"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "woodpile",
+          "path": "scenes/woodpile.md",
+          "commit": "ac921f6e",
+          "quote": "She pressed them against her thighs, denim rough under her palms"
+        },
+        {
+          "scene": "child",
+          "path": "scenes/child.md",
+          "commit": "ac921f6e",
+          "quote": "the woodpile's bark still rough against her palms"
+        }
+      ],
+      "fix": {
+        "status": "incomplete",
+        "commit": "6a323429",
+        "after": [
+          {
+            "scene": "woodpile",
+            "path": "scenes/woodpile.md",
+            "commit": "6a323429",
+            "quote": "denim rough even through the gloves"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "166c6cc:working/annotations.json: woodpile \"She still has gloves on\"; child \"Still has gloves\"",
+      "confidence": "high",
+      "notes": "Incomplete: child's \"bark still rough against her palms\" was not touched and is still in the squash 166c6cc. The same fix introduced a new glove error (\"the Portland leather useless\"); see the next case."
+    },
+    {
+      "id": "shared-dark-030",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "A continuity-fixes pass describes Maren's gloves as useless Portland leather, contradicting the insulated gloves she bought in Duluth and is wearing.",
+      "established": [
+        {
+          "scene": "property",
+          "path": "scenes/property.md",
+          "commit": "e946c208",
+          "quote": "Maren's hands on the wheel wore the insulated gloves she'd bought in Duluth"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "woodpile",
+          "path": "scenes/woodpile.md",
+          "commit": "e946c208",
+          "quote": "the Portland leather useless against the Minnesota December"
+        },
+        {
+          "scene": "child",
+          "path": "scenes/child.md",
+          "commit": "e946c208",
+          "quote": "gloved hands, the useless leather stiff with cold."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "abb17e99",
+        "after": [
+          {
+            "scene": "woodpile",
+            "path": "scenes/woodpile.md",
+            "commit": "abb17e99",
+            "quote": "even with the surplus gloves, the cold pushed through"
+          },
+          {
+            "scene": "child",
+            "path": "scenes/child.md",
+            "commit": "3568e6ae",
+            "quote": "She held out her arms. \"Give her to me.\""
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "continuity-fixes",
+        "commit": "6a323429"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "A fix-induced regression of shared-dark-007: the pass fixing the annotation \"She still has gloves on\" brought back the Portland gloves. Fixed during PR #40 review (abb17e99 woodpile, 3568e6ae child); all on origin/storyforge/revise-20260323-2230, squash 166c6cc on main."
+    },
+    {
+      "id": "shared-dark-031",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Maren took her personal days on Friday morning and drove to Coos Bay, but pewter-town has her driving down Friday afternoon and working the case on Saturday morning.",
+      "established": [
+        {
+          "scene": "missing-persons",
+          "path": "scenes/missing-persons.md",
+          "commit": "ac921f6e",
+          "quote": "Friday morning, laptop open on the kitchen table, coffee going cold beside it."
+        },
+        {
+          "scene": "missing-persons",
+          "path": "scenes/missing-persons.md",
+          "commit": "ac921f6e",
+          "quote": "\"It's Maren. I need to take my personal days. Starting today.\""
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "pewter-town",
+          "path": "scenes/pewter-town.md",
+          "commit": "ac921f6e",
+          "quote": "She'd driven down Friday afternoon"
+        },
+        {
+          "scene": "pewter-town",
+          "path": "scenes/pewter-town.md",
+          "commit": "ac921f6e",
+          "quote": "Saturday morning she spread the police report across the motel bed"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "6a323429",
+        "after": [
+          {
+            "scene": "pewter-town",
+            "path": "scenes/pewter-town.md",
+            "commit": "6a323429",
+            "quote": "She'd driven down Friday — south through the valley after she'd packed and lied to Carolyn"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "166c6cc:working/annotations.json: pewter-town \"This all needs to happen Friday.\"",
+      "confidence": "medium",
+      "notes": "Medium: the author also judged the day-count against the diner scene at dusk; the pair here is the Friday-morning departure vs the Saturday-morning read."
+    },
+    {
+      "id": "shared-dark-032",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [
+        "WLD"
+      ],
+      "summary": "Maren surveys the route in daylight and photographs the \"dead streetlight\" on Seventh; a burned-out light cannot be seen by day.",
+      "established": [
+        {
+          "scene": "pewter-town",
+          "path": "scenes/pewter-town.md",
+          "commit": "ac921f6e",
+          "quote": "Saturday morning she spread the police report across the motel bed"
+        },
+        {
+          "scene": "pewter-town",
+          "path": "scenes/pewter-town.md",
+          "commit": "ac921f6e",
+          "quote": "She pulled over and photographed each one."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "pewter-town",
+          "path": "scenes/pewter-town.md",
+          "commit": "ac921f6e",
+          "quote": "The stop sign on Seventh with its dead streetlight and its view of nothing."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "6a323429",
+        "after": [
+          {
+            "scene": "pewter-town",
+            "path": "scenes/pewter-town.md",
+            "commit": "6a323429",
+            "quote": "Marie also mentioned the streetlight on the corner of Seventh had been out for weeks"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled"
+      ],
+      "label_source": "166c6cc:working/annotations.json: pewter-town \"Again, dead streetlight would not be apparent in the day.\"",
+      "confidence": "medium",
+      "notes": "Medium: the establishing side is that the survey happens by day (the scene is set in the morning); the fix sources the fact from Marie."
+    },
+    {
+      "id": "shared-dark-033",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Claire was rescued in November and your-turn is set in January, but your-turn says she is back at work \"seven months after rescue\".",
+      "established": [
+        {
+          "scene": "waking-maren",
+          "path": "scenes/waking-maren.md",
+          "commit": "26789ed9",
+          "quote": "she stood in her kitchen at 2:47 in the morning on a Thursday in November"
+        },
+        {
+          "scene": "your-turn",
+          "path": "scenes/your-turn.md",
+          "commit": "26789ed9",
+          "quote": "the flat, low gray of January in Oregon"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "your-turn",
+          "path": "scenes/your-turn.md",
+          "commit": "26789ed9",
+          "quote": "Back on nights. Seven months after rescue."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "222ae9bf",
+        "after": [
+          {
+            "scene": "your-turn",
+            "path": "scenes/your-turn.md",
+            "commit": "222ae9bf",
+            "quote": "Back on nights. Nearly three months after rescue"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "plan",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "reference/continuity-tracker.md said \"Claire Renaud confirmed back on night rotation at Bay Area Hospital seven months after rescue\"; rewrite-weak-mid-scenes (a4f17f92) wrote it into prose from the tracker."
+    },
+    {
+      "id": "shared-dark-034",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Madison is sixteen (Shannon's student) in watching-ostrowski, but \"just turned thirteen\" in call.",
+      "established": [
+        {
+          "scene": "watching-ostrowski",
+          "path": "scenes/watching-ostrowski.md",
+          "commit": "b9ba79d3",
+          "quote": "This one is for Madison. Sixteen. Shannon's student."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "call",
+          "path": "scenes/call.md",
+          "commit": "b9ba79d3",
+          "quote": "Madison just turned thirteen."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "8375d7a3",
+        "after": [
+          {
+            "scene": "call",
+            "path": "scenes/call.md",
+            "commit": "8375d7a3",
+            "quote": "Madison is sixteen."
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "write (04-07 full redraft)",
+        "commit": "f084fdd6"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "The surrounding Madison/Shannon/Brianna identities are still contradictory at HEAD; see the two unfixed cases."
+    },
+    {
+      "id": "shared-dark-035",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Rook travels with Hank (in Bend), but phone-call puts Rook at the foot of the bed in Maren's Portland apartment.",
+      "established": [
+        {
+          "scene": "no-response",
+          "path": "scenes/no-response.md",
+          "commit": "b9ba79d3",
+          "quote": "Rook was asleep at the foot of the bed, her breathing slow and even"
+        },
+        {
+          "scene": "no-response",
+          "path": "scenes/no-response.md",
+          "commit": "b9ba79d3",
+          "quote": "Rook settled on the passenger seat and put her chin on the center console"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "phone-call",
+          "path": "scenes/phone-call.md",
+          "commit": "b9ba79d3",
+          "quote": "Rook's breathing was the only sound in the apartment, slow and even from the foot of the bed."
+        },
+        {
+          "scene": "phone-call",
+          "path": "scenes/phone-call.md",
+          "commit": "b9ba79d3",
+          "quote": "Rook shifted at the foot of the bed, tags clinking once."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "8375d7a3",
+        "after": [
+          {
+            "scene": "phone-call",
+            "path": "scenes/phone-call.md",
+            "commit": "8375d7a3",
+            "quote": "Outside, a car passed on Hawthorne, headlights crossing her ceiling."
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "write (04-07 full redraft)",
+        "commit": "ce6ad7e1"
+      },
+      "regressed_by": [
+        "7be8a1b3"
+      ],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "no-response is Hank's Bend apartment and drive; phone-call is Maren alone in Portland. \"redraft 51 scenes from corrected briefs\" (7be8a1b3) put Rook back in Maren's apartment (\"Rook's eyes tracking her from the doorway\"); 9fbb07e1 redrafted it away."
+    },
+    {
+      "id": "shared-dark-036",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "REL",
+      "secondary_codes": [
+        "TIM"
+      ],
+      "summary": "Maren and Margaret built their relationship on the Ramsey case three years ago (marens-network), but fells-point says they \"overlapped on a trafficking referral last year\".",
+      "established": [
+        {
+          "scene": "marens-network",
+          "path": "scenes/marens-network.md",
+          "commit": "39e3e3de",
+          "quote": "They'd built their working relationship on the Ramsey case three years ago"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "fells-point",
+          "path": "scenes/fells-point.md",
+          "commit": "39e3e3de",
+          "quote": "We overlapped on a trafficking referral last year."
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "fd3e02b4",
+        "after": [
+          {
+            "scene": "fells-point",
+            "path": "scenes/fells-point.md",
+            "commit": "fd3e02b4",
+            "quote": "We worked together three years ago on a trafficking case — the Ramsey case"
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "The survey says this fix left research.md's \"two years back\" in place; at fd3e02b research.md does not mention Ramsey, and the \"two years back\" line at HEAD was written later (when fells-point and marens-network no longer mention Ramsey), so this case is recorded as fixed."
+    },
+    {
+      "id": "shared-dark-037",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "KNO",
+      "secondary_codes": [
+        "TIM"
+      ],
+      "summary": "Maren tells Hank she sat across from him in a Fells Point diner while he described Ostrowski's fire pattern, and cites how he held the weapon in Duluth; she was not present for the Ostrowski call, and Duluth has not happened yet.",
+      "established": [
+        {
+          "scene": "call",
+          "path": "scenes/call.md",
+          "commit": "9cc7e355",
+          "quote": "He listened to Ostrowski breathe. Six breaths. Seven."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "theory",
+          "path": "scenes/theory.md",
+          "commit": "9cc7e355",
+          "quote": "\"I sat across from you in that diner in Fells Point and you described Ostrowski's fire pattern like a site assessment."
+        },
+        {
+          "scene": "theory",
+          "path": "scenes/theory.md",
+          "commit": "9cc7e355",
+          "quote": "And in Duluth — the way you held that weapon wasn't trained.\""
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "93549398",
+        "after": [
+          {
+            "scene": "theory",
+            "path": "scenes/theory.md",
+            "commit": "93549398",
+            "quote": "\"You told me about the call you made to Ostrowski."
+          }
+        ]
+      },
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "theory-as-dialogue",
+        "commit": "23491785"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "theory is seq 47 (Part 3, Portland); the lodge and the weapon are Part 4. The call scene is Hank alone in the motel. Introduced the same day by a dialogue-rewrite pass."
+    },
+    {
+      "id": "shared-dark-038",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "Maren's shoes are on as she waits on the bed, but when she stands her feet are \"cold through her socks\".",
+      "established": [
+        {
+          "scene": "decision",
+          "path": "scenes/decision.md",
+          "commit": "b1edfa59",
+          "quote": "Her shoes were on."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "decision",
+          "path": "scenes/decision.md",
+          "commit": "b1edfa59",
+          "quote": "Maren's feet found the floor — cold through her socks"
+        }
+      ],
+      "fix": {
+        "status": "fixed",
+        "commit": "a8572fe2",
+        "after": [],
+        "rewrite": true
+      },
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "somatic-vocabulary-diversification",
+        "commit": "26789ed9"
+      },
+      "regressed_by": [
+        "cb6d473f"
+      ],
+      "subsets": [
+        "author-labeled",
+        "tool-introduced"
+      ],
+      "label_source": "166c6cc:working/annotations.json: decision \"We just said her shoes were on.\"",
+      "confidence": "high",
+      "notes": "Never fixed directly: the Branch B Duluth redraft (a8572fe2) rewrote decision and the line went away, so fix.after is empty. \"Polish: upstream brief fixes\" (cb6d473f) reintroduced it on 04-15; f56db284 rewrote it away again."
+    },
+    {
+      "id": "shared-dark-039",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "PHY",
+      "secondary_codes": [],
+      "summary": "In building (Maren's dreams) Claire is on her knees on the concrete; in claire, Maren finds her zip-tied to a metal chair.",
+      "established": [
+        {
+          "scene": "building",
+          "path": "scenes/building.md",
+          "commit": "0eaa3867",
+          "quote": "On her knees on the concrete. Hood over her face."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "claire",
+          "path": "scenes/claire.md",
+          "commit": "0eaa3867",
+          "quote": "Her phone found a shape on a metal chair fifteen feet in."
+        },
+        {
+          "scene": "claire",
+          "path": "scenes/claire.md",
+          "commit": "0eaa3867",
+          "quote": "Claire was free of the chair and she pitched forward"
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": []
+      },
+      "introduced_by": {
+        "kind": "plan",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "author-labeled",
+        "unfixed-at-head"
+      ],
+      "label_source": "166c6cc:working/annotations.json: claire \"Not in a chair—kneeling\"",
+      "confidence": "high",
+      "notes": "reference/character-bible.md still says \"Zip-tied to a metal chair\", so brief-driven redrafts keep regenerating it. 6a32342 only changed \"crouched\" to \"knelt\"."
+    },
+    {
+      "id": "shared-dark-040",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Maren dreamed Claire's captivity for four nights, but claire says she heard Claire \"through eleven nights of dreaming\".",
+      "established": [
+        {
+          "scene": "building",
+          "path": "scenes/building.md",
+          "commit": "0eaa3867",
+          "quote": "She knew these things because she had been inside this building every night for four nights."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "claire",
+          "path": "scenes/claire.md",
+          "commit": "0eaa3867",
+          "quote": "the sound Maren had heard through eleven nights of dreaming"
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": []
+      },
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "naturalness (upstream brief fixes)",
+        "commit": "f56db284"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Conflates Claire's eleven nights of captivity with Maren's four nights of dreams."
+    },
+    {
+      "id": "shared-dark-041",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Claire's captivity length: missing-persons already says eleven days on Friday morning, pewter-town (later) and the diner say nine, and claire, at the rescue, says both \"nine days\" and \"eleven nights\".",
+      "established": [
+        {
+          "scene": "pewter-town",
+          "path": "scenes/pewter-town.md",
+          "commit": "0eaa3867",
+          "quote": "Claire had been gone nine days"
+        },
+        {
+          "scene": "diner",
+          "path": "scenes/diner.md",
+          "commit": "0eaa3867",
+          "quote": "\"Claire Renaud,\" she said. \"Thirty-four. ER nurse. Missing nine days.\""
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "missing-persons",
+          "path": "scenes/missing-persons.md",
+          "commit": "0eaa3867",
+          "quote": "Eleven days in that building."
+        },
+        {
+          "scene": "claire",
+          "path": "scenes/claire.md",
+          "commit": "0eaa3867",
+          "quote": "the same indifferent rhythm it had kept for all nine days and all eleven nights"
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": []
+      },
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "naturalness (upstream brief fixes)",
+        "commit": "f56db284"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "medium",
+      "notes": "Medium: which count is right is itself unsettled (the bible says \"Held for nine days\"); the error is that the count runs backwards (eleven before nine) and that nine days and eleven nights cannot both hold. f56db284 wrote the claire line."
+    },
+    {
+      "id": "shared-dark-042",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TIM",
+      "secondary_codes": [],
+      "summary": "Maren has dreamed four nights when Hank leaves for the coast, but driving-west says the legal pad holds \"three nights of notes\".",
+      "established": [
+        {
+          "scene": "building",
+          "path": "scenes/building.md",
+          "commit": "0eaa3867",
+          "quote": "every night for four nights"
+        },
+        {
+          "scene": "twelve-minutes",
+          "path": "scenes/twelve-minutes.md",
+          "commit": "0eaa3867",
+          "quote": "Four nights of someone else's hands on this door"
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "driving-west",
+          "path": "scenes/driving-west.md",
+          "commit": "0eaa3867",
+          "quote": "The legal pad with three nights of notes went into the glove box."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": []
+      },
+      "introduced_by": {
+        "kind": "tool",
+        "pass": "naturalness (upstream brief fixes)",
+        "commit": "f56db284"
+      },
+      "regressed_by": [],
+      "subsets": [
+        "tool-introduced",
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Regresses the plan-6 four-nights decision (shared-dark-004)."
+    },
+    {
+      "id": "shared-dark-043",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [
+        "REL"
+      ],
+      "summary": "Shannon is a second-floor tenant who works a warehouse shift (keisha-argument), a third-grade teacher (call), and a daycare child (research).",
+      "established": [
+        {
+          "scene": "keisha-argument",
+          "path": "scenes/keisha-argument.md",
+          "commit": "0eaa3867",
+          "quote": "There's a woman on the second floor. Shannon. She works a warehouse shift, leaves at 5:15."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "call",
+          "path": "scenes/call.md",
+          "commit": "0eaa3867",
+          "quote": "Shannon teaches third grade at Hampstead Hill."
+        },
+        {
+          "scene": "research",
+          "path": "scenes/research.md",
+          "commit": "0eaa3867",
+          "quote": "Shannon and Brianna sharing the easel."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": []
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "Part of the Madison/Shannon/Brianna tangle the survey lists as live at HEAD."
+    },
+    {
+      "id": "shared-dark-044",
+      "repo": "shared-dark",
+      "level": "prose",
+      "code": "TRT",
+      "secondary_codes": [],
+      "summary": "Madison is a woman tenant on the third floor (keisha-argument), sixteen (call), and a daycare child (research).",
+      "established": [
+        {
+          "scene": "keisha-argument",
+          "path": "scenes/keisha-argument.md",
+          "commit": "0eaa3867",
+          "quote": "And a woman on the third floor, Madison, with a fire escape that's rusted through."
+        }
+      ],
+      "established_by_absence": "",
+      "contradicted": [
+        {
+          "scene": "call",
+          "path": "scenes/call.md",
+          "commit": "0eaa3867",
+          "quote": "Madison is sixteen."
+        },
+        {
+          "scene": "research",
+          "path": "scenes/research.md",
+          "commit": "0eaa3867",
+          "quote": "Madison's turn with the blocks."
+        }
+      ],
+      "fix": {
+        "status": "unfixed",
+        "commit": "",
+        "after": []
+      },
+      "introduced_by": {
+        "kind": "unknown",
+        "pass": "",
+        "commit": ""
+      },
+      "regressed_by": [],
+      "subsets": [
+        "unfixed-at-head"
+      ],
+      "label_source": "",
+      "confidence": "high",
+      "notes": "call's \"Madison is sixteen\" is the 8375d7a fix of an earlier error (shared-dark-034); the rest of the book moved on without it."
+    }
+  ]
+}

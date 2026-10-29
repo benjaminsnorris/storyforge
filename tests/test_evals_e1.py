@@ -57,6 +57,9 @@ def test_valid_case_has_no_problems():
     ({'subsets': ['unfixed-at-head']}, 'must agree'),
     ({'regressed_by': ['HEAD']}, 'regressed_by'),
     ({'confidence': 'sure'}, 'confidence'),
+    ({'fix': {'status': 'fixed', 'commit': 'def5678', 'after': []}}, 'must set fix.rewrite'),
+    ({'fix': {'status': 'fixed', 'commit': 'def5678', 'after': [], 'rewrite': 'yes'}}, 'true or false'),
+    ({'related_cases': 'book-002'}, 'related_cases must be'),
 ])
 def test_each_rule(changes, fragment):
     problems = e1.validate_case(_case(**changes))
@@ -65,6 +68,16 @@ def test_each_rule(changes, fragment):
 
 def test_absence_case_is_valid():
     assert e1.validate_case(_case(established=[], established_by_absence='never told')) == []
+
+
+def test_rewrite_fix_needs_no_after_spans():
+    assert e1.validate_case(_case(fix={'status': 'fixed', 'commit': 'def5678',
+                                       'after': [], 'rewrite': True})) == []
+
+
+def test_related_case_must_exist():
+    problems = e1.validate_corpus([_case(related_cases=['book-009'])])
+    assert any("'book-009' does not exist" in p for p in problems)
 
 
 def test_duplicate_ids_reported():
@@ -117,6 +130,8 @@ def test_verify_quotes(repo):
     missing = _case(**{**good, 'contradicted': [{**span, 'path': 'scenes/91.md'}]})
     assert 'quote not found' in e1.verify_quotes([wrong], str(root))[0]
     assert 'does not exist' in e1.verify_quotes([missing], str(root))[0]
+    ghost = _case(**{**good, 'regressed_by': ['deadbee']})
+    assert 'deadbee does not exist' in e1.verify_quotes([ghost], str(root))[0]
     assert 'not cloned' in e1.verify_quotes([_case(repo='gone', id='gone-001')], str(root))[0]
 
 

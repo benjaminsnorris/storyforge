@@ -17,7 +17,9 @@ A case (see ``evals/e1/FORMAT.md`` for the labeling guide)::
       "established": [<span>, ...],        # empty only with established_by_absence
       "established_by_absence": "",        # KNO cases: why the earlier scenes establish a gap
       "contradicted": [<span>, ...],       # at least one
-      "fix": {"status": "fixed", "commit": "<sha>", "after": [<span>, ...]},
+      "fix": {"status": "fixed", "commit": "<sha>", "after": [<span>, ...],
+              "rewrite": false},             # true: the error left in a wholesale rewrite, no targeted edit
+      "related_cases": [],                 # e.g. the regression case of this error, and back
       "introduced_by": {"kind": "plan", "pass": "", "commit": ""},
       "regressed_by": [],                  # commits that later reintroduced the error
       "subsets": ["author-labeled"],
@@ -52,7 +54,7 @@ HOLDOUT_FRACTION = 0.2
 ERROR_CODES = ('PHY', 'TIM', 'KNO', 'REL', 'TRT', 'WLD', 'PRM', 'VOI')
 LEVELS = ('prose', 'csv')
 FIX_STATUSES = ('fixed', 'incomplete', 'unfixed')
-INTRODUCED_KINDS = ('author', 'plan', 'tool', 'unknown')
+INTRODUCED_KINDS = ('draft', 'author', 'plan', 'tool', 'unknown')
 SUBSETS = ('author-labeled', 'tool-introduced', 'unfixed-at-head')
 CONFIDENCES = ('high', 'medium', 'low')
 _SHA = re.compile(r'^[0-9a-f]{7,40}$')
@@ -142,6 +144,13 @@ def validate_case(case: dict) -> list[str]:
             bad('a fixed or incomplete case needs fix.commit')
         for i, span in enumerate(fix.get('after', [])):
             p.extend(f'{cid}: {m}' for m in _span_problems(f'fix.after[{i}]', span))
+        if not fix.get('after') and not fix.get('rewrite'):
+            bad('a fix with no fix.after spans must set fix.rewrite (the error left in a rewrite)')
+    if 'rewrite' in fix and not isinstance(fix['rewrite'], bool):
+        bad('fix.rewrite must be true or false')
+    related = case.get('related_cases', [])
+    if not isinstance(related, list) or not all(isinstance(r, str) for r in related):
+        bad('related_cases must be a list of case ids')
 
     introduced = case.get('introduced_by')
     if not isinstance(introduced, dict) or introduced.get('kind') not in INTRODUCED_KINDS:
@@ -176,6 +185,10 @@ def validate_corpus(cases: list[dict]) -> list[str]:
         problems.extend(validate_case(case))
     counts = Counter(c.get('id') for c in cases)
     problems.extend(f'{cid}: duplicate id' for cid, n in counts.items() if n > 1)
+    for case in cases:
+        for other in case.get('related_cases', []) if isinstance(case.get('related_cases'), list) else []:
+            if other not in counts:
+                problems.append(f'{case.get("id")}: related case {other!r} does not exist')
     return problems
 
 
@@ -209,6 +222,10 @@ def verify_quotes(cases: list[dict], root: str | None = None) -> list[str]:
         spans = [('established', s) for s in case.get('established', [])]
         spans += [('contradicted', s) for s in case.get('contradicted', [])]
         spans += [('fix.after', s) for s in (case.get('fix') or {}).get('after', [])]
+        for sha in case.get('regressed_by', []) + [(case.get('fix') or {}).get('commit') or '']:
+            if sha and subprocess.run(['git', '-C', repo_dir, 'cat-file', '-e', f'{sha}^{{commit}}'],
+                                      capture_output=True).returncode != 0:
+                problems.append(f'{case["id"]}: commit {sha} does not exist in {case["repo"]}')
         for where, span in spans:
             text = _show(repo_dir, span.get('commit', ''), span.get('path', ''), cache)
             if text is None:

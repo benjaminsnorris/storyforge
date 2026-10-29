@@ -40,6 +40,11 @@ second code only when two genuinely break.
   Record every mapping you rely on in `evals/fixtures/e1/id-maps/<repo>.csv`
   (`old_path|slug|commit|method|notes`, pipe-delimited; `method` is `rename`
   when git's rename detection gave it, `content` when you matched by text).
+- Prefer commits on `main`. A commit reachable only from a side branch is
+  allowed (the verifier checks it exists) but say so in `notes`, since a
+  main-only clone loses it.
+- `git log -S` skips merge commits; add `-m` when an error may have come back
+  through a merge.
 - Restrict history searches to scene prose (`git log -S'...' -- scenes/`):
   `manuscript/`, builds, and backups duplicate the text and bury the signal.
 - A knowledge case whose "established" side is an absence (nothing earlier
@@ -50,7 +55,14 @@ second code only when two genuinely break.
 
 - `fix.status`: `fixed`; `incomplete` (the fix left part of the error in
   place — say what in `notes`); `unfixed` (still contradicted at HEAD).
-- `introduced_by.kind`: `author` (the author wrote it), `plan` (a wrong
+- `fix.rewrite: true` when the error disappeared in a wholesale scene
+  rewrite rather than a targeted edit (then `fix.after` may be empty). A fix
+  spread over several commits: name the main one in `fix.commit` and give each
+  `fix.after` span its own commit.
+- `related_cases`: link a regression case to the original error's case (both
+  ways), or two cases that share a cause.
+- `introduced_by.kind`: `draft` (written in the first draft, author or
+  `storyforge write` unknown), `author` (a later author edit), `plan` (a wrong
   brief/bible/tracker that the prose followed), `tool` (a Storyforge pass
   wrote it — set `pass` to the pass name and `commit`), or `unknown`.
 - `regressed_by`: commits that reintroduced an error after it was fixed.
