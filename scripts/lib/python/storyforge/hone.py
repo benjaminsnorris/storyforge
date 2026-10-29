@@ -462,7 +462,7 @@ def _domain_rules(domain: str) -> str:
 - A rewording of a fact already in the registry maps to its id; a reference stating two facts maps to both (`N | id1;id2`)""",
         'physical-states': """- NEW fields: `N | NEW | id | character | description | category | action_gating`
 - id: kebab-case slug scoped to the character (e.g., broken-arm-marcus, has-compass-elena)
-- character: the character's id from the Character Registry (e.g., marcus-hale, not Marcus Hale)
+- character: the character's id from the Character Registry (e.g., marcus-hale, not Marcus Hale): the one the state happens to, who is normally among those present in the scene where it begins
 - description: concise, prose-usable description (under 20 words)
 - category: injury, equipment, ability, appearance, or fatigue
 - action_gating: true if this state constrains what the character can physically do, false otherwise
@@ -495,11 +495,21 @@ def build_mapping_prompt(domain: str, ref_dir: str, batch: list[dict],
     registry = [r for r in _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
                 if r.get('id')]
     registry_text = '\n'.join(_registry_line(domain, r) for r in registry) or '(empty)'
+    present = {}
+    if domain == 'physical-states':  # who could own the state (governor d7e98f3)
+        from storyforge.elaborate import present_in_scene
+        scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+        intent = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+        present = {sid: sorted(present_in_scene(scenes[sid], intent.get(sid, {})))
+                   for sid in scenes}
     refs = []
     for i, ref in enumerate(batch, 1):
         text = f'{ref["type"]}:{ref["text"]}' if ref.get('type') else ref['text']
         used = ref['scenes'][:3]
-        refs.append(f'{i}. {text}' + (f'  [scenes: {", ".join(used)}]' if used else ''))
+        line = f'{i}. {text}' + (f'  [scenes: {", ".join(used)}]' if used else '')
+        if used and present.get(used[0]):
+            line += f'  [present in {used[0]}: {", ".join(present[used[0]])}]'
+        refs.append(line)
 
     sections = [f'## {noun[0].upper() + noun[1:]} Registry\n\n{registry_text}']
     if domain == 'physical-states':
@@ -2706,9 +2716,13 @@ def propagate_physical_states(ref_dir: str, dry_run: bool = False) -> dict:
         ref_dir: Path to the reference/ directory.
         dry_run: If True, report what would change without writing.
 
+    A state whose character is known not to be present in its acquired scene
+    is not propagated; its id is listed in ``refused`` for the caller to report.
+
     Returns:
-        Dict with states_propagated, scenes_updated, changes.
+        Dict with states_propagated, scenes_updated, changes, refused.
     """
+    from storyforge.elaborate import state_owner_absent
     registry_path = os.path.join(ref_dir, 'physical-states.csv')
     scenes_path = os.path.join(ref_dir, 'scenes.csv')
     intent_path = os.path.join(ref_dir, 'scene-intent.csv')
@@ -2731,6 +2745,7 @@ def propagate_physical_states(ref_dir: str, dry_run: bool = False) -> dict:
 
     changes = []
     states_propagated = set()
+    refused = []
 
     for state in registry:
         state_id = state.get('id', '').strip()
@@ -2739,6 +2754,11 @@ def propagate_physical_states(ref_dir: str, dry_run: bool = False) -> dict:
         resolves = state.get('resolves', '').strip()
 
         if not state_id or not acquired or acquired not in seq_index:
+            continue
+        # Spreading a state its owner isn't present to acquire would carry a
+        # misattribution into every later scene (governor d7e98f3)
+        if state_owner_absent(state, scenes_map, intent_map):
+            refused.append(state_id)
             continue
 
         start_idx = seq_index[acquired]
@@ -2803,6 +2823,7 @@ def propagate_physical_states(ref_dir: str, dry_run: bool = False) -> dict:
         'states_propagated': len(states_propagated),
         'scenes_updated': scenes_updated,
         'changes': changes,
+        'refused': refused,
     }
 
 

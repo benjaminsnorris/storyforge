@@ -373,6 +373,9 @@ def _run_gaps_domain(ref_dir: str, project_dir: str,
     prop = propagate_physical_states(ref_dir, dry_run=dry_run)
     log(f'  Physical state propagation: {prop["states_propagated"]} states '
         f'across {prop["scenes_updated"]} scenes ({len(prop["changes"])} field updates)')
+    if prop['refused']:
+        log(f'  WARNING: not propagated, because the character is not on stage where '
+            f'the state is acquired (check its character): {", ".join(prop["refused"])}')
 
     if dry_run:
         return
