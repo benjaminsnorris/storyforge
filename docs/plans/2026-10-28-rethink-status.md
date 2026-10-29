@@ -13,8 +13,9 @@ Last updated 2026-10-28, at v1.80.0. Start here when resuming the rethink in a n
 | 2 E1 corpus | done: 144 cases (130 prose), 30 held out | #340 |
 | 3 E2 / E7 / E8 | done: E2 Carol (evals-56), E2 on E1, E7 Carol, E8 three pass families | #341, #342, #343, #344, #346 |
 | 4 E3 / E5 | done | #346 |
-| — E4 / E6 | **not started**: needs a budget decision (below) | |
-| 5 Phase 1 | in progress: models (runtime tier resolution, thinking allowance), duplicate-`seq` check done; rest of the bug checklist, structured outputs, warn-and-continue → halt to go | v1.80.0 PR |
+| — E4 | done (overnight): shared-dark Act 1 drafted with today's `write`, judged; see the E4 note below | E4 PR (v1.81.0) |
+| — E6 | not started: needs a budget decision (below) | |
+| 5 Phase 1 | in progress: models (runtime tier resolution, thinking allowance), the whole bug checklist (#359, v1.80.2) and the E3 tier comparison (no routing change) done; structured outputs and warn-and-continue → halt to go | v1.80.0 PR, #359 |
 
 ## Baseline (`evals/baseline.json`)
 
@@ -29,7 +30,8 @@ All eight suites replay offline: 2106 recorded calls, $0 to rerun, $10.80 if run
 | `e3-extraction` | extraction captures the fact behind each E1 error | 0.24 (0.16); 0.82 with partial (0.43) | ≥ 0.85 |
 | `e5-roundtrip` | facts a redraft-from-brief changes (10 shared-dark Act 1 scenes) | 3.2 per scene (7.2) | coverage only (trend metric) |
 | `e7-classics` | continuity flags on *A Christmas Carol* (2 runs) and *The Plastic Age* (1 run); no real errors | 115 flags, all noise: 96 FP, 7 deliberate, 12 extraction errors (Carol alone: 60) | 0 noise, 0 unreviewed |
-| `e8-revision-safety` | today's passes reintroduce E1 tool-introduced errors | 5 of 23 (4) | 0 |
+| `e8-revision-safety` | today's passes reintroduce E1 tool-introduced errors | 5 of 22, 1 halted (v1.80.2: a cut-off naturalness redraft now halts) | 0 |
+| `e4-generation` | draft shared-dark Act 1 (23 scenes) with today's `write`, judge it | CP10k 18.2 (judge), 0.48 (shipped checker); BPS 3.09; length drift 0.071; voice 4.71 (author 4.75). $5.76 live | coverage only (trend metric) |
 
 Read the exact numbers from `evals/baseline.json`; compare a run with `python3 evals/run.py` (deltas are printed).
 
@@ -70,6 +72,24 @@ Ben is asleep; work through **Next steps** in order without asking. Rules:
 - In the morning Ben wants: what merged, eval deltas vs baseline, spend, and anything skipped with the reason, at the top of this section.
 
 Spend so far: $0 of $20 (E4), $0 of $25 (other). (The v1.80.0 re-record before this run cost $9.70 under a separate approval.)
+
+## E4 notes (2026-10-28 overnight)
+
+- **How it runs** (`evals/e4`): Act 1 prose is removed, then the 23 scenes are drafted in reading order the way `write --direct` drafts them (shared cached context, `cmd_write._build_prompt` with briefs, each scene's deps reading the new drafts). An Opus judge reads each scene against the drafts before it plus the character, world and systems bibles and `characters.csv`, and lists contradictions (by code) and broken brief promises. The shipped checker is the timeline drift check `write` runs after drafting. Direct mode, not batch (batch is refused under a cassette). The plan's human spot-check is still owed.
+- **BPS mostly measures corrupt briefs, not drafting.** At the pinned commit (`0eaa3867`, shared with E5), the briefs of at least six Act 1 scenes (`claires-cold`, `waking-hank`, `name-surfaces`, `the-school`, `drive`, `fire-ostrowski`, and by the judge's notes also `harmons-hands` and `waking-maren`) describe a different story: Mallen, Yael, a prison facility, Olinsky, a Meszaros lawsuit. None of that is in the bibles or the prose. They were introduced by Storyforge's own `Polish: upstream brief fixes` / `Naturalness: upstream brief fixes` passes (`_fix_upstream_briefs`) from `0940bd4d` (2026-04-07) to `f56db284` (04-16), and they are still at shared-dark HEAD. The drafter followed the book, so the judge counted every beat of those briefs as broken (e.g. `waking-hank`: 9). **Decision for Ben:** re-pin E4 to a commit with sound briefs, exclude those scenes, or fix the briefs in shared-dark. This also affects E5 and E8, which redraft from the same briefs. It looks like a serious live bug in `_fix_upstream_briefs` (it can invent characters and plot), and it's a source of E1 brief-level `tool-introduced` cases.
+- **One draft is a refusal.** `waking-hank`'s draft came back with `stop_reason: refusal`, cut off mid-word at 528 words. Today's `write` accepts it: its only check is ≥100 words, and the direct and batch paths have no truncation guard. E4 records that faithfully. evals-56 is making `api` raise on refusals (v1.80.4+). After that, E4's replay errors at that scene, and E4 must be re-recorded from there (≈$5, inside the E4 budget).
+
+## E3 tier comparison (2026-10-28 overnight)
+
+Same 49 facts, extraction model forced with `STORYFORGE_MODEL`, Opus judge unchanged. Recordings in `evals/fixtures/tier-comparison/` (replay free; see `evals/README.md`).
+
+| Extraction model | captured | partial | missing | recall | with partial | cost if live |
+|---|---|---|---|---|---|---|
+| Haiku 5.5 | 13 | 23 | 13 | 0.265 | 0.735 | $0.52 |
+| Sonnet 5.5 (today's `evaluation` tier) | 12 | 28 | 9 | 0.245 | 0.816 | $2.51 |
+| Opus 5.5 | 13 | 29 | 7 | 0.265 | 0.857 | $5.02 |
+
+**Decision: no routing change.** Sonnet is within one or two facts of Opus on a single run of 49 cases, which is inside run-to-run noise (E6 hasn't measured that noise yet), at half the cost. Haiku misses clearly more (13 vs 7). So `cmd_extract`'s fact phases stay on Sonnet (`evaluation`), and `select_revision_model`'s continuity branch stays on Sonnet. `_TASK_TIER['extraction']` (Haiku: timeline cue reads, `enrich`) isn't measured by E3. Moving it to Sonnet would mean re-recording `e2-corpus-drift` (~$16 at Sonnet) while evals-56 is changing the timeline prompt, so it's left for Ben with this evidence: E3 says Haiku drops facts.
 
 ## Open decisions for Ben
 
