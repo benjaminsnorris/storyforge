@@ -39,6 +39,13 @@ def _stub_model_catalog(monkeypatch):
     monkeypatch.setattr(common, '_catalog', [dict(m) for m in STUB_MODEL_CATALOG])
 
 
+@pytest.fixture(autouse=True)
+def _fresh_fallback_replies(monkeypatch):
+    """api records refusal-fallback replies per process; keep them per test."""
+    import storyforge.api as api
+    monkeypatch.setattr(api, '_fallback_replies', [])
+
+
 @pytest.fixture
 def fixture_dir_gn():
     """Path to the graphic-novel test-project fixture."""

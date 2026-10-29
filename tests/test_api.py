@@ -371,3 +371,28 @@ class TestRefusalFallback:
         assert extract_text(self.FALLBACK_CONTENT) == 'the reply'
         assert extract_api_response(str(log)) == 'the reply'
         assert extract_text({'content': self.FALLBACK_CONTENT['content'][:2]}) == ''
+
+
+class TestFallbackRecord:
+    """H1: every reply the fallback wrote is kept for the end-of-run summary
+    and commit messages."""
+
+    @patch('storyforge.api._api_request')
+    def test_recorded_noted_and_reported(self, mock_req, capsys):
+        from storyforge import api
+        mock_req.return_value = TestRefusalFallback.SERVED
+        assert api.fallback_note() == ''
+        api.invoke('p', 'claude-opus-5-5', label='redraft a', fallback=True)
+        assert api.fallback_replies() == [('redraft a', 'claude-opus-5-5', 'claude-opus-5')]
+        assert api.fallback_note() == ' (refusal fallback: written by claude-opus-5)'
+        assert api.fallback_note(since=1) == ''
+        capsys.readouterr()
+        api.report_fallback_replies()
+        out = capsys.readouterr()
+        assert 'redraft a: claude-opus-5 in place of claude-opus-5-5' in out.out + out.err
+
+    def test_silent_without_fallback_replies(self, capsys):
+        from storyforge import api
+        api.report_fallback_replies()
+        out = capsys.readouterr()
+        assert out.out + out.err == ''

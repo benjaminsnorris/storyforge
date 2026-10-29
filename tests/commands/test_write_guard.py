@@ -162,6 +162,23 @@ class TestDirectMode:
         assert [op['model'] for op in mock_costs.operations if 'model' in op
                 and op['operation'] == 'draft'] == ['claude-opus-5']
 
+    def test_fallback_draft_is_named_in_commit_and_summary(
+            self, setup, monkeypatch, mock_git, capsys):
+        """H1: a scene another model wrote is recorded, not just warned about
+        mid-run."""
+        from storyforge import api
+        calls = _direct_replies(monkeypatch, {'act1-sc01': _fallback_reply(GOOD)})
+        # the fake bypasses api._send, which records each fallback reply
+        api._fallback_replies.append(('drafting act1-sc01', 'claude-opus-5-5',
+                                      'claude-opus-5'))
+        main(['--direct', '--scenes', 'act1-sc01'])
+        assert calls
+        commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']
+        assert 'Draft scene act1-sc01 (refusal fallback: written by claude-opus-5)' in commits
+        out = capsys.readouterr().out
+        assert 'WARNING: 1 reply was written by another model' in out
+        assert 'drafting act1-sc01: claude-opus-5 in place of claude-opus-5-5' in out
+
     def test_clean_run_does_not_exit(self, setup, monkeypatch):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
         main(['--direct', '--scenes', 'act1-sc01,act1-sc02'])
@@ -212,9 +229,9 @@ class TestBatchMode:
         assert kept in capsys.readouterr().out
 
     def test_refused_scene_is_retried_directly_with_the_fallback(
-            self, setup, monkeypatch, capsys):
+            self, setup, monkeypatch, capsys, mock_costs, mock_git):
         """The Batches API rejects the fallback, so a refused scene gets one
-        direct call with it."""
+        direct call with it. Both calls are paid for and costed."""
         calls = _direct_replies(monkeypatch, {'act1-sc01': _fallback_reply(GOOD)})
         self._run(monkeypatch, {'act1-sc01': self.REFUSAL, 'act1-sc02': _reply(GOOD)},
                   code=None)
@@ -222,13 +239,21 @@ class TestBatchMode:
         assert _scene(setup, 'act1-sc01').strip() == GOOD
         assert _status(setup, 'act1-sc01') == 'drafted'
         assert 'retrying it directly' in capsys.readouterr().out
+        models = [op['model'] for op in mock_costs.operations
+                  if op.get('target') == 'act1-sc01']
+        assert len(models) == 2 and models[1] == 'claude-opus-5'
+        commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']
+        assert 'Draft scene act1-sc01 (refusal fallback: written by claude-opus-5)' in commits
 
     def test_refused_again_skips_the_scene(self, setup, monkeypatch, capsys):
-        _direct_replies(monkeypatch, {'act1-sc01': self.REFUSAL})
+        retry = dict(self.REFUSAL, id='the-retry')
+        _direct_replies(monkeypatch, {'act1-sc01': retry})
         self._run(monkeypatch, {'act1-sc01': self.REFUSAL, 'act1-sc02': _reply(GOOD)})
         assert _scene(setup, 'act1-sc01') is None
         assert _scene(setup, 'act1-sc02').strip() == GOOD
         assert 'refused the request (cyber)' in capsys.readouterr().out
+        with open(os.path.join(setup, 'working', 'logs', 'drafting-act1-sc01.json')) as f:
+            assert json.load(f)['id'] == 'the-retry'  # the kept log is the retry's
 
     def test_failed_retry_skips_the_scene(self, setup, monkeypatch, capsys):
         def boom(*a, **k):

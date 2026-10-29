@@ -32,7 +32,7 @@ from storyforge.cli import apply_coaching_override
 from storyforge.api import (
     invoke_to_file, extract_text, extract_text_from_file, extract_usage,
     calculate_cost_from_usage, submit_batch, poll_batch, download_batch_results,
-    stop_problem, fallback_model, is_refusal, RefusalError,
+    stop_problem, fallback_model, is_refusal, RefusalError, report_fallback_replies,
 )
 from storyforge.costs import estimate_cost, check_threshold, log_operation, print_summary
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
@@ -221,6 +221,8 @@ def main(argv=None):
         drift_check(project_dir, [sid for sid in pending_ids
                                   if os.path.isfile(os.path.join(scenes_dir, f'{sid}.md'))])
         run_review_phase('drafting', project_dir)
+
+    report_fallback_replies()
 
     if failed:
         log(f'ERROR: {len(failed)} scene(s) not drafted:')
@@ -426,8 +428,10 @@ _MIN_SCENE_WORDS = 100
 
 def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
                              metadata_csv: str, coaching: str,
-                             head_before: str) -> tuple:
-    """Verify and commit a drafted scene. Returns (word_count, success)."""
+                             head_before: str, written_by: str = '') -> tuple:
+    """Verify and commit a drafted scene. Returns (word_count, success).
+    ``written_by`` names the model the refusal fallback used, for the commit
+    message."""
     scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
     word_count = 0
 
@@ -464,6 +468,8 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
         else:
             paths = [f'scenes/{scene_id}.md', 'reference/', 'working/logs/']
             msg = f'Draft scene {scene_id}'
+        if written_by:
+            msg += f' (refusal fallback: written by {written_by})'
 
         from storyforge.git import commit_and_push
         commit_and_push(project_dir, msg, paths)
@@ -610,7 +616,7 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
         # Verify and commit
         wc, ok = _verify_and_commit_scene(
             scene_id, project_dir, scenes_dir, metadata_csv, coaching,
-            head_before,
+            head_before, written_by=_written_by(scene_json),
         )
         if ok:
             drafted_count += 1
@@ -731,7 +737,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
         wc, ok = _verify_and_commit_scene(
             scene_id, project_dir, scenes_dir, metadata_csv, coaching,
-            head_before,
+            head_before, written_by=_written_by(scene_log),
         )
         if ok:
             drafted_count += 1
@@ -761,6 +767,15 @@ def _invoke_interactive(prompt: str, model: str, project_dir: str) -> int:
     except FileNotFoundError:
         log('ERROR: claude CLI not found — install Claude Code first')
         return 1
+
+
+def _written_by(log_file: str) -> str:
+    """The model the refusal fallback used for this reply, else ''."""
+    try:
+        with open(log_file) as f:
+            return fallback_model(json.load(f))
+    except (OSError, ValueError):
+        return ''  # the reply was already read and written; nothing to name
 
 
 def _is_refusal(log_file: str) -> bool:

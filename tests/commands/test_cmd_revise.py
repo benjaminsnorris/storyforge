@@ -1037,3 +1037,56 @@ class TestPolishLoopPass:
         rows = _read_csv_plan(os.path.join(project_dir, 'working', 'plans',
                                            'revision-plan.csv'))
         assert rows[0]['status'] == 'in_progress'
+
+
+
+class TestPassFallback:
+    """T1: prose passes opt into the refusal fallback; structural and
+    registry passes, which write CSV, do not."""
+
+    @pytest.mark.parametrize('fix_location, expected', [
+        ('craft', True), ('structural', False), ('registry', False)])
+    def test_opt_in_follows_fix_location(self, mock_api, mock_git, mock_costs, project_dir,
+                                         monkeypatch, fix_location, expected):
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_revise.detect_project_root', lambda: project_dir)
+        plugin_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(__file__)))))
+        monkeypatch.setattr('storyforge.cmd_revise.get_plugin_dir', lambda: plugin_dir)
+        _write_plan(project_dir, _make_plan_rows(('pass-a',), fix_location=fix_location))
+        _ensure_scene_files(project_dir)
+        import subprocess as sp
+
+        def fake_run(cmd, **kwargs):
+            out = 'Prompt text' if 'storyforge.revision' in ' '.join(map(str, cmd)) else ''
+            return sp.CompletedProcess(cmd, 0, stdout=out, stderr='')
+        monkeypatch.setattr('subprocess.run', _rewrites_a_scene(fake_run, project_dir))
+        mock_api.set_response('Revised content')
+        try:
+            main(['1'])
+        except SystemExit:
+            pass  # an upstream pass with no CSV blocks halts; the call is what matters
+        calls = mock_api.calls_for('invoke_to_file')
+        assert calls and calls[0]['fallback'] is expected
+
+
+class TestLogUsage:
+    def test_fallback_reply_is_costed_as_its_model(self, project_dir, mock_costs, tmp_path):
+        """T4"""
+        import json
+        from storyforge.cmd_revise import _log_usage
+        log = tmp_path / 'r.json'
+        log.write_text(json.dumps({
+            'model': 'claude-opus-5', 'stop_reason': 'end_turn', 'content': [],
+            'usage': {'input_tokens': 1, 'output_tokens': 1,
+                      'iterations': [{'type': 'fallback_message'}]}}))
+        _log_usage(project_dir, str(log), 'revise', 'pass-a', 'claude-opus-5-5')
+        assert [op['model'] for op in mock_costs.operations] == ['claude-opus-5']
+
+    def test_unreadable_log_warns(self, project_dir, mock_costs, tmp_path, capsys):
+        """I3: was a silent pass"""
+        from storyforge.cmd_revise import _log_usage
+        log = tmp_path / 'r.json'
+        log.write_text('{not json')
+        _log_usage(project_dir, str(log), 'revise', 'pass-a', 'm')
+        assert 'WARNING: could not log the cost of revise pass-a' in capsys.readouterr().out

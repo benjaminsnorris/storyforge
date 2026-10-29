@@ -219,6 +219,38 @@ def fallback_model(response) -> str:
     return ''
 
 
+# (label, requested model, model that wrote the reply) for every reply the
+# refusal fallback served in this process; commands report them at the end.
+_fallback_replies: list[tuple[str, str, str]] = []
+
+
+def fallback_replies() -> list[tuple[str, str, str]]:
+    """Every (label, requested model, serving model) the refusal fallback
+    served so far in this process, oldest first."""
+    return list(_fallback_replies)
+
+
+def fallback_note(since: int = 0) -> str:
+    """A commit-message suffix naming the fallback replies served after
+    the first ``since`` ('' when none), so the history records which prose
+    another model wrote."""
+    served = sorted({m for _, _, m in _fallback_replies[since:]})
+    return f' (refusal fallback: written by {", ".join(served)})' if served else ''
+
+
+def report_fallback_replies() -> None:
+    """Log a WARNING block listing every reply the refusal fallback wrote,
+    for an end-of-run summary. Silent when there were none."""
+    if not _fallback_replies:
+        return
+    from storyforge.common import log
+    count = len(_fallback_replies)
+    log(f'WARNING: {count} repl{"y was" if count == 1 else "ies were"} written by another '
+        f'model after a refusal (refusal fallback); read them for voice and continuity:')
+    for label, requested, served in _fallback_replies:
+        log(f'  {label}: {served} in place of {requested}')
+
+
 def _check_refusal(response) -> None:
     if is_refusal(response):
         raise RefusalError(response)
@@ -267,6 +299,7 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
     if served:
         # Not always a fresh refusal: after one, the API routes the same
         # request straight to the fallback model for about an hour.
+        _fallback_replies.append((label or 'a request', model, served))
         from storyforge.common import log
         log(f'WARNING: {served} wrote the reply to {label or "the request"} in place of '
             f'{model} (refusal fallback)')
