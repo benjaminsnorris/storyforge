@@ -360,7 +360,8 @@ def _run_phase_0(project_dir, scenes_dir, log_dir, profile_file, dry_run,
 
     from storyforge.extract import build_characterize_prompt, parse_characterize_response
 
-    prompt = build_characterize_prompt(project_dir)
+    model = select_model('synthesis')  # Opus for full-manuscript comprehension
+    prompt = build_characterize_prompt(project_dir, model=model)
     if not prompt:
         log('ERROR: Could not build characterize prompt — no manuscript content found')
         sys.exit(1)
@@ -373,7 +374,6 @@ def _run_phase_0(project_dir, scenes_dir, log_dir, profile_file, dry_run,
         return
 
     char_log = os.path.join(log_dir, 'extract-phase0.json')
-    model = select_model('synthesis')  # Opus for full-manuscript comprehension
 
     log(f'  Invoking {model} for manuscript characterization...')
 

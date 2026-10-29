@@ -393,3 +393,51 @@ class TestKnowledgeIdsAtSource:
         assert resolve_knowledge_ids(
             registry, 'Tom has a mistress;myrtle-is-mistress;(none);something else'
         ) == 'tom-affair-ny;myrtle-is-mistress;something else'
+
+
+class TestCharacterizeBudget:
+    """#355: Phase 0's budget was sized for a 200k window, so Pride and
+    Prejudice (122k words) lost its middle 37.6k (Hunsford, the first
+    proposal, the letter) though the model takes 1M tokens."""
+
+    def test_budget_follows_the_models_window(self, monkeypatch):
+        from storyforge import extract
+        monkeypatch.setattr('storyforge.common.model_catalog', lambda: [
+            {'id': 'big', 'max_input_tokens': 1_000_000},
+            {'id': 'small', 'max_input_tokens': 200_000}])
+        assert extract.characterize_budget('small') == extract.CHARACTERIZE_MAX_CHARS == 480_000
+        assert extract.characterize_budget('big') > 3_000_000
+        assert extract.characterize_budget('unlisted') == 480_000
+
+    def test_long_novel_sent_whole_to_a_large_window(self, tmp_path, monkeypatch):
+        from storyforge import extract
+        monkeypatch.setattr('storyforge.common.model_catalog', lambda: [
+            {'id': 'big', 'max_input_tokens': 1_000_000}])
+        (tmp_path / 'storyforge.yaml').write_text('project:\n  title: "T"\n')
+        book = 'prose line of the novel.\n' * 30_000  # ~750k chars, like P&P
+        monkeypatch.setattr(extract, '_read_manuscript', lambda d: book)
+        assert 'omitted here' in extract.build_characterize_prompt(str(tmp_path))
+        assert 'omitted here' not in extract.build_characterize_prompt(str(tmp_path), model='big')
+
+
+class TestCharacterizeMultilineFields:
+    """Opus 5.5 answered ACT_STRUCTURE and STRUCTURAL_CONCERNS as bullet
+    lists on Pride and Prejudice; the line parser kept only the lead-in
+    ("3 acts, following the original volumes:") and dropped the concerns."""
+
+    def test_bullets_join_their_field(self):
+        from storyforge.extract import parse_characterize_response
+        result = parse_characterize_response(
+            'TONE: ironic\n\nACT_STRUCTURE: 3 acts, following the volumes:\n'
+            '- Act I (scenes 1-62)\n- Act II (scenes 63-120)\n\n'
+            'STRUCTURAL_CONCERNS:\n- Darcy fades\n- Kitty: thin\nCAST_SIZE: 55\n')
+        assert result['tone'] == 'ironic'
+        assert result['act_structure'] == ('3 acts, following the volumes: Act I (scenes 1-62); '
+                                           'Act II (scenes 63-120)')
+        assert result['structural_concerns'] == 'Darcy fades; Kitty: thin'
+        assert result['cast_size'] == '55'
+
+    def test_single_line_fields_unchanged(self):
+        from storyforge.extract import parse_characterize_response
+        assert parse_characterize_response('TIMELINE: linear\nCOMPRESSION_POINTS: none\n') == {
+            'timeline': 'linear'}
