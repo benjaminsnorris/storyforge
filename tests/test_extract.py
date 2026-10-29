@@ -529,3 +529,19 @@ class TestCharacterizeMultilineFields:
         from storyforge.extract import parse_characterize_response
         assert parse_characterize_response('TIMELINE: linear\nCOMPRESSION_POINTS: none\n') == {
             'timeline': 'linear'}
+
+
+class TestExtractValidation:
+    def test_schema_errors_fail_validation(self, fixture_dir):
+        """F-058: extract logged "All validation checks pass" while
+        `validate` found schema errors (Self-Control: 7), because it ran
+        only the structural checks. The fixture has 6 schema errors."""
+        from storyforge.cmd_extract import _run_validation
+        from storyforge.schema import validate_schema
+        ref = os.path.join(fixture_dir, 'reference')
+        schema_failures = validate_schema(ref, fixture_dir)['failed']
+        assert schema_failures > 0
+        passed, failures = _run_validation(ref, fixture_dir)
+        assert not passed
+        # The structural report passes; its advisories aren't failures
+        assert failures == schema_failures

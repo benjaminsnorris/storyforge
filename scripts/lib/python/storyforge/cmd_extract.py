@@ -919,15 +919,25 @@ def _run_validation(ref_dir: str, project_dir: str) -> tuple:
     log('--- Running validation ---')
 
     from storyforge.elaborate import validate_structure
+    from storyforge.schema import validate_schema
     report = validate_structure(ref_dir)
+    # The schema check too, as `storyforge validate` runs it: without it,
+    # extraction reported a clean pass over invalid cells (F-058)
+    schema = validate_schema(ref_dir, project_dir)
 
-    passed = report['passed']
-    failures = len(report['failures'])
+    passed = report['passed'] and schema['failed'] == 0
+    # A passing structural report still lists its advisories; count them
+    # only when they fail it
+    failures = (0 if report['passed'] else len(report['failures'])) + schema['failed']
 
     if passed:
         log('Validation passed')
     else:
         log(f'Validation found {failures} issue(s) — review recommended')
+        for err in schema['errors'][:5]:
+            log(f'  schema: {err["file"]} {err["row"]} {err["column"]} = {str(err["value"])[:60]}')
+        if schema['failed'] > 5:
+            log(f'  ... and {schema["failed"] - 5} more (run ./storyforge validate)')
 
     return passed, failures
 
