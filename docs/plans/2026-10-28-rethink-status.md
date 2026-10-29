@@ -13,9 +13,9 @@ Last updated 2026-10-29, at v1.83.0 (end of the overnight run). Start here when 
 | 2 E1 corpus | done: 144 cases (130 prose), 30 held out | #340 |
 | 3 E2 / E7 / E8 | done: E2 Carol (evals-56), E2 on E1, E7 Carol, E8 three pass families | #341, #342, #343, #344, #346 |
 | 4 E3 / E5 | done | #346 |
-| — E4 | done (overnight): shared-dark Act 1 drafted with today's `write`, judged; see the E4 notes below | #361 (v1.81.0), re-recorded in the v1.83.0 PR |
+| — E4 | done (overnight): shared-dark Act 1 drafted with today's `write`, judged; see the E4 notes below | #361 (v1.81.0), re-recorded in #363 |
 | — E6 | not started: needs a budget decision (below) | |
-| 5 Phase 1 | in progress: models (runtime tier resolution, thinking allowance), the whole bug checklist (#359, v1.80.2), the E3 tier comparison (no routing change), and structured outputs for the knowledge and physical-state chains (v1.83.0) done; the other `KEY: value` parsers and the remaining warn-and-continue sites to go | v1.80.0 PR, #359, #361, v1.83.0 PR |
+| 5 Phase 1 | in progress: models (runtime tier resolution, thinking allowance), the whole bug checklist (#359, v1.80.2), the E3 tier comparison (no routing change), and structured outputs for the knowledge and physical-state chains (v1.83.0) done; the other `KEY: value` parsers and the remaining warn-and-continue sites to go | v1.80.0 PR, #359, #361, #363 |
 
 ## Baseline (`evals/baseline.json`)
 
@@ -71,7 +71,7 @@ Prerequisites:
 |---|---|---|
 | #359 | 1.80.2 | All five open Phase 1 checklist bugs fixed, each with a regression test (details in the plan's checklist) |
 | #361 | 1.81.0 | E4 generation benchmark; E3 model-tier comparison (no routing change) |
-| v1.83.0 PR | 1.83.0 | Structured outputs (`api.invoke(output_schema=…)`) for the knowledge and physical-state chains; extract Phase 3b/3c halt at a failed scene instead of skipping it; E4/E8 count refusals as outcomes; E3 and E4 re-recorded |
+| #363 | 1.83.0 | Structured outputs (`api.invoke(output_schema=…)`) for the knowledge and physical-state chains; extract Phase 3b/3c halt at a failed scene instead of skipping it; E4/E8 count refusals as outcomes; E3 and E4 re-recorded |
 
 evals-56 merged #357 (1.80.1), #358 (1.80.3, physical-state `resolves`), #360 (1.81.1, `RefusalError`; timeline no longer asks for written reasoning) and #362 (1.82.0, Phase 0 budget from the context window) in the same window. The versions were coordinated.
 
