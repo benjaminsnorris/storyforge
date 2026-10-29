@@ -895,9 +895,11 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         # from Scrooge's boyhood to Belle's family), but not out of it
         if relation == 'earlier' and last_day is not None and (
                 day >= last_day if at_present else day >= present):
+            before = (f'the previous scene\'s ({last_day})' if at_present
+                      else f'the story\'s present (day {present})')
             findings.append({'scene_id': sid, 'check': 'flashback_not_earlier',
                              'message': f'reads as set earlier, but its day ({day}) is not before '
-                                        f'the previous scene\'s ({last_day})'})
+                                        f'{before}'})
         gap = gap_to_days(cue.get('gap', ''))
         # After a summary the gap counts from the end of a stretch whose
         # length is only roughly known, so it isn't checked
