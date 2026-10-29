@@ -115,7 +115,9 @@ def extract_single_scene(response: str) -> str | None:
 
 
 def extract_api_response(log_file: str) -> str:
-    """Extract text content from an Anthropic Messages API JSON response.
+    """Extract text content from an Anthropic Messages API JSON response,
+    the same way as ``api.extract_text`` (text before a refusal-fallback
+    block is not the reply).
 
     Args:
         log_file: Path to the JSON response file.
@@ -123,14 +125,11 @@ def extract_api_response(log_file: str) -> str:
     Returns:
         The text content, or empty string on failure.
     """
+    from storyforge.api import extract_text
     try:
         with open(log_file) as f:
             data = json.load(f)
-        texts = []
-        for block in data.get('content', []):
-            if block.get('type') == 'text':
-                texts.append(block.get('text', ''))
-        return '\n'.join(texts)
+        return extract_text(data)
     except (json.JSONDecodeError, FileNotFoundError, KeyError):
         return ''
 

@@ -57,11 +57,6 @@ def mode() -> str:
 
 
 def request_key(method: str, path: str, body: dict | None) -> str:
-    # The refusal fallback (``fallbacks``) changes only what a refused reply
-    # becomes, so it is not part of the key: a recording made without it
-    # still replays, refusal included. Evals measure the requested model.
-    if body and 'fallbacks' in body:
-        body = {k: v for k, v in body.items() if k != 'fallbacks'}
     canonical = json.dumps({'method': method, 'path': path, 'body': body},
                            sort_keys=True, separators=(',', ':'))
     return hashlib.sha256(canonical.encode()).hexdigest()

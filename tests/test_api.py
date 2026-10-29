@@ -4,6 +4,8 @@ import json
 import os
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 
 class TestExtractApiResponse:
     def test_extracts_text(self, tmp_path):
@@ -249,24 +251,29 @@ class TestRefusalFallback:
               'usage': {'input_tokens': 1, 'output_tokens': 1,
                         'iterations': [{'type': 'message', 'model': None},
                                        {'type': 'fallback_message', 'model': 'claude-opus-5'}]}}
+    PLAIN = {'model': 'claude-opus-5-5', 'stop_reason': 'end_turn',
+             'content': [{'type': 'text', 'text': 'prose'}], 'usage': {}}
 
+    @pytest.mark.parametrize('call', [
+        lambda tmp: __import__('storyforge.api').api.invoke('p', 'm', fallback=True),
+        lambda tmp: __import__('storyforge.api').api.invoke_to_file(
+            'p', 'm', str(tmp / 'r.json'), fallback=True),
+        lambda tmp: __import__('storyforge.api').api.invoke_api('p', 'm', fallback=True),
+    ], ids=['invoke', 'invoke_to_file', 'invoke_api'])
     @patch('storyforge.api._api_request')
-    def test_opt_in_sends_the_parameter_and_beta(self, mock_req):
-        from storyforge.api import invoke, FALLBACK_BETA
-        mock_req.return_value = {'stop_reason': 'end_turn', 'content': []}
-        invoke('p', 'claude-opus-5-5', fallback=True)
+    def test_opt_in_reaches_the_request(self, mock_req, call, tmp_path):
+        mock_req.return_value = self.PLAIN
+        call(tmp_path)
         assert mock_req.call_args[0][1]['fallbacks'] == 'default'
-        assert mock_req.call_args[1]['betas'] == [FALLBACK_BETA]
 
     @patch('storyforge.api._api_request')
     def test_off_by_default(self, mock_req):
         from storyforge.api import invoke
-        mock_req.return_value = {'stop_reason': 'end_turn', 'content': []}
+        mock_req.return_value = self.PLAIN
         invoke('p', 'claude-opus-5-5')
         assert 'fallbacks' not in mock_req.call_args[0][1]
-        assert 'betas' not in mock_req.call_args[1]
 
-    def test_beta_becomes_a_header(self, monkeypatch):
+    def _sent_headers(self, monkeypatch, body):
         from storyforge import api
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'k')
         sent = {}
@@ -285,8 +292,26 @@ class TestRefusalFallback:
             sent.update({k.lower(): v for k, v in req.header_items()})
             return Resp()
         monkeypatch.setattr(api, 'urlopen', fake_urlopen)
-        api._live_request('messages', {}, 'POST', 5, betas=['a', 'b'])
-        assert sent['anthropic-beta'] == 'a,b'
+        api._live_request('messages', body, 'POST', 5)
+        return sent
+
+    def test_the_body_turns_on_the_beta_header(self, monkeypatch):
+        from storyforge.api import FALLBACK_BETA
+        assert self._sent_headers(monkeypatch, {'fallbacks': 'default'})[
+            'anthropic-beta'] == FALLBACK_BETA
+        assert 'anthropic-beta' not in self._sent_headers(monkeypatch, {'model': 'm'})
+
+    def test_cassette_strips_the_fallback(self, monkeypatch, tmp_path):
+        """A recording is always the requested model's reply, so evals
+        measure that model, and older recordings still replay."""
+        from storyforge import api
+        monkeypatch.setenv('STORYFORGE_CASSETTE', str(tmp_path))
+        monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'record')
+        sent = []
+        monkeypatch.setattr(api, '_live_request',
+                            lambda path, body, method, timeout: sent.append(body) or self.PLAIN)
+        api.invoke('p', 'claude-opus-5-5', fallback=True)
+        assert sent and 'fallbacks' not in sent[0]
 
     def test_fallback_model(self):
         from storyforge.api import fallback_model
@@ -295,6 +320,8 @@ class TestRefusalFallback:
                                'usage': {'iterations': [{'type': 'message'}]}}) == ''
         refused = dict(self.SERVED, stop_reason='refusal')
         assert fallback_model(refused) == ''  # the fallback refused too
+        nameless = {k: v for k, v in self.SERVED.items() if k != 'model'}
+        assert fallback_model(nameless) == ''  # never a placeholder priced as a model
         assert fallback_model(None) == ''
 
     @patch('storyforge.api._api_request')
@@ -304,21 +331,43 @@ class TestRefusalFallback:
         invoke('p', 'claude-opus-5-5', label='drafting waking-hank', fallback=True)
         out = capsys.readouterr()
         text = out.out + out.err
-        assert 'WARNING' in text and 'drafting waking-hank' in text
-        assert 'claude-opus-5 wrote this reply' in text
+        assert 'WARNING: claude-opus-5 wrote the reply to drafting waking-hank' in text
+        assert 'in place of claude-opus-5-5' in text
 
-    def test_text_after_the_fallback_block_only(self):
+    @pytest.mark.parametrize('reply', ['plain', 'refused'])
+    @patch('storyforge.api._api_request')
+    def test_no_warning_unless_a_fallback_wrote_it(self, mock_req, reply, capsys):
+        from storyforge.api import invoke, RefusalError
+        mock_req.return_value = (self.PLAIN if reply == 'plain'
+                                 else dict(self.SERVED, stop_reason='refusal', content=[]))
+        try:
+            invoke('p', 'claude-opus-5-5', label='x', fallback=True)
+        except RefusalError:
+            pass
+        out = capsys.readouterr()
+        assert 'WARNING' not in out.out + out.err
+
+    def test_refusal_names_the_recommended_retry(self):
+        """The fallback could not run (e.g. rate-limited): say a retry may
+        work, unlike a second refusal."""
+        from storyforge.api import RefusalError
+        e = RefusalError({'stop_reason': 'refusal', 'stop_details': {
+            'category': 'cyber', 'recommended_model': 'claude-opus-4-8'}})
+        assert 'cyber' in str(e) and 'retrying on claude-opus-4-8' in str(e)
+        assert 'retrying' not in str(RefusalError({'stop_details': {'category': 'cyber'}}))
+
+    FALLBACK_CONTENT = {'content': [
+        {'type': 'text', 'text': '=== SCENE: a ===\npartial\n=== END SCENE: a ==='},
+        {'type': 'fallback', 'from': {'model': 'x'}, 'to': {'model': 'y'}},
+        {'type': 'text', 'text': 'the reply'}]}
+
+    def test_text_after_the_fallback_block_only(self, tmp_path):
+        """api.extract_text and parsing.extract_api_response (which revise
+        passes read) agree."""
         from storyforge.api import extract_text
-        response = {'content': [
-            {'type': 'text', 'text': 'partial from the refused model'},
-            {'type': 'fallback', 'from': {'model': 'a'}, 'to': {'model': 'b'}},
-            {'type': 'text', 'text': 'the reply'}]}
-        assert extract_text(response) == 'the reply'
-
-    def test_cassette_key_ignores_the_fallback(self):
-        """Recordings made without it still replay; evals measure the
-        requested model."""
-        from storyforge.cassette import request_key
-        body = {'model': 'm', 'messages': []}
-        assert request_key('POST', 'messages', dict(body, fallbacks='default')) == \
-            request_key('POST', 'messages', body)
+        from storyforge.parsing import extract_api_response
+        log = tmp_path / 'r.json'
+        log.write_text(json.dumps(self.FALLBACK_CONTENT))
+        assert extract_text(self.FALLBACK_CONTENT) == 'the reply'
+        assert extract_api_response(str(log)) == 'the reply'
+        assert extract_text({'content': self.FALLBACK_CONTENT['content'][:2]}) == ''

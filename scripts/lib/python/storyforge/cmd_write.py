@@ -32,7 +32,7 @@ from storyforge.cli import apply_coaching_override
 from storyforge.api import (
     invoke_to_file, extract_text, extract_text_from_file, extract_usage,
     calculate_cost_from_usage, submit_batch, poll_batch, download_batch_results,
-    stop_problem, fallback_model, RefusalError,
+    stop_problem, fallback_model, is_refusal, RefusalError,
 )
 from storyforge.costs import estimate_cost, check_threshold, log_operation, print_summary
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
@@ -766,8 +766,8 @@ def _invoke_interactive(prompt: str, model: str, project_dir: str) -> int:
 def _is_refusal(log_file: str) -> bool:
     try:
         with open(log_file) as f:
-            return json.load(f).get('stop_reason') == 'refusal'
-    except (OSError, ValueError, AttributeError):
+            return is_refusal(json.load(f))
+    except (OSError, ValueError):
         return False  # the extract step reports an unreadable log
 
 

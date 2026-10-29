@@ -115,26 +115,31 @@ def get_api_key() -> str:
 
 
 def _api_request(path: str, body: dict | None = None, method: str = 'GET',
-                 timeout: int = API_TIMEOUT, betas: list[str] | None = None) -> dict:
-    """Make an authenticated API request, through the eval cassette if one is set."""
+                 timeout: int = API_TIMEOUT) -> dict:
+    """Make an authenticated API request, through the eval cassette if one is set.
+
+    Under a cassette the refusal fallback is stripped, so a recording is
+    always the requested model's reply (or its refusal): evals measure that
+    model, and recordings made before prose calls opted in still replay."""
     from storyforge import cassette
-    extra ={'betas': betas} if betas else {}
     if cassette.active_dir():
+        if body and 'fallbacks' in body:
+            body = {k: v for k, v in body.items() if k != 'fallbacks'}
         return cassette.request(method, path, body,
-                                lambda: _live_request(path, body, method, timeout, **extra))
-    return _live_request(path, body, method, timeout, **extra)
+                                lambda: _live_request(path, body, method, timeout))
+    return _live_request(path, body, method, timeout)
 
 
-def _live_request(path: str, body: dict | None, method: str, timeout: int,
-                  betas: list[str] | None = None) -> dict:
+def _live_request(path: str, body: dict | None, method: str, timeout: int) -> dict:
     url = f'{API_BASE}/{path}'
     headers = {
         'x-api-key': get_api_key(),
         'anthropic-version': API_VERSION,
         'content-type': 'application/json',
     }
-    if betas:
-        headers['anthropic-beta'] = ','.join(betas)
+    if body and 'fallbacks' in body:
+        # the body is the one place that says the fallback is on
+        headers['anthropic-beta'] = FALLBACK_BETA
 
     data = json.dumps(body).encode() if body else None
     req = Request(url, data=data, headers=headers, method=method)
@@ -174,7 +179,18 @@ class RefusalError(RuntimeError):
         self.response = response
         details = response.get('stop_details') or {}
         self.category = details.get('category', '')
-        super().__init__(f"model refused the request ({self.category or 'no category'})")
+        message = f"model refused the request ({self.category or 'no category'})"
+        # Set when the refusal fallback could not run (e.g. that model was
+        # rate-limited): a retry may well succeed, unlike a second refusal.
+        if details.get('recommended_model'):
+            message += (f"; the fallback could not run, and the API suggests "
+                        f"retrying on {details['recommended_model']}")
+        super().__init__(message)
+
+
+def is_refusal(response) -> bool:
+    """Whether ``response`` (live or a saved log) is a refusal."""
+    return isinstance(response, dict) and response.get('stop_reason') == 'refusal'
 
 
 def stop_problem(response) -> str:
@@ -183,9 +199,7 @@ def stop_problem(response) -> str:
     response and on a saved log, from ``invoke_to_file`` or batch results.
     Only those two stop reasons are known to leave an incomplete answer;
     ``parsing.unsafe_scene_reason`` catches prose cut off any other way."""
-    if not isinstance(response, dict):
-        return ''
-    if response.get('stop_reason') == 'refusal':
+    if is_refusal(response):
         return str(RefusalError(response))
     if is_truncated(response):
         return 'the reply was cut off at max_tokens'
@@ -195,17 +209,18 @@ def stop_problem(response) -> str:
 def fallback_model(response) -> str:
     """The model that wrote ``response`` when the refusal fallback served it
     in place of the requested model, else ''. A fallback that also refused
-    returns '' (the response is a refusal)."""
-    if not isinstance(response, dict) or response.get('stop_reason') == 'refusal':
+    returns '' (the response is a refusal), as does a response that names no
+    model."""
+    if not isinstance(response, dict) or is_refusal(response):
         return ''
     iterations = (response.get('usage') or {}).get('iterations') or []
     if any(it.get('type') == 'fallback_message' for it in iterations):
-        return response.get('model') or 'another model'
+        return response.get('model') or ''
     return ''
 
 
 def _check_refusal(response) -> None:
-    if isinstance(response, dict) and response.get('stop_reason') == 'refusal':
+    if is_refusal(response):
         raise RefusalError(response)
 
 
@@ -225,7 +240,7 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
         output_schema: Optional JSON schema; the reply's text is then one JSON
             object matching it (structured outputs).
         fallback: Opt into the server-side refusal fallback (FALLBACK_BETA).
-            A reply written by the fallback model is logged as a WARNING
+            A reply written by a fallback model is logged as a WARNING
             naming ``label`` and that model.
 
     Returns:
@@ -240,21 +255,21 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
         body['system'] = system
     if output_schema:
         body['output_config'] = {'format': {'type': 'json_schema', 'schema': output_schema}}
-    extra = {}
     if fallback:
         body['fallbacks'] = 'default'
-        extra['betas'] = [FALLBACK_BETA]
     heartbeat = _Heartbeat(label or model)
     heartbeat.start()
     try:
-        response = _api_request('messages', body, method='POST', timeout=timeout, **extra)
+        response = _api_request('messages', body, method='POST', timeout=timeout)
     finally:
         heartbeat.stop()
     served = fallback_model(response)
     if served:
+        # Not always a fresh refusal: after one, the API routes the same
+        # request straight to the fallback model for about an hour.
         from storyforge.common import log
-        log(f'WARNING: {model} refused {label or "the request"}; '
-            f'{served} wrote this reply instead')
+        log(f'WARNING: {served} wrote the reply to {label or "the request"} in place of '
+            f'{model} (refusal fallback)')
     return response
 
 
@@ -278,8 +293,9 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
         Full API response dict.
 
     Raises:
-        RefusalError: the model refused the request (with ``fallback``, the
-            fallback model refused too).
+        RefusalError: the model refused the request (with ``fallback``, no
+            fallback model served it: it refused too, could not run, or the
+            requested model has none).
     """
     response = _send(prompt, model, max_tokens, label, timeout, system, output_schema,
                      fallback)
@@ -374,9 +390,10 @@ def extract_response(log_file: str) -> str:
 
 
 def extract_text(response: dict) -> str:
-    """Extract text content from an API response dict. After a refusal
-    fallback, only the text after the last ``fallback`` block is the reply
-    (a streamed decline keeps the refused model's partial before it)."""
+    """Extract text content from an API response dict. Only text after the
+    last ``fallback`` block is kept: our non-streamed replies put that block
+    first, but a streamed mid-output decline would leave the refused model's
+    partial before it."""
     texts = []
     for block in response.get('content', []):
         if block.get('type') == 'fallback':
