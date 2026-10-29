@@ -568,6 +568,19 @@ class TestDownloadBatchResults:
                     'message': {
                         'content': [{'type': 'text', 'text': 'Alpha prose'}],
                         'usage': {'input_tokens': 100, 'output_tokens': 50},
+                        'stop_reason': 'max_tokens',
+                    },
+                },
+            }),
+            json.dumps({
+                'custom_id': 'scene-gamma',
+                'result': {
+                    'type': 'succeeded',
+                    'message': {
+                        'content': [],
+                        'usage': {'input_tokens': 100, 'output_tokens': 0},
+                        'stop_reason': 'refusal',
+                        'stop_details': {'type': 'refusal', 'category': 'cyber'},
                     },
                 },
             }),
@@ -589,7 +602,7 @@ class TestDownloadBatchResults:
         with patch('storyforge.api.urlopen', return_value=mock_resp):
             succeeded = api.download_batch_results('https://example.com/results', output_dir, log_dir)
 
-        assert succeeded == ['scene-alpha']
+        assert succeeded == ['scene-alpha', 'scene-gamma']
 
         # Check status files
         assert open(os.path.join(output_dir, '.status-scene-alpha')).read() == 'ok'
@@ -597,6 +610,11 @@ class TestDownloadBatchResults:
 
         # Check text output
         assert open(os.path.join(log_dir, 'scene-alpha.txt')).read() == 'Alpha prose'
+        # stop_reason is kept so a caller can tell a cut-off reply (cmd_write)
+        saved = json.load(open(os.path.join(log_dir, 'scene-alpha.json')))
+        assert saved['stop_reason'] == 'max_tokens'
+        refused = json.load(open(os.path.join(log_dir, 'scene-gamma.json')))
+        assert refused['stop_details']['category'] == 'cyber'
 
         # Check JSON log
         with open(os.path.join(log_dir, 'scene-alpha.json')) as f:

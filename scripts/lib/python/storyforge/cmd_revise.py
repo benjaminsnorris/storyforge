@@ -252,9 +252,14 @@ def _resolve_targets_to_scene_ids(targets, valid_scene_ids, ref_dir):
 
 
 def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
-    """Re-draft scenes from their updated briefs."""
+    """Re-draft scenes from their updated briefs and commit those written.
+
+    Raises RedraftError (after that commit) naming every scene whose prose
+    was not re-drafted: no prompt, or a reply refused, cut off or unsafe per
+    ``cmd_write._extract_scene_from_response``. Its brief changed but its
+    prose did not, so the run must not report success."""
     from storyforge.cmd_write import _build_prompt, _extract_scene_from_response
-    from storyforge.api import invoke_to_file as _invoke_to_file
+    from storyforge.api import invoke_to_file as _invoke_to_file, RefusalError
 
     # Build shared context for prompt caching if not provided
     if system is None:
@@ -263,24 +268,47 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
 
     log(f'  Redrafting {len(scene_ids)} scenes from updated briefs...')
     scenes_dir = os.path.join(project_dir, 'scenes')
+    failed: list[str] = []
+    written = 0
 
     for i, sid in enumerate(scene_ids, 1):
         log(f'    [{i}/{len(scene_ids)}] Redrafting: {sid}')
         prompt = _build_prompt(sid, project_dir, 'full', use_briefs=True,
                                system_context=bool(system))
         if not prompt:
-            log(f'    WARNING: Could not build prompt for {sid}, skipping')
+            log(f'    ERROR: Could not build a prompt for {sid}')
+            failed.append(f'{sid} (no prompt)')
             continue
         log_file = os.path.join(log_dir, f'redraft-{sid}.json')
-        _invoke_to_file(prompt, model, log_file, max_tokens=16384,
-                        label=f'redraft {sid}', system=system or None)
+        try:
+            _invoke_to_file(prompt, model, log_file, max_tokens=16384,
+                            label=f'redraft {sid}', system=system or None)
+        except RefusalError:
+            pass  # logged to log_file; the extract below names it
         scene_file = os.path.join(scenes_dir, f'{sid}.md')
-        _extract_scene_from_response(log_file, scene_file)
+        reason = _extract_scene_from_response(log_file, scene_file)
+        if reason:
+            reason = reason.rstrip('.')
+            log(f'    ERROR: Not writing the re-draft of {sid}: {reason}')
+            failed.append(f'{sid} ({reason})')
+        else:
+            written += 1
 
     commit_and_push(
         project_dir,
-        f'Revision: redraft {len(scene_ids)} scenes from corrected briefs',
+        f'Revision: redraft {written} scenes from corrected briefs',
         ['scenes/', 'reference/', 'working/'])
+
+    if failed:
+        raise RedraftError(f'{len(failed)} scene(s) not re-drafted: {"; ".join(failed)}')
+
+
+def _report_redraft_error(e: 'RedraftError') -> None:
+    """Tell the author how to re-draft what ``_redraft_from_briefs`` could not.
+    Their passes are already completed, so re-running revise would not."""
+    log(f'ERROR: {e}')
+    log('Their briefs were rewritten but their prose was not. Re-draft them with '
+        '`storyforge write --force --coaching full --scenes <id>[,<id>...]`.')
 
 
 def _count_passes(rows):
@@ -2216,6 +2244,7 @@ def main(argv=None):
         log(f'Deferred redrafting enabled: {upstream_count} upstream passes, '
             f'{len(deferred_scenes)} scenes will be redrafted after all CSV fixes')
     redraft_needed = set()
+    redraft_error = None  # RedraftError from a redraft; exit 1 after the summary
 
     # ---- MAIN PASS LOOP ----
     for pass_num in range(start_pass, total_passes + 1):
@@ -2355,8 +2384,15 @@ def main(argv=None):
                     redraft_needed.update(affected)
                     log(f'  Deferred redraft for {len(affected)} scenes (will batch after all upstream passes)')
                 else:
-                    _redraft_from_briefs(project_dir, affected, pass_model, log_dir,
-                                         system=system)
+                    try:
+                        _redraft_from_briefs(project_dir, affected, pass_model,
+                                             log_dir, system=system)
+                    except RedraftError as e:
+                        _report_redraft_error(e)
+                        _update_pass_field(plan_rows, pass_num, 'status', 'failed',
+                                           csv_plan_file)
+                        redraft_error = e
+                        continue
 
             # Log usage (hone handles its own API logging; pass empty string)
             _log_usage(project_dir, '', 'revise', pass_name, pass_model, duration)
@@ -2645,8 +2681,11 @@ Rules:
     if defer_redraft and redraft_needed:
         log(f'\n=== Batch Redraft: {len(redraft_needed)} scenes ===')
         pass_model = select_revision_model('redraft', 'redraft from corrected briefs')
-        _redraft_from_briefs(project_dir, sorted(redraft_needed), pass_model, log_dir,
-                             system=system)
+        try:
+            _redraft_from_briefs(project_dir, sorted(redraft_needed), pass_model,
+                                 log_dir, system=system)
+        except RedraftError as e:
+            redraft_error = e
 
     # ---- SESSION SUMMARY ----
     completed = sum(
@@ -2693,6 +2732,11 @@ Rules:
     # Cost summary
     if not args.dry_run:
         print_summary(project_dir, 'revise', session_start=session_start)
+
+    if redraft_error:
+        _report_redraft_error(redraft_error)
+        log('============================================')
+        sys.exit(1)
 
     if completed == total_passes:
         log('All revision passes are done!')

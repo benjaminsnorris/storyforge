@@ -13,7 +13,9 @@ replayed; every other case is reported as excluded with its reason, never
 dropped silently. Holdout cases are excluded. Families:
 
 - ``redraft-from-brief``: ``cmd_write._build_prompt`` with briefs, the path
-  ``storyforge write`` and ``revise``'s ``_redraft_from_briefs`` take.
+  ``storyforge write`` and ``revise``'s ``_redraft_from_briefs`` take. Their
+  cut-off guard is not applied here: a refusal halts, a cut-off reply would
+  be replayed as a revision.
 - ``naturalness-upstream``: ``cmd_revise._fix_upstream_briefs`` then
   ``_redraft_scenes`` on the scene, the path ``revise --naturalness`` takes
   when the diagnosis names upstream causes.
@@ -189,7 +191,7 @@ def redraft(project_dir: str, scene_id: str) -> str:
     try:
         response = invoke(prompt, model, max_tokens=16384, label=f'e8 redraft {scene_id}',
                           system=system or None)
-    except RefusalError as e:  # write stops at a refusal and writes nothing
+    except RefusalError as e:  # write and revise write nothing for a refusal
         raise PassHalted(f'redraft of {scene_id} refused: {e}') from e
     text = extract_text(response)
     if not text:

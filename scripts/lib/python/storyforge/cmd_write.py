@@ -14,6 +14,7 @@ Usage:
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -31,6 +32,7 @@ from storyforge.cli import apply_coaching_override
 from storyforge.api import (
     invoke_to_file, extract_text, extract_text_from_file, extract_usage,
     calculate_cost_from_usage, submit_batch, poll_batch, download_batch_results,
+    stop_problem, RefusalError,
 )
 from storyforge.costs import estimate_cost, check_threshold, log_operation, print_summary
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
@@ -187,13 +189,15 @@ def main(argv=None):
     drafted_count = 0
     total_words = 0
 
+    failed: list[str] = []
+
     if write_mode == 'batch' and not args.dry_run:
-        drafted_count, total_words = _run_batch_mode(
+        drafted_count, total_words, failed = _run_batch_mode(
             pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
             coaching, use_briefs, args.force, filter_mode,
         )
     else:
-        drafted_count, total_words = _run_direct_mode(
+        drafted_count, total_words, failed = _run_direct_mode(
             pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
             coaching, use_briefs, args.force, filter_mode, write_mode,
             args.dry_run,
@@ -217,6 +221,14 @@ def main(argv=None):
         drift_check(project_dir, [sid for sid in pending_ids
                                   if os.path.isfile(os.path.join(scenes_dir, f'{sid}.md'))])
         run_review_phase('drafting', project_dir)
+
+    if failed:
+        log(f'ERROR: {len(failed)} scene(s) not drafted:')
+        for entry in failed:
+            log(f'  {entry}')
+        log('Re-run them with `storyforge write --scenes <id>[,<id>...]` '
+            '(add --force for a scene already drafted, revised or final).')
+        sys.exit(1)
 
 
 # ============================================================================
@@ -342,22 +354,74 @@ def _build_prompt(scene_id: str, project_dir: str, coaching: str,
                                   system_context=system_context)
 
 
-def _extract_scene_from_response(log_file: str, scene_file: str) -> None:
-    """Extract scene prose from API response."""
-    from storyforge.parsing import extract_single_scene, clean_scene_content
+def _output_file(project_dir: str, scene_id: str, coaching: str) -> str:
+    """Where a reply for ``scene_id`` is saved: the scene file at coaching
+    ``full``; the brief or constraint list in working/coaching/ otherwise
+    (the coach and strict prompts ask for that, not prose)."""
+    if coaching == 'coach':
+        return os.path.join(project_dir, 'working', 'coaching', f'brief-{scene_id}.md')
+    if coaching == 'strict':
+        return os.path.join(project_dir, 'working', 'coaching', f'constraints-{scene_id}.md')
+    return os.path.join(project_dir, 'scenes', f'{scene_id}.md')
+
+
+def _extract_scene_from_response(log_file: str, out_file: str,
+                                 prose: bool = True) -> str:
+    """Write the reply in API response ``log_file`` to ``out_file``.
+
+    Returns '' when written, otherwise why the reply must not be written, and
+    ``out_file`` is left as it was: the log could not be read, the model
+    refused or was cut off (``api.stop_problem``), or the reply is empty. With
+    ``prose`` (a scene, not a coaching brief) the reply must also pass
+    ``parsing.unsafe_scene_reason`` and have at least ``_MIN_SCENE_WORDS``.
+
+    Before this a reply cut off mid-sentence passed the 100-word floor and was
+    committed as a drafted scene, and batch mode could not tell: its saved
+    response had no ``stop_reason``. Coach and strict replies were written
+    over the scene's prose.
+    """
+    from storyforge.parsing import (
+        extract_single_scene, clean_scene_content, unsafe_scene_reason,
+    )
+    try:
+        with open(log_file) as f:
+            response = json.load(f)
+    except (OSError, ValueError) as e:
+        return f'could not read the response log ({e})'
+    problem = stop_problem(response)
+    if problem:
+        return problem
+
     text = extract_text_from_file(log_file)
-    if not text:
-        log(f'WARNING: Empty API response for {scene_file}')
-        return
+    if not text.strip():
+        return 'the API response is empty'
 
-    extracted = extract_single_scene(text)
-    content = extracted if extracted else text
+    if prose:
+        extracted = extract_single_scene(text)
+        content = extracted if extracted else text
+        # Strip writing-agent artifacts (scene title headers, continuity blocks)
+        content = clean_scene_content(content)
 
-    # Strip writing-agent artifacts (scene title headers, continuity blocks)
-    content = clean_scene_content(content)
+        old_text = None
+        if os.path.isfile(out_file):
+            with open(out_file) as f:
+                old_text = f.read()
+        reason = unsafe_scene_reason(content, old_text)
+        if reason:
+            return reason
+        words = len(content.split())
+        if words < _MIN_SCENE_WORDS:
+            return f'only {words} words (the floor is {_MIN_SCENE_WORDS})'
+    else:
+        content = text
 
-    with open(scene_file, 'w') as f:
+    os.makedirs(os.path.dirname(out_file), exist_ok=True)
+    with open(out_file, 'w') as f:
         f.write(content)
+    return ''
+
+
+_MIN_SCENE_WORDS = 100
 
 
 def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
@@ -368,24 +432,19 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
     word_count = 0
 
     if coaching in ('coach', 'strict'):
-        if coaching == 'coach':
-            coaching_file = os.path.join(project_dir, 'working', 'coaching',
-                                         f'brief-{scene_id}.md')
-        else:
-            coaching_file = os.path.join(project_dir, 'working', 'coaching',
-                                         f'constraints-{scene_id}.md')
+        coaching_file = _output_file(project_dir, scene_id, coaching)
         if not os.path.isfile(coaching_file):
-            log(f'WARNING: Coaching output not created: {coaching_file}')
-        if os.path.isfile(coaching_file):
-            with open(coaching_file) as f:
-                word_count = len(f.read().split())
+            log(f'ERROR: Coaching output not created: {coaching_file}')
+            return 0, False
+        with open(coaching_file) as f:
+            word_count = len(f.read().split())
     else:
         if not os.path.isfile(scene_file):
             log(f'ERROR: Scene file not created: {scene_file}')
             return 0, False
         with open(scene_file) as f:
             word_count = len(f.read().split())
-        if word_count < 100:
+        if word_count < _MIN_SCENE_WORDS:
             log(f'ERROR: Scene file suspiciously short ({word_count} words): {scene_file}')
             return 0, False
         update_field(metadata_csv, scene_id, 'word_count', str(word_count))
@@ -423,7 +482,9 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
 
 def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
                     metadata_csv, coaching, use_briefs, force, filter_mode):
-    """Run batch API mode. Returns (drafted_count, total_words)."""
+    """Run batch API mode. Returns (drafted_count, total_words, failed),
+    ``failed`` naming each scene not drafted and why. A bad reply skips only
+    its scene; its response is kept in ``log_dir``."""
     log('Building prompts for batch submission...')
 
     batch_file = os.path.join(log_dir, f'drafting-batch-{os.getpid()}.jsonl')
@@ -461,7 +522,7 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
     if not batch_scene_ids:
         log('No scenes to submit in batch.')
-        return 0, 0
+        return 0, 0, []
 
     log(f'Submitting batch with {len(batch_scene_ids)} scenes...')
 
@@ -482,10 +543,10 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
     # Process each scene result
     drafted_count = 0
     total_words = 0
+    failed: list[str] = []
     from storyforge.git import _git
 
     for scene_id in batch_scene_ids:
-        scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
         scene_json = os.path.join(batch_output_dir, f'{scene_id}.json')
 
         r = _git(project_dir, 'rev-parse', 'HEAD', check=False)
@@ -500,16 +561,29 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
         if batch_status != 'ok':
             log(f'ERROR: Batch failed for scene {scene_id}. Skipping.')
+            failed.append(f'{scene_id} (batch request failed)')
             continue
 
-        # Extract scene text
-        if os.path.isfile(scene_json):
-            _extract_scene_from_response(scene_json, scene_file)
+        if not os.path.isfile(scene_json):
+            log(f'ERROR: No batch response for scene {scene_id}. Skipping.')
+            failed.append(f'{scene_id} (no response)')
+            continue
 
-        # Log usage (batch=True for 50% discount pricing)
-        if os.path.isfile(scene_json):
-            _log_api_usage(scene_json, 'draft', scene_id, model, project_dir,
-                           batch=True)
+        # Log usage (batch=True for 50% discount pricing) — paid either way
+        _log_api_usage(scene_json, 'draft', scene_id, model, project_dir,
+                       batch=True)
+
+        reason = _extract_scene_from_response(
+            scene_json, _output_file(project_dir, scene_id, coaching),
+            prose=coaching == 'full')
+        if reason:
+            # Keep the paid reply: the batch directory is removed below.
+            kept = os.path.join(log_dir, f'drafting-{scene_id}.json')
+            shutil.copyfile(scene_json, kept)
+            log(f'ERROR: Not writing scene {scene_id}: {reason.rstrip(".")}. Skipping.')
+            log(f'See full output: {kept}')
+            failed.append(f'{scene_id} ({reason.rstrip(".")})')
+            continue
 
         # Verify and commit
         wc, ok = _verify_and_commit_scene(
@@ -519,20 +593,27 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
         if ok:
             drafted_count += 1
             total_words += wc
+        else:
+            failed.append(f'{scene_id} (failed verification; see the ERROR above)')
 
     # Cleanup
     _safe_remove(batch_file)
     _safe_rmdir(batch_output_dir)
 
-    return drafted_count, total_words
+    return drafted_count, total_words, failed
 
 
 def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                      metadata_csv, coaching, use_briefs, force, filter_mode,
                      write_mode, dry_run):
-    """Run direct/interactive mode. Returns (drafted_count, total_words)."""
+    """Run direct/interactive mode. Returns (drafted_count, total_words,
+    failed), ``failed`` naming each scene not drafted and why. A bad reply
+    (refused, cut off, unsafe) skips only its scene; any other API failure
+    ends the loop, and that scene and every later one go into ``failed``.
+    Interactive replies are written by the CLI and are not checked."""
     drafted_count = 0
     total_words = 0
+    failed: list[str] = []
     from storyforge.git import _git
 
     # Build shared context once for prompt caching across all scenes
@@ -583,22 +664,29 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
         log(f'Invoking API for scene {scene_id} (model: {model})...')
         log(f'  Per-scene log: {scene_log}')
 
+        reason = ''
         if write_mode == 'interactive':
-            # Interactive mode — invoke claude CLI
+            # Interactive mode — invoke claude CLI. It writes the file itself,
+            # so no reply passes through the guard below.
             exit_code = _invoke_interactive(prompt, model, project_dir)
         else:
             # Direct API mode
+            max_tokens = 16384 if write_mode != 'direct' else 8192
             try:
-                max_tokens = 16384 if write_mode != 'direct' else 8192
                 invoke_to_file(prompt, model, scene_log, max_tokens,
                                label=f'drafting {scene_id}',
                                system=system or None)
-                _extract_scene_from_response(scene_log, scene_file)
-                _log_api_usage(scene_log, 'draft', scene_id, model, project_dir)
                 exit_code = 0
+            except RefusalError:
+                exit_code = 0  # logged to scene_log; the extract below names it
             except Exception as e:
                 log(f'ERROR: API call failed: {e}')
                 exit_code = 1
+            if exit_code == 0:
+                _log_api_usage(scene_log, 'draft', scene_id, model, project_dir)
+                reason = _extract_scene_from_response(
+                    scene_log, _output_file(project_dir, scene_id, coaching),
+                    prose=coaching == 'full')
 
         elapsed = int(time.time() - start_time)
         mins, secs = divmod(elapsed, 60)
@@ -608,7 +696,16 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                 f'after {mins}m{secs}s')
             log(f'See full output: {scene_log}')
             log('Stopping — continuity may be broken.')
+            failed.append(f'{scene_id} (API call failed; see {scene_log})')
+            failed.extend(f'{sid} (not attempted: the run stopped at {scene_id})'
+                          for sid in pending_ids[i + 1:])
             break
+
+        if reason:
+            log(f'ERROR: Not writing scene {scene_id}: {reason.rstrip(".")}. Skipping.')
+            log(f'See full output: {scene_log}')
+            failed.append(f'{scene_id} ({reason.rstrip(".")})')
+            continue
 
         wc, ok = _verify_and_commit_scene(
             scene_id, project_dir, scenes_dir, metadata_csv, coaching,
@@ -617,6 +714,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
         if ok:
             drafted_count += 1
             total_words += wc
+        else:
+            failed.append(f'{scene_id} (failed verification; see the ERROR above)')
 
         log(f'  Time: {mins}m{secs}s')
 
@@ -625,7 +724,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             log('Pausing 10s before next scene...')
             time.sleep(10)
 
-    return drafted_count, total_words
+    return drafted_count, total_words, failed
 
 
 def _invoke_interactive(prompt: str, model: str, project_dir: str) -> int:
@@ -660,8 +759,8 @@ def _log_api_usage(log_file: str, operation: str, target: str, model: str,
             cache_read=usage.get('cache_read', 0),
             cache_create=usage.get('cache_create', 0),
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log(f'WARNING: could not log the cost of {operation} {target}: {e}')
 
 
 def _replace_in_file(filepath: str, pattern: str, replacement: str) -> None:
@@ -694,7 +793,6 @@ def _safe_remove(path: str) -> None:
 
 
 def _safe_rmdir(path: str) -> None:
-    import shutil
     try:
         shutil.rmtree(path)
     except OSError:

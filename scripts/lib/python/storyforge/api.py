@@ -167,6 +167,21 @@ class RefusalError(RuntimeError):
         super().__init__(f"model refused the request ({self.category or 'no category'})")
 
 
+def stop_problem(response) -> str:
+    """Why ``response``'s text is not a complete answer ('' when it is): the
+    model refused, or the reply was cut off at ``max_tokens``. Works on a live
+    response and on a saved log, from ``invoke_to_file`` or batch results.
+    Only those two stop reasons are known to leave an incomplete answer;
+    ``parsing.unsafe_scene_reason`` catches prose cut off any other way."""
+    if not isinstance(response, dict):
+        return ''
+    if response.get('stop_reason') == 'refusal':
+        return str(RefusalError(response))
+    if is_truncated(response):
+        return 'the reply was cut off at max_tokens'
+    return ''
+
+
 def _check_refusal(response) -> None:
     if isinstance(response, dict) and response.get('stop_reason') == 'refusal':
         raise RefusalError(response)
@@ -480,9 +495,12 @@ def download_batch_results(results_url: str, output_dir: str, log_dir: str) -> l
                 if block.get('type') == 'text':
                     text = block.get('text', '')
 
-            # Write JSON response (for log_usage)
+            # Write JSON response (for log_usage). stop_reason/stop_details
+            # let a caller tell a refused or cut-off reply from a finished one.
             with open(os.path.join(log_dir, f'{cid}.json'), 'w') as f:
-                json.dump({'usage': usage, 'content': msg.get('content', [])}, f)
+                json.dump({'usage': usage, 'content': msg.get('content', []),
+                           'stop_reason': msg.get('stop_reason'),
+                           'stop_details': msg.get('stop_details')}, f)
 
             # Write text content
             with open(os.path.join(log_dir, f'{cid}.txt'), 'w') as f:

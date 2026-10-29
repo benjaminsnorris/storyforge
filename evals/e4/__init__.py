@@ -115,9 +115,11 @@ def clear_prose(project_dir: str, scene_ids: list[str]) -> dict[str, str]:
 
 def draft(project_dir: str, scene_ids: list[str]) -> tuple[dict[str, str], dict[str, str]]:
     """Draft the scenes in order as ``write --direct`` does. Returns (prose by
-    id, refusal reason by id). ``write`` stops at a refused scene; E4 records
-    the refusal and drafts on, so one refusal doesn't hide the other 22
-    scenes. A refused scene has no prose and is not judged."""
+    id, refusal reason by id). Like ``write``, E4 records a refused scene and
+    drafts on; a refused scene has no prose and is not judged. Unlike
+    ``write``, E4 does not apply the cut-off guard
+    (``cmd_write._extract_scene_from_response``), so it can judge a draft that
+    ``write`` would refuse to save; no recorded draft has been cut off."""
     from storyforge.api import RefusalError, extract_text, invoke
     from storyforge.cmd_write import _build_prompt
     from storyforge.common import build_shared_context, select_model
@@ -142,7 +144,7 @@ def draft(project_dir: str, scene_ids: list[str]) -> tuple[dict[str, str], dict[
             continue
         prose = clean_scene_content(extract_single_scene(text) or text) if text else ''
         words = len(prose.split())
-        if words < 100:  # cmd_write's own floor for a failed draft
+        if words < 100:  # cmd_write's _MIN_SCENE_WORDS
             raise RuntimeError(f'draft of {sid} is {words} words')
         with open(os.path.join(project_dir, 'scenes', f'{sid}.md'), 'w', encoding='utf-8') as f:
             f.write(prose)

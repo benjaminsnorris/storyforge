@@ -88,3 +88,19 @@ def test_unsafe_scene_reason():
     assert 'empty' in unsafe_scene_reason('  ')
     assert 'mid-sentence' in unsafe_scene_reason('and then')
     assert 'collapsed' in unsafe_scene_reason('Short.', LONG)
+
+
+@pytest.mark.parametrize('ending', [
+    'She left…', '*I am home.*', '_Run._', 'The end.\n\n---', 'The end.\n\n* * *',
+])
+def test_finished_prose_with_a_literary_ending_is_safe(ending):
+    """An ellipsis, closing emphasis or a trailing scene break ends finished
+    prose; rejecting it threw away paid, complete drafts (PR #364 review)."""
+    from storyforge.parsing import unsafe_scene_reason
+    assert unsafe_scene_reason(ending) == ''
+
+
+@pytest.mark.parametrize('cut_off', ['and then she', 'word*', '---'])
+def test_markup_does_not_hide_a_cut_off(cut_off):
+    from storyforge.parsing import unsafe_scene_reason
+    assert 'mid-sentence' in unsafe_scene_reason(cut_off)
