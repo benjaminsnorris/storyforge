@@ -1,6 +1,6 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-28, at v1.80.0. Start here when resuming the rethink in a new session. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`.
+Last updated 2026-10-29, at v1.83.0 (end of the overnight run). Start here when resuming the rethink in a new session. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`.
 
 ## Where we are
 
@@ -13,9 +13,9 @@ Last updated 2026-10-28, at v1.80.0. Start here when resuming the rethink in a n
 | 2 E1 corpus | done: 144 cases (130 prose), 30 held out | #340 |
 | 3 E2 / E7 / E8 | done: E2 Carol (evals-56), E2 on E1, E7 Carol, E8 three pass families | #341, #342, #343, #344, #346 |
 | 4 E3 / E5 | done | #346 |
-| — E4 | done (overnight): shared-dark Act 1 drafted with today's `write`, judged; see the E4 note below | E4 PR (v1.81.0) |
+| — E4 | done (overnight): shared-dark Act 1 drafted with today's `write`, judged; see the E4 notes below | #361 (v1.81.0), re-recorded in #363 |
 | — E6 | not started: needs a budget decision (below) | |
-| 5 Phase 1 | in progress: models (runtime tier resolution, thinking allowance), the whole bug checklist (#359, v1.80.2) and the E3 tier comparison (no routing change) done; structured outputs and warn-and-continue → halt to go | v1.80.0 PR, #359 |
+| 5 Phase 1 | in progress: models (runtime tier resolution, thinking allowance), the whole bug checklist (#359, v1.80.2), the E3 tier comparison (no routing change), and structured outputs for the knowledge and physical-state chains (v1.83.0) done; the other `KEY: value` parsers and the remaining warn-and-continue sites to go | v1.80.0 PR, #359, #361, #363 |
 
 ## Baseline (`evals/baseline.json`)
 
@@ -27,11 +27,11 @@ All eight suites replay offline: 2106 recorded calls, $0 to rerun, $10.80 if run
 | `e2-carol` | 37 errors injected into *A Christmas Carol* | 0 detected (0) | recall ≥ 0.9 per code, precision ≥ 0.8 |
 | `e2-corpus-validate` | deterministic continuity checks vs 51 real E1 errors | code-matched recall 0.12 (likely incidental), precision 0.035 (unchanged: no model) | same |
 | `e2-corpus-drift` | timeline drift check vs the same 51 | recall 0.10 (0.16), precision 0.40 (0.30) | same |
-| `e3-extraction` | extraction captures the fact behind each E1 error | 0.24 (0.16); 0.82 with partial (0.43) | ≥ 0.85 |
+| `e3-extraction` | extraction captures the fact behind each E1 error | 0.29 with structured outputs (0.24 before, v1.80.0); 0.76 with partial (0.82) | ≥ 0.85 |
 | `e5-roundtrip` | facts a redraft-from-brief changes (10 shared-dark Act 1 scenes) | 3.2 per scene (7.2) | coverage only (trend metric) |
 | `e7-classics` | continuity flags on *A Christmas Carol* (2 runs) and *The Plastic Age* (1 run); no real errors | 115 flags, all noise: 96 FP, 7 deliberate, 12 extraction errors (Carol alone: 60) | 0 noise, 0 unreviewed |
-| `e8-revision-safety` | today's passes reintroduce E1 tool-introduced errors | 5 of 22, 1 halted (v1.80.2: a cut-off naturalness redraft now halts) | 0 |
-| `e4-generation` | draft shared-dark Act 1 (23 scenes) with today's `write`, judge it | CP10k 18.2 (judge), 0.48 (shipped checker); BPS 3.09; length drift 0.071; voice 4.71 (author 4.75). $5.76 live | coverage only (trend metric) |
+| `e8-revision-safety` | today's passes reintroduce E1 tool-introduced errors | 5 of 21, 2 halted (a cut-off naturalness redraft and a refused redraft-from-brief now halt) | 0 |
+| `e4-generation` | draft shared-dark Act 1 (23 scenes) with today's `write`, judge it | 22 drafted, 1 refused; CP10k 18.2 (judge), 0.49 (shipped checker); BPS 2.86; length drift 0.054; voice 4.69 (author 4.75). $5.77 if live | every scene drafted (fails: 1 refused) |
 
 Read the exact numbers from `evals/baseline.json`; compare a run with `python3 evals/run.py` (deltas are printed).
 
@@ -63,6 +63,41 @@ Prerequisites:
 
 ## Overnight run (2026-10-28 → 29): Ben's instructions
 
+### Morning summary (2026-10-29)
+
+**Merged** (5-agent review pending on all of them; it was skipped overnight):
+
+| PR | Version | What |
+|---|---|---|
+| #359 | 1.80.2 | All five open Phase 1 checklist bugs fixed, each with a regression test (details in the plan's checklist) |
+| #361 | 1.81.0 | E4 generation benchmark; E3 model-tier comparison (no routing change) |
+| #363 | 1.83.0 | Structured outputs (`api.invoke(output_schema=…)`) for the knowledge and physical-state chains; extract Phase 3b/3c halt at a failed scene instead of skipping it; E4/E8 count refusals as outcomes; E3 and E4 re-recorded |
+
+evals-56 merged #357 (1.80.1), #358 (1.80.3, physical-state `resolves`), #360 (1.81.1, `RefusalError`; timeline no longer asks for written reasoning) and #362 (1.82.0, Phase 0 budget from the context window) in the same window. The versions were coordinated.
+
+**Eval deltas vs the v1.80.0 baseline:**
+- **E3:** recall 0.245 → 0.286 (12 → 14 captured). With partial, 0.816 → 0.755 (missing 9 → 12). Most of the move came with structured outputs, from single runs on 49 cases; it's inside noise until E6 measures variance.
+- **E8:** reintroduced 5 (unchanged). Replayed 23 → 21, because 2 cases now halt: one cut-off and one refused redraft. Both used to be judged as finished scenes.
+- **E2-corpus-validate:** flag counts moved because of #358 (precision 0.036 → 0.031).
+- **E4:** new. CP10k 18.2 (judge) vs 0.49 for the shipped checker; BPS 2.86 (mostly the corrupt briefs below); 1 of 23 scenes refused.
+- **Unchanged:** E1, E2-Carol, E2-drift, E5, E7.
+
+**Spend:** $8.45 of $20 on E4 (first recording $5.76, re-record after the refusal change $2.69). $6.09 of $25 on everything else (E3 Haiku $0.48 and Opus $3.73 for the tier comparison; E3 re-record $1.88).
+
+**Skipped, and why:**
+- **The other seven `KEY: value` parsers** in `extract.py` (characterize, skeleton, intent, briefs, cleanup), the `prompts.py` consumers, and the remaining warn-and-continue sites. I did the two fact-work chains that E3 measures. The rest is a larger refactor with no eval covering it and no review overnight.
+- **The `validate` check for a physical state whose owner is absent.** It adds two unlabeled E7 flags (Christmas Carol `scrooge-cold-exterior`, Plastic Age `caps-pocketed-carl`; both look like extraction errors), and labeling them is your call.
+- **Routing `_TASK_TIER['extraction']` off Haiku.** E3 doesn't measure timeline cues or `enrich`, and the drift re-record would cost ~$16.
+- **"A pass cannot overwrite a reference doc"** (plan Phase 1 success criteria). I couldn't tie it to a specific survey case; say which one you meant.
+
+**Needs your decision** (details in the E4 notes below):
+1. **shared-dark briefs.** Storyforge's upstream-brief-fix passes rewrote at least six Act 1 briefs into a different story in April, and they're still at shared-dark HEAD. Options: re-pin E4/E5 elsewhere, exclude those scenes, or fix the briefs. The pass itself (`_fix_upstream_briefs`) needs a guard against inventing characters.
+2. **Refusals.** Opus 5.5 refused one drafting request (`cyber`, waking-hank). `write` now stops there, and E8 shows a redraft refusal too. The API's server-side `fallbacks` parameter could rescue these, but adopting it is a product choice.
+3. **`write` writes cut-off drafts.** Its only guard is ≥100 words. `parsing.unsafe_scene_reason` exists now and could guard `write` as it guards revise.
+4. **E2-Carol:** 37 of its recorded Haiku replies hit `max_tokens`. That may explain part of its 0 recall; worth a look before trusting it.
+
+### Original instructions
+
 Ben is asleep; work through **Next steps** in order without asking. Rules:
 
 - **Budget:** E4 is approved, target **under $20** for building and recording it. Separately, **$25** for everything else (E3 tier comparison, re-records after prompt changes). Before any recording, estimate its cost (`evals/e8/cli.py plan`-style or from `baseline.json` "if live" figures, adjusted to current per-model prices in `costs.PRICING`). If a step would push either budget past its cap, skip it and record why here. Keep a running spend tally in this section.
@@ -71,13 +106,13 @@ Ben is asleep; work through **Next steps** in order without asking. Rules:
 - **Stop and leave a note here** rather than guess on anything that changes what the author sees in a book's prose or deletes author data.
 - In the morning Ben wants: what merged, eval deltas vs baseline, spend, and anything skipped with the reason, at the top of this section.
 
-Spend so far: $0 of $20 (E4), $0 of $25 (other). (The v1.80.0 re-record before this run cost $9.70 under a separate approval.)
+Spend: $8.45 of $20 (E4), $6.09 of $25 (other). (The v1.80.0 re-record before this run cost $9.70 under a separate approval.)
 
 ## E4 notes (2026-10-28 overnight)
 
 - **How it runs** (`evals/e4`): Act 1 prose is removed, then the 23 scenes are drafted in reading order the way `write --direct` drafts them (shared cached context, `cmd_write._build_prompt` with briefs, each scene's deps reading the new drafts). An Opus judge reads each scene against the drafts before it plus the character, world and systems bibles and `characters.csv`, and lists contradictions (by code) and broken brief promises. The shipped checker is the timeline drift check `write` runs after drafting. Direct mode, not batch (batch is refused under a cassette). The plan's human spot-check is still owed.
 - **BPS mostly measures corrupt briefs, not drafting.** At the pinned commit (`0eaa3867`, shared with E5), the briefs of at least six Act 1 scenes (`claires-cold`, `waking-hank`, `name-surfaces`, `the-school`, `drive`, `fire-ostrowski`, and by the judge's notes also `harmons-hands` and `waking-maren`) describe a different story: Mallen, Yael, a prison facility, Olinsky, a Meszaros lawsuit. None of that is in the bibles or the prose. They were introduced by Storyforge's own `Polish: upstream brief fixes` / `Naturalness: upstream brief fixes` passes (`_fix_upstream_briefs`) from `0940bd4d` (2026-04-07) to `f56db284` (04-16), and they are still at shared-dark HEAD. The drafter followed the book, so the judge counted every beat of those briefs as broken (e.g. `waking-hank`: 9). **Decision for Ben:** re-pin E4 to a commit with sound briefs, exclude those scenes, or fix the briefs in shared-dark. This also affects E5 and E8, which redraft from the same briefs. It looks like a serious live bug in `_fix_upstream_briefs` (it can invent characters and plot), and it's a source of E1 brief-level `tool-introduced` cases.
-- **One draft is a refusal.** `waking-hank`'s draft came back with `stop_reason: refusal`, cut off mid-word at 528 words. Today's `write` accepts it: its only check is ≥100 words, and the direct and batch paths have no truncation guard. E4 records that faithfully. evals-56 is making `api` raise on refusals (v1.80.4+). After that, E4's replay errors at that scene, and E4 must be re-recorded from there (≈$5, inside the E4 budget).
+- **One draft is a refusal.** `waking-hank`'s draft came back with `stop_reason: refusal` (category `cyber`), cut off mid-word at 528 words, and the first recording (#361) judged it as a scene. Since v1.81.1, `api` raises `RefusalError`, which stops `write` at that scene. E4 now records the scene as `refused` and drafts on, so the coverage gate fails. It was re-recorded in v1.83.0 ($2.69).
 
 ## E3 tier comparison (2026-10-28 overnight)
 
@@ -103,7 +138,7 @@ Same 49 facts, extraction model forced with `STORYFORGE_MODEL`, Opus judge uncha
 1. **E4** (plan §4.2, decision 7): draft shared-dark Act 1 (23 scenes) end to end with today's `write`, judge it (CP10k, BPS), record under a cassette, add to `baseline.json`. Earlier estimate was ~$14 at old prices; re-estimate first. This is the "before" picture for Phase 3, so build it before Phase 1 changes the drafting prompts.
 2. **Phase 1 bug checklist** (plan, Phase 1): the five unchecked items. Deterministic, no spend; each gets a regression test.
 3. **Fact-work tier comparison on E3** (plan, "Model selection"): run E3 with fact work on opus, sonnet and haiku (`STORYFORGE_MODEL` or the `_TASK_TIER` map) and keep the cheapest that matches opus. Then route `_TASK_TIER['extraction']` and `select_revision_model`'s continuity branch accordingly.
-4. **Structured outputs** replacing `KEY: value` parsers (`extract.py`, parser consumers in `prompts.py`); current Opus writes `**VERDICT: yes.**`, so line-anchored parsers are fragile now. Then **warn-and-continue → halt** (plan Phase 1 success criteria, including the three silent-failure regression tests). Re-record affected suites within budget.
+4. **Structured outputs** (knowledge and physical-state chains done in v1.83.0; the rest open) replacing `KEY: value` parsers (`extract.py`, parser consumers in `prompts.py`); current Opus writes `**VERDICT: yes.**`, so line-anchored parsers are fragile now. Then **warn-and-continue → halt** (plan Phase 1 success criteria, including the three silent-failure regression tests). Re-record affected suites within budget.
 
 ## Key paths
 

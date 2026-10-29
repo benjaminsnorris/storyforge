@@ -96,6 +96,33 @@ class TestInvokeSystemParam:
         assert body['messages'] == [{'role': 'user', 'content': 'hello'}]
 
 
+class TestInvokeOutputSchema:
+    SCHEMA = {'type': 'object', 'properties': {'a': {'type': 'string'}},
+              'required': ['a'], 'additionalProperties': False}
+
+    @patch('storyforge.api._api_request')
+    @patch('storyforge.api.get_api_key', return_value='test-key')
+    def test_schema_becomes_output_config_format(self, mock_key, mock_req, tmp_path):
+        from storyforge.api import invoke, invoke_to_file
+        mock_req.return_value = {'content': [{'type': 'text', 'text': '{"a": "x"}'}],
+                                 'usage': {'input_tokens': 1, 'output_tokens': 1}}
+        invoke('hello', 'claude-sonnet-5-5', max_tokens=100, output_schema=self.SCHEMA)
+        assert mock_req.call_args[0][1]['output_config'] == {
+            'format': {'type': 'json_schema', 'schema': self.SCHEMA}}
+        invoke_to_file('hello', 'claude-sonnet-5-5', str(tmp_path / 'r.json'),
+                       output_schema=self.SCHEMA)
+        assert mock_req.call_args[0][1]['output_config']['format']['schema'] == self.SCHEMA
+
+    @patch('storyforge.api._api_request')
+    @patch('storyforge.api.get_api_key', return_value='test-key')
+    def test_no_schema_sends_no_output_config(self, mock_key, mock_req):
+        from storyforge.api import invoke
+        mock_req.return_value = {'content': [{'type': 'text', 'text': 'ok'}],
+                                 'usage': {'input_tokens': 1, 'output_tokens': 1}}
+        invoke('hello', 'claude-sonnet-5-5', max_tokens=100)
+        assert 'output_config' not in mock_req.call_args[0][1]
+
+
 class TestInvokeApiConsecutiveFailures:
     @patch('storyforge.api._api_request')
     @patch('storyforge.api.get_api_key', return_value='test-key')

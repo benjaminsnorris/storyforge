@@ -63,12 +63,18 @@ class TestBooleanAnswers:
             assert reduce_boolean(raw) == raw, raw
 
     def test_physical_state_parser_reduces(self):
+        # action_gating is now a JSON boolean in a structured reply, so the
+        # model can no longer attach prose; the parser writes the CSV strings.
+        import json
         from storyforge.extract import parse_physical_state_response
-        result = parse_physical_state_response(
-            'NEW_STATES: daisy-sobbing|daisy-buchanan|sobbing|appearance|'
-            'yes — affects her speech\n'
-            'gatsby-pink-suit|jay-gatsby|pink suit|appearance|No — cosmetic\n',
-            'sc1')
+        result = parse_physical_state_response(json.dumps({
+            'physical_state_in': [], 'physical_state_out': [], 'resolved_states': [],
+            'new_states': [
+                {'id': 'daisy-sobbing', 'character': 'daisy-buchanan',
+                 'description': 'sobbing', 'category': 'appearance', 'action_gating': True},
+                {'id': 'gatsby-pink-suit', 'character': 'jay-gatsby',
+                 'description': 'pink suit', 'category': 'appearance', 'action_gating': False},
+            ]}), 'sc1')
         gating = {s['id']: s['action_gating'] for s in result['_new_states']}
         assert gating == {'daisy-sobbing': 'true', 'gatsby-pink-suit': 'false'}
 
@@ -127,6 +133,9 @@ class TestCleanupAnswerFormats:
 
 
 def test_physical_state_prompt_asks_for_a_boolean():
-    import inspect
-    from storyforge import extract
-    assert 'action_gating is the single word true' in inspect.getsource(extract)
+    # The structured reply's schema now enforces the boolean; the prompt names the field.
+    from storyforge.extract import PHYSICAL_STATE_SCHEMA, build_physical_state_prompt
+    state = PHYSICAL_STATE_SCHEMA['properties']['new_states']['items']
+    assert state['properties']['action_gating'] == {'type': 'boolean'}
+    prompt = build_physical_state_prompt('s1', 'Text.', {'on_stage': 'Nick'}, {}, [])
+    assert 'action_gating (true when' in prompt

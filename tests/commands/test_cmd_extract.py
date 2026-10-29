@@ -309,6 +309,18 @@ class TestErrorHandling:
 # ============================================================================
 
 
+def _chain_or_csv_reply(prompt):
+    """Structured JSON for the sequential knowledge and physical-state
+    chains, a CSV block for everything else."""
+    if 'Track the knowledge state' in prompt:
+        return json.dumps({'knowledge_in': [], 'knowledge_out': [], 'new_facts': [],
+                           'continuity_deps': [], 'scene_summary': 'Something happens.'})
+    if 'Track the physical state' in prompt:
+        return json.dumps({'physical_state_in': [], 'physical_state_out': [],
+                           'new_states': [], 'resolved_states': []})
+    return 'id|seq|title\nact1-sc01|1|Test\n'
+
+
 class TestPhaseExecution:
     """Test individual phase execution through main."""
 
@@ -401,7 +413,7 @@ class TestPhaseExecution:
         monkeypatch.setattr('storyforge.cmd_extract._run_hone',
                             lambda plugin_dir, phase: None)
 
-        mock_api.set_response('id|seq|title\nact1-sc01|1|Test\n')
+        mock_api.set_response_fn(_chain_or_csv_reply)
 
         # Patch validate/cleanup
         monkeypatch.setattr('storyforge.elaborate.validate_structure', lambda ref_dir: {

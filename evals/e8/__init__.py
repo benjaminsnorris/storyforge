@@ -175,7 +175,7 @@ def parse_verdict(text: str) -> dict:
 
 def redraft(project_dir: str, scene_id: str) -> str:
     """Run the current redraft-from-brief pass on one scene; return the new prose."""
-    from storyforge.api import extract_text, invoke
+    from storyforge.api import RefusalError, extract_text, invoke
     from storyforge.cmd_write import _build_prompt
     from storyforge.common import build_shared_context, select_model
     from storyforge.parsing import clean_scene_content, extract_single_scene
@@ -186,8 +186,11 @@ def redraft(project_dir: str, scene_id: str) -> str:
                            system_context=bool(system))
     if not prompt:
         raise RuntimeError(f'could not build a redraft prompt for {scene_id}')
-    response = invoke(prompt, model, max_tokens=16384, label=f'e8 redraft {scene_id}',
-                      system=system or None)
+    try:
+        response = invoke(prompt, model, max_tokens=16384, label=f'e8 redraft {scene_id}',
+                          system=system or None)
+    except RefusalError as e:  # write stops at a refusal and writes nothing
+        raise PassHalted(f'redraft of {scene_id} refused: {e}') from e
     text = extract_text(response)
     if not text:
         raise RuntimeError(f'empty redraft for {scene_id}')
@@ -260,8 +263,8 @@ def revision_pass(project_dir: str, scene_id: str, row: dict) -> str:
 
 
 class PassHalted(Exception):
-    """The current pass refused to write the scene (e.g. a cut-off reply) and
-    halted. Nothing was written, so nothing can be reintroduced; counted as
+    """The current pass refused to write the scene (a cut-off reply, or the
+    model refused the request) and halted. Nothing was written, so nothing can be reintroduced; counted as
     ``halted``, separately from the replayed cases."""
 
 

@@ -1,9 +1,26 @@
 """Tests for reverse elaboration extraction helpers (migrated from test-extract.sh)."""
 
+import json
 import os
 import shutil
 
 import pytest
+
+
+def _knowledge_reply(**fields):
+    """A structured Phase 3b reply (KNOWLEDGE_SCHEMA) holding every required field."""
+    reply = {'knowledge_in': [], 'knowledge_out': [], 'new_facts': [],
+             'continuity_deps': [], 'scene_summary': ''}
+    reply.update(fields)
+    return json.dumps(reply)
+
+
+def _physical_reply(**fields):
+    """A structured Phase 3c reply (PHYSICAL_STATE_SCHEMA) holding every required field."""
+    reply = {'physical_state_in': [], 'physical_state_out': [], 'new_states': [],
+             'resolved_states': []}
+    reply.update(fields)
+    return json.dumps(reply)
 
 
 class TestParseCharacterizeResponse:
@@ -81,12 +98,12 @@ class TestParseBriefResponse:
 class TestParseKnowledgeResponse:
     def test_extracts_fields(self):
         from storyforge.extract import parse_knowledge_response
-        response = (
-            'KNOWLEDGE_IN: Orcutt was found dead at the alkali flat\n'
-            'KNOWLEDGE_OUT: Orcutt was found dead;the body was deliberately staged;survey equipment present\n'
-            'CONTINUITY_DEPS: discovery-at-flat\n'
-            'SCENE_SUMMARY: Emmett examines the staged crime scene and decides to investigate quietly'
-        )
+        response = _knowledge_reply(
+            knowledge_in=['Orcutt was found dead at the alkali flat'],
+            knowledge_out=['Orcutt was found dead', 'the body was deliberately staged',
+                           'survey equipment present'],
+            continuity_deps=['discovery-at-flat'],
+            scene_summary='Emmett examines the staged crime scene and decides to investigate quietly')
         result = parse_knowledge_response(response, 'arranged-dead')
         assert 'Orcutt was found dead' in result['knowledge_in']
         assert 'deliberately staged' in result['knowledge_out']
@@ -338,20 +355,27 @@ class TestKnowledgeIdsAtSource:
                          'gatsby-throws-parties': 'Gatsby throws the parties'})
         assert '- tom-affair-ny — Tom has a mistress in New York' in prompt
         assert '- gatsby-throws-parties — Gatsby throws the parties' in prompt
-        assert 'NEW_FACTS:' in prompt
+        for field in ('knowledge_in', 'knowledge_out', 'new_facts', 'continuity_deps',
+                      'scene_summary'):
+            assert f'- {field}:' in prompt
+        assert 'NEW_FACTS:' not in prompt and 'KNOWLEDGE_IN:' not in prompt
         assert 'IDs only, never sentences' in prompt
         assert 'at most 15 words' in prompt
-        assert 'never write "none"' in prompt
+        assert 'an empty list is a valid value' in prompt
 
     def test_parses_new_facts(self):
         from storyforge.extract import parse_knowledge_response
-        result = parse_knowledge_response(
-            'KNOWLEDGE_IN: tom-affair-ny\n'
-            'KNOWLEDGE_OUT: tom-affair-ny;myrtle-is-mistress;wilson-unaware\n'
-            'NEW_FACTS: myrtle-is-mistress | Tom\'s mistress is Myrtle Wilson | identity\n'
-            'wilson-unaware | George Wilson does not know of the affair | identity\n'
-            'CONTINUITY_DEPS: s1\n'
-            'SCENE_SUMMARY: Nick meets Myrtle.', 's2')
+        result = parse_knowledge_response(_knowledge_reply(
+            knowledge_in=['tom-affair-ny'],
+            knowledge_out=['tom-affair-ny', 'myrtle-is-mistress', 'wilson-unaware'],
+            new_facts=[
+                {'id': 'myrtle-is-mistress', 'name': "Tom's mistress is Myrtle Wilson",
+                 'category': 'identity'},
+                {'id': 'wilson-unaware', 'name': 'George Wilson does not know of the affair',
+                 'category': 'identity'},
+            ],
+            continuity_deps=['s1'],
+            scene_summary='Nick meets Myrtle.'), 's2')
         assert [f['id'] for f in result['_new_facts']] == ['myrtle-is-mistress', 'wilson-unaware']
         assert result['_new_facts'][0]['category'] == 'identity'
         assert result['continuity_deps'] == 's1'
@@ -361,9 +385,10 @@ class TestKnowledgeIdsAtSource:
                                        'No new facts'])
     def test_placeholder_fields_are_empty(self, value):
         from storyforge.extract import parse_knowledge_response
-        result = parse_knowledge_response(
-            f'KNOWLEDGE_IN: {value}\nKNOWLEDGE_OUT: fact-a;{value}\n'
-            f'NEW_FACTS: {value}\nCONTINUITY_DEPS: {value}\n', 's1')
+        result = parse_knowledge_response(_knowledge_reply(
+            knowledge_in=[value], knowledge_out=['fact-a', value],
+            new_facts=[{'id': value, 'name': '', 'category': 'identity'}],
+            continuity_deps=[value]), 's1')
         assert 'knowledge_in' not in result
         assert result['knowledge_out'] == 'fact-a'
         assert 'continuity_deps' not in result
@@ -371,9 +396,11 @@ class TestKnowledgeIdsAtSource:
 
     def test_physical_state_placeholders_are_empty(self):
         from storyforge.extract import parse_physical_state_response
-        result = parse_physical_state_response(
-            'PHYSICAL_STATE_IN: (none)\nPHYSICAL_STATE_OUT: none\n'
-            'NEW_STATES: none\nRESOLVED_STATES: none\n', 's1')
+        result = parse_physical_state_response(_physical_reply(
+            physical_state_in=['(none)'], physical_state_out=['none'],
+            new_states=[{'id': 'none', 'character': '', 'description': '',
+                         'category': 'injury', 'action_gating': False}],
+            resolved_states=['none']), 's1')
         assert 'physical_state_in' not in result
         assert 'physical_state_out' not in result
         assert result['_new_states'] == []
@@ -393,6 +420,49 @@ class TestKnowledgeIdsAtSource:
         assert resolve_knowledge_ids(
             registry, 'Tom has a mistress;myrtle-is-mistress;(none);something else'
         ) == 'tom-affair-ny;myrtle-is-mistress;something else'
+
+
+class TestStructuredReplies:
+    """Phase 3b/3c replies are structured outputs: an unreadable reply raises
+    rather than reading as "nothing changed", and the schemas meet the API's
+    structured-output rules."""
+
+    def test_missing_required_field_raises(self):
+        from storyforge.extract import parse_knowledge_response
+        reply = json.loads(_knowledge_reply(knowledge_out=['fact-a']))
+        del reply['continuity_deps']
+        with pytest.raises(ValueError, match='continuity_deps'):
+            parse_knowledge_response(json.dumps(reply), 's1')
+
+    def test_non_json_raises(self):
+        from storyforge.extract import parse_knowledge_response
+        with pytest.raises(ValueError):
+            parse_knowledge_response('The POV character learns nothing new.', 's1')
+
+    def test_labeled_line_reply_raises(self):
+        from storyforge.extract import parse_knowledge_response
+        with pytest.raises(ValueError):
+            parse_knowledge_response('**KNOWLEDGE_IN: a**', 's1')
+
+    @staticmethod
+    def _objects(schema, path='$'):
+        """Every object schema within ``schema``, with its path."""
+        if isinstance(schema, dict):
+            if schema.get('type') == 'object':
+                yield path, schema
+            for key, sub in schema.get('properties', {}).items():
+                yield from TestStructuredReplies._objects(sub, f'{path}.{key}')
+            if 'items' in schema:
+                yield from TestStructuredReplies._objects(schema['items'], f'{path}[]')
+
+    @pytest.mark.parametrize('name', ['KNOWLEDGE_SCHEMA', 'PHYSICAL_STATE_SCHEMA'])
+    def test_schemas_are_strict(self, name):
+        from storyforge import extract
+        objects = list(self._objects(getattr(extract, name)))
+        assert len(objects) == 2  # the reply and its new_facts / new_states entries
+        for path, obj in objects:
+            assert sorted(obj['required']) == sorted(obj['properties']), path
+            assert obj['additionalProperties'] is False, path
 
 
 class TestCharacterizeBudget:

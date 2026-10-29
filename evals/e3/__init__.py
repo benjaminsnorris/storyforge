@@ -90,7 +90,8 @@ def extract(project_dir: str, scene_id: str) -> tuple[str, str]:
     from storyforge.api import extract_text, invoke
     from storyforge.common import select_model
     from storyforge.elaborate import _read_csv_as_map, get_scene
-    from storyforge.extract import build_knowledge_prompt, build_physical_state_prompt
+    from storyforge.extract import (KNOWLEDGE_SCHEMA, PHYSICAL_STATE_SCHEMA,
+                                    build_knowledge_prompt, build_physical_state_prompt)
     from storyforge.enrich import format_registries_for_prompt
 
     ref_dir = os.path.join(project_dir, 'reference')
@@ -109,9 +110,10 @@ def extract(project_dir: str, scene_id: str) -> tuple[str, str]:
         scene_id, text, {k: scene.get(k, '') for k in ('title', 'pov', 'location', 'act', 'on_stage')},
         {}, [], registries_text=format_registries_for_prompt(project_dir))
     out = []
-    for prompt, kind in ((knowledge_prompt, 'knowledge'), (physical_prompt, 'physical')):
+    for prompt, kind, schema in ((knowledge_prompt, 'knowledge', KNOWLEDGE_SCHEMA),
+                                 (physical_prompt, 'physical', PHYSICAL_STATE_SCHEMA)):
         response = extract_text(invoke(prompt, model, max_tokens=1024,
-                                       label=f'e3 {kind} {scene_id}'))
+                                       label=f'e3 {kind} {scene_id}', output_schema=schema))
         if not response.strip():
             raise RuntimeError(f'empty {kind} extraction for {scene_id}')
         out.append(response)

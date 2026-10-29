@@ -254,6 +254,18 @@ def _build_sorted_scene_ids(scenes_dir: str, ref_dir: str) -> list[str]:
     return scene_ids
 
 
+def _halt_chain(project_dir: str, phase: str, scene_id: str, error: Exception,
+                paths: list[str]) -> None:
+    """Stop a sequential extraction chain at a scene that could not be read.
+    The scenes before it are complete and committed; nothing after it runs,
+    since each later prompt would carry the gap."""
+    log(f'ERROR: Phase {phase} stopped at {scene_id}: {error}')
+    commit_and_push(project_dir, f'Extract: Phase {phase} (stopped at {scene_id})', paths)
+    log('The scenes before it are saved. Fix the cause (see the log in working/logs/) '
+        'and run extract again.')
+    sys.exit(1)
+
+
 def _log_api_usage(log_file: str, operation: str, target: str, model: str,
                    project_dir: str) -> None:
     """Log API usage/cost from a JSON response file."""
@@ -612,9 +624,9 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     from storyforge.extract import (
         build_brief_parallel_prompt, parse_brief_parallel_response,
-        build_knowledge_prompt, parse_knowledge_response,
+        build_knowledge_prompt, parse_knowledge_response, KNOWLEDGE_SCHEMA,
         merge_new_knowledge_facts, resolve_knowledge_ids, KNOWLEDGE_COLUMNS,
-        build_physical_state_prompt, parse_physical_state_response,
+        build_physical_state_prompt, parse_physical_state_response, PHYSICAL_STATE_SCHEMA,
     )
     from storyforge.elaborate import (
         get_scene, update_scene, _read_csv_as_map, _write_csv, _FILE_MAP,
@@ -714,17 +726,20 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
         knowledge_log = os.path.join(log_dir, f'extract-knowledge-{scene_id}.json')
 
+        # Each scene's prompt carries the chain so far: a scene that fails
+        # can't be skipped without every later scene inheriting the gap
         try:
             response = invoke_to_file(prompt, knowledge_model, knowledge_log,
-                                      1024, system=system)
-            text = extract_text(response)
+                                      1024, system=system,
+                                      output_schema=KNOWLEDGE_SCHEMA)
             _log_api_usage(knowledge_log, 'extract-knowledge', scene_id,
                            knowledge_model, project_dir)
-        except Exception:
-            log(f'  WARNING: Knowledge extraction failed for {scene_id}')
-            continue
-
-        result = parse_knowledge_response(text, scene_id)
+            if is_truncated(response):
+                raise ValueError('the reply hit its token limit')
+            result = parse_knowledge_response(extract_text(response), scene_id)
+        except Exception as e:
+            _halt_chain(project_dir, '3b — knowledge chain', scene_id, e,
+                        ['reference/scene-briefs.csv', 'reference/knowledge.csv', 'working/'])
 
         # Register the scene's new facts, then resolve both fields to ids
         if merge_new_knowledge_facts(knowledge_registry,
@@ -789,15 +804,17 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
         try:
             response = invoke_to_file(prompt, phys_model, phys_log, 1024,
-                                      system=system)
-            text = extract_text(response)
+                                      system=system,
+                                      output_schema=PHYSICAL_STATE_SCHEMA)
             _log_api_usage(phys_log, 'extract-physical', scene_id,
                            phys_model, project_dir)
-        except Exception:
-            log(f'  WARNING: Physical state extraction failed for {scene_id}')
-            continue
-
-        result = parse_physical_state_response(text, scene_id)
+            if is_truncated(response):
+                raise ValueError('the reply hit its token limit')
+            result = parse_physical_state_response(extract_text(response), scene_id)
+        except Exception as e:
+            _halt_chain(project_dir, '3c — physical state chain', scene_id, e,
+                        ['reference/scene-briefs.csv', 'reference/physical-states.csv',
+                         'working/'])
 
         # Update briefs CSV
         updates = {}

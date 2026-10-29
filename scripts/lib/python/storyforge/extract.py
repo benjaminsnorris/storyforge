@@ -499,8 +499,8 @@ def build_knowledge_prompt(scene_id: str, scene_text: str,
 
     ``known_facts`` is the knowledge registry so far (id -> name). The fields
     are registry-backed, so the model reports facts by id, reusing these ids
-    for facts already established and declaring each new fact once on a
-    NEW_FACTS line. ``prior_knowledge`` maps each POV character to the
+    for facts already established and declaring each new fact once in
+    ``new_facts``. The reply is structured (``KNOWLEDGE_SCHEMA``). ``prior_knowledge`` maps each POV character to the
     semicolon-separated ids they know; with a registry, each is rendered
     with its name.
     """
@@ -559,69 +559,97 @@ A fact is structurally useful if it fits one of these categories:
 **Too granular (don't do this):** "Maren notices the surveyor's hands are shaking"; "Kael orders ale at the tavern"
 **Right level:** "the mine assay was forged"; "Dara is alive and hiding in the northern pass"
 
-Every fact is referred to by its **ID**. If a fact is already in the knowledge registry above, use its existing ID — even if this scene words it differently. Only a fact not in the registry is new: give it a new kebab-case ID (2-5 words, e.g. assay-was-forged, dara-hiding-northern-pass) and declare it on a NEW_FACTS line. A fact's name states the fact alone, in at most {MAX_FACT_NAME_WORDS} words — no reasons, no consequences, no second clause.
+Every fact is referred to by its **ID**. If a fact is already in the knowledge registry above, use its existing ID — even if this scene words it differently. Only a fact not in the registry is new: give it a new kebab-case ID (2-5 words, e.g. assay-was-forged, dara-hiding-northern-pass) and declare it in new_facts. A fact's name states the fact alone, in at most {MAX_FACT_NAME_WORDS} words — no reasons, no consequences, no second clause.
 
-Output each field on its own labeled line. Leave a field empty when there is nothing to list — never write "none" or "(none)".
+Answer with a JSON object with these fields (an empty list is a valid value):
 
-KNOWLEDGE_IN: [semicolon-separated fact IDs {pov} knows at the START — carry forward only facts from prior knowledge that are relevant to this scene's decisions]
-KNOWLEDGE_OUT: [semicolon-separated fact IDs {pov} knows at the END — knowledge_in plus 0-2 new facts learned during the scene]
-NEW_FACTS: [one per line for each new ID used above: id | name | category — category is identity, motive-intent, capability-constraint, state-change, stakes-threat, or relationship-shift]
-CONTINUITY_DEPS: [semicolon-separated scene IDs that this scene directly depends on — which prior scenes established facts that this scene uses?]
-SCENE_SUMMARY: [one sentence summarizing what happens in this scene — this will be used as context for subsequent scenes]
+- knowledge_in: fact IDs {pov} knows at the START — carry forward only facts from prior knowledge that are relevant to this scene's decisions
+- knowledge_out: fact IDs {pov} knows at the END — knowledge_in plus 0-2 new facts learned during the scene
+- new_facts: one entry for each new ID used above, with its id, name and category
+- continuity_deps: scene IDs that this scene directly depends on — which prior scenes established facts that this scene uses?
+- scene_summary: one sentence summarizing what happens in this scene — this will be used as context for subsequent scenes
 
-IMPORTANT: KNOWLEDGE_IN and KNOWLEDGE_OUT contain IDs only, never sentences. Every ID must be either in the knowledge registry above or declared on a NEW_FACTS line. This enables automated validation."""
+knowledge_in and knowledge_out contain IDs only, never sentences. Every ID must be either in the knowledge registry above or declared in new_facts."""
 
 
-def _parse_new_fact(line: str) -> dict[str, str] | None:
-    """Parse one ``id | name | category`` NEW_FACTS entry, or None."""
-    parts = [p.strip() for p in line.split('|')]
-    if len(parts) < 2 or not parts[0] or not parts[1] or is_placeholder(parts[0]):
-        return None
-    return {
-        'id': parts[0],
-        'name': parts[1],
-        'category': parts[2] if len(parts) > 2 else '',
-    }
+KNOWLEDGE_CATEGORIES = ('identity', 'motive-intent', 'capability-constraint',
+                        'state-change', 'stakes-threat', 'relationship-shift')
+PHYSICAL_CATEGORIES = ('injury', 'equipment', 'ability', 'appearance', 'fatigue')
+
+_ID_LIST = {'type': 'array', 'items': {'type': 'string'}}
+
+
+def _object(properties: dict) -> dict:
+    return {'type': 'object', 'properties': properties,
+            'required': list(properties), 'additionalProperties': False}
+
+
+# Structured-output schemas (``api.invoke(output_schema=...)``) for the
+# sequential fact chains; the parsers below read exactly these shapes.
+KNOWLEDGE_SCHEMA = _object({
+    'knowledge_in': _ID_LIST,
+    'knowledge_out': _ID_LIST,
+    'new_facts': {'type': 'array', 'items': _object({
+        'id': {'type': 'string'}, 'name': {'type': 'string'},
+        'category': {'type': 'string', 'enum': list(KNOWLEDGE_CATEGORIES)}})},
+    'continuity_deps': _ID_LIST,
+    'scene_summary': {'type': 'string'},
+})
+
+PHYSICAL_STATE_SCHEMA = _object({
+    'physical_state_in': _ID_LIST,
+    'physical_state_out': _ID_LIST,
+    'new_states': {'type': 'array', 'items': _object({
+        'id': {'type': 'string'}, 'character': {'type': 'string'},
+        'description': {'type': 'string'},
+        'category': {'type': 'string', 'enum': list(PHYSICAL_CATEGORIES)},
+        'action_gating': {'type': 'boolean'}})},
+    'resolved_states': _ID_LIST,
+})
+
+
+def _json_answer(response: str, schema: dict) -> dict:
+    """The JSON object a structured-output reply holds, with every required
+    field present. Raises ValueError rather than return a partial answer: an
+    unreadable reply must stop the chain, never read as "nothing changed"."""
+    try:
+        data = json.loads(response)
+    except (TypeError, json.JSONDecodeError) as e:
+        raise ValueError(f'reply is not a JSON object: {str(response)[:200]!r}') from e
+    if not isinstance(data, dict):
+        raise ValueError(f'reply is not a JSON object: {str(response)[:200]!r}')
+    missing = [k for k in schema['required'] if k not in data]
+    if missing:
+        raise ValueError(f'reply has no {", ".join(missing)}')
+    return data
+
+
+def _ids(values) -> str:
+    """A list of ids as the CSV's ``;`` field, placeholders dropped."""
+    return strip_placeholders(';'.join(str(v).strip() for v in values or [] if str(v).strip()))
 
 
 def parse_knowledge_response(response: str, scene_id: str) -> dict:
-    """Parse Phase 3b response.
+    """Parse Phase 3b's structured reply (``KNOWLEDGE_SCHEMA``).
 
-    Placeholder entries (``none``, ``(none)``, ``n/a``) are dropped from the
-    list fields, so a scene with nothing to report stores an empty field
-    rather than a fact named "none". New facts declared on NEW_FACTS lines
-    are returned under ``_new_facts`` as ``{id, name, category}`` dicts.
+    Returns ``knowledge_in``, ``knowledge_out`` and ``continuity_deps`` as
+    ``;`` fields (omitted when empty), ``_summary``, and ``_new_facts`` as
+    ``{id, name, category}`` dicts. Raises ValueError on an unreadable reply.
     """
+    data = _json_answer(response, KNOWLEDGE_SCHEMA)
     result: dict = {'id': scene_id, '_new_facts': []}
-    label_map = {
-        'KNOWLEDGE_IN': 'knowledge_in',
-        'KNOWLEDGE_OUT': 'knowledge_out',
-        'CONTINUITY_DEPS': 'continuity_deps',
-        'SCENE_SUMMARY': '_summary',
-    }
-    list_fields = {'knowledge_in', 'knowledge_out', 'continuity_deps'}
-    in_new_facts = False
-    for line in response.split('\n'):
-        stripped = line.strip()
-        match = re.match(r'^([A-Z_]+):\s*(.*)', stripped)
-        if match and (match.group(1) in label_map or match.group(1) == 'NEW_FACTS'):
-            label = match.group(1)
-            value = match.group(2).strip()
-            in_new_facts = label == 'NEW_FACTS'
-            if in_new_facts:
-                fact = _parse_new_fact(value) if value else None
-                if fact:
-                    result['_new_facts'].append(fact)
-                continue
-            key = label_map[label]
-            if key in list_fields:
-                value = strip_placeholders(value)
-            if value:
-                result[key] = value
-        elif in_new_facts and stripped:
-            fact = _parse_new_fact(stripped.lstrip('-* ').strip())
-            if fact:
-                result['_new_facts'].append(fact)
+    for key in ('knowledge_in', 'knowledge_out', 'continuity_deps'):
+        value = _ids(data[key])
+        if value:
+            result[key] = value
+    summary = str(data['scene_summary']).strip()
+    if summary:
+        result['_summary'] = summary
+    for fact in data['new_facts']:
+        fid = str(fact.get('id', '')).strip()
+        if fid and not is_placeholder(fid):
+            result['_new_facts'].append({'id': fid, 'name': str(fact.get('name', '')).strip(),
+                                         'category': str(fact.get('category', '')).strip()})
     return result
 
 
@@ -631,7 +659,7 @@ KNOWLEDGE_COLUMNS = ['id', 'name', 'aliases', 'category', 'origin']
 def merge_new_knowledge_facts(registry: dict[str, dict[str, str]],
                               new_facts: list[dict[str, str]],
                               scene_id: str) -> list[str]:
-    """Add facts declared on NEW_FACTS lines to the running knowledge registry.
+    """Add facts declared in a reply's ``new_facts`` to the running knowledge registry.
 
     ``registry`` maps id -> knowledge.csv row and is updated in place; a new
     fact's origin is the scene that declared it. An id already registered
@@ -718,75 +746,42 @@ Litmus test: Would a drafter who knows about this state write a *different scene
 Too granular (don't): "Character frowns", "Hair is windblown", "Feels cold"
 Right level: "Left arm broken, splinted", "Carrying the stolen compass", "Exhausted after 36 hours awake"
 
-Output each field on its own labeled line. Leave a field empty when there is nothing to list — never write "none" or "(none)".
+Answer with a JSON object with these fields (an empty list is a valid value):
 
-PHYSICAL_STATE_IN: [semicolon-separated state IDs active at START — carry forward from prior states for on-stage characters only]
-PHYSICAL_STATE_OUT: [semicolon-separated state IDs active at END — state_in plus new states acquired, minus states resolved]
-NEW_STATES: [one per line if any: id|character|description|category|action_gating — use kebab-case IDs; action_gating is the single word true (the state limits what the character can physically do) or false, with no explanation]
-RESOLVED_STATES: [semicolon-separated state IDs that resolve during this scene, or empty if none]
+- physical_state_in: state IDs active at START — carry forward from prior states for on-stage characters only
+- physical_state_out: state IDs active at END — physical_state_in plus new states acquired, minus states resolved
+- new_states: one entry per state acquired in this scene: id (kebab-case), character, description, category, and action_gating (true when the state limits what the character can physically do)
+- resolved_states: state IDs that resolve during this scene
 
-IMPORTANT: Use EXACT state IDs for carry-forward. New states need new IDs in kebab-case (e.g., broken-arm-marcus, has-compass-elena)."""
+Use EXACT state IDs for carry-forward. New states need new IDs in kebab-case (e.g., broken-arm-marcus, has-compass-elena)."""
 
 
 def parse_physical_state_response(response: str, scene_id: str) -> dict:
-    """Parse Phase 3c response.
+    """Parse Phase 3c's structured reply (``PHYSICAL_STATE_SCHEMA``).
 
     Returns:
-        Dict with keys: id, physical_state_in, physical_state_out,
-        _new_states (list of dicts), _resolved (list of IDs).
+        Dict with keys: id, physical_state_in, physical_state_out (``;``
+        fields, omitted when empty), _new_states (list of dicts, action_gating
+        as 'true'/'false'), _resolved (list of IDs). Raises ValueError on an
+        unreadable reply.
     """
-    result = {'id': scene_id, '_new_states': [], '_resolved': []}
-    label_map = {
-        'PHYSICAL_STATE_IN': 'physical_state_in',
-        'PHYSICAL_STATE_OUT': 'physical_state_out',
-    }
-
-    lines = response.split('\n')
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-        match = re.match(r'^([A-Z_]+):\s*(.*)', line)
-        if match:
-            label = match.group(1)
-            value = match.group(2).strip()
-            if label in label_map:
-                value = strip_placeholders(value)
-                if value:
-                    result[label_map[label]] = value
-            elif label == 'NEW_STATES':
-                # First new state may be on this line
-                if value:
-                    parts = value.split('|')
-                    if len(parts) >= 4 and not is_placeholder(parts[0]):
-                        result['_new_states'].append({
-                            'id': parts[0].strip(),
-                            'character': parts[1].strip(),
-                            'description': parts[2].strip(),
-                            'category': parts[3].strip(),
-                            'action_gating': reduce_boolean(parts[4].strip()) if len(parts) > 4 else 'false',
-                        })
-                # Check subsequent lines for more new states
-                i += 1
-                while i < len(lines):
-                    nline = lines[i].strip()
-                    if not nline or re.match(r'^[A-Z_]+:', nline):
-                        break
-                    nparts = nline.split('|')
-                    if len(nparts) >= 4 and not is_placeholder(nparts[0]):
-                        result['_new_states'].append({
-                            'id': nparts[0].strip(),
-                            'character': nparts[1].strip(),
-                            'description': nparts[2].strip(),
-                            'category': nparts[3].strip(),
-                            'action_gating': reduce_boolean(nparts[4].strip()) if len(nparts) > 4 else 'false',
-                        })
-                    i += 1
-                continue
-            elif label == 'RESOLVED_STATES' and value:
-                result['_resolved'] = [s.strip() for s in strip_placeholders(value).split(';')
-                                       if s.strip()]
-        i += 1
-
+    data = _json_answer(response, PHYSICAL_STATE_SCHEMA)
+    result: dict = {'id': scene_id, '_new_states': [],
+                    '_resolved': [r for r in _ids(data['resolved_states']).split(';') if r]}
+    for key in ('physical_state_in', 'physical_state_out'):
+        value = _ids(data[key])
+        if value:
+            result[key] = value
+    for state in data['new_states']:
+        sid = str(state.get('id', '')).strip()
+        if sid and not is_placeholder(sid):
+            result['_new_states'].append({
+                'id': sid,
+                'character': str(state.get('character', '')).strip(),
+                'description': str(state.get('description', '')).strip(),
+                'category': str(state.get('category', '')).strip(),
+                'action_gating': 'true' if state.get('action_gating') is True else 'false',
+            })
     return result
 
 

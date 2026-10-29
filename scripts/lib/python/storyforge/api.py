@@ -173,7 +173,7 @@ def _check_refusal(response) -> None:
 
 
 def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
-          system: list[dict] | None) -> dict:
+          system: list[dict] | None, output_schema: dict | None = None) -> dict:
     """Call the Anthropic Messages API.
 
     Args:
@@ -184,6 +184,8 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
         label: Optional label for heartbeat messages (e.g., 'revision pass 3').
         timeout: Socket timeout in seconds (default API_TIMEOUT).
         system: Optional list of system content blocks (supports cache_control).
+        output_schema: Optional JSON schema; the reply's text is then one JSON
+            object matching it (structured outputs).
 
     Returns:
         Full API response dict.
@@ -195,6 +197,8 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
     }
     if system:
         body['system'] = system
+    if output_schema:
+        body['output_config'] = {'format': {'type': 'json_schema', 'schema': output_schema}}
     heartbeat = _Heartbeat(label or model)
     heartbeat.start()
     try:
@@ -204,7 +208,8 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
 
 
 def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
-           timeout: int = API_TIMEOUT, system: list[dict] | None = None) -> dict:
+           timeout: int = API_TIMEOUT, system: list[dict] | None = None,
+           output_schema: dict | None = None) -> dict:
     """Call the Anthropic Messages API.
 
     Args:
@@ -215,6 +220,7 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
         label: Optional label for heartbeat messages (e.g., 'revision pass 3').
         timeout: Socket timeout in seconds (default API_TIMEOUT).
         system: Optional list of system content blocks (supports cache_control).
+        output_schema: Optional JSON schema for a structured reply (see _send).
 
     Returns:
         Full API response dict.
@@ -222,13 +228,14 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
     Raises:
         RefusalError: the model refused the request.
     """
-    response = _send(prompt, model, max_tokens, label, timeout, system)
+    response = _send(prompt, model, max_tokens, label, timeout, system, output_schema)
     _check_refusal(response)
     return response
 
 
 def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 4096, label: str = '',
-                   timeout: int = API_TIMEOUT, system: list[dict] | None = None) -> dict:
+                   timeout: int = API_TIMEOUT, system: list[dict] | None = None,
+                   output_schema: dict | None = None) -> dict:
     """Call the API and write the response to a JSON file.
 
     Args:
@@ -239,6 +246,7 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
         label: Optional label for heartbeat messages.
         timeout: Socket timeout in seconds (default API_TIMEOUT).
         system: Optional list of system content blocks (supports cache_control).
+        output_schema: Optional JSON schema for a structured reply (see _send).
 
     Returns:
         Full API response dict.
@@ -247,7 +255,8 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
         RefusalError: the model refused the request (the log is written first).
     """
     try:
-        response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system)
+        response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system,
+                          output_schema=output_schema)
     except RefusalError as e:
         _write_log(log_file, e.response)
         raise

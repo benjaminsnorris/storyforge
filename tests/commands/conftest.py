@@ -228,20 +228,20 @@ def mock_api(monkeypatch):
             }
 
         def _invoke(self, prompt, model, max_tokens=4096, label='', timeout=600,
-                    system=None):
+                    system=None, output_schema=None):
             self.calls.append({
                 'fn': 'invoke', 'prompt': prompt, 'model': model,
                 'max_tokens': max_tokens, 'label': label, 'timeout': timeout,
-                'system': system,
+                'system': system, 'output_schema': output_schema,
             })
             return self._get_response_dict(prompt)
 
         def _invoke_to_file(self, prompt, model, log_file, max_tokens=4096,
-                           label='', timeout=600, system=None):
+                           label='', timeout=600, system=None, output_schema=None):
             self.calls.append({
                 'fn': 'invoke_to_file', 'prompt': prompt, 'model': model,
                 'log_file': log_file, 'max_tokens': max_tokens,
-                'system': system,
+                'system': system, 'output_schema': output_schema,
             })
             response = self._get_response_dict(prompt)
             os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)

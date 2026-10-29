@@ -177,17 +177,23 @@ class TestExtraction:
             prior_states={},
             prior_scene_summaries=[],
         )
-        assert 'PHYSICAL_STATE_IN' in prompt
+        for field in ('physical_state_in', 'physical_state_out', 'new_states',
+                      'resolved_states'):
+            assert f'- {field}:' in prompt
+        assert 'PHYSICAL_STATE_IN' not in prompt
         assert 'injury' in prompt and 'equipment' in prompt
 
     def test_parse_physical_state_response(self):
+        import json
         from storyforge.extract import parse_physical_state_response
-        response = (
-            'PHYSICAL_STATE_IN: archive-key-dorren\n'
-            'PHYSICAL_STATE_OUT: archive-key-dorren;sprained-ankle-tessa\n'
-            'NEW_STATES: sprained-ankle-tessa|Tessa Merrin|right ankle sprained|injury|true\n'
-            'RESOLVED_STATES: '
-        )
+        response = json.dumps({
+            'physical_state_in': ['archive-key-dorren'],
+            'physical_state_out': ['archive-key-dorren', 'sprained-ankle-tessa'],
+            'new_states': [{'id': 'sprained-ankle-tessa', 'character': 'Tessa Merrin',
+                            'description': 'right ankle sprained', 'category': 'injury',
+                            'action_gating': True}],
+            'resolved_states': [],
+        })
         result = parse_physical_state_response(response, 'act2-sc02')
         assert result['id'] == 'act2-sc02'
         assert result.get('physical_state_in') == 'archive-key-dorren'

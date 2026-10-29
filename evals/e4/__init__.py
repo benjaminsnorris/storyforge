@@ -6,8 +6,9 @@ E1, E4, E5 and E8 share a world. Every Act 1 scene's prose is removed, then
 the scenes are drafted in reading order the way ``storyforge write --direct``
 drafts them: one shared, cached system context, ``cmd_write._build_prompt``
 with briefs, each prompt built after the scenes before it exist, so a scene's
-``continuity_deps`` read the new drafts, not the author's prose. A scene that
-fails to draft errors the suite; it is never skipped.
+``continuity_deps`` read the new drafts, not the author's prose. A scene the
+model refuses is counted as ``refused`` (and fails the coverage gate); any
+other drafting failure errors the suite.
 
 Metrics (plan §4.2):
 
@@ -112,9 +113,12 @@ def clear_prose(project_dir: str, scene_ids: list[str]) -> dict[str, str]:
     return original
 
 
-def draft(project_dir: str, scene_ids: list[str]) -> dict[str, str]:
-    """Draft the scenes in order as ``write --direct`` does; return the prose by id."""
-    from storyforge.api import extract_text, invoke
+def draft(project_dir: str, scene_ids: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+    """Draft the scenes in order as ``write --direct`` does. Returns (prose by
+    id, refusal reason by id). ``write`` stops at a refused scene; E4 records
+    the refusal and drafts on, so one refusal doesn't hide the other 22
+    scenes. A refused scene has no prose and is not judged."""
+    from storyforge.api import RefusalError, extract_text, invoke
     from storyforge.cmd_write import _build_prompt
     from storyforge.common import build_shared_context, select_model
     from storyforge.csv_cli import update_field
@@ -124,13 +128,18 @@ def draft(project_dir: str, scene_ids: list[str]) -> dict[str, str]:
     system = build_shared_context(project_dir, model=model)
     metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
     drafts = {}
+    refused = {}
     for sid in scene_ids:
         prompt = _build_prompt(sid, project_dir, 'full', use_briefs=True,
                                system_context=bool(system))
         if not prompt:
             raise RuntimeError(f'could not build a drafting prompt for {sid}')
-        text = extract_text(invoke(prompt, model, max_tokens=DRAFT_MAX_TOKENS,
-                                   label=f'e4 draft {sid}', system=system or None))
+        try:
+            text = extract_text(invoke(prompt, model, max_tokens=DRAFT_MAX_TOKENS,
+                                       label=f'e4 draft {sid}', system=system or None))
+        except RefusalError as e:
+            refused[sid] = str(e)
+            continue
         prose = clean_scene_content(extract_single_scene(text) or text) if text else ''
         words = len(prose.split())
         if words < 100:  # cmd_write's own floor for a failed draft
@@ -140,7 +149,7 @@ def draft(project_dir: str, scene_ids: list[str]) -> dict[str, str]:
         update_field(metadata_csv, sid, 'word_count', str(words))
         update_field(metadata_csv, sid, 'status', 'drafted')
         drafts[sid] = prose
-    return drafts
+    return drafts, refused
 
 
 def brief_block(project_dir: str, scene_id: str) -> str:
@@ -191,6 +200,7 @@ def judge(project_dir: str, scene_ids: list[str], drafts: dict[str, str]) -> dic
     system = judge_system(project_dir)
     model = model_for_tier('opus')
     results = {}
+    scene_ids = [s for s in scene_ids if s in drafts]
     for i, sid in enumerate(scene_ids):
         earlier = [(s, drafts[s]) for s in scene_ids[:i]]
         prompt = judge_prompt(earlier, brief_block(project_dir, sid), sid, drafts[sid])
