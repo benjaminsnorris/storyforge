@@ -1,0 +1,49 @@
+{
+ "request": {
+  "method": "POST",
+  "path": "messages",
+  "body": {
+   "model": "claude-opus-4-8",
+   "max_tokens": 1024,
+   "messages": [
+    {
+     "role": "user",
+     "content": "You are checking one scene of a novel for one specific continuity error.\n\nThe book had already established this, earlier or elsewhere:\n- (watching-ostrowski) \"This one is for Madison. Sixteen. Shannon's student.\"\n\nA past rewrite of this scene contradicted it. The error looked like this:\n- (call) \"Madison just turned thirteen.\"\n(Summary: Madison is sixteen (Shannon's student) in watching-ostrowski, but \"just turned thirteen\" in call.)\n\nHere is a NEW draft of the same scene:\n<scene>\nThe number came from the dreams the way everything came from the dreams now, surfacing whole and verified, no work required. Hank had written it on the legal pad under the address and the date. He sat on the edge of the bed with the pad on his knee and the phone in his hand and Rook stretched along the floor at his feet, her head on his boots.\n\nHe dialed.\n\nThree rings. A man's voice, cautious, the voice of someone who had learned to answer calls he didn't recognize.\n\n\"Yeah.\"\n\n\"Mr. Ostrowski, my name is Hank Voigt. Structural engineer. I specialize in understanding how buildings fail.\"\n\nThe pause on the other end had weight to it. Hank waited inside it. He knew how to wait. He knew the exact quality of the silence that meant a man was recalculating, because he had been inside that silence, had felt the recalculation from the inside, had worn the hands that made these calls and the mind that scouted these buildings.\n\n\"You got the wrong number.\"\n\n\"I know about East Federal Street. I know about 924 Eager Street. And I know about Friday.\"\n\nBreathing now. Shallow. Hank listened to it the way he'd listen to a beam under load, reading where it would give.\n\n\"I don't know what you're talking about.\"\n\n\"You do, Mr. Ostrowski. You know exactly what I'm talking about, because you've already scouted that building three times this week and the jerry can is in your truck bed right now.\"\n\nHe said it flat. No threat in it. He described the building instead. The rear stairwell that ran like a flue. The load-bearing wall on the second floor that would come down inside eleven minutes once the fire found the joists. The dry rot in the floor above the ground-floor unit that meant the collapse would come faster than Ostrowski's model allowed. He laid it out the way the man had laid it out for himself, in sequence, each step resting on the one before, and the ease of it moved through Hank like warm water, and his hands stayed open on his knee and did not go to the bathroom and did not want the scalding faucet.\n\n\"Who the hell is this.\"\n\n\"I'm not police. I'm not a reporter.\" Hank's voice didn't change. \"I know about Brianna. I know about Madison. And I'm telling you that in forty-eight hours you're going to do something you cannot undo.\"\n\n\"Don't.\" The word broke out of him. \"Don't you say their names.\"\n\n\"You brought their names into it. You built this around them. The girl who OD'd was a friend of theirs and the dealers walked and nobody did anything and you decided to be the one who did.\" Hank looked at the pad. At the address. \"I understand it. I want you to hear that. I understand it all the way down.\"\n\nAnd he did. That was the thing he kept finding at the bottom of the call, the thing that wouldn't move. He understood it all the way down and his understanding had a shape and the shape was Ostrowski's.\n\n\"Then you know I have to.\"\n\n\"I know you believe you have to.\" Hank turned the pad over. \"Her name was Keisha Rowland. She worked at a daycare. Little Lambs, on South Charles. Seven years. Knew every kid's birthday, kept a list on the wall behind her desk. Thirty-one years old. She lived on the third floor of the building you burned on Federal Street, and she wasn't a dealer, and she wasn't a user, and she wasn't in the grand jury file. She was asleep.\"\n\nThe breathing had gone wrong. Thick.\n\n\"There was no sprinkler because the owner's a shell company with fourteen violations and no inspector ever came. You didn't factor the dry rot. The second floor came down into the third. She didn't get out.\"\n\n\"That's not\u2014\" The voice cracked and reassembled. \"That building was empty above the shop. I watched it. I watched for weeks.\"\n\n\"You watched the ground floor. You read the part you needed to read.\" Hank kept it level. \"She had a mother in hospice. Visited her twice a week. The mother keeps asking for her and nobody's told her yet, because the woman who was supposed to tell her is in the morgue.\"\n\nSilence that was not empty. Hank could hear the man's chair, a small shift of weight, the sound of someone standing up and not knowing why.\n\n\"There's a fire marshal reopening Federal Street as of this morning. Supplementary investigation. Bayshore Properties, the violations, all of it. They're looking at accelerant patterns. They'll be looking harder after Friday, and there are only so many retired men with your record and your grievance who fit the shape of this. You light 924 Eager and you don't get your righteous fire. You get caught, and the dealers you want gone become the men you martyred, and the next Keisha Rowland is on you the same as the last one.\"\n\nNothing.\n\n\"924 Eager has people over the shop too. I checked. You didn't.\"\n\nThe lie sat clean in Hank's mouth. He had not checked. The dream had not shown him the upper floors of Eager Street at all. He said it because it was the load the whole structure needed, the final member that would hold Ostrowski in place, and he placed it with the certainty of a man who knew precisely where the weight had to go.\n\n\"Who are you,\" Ostrowski said. Barely a voice now. \"How do you know any of this.\"\n\nHank didn't answer. There was no answer that wouldn't collapse the rest. He let the question stand in the open and he waited two seconds, three, long enough that the silence became its own confirmation.\n\n\"Don't be on Eager Street Friday,\" he said.\n\nHe ended the call.\n\nThe phone was warm against his palm. He set it face-down on the pad and sat with his hands loose between his knees, and his hands were steady, and they had been steady the whole time, and that was the part that stayed.\n\nRook lifted her head off his boots and looked up at him. He put his hand on the back of her neck and left it there.\n\n</scene>\n\nDoes the new draft make the same error \u2014 does it assert something that contradicts what was established, in the way described? A draft that simply leaves the fact out does not make the error.\n\nAnswer with one JSON object and nothing else:\n{\"verdict\": \"reintroduced\" | \"consistent\" | \"not_present\", \"evidence\": \"<verbatim sentence from the new draft that decides it, or empty for not_present>\"}\n\n\"reintroduced\": the new draft contradicts the established fact.\n\"consistent\": the new draft states the fact and agrees with what was established.\n\"not_present\": the new draft does not touch the fact either way."
+    }
+   ]
+  }
+ },
+ "response": {
+  "model": "claude-opus-4-8",
+  "id": "msg_011CgVbsj39BUE3WjXA4s7Wy",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"verdict\": \"not_present\", \"evidence\": \"\"}"
+   }
+  ],
+  "container": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+   "input_tokens": 2243,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 21,
+   "output_tokens_details": {
+    "thinking_tokens": 0
+   },
+   "service_tier": "standard",
+   "inference_geo": "global",
+   "speed": "standard"
+  },
+  "diagnostics": null
+ }
+}

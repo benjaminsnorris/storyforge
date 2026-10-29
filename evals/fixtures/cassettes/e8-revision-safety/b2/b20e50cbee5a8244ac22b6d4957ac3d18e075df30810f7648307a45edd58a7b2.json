@@ -1,0 +1,49 @@
+{
+ "request": {
+  "method": "POST",
+  "path": "messages",
+  "body": {
+   "model": "claude-opus-4-8",
+   "max_tokens": 1024,
+   "messages": [
+    {
+     "role": "user",
+     "content": "You are checking one scene of a novel for one specific continuity error.\n\nThe book had already established this, earlier or elsewhere:\n- (thessan-vigil) \"Greenhollow's Warden had signed the papers and thanked her for her service. Davin. His name was Davin.\"\n- (crowded-chamber) \"\"Davin Hale thought he'd found a new technique.\"\n\nA past rewrite of this scene contradicted it. The error looked like this:\n- (thessan-at-verath) \"Greenhollow was in the fourth row, second shelf, a thin folder in a thicker box.\"\n- (thessan-at-verath) \"Warden Aldren Moss, nineteen years of service, separated with full honors. Deceased, six months post-separation.\"\n(Summary: The Greenhollow Warden is Davin (Davin Hale) everywhere except the closure file Thessan pulls in Verath, which names him Warden Aldren Moss.)\n\nHere is a NEW draft of the same scene:\n<scene>\nSeven floorboard joins lay between her chair and the edge of Corvin's desk. Thessan counted them while he read, the file open in his hands, the morning light from the high windows falling across the paper at an angle that made the ink legible from where she sat. She did not need to read it upside down. She knew the shape of these files.\n\n\"Thornwall.\" Corvin set the folder flat and pressed his palm against the wood beside it. \"Northern range, Kethren Passes. Class Three fissure, four active Holders, one retired.\"\n\n\"Three.\" She kept her voice level. \"One non-operational.\"\n\nHe looked up. The correction pleased him; she could tell by the small settling of his shoulders. Precision was a courtesy he expected and rarely received. \"Three. One non-operational. The retired Holder draws rations and occupies a chamber. He contributes nothing to containment.\"\n\nShe waited. A directorate briefing had a rhythm, and interruption cost more than patience.\n\n\"The Assessor?\"\n\n\"Vasht. Six days ago.\" He turned a page without looking at it. \"She'll have completed her readings by now. The report will confirm what the supply ledgers already show. The Hold cannot sustain containment at current complement. Decommission, orderly transfer of the fissure to Ashward's rotation.\"\n\nThe same procedure that had closed Ashward Station two winters ago. The same ledgers, the same arithmetic of rations against years of service. She had signed the Ashward order in a room much like this one, and the Warden there had been a practical woman who understood numbers and had not argued.\n\n\"The Warden at Thornwall,\" Corvin said. \"Davreth. He's filed two reclassification requests. Both reviewed, both denied. He will file a third when he sees the detail arrive. You'll receive it, log it, and proceed.\"\n\n\"Length of service.\"\n\nCorvin checked the file. \"Twenty-three years.\"\n\nSomething moved under the count she was keeping. Seven joins in the floor, four winters since Ashward, two reclassification requests, twenty-three years.\n\n\"Twenty-three years,\" she said.\n\n\"Remarkable endurance.\" He closed the folder. \"Not relevant to classification.\"\n\nThe Greenhollow Warden had served nineteen. She remembered the gate going shut, iron settling into the stone channel, and then the particular quiet that followed. She had counted it, standing there with the signed order in her coat. Two seconds before the birds resumed in the pines above the wall. He had thanked her. He had taken her gloved hand in both of his and thanked her for her service, and she had written the transfer order that bore his name, and six months after that he had walked into the river below his decommissioned Hold.\n\nNineteen years was long enough to become the Hold. Twenty-three was longer.\n\nThe thought came wrapped in the habit of her training: the correlation is unestablished, provisionally, pending review; one instance is not a pattern; the file is relevant only insofar as it bears on classification, and it does not. She watched the qualifications arrange themselves around the fact and blunt it. Pending. Subject to. Insofar as. By the time the thought finished, it had been filed and closed.\n\nShe found her own hands flat against the table, fingers spread, mirroring the posture Corvin held over his desk. She drew them into her lap.\n\n\"I need the Greenhollow file,\" she said.\n\nCorvin's expression did not change. \"That Hold is closed, Thessan.\"\n\n\"The after-action record is incomplete. There's a notation gap in the transfer sequence.\" True enough. She had left it incomplete herself.\n\n\"Closed files are archived. They are not pulled for enforcement postings.\" He slid the Thornwall folder across the wood. \"You want Thornwall, you take Thornwall. The Greenhollow matter is settled. I'll have the archive note that it remains settled.\"\n\nShe took the folder. \"What complement?\"\n\n\"Your discretion. The Warden won't resist in force. He hasn't the people.\"\n\n\"Twelve riders. Standard enforcement protocol.\"\n\n\"Standard.\" He nodded, already reaching for the next item on his desk. \"The order's signed. You leave at your convenience.\"\n\nSigned. Before the briefing, before her acceptance, before the word enforcement had crossed the room. The arithmetic had been complete before she walked in. Her part was the riding.\n\n\"Acknowledged,\" she said. \"Standing orders received.\"\n\nThe protocol phrase. He heard it and was satisfied, and she rose and left the office with the Thornwall folder under her arm.\n\nIn the corridor she stopped. She counted four breaths before she trusted her stride, then walked.\n\n---\n\nThe archive wing after hours held the cold of unheated stone and the smell of old paper and the lamp oil the night clerk hadn't trimmed. She knew the clerk's rounds. She had timed enforcement raids tighter than this on fissures that could have killed her.\n\nThe lock on the sealed-record cabinet was a four-pin tumbler, directorate standard, older than the clerk who guarded it. She drew the pin from her field gauge, the slender brass one meant for clearing a clogged needle-channel, and worked it into the keyway. The first pin set. The second. Her hands were not steady. She counted the pins as they gave \u2014 three, and the mechanism turned under the tension of the gauge pin, and the drawer slid open on its runner.\n\nGreenhollow. Thin folder, her own hand on the transfer sequence, the gap where she had stopped writing. She had told herself for four years that the gap was an oversight. She had known better. She lifted it out and pressed the drawer shut and heard the lock reseat.\n\nShe did not read it. She knew what it said and what it did not.\n\nIn the courtyard the night was clear and cold and the horses stirred at the picket line when she crossed the cobbles. She unbuckled the saddlebag. The Thornwall posting lay inside, the folder with its signed enforcement order, twelve riders, Class Three, orderly transfer. She took the field-report cloth from her kit, the waxed square she carried to keep dispatches dry in rain, and wrapped the Greenhollow file in it, and laid it against the Thornwall folder, and drew the buckle taut.\n\nThe two documents pressed with the same weight against the leather, against her ribs when she mounted. The posting that proved the institution's record clean. The file that proved it was not.\n\nShe counted the strokes of the gate chain as the night porter drew it back, and rode out onto the Verath road, the saddlebag steady at her knee.\n\n</scene>\n\nDoes the new draft make the same error \u2014 does it assert something that contradicts what was established, in the way described? A draft that simply leaves the fact out does not make the error.\n\nAnswer with one JSON object and nothing else:\n{\"verdict\": \"reintroduced\" | \"consistent\" | \"not_present\", \"evidence\": \"<verbatim sentence from the new draft that decides it, or empty for not_present>\"}\n\n\"reintroduced\": the new draft contradicts the established fact.\n\"consistent\": the new draft states the fact and agrees with what was established.\n\"not_present\": the new draft does not touch the fact either way."
+    }
+   ]
+  }
+ },
+ "response": {
+  "model": "claude-opus-4-8",
+  "id": "msg_011CgVcHWRXvUSxQxGc6Rt6b",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"verdict\": \"not_present\", \"evidence\": \"\"}"
+   }
+  ],
+  "container": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+   "input_tokens": 2611,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 21,
+   "output_tokens_details": {
+    "thinking_tokens": 0
+   },
+   "service_tier": "standard",
+   "inference_geo": "global",
+   "speed": "standard"
+  },
+  "diagnostics": null
+ }
+}

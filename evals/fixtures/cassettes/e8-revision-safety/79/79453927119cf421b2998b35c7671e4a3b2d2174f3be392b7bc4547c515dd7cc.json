@@ -1,0 +1,49 @@
+{
+ "request": {
+  "method": "POST",
+  "path": "messages",
+  "body": {
+   "model": "claude-opus-4-8",
+   "max_tokens": 1024,
+   "messages": [
+    {
+     "role": "user",
+     "content": "You are checking one scene of a novel for one specific continuity error.\n\nThe book had already established this, earlier or elsewhere:\n- (haddons-reckoning) \"Sera Holdt. Sixty-eight. Upper floors, the building adjacent to the junction housing. The pressure wave took out her wall.\"\n- (the-governors-vigil) \"Sera Holdt. First floor, nine years.\"\n\nA past rewrite of this scene contradicted it. The error looked like this:\n- (acceptable-losses) \"The casualty report was waiting on his desk when he returned, centered on the blotter where Sera Holdt had placed it.\"\n- (acceptable-losses) \"Sera Holdt finished her count and turned from the cabinet.\"\n(Summary: Sera Holdt is one of the two Fenwick Row dead in haddons-reckoning and the-governors-vigil, but in acceptable-losses she is alive and working in Voss's office.)\n\nHere is a NEW draft of the same scene:\n<scene>\nThe casualty report lay squared to the edge of the blotter, three pages, the corner still dark where the runner's wet hand had held it. Voss read it a second time under the lamp. The flame stood steady in the sealed office, no draft to trouble it, the glass chimney polished that morning.\n\nTwo names. He had expected a number, and the office had given him names.\n\n*Sera Holdt's daughter, age four. Removed from the collapse at Fenwick Row South. Deceased before reaching the medic station.* And above it, the line that mattered for the record: cause of structural failure, east junction seal, Fenwick lateral.\n\nHe set the pages down. His coat still hung on him, damp through the shoulders, and when he shifted it carried the smell of the junction into the room with him, ruptured pipe and scalded mineral and the particular mud of the lower Basin after rain. He had gone down himself. He did not know, afterward, why he had gone down. A governor did not attend junction failures. But he had stood at the edge of the cordon and watched them carry the small shape out, and now the report had given it a name and an age, and the two things would not sit in the same frame.\n\nHe drew the Fenwick failure assessment toward him and uncapped the pen.\n\nThe engineers' draft entry read plainly enough. *Compensatory redistribution from sealed eastern quadrant exceeding rated thermal and pressure tolerances at aging junction infrastructure.* Someone in the Gallery Authority had written exactly what had happened. The eastern network, cut and cut again across two and three years, healing faster each time than the cuts could keep ahead of it, had shed its load westward and southward into pipe never rated to carry it, and the oldest seal on the Fenwick lateral had let go.\n\nThat sentence could not stand. It drew a line from the sealed quadrant to the dead child, and anyone with a survey map and a grievance could walk that line backward to his own signature on the sealing order of '08.\n\nHe read it once more to be certain he understood what he was removing. Then he set the ruler along the line and struck it through, one pass, clean, and wrote above it in the small upright hand he used for the record: *Thermal cycling beyond rated tolerances. Infrastructure aging consistent with 60-year service life. Recommend junction replacement program, southern Basin priority.*\n\nTrue, every word of it. The junction was sixty years old. It had cycled beyond tolerance. A replacement program was prudent and would read, in the minutes, as a governor responding to tragedy with investment rather than concealment. The sentence loaded. He had learned long ago that a figure held weight only at the correct distance; stand too close to any number and it came apart into the particular, and the particular could not be administered.\n\nHe blotted the correction. A single round dot of ink stood where the nib had rested before he lifted it, and he let it dry rather than smear it.\n\nThe second document was the petition. Sarel Davan, on behalf of the Terrace Row residents, requesting review of the eastern development's foundation work against the subsidence of '08. The hand was uneven, pressed too hard, and where Davan had borne down the ink had bled through to the second page so that the man's argument showed faint and reversed on the reverse, a shadow of itself. Voss read it. Block Fifteen's foundation went into ground that the eastern cuts had hollowed, and Davan, who was not an engineer, had felt the wrongness of it the way a man feels a floor give before he understands why.\n\nHe wrote *received, referred to Gallery Authority for standard assessment* across the top, and the referral would die in the same office that had drafted the honest sentence he had just removed.\n\nThen the third.\n\nHe had drafted it himself that afternoon, before the runner came with the names, and it lay now waiting for his signature. A commendation. He read it as though another man had written it.\n\n*E. Vael, Senior Gallery Engineer. For exceptional technical response during the Fenwick Row South junction failure of Day 12. His decisive action preserved sixteen lives and contained a cascade that, unchecked, would have compromised the full residential block.*\n\nSixteen lives. Vael had gone down into the failure and held the block together with his hands and sixteen people had walked out of it who would not have. That was also true. It was the truest sentence on the desk.\n\nAnd the same hand that would commend Vael had, before the rain started, given Haddon Breck an order off the record to go into the eastern galleries and finish what two decades of cutting had not yet finished, to open the regulatory core itself before the Foundry's tribunal could convene and send its own people down to look. The commendation and the order were the same signature. The same pen. He had not thought of it that way until the names came.\n\nHe put the pen down.\n\nSixteen saved at Fenwick. One not saved, four years old, carried past him under a coat. And below them both, in the dark where Breck's crew would be moving now with the charges, the thing that held the whole caldera balanced against the vents, that he had been cutting for nineteen years because the eastern ground was worth more rezoned than regulated.\n\nHe could hold the sixteen. He could hold the development, the western capacity, the sixty-year junctions, the arithmetic that had always closed. He could not hold the sixteen and the four-year-old in the same hand, and for a moment the desk and the steady flame and the squared pages all tipped, and he sat with his wet coat heavy on his shoulders and felt the whole structure go weightless under him the way the Fenwick seal must have gone weightless in the instant before it let go.\n\nIt lasted the time it takes a drip to gather and fall.\n\nThen he set it right. The child was a consequence of aging infrastructure, now addressed by a replacement program. The petition was referred. Vael had saved sixteen and would be commended for it, because he had, in fact, saved sixteen, and a city that honored its engineers was a city that trusted its governor. The core order stood because the tribunal could not be allowed to find below what it would find. Each page was true at the distance from which it would be read. He had only to stop reading them from the floor of the junction.\n\nHe capped the pen, then uncapped it. He signed the amended assessment. He signed the referral across Davan's bled-through hand, his own line ruler-straight above the pressed-in grief. He signed the commendation last, and his signature was the same on all three, unhurried, identical, a thing he had made ten thousand times.\n\nHe sorted the three documents into their folders, the way he always did, and it took the thirty seconds it always took.\n\nFrom the hem of his coat where it hung over the chair arm, a drop of junction water gathered and fell to the stone floor, and then another, and then the cloth held what remained.\n\n</scene>\n\nDoes the new draft make the same error \u2014 does it assert something that contradicts what was established, in the way described? A draft that simply leaves the fact out does not make the error.\n\nAnswer with one JSON object and nothing else:\n{\"verdict\": \"reintroduced\" | \"consistent\" | \"not_present\", \"evidence\": \"<verbatim sentence from the new draft that decides it, or empty for not_present>\"}\n\n\"reintroduced\": the new draft contradicts the established fact.\n\"consistent\": the new draft states the fact and agrees with what was established.\n\"not_present\": the new draft does not touch the fact either way."
+    }
+   ]
+  }
+ },
+ "response": {
+  "model": "claude-opus-4-8",
+  "id": "msg_011CgVbYHhcc79c3QqXHSr3E",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"verdict\": \"consistent\", \"evidence\": \"*Sera Holdt's daughter, age four. Removed from the collapse at Fenwick Row South. Deceased before reaching the medic station.*\"}"
+   }
+  ],
+  "container": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+   "input_tokens": 2675,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 69,
+   "output_tokens_details": {
+    "thinking_tokens": 0
+   },
+   "service_tier": "standard",
+   "inference_geo": "global",
+   "speed": "standard"
+  },
+  "diagnostics": null
+ }
+}
