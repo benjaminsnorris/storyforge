@@ -1,0 +1,54 @@
+id|name|aliases|category|origin
+marley-is-dead|Jacob Marley is dead before the story begins||state-change|marley-was-dead-narration
+scrooge-was-marleys-sole-heir|Scrooge was Marley's sole executor, administrator, and legatee||relationship-shift|marley-was-dead-narration
+scrooge-repels-all-human-contact|Scrooge actively repels all human sympathy and social approach||capability-constraint|marley-was-dead-narration
+scrooge-controls-coal-box|Scrooge keeps the coal-box in his own room, denying his clerk heat||capability-constraint|scrooge-in-counting-house
+fred-is-scrooges-nephew|Fred is Scrooge's nephew||identity|nephew-visits-scrooge
+scrooge-rejects-freds-dinner-invitation|Scrooge refuses Fred's Christmas dinner invitation||state-change|nephew-visits-scrooge
+scrooge-denies-charitable-obligation|Scrooge refuses to donate and disavows responsibility for the poor||motive-intent|charity-collectors-visit-scrooge
+city-celebrates-christmas-scrooge-excluded|The Christmas Eve city celebrates communally while Scrooge remains isolated behind his keyhole||state-change|city-at-christmas-eve
+cratchit-gets-christmas-day-grudgingly|Scrooge grudgingly grants Cratchit Christmas Day off, framing it as theft||capability-constraint|scrooge-dismisses-clerk
+scrooge-lives-in-marleys-old-chambers|Scrooge inhabits the gloomy chambers that once belonged to Marley||state-change|scrooge-walks-home
+marley-face-appears-on-knocker|Marley's face appears in the door knocker before Scrooge enters||state-change|marley-face-on-knocker
+marleys-presence-cannot-be-rationalized-away|Marley's face haunts Scrooge's thoughts even after rational dismissal||capability-constraint|scrooge-settles-in-chambers
+marley-ghost-is-real-and-present|Marley's ghost physically manifests inside Scrooge's locked chambers||state-change|marley-ghost-arrives
+marley-ghost-bears-chain-of-business-symbols|Marley's ghost is bound in a chain of cash-boxes, keys, ledgers, and purses||capability-constraint|marley-ghost-arrives
+scrooge-bears-own-chain|Scrooge carries his own forged chain, as long as Marley's seven years ago||stakes-threat|scrooge-confronts-marley-ghost
+three-spirits-will-visit-scrooge|Three Spirits will visit Scrooge on three successive nights||capability-constraint|scrooge-confronts-marley-ghost
+chained-dead-cannot-intervene-in-human-affairs|The chained dead have permanently lost the power to help the living||capability-constraint|ghost-departs-phantoms-appear
+first-spirit-has-arrived|The Ghost of Christmas Past has physically arrived and confronted Scrooge||state-change|scrooge-wakes-awaits-spirit
+first-spirit-purpose-is-reclamation|The First Spirit's stated purpose is Scrooge's reclamation, not merely his welfare||motive-intent|scrooge-wakes-awaits-spirit
+scrooge-was-a-neglected-schoolboy|Scrooge was a solitary, neglected child left behind at school||identity|spirit-transports-scrooge-past
+scrooge-recognizes-cost-of-isolation|Scrooge feels the first stirring of regret for his own coldness toward others||motive-intent|scrooge-sees-boyhood-school
+fan-is-scrooges-sister|Fan is Scrooge's younger sister||identity|scrooge-revisits-second-christmas
+fred-is-fans-child|Fred is Fan's child, making him Scrooge's nephew through Fan||identity|scrooge-revisits-second-christmas
+employer-power-lies-in-small-acts|An employer's power to give happiness costs nothing measurable||capability-constraint|fezziwig-warehouse-christmas-party
+scrooge-wishes-to-speak-to-clerk|Scrooge wants to speak a kind word to his clerk, Bob Cratchit||state-change|fezziwig-warehouse-christmas-party
+belle-released-scrooge-from-engagement|Belle released Scrooge from their engagement because he was changed by avarice||state-change|belle-releases-young-scrooge
+scrooge-chose-gain-over-love|Scrooge's pursuit of wealth drove away Belle, the woman who loved him||motive-intent|belle-releases-young-scrooge
+scrooge-dies-utterly-alone|Scrooge sits alone as Marley dies, alone in the world||state-change|belle-family-happy-without-scrooge
+scrooge-cannot-be-surprised-by-spirits|Scrooge has steeled himself to face the second Spirit without fear||capability-constraint|scrooge-awaits-second-spirit
+scrooge-submits-to-second-spirit|Scrooge submits willingly to the Ghost of Christmas Present's guidance||state-change|ghost-of-christmas-present-revealed
+spirit-does-not-sanction-sabbatarian-restriction|The Spirit disavows those who close bakers' shops on Sundays in its name||motive-intent|spirit-tours-christmas-morning-city
+tiny-tim-will-die-if-nothing-changes|Tiny Tim will die if the future remains unaltered||stakes-threat|cratchit-family-christmas-dinner
+scrooges-words-used-against-him|"The Spirit quotes Scrooge's own ""surplus population"" words back at him"||motive-intent|cratchit-family-christmas-dinner
+christmas-belongs-to-the-isolated|Christmas spirit reaches even the most remote and isolated human lives||capability-constraint|spirit-visits-moor-and-sea
+fred-persists-in-annual-invitation|Fred intends to invite Scrooge to Christmas dinner every year regardless of refusal||motive-intent|nephew-fred-christmas-party
+second-spirit-dies-at-midnight|The Ghost of Christmas Present exists only one night and dies at midnight||state-change|spirit-ages-ignorance-and-want
+ignorance-more-dangerous-than-want|Ignorance, not Want, is the greater threat to humanity's doom||stakes-threat|spirit-ages-ignorance-and-want
+third-spirit-does-not-speak|The Ghost of Christmas Yet to Come communicates only by pointing, never speaking||capability-constraint|scrooge-meets-final-phantom
+dead-man-identity-unknown-to-scrooge|Scrooge does not yet know who the dead man is||stakes-threat|merchants-discuss-dead-man
+scrooge-absent-from-his-own-corner|Scrooge finds no image of himself in his accustomed place at the Exchange||state-change|wealthy-men-exchange-cold-words
+scrooges-isolation-caused-his-death|The dead man's isolation in life left him to die alone and ungrieved||motive-intent|thieves-sell-dead-mans-belongings
+scrooge-cannot-lift-the-shroud|Scrooge lacks the power to uncover the dead man's face||capability-constraint|scrooge-confronts-shrouded-corpse
+debtors-relieved-by-dead-mans-death|The dead man's debtors feel relief and hope at news of his death||stakes-threat|debtors-rejoice-at-creditors-death
+tiny-tim-has-died|Tiny Tim has died||state-change|cratchit-family-mourns-tiny-tim
+scrooge-is-the-dead-man|Scrooge learns he is the dead man shown throughout the visions||identity|scrooge-reads-his-own-gravestone
+future-is-not-fixed|An altered life can change the future the Spirit has shown||capability-constraint|scrooge-reads-his-own-gravestone
+scrooge-has-returned-to-living-world|Scrooge wakes in his own bed, restored to the living world||state-change|scrooge-wakes-transformed
+spirits-completed-work-in-one-night|The three Spirits completed their work in a single night||capability-constraint|scrooge-learns-christmas-day
+scrooge-sends-cratchit-prize-turkey|Scrooge anonymously sends the prize turkey to Bob Cratchit's family||state-change|scrooge-buys-prize-turkey
+scrooge-pledges-donation-to-charity|Scrooge pledges a substantial charitable donation to the portly gentleman||state-change|scrooge-pledges-donation-streets
+scrooge-reconciles-with-fred|Scrooge attends Fred's Christmas dinner and is welcomed||state-change|scrooge-visits-nephews-dinner
+tiny-tim-survives|Tiny Tim does not die||state-change|scrooge-raises-bobs-salary
+scrooge-raises-cratchit-salary|Scrooge raises Bob Cratchit's salary and pledges to help his family||state-change|scrooge-raises-bobs-salary

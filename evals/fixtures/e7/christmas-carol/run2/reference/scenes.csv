@@ -1,0 +1,41 @@
+id|seq|title|summary|part|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words|time_mode|timeline_date|target_pages|panel_count|page_count|architecture_scene
+marley-was-dead-narration|1|Marley Was Dead: To Begin|||1|intrusive-narrator|scrooges-counting-house|3|||character||726|900|frame|||||
+scrooge-in-counting-house|2|Scrooge Keeps Cold Christmas Eve|||1|ebenezer-scrooge|scrooges-counting-house|1|afternoon|30 minutes|world||271|400|scene|XXXX-12-24||||
+nephew-visits-scrooge|3|Nephew Defends Christmas to Scrooge|||1|intrusive-narrator|scrooges-counting-house|1|afternoon|15 minutes|confrontation||811|900|scene|XXXX-12-24||||
+charity-collectors-visit-scrooge|4|Scrooge Dismisses the Charity Collectors|||1|intrusive-narrator|scrooges-counting-house|1|afternoon|10 minutes|confrontation||513|620|scene|XXXX-12-24||||
+city-at-christmas-eve|5|Fog and Cold Consume the City|||1|intrusive-narrator|scrooges-counting-house|1|evening|30 minutes|world||392|350|scene|XXXX-12-24||||
+scrooge-dismisses-clerk|6|Scrooge Dismisses the Clerk|||1|intrusive-narrator|scrooges-counting-house|1|evening|10 minutes|character||226|300|scene|XXXX-12-24||||
+scrooge-walks-home|7|Scrooge Comes Home to Marley's Rooms|||1|intrusive-narrator|scrooges-chambers|1|evening|30 minutes|transition||170|210|scene|XXXX-12-24||||
+marley-face-on-knocker|8|Marley's Face in the Knocker|||1|intrusive-narrator|scrooges-chambers|1|night|15 minutes|revelation||688|750|scene|||||
+scrooge-settles-in-chambers|9|Scrooge Double-Locks Against Marley's Face|||1|intrusive-narrator|scrooges-chambers|1|night|10 minutes|introspection||215|310|scene|||||
+marley-ghost-arrives|10|Marley's Ghost Passes Through|||1|ebenezer-scrooge|scrooges-chambers|1|night|10 minutes|revelation||425|530|scene|||||
+scrooge-confronts-marley-ghost|11|Marley's Ghost Warns Scrooge|||1|ebenezer-scrooge|scrooges-chambers|1|night|20 minutes|confrontation||1609|1700|scene|XXXX-12-24||||
+ghost-departs-phantoms-appear|12|Phantoms Fade, Scrooge Falls Asleep|||1|ebenezer-scrooge|scrooges-chambers|1|night|10 minutes|revelation||373|380|scene|||||
+scrooge-wakes-awaits-spirit|13|Scrooge Wakes and Meets First Spirit|||2|ebenezer-scrooge|scrooges-chambers|2|night|approximately 30 minutes|revelation||1332|1200|scene|XXXX-12-25||||
+spirit-transports-scrooge-past|14|Scrooge Returns to His Boyhood Country|||2|intrusive-narrator|open-country-road;market-town-outskirts|-3650|morning|15 minutes|revelation||425|500|scene|||||
+scrooge-sees-boyhood-school|15|Scrooge Weeps for Forgotten Boy|||2|ebenezer-scrooge|boyhood-boarding-school|-3650||15 minutes|revelation||657|650|scene|||||
+scrooge-revisits-second-christmas|16|Fan Brings Scrooge Home at Last|||2|intrusive-narrator|boyhood-boarding-school|-3285||20 minutes|revelation||633|750|scene|||||
+fezziwig-warehouse-christmas-party|17|Fezziwig's Christmas Ball, Past Joy|||2|ebenezer-scrooge|fezziwigs-warehouse|-1825|evening|several hours|revelation||1426|1200|scene|XXXX-12-24||||
+belle-releases-young-scrooge|18|Belle Releases Young Scrooge|||2|intrusive-narrator|belles-family-home|-1460||15 minutes|confrontation||736|750|scene|||||
+belle-family-happy-without-scrooge|19|Belle's Joy, Scrooge's Unbearable Loss|||2|intrusive-narrator|belles-family-home|-1095|evening|30 minutes|revelation||949|820|scene|||||
+scrooge-awaits-second-spirit|20|Scrooge Waits for the Second Spirit|||2|ebenezer-scrooge|scrooges-chambers|2|night|15 minutes|introspection||495|560|scene|XXXX-12-25||||
+ghost-of-christmas-present-revealed|21|Giant of Generosity, Touch My Robe|||2|intrusive-narrator|scrooges-chambers|2|morning|15 minutes|revelation||523|650|scene|XXXX-12-25||||
+spirit-tours-christmas-morning-city|22|The Spirit Blesses Christmas Morning Streets|||2|intrusive-narrator|christmas-morning-city-streets|2|morning|1-2 hours|world||1333|1150|scene|XXXX-12-25||||
+cratchit-family-christmas-dinner|23|God Bless Us Every One|||2|ebenezer-scrooge|bob-cratchits-house;city-streets|2|afternoon|2 hours|revelation||2589|1900|scene|XXXX-12-25||||
+spirit-visits-moor-and-sea|24|Moor, Lighthouse, Ship at Christmas|||2|intrusive-narrator|bleak-moor;miners-hut;open-sea;lighthouse;ship-at-sea|2|evening|30 minutes|world||635|700|scene|XXXX-12-25||||
+nephew-fred-christmas-party|25|Fred's Party, Uncle Scrooge Toasted|||2|intrusive-narrator|freds-house|2|evening|several hours|character||2002|1750|scene|XXXX-12-25||||
+spirit-ages-ignorance-and-want|26|Ignorance and Want Revealed at Midnight|||2|intrusive-narrator|open-place|2|night|approaching midnight; the scene ends at twelve strokes|revelation||631|630|scene|XXXX-12-25||||
+scrooge-meets-final-phantom|27|Scrooge Meets the Silent Phantom|||3|intrusive-narrator|scrooges-chambers|2|night|10 minutes|revelation||440|550|scene|XXXX-12-25~||||
+merchants-discuss-dead-man|28|Merchants Laugh About the Dead Man|||3|intrusive-narrator|royal-exchange|2|night|10 minutes|revelation||383|500|scene|||||
+wealthy-men-exchange-cold-words|29|Two Words, No Warmth|||3|intrusive-narrator|city-streets|2|morning|10 minutes|revelation||418|380|scene|||||
+thieves-sell-dead-mans-belongings|30|Thieves Sell the Dead Man's Belongings|||3|ebenezer-scrooge|old-joes-rag-and-bone-shop|2|night|30 minutes|revelation||1442|1350|scene|||||
+scrooge-confronts-shrouded-corpse|31|Scrooge Faces the Shrouded Corpse|||3|ebenezer-scrooge|dead-mans-bedchamber|2|night|15 minutes|confrontation||514|590|scene|||||
+debtors-rejoice-at-creditors-death|32|A Family Rejoices at His Death|||3|intrusive-narrator|caroline-and-husbands-home|2|afternoon|20 minutes|revelation||450|490|scene|||||
+cratchit-family-mourns-tiny-tim|33|Bob Cratchit Mourns His Little Child|||3|intrusive-narrator|bob-cratchits-house|4|evening|30 minutes|character||1026|800|scene|||||
+scrooge-reads-his-own-gravestone|34|Scrooge Reads His Own Gravestone|||3|ebenezer-scrooge|churchyard|4||15 minutes|confrontation||683|750|scene|||||
+scrooge-wakes-transformed|35|Scrooge Wakes Laughing and Transformed|||3|ebenezer-scrooge|scrooges-chambers|2|morning|15 minutes|revelation||502|700|scene|XXXX-12-25||||
+scrooge-learns-christmas-day|36|Scrooge Learns It Is Christmas|||3|intrusive-narrator|scrooges-chambers|2|morning|5 minutes|revelation||87|150|scene|XXXX-12-25||||
+scrooge-buys-prize-turkey|37|Scrooge Sends the Prize Turkey|||3|intrusive-narrator|scrooges-chambers;christmas-morning-city-streets|2|morning|30 minutes|character||565|600|scene|XXXX-12-25||||
+scrooge-pledges-donation-streets|38|Scrooge Pledges a Generous Donation|||3|ebenezer-scrooge|christmas-morning-city-streets|2|morning|5 minutes|confrontation||250|260|scene|XXXX-12-25||||
+scrooge-visits-nephews-dinner|39|Uncle Scrooge Comes to Dinner|||3|intrusive-narrator|christmas-morning-city-streets;freds-house|2|afternoon|several hours|character||317|350|scene|XXXX-12-25||||
+scrooge-raises-bobs-salary|40|Scrooge Raises Bob's Salary|||3|intrusive-narrator|scrooges-counting-house|3|morning|a lifetime (opens with one morning, then summarizes the rest of Scrooge's days)|revelation||578|450|summary|XXXX-12-25||||

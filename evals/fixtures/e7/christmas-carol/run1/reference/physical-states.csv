@@ -1,0 +1,30 @@
+id|character|description|category|acquired|resolves|action_gating
+scrooge-cold-within|ebenezer-scrooge|The cold within him freezes his features: nipped nose, shrivelled cheek, stiffened gait, red eyes, blue lips, grating voice|appearance|marley-was-dead-narration|never|false
+cratchit-insufficient-warmth|bob-cratchit|Cratchit has only a single coal for his fire and cannot replenish it; he is reduced to warming himself at a candle and wearing his comforter indoors|fatigue|scrooge-in-counting-house|never|false
+fred-heated-from-walk|fred|Flushed and glowing from walking rapidly through cold fog and frost; face ruddy, breath visibly smoking|appearance|nephew-visits-scrooge|never|false
+scrooge-great-coat-buttoned|ebenezer-scrooge|Scrooge buttons his great-coat to the chin before leaving|appearance|scrooge-dismisses-clerk|never|false
+scrooge-has-cold-in-head|ebenezer-scrooge|Scrooge has a cold in his head, as evidenced by the gruel prepared on the hob|injury|marley-face-on-knocker|never|false
+scrooge-in-dressing-gown-and-slippers|ebenezer-scrooge|Changed from outdoor coat into dressing-gown and slippers|appearance|scrooge-settles-in-chambers|never|false
+scrooge-wearing-nightcap|ebenezer-scrooge|Nightcap on, signalling full domestic undress|appearance|scrooge-settles-in-chambers|never|false
+marley-wrapped-in-chain|jacob-marley|Long chain clasped about his middle, wound like a tail, made of cash-boxes, keys, padlocks, ledgers, deeds, and heavy steel purses|equipment|marley-ghost-arrives|never|false
+marley-transparent-body|jacob-marley|Body is transparent — visible through to the coat buttons behind|appearance|marley-ghost-arrives|never|false
+marley-head-bound-in-kerchief|jacob-marley|Folded kerchief bound about head and chin|appearance|marley-ghost-arrives|never|false
+scrooge-asleep-without-undressing|ebenezer-scrooge|Scrooge has gone to bed fully clothed in his dressing gown and nightcap, without undressing|fatigue|ghost-departs-phantoms-appear|never|false
+scrooge-grasped-by-ghost-of-christmas-past|ebenezer-scrooge|The Ghost of Christmas Past has clasped Scrooge by the arm and laid its hand upon his heart, physically compelling him to rise and move toward the window|equipment|scrooge-wakes-awaits-spirit|never|true
+scrooge-weeping|ebenezer-scrooge|Scrooge is crying, moved to tears by the sight of his childhood home and schoolmates|appearance|spirit-transports-scrooge-past|never|false
+scrooge-pinioned-by-ghost|ebenezer-scrooge|Ghost of Christmas Past has seized Scrooge bodily and holds him fast, forcing him to watch|equipment|belle-releases-young-scrooge|never|true
+scrooge-exhausted-after-ghost-struggle|ebenezer-scrooge|Overcome by irresistible drowsiness after wrestling with the Ghost; barely able to reel to bed|fatigue|belle-family-happy-without-scrooge|never|false
+scrooge-trembling-from-supernatural-fear|ebenezer-scrooge|Seized by a violent fit of trembling while waiting for the Second Spirit to appear|fatigue|scrooge-awaits-second-spirit|never|false
+scrooge-grasping-spirits-robe|ebenezer-scrooge|Scrooge has taken hold of the Ghost of Christmas Present's robe at the Spirit's command|equipment|ghost-of-christmas-present-revealed|never|false
+tiny-tim-on-crutch-with-iron-frame|tiny-tim|Bears a crutch and has his limbs supported by an iron frame|ability|cratchit-family-christmas-dinner|never|true
+bob-cratchit-wearing-comforter|bob-cratchit|Wearing at least three feet of comforter hanging down before him on arrival|appearance|cratchit-family-christmas-dinner|never|false
+ghost-of-christmas-present-aged-grey|ghost-of-christmas-present|Hair has turned grey; the Ghost has visibly aged over the course of the night|appearance|spirit-ages-ignorance-and-want|never|false
+ghost-of-christmas-present-dying|ghost-of-christmas-present|Life ending at midnight; the Ghost expires as the bell strikes twelve|ability|spirit-ages-ignorance-and-want|never|true
+scrooge-trembling-legs|ebenezer-scrooge|Legs trembling beneath him, barely able to stand|fatigue|scrooge-meets-final-phantom|never|true
+scrooge-shuddering-from-phantom-gaze|ebenezer-scrooge|Scrooge shudders and feels very cold under the Phantom's unseen gaze|fatigue|wealthy-men-exchange-cold-words|never|false
+scrooge-shuddering-from-thieves-scene|ebenezer-scrooge|Shuddering from head to foot at the sight of the thieves dividing the dead man's belongings|appearance|thieves-sell-dead-mans-belongings|never|false
+scrooge-recoiling-from-corpse|ebenezer-scrooge|Physically recoiling in terror at the proximity of the sheeted body, unable to bring himself to lift the covering|appearance|scrooge-confronts-shrouded-corpse|never|false
+scrooge-face-wet-with-tears|ebenezer-scrooge|Face wet from sobbing during the conflict with the Spirit|appearance|scrooge-wakes-transformed|never|false
+scrooge-winded-from-exertion|ebenezer-scrooge|Perfectly winded after frenzied movement through rooms|fatigue|scrooge-wakes-transformed|never|false
+scrooge-hand-tremor|ebenezer-scrooge|Scrooge's hand shakes badly enough to make writing the address and shaving difficult|ability|scrooge-buys-prize-turkey|never|true
+scrooge-dressed-in-best-clothes|ebenezer-scrooge|Scrooge has changed out of nightclothes into his best day clothes|appearance|scrooge-buys-prize-turkey|never|false
