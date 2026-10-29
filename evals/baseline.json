@@ -1,15 +1,15 @@
 {
   "cost": {
-    "calls": 2105,
-    "input_tokens": 5641323,
-    "output_tokens": 254764,
-    "replayed_calls": 2105,
+    "calls": 2106,
+    "input_tokens": 7473930,
+    "output_tokens": 2215437,
+    "replayed_calls": 2106,
     "unpriced_calls": 0,
-    "usd_if_live": 15.1087,
+    "usd_if_live": 10.7967,
     "usd_spent": 0.0
   },
   "git_dirty": true,
-  "git_sha": "c697b58a1b362defe0342bf0f96d330feceb90e1",
+  "git_sha": "f68ecfa62f611e8e1fc273d38a9c40dd4c6886fc",
   "mode": "replay",
   "results": [
     {
@@ -82,7 +82,7 @@
       },
       "mode": "replay",
       "notes": [],
-      "started_at": "2026-10-29T01:38:38+00:00",
+      "started_at": "2026-10-29T04:13:33+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -110,6 +110,7 @@
         },
         "TIM": {
           "cases": 5,
+          "precision": 0.0,
           "recall": 0.0,
           "recall_code_match": 0.0
         },
@@ -130,16 +131,16 @@
         }
       },
       "cost": {
-        "calls": 61,
-        "input_tokens": 136629,
-        "output_tokens": 4328,
-        "replayed_calls": 61,
+        "calls": 62,
+        "input_tokens": 178734,
+        "output_tokens": 66259,
+        "replayed_calls": 62,
         "unpriced_calls": 0,
-        "usd_if_live": 0.1583,
+        "usd_if_live": 0.051,
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 4.11,
+      "duration_s": 9.74,
       "error": null,
       "gates": [
         {
@@ -189,8 +190,8 @@
         "benign_cases": 8,
         "benign_flagged": 0,
         "cases": 37,
-        "control_flags": 0,
-        "flags_false": 0,
+        "control_flags": 1,
+        "flags_false": 1,
         "flags_true": 0,
         "precision": 0.0,
         "recall": 0.0,
@@ -201,9 +202,9 @@
         "detector: drift-check",
         "a detection is a new flag on the case's scenes with the case's code; it may still not be about the injected error (see evals/fixtures/e2-carol/README.md)",
         "missed 37 of 37: e2-carol-001, e2-carol-002, e2-carol-003, e2-carol-004, e2-carol-005, e2-carol-006, e2-carol-007, e2-carol-008, e2-carol-009, e2-carol-010, e2-carol-011, e2-carol-012, e2-carol-013, e2-carol-014, e2-carol-015, e2-carol-016, e2-carol-017, e2-carol-018, e2-carol-019, e2-carol-020, e2-carol-021, e2-carol-022, e2-carol-023, e2-carol-024, e2-carol-025, e2-carol-026, e2-carol-027, e2-carol-028, e2-carol-029, e2-carol-030, e2-carol-031, e2-carol-032, e2-carol-033, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
-        "0 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
+        "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
-      "started_at": "2026-10-29T01:38:38+00:00",
+      "started_at": "2026-10-29T04:13:33+00:00",
       "status": "fail",
       "suite": "e2-carol"
     },
@@ -211,12 +212,12 @@
       "by_code": {
         "KNO": {
           "cases": 5,
-          "recall": 0.0,
+          "recall": 0.2,
           "recall_code_match": 0.0
         },
         "PHY": {
           "cases": 14,
-          "recall": 0.0714,
+          "recall": 0.0,
           "recall_code_match": 0.0
         },
         "PRM": {
@@ -226,13 +227,13 @@
         },
         "TIM": {
           "cases": 12,
-          "precision": 0.3,
-          "recall": 0.25,
-          "recall_code_match": 0.25
+          "precision": 0.4,
+          "recall": 0.1667,
+          "recall_code_match": 0.1667
         },
         "TRT": {
           "cases": 14,
-          "recall": 0.2857,
+          "recall": 0.1429,
           "recall_code_match": 0.0
         },
         "WLD": {
@@ -243,15 +244,15 @@
       },
       "cost": {
         "calls": 1828,
-        "input_tokens": 4561040,
-        "output_tokens": 142397,
+        "input_tokens": 6129139,
+        "output_tokens": 1935726,
         "replayed_calls": 1828,
         "unpriced_calls": 0,
-        "usd_if_live": 5.273,
+        "usd_if_live": 1.5808,
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 150.06,
+      "duration_s": 179.91,
       "error": null,
       "gates": [
         {
@@ -262,7 +263,7 @@
           "threshold": 0.9
         },
         {
-          "actual": 0.25,
+          "actual": 0.1667,
           "name": "recall_TIM",
           "op": ">=",
           "passed": false,
@@ -290,7 +291,7 @@
           "threshold": 0.9
         },
         {
-          "actual": 0.3,
+          "actual": 0.4,
           "name": "precision",
           "op": ">=",
           "passed": false,
@@ -301,21 +302,21 @@
         "benign_cases": 0,
         "benign_flagged": 0,
         "cases": 51,
-        "control_flags": 4,
-        "flags_false": 7,
-        "flags_true": 3,
-        "precision": 0.3,
-        "recall": 0.1569,
-        "recall_code_match": 0.0588
+        "control_flags": 1,
+        "flags_false": 3,
+        "flags_true": 2,
+        "precision": 0.4,
+        "recall": 0.098,
+        "recall_code_match": 0.0392
       },
       "mode": "replay",
       "notes": [
         "detector: drift-check (timeline)",
-        "detected 3 of 51: governor-022, shared-dark-041, thornwall-002",
+        "detected 2 of 51: shared-dark-041, thornwall-030",
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-29T01:38:42+00:00",
+      "started_at": "2026-10-29T04:13:43+00:00",
       "status": "fail",
       "suite": "e2-corpus-drift"
     },
@@ -365,7 +366,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 165.46,
+      "duration_s": 126.95,
       "error": null,
       "gates": [
         {
@@ -429,7 +430,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-29T01:41:12+00:00",
+      "started_at": "2026-10-29T04:16:43+00:00",
       "status": "fail",
       "suite": "e2-corpus-validate"
     },
@@ -441,7 +442,7 @@
         },
         "PHY": {
           "facts": 14,
-          "recall": 0.2143
+          "recall": 0.2857
         },
         "PRM": {
           "facts": 1,
@@ -449,28 +450,28 @@
         },
         "TIM": {
           "facts": 12,
-          "recall": 0.1667
+          "recall": 0.0833
         },
         "TRT": {
           "facts": 14,
-          "recall": 0.0
+          "recall": 0.1429
         },
         "WLD": {
           "facts": 5,
-          "recall": 0.0
+          "recall": 0.4
         }
       },
       "cost": {
         "calls": 147,
-        "input_tokens": 643156,
-        "output_tokens": 28825,
+        "input_tokens": 862682,
+        "output_tokens": 56918,
         "replayed_calls": 147,
         "unpriced_calls": 0,
-        "usd_if_live": 2.5001,
+        "usd_if_live": 2.5066,
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 69.29,
+      "duration_s": 44.47,
       "error": null,
       "gates": [
         {
@@ -481,7 +482,7 @@
           "threshold": 20
         },
         {
-          "actual": 0.1633,
+          "actual": 0.2449,
           "name": "recall",
           "op": ">=",
           "passed": false,
@@ -489,12 +490,12 @@
         }
       ],
       "metrics": {
-        "captured": 8,
+        "captured": 12,
         "facts": 49,
-        "missing": 28,
-        "partial": 13,
-        "recall": 0.1633,
-        "recall_with_partial": 0.4286
+        "missing": 9,
+        "partial": 28,
+        "recall": 0.2449,
+        "recall_with_partial": 0.8163
       },
       "mode": "replay",
       "notes": [
@@ -503,90 +504,87 @@
         "excluded 53: tree predates reference/scenes.csv",
         "governor-015 (routine-maintenance): partial",
         "governor-016 (routine-maintenance): missing",
-        "governor-018 (haddons-reckoning): missing",
-        "governor-019 (finest-cartographer): missing",
+        "governor-018 (haddons-reckoning): captured",
+        "governor-019 (finest-cartographer): partial",
         "governor-020 (ashward-breach): captured",
-        "governor-022 (terrace-row): captured",
+        "governor-022 (terrace-row): partial",
         "governor-023 (haddons-reckoning): partial",
         "governor-024 (haddons-reckoning): partial",
         "governor-025 (the-governors-vigil): missing",
-        "governor-026 (haddons-reckoning): missing",
+        "governor-026 (haddons-reckoning): partial",
         "governor-027 (confrontation-at-stairwell-nine): partial",
-        "governor-028 (order): missing",
+        "governor-028 (order): partial",
         "lantern-folk-001 (a07-the-cold-sleep): captured",
-        "lantern-folk-002 (a03-the-little-voices): partial",
-        "lantern-folk-003 (a12-the-remembering): missing",
-        "lantern-folk-004 (a14-the-keepers-flame): missing",
+        "lantern-folk-002 (a03-the-little-voices): captured",
+        "lantern-folk-003 (a12-the-remembering): partial",
+        "lantern-folk-004 (a14-the-keepers-flame): partial",
         "lantern-folk-005 (a11-in-the-dark): partial",
-        "lantern-folk-006 (a08-what-the-folk-fear): missing",
+        "lantern-folk-006 (a08-what-the-folk-fear): partial",
         "lantern-folk-008 (a03-the-little-voices): captured",
         "lantern-folk-011 (a07-the-cold-sleep): captured",
-        "lantern-folk-012 (a04-the-great-lamp): missing",
+        "lantern-folk-012 (a04-the-great-lamp): partial",
         "lantern-folk-013 (a12-the-remembering): missing",
         "lantern-folk-014 (a03-the-little-voices): captured",
         "lantern-folk-015 (a03-the-little-voices): captured",
-        "lantern-folk-016 (a05-the-pledge): missing",
-        "lantern-folk-018 (a01-moving-night): missing",
-        "lantern-folk-019 (a02-into-the-trees): partial",
-        "lantern-folk-020 (a08-what-the-folk-fear): partial",
+        "lantern-folk-016 (a05-the-pledge): captured",
+        "lantern-folk-018 (a01-moving-night): partial",
+        "lantern-folk-019 (a02-into-the-trees): captured",
+        "lantern-folk-020 (a08-what-the-folk-fear): captured",
         "lantern-folk-025 (a13-through-the-woods): captured",
         "lantern-folk-027 (a11-in-the-dark): missing",
         "lantern-folk-028 (a11-in-the-dark): missing",
         "shared-dark-034 (watching-ostrowski): missing",
-        "shared-dark-035 (no-response): missing",
-        "shared-dark-039 (building): missing",
-        "shared-dark-040 (building): missing",
+        "shared-dark-035 (no-response): partial",
+        "shared-dark-039 (building): partial",
+        "shared-dark-040 (building): partial",
         "shared-dark-041 (pewter-town): partial",
-        "shared-dark-043 (keisha-argument): missing",
-        "shared-dark-044 (keisha-argument): missing",
-        "thornwall-002 (garrens-ledger): missing",
+        "shared-dark-043 (keisha-argument): partial",
+        "shared-dark-044 (keisha-argument): partial",
+        "thornwall-002 (garrens-ledger): partial",
         "thornwall-021 (garrens-ledger): missing",
-        "thornwall-022 (lone-rider): missing",
+        "thornwall-022 (lone-rider): partial",
         "thornwall-023 (journals-of-the-east-wing): missing",
-        "thornwall-024 (not-alone): missing",
-        "thornwall-025 (thessan-resistance): missing",
+        "thornwall-024 (not-alone): partial",
+        "thornwall-025 (thessan-resistance): partial",
         "thornwall-026 (crowded-chamber): partial",
-        "thornwall-027 (thessan-vigil): partial",
+        "thornwall-027 (thessan-vigil): missing",
         "thornwall-028 (thessan-resistance): partial",
         "thornwall-029 (journals-of-the-east-wing): partial",
-        "thornwall-030 (ivra-visits-sera): missing"
+        "thornwall-030 (ivra-visits-sera): partial"
       ],
-      "started_at": "2026-10-29T01:43:57+00:00",
+      "started_at": "2026-10-29T04:18:50+00:00",
       "status": "fail",
       "suite": "e3-extraction"
     },
     {
       "by_code": {
         "KNO": {
-          "mismatches": 11
+          "mismatches": 2
         },
         "PHY": {
-          "mismatches": 35
-        },
-        "REL": {
-          "mismatches": 5
+          "mismatches": 19
         },
         "TIM": {
-          "mismatches": 7
+          "mismatches": 6
         },
         "TRT": {
-          "mismatches": 5
+          "mismatches": 3
         },
         "WLD": {
-          "mismatches": 9
+          "mismatches": 2
         }
       },
       "cost": {
         "calls": 20,
-        "input_tokens": 87239,
-        "output_tokens": 23494,
+        "input_tokens": 87571,
+        "output_tokens": 49194,
         "replayed_calls": 20,
         "unpriced_calls": 0,
-        "usd_if_live": 1.8461,
+        "usd_if_live": 2.0737,
         "usd_spent": 0.0
       },
       "description": "Redraft from plan + ledger; facts the redraft changes",
-      "duration_s": 3.33,
+      "duration_s": 5.18,
       "error": null,
       "gates": [
         {
@@ -598,34 +596,38 @@
         }
       ],
       "metrics": {
-        "mismatches": 72,
-        "mismatches_per_scene": 7.2,
+        "mismatches": 32,
+        "mismatches_per_scene": 3.2,
         "scenes": 10
       },
       "mode": "replay",
       "notes": [
-        "claires-cold: 6 mismatch(es)\n    PHY: In the original both her hands are bound behind her back; in the redraft her wrist is tied to a metal object and she brings a hand up to man\n    PHY: The original has no monitoring sensor on her body; the redraft has an adhesive sensor on her sternum.\n    PHY: The original states the floor is gravel over concrete and she is dragged across it; the redraft describes poured concrete with a seam while \n    KNO: In the original the captor is referred to only as unnamed 'he'; in the redraft he is named Mallen.\n    KNO: In the original she is alone with the captor (hands/he); in the redraft a woman is present across the table.\n    WLD: In the original the captor's hands never hurt her and perform only maintenance; in the redraft she actively wounds herself.",
-        "harmons-hands: 7 mismatch(es)\n    PHY: The space heater's running state differs between versions.\n    PHY: The captive's position differs: kneeling on gravel versus sitting.\n    PHY: The floor surface the captive is on differs.\n    PHY: The cause of the left wrist's condition differs: compression swelling versus a gash against a metal chair.\n    PHY: The pillowcase's dampness source differs: dried salt versus condensation/damp.\n    TRT: The childhood figure who taught tenderness differs: a mother/grandmother with violets versus a boy who liked to fix things.\n    WLD: Hank's ability to influence the perpetrator's hands differs: in original he only observes, in redraft he tries and fails to pull the fingers",
-        "waking-maren: 8 mismatch(es)\n    WLD: Maren's profession differs: she works at the DA's office reading clients' bodies, not as a nurse walking a ward.\n    REL: In the redraft Maren has a daughter, Cora, present in the home; the original shows her living alone.\n    WLD: The dwelling differs: the original is a second-floor apartment above a bookstore; the redraft has a hall, a daughter's room, and a kitchen w\n    KNO: In the original Maren has no knowledge of a street name or plate; in the redraft she writes a plate and street name.\n    WLD: The case named differs: the original references the Delgado case; the redraft references Glenn's attorney and a hearing.\n    TIM: The original has Maren awake and investigating at 2:47 then still at the counter; the redraft advances clocks to 2:53 and then 2:53/six minu\n    PHY: The original has Maren with loose dark hair in a half-undone braid; the redraft never mentions this but contradicts nothing \u2014 removed.\n    KNO: In the original Maren identifies the victim by searching news and finding Claire Renaud; in the redraft she already knows details via a jour",
-        "waking-hank: 6 mismatch(es)\n    PHY: The pen used to write on the legal pad is a different color/type.\n    PHY: The floor surface in the kitchen differs.\n    WLD: The building's location: original places it in high desert Bend with the Three Sisters, redraft describes a corrugated shed on a cove.\n    KNO: When the serif/print style was instilled is specified differently in time.\n    TRT: Rook whines during the scene in the redraft, whereas the original states she had learned not to whine.\n    PHY: The protagonist is wearing boots in the original but the redraft shows him seated with no boots and Rook leaning on his shin.",
-        "the-school: 5 mismatch(es)\n    PHY: The crack Hank finds is on a different wall (east face vs west wall).\n    PHY: The crack orientation differs (vertical in original vs diagonal in redraft).\n    PHY: The building smells of fresh concrete and varnish, implying new construction, whereas the original describes it as a 1968 building with weat\n    PHY: Rook's location differs: in the cab/passenger seat of the truck vs lying at the gymnasium doors inside.\n    TRT: Hank's handwriting medium differs: the original says he writes in his own squared-off hand, while the redraft says he writes in another man'",
-        "advocate: 10 mismatch(es)\n    PHY: Sofia's injury differs between versions.\n    TIM: The timing of the assault differs.\n    PHY: Sofia's hand position differs.\n    REL: The abuser's occupation/identity differs.\n    WLD: The protective order gives a different duration/hearing window.\n    PHY: The petition filing status differs; in the original it was already filed that morning.\n    PHY: The housing arrangement for Sofia differs.\n    REL: The traumatic backstory woman's identity differs; the original implies Maren's own childhood captivity in a van, the redraft names a dead cl\n    PHY: The interview location differs.\n    PHY: The room's door configuration differs.",
-        "maren-runs: 5 mismatch(es)\n    TIM: The number of consecutive crossings/days differs.\n    WLD: The bridge deck surface is described differently (concrete decking vs steel grid).\n    PHY: The phone's location on her body differs.\n    KNO: The professional confided in differs (therapist vs PT).\n    PHY: The breathing pattern is four in and four out in the original, but four shallow counts of in-and-hold in the redraft.",
-        "engineer: 7 mismatch(es)\n    PHY: The school is single-story in the original but has multiple floors in the redraft.\n    REL: The maintenance/facilities man accompanying Hank is named differently.\n    PHY: The out-of-plumb measurement differs.\n    KNO: In the original the building could possibly stay open pending inspection; in the redraft Hank declares the wing closed.\n    PHY: The count of bolts along the run differs within the redraft and from the original's documentation approach, but notably the redraft states a\n    TRT: Hank's hands are described as still and steady in the original but shaking/tremoring in the redraft.\n    PHY: The prior engineering assessment date is given in the redraft but not the original.",
-        "name-surfaces: 11 mismatch(es)\n    TIM: The clock reads a different time.\n    PHY: The clock is on a different device/location.\n    PHY: The space heater's running state differs.\n    PHY: He writes at a kitchen table in the original, a desk in the redraft.\n    PHY: The room has no windows in the dream structure but the redraft places cold windows at his location; the original location implies a kitchen,\n    PHY: Rook's chin rests on his left boot in the original versus both boots in the redraft.\n    PHY: His hand/handwriting is steady with no tremor in the original, but has a tremor in the redraft.\n    TIM: The dream/experience spans a different duration; original is a single night, redraft is three nights.\n    PHY: The victim's last name differs.\n    KNO: In the original Hank learns Claire's name as knowledge from the dream before searching; in the redraft the name arrives from reading the fil\n    KNO: In the original he knew about the hood (pillowcase); the redraft instead specifies ligature marks felt in advance.",
-        "voicemail: 7 mismatch(es)\n    REL: Marie is Claire's sister in the original, but Claire's mother in the redraft.\n    TRT: Claire is the missing woman in the original, but Marie is the missing woman in the redraft.\n    KNO: In the original Maren has never met Claire or Marie and contacts Marie by phone through the hospital; in the redraft Maren had met Claire in\n    TIM: The duration of the disappearance differs: nine days in the original versus eleven days in the redraft.\n    WLD: The original is set in Oregon (Coos Bay, Bandon, Multnomah County, Highway 101); the redraft places the building off Decatur.\n    KNO: Maren had dreamed/heard the hinge sound three nights before in the redraft, a detail absent from the original where she recalls a physical a\n    TIM: The number of the next-nightly messages differs: the original gives a single repeated text ending at 11:47 PM, the redraft gives seven saved"
+        "claires-cold: 2 mismatch(es)\n    PHY: Her wrists are zip-tied behind her back in the original, but in front of her in the redraft.\n    PHY: In the original the space heater switches on and gives off heat; in the redraft it has never been on.",
+        "harmons-hands: 2 mismatch(es)\n    PHY: The original has the space heater running with its cord in the outlet; the redraft has it sitting unplugged.\n    PHY: The original has the captive kneeling on gravel deliberately laid over the concrete; the redraft has her bound to a chair, with her knees op",
+        "waking-maren: 1 mismatch(es)\n    PHY: The surface the captive woman is kept on: in the original it is gravel deliberately chosen over bare concrete; in the redraft it is a concre",
+        "waking-hank: 4 mismatch(es)\n    PHY: In the original he wakes standing at the bathroom sink; in the redraft he is at the kitchen sink.\n    TRT: In the original Rook did not whine this time; in the redraft she makes a whining sound.\n    PHY: In the original Rook settles by the door with her head on his boots; in the redraft she lies across his bare feet at the table with her chin\n    PHY: In the original the apartment floors are cold; in the redraft the floor feels too warm.",
+        "the-school: 1 mismatch(es)\n    PHY: Rook's location during the inspection differs: in the original she waits outside in the truck cab, while in the redraft she is inside the sc",
+        "advocate: 5 mismatch(es)\n    TIM: The original has the petition already filed by Maren that morning, while the redraft has it only drafted and filed at the clerk's window at \n    TIM: The original puts the hearing within seventy-two hours of filing, while the redraft sets a same-day hearing at 1:30.\n    WLD: The original sets the meeting in a windowless interview room, while the redraft sets it in a courthouse corridor waiting area.\n    PHY: In the original Sofia's injury is from strangulation two weeks earlier (burst eye capillaries), while in the redraft her face is freshly swo\n    PHY: In the original Maren's hands are steady during the meeting, while in the redraft her left hand is trembling throughout.",
+        "maren-runs: 5 mismatch(es)\n    TIM: The time of day she is on the bridge differs: before dawn just before 6 a.m. in the original, daylight around seven in the morning in the re\n    PHY: Her breathing pattern is a four-count in and four-count out in the original but a three-count in the redraft.\n    PHY: The homeless camp is on the east bank in the original but on the west bank in the redraft.\n    TRT: The number ninety counts consecutive mornings of crossing the bridge once on a loop route in the original, but ninety lamp-to-lamp intervals\n    PHY: In the original she crosses the bridge without stopping, turns north on Naito and loops back toward Hawthorne, and her body is fine; in the ",
+        "engineer: 4 mismatch(es)\n    PHY: The original school is a single-story building, but the redraft gives it a stairwell, a second floor and a second-floor diaphragm.\n    PHY: In the original Rook stays in the truck during the inspection, but in the redraft she is inside the building at Hank's side.\n    TIM: In the original Hank arrives early and Danny pulls up later while Hank is studying the drawings, but in the redraft Danny is already in the \n    WLD: In the original Hank's own hands restrained the captive woman the night before, but in the redraft the night work was done by hands that wer",
+        "name-surfaces: 5 mismatch(es)\n    TIM: The time on the kitchen clock differs, and so does which appliance shows it.\n    PHY: Rook's position differs: in the original she lies at his feet with her chin on his boot; in the redraft she lies across the hall threshold w\n    KNO: In the original Hank knows the name Claire from the dream before he searches; in the redraft the name comes to him only after he finds the n\n    PHY: He searches on his phone in the original but on a laptop in the redraft.\n    TIM: The driving time to Coos Bay/the coast differs.",
+        "voicemail: 3 mismatch(es)\n    KNO: How Maren obtained Marie's contact number differs: in the original a charge nurse at the hospital ER gave it to her over the phone, while in\n    TRT: Claire's habit of contacting Marie differs: in the original she texted every night on getting home, while in the redraft Marie says Claire a\n    PHY: The circumstances of the disappearance differ: in the original Claire's last nightly text (sent on getting home) arrived, implying she left "
       ],
-      "started_at": "2026-10-29T01:45:06+00:00",
+      "started_at": "2026-10-29T04:19:34+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
     {
       "by_code": {
+        "KNO": {
+          "extraction-error": 5
+        },
         "PHY": {
-          "false-positive": 48
+          "extraction-error": 1,
+          "false-positive": 96
         },
         "TIM": {
-          "deliberate": 6,
+          "deliberate": 7,
           "extraction-error": 6
         }
       },
@@ -639,7 +641,7 @@
         "usd_spent": 0.0
       },
       "description": "Continuity flags raised on classics with no known errors",
-      "duration_s": 0.03,
+      "duration_s": 0.09,
       "error": null,
       "gates": [
         {
@@ -650,7 +652,7 @@
           "threshold": 0
         },
         {
-          "actual": 60,
+          "actual": 115,
           "name": "noise",
           "op": "==",
           "passed": false,
@@ -658,21 +660,22 @@
         }
       ],
       "metrics": {
-        "deliberate": 6,
-        "extraction_error": 6,
-        "false_positive": 48,
-        "flags": 60,
-        "noise": 60,
+        "deliberate": 7,
+        "extraction_error": 12,
+        "false_positive": 96,
+        "flags": 115,
+        "noise": 115,
         "real": 0,
-        "snapshots": 2,
+        "snapshots": 3,
         "unreviewed": 0
       },
       "mode": "replay",
       "notes": [
+        "plastic-age/run1: 55 flag(s)",
         "christmas-carol/run2: 35 flag(s)",
         "christmas-carol/run1: 25 flag(s)"
       ],
-      "started_at": "2026-10-29T01:45:10+00:00",
+      "started_at": "2026-10-29T04:19:39+00:00",
       "status": "fail",
       "suite": "e7-classics"
     },
@@ -683,15 +686,15 @@
           "replayed": 1
         },
         "PHY": {
-          "reintroduced": 2,
+          "reintroduced": 0,
           "replayed": 4
         },
         "TIM": {
-          "reintroduced": 1,
+          "reintroduced": 2,
           "replayed": 6
         },
         "TRT": {
-          "reintroduced": 0,
+          "reintroduced": 2,
           "replayed": 11
         },
         "WLD": {
@@ -701,15 +704,15 @@
       },
       "cost": {
         "calls": 49,
-        "input_tokens": 213259,
-        "output_tokens": 55720,
+        "input_tokens": 215804,
+        "output_tokens": 107340,
         "replayed_calls": 49,
         "unpriced_calls": 0,
-        "usd_if_live": 5.3312,
+        "usd_if_live": 4.5846,
         "usd_spent": 0.0
       },
       "description": "Current revision passes vs the E1 errors past passes introduced",
-      "duration_s": 124.39,
+      "duration_s": 94.38,
       "error": null,
       "gates": [
         {
@@ -720,7 +723,7 @@
           "threshold": 15
         },
         {
-          "actual": 4,
+          "actual": 5,
           "name": "reintroduced",
           "op": "==",
           "passed": false,
@@ -728,15 +731,15 @@
         }
       ],
       "metrics": {
-        "errors_per_10k_words": 1.403,
-        "family.naturalness-upstream.reintroduced": 0,
+        "errors_per_10k_words": 1.743,
+        "family.naturalness-upstream.reintroduced": 1,
         "family.naturalness-upstream.replayed": 3,
         "family.redraft-from-brief.reintroduced": 3,
         "family.redraft-from-brief.replayed": 19,
         "family.revision-plan.reintroduced": 1,
         "family.revision-plan.replayed": 1,
-        "reintroduced": 4,
-        "reintroduction_rate": 0.174,
+        "reintroduced": 5,
+        "reintroduction_rate": 0.217,
         "replayed": 23,
         "unreplayable": 20
       },
@@ -745,37 +748,37 @@
         "excluded 9: csv-level (no prose to redraft)",
         "excluded 14: holdout",
         "excluded 1: pass not replayable yet: hone (registries/physical-states)",
-        "governor-016 (routine-maintenance): reintroduced \u2014 \"Stone-cutters were working on Block Fourteen.\"",
+        "governor-016 (routine-maintenance): reintroduced \u2014 \"Through the sealed glass, on Block Fourteen, the stone-cutters had settled into their afternoon rhythm: two strikes and \"",
         "governor-018 (acceptable-losses): not_present",
         "governor-022 (article-twelve): not_present",
-        "governor-023 (acceptable-losses): consistent",
+        "governor-023 (acceptable-losses): reintroduced \u2014 \"Sera Holdt waited by the door with the dispatch satchel.\"",
         "governor-024 (acceptable-losses): not_present",
-        "governor-025 (haddons-reckoning): reintroduced \u2014 \"The chief wiped his mouth. \"Old woman upstairs. Holdt. Sixty-eight. Lived here forty years, the neighbor says.\"\"",
+        "governor-025 (haddons-reckoning): not_present",
         "governor-026 (the-governors-vigil): not_present",
         "governor-027 (elias-agrees-to-the-terms): not_present",
         "governor-028 (order): not_present",
         "lantern-folk-015 (a09-the-worst-night): consistent",
         "lantern-folk-020 (a06-standing-guard): consistent",
-        "shared-dark-034 (call): not_present",
-        "shared-dark-035 (phone-call): reintroduced \u2014 \"She picked up on the first ring. She'd been holding the phone against her sternum, waiting, Rook's weight warm across he\"",
-        "shared-dark-040 (claire): not_present",
+        "shared-dark-034 (call): consistent",
+        "shared-dark-035 (phone-call): consistent",
+        "shared-dark-040 (claire): reintroduced \u2014 \"Eleven nights she'd sat in it.\"",
         "shared-dark-041 (missing-persons): not_present",
         "thornwall-022 (undefended-flame): not_present",
         "thornwall-023 (journals-of-the-east-wing): consistent",
         "thornwall-024 (evening-visit): not_present",
-        "thornwall-025 (thessan-vigil): not_present",
-        "thornwall-026 (thessan-rides): consistent",
+        "thornwall-025 (thessan-vigil): consistent",
+        "thornwall-026 (thessan-rides): reintroduced \u2014 \"He'd thanked her for her service, as if she'd done him a kindness, and signed where she showed him to sign.\"",
         "thornwall-027 (thessan-at-verath): not_present",
         "thornwall-029 (evidence-room): not_present",
-        "thornwall-030 (ivra-seals-archive): reintroduced \u2014 \"At Garren's Watch the supply records told the same story: declining allotments over nine years, each reduction justified\""
+        "thornwall-030 (ivra-seals-archive): reintroduced \u2014 \"At Garren's Watch the figures had told the same story over nine years, each reduction justified by a different administr\""
       ],
-      "started_at": "2026-10-29T01:45:10+00:00",
+      "started_at": "2026-10-29T04:19:39+00:00",
       "status": "fail",
       "suite": "e8-revision-safety"
     }
   ],
   "schema_version": 1,
   "status": "fail",
-  "storyforge_version": "1.77.0",
+  "storyforge_version": "1.80.0",
   "suite_count": 8
 }
