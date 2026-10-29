@@ -93,7 +93,7 @@ pytest; files `tests/test_*.py` and `tests/commands/`. Run `./tests/run-tests.sh
 
 ## Evals
 
-`python3 evals/run.py` runs the eval suites (`evals/suites/*.py`) with API calls replayed from `evals/fixtures/cassettes/`; exit 0/1/2 = pass/gate failed/errored. See `evals/README.md`. Plan: `docs/plans/2026-10-28-storyforge-rethink.md`.
+`python3 evals/run.py` runs the eval suites (`evals/suites/*.py`) with API calls replayed from `evals/fixtures/cassettes/`; exit 0/1/2 = pass/gate failed/errored. See `evals/README.md`. Plan: `docs/plans/2026-10-28-storyforge-rethink.md`; **current status and how to resume: `docs/plans/2026-10-28-rethink-status.md`** (read it first when working on the rethink). Book repos for the E1-based suites must be cloned under `STORYFORGE_CORPUS_DIR` (default `~/Developer`).
 
 ## Architecture
 

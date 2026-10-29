@@ -1,7 +1,8 @@
 # Storyforge evals
 
 Measures whether Storyforge is reliable, consistent, and accurate. Plan and
-suite definitions (E1–E7): `docs/plans/2026-10-28-storyforge-rethink.md`.
+suite definitions (E1–E8): `docs/plans/2026-10-28-storyforge-rethink.md`.
+What exists, the baseline, and what's next: `docs/plans/2026-10-28-rethink-status.md`.
 
 ```bash
 python3 evals/run.py               # every suite, replaying recorded API calls (free)
