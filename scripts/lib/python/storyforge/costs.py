@@ -25,23 +25,42 @@ _LEDGER_LOCK = threading.Lock()
 # Pricing (per million tokens, env-overridable)
 # ============================================================================
 
+def _rates(input_: float, output: float, cache_read: float | None = None) -> dict:
+    """Per-million-token rates. Cache writes (5-minute TTL) are 1.25x input;
+    cache reads are 0.1x input unless the model's price sheet says otherwise."""
+    return {'input': input_, 'output': output,
+            'cache_read': round(input_ * 0.1, 6) if cache_read is None else cache_read,
+            'cache_create': round(input_ * 1.25, 6)}
+
+
+# Rates by model id (a dated id like ``claude-haiku-4-5-20251001`` matches its
+# undated prefix). Code never pins a model (``common.model_for_tier`` resolves
+# the newest), so a release can arrive before its row does; it is then priced
+# at the newest listed rates for its tier, with a WARNING saying so.
+# Input/output and the listed cache-read rates are from Anthropic's model table
+# as of 2026-10-06; other cache rates use the standard multipliers in _rates.
 PRICING = {
-    'opus':   {'input': 5.00,  'output': 25.00, 'cache_read': 0.50, 'cache_create': 6.25},
-    'sonnet': {'input': 3.00,  'output': 15.00, 'cache_read': 0.30, 'cache_create': 3.75},
-    'haiku':  {'input': 1.00,  'output': 5.00,  'cache_read': 0.10, 'cache_create': 1.25},
+    'claude-opus-5-5':   _rates(4.00, 20.00, cache_read=0.20),
+    'claude-opus-5':     _rates(5.00, 25.00),
+    'claude-opus-4-8':   _rates(5.00, 25.00),
+    'claude-opus-4-7':   _rates(5.00, 25.00),
+    'claude-opus-4-6':   _rates(5.00, 25.00),
+    'claude-sonnet-5-5': _rates(2.00, 10.00, cache_read=0.20),
+    'claude-sonnet-5':   _rates(2.00, 10.00, cache_read=0.20),
+    'claude-sonnet-4-6': _rates(3.00, 15.00),
+    'claude-haiku-5-5':  _rates(0.10, 0.50),
+    'claude-haiku-4-5':  _rates(1.00, 5.00),
 }
 
-# The exact model ID each tier's PRICING above was last verified against.
-# Pricing is tier-based, but a new model version can reprice — so whenever
-# common.LATEST_MODELS bumps a tier to a new model, re-check the rates at
-# platform.claude.com/pricing, update PRICING if they changed, then bump the
-# ID here. A test asserts this matches LATEST_MODELS, so a version change that
-# skips the pricing review fails CI (see tests/commands/test_costs.py).
-PRICING_VERIFIED_FOR = {
-    'opus':   'claude-opus-4-8',
-    'sonnet': 'claude-sonnet-4-6',
-    'haiku':  'claude-haiku-4-5-20251001',
+# Models whose rates rise once the prompt passes a size: (prompt tokens, rates).
+LONG_PROMPT_PRICING = {
+    'claude-haiku-5-5': (100_000, _rates(0.50, 2.50)),
 }
+
+# The newest listed model per tier: the fallback for an unlisted release.
+_TIER_FALLBACK = {'opus': 'claude-opus-5-5', 'sonnet': 'claude-sonnet-5-5',
+                  'haiku': 'claude-haiku-5-5'}
+_warned_unpriced: set[str] = set()
 
 LEDGER_HEADER = 'timestamp|operation|target|model|input_tokens|output_tokens|cache_read|cache_create|cost_usd|duration_s'
 
@@ -57,7 +76,7 @@ _DEFAULT_OUTPUT_PER_ITEM = 1500
 
 
 def _detect_tier(model: str) -> str:
-    """Map a model name to a pricing tier."""
+    """Map a model name to its capability tier."""
     m = model.lower()
     if 'opus' in m:
         return 'opus'
@@ -66,14 +85,32 @@ def _detect_tier(model: str) -> str:
     return 'sonnet'
 
 
-def _get_price(model: str, token_type: str) -> float:
+def _price_key(model: str) -> str:
+    """The PRICING row for a model: the longest id that is the model or a
+    prefix of it, else its tier's newest row (warned once per model)."""
+    matches = [k for k in PRICING if model == k or model.startswith(k + '-')]
+    if matches:
+        return max(matches, key=len)
+    fallback = _TIER_FALLBACK[_detect_tier(model)]
+    if model not in _warned_unpriced:
+        _warned_unpriced.add(model)
+        print(f'WARNING: no price listed for {model}; costs use {fallback} rates '
+              f'(update storyforge/costs.py PRICING)', file=sys.stderr)
+    return fallback
+
+
+def _get_price(model: str, token_type: str, prompt_tokens: int = 0) -> float:
     """Get per-million-token price, checking env overrides first."""
-    tier = _detect_tier(model)
-    env_key = f'PRICING_{tier.upper()}_{token_type.upper()}'
+    env_key = f'PRICING_{_detect_tier(model).upper()}_{token_type.upper()}'
     env_val = os.environ.get(env_key)
     if env_val:
         return float(env_val)
-    return PRICING[tier][token_type]
+    key = _price_key(model)
+    if key in LONG_PROMPT_PRICING:
+        threshold, rates = LONG_PROMPT_PRICING[key]
+        if prompt_tokens > threshold:
+            return rates[token_type]
+    return PRICING[key][token_type]
 
 
 # ============================================================================
@@ -93,11 +130,12 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int,
 
     If batch=True, applies the Anthropic Batch API 50% discount.
     """
+    prompt = input_tokens + cache_read + cache_create
     cost = 0.0
-    cost += input_tokens * _get_price(model, 'input') / 1_000_000
-    cost += output_tokens * _get_price(model, 'output') / 1_000_000
-    cost += cache_read * _get_price(model, 'cache_read') / 1_000_000
-    cost += cache_create * _get_price(model, 'cache_create') / 1_000_000
+    cost += input_tokens * _get_price(model, 'input', prompt) / 1_000_000
+    cost += output_tokens * _get_price(model, 'output', prompt) / 1_000_000
+    cost += cache_read * _get_price(model, 'cache_read', prompt) / 1_000_000
+    cost += cache_create * _get_price(model, 'cache_create', prompt) / 1_000_000
     if batch:
         cost *= BATCH_DISCOUNT
     return cost

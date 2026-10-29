@@ -12,8 +12,7 @@ import threading
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-from storyforge.common import LATEST_MODELS
-from storyforge.costs import PRICING, calculate_cost, log_operation
+from storyforge.costs import calculate_cost, log_operation
 
 
 API_BASE = 'https://api.anthropic.com/v1'
@@ -23,21 +22,46 @@ API_TIMEOUT = 600  # seconds before giving up on an API call (10 min)
 REVISION_TIMEOUT = 3600  # seconds for large revision calls (60 min)
 API_RETRIES = 2  # retry transient failures (timeouts, 5xx)
 
-# Model output token limits — the API returns HTTP 400 if max_tokens exceeds these.
-# You only pay for tokens actually generated, so requesting the max is safe cost-wise.
-# Keyed off the tier map so a model bump in common.LATEST_MODELS flows through
-# here with no separate version string to update.
-MODEL_MAX_OUTPUT = {
-    LATEST_MODELS['opus']:   128000,
-    LATEST_MODELS['sonnet']: 64000,
-    LATEST_MODELS['haiku']:  16384,
-}
+# Current models think before answering (Opus can't turn it off), and
+# thinking counts against max_tokens, so a budget sized for the answer alone
+# can end in thinking with no text. invoke adds this much on top of the
+# caller's budget. Only generated tokens are billed, so the headroom is free.
+THINKING_ALLOWANCE = 16000
+
+# Output limit for a model the catalog does not list (a STORYFORGE_MODEL
+# override the API will reject anyway); every listed model reports its own.
 _DEFAULT_MAX_OUTPUT = 32768
 
 
 def max_output_tokens(model: str) -> int:
-    """Return the maximum output tokens supported by a model."""
-    return MODEL_MAX_OUTPUT.get(model, _DEFAULT_MAX_OUTPUT)
+    """The model's maximum output tokens, from the Models API catalog.
+
+    The API returns HTTP 400 if max_tokens exceeds this. You only pay for
+    tokens actually generated, so requesting the max is safe cost-wise.
+    """
+    from storyforge.common import model_catalog
+    for m in model_catalog():
+        if m.get('id') == model and m.get('max_tokens'):
+            return int(m['max_tokens'])
+    return _DEFAULT_MAX_OUTPUT
+
+
+def request_max_tokens(model: str, answer_tokens: int) -> int:
+    """The max_tokens to send: the answer budget plus THINKING_ALLOWANCE,
+    capped at the model's limit."""
+    return min(answer_tokens + THINKING_ALLOWANCE, max_output_tokens(model))
+
+
+def list_models() -> list[dict]:
+    """Every model the API offers, following pagination."""
+    models: list[dict] = []
+    after = ''
+    while True:
+        page = _api_request('models?limit=1000' + (f'&after_id={after}' if after else ''))
+        models.extend(page.get('data', []))
+        if not page.get('has_more') or not page.get('last_id'):
+            return models
+        after = page['last_id']
 
 
 class _Heartbeat:
@@ -120,14 +144,14 @@ def _live_request(path: str, body: dict | None, method: str, timeout: int) -> di
 
 
 def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
-           timeout: int = API_TIMEOUT, system: list[dict] | None = None,
-           temperature: float | None = None) -> dict:
+           timeout: int = API_TIMEOUT, system: list[dict] | None = None) -> dict:
     """Call the Anthropic Messages API.
 
     Args:
         prompt: The user message text.
-        model: Model ID (e.g., 'claude-opus-4-8').
-        max_tokens: Maximum output tokens.
+        model: Model ID (from ``common.select_model`` or ``model_for_tier``).
+        max_tokens: Output tokens for the answer; THINKING_ALLOWANCE is added,
+            capped at the model's limit.
         label: Optional label for heartbeat messages (e.g., 'revision pass 3').
         timeout: Socket timeout in seconds (default API_TIMEOUT).
         system: Optional list of system content blocks (supports cache_control).
@@ -137,13 +161,11 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
     """
     body = {
         'model': model,
-        'max_tokens': max_tokens,
+        'max_tokens': request_max_tokens(model, max_tokens),
         'messages': [{'role': 'user', 'content': prompt}],
     }
     if system:
         body['system'] = system
-    if temperature is not None:
-        body['temperature'] = temperature
     heartbeat = _Heartbeat(label or model)
     heartbeat.start()
     try:
@@ -153,8 +175,7 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
 
 
 def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 4096, label: str = '',
-                   timeout: int = API_TIMEOUT, system: list[dict] | None = None,
-                   temperature: float | None = None) -> dict:
+                   timeout: int = API_TIMEOUT, system: list[dict] | None = None) -> dict:
     """Call the API and write the response to a JSON file.
 
     Args:
@@ -169,9 +190,7 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
     Returns:
         Full API response dict.
     """
-    extra = {'temperature': temperature} if temperature is not None else {}
-    response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system,
-                      **extra)
+    response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system)
     os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
     with open(log_file, 'w') as f:
         json.dump(response, f)
@@ -286,7 +305,7 @@ def build_batch_request(custom_id: str, prompt: str, model: str,
     """
     params = {
         'model': model,
-        'max_tokens': max_tokens,
+        'max_tokens': request_max_tokens(model, max_tokens),
         'messages': [{'role': 'user', 'content': prompt}],
     }
     if system:

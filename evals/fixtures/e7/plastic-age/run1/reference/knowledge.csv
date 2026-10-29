@@ -1,0 +1,128 @@
+id|name|aliases|category|origin
+sanford-college-founded-on-hill|Sanford College was deliberately founded on a hill by Hezekiah Sanford||capability-constraint|sanford-college-history-established
+hezekiah-sanford-founder|Hezekiah Sanford founded the college, served all roles for thirty years, then died||state-change|sanford-college-history-established
+carl-peters-attended-kane-school|Carl Peters attended Kane School before Sanford||identity|hugh-arrives-climbs-hill
+hugh-visited-sanford-before|Hugh visited Sanford College once previously with his father||capability-constraint|hugh-arrives-climbs-hill
+carl-father-is-dead|Carl Peters's father is dead||state-change|hugh-meets-carl-peters
+hugh-carl-mutual-liking-established|Hugh and Carl Peters have formed a mutual liking||relationship-shift|hugh-meets-carl-peters
+helen-simpson-is-hughs-girl|Helen Simpson is Hugh's girlfriend from home||relationship-shift|hugh-writes-letters-dreams
+helen-growing-distant-in-hughs-mind|Helen Simpson is already fading from vivid presence to nebulous memory in Hugh's mind||state-change|helen-memory-fades-college
+adviser-assigned-schedule-without-guidance|Professor Kane assigned Hugh's schedule without explanation or guidance||capability-constraint|freshmen-endure-orientation-chaos
+hugh-belongs-to-sanford-now|Hugh feels himself a genuine part of Sanford College||state-change|upperclassmen-arrive-freshmen-hazed
+hugh-loves-books-secretly|Hugh secretly loves books but hides it from Carl as shameful||identity|carl-explains-schedule-to-hugh
+carl-writes-mother-nightly|Carl Peters writes to his mother every night||state-change|boys-stroll-home-after-film
+chapel-upperclassmen-behavior-irreverent|Upperclassmen treat mandatory chapel with open irreverence||capability-constraint|chapel-convocation-freshmen-assembled
+freshmen-must-run-to-class|Freshmen run to class while upperclassmen stroll||capability-constraint|hugh-races-to-class
+hugh-already-knows-trigonometry|Hugh already studied trigonometry in high school||capability-constraint|math-class-roll-call
+kane-misread-hughs-credentials|Professor Kane misread Hugh's high-school credentials as advanced algebra||motive-intent|math-class-roll-call
+alling-latin-class-unexpectedly-enjoyable|Hugh comes to love Alling's Latin class despite initial disapproval||state-change|survey-of-other-instructors
+kane-made-scheduling-error|Professor Kane placed Hugh in the wrong English section||state-change|wrong-classroom-humiliation
+carl-was-severely-homesick-at-kane|Carl Peters suffered severe, sustained homesickness during four years at Kane School||identity|hugh-comforts-morse-homesickness
+carl-considers-himself-not-a-gentleman|Carl Peters believes himself not a gentleman despite knowing the outward tricks||identity|hugh-comforts-morse-homesickness
+morse-has-left-sanford|Herbert Morse withdraws from Sanford College and goes home||state-change|carl-confesses-by-firelight
+hugh-resents-morse-for-leaving|Hugh feels irritated and hurt by Morse's departure, not just sorry||relationship-shift|morse-letter-irritates-hugh
+hugh-targets-adams-cooper-dodge|Hugh has named Adams, Cooper, and Dodge as sophomores he intends to retaliate against||stakes-threat|freshmen-hazing-campus-rituals
+adams-dodge-unaware-of-hughs-grievance|Adams and Dodge are unaware of the reason Hugh targeted them||motive-intent|hugh-retaliates-class-rush
+adams-dodge-intend-to-rush-hugh|Adams and Dodge plan to recruit Hugh for their fraternity||motive-intent|adams-dodge-discuss-carver
+hughs-college-ideals-shaken|Hugh's ideals about college life are severely destabilized||state-change|hugh-questions-college-ideals
+father-arranged-nu-delta-legacy|Mr. Carver wrote to Nu Delta recommending Hugh as a legacy||motive-intent|father-son-talk-eve
+father-gave-idealized-college-picture|Mr. Carver filled Hugh with idolatry for Sanford and Nu Delta on the eve of departure||state-change|father-son-talk-eve
+hugh-ignorant-of-sexual-facts|Hugh is deeply ignorant of sexual facts despite claiming otherwise to his father||capability-constraint|father-son-talk-eve
+hugh-doubts-fathers-sanford-picture|Hugh suspects Sanford has changed or his father forgot what college was like||motive-intent|hugh-reflects-on-talk
+wayne-gifford-is-cheerleader|Wayne Gifford is Sanford's cheer-leader||identity|smoker-rally-pregame-speeches
+jack-price-is-coach|Jack Price is Sanford's football coach||identity|smoker-rally-pregame-speeches
+hugh-kissed-unknown-girl|Hugh kissed an unnamed girl at a fraternity dance and told no one||state-change|football-fever-grips-campus
+sanford-loses-big-game|Sanford loses the big game against Raleigh||state-change|sanford-loses-big-game
+helen-relationship-effectively-ended|Hugh consciously feels relief after his final kiss with Helen||state-change|post-game-college-life-drifts
+pudge-jamieson-is-english-authority|Pudge Jamieson is the freshman class authority on the English course||identity|english-seminar-poetry-night
+cheating-student-expelled-mid-exam|A student is caught cheating mid-exam and leaves Sanford within five hours||state-change|freshman-class-takes-exams
+freddy-dickson-flunked-out|Freddy Dickson fails to pass enough courses and is expelled||state-change|exam-period-ends-grades-arrive
+hugh-passed-all-courses|Hugh passes all first-term courses with undistinguished grades||state-change|exam-period-ends-grades-arrive
+hughs-grades-shame-him|Hugh's first-term grades are mediocre and cause him shame||state-change|hugh-writes-home-about-grades
+hugh-carl-both-pledged-nu-delta|Hugh and Carl both accepted Nu Delta bids and are now pledges||state-change|fraternity-rushing-pledging-season
+fraternities-are-political-not-brotherly|Graham told Hugh fraternities are political organizations, not brotherhoods||motive-intent|fraternity-rushing-pledging-season
+hugh-carl-are-nu-delts|Hugh and Carl are fully initiated Nu Delta members||state-change|fraternity-initiation-rituals-completed
+alling-lost-as-teacher|Hugh loses Alling as his Latin instructor due to section reassignment||state-change|freshman-year-slips-away
+instructors-fail-to-inspire-hugh|Hugh's remaining instructors are competent but generate no intellectual enthusiasm in him||capability-constraint|freshman-year-slips-away
+hugh-uncomfortable-with-hectic-social-atmosphere|Hugh feels confused and alienated by the hectic atmosphere of fraternity social events||state-change|grippe-prevents-house-dance
+hugh-failed-raleigh-track-meet|Hugh broke three times at the mark and finished set back two yards in the Raleigh meet||state-change|track-consumes-hugh
+hugh-earned-class-numerals|Hugh won the hundred in two lesser meets and was granted his class numerals||capability-constraint|track-consumes-hugh
+spring-sings-shape-hughs-feeling|Campus sings become a lasting emotional anchor for Hugh||state-change|campus-sings-begin
+hugh-surer-second-exam-term|Hugh approaches second-term exams with greater confidence than the first||state-change|examinations-descend-again
+hugh-carl-plan-to-room-together-sophomore-year|Hugh and Carl have agreed to room together again in Surrey 19||capability-constraint|carl-and-hugh-part
+janet-harton-emotionally-incapable|Janet Harton is incapable of real love, wanting only to be petted||identity|hugh-summers-janet-disappoints
+carl-had-sexual-experience|Carl Peters had sex with Elaine Marston at Christmas Cove||state-change|carl-confesses-sexual-experience
+sanford-defeats-raleigh-sophomore-year|Sanford defeats Raleigh in football during Hugh's sophomore year||state-change|football-victory-campus-settles
+hugh-finds-peers-more-stimulating-than-instructors|Hugh finds bull sessions with peers more intellectually alive than his formal instruction||capability-constraint|bull-session-turns-serious
+hugh-lacks-faculty-mentor|Hugh finds no professor he can approach about sex or religion||capability-constraint|hugh-reflects-alone
+hugh-moral-framework-collapsing|Hugh's inherited moral certainties are dissolving with nothing to replace them||state-change|hugh-reflects-alone
+slade-admires-hughs-chastity|Harry Slade admires and envies Hugh's sexual chastity||motive-intent|hugh-disillusionment-fraternity-slade-rescue
+nu-delta-excludes-catholics-jews|Nu Delta at Sanford excludes Catholics and Jews by local practice||capability-constraint|hugh-disillusionment-fraternity-slade-rescue
+carl-expelled-for-venereal-disease|Carl Peters is expelled from Sanford due to venereal disease||state-change|carl-expelled-for-disease
+henley-becomes-faculty-mentor|Henley becomes Hugh's first genuine faculty mentor||relationship-shift|henley-challenges-hugh-to-rewrite
+henley-indicts-college-conformity|Henley delivers a public lecture condemning student conformity and false college loyalty||state-change|henley-lectures-class-on-conformity
+hugh-overcorrects-to-total-condemnation|Hugh concludes from Henley's lecture that Sanford is a colossal failure||motive-intent|henley-lectures-class-on-conformity
+father-is-dreamer-not-deceiver|Hugh concludes his father was an innocent dreamer, not a deliberate deceiver||motive-intent|hugh-dissatisfied-with-fraternity
+hugh-refuses-female-theatrical-role|Hugh declines a woman's part in the Dramatic Society musical comedy||state-change|hugh-dissatisfied-with-fraternity
+tucker-pressures-hugh-on-activities|Tucker formally pressured Hugh to do more activities and conform fraternity expectations||stakes-threat|tucker-confronts-hugh-activities
+hugh-regrets-ignoring-grahams-advice|Hugh now believes joining Nu Delta was a mistake and Graham's freshman warning was correct||motive-intent|hugh-reflects-on-wrong-choice
+parker-went-delta-sig|Norry Parker joined Delta Sigma Delta on Hugh's advice||state-change|hugh-reflects-on-wrong-choice
+hugh-hypersensitive-to-fraternity-judgment|Hugh's fear of fraternity censure now controls his decisions even without actual opposition||capability-constraint|hugh-and-parker-spring-walks
+parker-is-aesthetic-mystic|Norry Parker is a dreamer and mystic who weeps at music and poetry||identity|parker-describes-his-inner-world
+delta-sig-protects-parkers-purity|Delta Sigma Delta brothers silently appoint themselves guardians of Parker's purity||relationship-shift|parker-describes-his-inner-world
+janet-harton-engaged|Janet Harton is engaged to another man||state-change|hugh-settles-into-college-life
+nu-delta-dance-is-drunken-debacle|Nu Delta's annual house dance descends into open drunkenness and sexual disorder||state-change|nu-delta-house-dance
+hugh-resolves-to-resign-nu-delta|Hugh resolves to resign from Nu Delta the next day||state-change|hugh-flees-in-disgust
+hugh-resignation-abandoned|Hugh abandons his Nu Delta resignation the following day||state-change|hugh-reconsiders-resignation
+hugh-self-doubt-as-prude|Hugh doubts his own indignation, wondering if he is a prude or prig||state-change|hugh-reconsiders-resignation
+hugh-cannot-confide-in-parents|Hugh cannot bring himself to discuss Nu Delta or college realities with either parent||capability-constraint|hugh-avoids-fraternity-studies
+parker-family-is-wealthy-cultivated|The Parker family is wealthy, artistically cultivated, and warmly welcoming||identity|hugh-arrives-new-york-norry
+hugh-falls-in-love-long-island|Hugh falls in love during the final week of his Long Island visit||state-change|hugh-arrives-new-york-norry
+cynthia-day-is-love-object|Hugh is romantically captivated by Cynthia Day||state-change|hugh-meets-cynthia-beach
+gates-reforms-nu-delta-house|Leonard Gates publicly condemns the house dance and demands reform||state-change|hugh-returns-college-junior-year
+campus-intellectual-turn-junior-year|A campus-wide turn toward reading and idealism takes hold junior year||capability-constraint|hugh-returns-college-junior-year
+hugh-drinking-no-longer-resisted|Hugh accepts Vinton's alcohol without protest and has abandoned his running identity||state-change|hugh-settles-into-routine
+allen-suspected-card-cheat|Ted Allen is widely suspected of cheating at cards and dice||identity|poker-game-at-allens
+marpessa-poem-stephen-phillips|"Freddy Fowler reads aloud Stephen Phillips's poem ""Marpessa"""||capability-constraint|marpessa-poem-in-hallway
+beauty-redeems-sordidness|Exposure to beauty makes Hugh feel ashamed of his sordid pursuits||state-change|campus-walk-after-poem
+cynthia-coming-to-prom|Cynthia Day has confirmed she will attend Prom||state-change|hugh-anticipates-cynthias-arrival
+cynthia-arrived-at-haydensville|Cynthia Day has arrived at Haydensville station for Prom||state-change|cynthia-arrives-at-station
+cynthia-staying-hughs-room|Cynthia Day is staying in Hugh's room during Prom||state-change|couple-walks-to-fraternity
+hugh-staying-keller-with-parker|Hugh is displaced to Keller Hall with Norry Parker during Prom||state-change|couple-walks-to-fraternity
+cynthia-kiss-confirmed|Hugh and Cynthia have kissed and declared love||state-change|campus-tour-leads-to-kiss
+norry-warns-cynthia-fast-crowd|Norry Parker has warned Hugh that Cynthia runs with a fast crowd||stakes-threat|hugh-dresses-with-norry
+hugh-procures-alcohol-for-cynthia|Hugh steals gin from Vinton and drinks with Cynthia at Prom||state-change|prom-musical-comedy-dance
+prom-night-is-openly-wet|Prom night is the wettest on record with campus-wide open drinking||capability-constraint|next-day-baseball-prom-night
+hugh-and-cynthia-drunk-at-prom|Hugh and Cynthia are both drunk at the Prom dance and moving toward a sexual encounter||state-change|drunken-prom-carnival
+norry-intervened-prom-night|Norry Parker intercepted Hugh and Cynthia and removed Cynthia from Hugh's room||state-change|norry-interrupts-in-room
+hugh-self-condemns-drunk|"Hugh, while drunk, declares himself worthless and an ""excrescence"""||state-change|norry-interrupts-in-room
+norry-tended-hugh-through-night|Norry Parker silently tended Hugh through the night, changing his compress three times||relationship-shift|hugh-wakes-hungover
+norry-escorted-cynthia-home-safely|Norry Parker escorted Cynthia home without being seen||state-change|hugh-confesses-to-norry
+nothing-sexual-occurred-prom-night|Nothing sexual happened between Hugh and Cynthia on prom night||capability-constraint|hugh-confesses-to-norry
+cynthia-ends-relationship-with-hugh|Cynthia Day ends the relationship with Hugh and departs Prom early||state-change|farewell-conversation-in-woods
+cynthia-names-sex-attraction-not-love|Cynthia tells Hugh their feeling was sex attraction, not love||motive-intent|farewell-conversation-in-woods
+cynthia-has-departed-sanford|Cynthia Day has left Sanford by train||state-change|cynthia-departs-by-train
+hugh-grieves-cynthia-as-lost-dreams|Hugh recognizes he has lost his dreams, not love||state-change|hugh-grieves-alone
+hugh-cannot-confess-to-henley|Hugh cannot bring himself to confess his prom-night conduct to Henley||capability-constraint|hugh-tormented-by-guilt
+norry-confesses-own-passions|Norry Parker confesses he has passions and once suffered unrequited love||identity|hugh-confesses-to-norry-2
+hugh-promises-reformation-to-norry|Hugh promises Norry he will do better going forward||motive-intent|hugh-confesses-to-norry-2
+hugh-sobriety-oath-kept|Hugh swore off smoking and drinking and has kept that oath||state-change|hugh-reforms-after-talk
+prom-expulsions-occur|A dozen men caught flagrante delicto at Prom are summarily expelled||state-change|hugh-reforms-after-talk
+hugh-counts-himself-among-disgraced-minority|Hugh recognizes himself as one of the minority who disgraced Sanford at Prom||state-change|gates-defends-sanford-men
+hugh-targets-raleigh-meet-for-redemption|Hugh has fixed on winning a dash at the Raleigh meet as his sole path to self-redemption||motive-intent|hugh-trains-for-redemption
+hugh-lost-hundred-to-calvert|Hugh finished second in the hundred-yard dash behind Calvert||state-change|hundred-yard-dash-race
+calvert-broke-sanford-raleigh-record|Calvert won the hundred in ten seconds flat, breaking the meet record||capability-constraint|hundred-yard-dash-race
+hugh-lost-two-twenty-to-calvert|Hugh finished second in the two-twenty behind Calvert||state-change|two-twenty-yard-race
+hugh-won-letter-insufficient-for-self-redemption|Hugh won his letter and ran a praised race but does not feel redeemed||capability-constraint|hugh-devastated-after-race
+henley-reframes-defeat-as-success|Henley tells Hugh that losing to Calvert constitutes a genuine moral success||motive-intent|henley-comforts-hugh
+henley-endorses-cynthia-departure|Henley tells Hugh Cynthia was wise to remove herself from his life||relationship-shift|henley-comforts-hugh
+hugh-elected-boule-third|Hugh is elected to the Boule third, becoming one of the twelve chosen||state-change|hugh-elected-to-boule
+cynthia-still-loves-hugh|Cynthia Day confesses she is still in love with Hugh||state-change|hugh-reflects-postgraduate-uncertainty
+cynthia-and-hugh-in-unresolved-correspondence|Hugh and Cynthia exchange letters but reach no resolution||state-change|hugh-reflects-postgraduate-uncertainty
+henley-revises-cream-of-earth-verdict|Henley now considers college graduates the best society produces despite all failures||state-change|henley-defends-college-education
+hugh-plans-harvard-graduate-year|Hugh intends to spend at least a year at Harvard after graduating||state-change|seniors-mourn-approaching-graduation
+cynthia-relationship-formally-ended|Hugh and Cynthia mutually agree they do not love each other and will not marry||state-change|hugh-and-cynthia-part
+carl-and-cynthia-introduced|Hugh introduces Carl Peters and Cynthia Day to each other||relationship-shift|hugh-and-cynthia-part
+hugh-graduated-sanford|Hugh Carver receives his bachelor of science degree at Sanford commencement||state-change|parents-arrive-commencement-begins
+hugh-sanford-farewell-complete|Hugh has made his final private farewell walk of the Sanford campus||state-change|hugh-leaves-dance-alone
+hugh-sanford-departure-complete|Hugh has made his final farewell and left Sanford behind||state-change|seniors-sing-final-farewell

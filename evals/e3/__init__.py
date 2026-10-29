@@ -130,11 +130,11 @@ def parse_verdict(text: str) -> dict:
 
 def judge(item: dict, knowledge: str, physical: str) -> dict:
     from storyforge.api import extract_text, invoke
-    from storyforge.common import LATEST_MODELS
+    from storyforge.common import model_for_tier
     prompt = JUDGE_PROMPT.format(scene=item['scene'], quote=item['span']['quote'],
                                  summary=item['case']['summary'],
                                  knowledge=knowledge, physical=physical)
-    return parse_verdict(extract_text(invoke(prompt, LATEST_MODELS['opus'], max_tokens=512,
+    return parse_verdict(extract_text(invoke(prompt, model_for_tier('opus'), max_tokens=512,
                                              label=f'e3 judge {item["case"]["id"]}')))
 
 

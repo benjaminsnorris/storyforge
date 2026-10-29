@@ -193,17 +193,44 @@ class TestSelectModel:
         assert 'opus' in result
 
     def test_opus_tasks_resolve_through_tier_map(self):
-        # Opus-tier tasks resolve to the current opus model via LATEST_MODELS,
-        # so a version bump there is the only change needed — no per-site IDs.
-        from storyforge.common import LATEST_MODELS
         for task in ('drafting', 'revision', 'synthesis', 'creative'):
-            assert select_model(task) == LATEST_MODELS['opus']
-        assert select_model('unknown_task') == LATEST_MODELS['opus']
+            assert select_model(task) == 'claude-opus-5-5'
+        assert select_model('unknown_task') == 'claude-opus-5-5'
 
-    def test_model_for_tier(self):
-        from storyforge.common import model_for_tier, LATEST_MODELS
-        for tier in ('opus', 'sonnet', 'haiku'):
-            assert model_for_tier(tier) == LATEST_MODELS[tier]
+    def test_model_for_tier_picks_the_newest_in_each_family(self):
+        from storyforge.common import model_for_tier
+        assert model_for_tier('opus') == 'claude-opus-5-5'
+        assert model_for_tier('sonnet') == 'claude-sonnet-5-5'
+        assert model_for_tier('haiku') == 'claude-haiku-5-5'
+
+    def test_a_new_release_is_picked_up_without_a_code_change(self, monkeypatch):
+        import storyforge.common as common
+        monkeypatch.setattr(common, '_catalog', common._catalog + [
+            {'id': 'claude-opus-6', 'created_at': '2027-01-01T00:00:00Z', 'max_tokens': 128000}])
+        assert common.model_for_tier('opus') == 'claude-opus-6'
+
+    def test_a_family_missing_from_the_catalog_raises(self, monkeypatch):
+        import storyforge.common as common
+        monkeypatch.setattr(common, '_catalog', [
+            m for m in common._catalog if 'haiku' not in m['id']])
+        with pytest.raises(RuntimeError, match='no haiku model'):
+            common.model_for_tier('haiku')
+
+    def test_unknown_tier_raises(self):
+        from storyforge.common import model_for_tier
+        with pytest.raises(ValueError):
+            model_for_tier('claude-opus-5-5')
+
+    def test_catalog_is_fetched_once_per_process(self, monkeypatch):
+        import storyforge.common as common
+        calls = []
+        monkeypatch.setattr(common, '_catalog', None)
+        monkeypatch.setattr('storyforge.api.list_models',
+                            lambda: calls.append(1) or [
+                                {'id': 'claude-opus-5-5', 'created_at': '2026-09-21T16:24:00Z'}])
+        common.model_for_tier('opus')
+        common.model_for_tier('opus')
+        assert len(calls) == 1
 
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv('STORYFORGE_MODEL', 'custom-model-123')

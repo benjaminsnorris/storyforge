@@ -24,7 +24,7 @@ REDRAFT_OUTPUT_TOKENS = 5000  # a typical scene; the cap is 16384
 
 def main(argv=None) -> int:
     from storyforge.cmd_write import _build_prompt
-    from storyforge.common import LATEST_MODELS, build_shared_context, select_model
+    from storyforge.common import build_shared_context, model_for_tier, select_model
     from storyforge.costs import calculate_cost
 
     sel = e8.select(e1.load_cases(), e1.load_holdout())
@@ -42,7 +42,7 @@ def main(argv=None) -> int:
                                    system_context=bool(system))
             in_tokens = (len(prompt) + len(json.dumps(system or []))) // 4
             usd = (calculate_cost(model, in_tokens, REDRAFT_OUTPUT_TOKENS)
-                   + calculate_cost(LATEST_MODELS['opus'], in_tokens // 8, JUDGE_OUTPUT_TOKENS))
+                   + calculate_cost(model_for_tier('opus'), in_tokens // 8, JUDGE_OUTPUT_TOKENS))
             total += usd
             print(f'{case["id"]:18} {case["code"]} {scene_id:32} ~{in_tokens:>6} in  ~${usd:.2f}')
     for reason, ids in sorted(sel.excluded.items()):

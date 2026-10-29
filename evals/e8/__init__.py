@@ -196,8 +196,8 @@ def redraft(project_dir: str, scene_id: str) -> str:
 
 def judge(case: dict, scene_text: str) -> dict:
     from storyforge.api import extract_text, invoke
-    from storyforge.common import LATEST_MODELS
-    response = invoke(judge_prompt(case, scene_text), LATEST_MODELS['opus'],
+    from storyforge.common import model_for_tier
+    response = invoke(judge_prompt(case, scene_text), model_for_tier('opus'),
                       max_tokens=1024, label=f'e8 judge {case["id"]}')
     return parse_verdict(extract_text(response))
 

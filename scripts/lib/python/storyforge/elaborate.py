@@ -955,6 +955,24 @@ def validate_structure(ref_dir: str) -> dict:
         else "All brief rows have matching scenes",
     ))
 
+    # --- Identity: seq is unique ---
+    # Two scenes sharing a seq have no defined reading order, and renumbering
+    # would pick one silently (thornwall seq 58). The author decides the order.
+    by_seq: dict[str, list[str]] = {}
+    for sid, scene in scenes_map.items():
+        seq = scene.get('seq', '').strip()
+        if seq:
+            by_seq.setdefault(seq, []).append(sid)
+    dup_seqs = {seq: sids for seq, sids in by_seq.items() if len(sids) > 1}
+    checks.append(_check(
+        'identity', 'duplicate-seq',
+        not dup_seqs,
+        "Scenes share a seq (reading order is undefined): "
+        + '; '.join(f"seq {seq}: {sorted(sids)}"
+                    for seq, sids in sorted(dup_seqs.items()))
+        if dup_seqs else "Every seq is unique",
+    ))
+
     # --- Completeness: required columns for status ---
     # A pre-migration project has its acts in `part` and `act` empty: report
     # that once, rather than as a missing column on every scene.

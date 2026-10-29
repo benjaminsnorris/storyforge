@@ -1598,6 +1598,12 @@ def report_csv_integrity(project_dir: str) -> list[str]:
                 prev = val
         if needs_renumber:
             issues.append('SEQ_NEEDS_RENUMBER:gaps or non-integer seq values found')
+        # A shared seq is reported, never renumbered: which scene comes first
+        # is the author's call (thornwall seq 58).
+        from collections import Counter
+        shared = [s for s, n in Counter(seqs).items() if n > 1]
+        for s in sorted(shared, key=lambda x: float(x) if re.match(r'^[\d.]+$', x) else 0):
+            issues.append(f'DUPLICATE_SEQ:{s}')
 
     # Unknown characters — build known set from id + aliases columns
     if os.path.isfile(intent_csv) and os.path.isfile(chars_csv):
@@ -1911,6 +1917,15 @@ def _classify_issue(issue: str, rename_pairs: dict[str, list[tuple[str, str]]]) 
             'action': 'Renumber scene sequences',
             'command': 'storyforge scenes-setup --renumber',
             'severity': 'warning',
+        }
+
+    if issue.startswith('DUPLICATE_SEQ:'):
+        seq = issue.split(':', 1)[1]
+        return {
+            'type': 'duplicate_seq', 'file': 'reference/scenes.csv',
+            'detail': f'More than one scene has seq {seq}, so their reading order is undefined',
+            'action': 'Decide which scene comes first and give each a unique seq',
+            'severity': 'error',
         }
 
     if issue.startswith('UNKNOWN_CHARACTER:'):
