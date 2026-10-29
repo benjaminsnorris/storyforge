@@ -13,12 +13,14 @@ replayed; every other case is reported as excluded with its reason, never
 dropped silently. Holdout cases are excluded. Families:
 
 - ``redraft-from-brief``: ``cmd_write._build_prompt`` with briefs, the path
-  ``storyforge write`` and ``revise``'s ``_redraft_from_briefs`` take. Their
-  cut-off guard is not applied here: a refusal halts, a cut-off reply would
-  be replayed as a revision.
+  ``storyforge write`` and ``revise``'s ``_redraft_from_briefs`` take, without
+  their refusal fallback (E8 measures the requested model). Their cut-off
+  guard is not applied here: a refusal halts, a cut-off reply would be
+  replayed as a revision.
 - ``naturalness-upstream``: ``cmd_revise._fix_upstream_briefs`` then
   ``_redraft_scenes`` on the scene, the path ``revise --naturalness`` takes
-  when the diagnosis names upstream causes.
+  when the diagnosis names upstream causes. Production code asks for the
+  refusal fallback here; under the cassette it is stripped.
 - ``revision-plan``: a named pass from the book's own plan CSV, prompted by
   today's ``revision.build_revision_prompt`` with the config block assembled
   as ``cmd_revise.main``'s pass loop assembles it (reader-annotation guidance
@@ -191,7 +193,7 @@ def redraft(project_dir: str, scene_id: str) -> str:
     try:
         response = invoke(prompt, model, max_tokens=16384, label=f'e8 redraft {scene_id}',
                           system=system or None)
-    except RefusalError as e:  # write and revise write nothing for a refusal
+    except RefusalError as e:  # what write/revise do when the fallback also refuses
         raise PassHalted(f'redraft of {scene_id} refused: {e}') from e
     text = extract_text(response)
     if not text:
@@ -233,8 +235,8 @@ def _pass_block(row: dict) -> str:
 
 
 def revision_pass(project_dir: str, scene_id: str, row: dict) -> str:
-    """Run one named prose pass the way ``cmd_revise.main`` does; return the
-    new prose of ``scene_id``."""
+    """Run one named prose pass the way ``cmd_revise.main`` does (without the
+    refusal fallback); return the new prose of ``scene_id``."""
     from storyforge.api import extract_text, invoke, max_output_tokens, REVISION_TIMEOUT
     from storyforge.common import build_shared_context, get_coaching_level, select_revision_model
     from storyforge.parsing import extract_scenes_from_response
