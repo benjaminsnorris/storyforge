@@ -9,3 +9,6 @@ __pycache__/
 
 # Local agent state (worktrees here are embedded git repos)
 .claude/
+
+# Eval run output (baseline.json is committed; latest results are not)
+evals/results/
