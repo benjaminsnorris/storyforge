@@ -1,0 +1,46 @@
+{
+ "request": {
+  "method": "POST",
+  "path": "messages",
+  "body": {
+   "model": "claude-haiku-4-5-20251001",
+   "max_tokens": 1024,
+   "messages": [
+    {
+     "role": "user",
+     "content": "Read this scene from a novel and say what it tells us about time. Don't work out a day number: only what the text says.\n\n## End of the Previous Scene\n\n\"What's to-day!\" cried Scrooge, calling downward to a boy in Sunday clothes, who perhaps had loitered in to look about him. \"EH?\" returned the boy, with all his might of wonder. \"What's to-day, my fine fellow?\" said Scrooge. \"To-day!\" replied the boy. \"Why, CHRISTMAS DAY.\" \"It's Christmas Day!\" said Scrooge to himself. \"I haven't missed it. The Spirits have done it all in one night. They can do anything they like. Of course they can. Of course they can. Hallo, my fine fellow!\" \"Hallo!\" returned the boy.\n\n## Scene: scrooge-buys-prize-turkey\n\n\"Do you know the Poulterer's, in the next street but one, at the corner?\" Scrooge inquired.\n\n\"I should hope I did,\" replied the lad.\n\n\"An intelligent boy!\" said Scrooge. \"A remarkable boy! Do you know whether they've sold the prize Turkey that was hanging up there?--Not the little prize Turkey: the big one?\"\n\n\"What, the one as big as me?\" returned the boy.\n\n\"What a delightful boy!\" said Scrooge. \"It's a pleasure to talk to him. Yes, my buck!\"\n\n\"It's hanging there now,\" replied the boy.\n\n\"Is it?\" said Scrooge. \"Go and buy it.\"\n\n\"Walk-ER!\" exclaimed the boy.\n\n\"No, no,\" said Scrooge, \"I am in earnest. Go and buy it, and tell 'em to bring it here, that I may give them the direction where to take it. Come back with the man, and I'll give you a shilling. Come back with him in less than five minutes and I'll give you half-a-crown!\"\n\nThe boy was off like a shot. He must have had a steady hand at a trigger who could have got a shot off half so fast.\n\n\"I'll send it to Bob Cratchit's, wherever that may be, for I never asked where the fellow lives!\" whispered Scrooge, rubbing his hands, and splitting with a laugh. \"He sha'n't know who sends it. It's twice the size of Tiny Tim. Joe Miller never made such a joke as sending it to Bob's will be!\"\n\nThe hand in which he wrote the address was not a steady one, but write it he did, somehow, and went down-stairs to open the street door, ready for the coming of the poulterer's man. As he stood there, waiting his arrival, the knocker caught his eye.\n\n\"I shall love it, as long as I live!\" cried Scrooge, patting it with his hand. \"I scarcely ever looked at it before. What an honest expression it has in its face! It's a wonderful knocker!--Here's the Turkey! Hallo! Whoop! How are you! Merry Christmas!\"\n\nIt was a Turkey! He never could have stood upon his legs, that bird. He would have snapped 'em short off in a minute, like sticks of sealing-wax.\n\n\"Why, it's impossible to carry that to Camden Town,\" said Scrooge. \"You must have a cab.\"\n\nThe chuckle with which he said this, and the chuckle with which he paid for the Turkey, and the chuckle with which he paid for the cab, and the chuckle with which he recompensed the boy, were only to be exceeded by the chuckle with which he sat down breathless in his chair again, and chuckled till he cried.\n\nShaving was not an easy task, for his hand continued to shake very much; and shaving requires attention, even when you don't dance while you are at it. But if he had cut the end of his nose off, he would have put a piece of sticking-plaister over it, and been quite satisfied.\n\nHe dressed himself \"all in his best,\" and at last got out into the streets. The people were by this time pouring forth, as he had seen them with the Ghost of Christmas Present; and walking with his hands behind him, Scrooge regarded every one with a delighted smile. He looked so irresistibly pleasant, in a word, that three or four good-humoured fellows said, \"Good morning, sir! A merry Christmas to you!\" And Scrooge said often afterwards, that of all the blithe sounds he had ever heard, those were the blithest in his ears.\n\n\n\n## Instructions\n\nOutput each field on its own labeled line.\n\nTIME_RELATION: [when this scene happens relative to the scene before it in reading order \u2014 one of: continues (picks up at the same time or moments later), later (some time after it), earlier (before it: a flashback or a recollection told as a scene, including a past that a spirit, dream or vision shows a character; also a scene whose present is only a line or a short lead-in before it mostly tells the past, such as a story a character tells or the narrator's account of someone's youth, but not one where the present has real action on the page around the telling), frame (narration from after the story, looking back), vision (events that have not happened, or may not happen, as the story tells them: a prophecy, a future a character is shown that may be averted, a dream of what might come; the past is always earlier, even when a spirit, a dream or a vision shows it), unclear]\nTIME_GAP: [the gap from the previous scene in at most six words, no explanation: \"an hour\", \"the next morning\", \"three weeks\", \"five years\", \"several weeks\"; empty if none is stated or implied]\nTIME_ANCHOR: [a calendar fact pinning when THIS scene's action happens \u2014 a date, weekday, month, season, holiday or named day (\"the hottest day of the summer\") \u2014 quoted briefly; not a habit (\"every Friday\") or a date the scene only mentions; empty if none]\nTIME_REFERS: [any statement in this scene of how long ago or how long until another event in the story, quoted briefly: \"that June night three months before\", \"five years since he'd seen her\", \"the funeral was on the third day\"; separate several with semicolons; empty if none]\nTIME_SPAN: [when the scene summarizes a stretch of time (\"all that summer\"), how long; empty for a scene that plays out in one sitting]\nTIME_DATE: [only what this scene's own text states about the calendar date, in EDTF: \"1922-07-04\", \"XXXX-07-04\" when the year isn't given here, \"1922\" for a year, \"1922-22\" for summer 1922 (21 spring, 22 summer, 23 autumn, 24 winter), \"1917~\" for \"around 1917\", \"1922-06/1922-09\" for a stretch. A date the text fixes by a stated distance from a named calendar day counts as given, marked ~: \"In two weeks it'll be the longest day in the year\" \u2192 \"XXXX-06-07~\". Never fill in a part the text doesn't give; empty if the text gives no date]"
+    }
+   ]
+  }
+ },
+ "response": {
+  "model": "claude-haiku-4-5-20251001",
+  "id": "msg_011CgVbfjkE9zvB2UWsTkwLV",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+   {
+    "type": "text",
+    "text": "TIME_RELATION: continues\nTIME_GAP: \nTIME_ANCHOR: \"Christmas Day\"\nTIME_REFERS: \nTIME_SPAN: \nTIME_DATE: XXXX-12-25"
+   }
+  ],
+  "container": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+   "input_tokens": 1685,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 52,
+   "service_tier": "standard",
+   "inference_geo": "not_available",
+   "speed": "standard"
+  },
+  "diagnostics": null
+ }
+}

@@ -12,3 +12,6 @@ __pycache__/
 
 # Eval run output (baseline.json is committed; latest results are not)
 evals/results/
+
+# Eval fixtures are projects; their working/ files are fixture data
+!evals/fixtures/**/working/
