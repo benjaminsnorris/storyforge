@@ -47,6 +47,11 @@ def _reply(text, stop_reason='end_turn', **extra):
 def setup(mock_api, mock_git, mock_costs, project_dir, monkeypatch):
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     monkeypatch.setattr('storyforge.cmd_write.detect_project_root', lambda: project_dir)
+    # --coaching sets STORYFORGE_COACHING in os.environ; keep it to this test
+    # (setenv records the original so teardown restores it; delenv alone
+    # does not when the variable was absent)
+    monkeypatch.setenv('STORYFORGE_COACHING', 'full')
+    monkeypatch.delenv('STORYFORGE_COACHING')
     monkeypatch.setattr('storyforge.cmd_write.time.sleep', lambda s: None)
     _pending(project_dir, 'act1-sc01', 'act1-sc02')
     return project_dir
@@ -74,7 +79,7 @@ class TestDirectMode:
         (_reply(GOOD, 'max_tokens'), 'cut off at max_tokens'),
         (_reply(CUT_OFF), 'mid-sentence'),
         (_reply('', 'refusal', stop_details={'type': 'refusal', 'category': 'cyber'}),
-         'refused (cyber)'),
+         'refused the request (cyber)'),
     ])
     def test_bad_reply_skips_scene_and_drafts_the_rest(self, setup, monkeypatch,
                                                        capsys, bad, reason):
@@ -149,3 +154,52 @@ class TestReviseRedraftFromBriefs:
         assert _scene(project_dir, 'act1-sc02').strip() == GOOD
         commits = [c for c in mock_git.calls if c[0] == 'commit_and_push']
         assert commits  # the good redraft is committed before the halt
+
+
+class TestEveryUndraftedSceneIsListed:
+    """H2: `write` must not exit 0 while a scene went undrafted."""
+
+    def test_short_complete_reply_is_not_written(self, setup, monkeypatch, capsys):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply('I cannot write this scene.'),
+                                      'act1-sc02': _reply(GOOD)})
+        with pytest.raises(SystemExit) as exc:
+            main(['--direct', '--scenes', 'act1-sc01,act1-sc02'])
+        assert exc.value.code == 1
+        assert _scene(setup, 'act1-sc01') is None
+        assert 'only 5 words' in capsys.readouterr().out
+
+    def test_api_failure_lists_the_scene_and_every_later_one(self, setup, monkeypatch,
+                                                            capsys):
+        def boom(*a, **k):
+            raise RuntimeError('overloaded')
+        monkeypatch.setattr('storyforge.cmd_write.invoke_to_file', boom)
+        with pytest.raises(SystemExit) as exc:
+            main(['--direct', '--scenes', 'act1-sc01,act1-sc02'])
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert '2 scene(s) not drafted' in out
+        assert 'act1-sc02 (not attempted: the run stopped at act1-sc01)' in out
+
+
+class TestCoachingReplies:
+    """H1: a coach or strict reply is a brief, not prose. It goes to
+    working/coaching/ and never over the scene file."""
+
+    @pytest.mark.parametrize('level, name', [('coach', 'brief'), ('strict', 'constraints')])
+    def test_brief_goes_to_coaching_file(self, setup, monkeypatch, level, name):
+        prose = ' '.join(['original'] * 300) + '.'
+        with open(os.path.join(setup, 'scenes', 'act1-sc01.md'), 'w') as f:
+            f.write(prose)
+        brief = '## Brief\n\n- Open on the map room\n- End on the missing village:'
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(brief)})
+        main(['--direct', '--force', '--coaching', level, '--scenes', 'act1-sc01'])
+        assert _scene(setup, 'act1-sc01') == prose
+        with open(os.path.join(setup, 'working', 'coaching', f'{name}-act1-sc01.md')) as f:
+            assert f.read() == brief
+
+    def test_cut_off_brief_is_not_written(self, setup, monkeypatch):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply('## Brief\n- Open', 'max_tokens')})
+        with pytest.raises(SystemExit):
+            main(['--direct', '--coaching', 'coach', '--scenes', 'act1-sc01'])
+        assert not os.path.exists(
+            os.path.join(setup, 'working', 'coaching', 'brief-act1-sc01.md'))

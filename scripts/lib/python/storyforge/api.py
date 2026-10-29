@@ -167,6 +167,19 @@ class RefusalError(RuntimeError):
         super().__init__(f"model refused the request ({self.category or 'no category'})")
 
 
+def stop_problem(response) -> str:
+    """Why ``response``'s text is not a complete answer ('' when it is): the
+    model refused, or the reply was cut off at ``max_tokens``. Works on a live
+    response and on a saved log, from ``invoke_to_file`` or batch results."""
+    if not isinstance(response, dict):
+        return ''
+    if response.get('stop_reason') == 'refusal':
+        return str(RefusalError(response))
+    if is_truncated(response):
+        return 'the reply was cut off at max_tokens'
+    return ''
+
+
 def _check_refusal(response) -> None:
     if isinstance(response, dict) and response.get('stop_reason') == 'refusal':
         raise RefusalError(response)
