@@ -132,7 +132,16 @@ def request(method: str, path: str, body: dict | None, live) -> dict:
             f'path, date, or id it changes every run and can never replay. Otherwise '
             f're-run with STORYFORGE_CASSETTE_MODE=record or auto.'))
 
-    response = live()
+    try:
+        response = live()
+    except Exception as e:
+        # Command code often swallows API errors into a skipped scene; the
+        # log is how the harness still sees a failed live call
+        try:
+            _append_log({'error': f'live call failed: {type(e).__name__}: {e}'})
+        except OSError:
+            pass
+        raise
     _log_call(key, body, response, replayed=False)
     os.makedirs(os.path.dirname(target), exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), suffix='.tmp')

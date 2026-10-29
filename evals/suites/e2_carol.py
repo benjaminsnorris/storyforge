@@ -18,16 +18,18 @@ def run(ctx):
         raise ValueError('e2-carol fixtures: ' + '; '.join(problems))
     case_flags, control_flags = e2.run_detector(BOOK, e2.DETECTORS[DETECTOR], ctx.work_dir, cases)
     result = e2.score(cases, case_flags, control_flags, e2.reading_order(book_dir))
-    gates = [Gate(f'recall_{code}', result['by_code'].get(code, {}).get('recall', 0.0),
+    gates = [Gate(f'recall_{code}', result['by_code'].get(code, {}).get('recall_code_match', 0.0),
                   '>=', e2.RECALL_GATE) for code in e2.GATED_CODES]
-    gates.append(Gate('precision', result['metrics']['precision'], '>=', e2.PRECISION_GATE))
+    gates.append(Gate('precision', e2.precision_gate_value(result['metrics']), '>=', e2.PRECISION_GATE))
     missed = sorted(cid for cid, hit in result['detected'].items() if not hit)
+    flagged = result['metrics']['flags_true'] + result['metrics']['flags_false']
     notes = [f'detector: {DETECTOR}',
-             'a hit means a new flag landed on the case\'s scenes, not that it names the '
-             'injected error; see evals/fixtures/e2-carol/README.md',
-             f'missed {len(missed)} of {len(cases)}: {", ".join(missed)}']
-    if not result['metrics']['flags_true'] + result['metrics']['flags_false']:
-        notes.append('no flags at all: precision is reported as 0')
+             'a detection is a new flag on the case\'s scenes with the case\'s code; it may '
+             'still not be about the injected error (see evals/fixtures/e2-carol/README.md)',
+             f'missed {len(missed)} of {result["metrics"]["cases"]}: {", ".join(missed)}']
+    if flagged < e2.MIN_FLAGS_FOR_PRECISION:
+        notes.append(f'{flagged} distinct flag(s), fewer than {e2.MIN_FLAGS_FOR_PRECISION}: '
+                     'the precision gate counts precision as 0')
     return SuiteOutput(metrics=result['metrics'], by_code=result['by_code'], gates=gates, notes=notes)
 
 

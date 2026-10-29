@@ -129,3 +129,16 @@ def test_recording_holds_request_for_debugging(tape, monkeypatch, live_calls):
     key = cassette.request_key('POST', 'messages', BODY)
     with open(cassette.recording_path(os.environ['STORYFORGE_CASSETTE'], key)) as f:
         assert json.load(f)['request']['body'] == BODY
+
+
+def test_a_failed_live_call_is_logged_for_the_harness(tape, monkeypatch):
+    """Review of #341: command code swallows API errors into a skipped
+    scene, so a live failure in record or auto mode must reach the log."""
+    def failing_live(path, body, method, timeout):
+        raise ConnectionError('connection reset')
+
+    monkeypatch.setattr(api, '_live_request', failing_live)
+    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'auto')
+    with pytest.raises(Exception):
+        api._api_request('messages', BODY, method='POST')
+    assert any('live call failed: ConnectionError' in e.get('error', '') for e in _log(tape))
