@@ -54,3 +54,18 @@ when it declares no gates.
 Cost is reported per suite: `usd_spent` (live calls this run) and `usd_if_live`
 (what the run would cost without recordings). `unpriced_calls` counts calls
 to a model `costs.py` has no price for (they are costed at sonnet rates).
+
+## Model-tier comparisons
+
+`evals/fixtures/tier-comparison/<model>/` holds recordings of a suite run with
+`STORYFORGE_MODEL=<model>`, kept outside `cassettes/` so the baseline's
+recordings stay those of the default routing. To replay one for free:
+
+```bash
+STORYFORGE_MODEL=claude-opus-5-5 python3 evals/run.py --suite e3-extraction \
+    --cassettes-dir evals/fixtures/tier-comparison/claude-opus-5-5
+```
+
+The override also reaches every `select_model` call, so only suites whose
+judge uses `model_for_tier` directly (E3 does) compare the work alone.
+Results and the decision taken are in `docs/plans/2026-10-28-rethink-status.md`.

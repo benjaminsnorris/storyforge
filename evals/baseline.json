@@ -1,15 +1,15 @@
 {
   "cost": {
-    "calls": 2105,
-    "input_tokens": 7473114,
-    "output_tokens": 2215416,
-    "replayed_calls": 2105,
+    "calls": 2174,
+    "input_tokens": 8171759,
+    "output_tokens": 2352372,
+    "replayed_calls": 2174,
     "unpriced_calls": 0,
-    "usd_if_live": 10.793,
+    "usd_if_live": 16.5505,
     "usd_spent": 0.0
   },
-  "git_dirty": false,
-  "git_sha": "4546adc96f22484aca03488ddffe595cac9404f9",
+  "git_dirty": true,
+  "git_sha": "ddd661627e6ff4b888b581843cb3a09a4c5d9e2a",
   "mode": "replay",
   "results": [
     {
@@ -82,7 +82,7 @@
       },
       "mode": "replay",
       "notes": [],
-      "started_at": "2026-10-29T05:13:15+00:00",
+      "started_at": "2026-10-29T05:33:50+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -140,7 +140,7 @@
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 4.58,
+      "duration_s": 4.38,
       "error": null,
       "gates": [
         {
@@ -204,7 +204,7 @@
         "missed 37 of 37: e2-carol-001, e2-carol-002, e2-carol-003, e2-carol-004, e2-carol-005, e2-carol-006, e2-carol-007, e2-carol-008, e2-carol-009, e2-carol-010, e2-carol-011, e2-carol-012, e2-carol-013, e2-carol-014, e2-carol-015, e2-carol-016, e2-carol-017, e2-carol-018, e2-carol-019, e2-carol-020, e2-carol-021, e2-carol-022, e2-carol-023, e2-carol-024, e2-carol-025, e2-carol-026, e2-carol-027, e2-carol-028, e2-carol-029, e2-carol-030, e2-carol-031, e2-carol-032, e2-carol-033, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
-      "started_at": "2026-10-29T05:13:15+00:00",
+      "started_at": "2026-10-29T05:33:50+00:00",
       "status": "fail",
       "suite": "e2-carol"
     },
@@ -252,7 +252,7 @@
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 126.88,
+      "duration_s": 150.95,
       "error": null,
       "gates": [
         {
@@ -316,7 +316,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-29T05:13:20+00:00",
+      "started_at": "2026-10-29T05:33:54+00:00",
       "status": "fail",
       "suite": "e2-corpus-drift"
     },
@@ -330,7 +330,7 @@
         },
         "PHY": {
           "cases": 14,
-          "precision": 0.043,
+          "precision": 0.0387,
           "recall": 0.4286,
           "recall_code_match": 0.4286
         },
@@ -366,7 +366,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 113.59,
+      "duration_s": 118.81,
       "error": null,
       "gates": [
         {
@@ -405,7 +405,7 @@
           "threshold": 0.9
         },
         {
-          "actual": 0.0355,
+          "actual": 0.0312,
           "name": "precision",
           "op": ">=",
           "passed": false,
@@ -416,10 +416,10 @@
         "benign_cases": 0,
         "benign_flagged": 0,
         "cases": 51,
-        "control_flags": 1225,
-        "flags_false": 789,
-        "flags_true": 29,
-        "precision": 0.0355,
+        "control_flags": 1069,
+        "flags_false": 715,
+        "flags_true": 23,
+        "precision": 0.0312,
         "recall": 0.4118,
         "recall_code_match": 0.1176
       },
@@ -430,7 +430,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-29T05:15:27+00:00",
+      "started_at": "2026-10-29T05:36:25+00:00",
       "status": "fail",
       "suite": "e2-corpus-validate"
     },
@@ -471,7 +471,7 @@
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 30.13,
+      "duration_s": 31.63,
       "error": null,
       "gates": [
         {
@@ -552,9 +552,97 @@
         "thornwall-029 (journals-of-the-east-wing): partial",
         "thornwall-030 (ivra-visits-sera): partial"
       ],
-      "started_at": "2026-10-29T05:17:20+00:00",
+      "started_at": "2026-10-29T05:38:24+00:00",
       "status": "fail",
       "suite": "e3-extraction"
+    },
+    {
+      "by_code": {
+        "KNO": {
+          "contradictions": 4
+        },
+        "PHY": {
+          "contradictions": 21
+        },
+        "PRM": {
+          "broken_promises": 71
+        },
+        "REL": {
+          "contradictions": 3
+        },
+        "TIM": {
+          "contradictions": 6
+        },
+        "WLD": {
+          "contradictions": 4
+        }
+      },
+      "cost": {
+        "calls": 69,
+        "input_tokens": 698645,
+        "output_tokens": 136956,
+        "replayed_calls": 69,
+        "unpriced_calls": 0,
+        "usd_if_live": 5.7575,
+        "usd_spent": 0.0
+      },
+      "description": "Draft shared-dark Act 1 with write; CP10k, BPS, length, voice",
+      "duration_s": 5.72,
+      "error": null,
+      "gates": [
+        {
+          "actual": 23,
+          "name": "scenes",
+          "op": ">=",
+          "passed": true,
+          "threshold": 23
+        }
+      ],
+      "metrics": {
+        "bps": 3.087,
+        "broken_promises": 71,
+        "checker_flags": 1,
+        "contradictions": 38,
+        "cp10k": 18.218,
+        "cp10k_checker": 0.479,
+        "length_drift": 0.071,
+        "scenes": 23,
+        "target_words": 21370,
+        "voi": 4.707,
+        "voi_author": 4.75,
+        "words": 20859
+      },
+      "mode": "replay",
+      "notes": [
+        "claires-cold: 930 words, 1 contradiction(s), 4 broken promise(s)\n    PHY: Claire is held kneeling on the concrete slab with only a secondary tie running to a chair leg, whereas the reference has her zip-tied to a metal chair.\n    PRM crisis: None of this happens: there is no camera, no Yael, no mimicry, no near-strike and no empathy-anchor reveal, only Claire alone with an unnamed captor.\n    PRM decision: Yael is absent and Claire never makes this accusation; the scene ends with her whispering her own name.\n    PRM key_dialogue: The line is spoken by Claire herself, not by Yael, who never appears in the scene.\n    PRM physical_state_out: The scene gashes the left wrist but establishes no injury or abrasion on the right wrist.",
+        "harmons-hands: 750 words, 2 contradiction(s), 3 broken promise(s)\n    PHY: The scene has Claire seated in the metal chair with her hands resting on the chair arm, but the earlier scene has her kneeling on the gravel-strewn slab, her wr\n    PHY: The monitoring disc is still taped to Claire's sternum, but in the earlier scene she tore it off, smashed it against her wrist tie, and left it in pieces on the\n    PRM goal: The scene is a passive dream-inhabitation of Harmon tending Claire; there is no Elena, Marisol, reconstruction, or oxygen timer.\n    PRM crisis: None of these events, characters, or the dilemma appear in the scene.\n    PRM decision: No such decision or action occurs; Hank remains a passive passenger who cannot move.",
+        "waking-maren: 928 words, 1 contradiction(s), 3 broken promise(s)\n    PHY: The scene describes the captive woman's hood as black, but the reference material establishes it as a white pillowcase.\n    PRM goal: The scene contains no sleep journal, no custody hearing, no Dr. Shin and no Exhibit D; Maren writes on a legal pad pulled from her case files.\n    PRM crisis: None of these beats occur: there is no grounding exercise, no automatic writing of plate, street or clinical note, no Cora, no Glenn and no microwave clock.\n    PRM decision: The scene deliberately keeps the overhead light off, has no Cora or Glenn, and ends with her writing only the word 'concrete' on a legal pad, with none of the s",
+        "waking-hank: 528 words, 1 contradiction(s), 9 broken promise(s)\n    PHY: Hank's memory has Harmon feeding the zip tie two notches and stopping, a tightening, but the dream scene shows Harmon drawing the strap back a single notch to l\n    PRM goal: Olinsky never appears; Hank is alone in his kitchen with Rook.\n    PRM outcome: There is no attempt to persuade anyone, so no failed outcome or complication can occur.\n    PRM crisis: None of this happens; there is no Olinsky, phone, bomb, notebook page forty-four or sidearm.\n    PRM decision: The scene contains no such decision, and it ends mid-word while Hank is still drawing on the legal pad.\n    PRM key_actions: The writing begins but the scene cuts off mid-sentence, and the staring at the page and failing to tear it free never occurs.\n    PRM key_dialogue: Neither line, nor a close paraphrase, is spoken; Hank's only dialogue is \"I'm okay.\"\n    PRM knowledge_out: No character named Olinsky exists in the scene and no copies are made or mentioned.\n    PRM knowledge_out: The assessment is cut off mid-word and its content (padlock types, rotation system, nurse, water schedule) is never stated.\n    PRM physical_state_out: The writing hand is described as steady, producing even block capitals, and no tremor is established.",
+        "the-school: 881 words, 1 contradiction(s), 4 broken promise(s)\n    PHY: Hank's dream notes record the Harmon building as having no glazing, but in the dream Hank observed a window there.\n    PRM goal: There is no county 7 PM deadline, no subpoena, no Meszaros lawsuit and no licensing-board stakes; the scene is a routine district grant inspection, and the repo\n    PRM crisis: Lena, Terrell, the affidavit, Paul's graph paper and the threatened email never appear; the scene has no crisis or ultimatum at all.\n    PRM decision: Hank files alone with only his own signature and stamp, and no co-author is ever added.\n    PRM outcome: The filing succeeds without any cost or complication, so the 'but' half of the outcome is never delivered.",
+        "advocate: 1067 words, 0 contradiction(s), 1 broken promise(s)\n    PRM physical_state_out: The scene establishes the nausea behind her sternum and her knuckles pressed into the grout, but it never shows the tremor going quiet with her hands buzzing, n",
+        "maren-runs: 870 words, 0 contradiction(s), 0 broken promise(s)",
+        "engineer: 952 words, 0 contradiction(s), 1 broken promise(s)\n    PRM physical_state_out: The scene establishes the intermittent tremor and Hank staying functional through effort, but it never shows or mentions his jaw tightening.",
+        "name-surfaces: 820 words, 0 contradiction(s), 5 broken promise(s)\n    PRM goal: The scene has no off-books warehouse, no FBI midnight takeover and no unit; Hank identifies Claire alone at his kitchen table from a public missing-persons list\n    PRM crisis: There are no dental records, no back-channel contact, no Danny Olinsky and no Maryanne; the name that surfaces is Claire and Hank is alone with Rook.\n    PRM decision: Hank pockets Claire's name, but he lies to no one: Maryanne is absent and there is no FBI to keep blind.\n    PRM key_actions: Hank performs every one of these actions, not Maren, who does not appear in the scene.\n    PRM physical_state_out: The thirty-six hours are mentioned, but the scene never shows a pulse visible at the wrist, and the state is assigned to Hank rather than to the female characte",
+        "voicemail: 759 words, 2 contradiction(s), 4 broken promise(s)\n    REL: Marie Renaud calls Claire her daughter, but the reference and earlier scene establish Marie as Claire's sister.\n    TIM: Marie's first voicemail about Claire's disappearance is eleven days old, but Claire was taken nine days earlier.\n    PRM goal: Dahl, the subpoena, the carrier purge and the midnight deadline never appear; Maren simply finds the voicemails in an unchecked overflow box.\n    PRM outcome: With no attempt to get Dahl's signature, the scene never shows Maren's goal being denied.\n    PRM crisis: There is no driveway, no call from Claire, no old phone, and no man's voice saying \"Quiet\"; Maren listens alone at her kitchen table on a laptop.\n    PRM decision: Maren never leaves her apartment and Claire is not present.",
+        "missing-persons: 1153 words, 4 contradiction(s), 7 broken promise(s)\n    KNO: Maren treats Claire Renaud's name as a new discovery from a NamUs search, but in the previous scene she had already searched the name, listened to Marie's voice\n    REL: Marie Renaud is named as Claire's sister, but in the earlier voicemail scene she calls Claire her daughter.\n    TIM: The scene puts last contact with Claire nine days ago, but Marie's first voicemail reporting Claire missing was already eleven days old.\n    PHY: Maren's kitchen counter is described as granite, but it was laminate in an earlier scene.\n    PRM goal: There is no radiological image, no Vasquez, no deadline, and no meeting with Dan; Maren works alone at home.\n    PRM crisis: Dan is never present, and the excavation, the tablet, and Pettigrew are all absent.\n    PRM decision: None of these actions occur; she only closes her laptop, deletes a voicemail, and packs.\n    PRM outcome: She confirms Claire's identity, but there is no confrontation or rupture with Dan; she only avoids his call.\n    PRM key_actions: Dan is not in the room, so she never watches his hand and does not close the laptop to hide it from him.\n    PRM key_actions: She calls Carolyn from the stairwell of her apartment building, not a parking garage.\n    PRM knowledge_out: No act in the scene burns the alliance with Dan; she only ignores and deletes his voicemail.",
+        "driving-west: 780 words, 2 contradiction(s), 3 broken promise(s)\n    REL: Danny is presented as Hank's supervisor of six years, but earlier Danny Vasquez is the school district's facilities man who threatened to report Hank to someone\n    PHY: The scene says the tremor started at a bathroom sink, but Hank scalded his hands at the kitchen sink.\n    PRM goal: The scene ends just below the pass, heading west; Hank never reaches Yachats and never rescues Claire.\n    PRM crisis: Dawson never appears, and neither the referral, the sheriff threat nor the wiretap recording comes up.\n    PRM decision: There is no confrontation, no Tahoe, no phone and no turnaround choice; the only decision is closing the legal pad and picking up his keys.",
+        "pewter-town: 1242 words, 2 contradiction(s), 4 broken promise(s)\n    WLD: The scene gives the police classification of Claire's disappearance as voluntary, but earlier material says it was classified as suspicious.\n    TIM: Maren is still at thirty-six hours without sleep after the multi-hour drive to Coos Bay, though she was already thirty-six hours awake before leaving Portland.\n    PRM goal: There is no DSS records room, no Terri Bascom and no purge deadline; Maren photographs a copy of a police report in Marie's apartment.\n    PRM crisis: None of this happens; Terri, Whelan, the seventeen families and the caseworker promise are all absent.\n    PRM decision: Maren records the timeline to Marie with no witness named and no Whelan directive, and the form is torn up by Marie after the recording ends, at Maren's suggest\n    PRM physical_state_out: The scene puts her at thirty-six hours and mentions salt only in her mouth, never ground into her jacket.",
+        "diner: 1063 words, 3 contradiction(s), 1 broken promise(s)\n    KNO: Hank claims he never sees anything in the dreams and only feels them, but his earlier dream is full of visual observation, and his notes have a column for what \n    WLD: Hank says the water sound isn't waves, but in his earlier dream and in his waking account it is surf and waves coming through the wall.\n    PHY: Maren says Claire's wrist bruising is deeper on the right, but in Maren's own dream the left wrist was the worse one.\n    PRM physical_state_out: The scene never establishes how long Maren has gone without sleep, beyond the vague line 'Long enough to stop sleeping.'",
+        "two-hours: 1104 words, 0 contradiction(s), 5 broken promise(s)\n    PRM goal: The scene has no dead-man's-switch email, no surveillance photo, no Kowalski, and no state's attorney deadline; it is a dream-sharing and parcel-search scene in\n    PRM crisis: None of this happens: there is no audio, no distress code, no judge, no second account, and no demand for a unit number.\n    PRM decision: Hank confesses nothing of the kind, there is no Loomis address or Kowalski, Maren makes no call and deletes no files, and the scene ends with the two of them ag\n    PRM outcome: The scene resolves cooperatively, with both agreeing they can't go to police and leaving together; there is no failed goal compounded by a new setback as the br\n    PRM physical_state_out: The tremor and standing are shown, but no tight jaw is established for either character.",
+        "plan: 935 words, 1 contradiction(s), 2 broken promise(s)\n    TIM: Maren says she listened to Marie for forty minutes 'yesterday,' but she met Marie in person earlier this same day, the day she drove down from Portland, and her\n    PRM physical_state_out: The scene never establishes Maren's sleep deprivation; the only sleeplessness mentioned is the nine days claimed in Marie's voice.\n    PRM physical_state_out: Rain beads on the windshield, but the scene never says Maren's clothes are damp.",
+        "dark-road: 843 words, 3 contradiction(s), 0 broken promise(s)\n    PHY: Maren's clothes are described as damp from a payphone, but she made the diversion call from inside the truck on a prepaid phone.\n    PHY: The drive is said to start from a motel parking lot where Maren got in, but in the previous scene they were already sitting together in the truck in the diner l\n    WLD: The gravel turnoff is on the left, toward the water, but Hank's dream had Harmon making a right turn onto the gravel. Heading south on 101, the ocean would also",
+        "building: 1017 words, 3 contradiction(s), 1 broken promise(s)\n    WLD: Maren is said to have given up on her shaking hands 'somewhere around Bandon', but the drive was twelve miles south of Coos Bay to a property between Coos Bay a\n    KNO: The scene says they agreed in the motel to find the building and call it in to police, but earlier they explicitly agreed they could not bring this to the polic\n    PHY: Maren's dream-memory has Claire's shoulder wrenched behind her, but Claire's wrists were tied in front of her.\n    PRM physical_state_out: The scene never shows Maren's jaw locking or clenching.",
+        "twelve-minutes: 841 words, 1 contradiction(s), 3 broken promise(s)\n    PHY: The scene says Maren spoke her line with her palm on the metal and her ear to it, but in the earlier scene she had already taken her hand off the wall and was f\n    PRM crisis: The pin shears and the door groans, but there is no Ruzek, no radio and no ultimatum; the only pressure is a shape crossing Harmon's window.\n    PRM decision: No exchange with Ruzek happens, and Hank's technique comes from inside Harmon's mind rather than from a dead mentor; he never accepts that the case may collapse\n    PRM goal: No patrol car or noise complaint appears, so the race-against-the-handoff stakes are never established.",
+        "claire: 1016 words, 6 contradiction(s), 3 broken promise(s)\n    PHY: The chair is placed in the middle of the floor and said to match the dreams, but the dream put it against the north wall.\n    PHY: Claire wears green scrubs, but Hank's dream recorded her scrubs as ceil blue.\n    TIM: Maren is said to have dreamed Claire's experience for nine nights, but she had only been inside the building in dreams for four nights.\n    PHY: The space heater is described as never plugged in, but minutes earlier Maren felt it running through the wall.\n    PHY: Rook is placed outside with Hank on a leash, but she had followed Maren into the building.\n    PHY: The hood is a white pillowcase, whereas Maren's dream recorded it as black coarse weave.\n    PRM goal: The scene has no condemned third floor, no demolition charges, no cordon and no time pressure of that kind.\n    PRM crisis: None of these elements occur: there is no Lun, no alarm, no cable lock, no bolt cutters, no IV and no accusation, and Claire is zip-tied to a chair.\n    PRM decision: Maren only grounds herself briefly and cuts zip ties with a multi-tool; she says none of the specified lines, has no bolt-cutter struggle, does not press on an ",
+        "drive: 861 words, 5 contradiction(s), 2 broken promise(s)\n    KNO: Hank cuts Claire's zip ties beside the chair, with Maren on the other side, but in the previous scene Maren took the multi-tool from Hank at the doorway and cut\n    PHY: The pillowcase is lifted off Claire's head after the ties are cut, but it had already been removed earlier, before any tie was cut.\n    PHY: Claire is still seated in the chair being freed, whereas the previous scene ended with Maren already raising her and turning toward the doorway.\n    TIM: Claire is said to have been held for eleven days, but earlier scenes consistently put her captivity at nine days.\n    PHY: Harmon's house is described as dark the whole time, but earlier scenes show a window lit by a television that stayed on.\n    PRM crisis: None of this crisis occurs: there is no kitchen, no refusal from Claire, no approaching captor and no ninety-second dilemma.\n    PRM goal: The scene is set in Harmon's coastal shed, and Claire is carried to a truck rather than walking out of an apartment to a cab.",
+        "bench: 1020 words, 0 contradiction(s), 0 broken promise(s)",
+        "eleven-days: 499 words, 0 contradiction(s), 6 broken promise(s)\n    PRM crisis: The waking happens to Hank, not Maren, on the twelfth night rather than night eleven, and no stranger's face appears, only the taste and a pull east.\n    PRM decision: Hank, not Maren, counts the breaths, and it is the taste that sharpens; there is no face.\n    PRM key_actions: Hank walks Rook along the Deschutes in Bend; Maren never walks her on Belmont.\n    PRM key_actions: The scene has Hank sit up on the twelfth night, and nobody presses a fist to their mouth.\n    PRM knowledge_out: The new pull and the accelerant are experienced by Hank, so the brief's POV character, Maren, never reaches this knowledge, and the pull is not locked on any pe\n    PRM physical_state_out: The final state belongs to Hank, and the fist pressed to the mouth is never established.",
+        "checker eleven-days: the text says \"three nights\" (about 3 day(s)), but the calendar puts it 0 day(s) on",
+        "Judge stands in for the plan's human spot-check (still owed). Drafted in direct mode; batch mode is refused under a cassette."
+      ],
+      "started_at": "2026-10-29T05:38:55+00:00",
+      "status": "pass",
+      "suite": "e4-generation"
     },
     {
       "by_code": {
@@ -584,7 +672,7 @@
         "usd_spent": 0.0
       },
       "description": "Redraft from plan + ledger; facts the redraft changes",
-      "duration_s": 2.51,
+      "duration_s": 2.41,
       "error": null,
       "gates": [
         {
@@ -613,7 +701,7 @@
         "name-surfaces: 5 mismatch(es)\n    TIM: The time on the kitchen clock differs, and so does which appliance shows it.\n    PHY: Rook's position differs: in the original she lies at his feet with her chin on his boot; in the redraft she lies across the hall threshold w\n    KNO: In the original Hank knows the name Claire from the dream before he searches; in the redraft the name comes to him only after he finds the n\n    PHY: He searches on his phone in the original but on a laptop in the redraft.\n    TIM: The driving time to Coos Bay/the coast differs.",
         "voicemail: 3 mismatch(es)\n    KNO: How Maren obtained Marie's contact number differs: in the original a charge nurse at the hospital ER gave it to her over the phone, while in\n    TRT: Claire's habit of contacting Marie differs: in the original she texted every night on getting home, while in the redraft Marie says Claire a\n    PHY: The circumstances of the disappearance differ: in the original Claire's last nightly text (sent on getting home) arrived, implying she left "
       ],
-      "started_at": "2026-10-29T05:17:50+00:00",
+      "started_at": "2026-10-29T05:39:01+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -641,7 +729,7 @@
         "usd_spent": 0.0
       },
       "description": "Continuity flags raised on classics with no known errors",
-      "duration_s": 0.04,
+      "duration_s": 0.05,
       "error": null,
       "gates": [
         {
@@ -675,7 +763,7 @@
         "christmas-carol/run2: 35 flag(s)",
         "christmas-carol/run1: 25 flag(s)"
       ],
-      "started_at": "2026-10-29T05:17:53+00:00",
+      "started_at": "2026-10-29T05:39:04+00:00",
       "status": "fail",
       "suite": "e7-classics"
     },
@@ -712,7 +800,7 @@
         "usd_spent": 0.0
       },
       "description": "Current revision passes vs the E1 errors past passes introduced",
-      "duration_s": 56.96,
+      "duration_s": 64.09,
       "error": null,
       "gates": [
         {
@@ -773,13 +861,13 @@
         "thornwall-029 (evidence-room): not_present",
         "thornwall-030 (ivra-seals-archive): reintroduced \u2014 \"At Garren's Watch the figures had told the same story over nine years, each reduction justified by a different administr\""
       ],
-      "started_at": "2026-10-29T05:17:53+00:00",
+      "started_at": "2026-10-29T05:39:04+00:00",
       "status": "fail",
       "suite": "e8-revision-safety"
     }
   ],
   "schema_version": 1,
   "status": "fail",
-  "storyforge_version": "1.80.2",
-  "suite_count": 8
+  "storyforge_version": "1.81.0",
+  "suite_count": 9
 }
