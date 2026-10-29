@@ -1,0 +1,896 @@
+{
+  "book": "a-christmas-carol",
+  "cases": [
+    {
+      "id": "e2-carol-001",
+      "code": "TIM",
+      "summary": "Marley has been dead seven years, but Scrooge muses \"twelve years dead\".",
+      "established": [
+        {
+          "scene": "charity-collectors-visit-scrooge",
+          "quote": "He died seven years ago, this very night",
+          "commitment": "C12"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-confronts-marley-ghost",
+          "quote": "Twelve years dead"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-confronts-marley-ghost",
+        "find": "\"Seven years dead,\" mused Scrooge.",
+        "replace": "\"Twelve years dead,\" mused Scrooge."
+      }
+    },
+    {
+      "id": "e2-carol-002",
+      "code": "TIM",
+      "summary": "On the night Marley lay dying, Belle's husband says he has been dead three years.",
+      "established": [
+        {
+          "scene": "charity-collectors-visit-scrooge",
+          "quote": "He died seven years ago, this very night",
+          "commitment": "C12"
+        },
+        {
+          "scene": "belle-family-happy-without-scrooge",
+          "quote": "His partner lies upon the point of death, I hear",
+          "commitment": "C42"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "belle-family-happy-without-scrooge",
+          "quote": "His partner has been dead these three years"
+        }
+      ],
+      "injection": {
+        "scene": "belle-family-happy-without-scrooge",
+        "find": "His partner lies upon the point of death, I hear;",
+        "replace": "His partner has been dead these three years, I hear;"
+      }
+    },
+    {
+      "id": "e2-carol-003",
+      "code": "TIM",
+      "summary": "Scrooge says three nights have passed, yet the boy says it is Christmas Day, the morning after Christmas Eve.",
+      "established": [
+        {
+          "scene": "scrooge-in-counting-house",
+          "quote": "on Christmas Eve--old Scrooge sat busy in his counting-house",
+          "commitment": "C05"
+        },
+        {
+          "scene": "scrooge-confronts-marley-ghost",
+          "quote": "Expect the first to-morrow, when the bell tolls One",
+          "commitment": "C26"
+        },
+        {
+          "scene": "scrooge-learns-christmas-day",
+          "quote": "The Spirits have done it all in one night",
+          "commitment": "C74"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-learns-christmas-day",
+          "quote": "The Spirits have taken three whole nights"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-learns-christmas-day",
+        "find": "The Spirits have done it all in one night.",
+        "replace": "The Spirits have taken three whole nights, just as Marley said they would."
+      }
+    },
+    {
+      "id": "e2-carol-004",
+      "code": "TIM",
+      "summary": "Bob is still absent at half past nine, but only eighteen and a half minutes late.",
+      "established": [
+        {
+          "scene": "scrooge-raises-bobs-salary",
+          "quote": "full eighteen minutes and a half behind his time",
+          "commitment": "C78"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-raises-bobs-salary",
+          "quote": "Half past. No Bob."
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-raises-bobs-salary",
+        "find": "The clock struck nine. No Bob. A quarter past. No Bob.",
+        "replace": "The clock struck nine. No Bob. Half past. No Bob."
+      }
+    },
+    {
+      "id": "e2-carol-005",
+      "code": "TIM",
+      "summary": "Bob had only Christmas Day off, yet says he was making merry for three days.",
+      "established": [
+        {
+          "scene": "scrooge-dismisses-clerk",
+          "quote": "Be here all the earlier next morning",
+          "commitment": "C17"
+        },
+        {
+          "scene": "scrooge-learns-christmas-day",
+          "quote": "The Spirits have done it all in one night",
+          "commitment": "C74"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-raises-bobs-salary",
+          "quote": "these three days past"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-raises-bobs-salary",
+        "find": "I was making rather merry yesterday, sir.",
+        "replace": "I was making rather merry these three days past, sir."
+      }
+    },
+    {
+      "id": "e2-carol-006",
+      "code": "PHY",
+      "summary": "The sign still reads Scrooge and Marley; the injection says it bears Scrooge's name alone.",
+      "established": [
+        {
+          "scene": "marley-was-dead-narration",
+          "quote": "Scrooge never painted out Old Marley's name",
+          "commitment": "C03"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "charity-collectors-visit-scrooge",
+          "quote": "the sign above the door had borne Scrooge's name alone"
+        }
+      ],
+      "injection": {
+        "scene": "charity-collectors-visit-scrooge",
+        "find": "\"Scrooge and Marley's, I believe,\" said one of the gentlemen, referring to his list.",
+        "replace": "\"Scrooge and Marley's, I believe,\" said one of the gentlemen, referring to his list, though the sign above the door had borne Scrooge's name alone these many years."
+      }
+    },
+    {
+      "id": "e2-carol-007",
+      "code": "PHY",
+      "summary": "The knocker that showed Marley's face last night was sold a week ago, yet Scrooge pats it.",
+      "established": [
+        {
+          "scene": "marley-face-on-knocker",
+          "quote": "saw in the knocker",
+          "commitment": "C20"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-buys-prize-turkey",
+          "quote": "the old knocker, which had been taken down and sold a week before"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-buys-prize-turkey",
+        "find": "As he stood there, waiting his arrival, the knocker caught his eye.",
+        "replace": "As he stood there, waiting his arrival, he missed the old knocker, which had been taken down and sold a week before."
+      }
+    },
+    {
+      "id": "e2-carol-008",
+      "code": "PHY",
+      "summary": "Scrooge double-locked his door that night, but the door is found unlocked and ajar as he left it.",
+      "established": [
+        {
+          "scene": "scrooge-settles-in-chambers",
+          "quote": "double-locked himself in, which was not his custom",
+          "commitment": "C22"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "ghost-departs-phantoms-appear",
+          "quote": "It stood unlocked and ajar, as he had left it"
+        }
+      ],
+      "injection": {
+        "scene": "ghost-departs-phantoms-appear",
+        "find": "It was double-locked, as he had locked it with his own hands, and the bolts were undisturbed.",
+        "replace": "It stood unlocked and ajar, as he had left it, for he never troubled to lock it."
+      }
+    },
+    {
+      "id": "e2-carol-009",
+      "code": "PHY",
+      "summary": "Tiny Tim has a crutch and is carried on Bob's shoulder; here he never needed carrying.",
+      "established": [
+        {
+          "scene": "cratchit-family-christmas-dinner",
+          "quote": "he bore a little crutch, and had his limbs supported by an iron frame",
+          "commitment": "C50"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "cratchit-family-mourns-tiny-tim",
+          "quote": "a heavy, sturdy boy, who never needed carrying"
+        }
+      ],
+      "injection": {
+        "scene": "cratchit-family-mourns-tiny-tim",
+        "find": "\"But he was very light to carry,\" she resumed,",
+        "replace": "\"But he was a heavy, sturdy boy, who never needed carrying,\" she resumed,"
+      }
+    },
+    {
+      "id": "e2-carol-010",
+      "code": "PHY",
+      "summary": "The chain drags through the wine-merchant's cellar below, then the noise comes from a garret above.",
+      "established": [
+        {
+          "scene": "scrooge-walks-home",
+          "quote": "nobody lived in it but Scrooge",
+          "commitment": "C19"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "marley-ghost-arrives",
+          "quote": "The garret-door flew open"
+        }
+      ],
+      "injection": {
+        "scene": "marley-ghost-arrives",
+        "find": "The cellar-door flew open with a booming sound, and then he heard the noise much louder, on the floors below; then coming up the stairs;",
+        "replace": "The garret-door flew open with a booming sound, and then he heard the noise much louder, on the floors above; then coming down the stairs;"
+      }
+    },
+    {
+      "id": "e2-carol-011",
+      "code": "PHY",
+      "summary": "Bob's Tank has a one-coal fire; Scrooge keeps the coal-box. The injection gives it a roaring fire.",
+      "established": [
+        {
+          "scene": "scrooge-in-counting-house",
+          "quote": "Scrooge kept the coal-box in his own room",
+          "commitment": "C06"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-raises-bobs-salary",
+          "quote": "a great fire of a dozen coals roared all day long"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-raises-bobs-salary",
+        "find": "Scrooge sat with his door wide open, that he might see him come into the Tank.",
+        "replace": "Scrooge sat with his door wide open, that he might see him come into the Tank, where a great fire of a dozen coals roared all day long."
+      }
+    },
+    {
+      "id": "e2-carol-012",
+      "code": "TRT",
+      "summary": "Scrooge's first name is Ebenezer; the gravestone says Nathaniel.",
+      "established": [
+        {
+          "scene": "scrooge-confronts-marley-ghost",
+          "quote": "Ebenezer Scrooge",
+          "commitment": "C25"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-reads-his-own-gravestone",
+          "quote": "NATHANIEL SCROOGE"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-reads-his-own-gravestone",
+        "find": "his own name, EBENEZER SCROOGE.",
+        "replace": "his own name, NATHANIEL SCROOGE."
+      }
+    },
+    {
+      "id": "e2-carol-013",
+      "code": "TRT",
+      "summary": "Scrooge calls his nephew Frank; the nephew is Fred.",
+      "established": [
+        {
+          "scene": "nephew-fred-christmas-party",
+          "quote": "More shame for him, Fred!",
+          "commitment": "C57"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-visits-nephews-dinner",
+          "quote": "\"Frank!\" said Scrooge"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-visits-nephews-dinner",
+        "find": "\"Fred!\" said Scrooge.",
+        "replace": "\"Frank!\" said Scrooge."
+      }
+    },
+    {
+      "id": "e2-carol-014",
+      "code": "TRT",
+      "summary": "The last Spirit never speaks; here it speaks.",
+      "established": [
+        {
+          "scene": "scrooge-meets-final-phantom",
+          "quote": "the Spirit neither spoke nor moved",
+          "commitment": "C63"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "merchants-discuss-dead-man",
+          "quote": "the Spirit said, in a deep and hollow voice"
+        }
+      ],
+      "injection": {
+        "scene": "merchants-discuss-dead-man",
+        "find": "Scrooge knew the men, and looked towards the Spirit for an explanation.",
+        "replace": "Scrooge knew the men, and looked towards the Spirit for an explanation. \"They speak of one you knew well,\" the Spirit said, in a deep and hollow voice."
+      }
+    },
+    {
+      "id": "e2-carol-015",
+      "code": "TRT",
+      "summary": "The Ghost of Christmas Present wears a long green robe; here a short crimson jacket.",
+      "established": [
+        {
+          "scene": "ghost-of-christmas-present-revealed",
+          "quote": "Girded round its middle was an antique scabbard; but no sword was in it",
+          "commitment": "C45"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "spirit-ages-ignorance-and-want",
+          "quote": "the Spirit's short crimson jacket"
+        }
+      ],
+      "injection": {
+        "scene": "spirit-ages-ignorance-and-want",
+        "find": "looking intently at the Spirit's robe,",
+        "replace": "looking intently at the Spirit's short crimson jacket,"
+      }
+    },
+    {
+      "id": "e2-carol-016",
+      "code": "TRT",
+      "summary": "The clerk earns fifteen shillings a week; here twenty-five.",
+      "established": [
+        {
+          "scene": "nephew-visits-scrooge",
+          "quote": "my clerk, with fifteen shillings a week, and a wife and family",
+          "commitment": "C10"
+        },
+        {
+          "scene": "cratchit-family-christmas-dinner",
+          "quote": "Bob had but fifteen \"Bob\" a-week himself",
+          "commitment": "C48"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "cratchit-family-christmas-dinner",
+          "quote": "twenty-five \"Bob\" a-week"
+        }
+      ],
+      "injection": {
+        "scene": "cratchit-family-christmas-dinner",
+        "find": "Bob had but fifteen \"Bob\" a-week himself;",
+        "replace": "Bob had but twenty-five \"Bob\" a-week himself;"
+      }
+    },
+    {
+      "id": "e2-carol-017",
+      "code": "TRT",
+      "summary": "The clerk has a comforter and no great-coat; here a new fur-collared great-coat.",
+      "established": [
+        {
+          "scene": "scrooge-in-counting-house",
+          "quote": "put on his white comforter",
+          "commitment": "C07"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "cratchit-family-christmas-dinner",
+          "quote": "a handsome new great-coat with a fur collar"
+        }
+      ],
+      "injection": {
+        "scene": "cratchit-family-christmas-dinner",
+        "find": "with at least three feet of comforter exclusive of the fringe, hanging down before him;",
+        "replace": "in a handsome new great-coat with a fur collar, buttoned up before him;"
+      }
+    },
+    {
+      "id": "e2-carol-018",
+      "code": "REL",
+      "summary": "Marley was Scrooge's partner, not his brother.",
+      "established": [
+        {
+          "scene": "marley-was-dead-narration",
+          "quote": "his sole friend, and sole mourner",
+          "commitment": "C02"
+        },
+        {
+          "scene": "belle-family-happy-without-scrooge",
+          "quote": "His partner lies upon the point of death, I hear",
+          "commitment": "C42"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "belle-family-happy-without-scrooge",
+          "quote": "His brother lies upon the point of death"
+        }
+      ],
+      "injection": {
+        "scene": "belle-family-happy-without-scrooge",
+        "find": "His partner lies upon the point of death, I hear;",
+        "replace": "His brother lies upon the point of death, I hear;"
+      }
+    },
+    {
+      "id": "e2-carol-019",
+      "code": "REL",
+      "summary": "Fred is the son of Scrooge's sister Fan; here Scrooge says he is no kin.",
+      "established": [
+        {
+          "scene": "scrooge-revisits-second-christmas",
+          "quote": "Home, little Fan?",
+          "commitment": "C36"
+        },
+        {
+          "scene": "scrooge-revisits-second-christmas",
+          "quote": "Your nephew!",
+          "commitment": "C37"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-visits-nephews-dinner",
+          "quote": "no kin of yours"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-visits-nephews-dinner",
+        "find": "\"It's I. Your uncle Scrooge. I have come to dinner.",
+        "replace": "\"It's I. Your godfather Scrooge, no kin of yours, I know. I have come to dinner."
+      }
+    },
+    {
+      "id": "e2-carol-020",
+      "code": "REL",
+      "summary": "Martha is the eldest Cratchit child; here Peter is.",
+      "established": [
+        {
+          "scene": "cratchit-family-christmas-dinner",
+          "quote": "Belinda Cratchit, second of her daughters",
+          "commitment": "C49"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "cratchit-family-mourns-tiny-tim",
+          "quote": "Peter, the eldest of the children"
+        }
+      ],
+      "injection": {
+        "scene": "cratchit-family-mourns-tiny-tim",
+        "find": "\"Past it rather,\" Peter answered, shutting up his book.",
+        "replace": "\"Past it rather,\" Peter, the eldest of the children, answered, shutting up his book."
+      }
+    },
+    {
+      "id": "e2-carol-021",
+      "code": "REL",
+      "summary": "Fred is Fan's only child and Topper a bachelor guest; here Topper is Fred's brother.",
+      "established": [
+        {
+          "scene": "scrooge-revisits-second-christmas",
+          "quote": "Your nephew!",
+          "commitment": "C37"
+        },
+        {
+          "scene": "nephew-fred-christmas-party",
+          "quote": "the plump one with the lace tucker",
+          "commitment": "C58"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-visits-nephews-dinner",
+          "quote": "Topper, Fred's younger brother"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-visits-nephews-dinner",
+        "find": "So did Topper when he came.",
+        "replace": "So did Topper, Fred's younger brother, when he came."
+      }
+    },
+    {
+      "id": "e2-carol-022",
+      "code": "REL",
+      "summary": "Scrooge has never visited his nephew; here he dines there often.",
+      "established": [
+        {
+          "scene": "nephew-visits-scrooge",
+          "quote": "Why did you get married?",
+          "commitment": "C08"
+        },
+        {
+          "scene": "nephew-visits-scrooge",
+          "quote": "Dine with us to-morrow",
+          "commitment": "C09"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "nephew-fred-christmas-party",
+          "quote": "he dines here often enough to tell us so"
+        }
+      ],
+      "injection": {
+        "scene": "nephew-fred-christmas-party",
+        "find": "\"I'm sure he is very rich, Fred,\" hinted Scrooge's niece. \"At least you always tell me so.\"",
+        "replace": "\"I'm sure he is very rich, Fred,\" hinted Scrooge's niece. \"At least he dines here often enough to tell us so.\""
+      }
+    },
+    {
+      "id": "e2-carol-023",
+      "code": "KNO",
+      "summary": "Scrooge does not learn the dead man is himself until the gravestone.",
+      "established": [
+        {
+          "scene": "merchants-discuss-dead-man",
+          "quote": "It's likely to be a very cheap funeral",
+          "commitment": "C64"
+        },
+        {
+          "scene": "scrooge-reads-his-own-gravestone",
+          "quote": "read upon the stone of the neglected grave his own name, EBENEZER SCROOGE",
+          "commitment": "C70"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "merchants-discuss-dead-man",
+          "quote": "knew too that it was himself they spoke of"
+        }
+      ],
+      "injection": {
+        "scene": "merchants-discuss-dead-man",
+        "find": "Scrooge knew the men, and looked towards the Spirit for an explanation.",
+        "replace": "Scrooge knew the men, and knew too that it was himself they spoke of; he looked towards the Spirit in dread."
+      }
+    },
+    {
+      "id": "e2-carol-024",
+      "code": "KNO",
+      "summary": "Scrooge says he doesn't know where Bob lives, then sends the turkey to Camden Town.",
+      "established": [
+        {
+          "scene": "scrooge-dismisses-clerk",
+          "quote": "ran home to Camden Town",
+          "commitment": "C18"
+        },
+        {
+          "scene": "scrooge-buys-prize-turkey",
+          "quote": "He sha'n't know who sends it",
+          "commitment": "C75"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-buys-prize-turkey",
+          "quote": "I never asked where the fellow lives"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-buys-prize-turkey",
+        "find": "\"I'll send it to Bob Cratchit's!\" whispered Scrooge,",
+        "replace": "\"I'll send it to Bob Cratchit's, wherever that may be, for I never asked where the fellow lives!\" whispered Scrooge,"
+      }
+    },
+    {
+      "id": "e2-carol-025",
+      "code": "KNO",
+      "summary": "The portly gentleman visited Scrooge's counting-house yesterday; here Scrooge has never seen him.",
+      "established": [
+        {
+          "scene": "charity-collectors-visit-scrooge",
+          "quote": "\"Nothing!\" Scrooge replied.",
+          "commitment": "C15"
+        },
+        {
+          "scene": "scrooge-pledges-donation-streets",
+          "quote": "Not a farthing less. A great many back-payments are included",
+          "commitment": "C76"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-pledges-donation-streets",
+          "quote": "whom he had never set eyes on before in his life"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-pledges-donation-streets",
+        "find": "the portly gentleman, who had walked into his counting-house the day before,",
+        "replace": "the portly gentleman, whom he had never set eyes on before in his life,"
+      }
+    },
+    {
+      "id": "e2-carol-026",
+      "code": "KNO",
+      "summary": "Bob cannot know about the Spirits' visits.",
+      "established": [
+        {
+          "scene": "cratchit-family-christmas-dinner",
+          "quote": "such an odious, stingy, hard, unfeeling man as Mr. Scrooge",
+          "commitment": "C54"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "cratchit-family-christmas-dinner",
+          "quote": "who sat up all last night with ghosts, they say"
+        }
+      ],
+      "injection": {
+        "scene": "cratchit-family-christmas-dinner",
+        "find": "\"Mr. Scrooge!\" said Bob; \"I'll give you Mr. Scrooge, the Founder of the Feast!\"",
+        "replace": "\"Mr. Scrooge!\" said Bob; \"who sat up all last night with ghosts, they say! I'll give you Mr. Scrooge, the Founder of the Feast!\""
+      }
+    },
+    {
+      "id": "e2-carol-027",
+      "code": "KNO",
+      "summary": "The people in the visions cannot see Scrooge; here the niece sees him.",
+      "established": [
+        {
+          "scene": "nephew-fred-christmas-party",
+          "quote": "the plump one with the lace tucker",
+          "commitment": "C58"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "nephew-fred-christmas-party",
+          "quote": "she turned and smiled at him"
+        }
+      ],
+      "injection": {
+        "scene": "nephew-fred-christmas-party",
+        "find": "where the Ghost and Scrooge were close behind her.",
+        "replace": "where the Ghost and Scrooge were close behind her; and feeling her uncle's eyes upon her, she turned and smiled at him."
+      }
+    },
+    {
+      "id": "e2-carol-028",
+      "code": "PRM",
+      "summary": "Scrooge refused his nephew's invitation outright; here he promised and backed out.",
+      "established": [
+        {
+          "scene": "nephew-visits-scrooge",
+          "quote": "Dine with us to-morrow",
+          "commitment": "C09"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "nephew-fred-christmas-party",
+          "quote": "he promised to come and dine with us"
+        }
+      ],
+      "injection": {
+        "scene": "nephew-fred-christmas-party",
+        "find": "he won't come and dine with us.",
+        "replace": "he promised to come and dine with us, and then sent word he was detained."
+      }
+    },
+    {
+      "id": "e2-carol-029",
+      "code": "PRM",
+      "summary": "Scrooge keeps his promises to Bob and is a second father to Tiny Tim; here he forgets them.",
+      "established": [
+        {
+          "scene": "scrooge-raises-bobs-salary",
+          "quote": "buy another coal-scuttle",
+          "commitment": "C79"
+        },
+        {
+          "scene": "scrooge-raises-bobs-salary",
+          "quote": "to Tiny Tim, who did NOT die, he was a second father",
+          "commitment": "C80"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-raises-bobs-salary",
+          "quote": "Scrooge was not so good as his word"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-raises-bobs-salary",
+        "find": "Scrooge was better than his word. He did it all, and infinitely more;",
+        "replace": "Scrooge was not so good as his word. He did a little of it, and forgot the rest;"
+      }
+    },
+    {
+      "id": "e2-carol-030",
+      "code": "PRM",
+      "summary": "Scrooge gave Bob only Christmas Day and told him to be in all the earlier next morning.",
+      "established": [
+        {
+          "scene": "scrooge-dismisses-clerk",
+          "quote": "Be here all the earlier next morning",
+          "commitment": "C17"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-raises-bobs-salary",
+          "quote": "You said I need not come in till the twenty-seventh"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-raises-bobs-salary",
+        "find": "\"I am very sorry, sir,\" said Bob. \"I am behind my time.\"",
+        "replace": "\"But you gave me the whole of to-day as well, sir,\" said Bob. \"You said I need not come in till the twenty-seventh.\""
+      }
+    },
+    {
+      "id": "e2-carol-031",
+      "code": "PRM",
+      "summary": "Scrooge vowed at the grave to live in the Past, the Present and the Future.",
+      "established": [
+        {
+          "scene": "scrooge-reads-his-own-gravestone",
+          "quote": "I will honour Christmas in my heart, and try to keep it all the year",
+          "commitment": "C71"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-wakes-transformed",
+          "quote": "I will have done with the Past"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-wakes-transformed",
+        "find": "\"I will live in the Past, the Present, and the Future!\" Scrooge repeated,",
+        "replace": "\"I will have done with the Past, and with the Future too!\" Scrooge cried,"
+      }
+    },
+    {
+      "id": "e2-carol-032",
+      "code": "PRM",
+      "summary": "Scrooge cuts Bob's salary, then says in the same scene he will raise it.",
+      "established": [
+        {
+          "scene": "fezziwig-warehouse-christmas-party",
+          "quote": "I should like to be able to say a word or two to my clerk just now",
+          "commitment": "C40"
+        },
+        {
+          "scene": "scrooge-raises-bobs-salary",
+          "quote": "buy another coal-scuttle",
+          "commitment": "C79"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-raises-bobs-salary",
+          "quote": "I am about to cut your salary"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-raises-bobs-salary",
+        "find": "\"and therefore I am about to raise your salary!\"",
+        "replace": "\"and therefore I am about to cut your salary!\""
+      }
+    },
+    {
+      "id": "e2-carol-033",
+      "code": "WLD",
+      "summary": "Marley is dead and his ghost transparent; here he is living and solid.",
+      "established": [
+        {
+          "scene": "marley-was-dead-narration",
+          "quote": "Marley was dead",
+          "commitment": "C01"
+        },
+        {
+          "scene": "marley-ghost-arrives",
+          "quote": "The chain he drew was clasped about his middle",
+          "commitment": "C24"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "marley-ghost-arrives",
+          "quote": "Marley, living, warm and solid as Scrooge himself"
+        }
+      ],
+      "injection": {
+        "scene": "marley-ghost-arrives",
+        "find": "The same face: the very same. Marley in his pigtail,",
+        "replace": "The same face: the very same. Marley, living, warm and solid as Scrooge himself, in his pigtail,"
+      }
+    },
+    {
+      "id": "e2-carol-034",
+      "code": "WLD",
+      "summary": "The Cratchits live in Camden Town; here Islington.",
+      "established": [
+        {
+          "scene": "scrooge-dismisses-clerk",
+          "quote": "ran home to Camden Town",
+          "commitment": "C18"
+        }
+      ],
+      "contradicted": [
+        {
+          "scene": "scrooge-buys-prize-turkey",
+          "quote": "all the way to Islington"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-buys-prize-turkey",
+        "find": "\"Why, it's impossible to carry that to Camden Town,\" said Scrooge.",
+        "replace": "\"Why, it's impossible to carry that all the way to Islington,\" said Scrooge."
+      }
+    },
+    {
+      "id": "e2-carol-035",
+      "code": "VOI",
+      "summary": "A modern colloquial sentence breaks the narrator's voice.",
+      "established": [],
+      "contradicted": [
+        {
+          "scene": "scrooge-wakes-transformed",
+          "quote": "for a guy who hadn't laughed in years, it was a pretty great laugh"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-wakes-transformed",
+        "find": "Really, for a man who had been out of practice for so many years, it was a splendid laugh, a most illustrious laugh.",
+        "replace": "Honestly, for a guy who hadn't laughed in years, it was a pretty great laugh, no joke."
+      }
+    },
+    {
+      "id": "e2-carol-036",
+      "code": "VOI",
+      "summary": "Modern slang in Scrooge's Victorian speech.",
+      "established": [],
+      "contradicted": [
+        {
+          "scene": "scrooge-pledges-donation-streets",
+          "quote": "Don't sweat it, pal"
+        }
+      ],
+      "injection": {
+        "scene": "scrooge-pledges-donation-streets",
+        "find": "\"Don't say anything, please,\" retorted Scrooge.",
+        "replace": "\"Don't sweat it, pal,\" retorted Scrooge."
+      }
+    }
+  ]
+}

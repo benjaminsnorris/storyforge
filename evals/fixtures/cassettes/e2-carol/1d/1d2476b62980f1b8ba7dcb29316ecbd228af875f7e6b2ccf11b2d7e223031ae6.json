@@ -1,0 +1,46 @@
+{
+ "request": {
+  "method": "POST",
+  "path": "messages",
+  "body": {
+   "model": "claude-haiku-4-5-20251001",
+   "max_tokens": 1024,
+   "messages": [
+    {
+     "role": "user",
+     "content": "Read this scene from a novel and say what it tells us about time. Don't work out a day number: only what the text says.\n\n## End of the Previous Scene\n\nto every kind of extravagance. \"I don't know what to do!\" cried Scrooge, laughing and crying in the same breath; and making a perfect Laoco\u00f6n of himself with his stockings. \"I am as light as a feather, I am as happy as an angel, I am as merry as a schoolboy. I am as giddy as a drunken man. A merry Christmas to everybody! A happy New Year to all the world. Hallo here! Whoop! Hallo!\" He had frisked into the sitting-room, and was now standing there: perfectly winded. \"There's the saucepan that the gruel was in!\" cried Scrooge, starting off again, and going round the fireplace. \"There's the door, by which the Ghost of Jacob Marley entered! There's the corner where the Ghost of Christmas Present, sat! There's the window where I saw the wandering Spirits! It's all right, it's all true, it all happened. Ha ha ha!\" Really, for a man who had been out of practice for so many years, it was a splendid laugh, a most illustrious laugh. The father of a long, long line of brilliant laughs! \"I don't know what day of the month it is!\" said Scrooge. \"I don't know how long I've been among the Spirits. I don't know anything. I'm quite a baby. Never mind. I don't care. I'd rather be a baby. Hallo! Whoop! Hallo here!\" He was checked in his transports by the churches ringing out the lustiest peals he had ever heard. Clash, clang, hammer; ding, dong, bell. Bell, dong, ding; hammer, clang, clash! Oh, glorious, glorious! Running to the window, he opened it, and put out his head. No fog, no mist; clear, bright, jovial, stirring, cold; cold, piping for the blood to dance to; Golden sunlight; Heavenly sky; sweet fresh air; merry bells. Oh, glorious! Glorious!\n\n## Scene: scrooge-learns-christmas-day\n\n\"What's to-day!\" cried Scrooge, calling downward to a boy in Sunday clothes, who perhaps had loitered in to look about him.\n\n\"EH?\" returned the boy, with all his might of wonder.\n\n\"What's to-day, my fine fellow?\" said Scrooge.\n\n\"To-day!\" replied the boy. \"Why, CHRISTMAS DAY.\"\n\n\"It's Christmas Day!\" said Scrooge to himself. \"I haven't missed it. The Spirits have taken three whole nights, just as Marley said they would. They can do anything they like. Of course they can. Of course they can. Hallo, my fine fellow!\"\n\n\"Hallo!\" returned the boy.\n\n\n\n## Instructions\n\nOutput each field on its own labeled line.\n\nTIME_RELATION: [when this scene happens relative to the scene before it in reading order \u2014 one of: continues (picks up at the same time or moments later), later (some time after it), earlier (before it: a flashback or a recollection told as a scene, including a past that a spirit, dream or vision shows a character; also a scene whose present is only a line or a short lead-in before it mostly tells the past, such as a story a character tells or the narrator's account of someone's youth, but not one where the present has real action on the page around the telling), frame (narration from after the story, looking back), vision (events that have not happened, or may not happen, as the story tells them: a prophecy, a future a character is shown that may be averted, a dream of what might come; the past is always earlier, even when a spirit, a dream or a vision shows it), unclear]\nTIME_GAP: [the gap from the previous scene in at most six words, no explanation: \"an hour\", \"the next morning\", \"three weeks\", \"five years\", \"several weeks\"; empty if none is stated or implied]\nTIME_ANCHOR: [a calendar fact pinning when THIS scene's action happens \u2014 a date, weekday, month, season, holiday or named day (\"the hottest day of the summer\") \u2014 quoted briefly; not a habit (\"every Friday\") or a date the scene only mentions; empty if none]\nTIME_REFERS: [any statement in this scene of how long ago or how long until another event in the story, quoted briefly: \"that June night three months before\", \"five years since he'd seen her\", \"the funeral was on the third day\"; separate several with semicolons; empty if none]\nTIME_SPAN: [when the scene summarizes a stretch of time (\"all that summer\"), how long; empty for a scene that plays out in one sitting]\nTIME_DATE: [only what this scene's own text states about the calendar date, in EDTF: \"1922-07-04\", \"XXXX-07-04\" when the year isn't given here, \"1922\" for a year, \"1922-22\" for summer 1922 (21 spring, 22 summer, 23 autumn, 24 winter), \"1917~\" for \"around 1917\", \"1922-06/1922-09\" for a stretch. A date the text fixes by a stated distance from a named calendar day counts as given, marked ~: \"In two weeks it'll be the longest day in the year\" \u2192 \"XXXX-06-07~\". Never fill in a part the text doesn't give; empty if the text gives no date]"
+    }
+   ]
+  }
+ },
+ "response": {
+  "model": "claude-haiku-4-5-20251001",
+  "id": "msg_011CgVaAXZ5L1znMzhBTAoh5",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+   {
+    "type": "text",
+    "text": "TIME_RELATION: continues\n\nTIME_GAP: moments later\n\nTIME_ANCHOR: \"CHRISTMAS DAY\"\n\nTIME_REFERS: \"The Spirits have taken three whole nights\"\n\nTIME_SPAN: \n\nTIME_DATE: XXXX-12-25"
+   }
+  ],
+  "container": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+   "input_tokens": 1322,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 64,
+   "service_tier": "standard",
+   "inference_geo": "not_available",
+   "speed": "standard"
+  },
+  "diagnostics": null
+ }
+}
