@@ -563,14 +563,30 @@ class TestSpikes:
     def test_the_freshman_exams_go_back_between_their_neighbours(self):
         from storyforge.timeline import repair_spikes
         items, placed = self._book([
+            ('initiation', 161, 'scene', 'later', ''),
             ('track', 230, 'summary', 'later', ''),
             ('sings', 180, 'summary', 'later', 'several months'),
             ('exams', 900, 'summary', 'later', 'some time after'),
             ('part', 270, 'scene', 'later', ''),
             ('summer', 275, 'summary', 'later', '')])
         repaired, moves = repair_spikes(items, placed)
-        assert moves == [('exams', 900, 225)]
+        assert moves == [('exams', 900, 215)]
         assert repaired['sings'][0] == 180 and repaired['part'][0] == 270
+
+    def test_a_summary_stepping_back_is_not_the_next_neighbour(self):
+        """After #352 merged (The Plastic Age): the smoker on day 67, then
+        the football season told from October 1 (a summary on day 16), then
+        the big game on day 69. The smoker was taken for a spike over the
+        summary and moved to day 16."""
+        from storyforge.timeline import repair_spikes
+        items, placed = self._book([
+            ('reflects', 2, 'scene', 'later', ''),
+            ('bonfire', 16, 'summary', 'later', ''),
+            ('smoker', 67, 'scene', 'later', ''),
+            ('room', 67, 'scene', 'later', 'moments later'),
+            ('fever', 16, 'summary', 'later', 'several weeks'),
+            ('game', 69, 'scene', 'later', '')])
+        assert repair_spikes(items, placed)[1] == []
 
     def test_a_stated_gap_places_the_run_and_its_run_moves_whole(self):
         from storyforge.timeline import repair_spikes
@@ -661,7 +677,7 @@ class TestSpikes:
                                     'c': {'relation': 'later'}})
         monkeypatch.setattr(tl, '_invoke_assignment', lambda model: (
             lambda prompt, log_file, label:
-                'CALENDAR:\na | 180 | summary | x\nb | 900 | summary | x\nc | 270 | scene | x\n'))
+                'CALENDAR:\na | 180 | scene | x\nb | 900 | summary | x\nc | 270 | scene | x\n'))
         tl.run_assignment(project_dir, 'm', os.path.join(project_dir, 'working', 'logs'), force=False)
         assert _column(project_dir, 'timeline_day') == {'a': '180', 'b': '225', 'c': '270'}
 

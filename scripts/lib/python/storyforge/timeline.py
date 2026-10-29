@@ -632,7 +632,8 @@ def _present_entries(items: list[dict], placed: dict[str, tuple[int, str, str]])
             continue
         stated = relation == 'continues' or (relation == 'later' and gap_to_days(cue.get('gap', '')) is not None)
         window = anchor_window(cue.get('anchor', '')) if mode == 'scene' else None
-        entries.append({'id': sid, 'day': day, 'stated': stated and bool(entries), 'window': window})
+        entries.append({'id': sid, 'day': day, 'mode': mode, 'stated': stated and bool(entries),
+                        'window': window})
     return entries, riders
 
 
@@ -758,7 +759,8 @@ def repair_spikes(items: list[dict], placed: dict[str, tuple[int, str, str]]):
     The story's present runs in reading order, so a run more than
     SPIKE_DAYS after the run before it *and* the run after it, where those
     two agree, is a miscount (The Plastic Age's freshman exams on day 900,
-    between days 180 and 270). It goes between them: a stated gap from the
+    between days 161 and 270). Only scenes count as neighbours: a summary's
+    day is where its stretch starts, not where the story stands. It goes between them: a stated gap from the
     run before, else halfway. Only forward spikes: a scene far behind both
     may be a flashback its cue missed, and is left to the checks. Left alone
     too: a jump the cue explains in years ("Years later"), a run wider than
@@ -772,8 +774,15 @@ def repair_spikes(items: list[dict], placed: dict[str, tuple[int, str, str]]):
     cues = {it['id']: it.get('cues', {}) for it in items}
     moves = []
     new_day: dict[str, int] = {}
-    for i in range(1, len(runs) - 1):
-        before, run, after = runs[i - 1], runs[i], runs[i + 1]
+    for i, run in enumerate(runs):
+        # Neighbours are scenes: a summary's day is where its stretch starts,
+        # so one may step back in reading order (The Plastic Age's season
+        # of football, from October 1, told after the smoker before the big
+        # game) and one ahead of a scene may cover weeks
+        before = next((r for r in reversed(runs[:i]) if r[-1]['mode'] == 'scene'), None)
+        after = next((r for r in runs[i + 1:] if r[0]['mode'] == 'scene'), None)
+        if before is None or after is None:
+            continue
         lo = new_day.get(before[-1]['id'], before[-1]['day'])
         hi = after[0]['day']
         first, last = min(e['day'] for e in run), max(e['day'] for e in run)
