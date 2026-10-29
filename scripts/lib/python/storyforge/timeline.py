@@ -748,6 +748,7 @@ def pin_month_anchors(items: list[dict], placed: dict[str, tuple[int, str, str]]
 # A run this far ahead of both runs around it, which agree with each other,
 # is out of reading order (F-072)
 SPIKE_DAYS = 30
+_YEARS = re.compile(r'\b(years?|decades?)\b', re.I)
 
 
 def repair_spikes(items: list[dict], placed: dict[str, tuple[int, str, str]]):
@@ -759,9 +760,12 @@ def repair_spikes(items: list[dict], placed: dict[str, tuple[int, str, str]]):
     two agree, is a miscount (The Plastic Age's freshman exams on day 900,
     between days 180 and 270). It goes between them: a stated gap from the
     run before, else halfway. Only forward spikes: a scene far behind both
-    may be a flashback its cue missed, and is left to the checks. A
-    flashback told inside the run moves with it if it remembers a day after
-    the run before.
+    may be a flashback its cue missed, and is left to the checks. Left alone
+    too: a jump the cue explains in years ("Years later"), a run wider than
+    the room between its neighbours, and two spikes in a row (each is the
+    other's neighbour; the checks report them). A flashback told inside the
+    run moves with it if it remembers the spike's stretch (after the next
+    run's day).
     """
     entries, riders = _present_entries(items, placed)
     runs = _runs(entries)
@@ -772,19 +776,28 @@ def repair_spikes(items: list[dict], placed: dict[str, tuple[int, str, str]]):
         before, run, after = runs[i - 1], runs[i], runs[i + 1]
         lo = new_day.get(before[-1]['id'], before[-1]['day'])
         hi = after[0]['day']
-        start = run[0]['day']
-        if not (start > lo + SPIKE_DAYS and min(e['day'] for e in run) > hi + SPIKE_DAYS
-                and hi >= lo):
+        first, last = min(e['day'] for e in run), max(e['day'] for e in run)
+        if not (first > lo + SPIKE_DAYS and first > hi + SPIKE_DAYS and hi >= lo):
             continue
-        gap = gap_to_days(cues[run[0]['id']].get('gap', ''))
+        cue = cues[run[0]['id']]
+        # A jump the text explains is not a miscount: "Years later" with no
+        # count of years is still a flash-forward
+        if _YEARS.search(' '.join(cue.get(k, '') for k in ('gap', 'anchor', 'span'))):
+            continue
+        # A run wider than the room between its neighbours can't go back
+        # without overrunning the next one
+        span = last - first
+        if span > hi - lo:
+            continue
+        gap = gap_to_days(cue.get('gap', ''))
         target = min(lo + gap, hi) if gap is not None else (lo + hi) // 2
-        span = run[-1]['day'] - start
         target = max(lo, min(target, hi - span))
-        shift = target - start
+        shift = target - first
         for e in run:
-            # A memory of the stretch the run sits in moves with it; one to
-            # before the run before it stays
-            near = [r for r in riders.get(e['id'], []) if placed[r][0] > lo]
+            # A memory of the spike's own stretch (past the next run) moves
+            # with it; one of the ordinary story time between its
+            # neighbours, or before, stays
+            near = [r for r in riders.get(e['id'], []) if placed[r][0] > hi]
             for sid in [e['id']] + near:
                 old = placed[sid][0]
                 new_day[sid] = old + shift

@@ -626,6 +626,34 @@ class TestSpikes:
         # carried on into the distant past stays
         assert repaired['memory'][0] == 870 - 875 and repaired['old'][0] == -2000
 
+    def test_review_of_352_cases_are_left_alone(self):
+        from storyforge.timeline import repair_spikes
+        for rows in (
+            # A flash-forward its cue explains in years
+            [('a', 180, 'scene', 'later', ''), ('b', 7300, 'scene', 'later', 'years later'),
+             ('c', 270, 'scene', 'later', '')],
+            # Wider than the room between its neighbours (900-1000 in 180-270)
+            [('a', 180, 'scene', 'later', ''), ('b', 900, 'scene', 'later', ''),
+             ('b2', 1000, 'scene', 'later', 'a hundred days'), ('c', 270, 'scene', 'later', '')],
+            # Two spikes in a row
+            [('a', 180, 'scene', 'later', ''), ('b', 900, 'scene', 'later', ''),
+             ('c', 910, 'scene', 'later', ''), ('d', 270, 'scene', 'later', '')],
+        ):
+            items, placed = self._book(rows)
+            assert repair_spikes(items, placed)[1] == [], rows
+
+    def test_a_memory_of_ordinary_story_time_stays(self):
+        """Review of #352: a flashback inside the spike that remembers day
+        200, between its neighbours, was thrown back 675 days with it."""
+        from storyforge.timeline import repair_spikes
+        items, placed = self._book([
+            ('a', 180, 'scene', 'later', ''),
+            ('b', 900, 'scene', 'later', ''),
+            ('memory', 200, 'scene', 'earlier', ''),
+            ('c', 270, 'scene', 'later', '')])
+        repaired, _moves = repair_spikes(items, placed)
+        assert repaired['b'][0] == 225 and repaired['memory'][0] == 200
+
     def test_the_pass_puts_a_spike_back(self, project_dir, monkeypatch):
         import storyforge.timeline as tl
         _scenes(project_dir, [('a', '', ''), ('b', '', ''), ('c', '', '')])
