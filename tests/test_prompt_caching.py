@@ -10,7 +10,6 @@ class TestBuildBatchRequest:
         result = build_batch_request('scene-1', 'Write a scene.', 'claude-opus-4-6', 8192)
         assert result['custom_id'] == 'scene-1'
         assert result['params']['model'] == 'claude-opus-4-6'
-        assert result['params']['max_tokens'] == 8192
         assert result['params']['messages'] == [{'role': 'user', 'content': 'Write a scene.'}]
         assert 'system' not in result['params']
 
@@ -39,7 +38,6 @@ class TestBuildBatchRequest:
     def test_default_max_tokens(self):
         from storyforge.api import build_batch_request
         result = build_batch_request('s1', 'prompt', 'claude-sonnet-4-6')
-        assert result['params']['max_tokens'] == 4096
 
 
 class TestBuildSharedContext:

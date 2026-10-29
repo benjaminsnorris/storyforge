@@ -109,7 +109,8 @@ def test_every_failure_is_logged_for_the_harness(tape, monkeypatch, live_calls):
 def test_unreadable_recording_is_an_error_not_an_answer(tape, monkeypatch, live_calls, content):
     monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'replay')
     target = cassette.recording_path(os.environ['STORYFORGE_CASSETTE'],
-                                     cassette.request_key('POST', 'messages', BODY))
+                                     cassette.request_key('POST', 'messages', {
+                                         **BODY, 'max_tokens': api.request_max_tokens(BODY['model'], 10)}))
     os.makedirs(os.path.dirname(target))
     with open(target, 'wb') as f:
         f.write(content)

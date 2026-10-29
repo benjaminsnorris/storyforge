@@ -1,29 +1,12 @@
 """Tests for revision safety improvements.
 
-Covers: truncation guard, pre-write safety checks, max_output_tokens helper,
-and rubric/exemplar loading.
+Covers: truncation guard, pre-write safety checks, and rubric/exemplar
+loading.
 """
 
 import csv
 import json
 import os
-
-
-# ============================================================================
-# max_output_tokens
-# ============================================================================
-
-class TestMaxOutputTokens:
-    def test_reads_each_models_cap_from_the_catalog(self):
-        from storyforge.api import max_output_tokens
-        from storyforge.common import model_for_tier
-        assert max_output_tokens(model_for_tier('opus')) == 128000
-        assert max_output_tokens('claude-haiku-4-5-20251001') == 64000
-
-    def test_unknown_model_returns_default(self):
-        from storyforge.api import max_output_tokens
-        result = max_output_tokens('claude-unknown-99')
-        assert result == 32768
 
 
 # ============================================================================

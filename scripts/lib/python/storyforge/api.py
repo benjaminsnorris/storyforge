@@ -22,6 +22,12 @@ API_TIMEOUT = 600  # seconds before giving up on an API call (10 min)
 REVISION_TIMEOUT = 3600  # seconds for large revision calls (60 min)
 API_RETRIES = 2  # retry transient failures (timeouts, 5xx)
 
+# Current models think before answering (Opus can't turn it off), and
+# thinking counts against max_tokens, so a budget sized for the answer alone
+# can end in thinking with no text. invoke adds this much on top of the
+# caller's budget. Only generated tokens are billed, so the headroom is free.
+THINKING_ALLOWANCE = 16000
+
 # Output limit for a model the catalog does not list (a STORYFORGE_MODEL
 # override the API will reject anyway); every listed model reports its own.
 _DEFAULT_MAX_OUTPUT = 32768
@@ -38,6 +44,12 @@ def max_output_tokens(model: str) -> int:
         if m.get('id') == model and m.get('max_tokens'):
             return int(m['max_tokens'])
     return _DEFAULT_MAX_OUTPUT
+
+
+def request_max_tokens(model: str, answer_tokens: int) -> int:
+    """The max_tokens to send: the answer budget plus THINKING_ALLOWANCE,
+    capped at the model's limit."""
+    return min(answer_tokens + THINKING_ALLOWANCE, max_output_tokens(model))
 
 
 def list_models() -> list[dict]:
@@ -138,7 +150,8 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
     Args:
         prompt: The user message text.
         model: Model ID (from ``common.select_model`` or ``model_for_tier``).
-        max_tokens: Maximum output tokens.
+        max_tokens: Output tokens for the answer; THINKING_ALLOWANCE is added,
+            capped at the model's limit.
         label: Optional label for heartbeat messages (e.g., 'revision pass 3').
         timeout: Socket timeout in seconds (default API_TIMEOUT).
         system: Optional list of system content blocks (supports cache_control).
@@ -148,7 +161,7 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
     """
     body = {
         'model': model,
-        'max_tokens': max_tokens,
+        'max_tokens': request_max_tokens(model, max_tokens),
         'messages': [{'role': 'user', 'content': prompt}],
     }
     if system:
@@ -292,7 +305,7 @@ def build_batch_request(custom_id: str, prompt: str, model: str,
     """
     params = {
         'model': model,
-        'max_tokens': max_tokens,
+        'max_tokens': request_max_tokens(model, max_tokens),
         'messages': [{'role': 'user', 'content': prompt}],
     }
     if system:
