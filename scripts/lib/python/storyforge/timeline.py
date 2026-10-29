@@ -1159,9 +1159,10 @@ def cue_prompts(project_dir: str, scene_ids: list[str]) -> dict[str, str]:
 
 
 def extract_cues(project_dir: str, scene_ids: list[str], model: str,
-                 log_dir: str) -> dict[str, dict[str, str]]:
+                 log_dir: str, store: bool = True) -> dict[str, dict[str, str]]:
     """Read time cues for *scene_ids* with direct calls in parallel, store
-    them in working/timeline-cues.csv, and return them."""
+    them in working/timeline-cues.csv (unless *store* is false), and return
+    them."""
     from .api import invoke_to_file, extract_text
     from .runner import run_parallel
     os.makedirs(log_dir, exist_ok=True)
@@ -1178,7 +1179,8 @@ def extract_cues(project_dir: str, scene_ids: list[str], model: str,
     for sid, r in results.items():
         if not isinstance(r, dict):
             log(f'  WARNING: time cues failed for {sid}: {r}')
-    write_cues(project_dir, cues)
+    if store:
+        write_cues(project_dir, cues)
     return cues
 
 
