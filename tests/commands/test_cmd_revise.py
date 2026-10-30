@@ -989,6 +989,122 @@ class TestPassThatChangesNothing:
         assert self._status(plan_file) == 'completed'
 
 
+class TestOwedScenes:
+    """Decision 5 (2026-10-30): a prose pass that stopped over unwritten
+    scenes used to re-revise every target when re-run."""
+
+    def _run(self, project_dir, monkeypatch, wrote, skipped, prompts, committed):
+        import subprocess as sp
+
+        def run(cmd, **kwargs):
+            joined = ' '.join(str(c) for c in cmd)
+            if 'build-prompt' in joined:
+                prompts.append([str(c) for c in cmd])
+                return sp.CompletedProcess(cmd, 0, stdout='Revision prompt.', stderr='')
+            if 'extract-scenes' in joined:
+                out = ''
+                for sid in wrote:
+                    with open(os.path.join(project_dir, 'scenes', f'{sid}.md'), 'w') as f:
+                        f.write(f'Revised prose for {sid}.\n')
+                    out += f'Wrote: {sid}\n'
+                for sid in skipped:
+                    out += f'Skipped: {sid} -- appears to end mid-sentence\n'
+                return sp.CompletedProcess(cmd, 0, stdout=out, stderr='')
+            return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
+        monkeypatch.setattr('subprocess.run', run)
+        monkeypatch.setattr(
+            'storyforge.cmd_revise.commit_and_push',
+            lambda *a, **kw: committed.append(_read_csv_plan(
+                os.path.join(project_dir, 'working', 'plans', 'revision-plan.csv'))[0]['owed']))
+        main([])
+
+    def test_a_re_run_revises_only_the_scenes_still_owed(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        plan_file = _run_pass_setup(project_dir, monkeypatch, 'craft')
+        mock_api.set_response('=== SCENE: act1-sc01 === ...')
+        prompts, committed = [], []
+
+        with pytest.raises(SystemExit) as exc:
+            self._run(project_dir, monkeypatch, ['act1-sc01'], ['act1-sc02'],
+                      prompts, committed)
+
+        assert exc.value.code == 1
+        row = _read_csv_plan(plan_file)[0]
+        assert row['status'] != 'completed' and row['owed'] == 'act1-sc02'
+        assert committed == ['act1-sc02']  # owed is in the commit with the scenes
+        assert 're-run `storyforge revise`' in capsys.readouterr().out
+
+        prompts.clear()
+        committed.clear()
+        self._run(project_dir, monkeypatch, ['act1-sc02'], [], prompts, committed)
+
+        assert 'act1-sc02' in prompts[0]  # the scope argument
+        config = prompts[0][prompts[0].index('--config') + 1]
+        assert 'targets: act1-sc02' in config
+        row = _read_csv_plan(plan_file)[0]
+        assert row['status'] == 'completed' and row['owed'] == ''
+        assert 'still owes: act1-sc02' in capsys.readouterr().out
+
+    def test_an_unreadable_reply_keeps_what_is_owed(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        import subprocess as sp
+        plan_file = _run_pass_setup(project_dir, monkeypatch, 'craft')
+        rows = _read_csv_plan(plan_file)
+        rows[0]['owed'] = 'act1-sc02'
+        from storyforge.cmd_revise import _write_csv_plan
+        _write_csv_plan(plan_file, rows)
+        mock_api.set_response('No scenes here.')
+
+        def run(cmd, **kwargs):
+            joined = ' '.join(str(c) for c in cmd)
+            if 'extract-scenes' in joined:
+                return sp.CompletedProcess(cmd, 1, stdout='', stderr='no content')
+            return sp.CompletedProcess(cmd, 0, stdout='Revision prompt.', stderr='')
+        monkeypatch.setattr('subprocess.run', run)
+
+        with pytest.raises(SystemExit):
+            main([])
+
+        assert _read_csv_plan(plan_file)[0]['owed'] == 'act1-sc02'
+
+    def test_a_reply_with_no_scene_keeps_what_is_owed(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """Extraction that succeeds with nothing in it used to blank owed, so
+        the next run revised every original target again."""
+        plan_file = _run_pass_setup(project_dir, monkeypatch, 'craft')
+        rows = _read_csv_plan(plan_file)
+        rows[0]['owed'] = 'act1-sc02'
+        from storyforge.cmd_revise import _write_csv_plan
+        _write_csv_plan(plan_file, rows)
+        mock_api.set_response('These scenes read well.')
+
+        with pytest.raises(SystemExit):
+            self._run(project_dir, monkeypatch, [], [], [], [])
+
+        assert _read_csv_plan(plan_file)[0]['owed'] == 'act1-sc02'
+
+    def test_a_cut_off_reply_owes_the_targets_it_never_reached(self):
+        from storyforge.cmd_revise import _owed_scenes
+        assert _owed_scenes('a;b;NEW:c;d', ['a'], {'b': 'mid-sentence'},
+                            cut_off=True) == 'b;NEW:c;d'
+
+    def test_a_reply_that_ended_normally_owes_only_what_it_skipped(self):
+        """A finished reply may leave a target alone on purpose."""
+        from storyforge.cmd_revise import _owed_scenes
+        assert _owed_scenes('a;b;c', ['a'], {'b': 'collapsed'}, cut_off=False) == 'b'
+
+    def test_a_full_scope_pass_owes_what_it_skipped(self):
+        from storyforge.cmd_revise import _owed_scenes
+        assert _owed_scenes('', ['a'], {'z': 'cut off'}, cut_off=True) == 'z'
+
+    def test_a_plan_without_the_column_reads_as_nothing_owed(self, tmp_path):
+        plan = tmp_path / 'plan.csv'
+        plan.write_text('pass|name|purpose|scope|targets|guidance|protection|'
+                        'findings|status|model_tier|fix_location\n'
+                        '1|p|x|full||||||sonnet|craft\n')
+        assert _read_csv_plan(str(plan))[0].get('owed', '') == ''
+
+
 class TestApplyUpstreamBlocks:
 
     def _ref(self, project_dir, name):

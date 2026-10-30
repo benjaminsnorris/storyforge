@@ -800,13 +800,14 @@ def main(argv=None):
             weights_file, args.dry_run, system=system,
         )
 
-    # Update latest symlink
-    latest_link = os.path.join(project_dir, 'working', 'scores', 'latest')
-    target = f'cycle-{cycle}'
-    if os.path.islink(latest_link):
-        os.remove(latest_link)
-    os.symlink(target, latest_link)
-    log(f'Updated latest symlink -> {target}')
+    # latest stays on the last complete cycle: an incomplete one is still
+    # saved and committed, but readers of latest shouldn't see its gaps
+    from storyforge.project import mark_cycle_incomplete
+    mark_cycle_incomplete(cycle_dir, _incomplete)
+    if _incomplete:
+        _log_latest_kept(project_dir, cycle)
+    else:
+        _update_latest_link(project_dir, cycle)
 
     # Cost summary
     print('')
@@ -890,6 +891,32 @@ def main(argv=None):
 # ============================================================================
 # Internal helpers
 # ============================================================================
+
+def _update_latest_link(project_dir, cycle):
+    """Point working/scores/latest at cycle-{cycle}."""
+    latest_link = os.path.join(project_dir, 'working', 'scores', 'latest')
+    target = f'cycle-{cycle}'
+    if os.path.islink(latest_link):
+        os.remove(latest_link)
+    os.symlink(target, latest_link)
+    log(f'Updated latest symlink -> {target}')
+
+
+def _log_latest_kept(project_dir, cycle):
+    """Say which cycle latest stays on when cycle-{cycle} is incomplete."""
+    latest_link = os.path.join(project_dir, 'working', 'scores', 'latest')
+    if os.path.islink(latest_link):
+        kept = os.readlink(latest_link)
+        if kept == f'cycle-{cycle}':
+            # A re-score within the same pipeline cycle writes into the
+            # directory latest already names
+            log(f'WARNING: latest is {kept}, which this run re-scored only '
+                f'in part; the parts named below were not re-scored')
+        else:
+            log(f'latest stays on {kept}: cycle-{cycle} has unscored parts')
+    else:
+        log(f'latest not created: cycle-{cycle} has unscored parts')
+
 
 def _score_repetition(scene_ids, project_dir, cycle_dir):
     """Run deterministic repetition scoring. Returns path to scores CSV."""
@@ -1077,13 +1104,7 @@ def _run_deterministic_only(principles, scene_ids, project_dir, cycle,
             continue
         merge_score_files(scores_path, path)
 
-    # Update latest symlink
-    latest_link = os.path.join(project_dir, 'working', 'scores', 'latest')
-    target = f'cycle-{cycle}'
-    if os.path.islink(latest_link):
-        os.remove(latest_link)
-    os.symlink(target, latest_link)
-    log(f'Updated latest symlink -> {target}')
+    _update_latest_link(project_dir, cycle)
 
     # Append to score history
     from storyforge.history import append_cycle
