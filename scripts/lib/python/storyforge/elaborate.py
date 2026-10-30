@@ -506,6 +506,16 @@ _REQUIRED_BY_STATUS = {
 }
 
 
+def finding_scene_list(finding: dict) -> str:
+    """``scenes: a, b, c`` for a finding over more than two scenes, else ''.
+
+    A grouped finding (a timeline-order run) names only its first and last
+    scene in its message; plain-text reports print this line under it so
+    the scenes between are not lost."""
+    scenes = finding.get('scenes') or []
+    return f"scenes: {', '.join(scenes)}" if len(scenes) > 2 else ''
+
+
 def _check(category: str, check: str, passed: bool, message: str,
            severity: str = 'blocking', scene_id: str = '',
            fields=None) -> dict:
@@ -637,12 +647,25 @@ def _validate_timeline(scenes_map, checks):
     A scene set before it is a flashback (or a crosscut, when the POV
     changes). These are devices, not errors, so they are advisory and listed
     plainly; assess_flashbacks in structural.py gauges whether they work.
+
+    A run of consecutive scenes set before the same present is one finding
+    (F-122: a multi-plot novel's crosscuts gave one line per scene), split as
+    assess_flashbacks splits passages: frame and vision scenes are skipped
+    without ending it, and a scene with no day ends it. (Unlike
+    assess_flashbacks, cut and merged scenes are not left out here.) A run
+    is a crosscut when any of its scenes leaves the present's POV, so a run
+    can be labelled differently here and in assess_flashbacks, which labels
+    a passage by its first scene alone: a run that opens in the present's
+    POV and then crosscuts is a flashback there and a crosscut here. The
+    finding names the run's first and last scene and its count, and lists
+    every scene in ``scenes``, so grouping loses nothing.
     """
     sorted_ids = sorted(scenes_map.keys(),
                         key=lambda sid: int(scenes_map[sid].get('seq', 0)))
 
     present_day = None
     present_id = None
+    runs, current = [], None
     for sid in sorted_ids:
         # Frame narration and visions are never the story's present
         if (scenes_map[sid].get('time_mode') or '').strip() in OFF_PRESENT_MODES:
@@ -651,23 +674,46 @@ def _validate_timeline(scenes_map, checks):
         try:
             day = int(day_str)
         except ValueError:
+            current = None
             continue
 
         if present_day is not None and day < present_day:
             pov = scenes_map[sid].get('pov', '').strip()
             present_pov = scenes_map[present_id].get('pov', '').strip()
             kind = 'crosscut' if pov and present_pov and pov != present_pov else 'flashback'
-            checks.append(_check(
-                'timeline', 'timeline-order', False,
-                f"{kind.capitalize()}: {sid} (day {day}) is set before the story's present "
-                f"(day {present_day}, reached in {present_id})",
-                scene_id=sid,
-                severity='advisory',
-            ))
+            if current is None:
+                current = {'present_day': present_day, 'present_id': present_id, 'scenes': []}
+                runs.append(current)
+            current['scenes'].append((sid, day, kind))
         else:
+            current = None
             present_day, present_id = day, sid
 
-    if not any(c['check'] == 'timeline-order' and not c['passed'] for c in checks):
+    for run in runs:
+        scenes = run['scenes']
+        present = f"the story's present (day {run['present_day']}, reached in {run['present_id']})"
+        first_id, first_day, first_kind = scenes[0]
+        if len(scenes) == 1:
+            message = (f"{first_kind.capitalize()}: {first_id} (day {first_day}) "
+                       f"is set before {present}")
+        else:
+            last_id, last_day, _ = scenes[-1]
+            crosscuts = sum(1 for _, _, kind in scenes if kind == 'crosscut')
+            flashbacks = len(scenes) - crosscuts
+            label = 'Crosscut' if crosscuts else 'Flashback'
+            message = (f"{label}: {len(scenes)} scenes, {first_id} (day {first_day}) to "
+                       f"{last_id} (day {last_day}), are set before {present}")
+            earliest = min(day for _, day, _ in scenes)
+            if earliest < min(first_day, last_day):
+                message += f'; reaching back to day {earliest}'
+            if crosscuts and flashbacks:
+                message += f'; {crosscuts} crosscut, {flashbacks} flashback'
+        check = _check('timeline', 'timeline-order', False, message,
+                       scene_id=first_id, severity='advisory')
+        check['scenes'] = [sid for sid, _, _ in scenes]
+        checks.append(check)
+
+    if not runs:
         checks.append(_check('timeline', 'timeline-order', True, 'Timeline order is consistent'))
 
 
