@@ -38,7 +38,7 @@ from storyforge.illustrations import strip_markers
 from storyforge.api import (
     invoke_to_file, extract_text, extract_text_from_file, extract_usage,
     calculate_cost_from_usage, submit_batch, poll_batch, download_batch_results,
-    stop_problem,
+    stop_problem, is_truncated,
     build_batch_request,
 )
 from storyforge.costs import estimate_cost, check_threshold, log_operation, print_summary
@@ -1348,6 +1348,9 @@ def _score_direct(scene_ids, eval_model, eval_template, evaluation_criteria,
             response = invoke_to_file(prompt, eval_model, log_file, 4096,
                                       system=system)
             _log_api_usage(log_file, 'score', sid, eval_model, project_dir)
+            if is_truncated(response):  # a refusal raises in invoke_to_file
+                log(f'    [{sid}] FAILED: {stop_problem(response)}')
+                return {'ok': False}
 
             text = extract_text(response)
             tmp_scores = os.path.join(cycle_dir, f'.tmp-scores-{sid}.csv')

@@ -31,6 +31,7 @@ from storyforge.git import (
 from storyforge.api import (
     invoke_to_file, extract_text, extract_usage, calculate_cost_from_usage,
     submit_batch, poll_batch, download_batch_results, build_batch_request,
+    is_truncated, stop_problem,
 )
 from storyforge.costs import (
     estimate_cost, check_threshold, print_summary, log_operation,
@@ -397,6 +398,10 @@ def main(argv=None):
                       cache_read=usage.get('cache_read', 0),
                       cache_create=usage.get('cache_create', 0))
 
+        # A cut-off reply names only some boundaries: splitting on it would
+        # write wrong scene files. (A refusal raises in invoke_to_file.)
+        if is_truncated(response_data):
+            raise RuntimeError(stop_problem(response_data))
         return response
 
     # ==================================================================

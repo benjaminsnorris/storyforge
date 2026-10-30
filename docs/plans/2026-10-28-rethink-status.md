@@ -1,10 +1,31 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-29, at v1.83.0 (end of the overnight run). Start here when resuming the rethink in a new session. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`.
+Last updated 2026-10-29, at v1.84.5. Start here when resuming the rethink in a new session. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`.
 
 ## Where we are
 
-**Phase 0 (evals and baseline) is done except E4 and E6.** Chunks 0–4 of plan §7 are merged. **Phase 1 has started:** model tiers resolve at runtime (no pinned versions), and the baseline was re-recorded on the current models (v1.80.0).
+**Phase 0 (evals and baseline) is done except E6.** Chunks 0–4 of plan §7 and E4 are merged. **Phase 1 is mostly done:**
+- **Models:** tiers resolve at runtime, with a thinking allowance.
+- **Bugs:** the whole bug checklist is fixed.
+- **E3 tier comparison:** no routing change.
+- **Structured outputs:** the knowledge and physical-state chains use them.
+- **Loud failures for bad replies:**
+  - cut-off drafts (#364);
+  - refusals, via the fallback (#368);
+  - invented names in brief rewrites (#373);
+  - refused, cut-off and errored batch replies (#374);
+  - cut-off replies in direct-mode score, timeline cues and scenes-setup (v1.84.5).
+
+**Phase 1 regression tests.** The three silent-failure tests from the success criteria exist:
+- `tests/commands/test_cmd_revise.py::TestPassThatChangesNothing` (understory `5ac1c26`);
+- `tests/test_redraft_guard.py` (thornwall `19530d5`; the "reference doc" was `scenes/council.md`, a scene file);
+- `tests/test_hone.py::test_a_mapping_never_takes_an_alias_from_its_owner` (meridian-line `5433d3f`).
+
+**Left in Phase 1:**
+- the remaining `KEY: value` parsers;
+- the remaining warn-and-continue sites.
+
+**E2 recall:** the Phase 1 criterion "E2 recall improves over baseline" is not met. E2-Carol finds 0 of 37, and e2-corpus-drift recall is about 0.10. Most of Carol's injected errors (physical state, knowledge, numbers) are outside what the timeline check reads, so real recall depends on the Phase 2 ledger and the Phase 3 checker.
 
 | Plan chunk | State | PRs |
 |---|---|---|
@@ -15,7 +36,7 @@ Last updated 2026-10-29, at v1.83.0 (end of the overnight run). Start here when 
 | 4 E3 / E5 | done | #346 |
 | — E4 | done (overnight): shared-dark Act 1 drafted with today's `write`, judged; see the E4 notes below | #361 (v1.81.0), re-recorded in #363 |
 | — E6 | not started: needs a budget decision (below) | |
-| 5 Phase 1 | in progress: models (runtime tier resolution, thinking allowance), the whole bug checklist (#359, v1.80.2), the E3 tier comparison (no routing change), and structured outputs for the knowledge and physical-state chains (v1.83.0) done; the other `KEY: value` parsers and the remaining warn-and-continue sites to go | v1.80.0 PR, #359, #361, #363 |
+| 5 Phase 1 | mostly done (see above); the other `KEY: value` parsers and the remaining warn-and-continue sites to go | v1.80.0 PR, #359, #361, #363, #364, #368, #373, #374 |
 
 ## Baseline (`evals/baseline.json`)
 
@@ -93,7 +114,7 @@ evals-56 merged #357 (1.80.1), #358 (1.80.3, physical-state `resolves`), #360 (1
 **Needs your decision** (details in the E4 notes below):
 1. ~~**shared-dark briefs.**~~ Done in v1.84.2. `_fix_upstream_briefs` saw a scene's title, POV, outcome, value at stake, arc and current brief, but not its characters, place, plan or prose. From ac569274 (2026-04-07) to f56db284 it rewrote 21 of the 23 Act 1 briefs, and 17 of those name people the book never mentions (Mallen, and *Chicago P.D.*'s Danny Olinsky and Detective Ruzek); it also recast the book's own Hank Voigt as a police sergeant. It now sees the scene's characters, place, plan and prose. A rewrite is rejected with a WARNING when it lacks a field or names a capitalized word found nowhere in the reference files, the scene's prose or the brief fields the fix keeps. The check can't catch a known name given a new role. Only scenes whose brief changed are redrafted, and the run lists the scenes left unchanged and why. Follow-up: `hone.hone_briefs` also rewrites briefs and could use the same check (move it to a shared module then). **E4/E5 were re-pinned** (Ben's call) to 5e9bdf39, the commit before the fix ran, and re-recorded ($7.06 with E8's two naturalness cases). E4: BPS 2.86 → 0.26, CP10k 18.2 → 16.1, 23/23 drafted. E5: mismatches 32 → 64, because the old pin's prose had been redrafted from the same rewritten briefs. **Still Ben's:** the briefs at shared-dark HEAD are still the rewritten ones; restoring them is author data.
 2. ~~**Refusals.**~~ Done in v1.84.0, #368 (Ben chose the recommendation). Prose calls send `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`): `write` drafts, `revise` redrafts, the polish loop, and every pass that isn't structural/registry (those write CSV). A refusal is re-run on Anthropic's fallback model for that category. Each reply it writes logs a WARNING, is listed again at the end of the run, and is named in the commit (`refusal fallback: written by <model>`); where the call's cost is logged (write, revise passes) it is costed as that model. Batch mode retries a refused scene once directly with the fallback. Non-prose calls (extract, score, timeline, evaluate) don't opt in. Under a cassette the fallback is stripped, so evals measure the requested model (waking-hank still replays as refused). Not done: the refused attempt's own tokens (`usage.iterations`) aren't costed, and `_redraft_from_briefs`, `_redraft_scenes` and the polish loop log no cost at all (pre-existing). The review also fixed the polish loop, which never wrote its scenes (wrong `extract-scenes` arguments) yet marked the pass completed.
-3. ~~**`write` writes cut-off drafts.**~~ Done in #364 (v1.83.1): `write` refuses a refused, cut-off, mid-sentence, empty or under-100-word reply, skips that scene and exits 1 naming it (Ben chose skip-and-continue). Batch results now keep `stop_reason`. The review also fixed coach/strict briefs being saved over scene prose and revise's redraft-from-briefs reporting success when a redraft was not written. Follow-up done in v1.84.4 (batch mode): `api.download_batch_results` marks a refused, cut-off or errored batch item `fail`, writes no `.txt` for it (removing a stale one, and an errored item's stale `.json`), and names it in a WARNING. The ten other batch callers (`timeline`, `score` ×2, `extract` ×3, `evaluate`, `enrich`, `elaborate`, `scenes_setup`) no longer use such a reply. Most skip non-`ok` items; extract and score's fidelity reader read the `.txt` directly and are protected because it is no longer there. `write` and `evaluate` pass `keep_incomplete=True`: write retries refusals, and evaluate keeps a cut-off report with a WARNING, as in direct mode. The review also made scenes-setup leave a chapter whose detection failed unsplit (exit 1), extract name scenes with no reply (exit 1), score and enrich cost every paid reply, and score and timeline name the scenes they have no fresh result for. **Still open:** the direct paths of score (scene scoring), timeline (cues) and scenes-setup (detection) still parse a reply cut off at `max_tokens`.
+3. ~~**`write` writes cut-off drafts.**~~ Done in #364 (v1.83.1): `write` refuses a refused, cut-off, mid-sentence, empty or under-100-word reply, skips that scene and exits 1 naming it (Ben chose skip-and-continue). Batch results now keep `stop_reason`. The review also fixed coach/strict briefs being saved over scene prose and revise's redraft-from-briefs reporting success when a redraft was not written. Follow-up done in v1.84.4 (batch mode): `api.download_batch_results` marks a refused, cut-off or errored batch item `fail`, writes no `.txt` for it (removing a stale one, and an errored item's stale `.json`), and names it in a WARNING. The ten other batch callers (`timeline`, `score` ×2, `extract` ×3, `evaluate`, `enrich`, `elaborate`, `scenes_setup`) no longer use such a reply. Most skip non-`ok` items; extract and score's fidelity reader read the `.txt` directly and are protected because it is no longer there. `write` and `evaluate` pass `keep_incomplete=True`: write retries refusals, and evaluate keeps a cut-off report with a WARNING, as in direct mode. The review also made scenes-setup leave a chapter whose detection failed unsplit (exit 1), extract name scenes with no reply (exit 1), score and enrich cost every paid reply, and score and timeline name the scenes they have no fresh result for. Direct paths done in v1.84.5: score's scene scoring, timeline's cue reads and scenes-setup's detection treat a reply cut off at `max_tokens` as a failure (a refusal already raised).
 4. ~~**E2-Carol:** 37 of its recorded Haiku replies hit `max_tokens`.~~ Checked 2026-10-29: not the cause. Those 37 (and 85 more) are orphaned recordings sent with `max_tokens: 1024`, from before 561c7876 added the thinking allowance. Replay now uses 61 cue reads at 17,024, all `end_turn`. The 0 recall is real: the drift check (`timeline.check_scenes`) raised 1 distinct flag across the 37 injected errors. Improving it is timeline work (evals-56's area); the orphans could be pruned.
 
 ### Original instructions

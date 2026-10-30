@@ -90,6 +90,13 @@ def parse_cues(response: str) -> dict[str, str]:
     return cues
 
 
+def has_cues(response: str) -> bool:
+    """Whether a reply answers the cue read at all: it states a relation.
+    A reply without one (prose, a refusal's text, a code fence) would parse
+    to empty cues that pass for a fresh read."""
+    return bool(re.search(r'^\s*TIME_RELATION:', response or '', re.M))
+
+
 def read_cues(project_dir: str, name: str = CUES_FILE) -> dict[str, dict[str, str]]:
     path = os.path.join(project_dir, name)
     if not os.path.isfile(path):
@@ -1209,7 +1216,7 @@ def extract_cues(project_dir: str, scene_ids: list[str], model: str,
     """Read time cues for *scene_ids* with direct calls in parallel, store
     them in working/timeline-cues.csv (unless *store* is false), and return
     them."""
-    from .api import invoke_to_file, extract_text
+    from .api import invoke_to_file, extract_text, is_truncated, stop_problem
     from .runner import run_parallel
     os.makedirs(log_dir, exist_ok=True)
     prompts = cue_prompts(project_dir, scene_ids)
@@ -1218,7 +1225,14 @@ def extract_cues(project_dir: str, scene_ids: list[str], model: str,
         response = invoke_to_file(prompts[sid], model,
                                   os.path.join(log_dir, f'timeline-cues-{sid}.json'),
                                   max_tokens=1024, label=f'timeline cues {sid}')
-        return parse_cues(extract_text(response))
+        # A cut-off reply may lack the relation or the anchor; parsed, it
+        # would pass for this scene's cues. (A refusal raises.)
+        if is_truncated(response):
+            raise RuntimeError(stop_problem(response))
+        text = extract_text(response)
+        if not has_cues(text):
+            raise RuntimeError('the reply has no TIME_RELATION line')
+        return parse_cues(text)
 
     results = run_parallel(list(prompts), worker, label='scene')
     cues = {sid: r for sid, r in results.items() if isinstance(r, dict)}
