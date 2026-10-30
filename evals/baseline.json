@@ -1,15 +1,15 @@
 {
   "cost": {
-    "calls": 2206,
-    "input_tokens": 8685290,
-    "output_tokens": 2402759,
-    "replayed_calls": 2206,
+    "calls": 2255,
+    "input_tokens": 9173511,
+    "output_tokens": 2533904,
+    "replayed_calls": 2255,
     "unpriced_calls": 0,
-    "usd_if_live": 20.1821,
+    "usd_if_live": 22.7228,
     "usd_spent": 0.0
   },
   "git_dirty": true,
-  "git_sha": "38f5d7befd05ce6ce2bac630a28f50d4cb41f2f0",
+  "git_sha": "215e86700691f50a0c2652883c9a59586ffbb0f8",
   "mode": "replay",
   "results": [
     {
@@ -46,7 +46,7 @@
         "usd_spent": 0.0
       },
       "description": "E1 gold-set health: format, 100+ prose cases, 20% holdout",
-      "duration_s": 0.04,
+      "duration_s": 0.01,
       "error": null,
       "gates": [
         {
@@ -82,7 +82,7 @@
       },
       "mode": "replay",
       "notes": [],
-      "started_at": "2026-10-30T13:48:17+00:00",
+      "started_at": "2026-10-30T17:02:17+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -140,7 +140,7 @@
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 5.13,
+      "duration_s": 5.7,
       "error": null,
       "gates": [
         {
@@ -204,7 +204,7 @@
         "missed 37 of 37: e2-carol-001, e2-carol-002, e2-carol-003, e2-carol-004, e2-carol-005, e2-carol-006, e2-carol-007, e2-carol-008, e2-carol-009, e2-carol-010, e2-carol-011, e2-carol-012, e2-carol-013, e2-carol-014, e2-carol-015, e2-carol-016, e2-carol-017, e2-carol-018, e2-carol-019, e2-carol-020, e2-carol-021, e2-carol-022, e2-carol-023, e2-carol-024, e2-carol-025, e2-carol-026, e2-carol-027, e2-carol-028, e2-carol-029, e2-carol-030, e2-carol-031, e2-carol-032, e2-carol-033, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
-      "started_at": "2026-10-30T13:48:17+00:00",
+      "started_at": "2026-10-30T17:02:17+00:00",
       "status": "fail",
       "suite": "e2-carol"
     },
@@ -252,7 +252,7 @@
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 130.85,
+      "duration_s": 142.94,
       "error": null,
       "gates": [
         {
@@ -316,7 +316,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-30T13:48:22+00:00",
+      "started_at": "2026-10-30T17:02:23+00:00",
       "status": "fail",
       "suite": "e2-corpus-drift"
     },
@@ -366,7 +366,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 134.6,
+      "duration_s": 141.85,
       "error": null,
       "gates": [
         {
@@ -430,7 +430,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-30T13:50:33+00:00",
+      "started_at": "2026-10-30T17:04:46+00:00",
       "status": "fail",
       "suite": "e2-corpus-validate"
     },
@@ -442,36 +442,36 @@
         },
         "PHY": {
           "facts": 14,
-          "recall": 0.2143
+          "recall": 0.8571
         },
         "PRM": {
           "facts": 1,
-          "recall": 0.0
+          "recall": 1.0
         },
         "TIM": {
           "facts": 12,
-          "recall": 0.25
+          "recall": 0.75
         },
         "TRT": {
           "facts": 14,
-          "recall": 0.2857
+          "recall": 1.0
         },
         "WLD": {
           "facts": 5,
-          "recall": 0.2
+          "recall": 1.0
         }
       },
       "cost": {
-        "calls": 147,
-        "input_tokens": 893450,
-        "output_tokens": 52956,
-        "replayed_calls": 147,
+        "calls": 196,
+        "input_tokens": 1381671,
+        "output_tokens": 184101,
+        "replayed_calls": 196,
         "unpriced_calls": 0,
-        "usd_if_live": 2.5029,
+        "usd_if_live": 5.0436,
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 36.28,
+      "duration_s": 69.51,
       "error": null,
       "gates": [
         {
@@ -482,78 +482,78 @@
           "threshold": 20
         },
         {
-          "actual": 0.2857,
+          "actual": 0.898,
           "name": "recall",
           "op": ">=",
-          "passed": false,
+          "passed": true,
           "threshold": 0.85
         }
       ],
       "metrics": {
-        "captured": 14,
+        "captured": 44,
         "facts": 49,
-        "missing": 14,
-        "partial": 21,
-        "recall": 0.2857,
-        "recall_with_partial": 0.7143
+        "missing": 0,
+        "partial": 5,
+        "recall": 0.898,
+        "recall_with_partial": 1.0
       },
       "mode": "replay",
       "notes": [
         "excluded 25: holdout",
         "excluded 3: no prose established span",
         "excluded 53: tree predates reference/scenes.csv",
-        "governor-015 (routine-maintenance): partial",
-        "governor-016 (routine-maintenance): missing",
+        "governor-015 (routine-maintenance): captured",
+        "governor-016 (routine-maintenance): captured",
         "governor-018 (haddons-reckoning): captured",
-        "governor-019 (finest-cartographer): partial",
+        "governor-019 (finest-cartographer): captured",
         "governor-020 (ashward-breach): captured",
-        "governor-022 (terrace-row): partial",
-        "governor-023 (haddons-reckoning): missing",
-        "governor-024 (haddons-reckoning): partial",
-        "governor-025 (the-governors-vigil): missing",
-        "governor-026 (haddons-reckoning): partial",
-        "governor-027 (confrontation-at-stairwell-nine): partial",
-        "governor-028 (order): missing",
+        "governor-022 (terrace-row): captured",
+        "governor-023 (haddons-reckoning): captured",
+        "governor-024 (haddons-reckoning): captured",
+        "governor-025 (the-governors-vigil): captured",
+        "governor-026 (haddons-reckoning): captured",
+        "governor-027 (confrontation-at-stairwell-nine): captured",
+        "governor-028 (order): captured",
         "lantern-folk-001 (a07-the-cold-sleep): captured",
         "lantern-folk-002 (a03-the-little-voices): captured",
         "lantern-folk-003 (a12-the-remembering): partial",
         "lantern-folk-004 (a14-the-keepers-flame): partial",
-        "lantern-folk-005 (a11-in-the-dark): partial",
-        "lantern-folk-006 (a08-what-the-folk-fear): partial",
+        "lantern-folk-005 (a11-in-the-dark): captured",
+        "lantern-folk-006 (a08-what-the-folk-fear): captured",
         "lantern-folk-008 (a03-the-little-voices): captured",
         "lantern-folk-011 (a07-the-cold-sleep): captured",
-        "lantern-folk-012 (a04-the-great-lamp): partial",
-        "lantern-folk-013 (a12-the-remembering): missing",
+        "lantern-folk-012 (a04-the-great-lamp): captured",
+        "lantern-folk-013 (a12-the-remembering): captured",
         "lantern-folk-014 (a03-the-little-voices): captured",
         "lantern-folk-015 (a03-the-little-voices): captured",
-        "lantern-folk-016 (a05-the-pledge): missing",
+        "lantern-folk-016 (a05-the-pledge): captured",
         "lantern-folk-018 (a01-moving-night): partial",
         "lantern-folk-019 (a02-into-the-trees): captured",
         "lantern-folk-020 (a08-what-the-folk-fear): captured",
-        "lantern-folk-025 (a13-through-the-woods): partial",
-        "lantern-folk-027 (a11-in-the-dark): missing",
-        "lantern-folk-028 (a11-in-the-dark): missing",
-        "shared-dark-034 (watching-ostrowski): missing",
-        "shared-dark-035 (no-response): partial",
-        "shared-dark-039 (building): partial",
-        "shared-dark-040 (building): missing",
+        "lantern-folk-025 (a13-through-the-woods): captured",
+        "lantern-folk-027 (a11-in-the-dark): captured",
+        "lantern-folk-028 (a11-in-the-dark): captured",
+        "shared-dark-034 (watching-ostrowski): captured",
+        "shared-dark-035 (no-response): captured",
+        "shared-dark-039 (building): captured",
+        "shared-dark-040 (building): captured",
         "shared-dark-041 (pewter-town): captured",
-        "shared-dark-043 (keisha-argument): missing",
-        "shared-dark-044 (keisha-argument): missing",
+        "shared-dark-043 (keisha-argument): captured",
+        "shared-dark-044 (keisha-argument): captured",
         "thornwall-002 (garrens-ledger): partial",
-        "thornwall-021 (garrens-ledger): missing",
+        "thornwall-021 (garrens-ledger): partial",
         "thornwall-022 (lone-rider): captured",
-        "thornwall-023 (journals-of-the-east-wing): missing",
-        "thornwall-024 (not-alone): partial",
-        "thornwall-025 (thessan-resistance): partial",
-        "thornwall-026 (crowded-chamber): partial",
-        "thornwall-027 (thessan-vigil): partial",
+        "thornwall-023 (journals-of-the-east-wing): captured",
+        "thornwall-024 (not-alone): captured",
+        "thornwall-025 (thessan-resistance): captured",
+        "thornwall-026 (crowded-chamber): captured",
+        "thornwall-027 (thessan-vigil): captured",
         "thornwall-028 (thessan-resistance): captured",
         "thornwall-029 (journals-of-the-east-wing): captured",
-        "thornwall-030 (ivra-visits-sera): partial"
+        "thornwall-030 (ivra-visits-sera): captured"
       ],
-      "started_at": "2026-10-30T13:52:48+00:00",
-      "status": "fail",
+      "started_at": "2026-10-30T17:07:08+00:00",
+      "status": "pass",
       "suite": "e3-extraction"
     },
     {
@@ -584,7 +584,7 @@
         "usd_spent": 0.0
       },
       "description": "Draft shared-dark Act 1 with write; CP10k, BPS, length, voice",
-      "duration_s": 6.94,
+      "duration_s": 6.49,
       "error": null,
       "gates": [
         {
@@ -638,7 +638,7 @@
         "checker engineer: the text says \"three days\" (about 3 day(s)), but the calendar puts it 0 day(s) on",
         "Judge stands in for the plan's human spot-check (still owed). Drafted in direct mode; batch mode is refused under a cassette."
       ],
-      "started_at": "2026-10-30T13:53:24+00:00",
+      "started_at": "2026-10-30T17:08:17+00:00",
       "status": "pass",
       "suite": "e4-generation"
     },
@@ -670,7 +670,7 @@
         "usd_spent": 0.0
       },
       "description": "Redraft from plan + ledger; facts the redraft changes",
-      "duration_s": 3.42,
+      "duration_s": 2.31,
       "error": null,
       "gates": [
         {
@@ -699,7 +699,7 @@
         "name-surfaces: 7 mismatch(es)\n    PHY: The number of pages of notes on the legal pad differs.\n    TIM: When the notes were written differs: the original has him writing them at 11:40 p.m. and 12:15, with 2:47 the moment the name surfaces; the \n    PHY: The building's door and lock differ: a steel personnel door with a padlock hasp welded to the frame and a Master 6271 tubular-key padlock, v\n    PHY: The water ration differs: eight ounces every six hours versus water by the capful.\n    PHY: The space heater is placed two meters from the chair to keep the subject alive in the original, but sits against the east wall unplugged in \n    KNO: How Hank learns the name Claire differs: a coworker calling it out in a parking lot versus the captor's thumb reading it off a laminated lan\n    KNO: In the original Hank has location clues (driving directions, Oregon plates, a Coos Bay receipt), while in the redraft he says the site could",
         "voicemail: 7 mismatch(es)\n    TIM: When Marie first called the office: two days ago in the original, eleven days ago in the redraft.\n    PHY: Where Claire's car was found: her apartment lot in the original, the hospital lot in the redraft.\n    PHY: The sixth message is an angry spoken complaint in the original but only twelve seconds of breathing in the redraft.\n    PHY: The fifth message lists different details: license plate, shift schedule and coworker Jennifer in the original; height, hair and a gap in he\n    PHY: Where Marie was during the seventh message: indoors in Claire's apartment on the landline in the original, outside in the wind in the redraf\n    PHY: The seventh message is cut off by the time limit right after the hinge in the original, but runs nine more seconds after the hinge in the re\n    TIM: When Maren heard the hinge in her vision: two nights ago in the original, at four that morning in the redraft."
       ],
-      "started_at": "2026-10-30T13:53:31+00:00",
+      "started_at": "2026-10-30T17:08:24+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -727,7 +727,7 @@
         "usd_spent": 0.0
       },
       "description": "Continuity flags raised on classics with no known errors",
-      "duration_s": 0.28,
+      "duration_s": 0.22,
       "error": null,
       "gates": [
         {
@@ -761,7 +761,7 @@
         "christmas-carol/run2: 25 flag(s)",
         "christmas-carol/run1: 25 flag(s)"
       ],
-      "started_at": "2026-10-30T13:53:34+00:00",
+      "started_at": "2026-10-30T17:08:26+00:00",
       "status": "fail",
       "suite": "e7-classics"
     },
@@ -802,7 +802,7 @@
         "usd_spent": 0.0
       },
       "description": "Current revision passes vs the E1 errors past passes introduced",
-      "duration_s": 85.96,
+      "duration_s": 126.93,
       "error": null,
       "gates": [
         {
@@ -890,13 +890,13 @@
         "thornwall-035 (riders-approach): consistent",
         "thornwall-037 (evening-visit): consistent"
       ],
-      "started_at": "2026-10-30T13:53:35+00:00",
+      "started_at": "2026-10-30T17:08:26+00:00",
       "status": "fail",
       "suite": "e8-revision-safety"
     }
   ],
   "schema_version": 1,
   "status": "fail",
-  "storyforge_version": "1.93.0",
+  "storyforge_version": "1.96.0",
   "suite_count": 9
 }
