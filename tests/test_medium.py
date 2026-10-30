@@ -328,6 +328,31 @@ def test_briefs_handler_gn_round_trip_preserves_gn_columns(project_dir_gn, monke
         )
 
 
+def test_briefs_handler_gn_skips_briefs_an_earlier_run_wrote(project_dir_gn, monkeypatch):
+    """Decision 5 (2026-10-30): status doesn't move when a brief is written,
+    so a re-run after one scene failed re-wrote every mapped scene's brief."""
+    from storyforge.csv_cli import update_field
+    from storyforge import api, cmd_elaborate
+    ref_dir = os.path.join(project_dir_gn, 'reference')
+    scenes_csv = os.path.join(ref_dir, 'scenes.csv')
+    for sid in ('the-blank-page', 'shadows-arrive'):
+        update_field(scenes_csv, sid, 'status', 'mapped')
+    update_field(os.path.join(ref_dir, 'scene-briefs.csv'), 'shadows-arrive',
+                 'caption_strategy', '')
+    asked = []
+
+    def fake_invoke_to_file(prompt, model, log_file, **kwargs):
+        asked.append(os.path.basename(log_file))
+        raise RuntimeError('no API in tests')
+    monkeypatch.setattr(api, 'invoke_to_file', fake_invoke_to_file)
+
+    cmd_elaborate._briefs_handler_gn(project_dir_gn, ref_dir, dry_run=False,
+                                     stage_model='m', system=None)
+
+    assert asked == ['shadows-arrive.json']
+    cmd_elaborate._gn_brief_failures.clear()
+
+
 def test_briefs_handler_gn_returns_none_when_no_work(project_dir_gn):
     """When all scenes are already briefed, _briefs_handler_gn returns None
     so the caller can short-circuit before branch / PR creation."""

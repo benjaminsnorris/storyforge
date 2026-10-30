@@ -525,6 +525,15 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
 _gn_brief_failures: list[str] = []
 
 
+#: The brief fields a GN brief reply fills; a brief with all of them is complete.
+_GN_BRIEF_FIELDS = ('goal', 'page_layout', 'panel_breakdown', 'visual_keywords',
+                    'page_turn_beats', 'caption_strategy')
+
+
+def _gn_brief_complete(brief: dict) -> bool:
+    return all(brief.get(field, '').strip() for field in _GN_BRIEF_FIELDS)
+
+
 def _briefs_handler_gn(project_dir: str, ref_dir: str,
                        dry_run: bool, stage_model: str, system,
                        interactive: bool = False):
@@ -567,11 +576,18 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
     briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
     alias_maps = load_registry_alias_maps(project_dir)
 
-    # Target: mapped scenes without a complete brief
-    target_ids = [
+    # Target: mapped scenes without a complete brief. A scene's status
+    # doesn't move when its brief is written, so a re-run after a partial
+    # failure skips the briefs an earlier run already wrote
+    mapped_ids = [
         sid for sid, row in scenes_map.items()
         if row.get('status', '') in ('mapped', 'architecture', 'spine', '')
     ]
+    target_ids = [sid for sid in mapped_ids
+                  if not _gn_brief_complete(briefs_map.get(sid, {}))]
+    if len(target_ids) < len(mapped_ids):
+        log(f'{len(mapped_ids) - len(target_ids)} scene(s) already have a '
+            f'complete GN brief; not rewritten')
     if not target_ids:
         log('No scenes need GN briefs.')
         return None

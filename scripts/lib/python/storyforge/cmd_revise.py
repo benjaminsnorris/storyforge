@@ -87,8 +87,12 @@ def parse_args(argv):
 # CSV plan helpers
 # ============================================================================
 
+# `owed`: the scenes a prose pass's reply held but didn't write (`;`-joined).
+# Written in the same commit as the scenes it did write; a re-run of the pass
+# revises only these, and the pass is completed when none remain.
 CSV_PLAN_FIELDS = ['pass', 'name', 'purpose', 'scope', 'targets', 'guidance',
-                   'protection', 'findings', 'status', 'model_tier', 'fix_location']
+                   'protection', 'findings', 'status', 'model_tier', 'fix_location',
+                   'owed']
 
 
 def _sanitize_csv_field(value: str) -> str:
@@ -1857,15 +1861,23 @@ def _extract_scenes(step_log: str, project_dir: str,
     return written, skipped
 
 
-def _fail_skipped_scenes(pass_name: str, skipped: dict[str, str], step_log: str) -> None:
+def _fail_skipped_scenes(pass_name: str, skipped: dict[str, str], step_log: str,
+                         owed_saved: bool = False) -> None:
     """Stop a pass whose reply held scenes that were not written: what it
-    did write is committed, but the pass did not do its job for these."""
+    did write is committed, but the pass did not do its job for these.
+    ``owed_saved``: the plan's `owed` column names them, so a re-run of the
+    pass revises only these."""
     log(f'ERROR: Pass \'{pass_name}\' did not write {len(skipped)} scene(s); '
         f'their prose is unchanged:')
     for sid, reason in skipped.items():
         log(f'  {sid}: {reason}')
-    log(f'The scenes it did write are committed. The pass is not marked completed; '
-        f're-run it for these scenes. See the reply: {step_log}')
+    if owed_saved:
+        log(f'The scenes it did write are committed. The pass is not marked completed; '
+            f're-run `storyforge revise` and it revises only these scenes. '
+            f'See the reply: {step_log}')
+    else:
+        log(f'The scenes it did write are committed. The pass is not marked completed; '
+            f're-run it for these scenes. See the reply: {step_log}')
     sys.exit(1)
 
 
@@ -2434,6 +2446,14 @@ def main(argv=None):
         elif pass_scope in ('scene-level', 'targeted'):
             effective_scope = 'full'
 
+        # A prose pass that stopped over unwritten scenes re-runs only those
+        owed = _read_pass_field(plan_rows, pass_num, 'owed')
+        if owed and fix_location not in ('brief', 'intent', 'structural', 'registry'):
+            log(f'  Re-running for the scenes this pass still owes: '
+                f'{owed.replace(";", ", ")}')
+            targets = owed
+            effective_scope = owed.replace(';', ',')
+
         # Build config block for prompt builder
         pass_block = f'- name: {pass_name}\n    purpose: {pass_purpose}\n    scope: {pass_scope}'
         if targets:
@@ -2713,6 +2733,11 @@ Rules:
                     try:
                         written_scenes, skipped_scenes = _extract_scenes(
                             step_log, project_dir, python_lib)
+                        # Saved before the commit below, so the plan names
+                        # what's still owed in the same commit as the scenes
+                        _update_pass_field(plan_rows, pass_num, 'owed',
+                                           ';'.join(sorted(skipped_scenes)),
+                                           csv_plan_file)
                     except ExtractError as e:
                         # No scene was written: the unchanged-content check below stops the pass
                         log(f'  API response received, but no scene could be read from it: {e}')
@@ -2810,7 +2835,7 @@ Rules:
         _git(project_dir, 'push', check=False)
 
         if skipped_scenes:
-            _fail_skipped_scenes(pass_name, skipped_scenes, step_log)
+            _fail_skipped_scenes(pass_name, skipped_scenes, step_log, owed_saved=True)
 
         # Mark completed
         _update_pass_field(plan_rows, pass_num, 'status', 'completed', csv_plan_file)
