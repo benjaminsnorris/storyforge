@@ -408,3 +408,56 @@ class TestMainMissingMetadata:
         with pytest.raises(SystemExit) as exc_info:
             main([])
         assert exc_info.value.code == 1
+
+
+class TestCuesNotRead:
+    """A scene whose cue read failed (refused, cut off or errored) keeps its
+    earlier stored cues, which may describe older prose; say so."""
+
+    def test_batch_path_uses_only_ok_replies(self, project_dir, tmp_path, monkeypatch, capsys):
+        from storyforge import cmd_timeline
+        log_dir = str(tmp_path / 'logs')
+        os.makedirs(log_dir)
+        monkeypatch.setattr(cmd_timeline, 'cue_prompts',
+                            lambda p, ids: {'act1-sc01': 'p1', 'act1-sc02': 'p2'})
+        monkeypatch.setattr(cmd_timeline, 'submit_batch', lambda f: 'b')
+        monkeypatch.setattr(cmd_timeline, 'poll_batch', lambda b, log_fn=None: 'u')
+
+        def download(url, out_dir, logs, keep_incomplete=False):
+            assert not keep_incomplete
+            with open(os.path.join(logs, 'act1-sc01.txt'), 'w') as f:
+                f.write('TIME_RELATION: continues\nTIME_GAP: moments later\n')
+            with open(os.path.join(logs, 'act1-sc02.txt'), 'w') as f:
+                f.write('TIME_RELATION: later\n')  # stale: this run's read was refused
+            return ['act1-sc01']
+        monkeypatch.setattr(cmd_timeline, 'download_batch_results', download)
+
+        cues = cmd_timeline._extract_cues_batch(project_dir, ['act1-sc01', 'act1-sc02'],
+                                                'm', log_dir)
+
+        assert list(cues) == ['act1-sc01']
+        out = capsys.readouterr().out
+        assert 'WARNING: no cue result for act1-sc02' in out
+        assert 'Cues stored for 1 of 2 scenes' in out
+
+    def test_summary_names_scenes_without_fresh_cues(self, mock_api, mock_git, mock_costs,
+                                                     project_dir, monkeypatch, capsys):
+        monkeypatch.setattr('storyforge.cmd_timeline.detect_project_root', lambda: project_dir)
+        _patch_interactive(monkeypatch)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        _ensure_scene_files(project_dir)
+        _patch_pass(monkeypatch)  # reads no cues
+        main(['--direct', '--scenes', 'act1-sc01'])
+        assert ('WARNING: no fresh cues for 1 scene(s); the calendar used their '
+                'earlier cues, if any: act1-sc01') in capsys.readouterr().out
+
+    def test_check_says_which_scenes_used_stored_cues(self, mock_api, mock_git, mock_costs,
+                                                      project_dir, monkeypatch, capsys):
+        monkeypatch.setattr('storyforge.cmd_timeline.detect_project_root', lambda: project_dir)
+        _patch_interactive(monkeypatch)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        _ensure_scene_files(project_dir)
+        _patch_pass(monkeypatch)
+        main(['--check', '--scenes', 'act1-sc01'])
+        assert 'no fresh cues for 1 scene(s), so they were checked against their stored cues' \
+            in capsys.readouterr().out
