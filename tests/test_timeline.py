@@ -930,6 +930,20 @@ class TestChecks:
         assert message.startswith('its date (24 December) is 1 day(s) before wakes\'s (25 December)')
         assert '364 day(s) after if the year turned' in message
 
+    def test_a_year_less_date_stepping_back_across_new_year(self):
+        """F-118 (Middlemarch): Raffles's Christmas Eve visit, recalled after
+        New Year's Day, was "357 days after" it; it is a week back."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('new-year', '821', 'scene', 'XXXX-01-01'),
+                          ('christmas', '814', 'scene', 'XXXX-12-24'))
+        assert check_timeline(rows, {}) == []
+        # Put much further back, it is still flagged, with both readings
+        rows = self._rows(('new-year', '821', 'scene', 'XXXX-01-01'),
+                          ('christmas', '780', 'scene', 'XXXX-12-24'))
+        found = check_timeline(rows, {})
+        assert [f['check'] for f in found] == ['date_mismatch']
+        assert '8 day(s) before' in found[0]['message']
+
     def test_a_year_less_date_across_new_year_reads_forward(self):
         from storyforge.timeline import check_timeline
         rows = self._rows(('a', '1', 'scene', 'XXXX-12-30'), ('b', '3', 'scene', 'XXXX-01-02'))
