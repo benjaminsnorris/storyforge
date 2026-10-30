@@ -256,6 +256,12 @@ class TestMigrate:
         result = migrate_registries(ref)
         assert result.rows[0]['statement'] == 'Nora hears a sound.'
         assert any('`fact`' in q.detail for q in result.quirks)
+        assert round_trip_differences(ref, result) == []
+
+    def test_a_fact_file_with_a_name_too_is_an_error(self, tmp_path):
+        ref = _ref(tmp_path, knowledge='id|fact|name|aliases|category|origin\n'
+                   'k1|A fact.|Another wording|||\n')
+        assert 'both `fact` and `name`' in migrate_registries(ref).errors[0]
 
     def test_slug_names_take_the_statement_from_the_first_alias(self, tmp_path):
         """understory: `name` is a slug, and its header has leading spaces."""
@@ -266,6 +272,7 @@ class TestMigrate:
         assert row['id'] == 'k01' and row['statement'] == 'Zara has the Sight'
         assert row['aliases'] == 'zara-has-the-sight;Zara has the Sight;synesthesia'
         assert {q.kind for q in result.quirks} == {'header', 'slug-names'}
+        assert round_trip_differences(ref, result) == []
 
     def test_a_lost_value_in_a_non_standard_file_is_named(self, tmp_path):
         ref = _ref(tmp_path, knowledge='id|fact|name|aliases|category|origin\n'
@@ -275,8 +282,8 @@ class TestMigrate:
         result.rows[0]['aliases'] = ''
         result.rows[0]['category'] = ''
         diffs = '\n'.join(round_trip_differences(ref, result))
-        assert "'a hum' is not in the ledger row" in diffs
-        assert "category 'identity'" in diffs
+        assert "aliases 'a hum' came back as ''" in diffs
+        assert "category 'identity' came back as ''" in diffs
 
     def test_a_column_with_no_place_is_an_error(self, tmp_path):
         ref = _ref(tmp_path, knowledge='id|name|aliases|category|origin|notes\n'
@@ -286,6 +293,54 @@ class TestMigrate:
     def test_missing_files_migrate_to_nothing(self, tmp_path):
         result = migrate_registries(_ref(tmp_path))
         assert (result.rows, result.quirks, result.errors) == ([], [], [])
+
+
+class TestStrictness:
+    """The round trip must not pass when data was lost or changed."""
+
+    def test_a_cell_quirk_accepts_only_its_own_column(self, tmp_path):
+        ref = _ref(tmp_path, physical=P_HEADER + 'a|Tessa|x|injury|s1|never|true\n')
+        result = migrate_registries(ref)
+        assert round_trip_differences(ref, result) == []  # Tessa → tessa-merrin
+        result.rows[0]['statement'] = 'changed'
+        assert any('description' in d for d in round_trip_differences(ref, result))
+
+    def test_surrounding_whitespace_is_a_reported_change(self, tmp_path):
+        ref = _ref(tmp_path, knowledge=K_HEADER + 'k1| Fact |a|identity|s1\n')
+        result = migrate_registries(ref)
+        assert result.rows[0]['statement'] == 'Fact'
+        assert [q.kind for q in result.quirks] == ['whitespace']
+        assert round_trip_differences(ref, result) == []
+
+    def test_a_row_with_more_cells_than_the_header_is_an_error(self, tmp_path):
+        ref = _ref(tmp_path, knowledge=K_HEADER + 'k1|Fact|a|identity|s1|extra\n')
+        assert '6 cells' in migrate_registries(ref).errors[0]
+
+    def test_a_line_separator_inside_a_cell_is_not_a_row_break(self, tmp_path):
+        ref = _ref(tmp_path, knowledge=K_HEADER + 'k1|Fact\u2028more|a|identity|s1\n')
+        result = migrate_registries(ref)
+        assert len(result.rows) == 1 and result.errors == []
+        assert round_trip_differences(ref, result) == []
+
+    def test_a_duplicate_with_an_extra_cell_is_not_exact(self, tmp_path):
+        ref = _ref(tmp_path, knowledge='id|name|aliases|category|origin\n'
+                   'k1|Fact|||s1\nk1|Fact||x|s1\n')
+        assert migrate_registries(ref).errors
+
+    def test_a_gained_row_and_a_new_order_are_named(self, tmp_path):
+        ref = _ref(tmp_path, knowledge=K_HEADER + 'k1|A|||s1\nk2|B|||s1\n')
+        result = migrate_registries(ref)
+        result.rows.reverse()
+        result.rows.append(dict(result.rows[0], id='k3'))
+        diffs = '\n'.join(round_trip_differences(ref, result))
+        assert 'k3: in the ledger but not in the old file' in diffs
+        assert 'different order' in diffs
+
+    def test_crlf_is_a_reported_quirk(self, tmp_path):
+        ref = _ref(tmp_path, knowledge=(K_HEADER + 'k1|Fact|||s1\n').replace('\n', '\r\n'))
+        result = migrate_registries(ref)
+        assert [q.kind for q in result.quirks] == ['crlf']
+        assert round_trip_differences(ref, result) == []
 
 
 class TestRoundTrip:
@@ -300,12 +355,7 @@ class TestRoundTrip:
         ref = _ref(tmp_path, physical=P_HEADER + 'a|Tessa|x|injury|s1|never|true\n')
         result = migrate_registries(ref)
         result.rows.clear()
-        assert any('(missing)' in d for d in round_trip_differences(ref, result))
-
-    def test_crlf_is_named(self, tmp_path):
-        ref = _ref(tmp_path, knowledge=(K_HEADER + 'k1|Fact|||s1\n').replace('\n', '\r\n'))
-        result = migrate_registries(ref)
-        assert any('CRLF' in d for d in round_trip_differences(ref, result))
+        assert any('missing from the ledger' in d for d in round_trip_differences(ref, result))
 
     def test_regenerated_text(self):
         rows = [_row('k1', type='knowledge', statement='F', aliases='a',

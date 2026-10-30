@@ -58,12 +58,24 @@ def ledger_path(project_dir: str) -> str:
 # Read and write
 # ============================================================================
 
+def _raw_lines(path: str) -> tuple[list[str], bool]:
+    """A file's lines, split on newlines only (a U+2028 inside a cell is not a
+    row break), and whether it had CRLF endings."""
+    with open(path, newline='', encoding='utf-8') as f:
+        text = f.read()
+    crlf = '\r\n' in text
+    text = text.replace('\r\n', '\n').replace('\r', '')
+    lines = text.split('\n')
+    if lines and lines[-1] == '':
+        lines.pop()
+    return lines, crlf
+
+
 def _read_rows(path: str) -> tuple[list[str], list[dict[str, str]]]:
     """Header (stripped) and rows of a pipe-delimited CSV; missing file → empty."""
     if not os.path.isfile(path):
         return [], []
-    with open(path, newline='', encoding='utf-8') as f:
-        lines = f.read().replace('\r\n', '\n').replace('\r', '').splitlines()
+    lines, _ = _raw_lines(path)
     if not lines:
         return [], []
     header = [h.strip() for h in lines[0].split('|')]
@@ -200,6 +212,10 @@ def active_states(rows: list[dict[str, str]], scene_id: str,
     holds, after it the state is gone. A fact whose scene isn't in `order`
     (blank, `backstory`, a renamed scene) holds from before the first scene.
 
+    Unlike `elaborate`'s state-disappearance check, which lets a state recur
+    after its one `resolves` scene, a resolved fact stays resolved here: a
+    state that returns is a new fact with its own `scene_id`.
+
     Raises:
         KeyError: if `scene_id` is not in `order`.
     """
@@ -251,11 +267,19 @@ def established_before(rows: list[dict[str, str]], scene_id: str,
 
 @dataclass
 class Quirk:
-    """Something the migration couldn't carry over as is, for the author."""
+    """Something the migration couldn't carry over as is, for the author.
+
+    A quirk with a `column` names one cell: the old file had `old` there and
+    the ledger gives back `new`. The round trip accepts exactly that change
+    and no other.
+    """
     file: str      # 'knowledge.csv' or 'physical-states.csv'
     kind: str
     row_id: str    # '' for a file-level quirk
     detail: str
+    column: str = ''
+    old: str = ''
+    new: str = ''
 
     def __str__(self) -> str:
         return (f'{self.file}' + (f' {self.row_id}' if self.row_id else '')
@@ -273,18 +297,23 @@ class Migration:
 #: Knowledge `origin` values that mean "before the story", not a scene
 _NO_SCENE_ORIGINS = ('backstory', 'before')
 
+_FILE_OF = {'knowledge': 'knowledge.csv', 'physical': 'physical-states.csv'}
+
 
 def migrate_registries(ref_dir: str) -> Migration:
     """Ledger rows from `ref_dir`'s knowledge.csv and physical-states.csv.
 
-    Nothing is written. Every change from the old data is a `Quirk`; a
-    duplicate id whose rows differ is an error, since keeping either would
-    be a guess.
+    Nothing is written. Every change from the old data is a `Quirk`. A
+    duplicate id whose rows differ, a row with more cells than the header,
+    or a column the ledger has no place for is an error, since keeping
+    either version would be a guess.
     """
     result = Migration()
     scene_ids = set(_ids(os.path.join(ref_dir, 'scenes.csv')))
-    _migrate_knowledge(os.path.join(ref_dir, 'knowledge.csv'), scene_ids, result)
-    _migrate_physical(ref_dir, scene_ids, result)
+    for file in _FILE_OF.values():
+        path = os.path.join(ref_dir, file)
+        if os.path.isfile(path):
+            _migrate_file(ref_dir, file, path, scene_ids, result)
     seen: dict[str, str] = {}
     for row in result.rows:
         other = seen.get(row['id'])
@@ -293,9 +322,6 @@ def migrate_registries(ref_dir: str) -> Migration:
                                  f'{_FILE_OF[row["type"]]}')
         seen[row['id']] = _FILE_OF[row['type']]
     return result
-
-
-_FILE_OF = {'knowledge': 'knowledge.csv', 'physical': 'physical-states.csv'}
 
 
 def _ids(path: str) -> list[str]:
@@ -310,133 +336,156 @@ def _base_row(rid: str, type_: str) -> dict[str, str]:
     return row
 
 
+def _old_rows(path: str, file: str, result: Migration):
+    """(header, layout, [(id, cells by column)]) of an old file, with its
+    structural quirks and errors recorded. `layout`: 'standard', 'fact'
+    (lantern-folk) or 'slug' (understory); None when it can't be migrated."""
+    lines, crlf = _raw_lines(path)
+    if not lines:
+        return [], None, []
+    if crlf:
+        result.quirks.append(Quirk(file, 'crlf', '', 'CRLF line endings (the '
+                                   'ledger writes LF)'))
+    raw_header = lines[0].split('|')
+    header = [h.strip() for h in raw_header]
+    if raw_header != header:
+        result.quirks.append(Quirk(file, 'header', '',
+                                   f'header {lines[0]!r} has stray whitespace'))
+    known = KNOWLEDGE_COLUMNS + ['fact'] if file == 'knowledge.csv' else PHYSICAL_COLUMNS
+    extra = [h for h in header if h not in known]
+    if extra or 'id' not in header:
+        result.errors.append(f'{file}: columns the ledger has no place for: '
+                             f'{", ".join(extra) or "(no id column)"}')
+        return header, None, []
+    rows = []
+    for n, line in enumerate(lines[1:], start=2):
+        if not line.strip():
+            continue
+        cells = line.split('|')
+        if len(cells) > len(header):
+            result.errors.append(f'{file} line {n}: {len(cells)} cells, the '
+                                 f'header has {len(header)}: {line[:80]!r}')
+            continue
+        by_col = {h: (cells[i] if i < len(cells) else '') for i, h in enumerate(header)}
+        rid = by_col['id'].strip()
+        if not rid:
+            result.errors.append(f'{file} line {n}: no id: {line[:80]!r}')
+            continue
+        rows.append((rid, by_col))
+    layout = 'standard'
+    if file == 'knowledge.csv' and 'fact' in header:
+        layout = 'fact'
+        result.quirks.append(Quirk(file, 'fact-column', '',
+                                   'statements taken from the `fact` column'))
+        for rid, cells in rows:
+            if cells.get('name', '').strip():
+                result.errors.append(f'{file} {rid}: both `fact` and `name` hold '
+                                     f'text; which is the statement is a guess')
+    elif file == 'knowledge.csv' and rows and all(
+            _is_slug(c.get('name', '')) and _split(c.get('aliases', ''))
+            for _, c in rows):
+        layout = 'slug'
+        result.quirks.append(Quirk(
+            file, 'slug-names', '',
+            '`name` holds slugs: statements taken from the first alias, and '
+            'each slug kept as the first alias'))
+    return header, layout, rows
+
+
 def _dedupe(rows, file, result):
     """Drop exact duplicate rows (reported); a differing duplicate is an error."""
     kept: dict[str, dict] = {}
-    for row in rows:
-        rid = row.get('id', '').strip()
-        if not rid:
-            result.errors.append(f'{file}: a row has no id: {"|".join(row.values())[:80]!r}')
-            continue
+    for rid, cells in rows:
         if rid in kept:
-            if kept[rid] == row:
+            if kept[rid] == cells:
                 result.quirks.append(Quirk(file, 'duplicate', rid,
                                            'exact duplicate row dropped'))
             else:
                 result.errors.append(f'{file}: id {rid!r} is on two rows that differ')
             continue
-        kept[rid] = row
-    return list(kept.values())
+        kept[rid] = cells
+    return list(kept.items())
 
 
-def _migrate_knowledge(path, scene_ids, result):
-    file = 'knowledge.csv'
-    header, rows = _read_rows(path)
-    if not header:
+def _migrate_file(ref_dir, file, path, scene_ids, result):
+    header, layout, rows = _old_rows(path, file, result)
+    if layout is None:
         return
-    raw_header = _raw_header(path)
-    if raw_header != '|'.join(header):
-        result.quirks.append(Quirk(file, 'header', '',
-                                   f'header {raw_header!r} has stray whitespace'))
-    extra = [h for h in header if h not in KNOWLEDGE_COLUMNS]
-    if 'fact' in header:
-        # lantern-folk: the statement is in `fact`
-        result.quirks.append(Quirk(file, 'header', '',
-                                   'statements taken from the `fact` column'))
-        extra.remove('fact')
-    if extra:
-        result.errors.append(f'{file}: columns the ledger has no place for: '
-                             f'{", ".join(extra)}')
-        return
-    # understory: `name` holds slugs and the statement is the first alias
-    slug_names = bool(rows) and all(
-        _is_slug(r.get('name', '')) and _split(r.get('aliases', ''))
-        for r in rows)
-    if slug_names:
-        result.quirks.append(Quirk(
-            file, 'slug-names', '',
-            '`name` holds slugs: statements taken from the first alias, and '
-            'each slug kept as an alias'))
-    for r in _dedupe(rows, file, result):
-        row = _base_row(r['id'].strip(), 'knowledge')
-        row['category'] = r.get('category', '').strip()
-        # Kept verbatim (spacing included), so the round trip is exact
-        aliases = r.get('aliases', '').strip()
-        if 'fact' in header:
-            row['statement'] = r.get('fact', '').strip()
-            if r.get('name', '').strip():
-                aliases = ';'.join(filter(None, [r['name'].strip(), aliases]))
-        elif slug_names:
-            row['statement'] = _split(aliases)[0]
-            aliases = f'{r["name"].strip()};{aliases}'
-        else:
-            row['statement'] = r.get('name', '').strip()
-        row['aliases'] = aliases
-        origin = r.get('origin', '').strip()
-        if origin in _NO_SCENE_ORIGINS or not origin:
-            result.quirks.append(Quirk(
-                file, 'no-scene', row['id'],
-                f'origin {origin!r} names no scene: scene_id left blank'
-                if origin else 'no origin: scene_id left blank'))
-        else:
-            row['scene_id'] = origin
-            if origin not in scene_ids:
+    characters = {}
+    if file == 'physical-states.csv':
+        from storyforge.enrich import load_alias_map
+        characters = load_alias_map(os.path.join(ref_dir, 'characters.csv'))
+    for rid, cells in _dedupe(rows, file, result):
+        clean = {}
+        for column, value in cells.items():
+            clean[column] = value.strip()
+            if column != 'id' and value != value.strip():
                 result.quirks.append(Quirk(
-                    file, 'unknown-scene', row['id'],
-                    f'origin {origin!r} is not a scene id (renamed or removed '
-                    f'scene?): kept as scene_id'))
-        result.rows.append(row)
+                    file, 'whitespace', rid, f'{column}: surrounding whitespace '
+                    f'removed', column=column, old=value, new=value.strip()))
+        if rid != cells['id']:
+            result.quirks.append(Quirk(file, 'whitespace', rid, 'id: surrounding '
+                                       'whitespace removed', column='id',
+                                       old=cells['id'], new=rid))
+        if file == 'knowledge.csv':
+            result.rows.append(_knowledge_row(rid, clean, layout, scene_ids, file, result))
+        else:
+            result.rows.append(_physical_row(rid, clean, characters, scene_ids, file, result))
 
 
-def _migrate_physical(ref_dir, scene_ids, result):
-    from storyforge.enrich import load_alias_map
-    file = 'physical-states.csv'
-    path = os.path.join(ref_dir, file)
-    header, rows = _read_rows(path)
-    if not header:
-        return
-    if _raw_header(path) != '|'.join(header):
-        result.quirks.append(Quirk(file, 'header', '',
-                                   'header has stray whitespace'))
-    extra = [h for h in header if h not in PHYSICAL_COLUMNS]
-    if extra:
-        result.errors.append(f'{file}: columns the ledger has no place for: '
-                             f'{", ".join(extra)}')
-        return
-    characters = load_alias_map(os.path.join(ref_dir, 'characters.csv'))
-    normalized: dict[str, str] = {}
-    for r in _dedupe(rows, file, result):
-        row = _base_row(r['id'].strip(), 'physical')
-        name = r.get('character', '').strip()
-        subject = characters.get(name.lower(), '')
-        if not subject:
-            result.quirks.append(Quirk(
-                file, 'unresolved-character', row['id'],
-                f'character {name!r} is not in characters.csv (name, id or '
-                f'alias): subject left blank'))
-        elif subject != name:
-            normalized[name] = subject
-        row['subject'] = subject
-        row['statement'] = r.get('description', '').strip()
-        row['category'] = r.get('category', '').strip()
-        row['scene_id'] = r.get('acquired', '').strip()
-        row['resolves'] = r.get('resolves', '').strip()
-        row['action_gating'] = r.get('action_gating', '').strip()
-        for column, sid in (('acquired', row['scene_id']), ('resolves', row['resolves'])):
-            if sid and sid != 'never' and sid not in scene_ids:
-                result.quirks.append(Quirk(file, 'unknown-scene', row['id'],
-                                           f'{column} {sid!r} is not a scene id: kept'))
-        result.rows.append(row)
-    for name, subject in sorted(normalized.items()):
-        count = sum(1 for r in rows if r.get('character', '').strip() == name)
+def _knowledge_row(rid, cells, layout, scene_ids, file, result):
+    row = _base_row(rid, 'knowledge')
+    row['category'] = cells.get('category', '')
+    aliases = cells.get('aliases', '')
+    if layout == 'fact':
+        row['statement'] = cells.get('fact', '')
+    elif layout == 'slug':
+        row['statement'] = _split(aliases)[0]
+        aliases = f'{cells["name"]};{aliases}'
+    else:
+        row['statement'] = cells.get('name', '')
+    row['aliases'] = aliases
+    origin = cells.get('origin', '')
+    if origin in _NO_SCENE_ORIGINS or not origin:
         result.quirks.append(Quirk(
-            file, 'character-id', '',
-            f'character {name!r} is written as its id {subject!r} ({count} row(s))'))
+            file, 'no-scene', rid,
+            f'origin {origin!r} names no scene: scene_id left blank'
+            if origin else 'no origin: scene_id left blank',
+            column='origin', old=origin, new=''))
+    else:
+        row['scene_id'] = origin
+        if origin not in scene_ids:
+            result.quirks.append(Quirk(
+                file, 'unknown-scene', rid,
+                f'origin {origin!r} is not a scene id (renamed or removed '
+                f'scene?): kept as scene_id'))
+    return row
 
 
-def _raw_header(path: str) -> str:
-    with open(path, newline='', encoding='utf-8') as f:
-        return f.readline().rstrip('\r\n')
+def _physical_row(rid, cells, characters, scene_ids, file, result):
+    row = _base_row(rid, 'physical')
+    name = cells.get('character', '')
+    subject = characters.get(name.lower(), '')
+    if not subject:
+        result.quirks.append(Quirk(
+            file, 'unresolved-character', rid,
+            f'character {name!r} is not in characters.csv (name, id or '
+            f'alias): subject left blank', column='character', old=name, new=''))
+    elif subject != name:
+        result.quirks.append(Quirk(
+            file, 'character-id', rid, f'character {name!r} is written as its '
+            f'id {subject!r}', column='character', old=name, new=subject))
+    row['subject'] = subject
+    row['statement'] = cells.get('description', '')
+    row['category'] = cells.get('category', '')
+    row['scene_id'] = cells.get('acquired', '')
+    row['resolves'] = cells.get('resolves', '')
+    row['action_gating'] = cells.get('action_gating', '')
+    for column, sid in (('acquired', row['scene_id']), ('resolves', row['resolves'])):
+        if sid and sid != 'never' and sid not in scene_ids:
+            result.quirks.append(Quirk(file, 'unknown-scene', rid,
+                                       f'{column} {sid!r} is not a scene id: kept'))
+    return row
 
 
 def _is_slug(value: str) -> bool:
@@ -449,12 +498,12 @@ def _is_slug(value: str) -> bool:
 # ============================================================================
 
 def regenerate_knowledge(rows: list[dict[str, str]]) -> str:
-    """knowledge.csv's text, written back out of the ledger."""
+    """knowledge.csv's text (standard columns), written back out of the ledger."""
     lines = ['|'.join(KNOWLEDGE_COLUMNS)]
     for r in rows:
         if r.get('type') == 'knowledge':
-            lines.append('|'.join([r['id'], r['statement'], r['aliases'],
-                                   r['category'], r['scene_id']]))
+            cells = _old_cells(r, 'knowledge.csv', 'standard')
+            lines.append('|'.join(cells[c] for c in KNOWLEDGE_COLUMNS))
     return '\n'.join(lines) + '\n'
 
 
@@ -464,100 +513,73 @@ def regenerate_physical(rows: list[dict[str, str]]) -> str:
     lines = ['|'.join(PHYSICAL_COLUMNS)]
     for r in rows:
         if r.get('type') == 'physical':
-            lines.append('|'.join([r['id'], r['subject'], r['statement'],
-                                   r['category'], r['scene_id'], r['resolves'],
-                                   r['action_gating']]))
+            cells = _old_cells(r, 'physical-states.csv', 'standard')
+            lines.append('|'.join(cells[c] for c in PHYSICAL_COLUMNS))
     return '\n'.join(lines) + '\n'
 
 
-def round_trip_differences(ref_dir: str, migration: Migration) -> list[str]:
-    """Lines of the old files that don't come back from the ledger unchanged
-    and that no quirk explains. Empty means the round trip holds.
+def _old_cells(row: dict, file: str, layout: str) -> dict[str, str]:
+    """A ledger row in the old file's columns (the migration, inverted)."""
+    if file == 'physical-states.csv':
+        return {'id': row['id'], 'character': row['subject'],
+                'description': row['statement'], 'category': row['category'],
+                'acquired': row['scene_id'], 'resolves': row['resolves'],
+                'action_gating': row['action_gating']}
+    cells = {'id': row['id'], 'name': row['statement'], 'aliases': row['aliases'],
+             'category': row['category'], 'origin': row['scene_id'], 'fact': ''}
+    if layout == 'fact':
+        cells.update(fact=row['statement'], name='')
+    elif layout == 'slug':
+        slug, _, rest = row['aliases'].partition(';')
+        cells.update(name=slug, aliases=rest)
+    return cells
 
-    A file-level quirk (header, `fact` column, slug names) explains every
-    line of its file; a row quirk explains that row; a `character-id` quirk
-    explains the rows whose character it names.
+
+def round_trip_differences(ref_dir: str, migration: Migration) -> list[str]:
+    """Every cell of the old files that doesn't come back from the ledger
+    unchanged and that no quirk names. Empty means the round trip holds.
+
+    Each old row is written back in its own file's columns and compared cell
+    by cell. A cell quirk accepts exactly its `old` → `new` change; an exact
+    duplicate row compares against the one ledger row it became. Rows the
+    ledger lost or gained, and a change of order, are differences too.
     """
     out = []
-    for file, regenerate in (('knowledge.csv', regenerate_knowledge),
-                             ('physical-states.csv', regenerate_physical)):
+    for type_, file in _FILE_OF.items():
         path = os.path.join(ref_dir, file)
         if not os.path.isfile(path):
             continue
-        with open(path, newline='', encoding='utf-8') as f:
-            original = f.read()
-        quirks = [q for q in migration.quirks if q.file == file]
-        file_level = {q.kind for q in quirks if not q.row_id}
-        explained = {q.row_id for q in quirks if q.row_id}
-        if file_level & {'header', 'slug-names'}:
-            # The lines can't come back as they were; check each row's
-            # fields reached the ledger instead
-            out += _field_differences(path, file, migration.rows, explained)
+        scratch = Migration()
+        header, layout, rows = _old_rows(path, file, scratch)
+        if layout is None:
+            out += [f'{e} (not migrated)' for e in scratch.errors]
             continue
-        # character-id quirks: name → the id it is written as
-        renamed = {q.detail.split("'")[1]: q.detail.split("'")[3]
-                   for q in quirks if q.kind == 'character-id'}
-        if '\r\n' in original:
-            out.append(f'{file}: CRLF line endings (the ledger writes LF)')
-            original = original.replace('\r\n', '\n')
-        old_lines = original.splitlines()
-        new_lines = regenerate(migration.rows).splitlines()
-        if old_lines[:1] != new_lines[:1]:
-            out.append(f'{file}: header {old_lines[0]!r} came back as {new_lines[0]!r}')
-        new_by_id = {line.split('|', 1)[0]: line for line in new_lines[1:]}
-        for line in old_lines[1:]:
-            if not line.strip():
+        accepted = {(q.row_id, q.column): (q.old, q.new)
+                    for q in migration.quirks if q.file == file and q.column}
+        ledger_rows = [r for r in migration.rows if r.get('type') == type_]
+        by_id = {r['id']: r for r in ledger_rows}
+        for rid, cells in rows:
+            new = by_id.get(rid)
+            if new is None:
+                out.append(f'{file} {rid}: missing from the ledger')
                 continue
-            rid = line.split('|', 1)[0].strip()
-            if new_by_id.get(rid) == line or rid in explained:
-                continue
-            if file == 'physical-states.csv':
-                cells = line.split('|')
-                if len(cells) > 1 and cells[1].strip() in renamed:
-                    cells[1] = renamed[cells[1].strip()]
-                    if new_by_id.get(rid) == '|'.join(cells):
-                        continue
-            out.append(f'{file} {rid}: {line!r} came back as '
-                       f'{new_by_id.get(rid, "(missing)")!r}')
-        if [l.split('|', 1)[0] for l in old_lines[1:] if l.strip()] != \
-                [l.split('|', 1)[0] for l in new_lines[1:]] and 'duplicate' not in \
-                {q.kind for q in quirks}:
+            back = _old_cells(new, file, layout)
+            if layout == 'slug' and _split(back['aliases'])[:1] != [new['statement']]:
+                # The statement is the first alias, so a changed one shows only here
+                out.append(f'{file} {rid}: statement {new["statement"]!r} is not '
+                           f'the first alias')
+            for column in header:
+                old_value, new_value = cells[column], back[column]
+                if old_value == new_value or accepted.get((rid, column)) == (
+                        old_value, new_value):
+                    continue
+                out.append(f'{file} {rid}: {column} {old_value!r} came back as '
+                           f'{new_value!r}')
+        old_ids = list(dict.fromkeys(rid for rid, _ in rows))
+        new_ids = [r['id'] for r in ledger_rows]
+        for rid in new_ids:
+            if rid not in old_ids:
+                out.append(f'{file} {rid}: in the ledger but not in the old file')
+        if [i for i in new_ids if i in old_ids] != [i for i in old_ids if i in new_ids]:
             out.append(f'{file}: rows came back in a different order')
-    return out
-
-
-def _field_differences(path, file, rows, explained):
-    """For a file whose lines can't round-trip (a non-standard header): every
-    old row's values must be in its ledger row, in the column the migration
-    maps them to."""
-    by_id = {r['id']: r for r in rows}
-    _, old_rows = _read_rows(path)
-    out = []
-    for old in old_rows:
-        rid = old.get('id', '').strip()
-        new = by_id.get(rid)
-        if new is None:
-            out.append(f'{file} {rid}: missing from the ledger')
-            continue
-        if file == 'knowledge.csv':
-            text = ';'.join([new['statement'], new['aliases']])
-            checks = [('category', new['category'])]
-            if rid not in explained:
-                checks.append(('origin', new['scene_id']))
-            carried = [c for c in ('fact', 'name', 'aliases') if c in old]
-        else:
-            text = new['statement']
-            checks = [('category', new['category']), ('acquired', new['scene_id']),
-                      ('resolves', new['resolves']),
-                      ('action_gating', new['action_gating'])]
-            carried = ['description']
-        for column, value in checks:
-            if old.get(column, '').strip() != value:
-                out.append(f'{file} {rid}: {column} {old.get(column, "")!r} '
-                           f'came back as {value!r}')
-        for column in carried:
-            for part in _split(old.get(column, '')):
-                if part not in text:
-                    out.append(f'{file} {rid}: {column} text {part!r} is not '
-                               f'in the ledger row')
     return out
