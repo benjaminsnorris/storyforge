@@ -85,13 +85,28 @@ class TestNothingWrittenUnlessClean:
         assert [f.code for f in result.findings] == ['TIM']
         self._unchanged(project_dir, before)
 
-    def test_superseding_a_fixed_fact_halts(self, project_dir, tmp_path):
+    def test_superseding_a_fixed_commitment_halts(self, project_dir, tmp_path):
         rows = ledger.load(project_dir)
-        rows[0].update(mutable='fixed')
+        rows.append(dict({c: '' for c in ledger.COLUMNS}, id='eyes', type='trait',
+                         statement='Her eyes are grey', origin='prose', status='binding',
+                         mutable='fixed', introduced_by='draft', scene_id='act1-sc01'))
         ledger.save(project_dir, rows, command='test')
         before = ledger.load(project_dir)
-        result = _gate(project_dir, tmp_path, [_commitment(supersedes=rows[0]['id'])])
+        result = _gate(project_dir, tmp_path, [_commitment(supersedes='eyes')])
         assert [h.kind for h in result.halts] == ['supersedes-fixed']
+        self._unchanged(project_dir, before)
+
+    def test_superseding_a_registry_fact_in_force_is_a_plan_contradiction(
+            self, project_dir, tmp_path):
+        """Review of #439 (M4): the design note halts on superseding a
+        registry fact in force entering the scene, not only one recorded for
+        it, as ending one already did."""
+        rows = ledger.load(project_dir)
+        before = ledger.load(project_dir)
+        result = _gate(project_dir, tmp_path, [_commitment(supersedes=rows[0]['id'])])
+        assert [(h.kind, h.fact_id) for h in result.halts] == [
+            ('plan-contradiction', result.proposed[0]['id'])]
+        assert rows[0]['id'] in result.halts[0].detail
         self._unchanged(project_dir, before)
 
     def test_disagreeing_with_the_scenes_registry_fact_is_a_plan_contradiction(
@@ -171,3 +186,77 @@ class TestFailsLoud:
 def test_gate_commands_are_commitment_writers():
     assert set(gate.GATE_COMMANDS) < set(ledger.COMMITMENT_WRITERS)
     assert ledger.COMMITMENTS_PASS not in gate.GATE_COMMANDS
+
+
+class TestReview439:
+    """Fixes from #439's review."""
+
+    def test_an_unverified_finding_blocks_the_commit(self, project_dir, tmp_path):
+        before = ledger.load(project_dir)
+        bad = dict(_contradiction(), established_quote='words act1-sc01 never says')
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[bad])
+        assert result.unverified and not result.findings
+        assert not result.passed and ledger.load(project_dir) == before
+
+    def test_a_redraft_is_checked_without_its_earlier_commitments(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [_commitment(statement='Hollow had 412 people')])
+        seen = []
+
+        def fake(path, body, **k):
+            if 'tools' not in body:
+                return _text({'commitments': [_commitment(statement='Hollow had 500')]})
+            if len(body['messages']) == 1:
+                return {'stop_reason': 'tool_use', 'usage': {}, 'content': [
+                    {'type': 'tool_use', 'id': 't1', 'name': 'query_ledger',
+                     'input': {'subject': '', 'type': 'world', 'text': 'hollow'}}]}
+            seen.append(body['messages'][2]['content'][0]['content'])
+            return _text({'findings': [], 'kept': []})
+        with patch('storyforge.api._api_request', side_effect=fake):
+            result = gate_scene(project_dir, SCENE, command='redraft', log_dir=str(tmp_path),
+                                extract_model='m', check_model='m')
+        assert result.committed
+        assert '412' not in seen[0]
+
+    def test_a_redraft_clears_the_ends_its_earlier_version_set(self, project_dir, tmp_path):
+        TestEnds()._state(project_dir, 'bleeding', 'draft')
+        _gate(project_dir, tmp_path, [_commitment(ends=['bleeding'])])
+        _gate(project_dir, tmp_path, [_commitment()], command='redraft')
+        assert {r['id']: r for r in ledger.load(project_dir)}['bleeding']['resolves'] == ''
+
+    def test_an_unresolved_extraction_problem_blocks_the_commit(self, project_dir, tmp_path):
+        before = ledger.load(project_dir)
+        result = _gate(project_dir, tmp_path, [_commitment(quote='words the scene lacks')])
+        assert result.unresolved == [f'quote: {SCENE}: {result.proposed[0]["id"]}']
+        assert not result.passed and ledger.load(project_dir) == before
+
+    def test_a_ledger_changed_during_the_gate_is_not_overwritten(self, project_dir, tmp_path):
+        def fake(path, body, **k):
+            if 'tools' in body:
+                rows = ledger.load(project_dir)
+                rows[0]['statement'] = 'edited meanwhile'
+                ledger.save(project_dir, rows, command='hand')
+                return _text({'findings': [], 'kept': []})
+            return _text({'commitments': [_commitment()]})
+        with patch('storyforge.api._api_request', side_effect=fake), \
+                pytest.raises(GateError, match='changed while'):
+            gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path),
+                       extract_model='m', check_model='m')
+        assert ledger.load(project_dir)[0]['statement'] == 'edited meanwhile'
+
+    @pytest.mark.parametrize('fail_on', ['extract', 'check'])
+    def test_an_api_failure_is_a_gate_error(self, project_dir, tmp_path, fail_on):
+        def fake(path, body, **k):
+            if ('tools' in body) == (fail_on == 'check'):
+                raise RuntimeError('API returned HTTP 500')
+            return _text({'commitments': []})
+        with patch('storyforge.api._api_request', side_effect=fake), \
+                pytest.raises(GateError, match='HTTP 500'):
+            gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path),
+                       extract_model='m', check_model='m')
+
+    def test_facts_tied_to_no_scene_are_reported(self, project_dir, tmp_path):
+        rows = ledger.load(project_dir)
+        rows[0]['scene_id'] = 'renamed-scene'
+        ledger.save(project_dir, rows, command='test')
+        result = _gate(project_dir, tmp_path, [_commitment()])
+        assert result.problems['unplaced'] == [rows[0]['id']]

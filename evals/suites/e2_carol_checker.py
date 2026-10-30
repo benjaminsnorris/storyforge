@@ -25,8 +25,8 @@ def run(ctx):
     missed = sorted(cid for cid, hit in result['detected'].items() if not hit)
     notes = ['detector: the gate checker (contradictions; no brief promises)',
              f'missed {len(missed)} of {result["metrics"]["cases"]}: {", ".join(missed)}',
-             f'{len(detector.unverified)} finding(s) dropped as unverified (quotes not in '
-             'the text they name)' + (': ' + '; '.join(detector.unverified[:10])
+             f'{len(detector.unverified)} unverified finding(s) (quotes not in the text '
+             'they name) not counted as flags; the gate blocks on them' + (': ' + '; '.join(detector.unverified[:10])
                                       if detector.unverified else '')]
     notes.append(f'{result["metrics"]["control_flags"]} flag(s) on unedited controls; '
                  f'{result["metrics"]["benign_flagged"]} benign case(s) flagged')

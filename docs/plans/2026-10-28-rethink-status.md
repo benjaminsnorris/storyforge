@@ -15,7 +15,7 @@ Last updated 2026-10-30 (late), at v1.98.0. **Phase 3 is next and nothing is in 
 
 **What exists now, for orientation** (contracts in `docs/agent-reference.md`):
 - **Ledger:** `ledger.load`/`save(…, command=)` (every save appends to `working/audit-log.csv`); typed views `knowledge_view`/`physical_view` (registry rows only, which briefs reference by id); `active_states`, `established_before`, `scene_order`, `drafting_slice` (a scene's share, for the drafting prompt); `LedgerError` / `NotMigratedError`.
-- **Extraction for the gate:** `extract.build_commitments_prompt` / `COMMITMENTS_SCHEMA` / `parse_commitments_response` (the rubric; offered facts in force and the scene's registry facts, `ends`), and `cmd_extract._phase4_known` (what a scene is offered). Phase 4 today is a whole-book batch pass in `cmd_extract._run_phase_4`; the gate needs the same per scene.
+- **Extraction for the gate:** `extract.build_commitments_prompt` / `COMMITMENTS_SCHEMA` / `parse_commitments_response` (the rubric; offered facts in force and the scene's registry facts, `ends`), and `extract.known_for_scene` (what a scene is offered). Phase 4 today is a whole-book batch pass in `cmd_extract._run_phase_4`; the gate needs the same per scene.
 - **Two kinds of fact rows:**
   - **Registry facts** (extract 3b/3c, hone; `introduced_by` extract/hone/migration) are what briefs' `knowledge_in/out` and `physical_state_in/out` name.
   - **Commitments** (extract phase 4, `introduced_by=commitments`, `ledger.COMMITMENTS_PASS`) cover all seven types, each with a quote. They're outside the views and untouched by view writes.
@@ -42,7 +42,7 @@ Last updated 2026-10-30 (late), at v1.98.0. **Phase 3 is next and nothing is in 
 
 **Done in v1.98.0: F-127 and F-128** (phase 4; Ben approved).
 - **F-127, the rubric:** "locations at scene end" became locations that carry past the scene; it now names what to leave out (staging, set dressing, asides, figurative language read literally, a time the text neither states nor shows), and keeps what a vision or ghost shows as a commitment.
-- **F-128, linking:** phase 4 is offered the registry facts in force and those recorded for the scene (`cmd_extract._phase4_known`), each marked state/fixed and registry; past `MAX_KNOWN_COMMITMENTS` the scene's people and place come first, fixed before states. A commitment's `ends` sets `resolves` on this pass's own earlier states. Reported for the author, never applied: prose that disagrees with a registry fact recorded for the same scene, a registry state the prose ends where its `resolves` says otherwise, facts tied to no scene in the run, and the cap.
+- **F-128, linking:** phase 4 is offered the registry facts in force and those recorded for the scene (`extract.known_for_scene`), each marked state/fixed and registry; past `MAX_KNOWN_COMMITMENTS` the scene's people and place come first, fixed before states. A commitment's `ends` sets `resolves` on this pass's own earlier states. Reported for the author, never applied: prose that disagrees with a registry fact recorded for the same scene, a registry state the prose ends where its `resolves` says otherwise, facts tied to no scene in the run, and the cap.
 - **Evals:** E3 recall 0.898 → 0.857 (still ≥ 0.85). E5 23 → 29: the new mismatches are nearly all staging and set dressing (which hand trembles, pen vs pencil), what F-127 stops recording.
 - **Carol re-score** (v1.98.0 vs v1.96.1; files in `evals/fixtures/carol-phase4/`, scored by a fresh-context agent the way evals-9a scored v1.96.1, not by Ben):
 

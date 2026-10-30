@@ -26,8 +26,8 @@ import re
 from dataclasses import dataclass, field
 
 from storyforge import ledger
-from storyforge.api import (RefusalError, ToolInputError, ToolLoopError, ToolRun,
-                            converse, extract_text, is_truncated)
+from storyforge.quotes import normalize, quote_in, word_count
+from storyforge.api import ToolInputError, ToolRun, converse, extract_text, is_truncated
 
 #: Ledger type → the error code a contradiction of it carries (E1/E2's codes)
 CODE_OF_TYPE = {'physical': 'PHY', 'timeline': 'TIM', 'knowledge': 'KNO',
@@ -113,6 +113,9 @@ class CheckResult:
     #: (id, quote, why) for a `kept` item that didn't hold up: an id the brief
     #: doesn't promise, or a quote not in the scene
     kept_unverified: list[tuple[str, str, str]] = field(default_factory=list)
+    #: brief items (`column: item`) that name no binding ledger fact: the
+    #: checker was told so, but can't check them
+    unknown_brief_items: list[str] = field(default_factory=list)
     run: ToolRun | None = None
 
 
@@ -120,18 +123,11 @@ def _flat(text: str) -> str:
     return ' '.join(text.split())
 
 
-def _norm(text: str) -> str:
-    """Lowercased, whitespace collapsed, curly quotes and dashes made plain:
-    how quotes are matched against the text."""
-    text = (text.replace('‘', "'").replace('’', "'")
-            .replace('“', '"').replace('”', '"')
-            .replace('—', '-').replace('–', '-'))
-    return _flat(text).lower()
+_norm = normalize
+_contains = quote_in
 
-
-def _contains(text: str, quote: str) -> bool:
-    q = _norm(quote).strip(' ."\'')
-    return bool(q) and q in _norm(text)
+#: A `kept` quote shorter than this can't show a fact was established
+MIN_KEPT_WORDS = 4
 
 
 # ============================================================================
@@ -148,7 +144,10 @@ class Book:
     rows: list[dict[str, str]]
 
     @classmethod
-    def load(cls, project_dir: str, scene_id: str, prose: str | None = None) -> 'Book':
+    def load(cls, project_dir: str, scene_id: str, prose: str | None = None,
+             rows: list[dict[str, str]] | None = None) -> 'Book':
+        """`rows` in place of the ledger on disk (the gate passes the ledger
+        without the scene's earlier commitments)."""
         from storyforge.elaborate import _read_csv_as_map
         ref_dir = os.path.join(project_dir, 'reference')
         order = ledger.scene_order(project_dir)
@@ -165,7 +164,7 @@ class Book:
             texts[scene_id] = prose
         if not (texts.get(scene_id) or '').strip():
             raise CheckError(f'{scene_id} has no prose to check')
-        return cls(order, scenes, texts, ledger.load(project_dir))
+        return cls(order, scenes, texts, ledger.load(project_dir) if rows is None else rows)
 
     def where(self, sid: str, at: str) -> str:
         if sid not in self.order:
@@ -209,14 +208,24 @@ def _read_scene(book: Book, at: str, args: dict) -> str:
     return f'[{sid}, {book.where(sid, at)}]\n\n{book.prose[sid]}'
 
 
-def _fact_line(row: dict, at: str, book: Book) -> str:
+def _fact_line(row: dict, at: str, book: Book, superseded_by: dict[str, str]) -> str:
+    """One fact for the model: where it was set up and, for a state, whether
+    it still holds (where it ends, what superseded it)."""
     sid = (row.get('scene_id') or '').strip()
     place = f'{sid}, {book.where(sid, at)}' if sid else 'backstory'
     kind = 'commitment' if ledger.is_commitment(row) else 'registry'
+    tags = [row.get('type') or '', row.get('mutable') or 'state', kind, place]
+    ends = (row.get('resolves') or '').strip()
+    if ends == 'never':
+        tags.append('never ends')
+    elif ends:
+        tags.append(f'ends {ends}, {book.where(ends, at)}')
+    if row['id'] in superseded_by:
+        later = superseded_by[row['id']]
+        tags.append(f'superseded by {later}')
     quote = (row.get('quote') or '').strip()
-    return (f'- {row["id"]} [{row.get("type")}, {row.get("mutable") or "state"}, {kind}, '
-            f'{place}] {row.get("subject") or "-"}: {row.get("statement")}'
-            + (f' — "{quote}"' if quote else ''))
+    return (f'- {row["id"]} [{", ".join(tags)}] {row.get("subject") or "-"}: '
+            f'{row.get("statement")}' + (f' — "{quote}"' if quote else ''))
 
 
 def _query_ledger(book: Book, at: str, args: dict) -> str:
@@ -243,9 +252,15 @@ def _query_ledger(book: Book, at: str, args: dict) -> str:
     if not out:
         return 'No binding fact matches.'
     out.sort(key=lambda r: book.order.get((r.get('scene_id') or '').strip(), -1))
+    superseded_by = {}
+    for r in book.rows:
+        if r.get('status') == 'binding':
+            for old in ledger._split(r.get('supersedes', '')):
+                superseded_by.setdefault(old, r['id'])
     head = f'{len(out)} binding fact(s)' + (
         f'; the first {MAX_LEDGER_ROWS} in reading order' if len(out) > MAX_LEDGER_ROWS else '')
-    return '\n'.join([head] + [_fact_line(r, at, book) for r in out[:MAX_LEDGER_ROWS]])
+    return '\n'.join([head] + [_fact_line(r, at, book, superseded_by)
+                               for r in out[:MAX_LEDGER_ROWS]])
 
 
 TOOLS = [
@@ -266,7 +281,9 @@ TOOLS = [
                     'filter given. subject: a character or location id (also matches who '
                     'knows a fact); type: physical, timeline, knowledge, relationship, '
                     'trait, world or promise; text: words in the statement or its quote. '
-                    'Leave a filter empty to skip it. Each fact says where it was set up.',
+                    'Leave a filter empty to skip it. Each fact says where it was set up '
+                    'and, for a state, where it ends or what superseded it: a state that '
+                    'ended before the scene no longer holds.',
      'input_schema': {'type': 'object', 'properties': {
          'subject': {'type': 'string'}, 'type': {'type': 'string'}, 'text': {'type': 'string'}},
          'required': ['subject', 'type', 'text'], 'additionalProperties': False}},
@@ -291,43 +308,65 @@ def _split_cell(value: str) -> list[str]:
     return [v.strip() for v in (value or '').split(';') if v.strip()]
 
 
-def _brief_section(book: Book, project_dir: str, at: str) -> tuple[str, dict[str, str]]:
-    """The brief's promises as prompt text, and registry id → statement for
-    each promised registry fact (what `kept` may name)."""
+@dataclass
+class Brief:
+    """The brief as the checker uses it."""
+    text: str = ''                                          # the prompt section
+    promised: dict[str, str] = field(default_factory=dict)  # registry id → statement
+    fields: dict[str, str] = field(default_factory=dict)    # PROMISE_FIELDS → text
+    unknown: list[str] = field(default_factory=list)        # brief items no ledger fact matches
+
+
+def _brief(book: Book, project_dir: str, at: str) -> Brief:
+    """The scene's brief: what holds entering it (not to be contradicted)
+    and what it promises (to be delivered). A registry item matches binding
+    facts only, by id, statement or alias."""
     from storyforge.elaborate import get_scene
     scene = get_scene(at, os.path.join(project_dir, 'reference')) or {}
-    lines, promised = [], {}
+    brief = Brief()
+    binding = [r for r in book.rows if r.get('status') == 'binding']
+    by_id = {r['id']: r for r in binding}
+    entering, promises = [], []
     for col in PROMISE_FIELDS:
         if (scene.get(col) or '').strip():
-            lines.append(f'- **{col}**: {scene[col].strip()}')
-    for fields, verb in ((REGISTRY_ENTERING_FIELDS, 'holds entering the scene'),
-                         (REGISTRY_PROMISE_FIELDS, 'the scene must establish')):
+            brief.fields[col] = scene[col].strip()
+            promises.append(f'- **{col}**: {brief.fields[col]}')
+    for fields, lines in ((REGISTRY_ENTERING_FIELDS, entering),
+                          (REGISTRY_PROMISE_FIELDS, promises)):
         for col, type_ in fields.items():
-            aliases = ledger.alias_map(ledger.view(book.rows, type_))
-            by_id = {r['id']: r for r in book.rows}
+            aliases = ledger.alias_map(ledger.view(binding, type_))
             for item in _split_cell(scene.get(col, '')):
                 rid = aliases.get(item.lower())
                 if rid is None:
-                    lines.append(f'- **{col}** ({verb}): "{item}" (not in the ledger)')
+                    brief.unknown.append(f'{col}: {item}')
+                    lines.append(f'- **{col}**: "{item}" (not a binding fact in the ledger)')
                     continue
-                lines.append(f'- **{col}** ({verb}): {rid}: {by_id[rid]["statement"]}')
+                lines.append(f'- **{col}**: {rid}: {by_id[rid]["statement"]}')
                 if col in REGISTRY_PROMISE_FIELDS:
-                    promised[rid] = by_id[rid]['statement']
-    if not lines:
-        return '', promised
-    return ('\n## The brief\'s promises\n\n' + '\n'.join(lines) + '\n'), promised
+                    brief.promised[rid] = by_id[rid]['statement']
+    parts = []
+    if entering:
+        parts.append('\n## What holds entering the scene (from its brief)\n\n'
+                     'The scene must not contradict these. They are not promises.\n\n'
+                     + '\n'.join(entering) + '\n')
+    if promises:
+        parts.append("\n## The brief's promises\n\n" + '\n'.join(promises) + '\n')
+    brief.text = ''.join(parts)
+    return brief
 
 
 def build_prompt(book: Book, at: str, brief_text: str) -> str:
     s = book.scenes.get(at, {})
-    promise_rules = '' if not brief_text else (
-        '\n**Broken promises.** Each item of the brief above is a promise. Report one the '
-        'scene does not deliver (kind `broken-promise`; `fact_id` the registry id, or the '
+    promise_rules = '' if "## The brief's promises" not in brief_text else (
+        "\n**Broken promises.** Each item under \"The brief's promises\" is a promise. "
+        'Report one the scene does not deliver (kind `broken-promise`; `fact_id` the registry id, or the '
         'brief field for outcome / key_actions / key_dialogue; `established_quote` the '
         'promised item; `established_scene` empty; `scene_quote` the scene\'s nearest '
         'words, or empty if nothing in the scene comes near). A close paraphrase keeps a '
         'key_dialogue promise. For each registry fact the scene must establish and does, '
-        'add it to `kept` with the scene\'s words that establish it.\n')
+        'add it to `kept` with the scene\'s words that establish it, copied verbatim (a '
+        'full clause or sentence). A fact that holds entering the scene and is '
+        'contradicted is a contradiction, not a broken promise.\n')
     return f"""You are checking one scene of a novel for continuity, the way a careful reader would notice a slip.
 
 ## Scene being checked: {at}
@@ -358,12 +397,19 @@ Return every finding, and an empty list when the scene is clean."""
 # The check
 # ============================================================================
 
-def _verify(f: Finding, book: Book, at: str) -> str:
-    """Why `f`'s quotes don't hold up ('' when they do)."""
+def _verify(f: Finding, book: Book, at: str, brief: Brief) -> str:
+    """Why `f`'s quotes don't hold up ('' when they do). A broken promise
+    must name a promise the brief makes: a promised registry id, or a
+    promise field whose text holds its `established_quote`."""
     if f.scene_quote and not _contains(book.prose[at], f.scene_quote):
         return 'its scene quote is not in the scene'
     if f.kind == 'broken-promise':
-        return ''
+        if f.fact_id in brief.promised:
+            return ''
+        if f.fact_id in brief.fields:
+            return ('' if _contains(brief.fields[f.fact_id], f.established_quote)
+                    else f'its promised item is not in the brief\'s {f.fact_id}')
+        return f'{f.fact_id!r} is not a promise of this scene\'s brief'
     if not f.scene_quote:
         return 'a contradiction with no scene quote'
     if f.established_scene:
@@ -372,36 +418,42 @@ def _verify(f: Finding, book: Book, at: str) -> str:
         if not _contains(book.prose[f.established_scene], f.established_quote):
             return f'its established quote is not in {f.established_scene}'
         return ''
-    row = next((r for r in book.rows if r.get('id') == f.fact_id), None)
+    row = next((r for r in book.rows if r.get('id') == f.fact_id
+                and r.get('status') == 'binding'), None)
     if row is None:
-        return f'it names no scene and {f.fact_id!r} is not a ledger fact'
+        return f'it names no scene and {f.fact_id!r} is not a binding ledger fact'
     return ''
 
 
 def check_scene(project_dir: str, scene_id: str, *, prose: str | None = None,
                 promises: bool = True, model: str | None = None,
-                log_file: str = '') -> CheckResult:
+                log_file: str = '', rows: list[dict[str, str]] | None = None) -> CheckResult:
     """Check `scene_id` (its file, or `prose` in its place) against the rest
-    of the book; with `promises`, against its brief too.
+    of the book; with `promises`, against its brief too. `rows` replaces the
+    ledger on disk.
 
     Raises:
         CheckError: the scene can't be checked, or the check didn't finish
-            (refusal, a reply cut off or off-schema, too many tool turns).
+            (refusal, an API failure, a reply cut off or off-schema, too many
+            tool turns). It carries the exchange so far as `.run` when there
+            was one.
     """
     from storyforge.common import select_model
-    book = Book.load(project_dir, scene_id, prose)
-    brief_text, promised = _brief_section(book, project_dir, scene_id) if promises else ('', {})
+    book = Book.load(project_dir, scene_id, prose, rows)
+    brief = _brief(book, project_dir, scene_id) if promises else Brief()
     handlers = {
         'search_manuscript': lambda a: _search(book, scene_id, a),
         'read_scene': lambda a: _read_scene(book, scene_id, a),
         'query_ledger': lambda a: _query_ledger(book, scene_id, a),
     }
     try:
-        run = converse(build_prompt(book, scene_id, brief_text), model or select_model('checking'),
+        run = converse(build_prompt(book, scene_id, brief.text), model or select_model('checking'),
                        TOOLS, handlers, max_tokens=8000, max_turns=MAX_TURNS,
                        label=f'check {scene_id}', output_schema=SCHEMA, log_file=log_file)
-    except (RefusalError, ToolLoopError) as e:
-        raise CheckError(f'{scene_id}: {e}') from e
+    except RuntimeError as e:   # RefusalError, ToolLoopError, an API failure
+        error = CheckError(f'{scene_id}: {e}')
+        error.run = getattr(e, 'run', None)
+        raise error from e
     if is_truncated(run.response):
         raise CheckError(f'{scene_id}: the checker\'s reply was cut off at max_tokens')
     try:
@@ -410,19 +462,21 @@ def check_scene(project_dir: str, scene_id: str, *, prose: str | None = None,
     except (ValueError, KeyError, TypeError) as e:
         raise CheckError(f'{scene_id}: the checker\'s reply is not the schema ({e})') from e
 
-    result = CheckResult(scene_id, run=run)
+    result = CheckResult(scene_id, run=run, unknown_brief_items=brief.unknown)
     for item in items:
         f = Finding(**{k: (item.get(k) or '').strip() for k in
                        ('kind', 'code', 'scene_quote', 'established_scene',
                         'established_quote', 'fact_id', 'explanation')})
-        f.problem = _verify(f, book, scene_id)
+        f.problem = _verify(f, book, scene_id, brief)
         (result.unverified if f.problem else result.findings).append(f)
     for k in kept:
         rid, quote = (k.get('fact_id') or '').strip(), (k.get('quote') or '').strip()
-        if rid not in promised:
+        if rid not in brief.promised:
             result.kept_unverified.append((rid, quote, 'not a fact the brief promises'))
         elif not _contains(book.prose[scene_id], quote):
             result.kept_unverified.append((rid, quote, 'the quote is not in the scene'))
+        elif word_count(quote) < MIN_KEPT_WORDS:
+            result.kept_unverified.append((rid, quote, f'fewer than {MIN_KEPT_WORDS} words'))
         else:
             result.kept.append((rid, quote))
     return result

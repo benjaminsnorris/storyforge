@@ -1121,14 +1121,6 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                      'working/'])
 
 
-def _unplaced_registry_rows(rows, order):
-    """Binding rows whose scene id is neither blank nor in `order`: phase 4
-    can't tell when they hold, so it offers them to no scene."""
-    return [r['id'] for r in rows if r.get('status') == 'binding'
-            and r.get('scene_id', '').strip()
-            and r['scene_id'].strip() not in order]
-
-
 def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                  force, dry_run, system=None):
     """Phase 4: every commitment each scene makes, by the reader-noticeable
@@ -1155,7 +1147,7 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     from storyforge.extract import (COMMITMENT_PROBLEMS, COMMITMENTS_SCHEMA,
                                     MAX_KNOWN_COMMITMENTS, build_commitments_prompt,
                                     commitment_rows, known_for_scene,
-                                    parse_commitments_response)
+                                    parse_commitments_response, unplaced_rows)
 
     log('')
     log('--- Phase 4: Extract commitments (sequential) ---')
@@ -1180,7 +1172,7 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                 r['resolves'] = ''
     done = {r['scene_id'] for r in rows if r.get('introduced_by') == ledger.COMMITMENTS_PASS}
     problems = {kind: [] for kind in COMMITMENT_PROBLEMS}
-    unplaced = _unplaced_registry_rows(rows, order)
+    unplaced = unplaced_rows(rows, order)
     if unplaced and not dry_run:
         log(f'  WARNING: {len(unplaced)} ledger fact(s) name a scene not in this '
             'run, so no scene is offered them: ' + ', '.join(unplaced[:20])

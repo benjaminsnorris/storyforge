@@ -16,7 +16,7 @@ The gate (plan §3.2) must know what it checks a scene against and what it write
 The registry is the **plan's vocabulary**: the facts a brief promises, by id. Commitments are **what the prose said**. Neither becomes a view over the other, and no author data is migrated.
 
 **What the gate checks against:**
-- **Every binding fact in force entering the scene**, both kinds: earlier scenes' facts and backstory, not superseded, no `state` whose `resolves` scene is past (the rule `cmd_extract._phase4_known` uses). The checker reaches them by tool, by subject, scene and type, so there is no 200-fact cap.
+- **Every binding fact in force entering the scene**, both kinds: earlier scenes' facts and backstory, not superseded, no `state` whose `resolves` scene is past (the rule `extract.known_for_scene` uses). The checker reaches them by tool, by subject, scene and type, so there is no 200-fact cap.
 - **The brief's promises.** `knowledge_in` / `physical_state_in` hold entering the scene, and the prose must not contradict them. `knowledge_out` / `physical_state_out` name registry facts the prose must establish: one it doesn't establish is a **broken promise**, reported by code with the registry id. The brief's outcome, key actions and key dialogue are promises too (the same items E4's judge counts as BPS); interpretive fields (emotions, motifs, subtext) are not.
 
 **What halts (decision 2's immediate tier):**
@@ -30,7 +30,7 @@ The registry is the **plan's vocabulary**: the facts a brief promises, by id. Co
 
 ## What changes in code
 
-- **Telling the two apart.** Today a commitment is `introduced_by == ledger.COMMITMENTS_PASS`, which `ledger._in_view`, `extract.build_commitments_prompt` (the `, registry` mark), `cmd_extract._phase4_known` and `schema.py`'s owner check test. Gate rows carry the drafting command instead, so that test becomes membership in a named set, `ledger.COMMITMENT_WRITERS` (`commitments` plus the gate's commands), behind one helper `ledger.is_commitment(row)`. A blank `introduced_by` stays a registry row, so a hand-added registry fact still reaches the views.
+- **Telling the two apart.** Today a commitment is `introduced_by == ledger.COMMITMENTS_PASS`, which `ledger._in_view`, `extract.build_commitments_prompt` (the `, registry` mark), `extract.known_for_scene` and `schema.py`'s owner check test. Gate rows carry the drafting command instead, so that test becomes membership in a named set, `ledger.COMMITMENT_WRITERS` (`commitments` plus the gate's commands), behind one helper `ledger.is_commitment(row)`. A blank `introduced_by` stays a registry row, so a hand-added registry fact still reaches the views.
 - **Halting on the plan.** A `plan-contradiction` kind beside `audit.HALT_KINDS`, raised by the gate from the checker's findings and from extraction's `supersedes` / `ends` naming a registry fact.
 - **Writing a quote.** A small ledger function, `ledger.fill_quote`, that sets a blank `quote` on a binding knowledge or physical registry row by id. A quote already there is left as it is (it returns False); a commitment row, another type, a non-binding row or an unknown id is refused. Saved through `ledger.save`, so the audit log shows it as `changed`.
 

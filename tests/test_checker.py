@@ -57,7 +57,7 @@ class TestVerification:
         ({'scene_quote': 'words the scene never says'}, 'scene quote is not in the scene'),
         ({'established_quote': 'words act1-sc01 never says'}, 'not in act1-sc01'),
         ({'established_scene': 'nowhere'}, "'nowhere' is not a scene"),
-        ({'established_scene': '', 'fact_id': 'no-such-fact'}, 'not a ledger fact'),
+        ({'established_scene': '', 'fact_id': 'no-such-fact'}, 'not a binding ledger fact'),
         ({'scene_quote': ''}, 'no scene quote'),
     ])
     def test_a_finding_that_does_not_hold_up_is_kept_apart(self, project_dir, over, why):
@@ -70,7 +70,7 @@ class TestVerification:
             established_scene='', fact_id='village-vanished', established_quote='x')])])
         assert len(result.findings) == 1
 
-    def test_quotes_match_across_curly_quotes_and_spacing(self, project_dir):
+    def test_quotes_match_across_line_breaks_spacing_and_end_punctuation(self, project_dir):
         result, _ = _run(project_dir, [_answer([_finding(
             scene_quote='population  four hundred and\ntwelve at last census.')])])
         assert len(result.findings) == 1
@@ -143,3 +143,74 @@ class TestPromises:
         assert result.kept == [(promised, HERE)]
         assert [why for _, _, why in result.kept_unverified] == [
             'the quote is not in the scene', 'not a fact the brief promises']
+
+
+class TestReview439:
+    """Fixes from #439's review."""
+
+    def test_the_ledger_tool_says_where_a_state_ends_and_what_superseded_it(
+            self, project_dir):
+        from storyforge import ledger
+        rows = ledger.load(project_dir)
+        base = dict({c: '' for c in ledger.COLUMNS}, type='physical', origin='prose',
+                    status='binding', mutable='state', introduced_by='draft', subject='tessa')
+        rows += [dict(base, id='cut', statement='Tessa is cut', scene_id='act1-sc01',
+                      resolves=SCENE),
+                 dict(base, id='scar', statement='Tessa has a scar', scene_id='act1-sc01',
+                      supersedes='cut')]
+        book = checker.Book.load(project_dir, SCENE, rows=rows)
+        out = checker._query_ledger(book, SCENE, {'subject': 'tessa', 'type': 'physical',
+                                                  'text': ''})
+        assert f'ends {SCENE}, this scene, superseded by scar' in out
+
+    def test_entering_facts_are_not_promises(self, project_dir):
+        book = checker.Book.load(project_dir, SCENE)
+        brief = checker._brief(book, project_dir, SCENE)
+        entering, promises = brief.text.split("## The brief's promises")
+        assert 'map-anomaly-exists' in entering and 'must not contradict' in entering
+        assert 'village-vanished' in promises and 'map-anomaly-exists' not in promises
+        assert set(brief.promised) == {'village-vanished', 'archive-erasure',
+                                       'archive-key-dorren', 'exhaustion-tessa'}
+
+    @pytest.mark.parametrize('over, ok', [
+        ({'fact_id': 'village-vanished'}, True),
+        ({'fact_id': 'map-anomaly-exists'}, False),     # entering, not promised
+        ({'fact_id': 'invented'}, False),
+        ({'fact_id': 'outcome', 'established_quote': 'not the outcome at all'}, False),
+    ])
+    def test_a_broken_promise_must_name_a_promise_of_the_brief(self, project_dir, over, ok):
+        f = _finding(**{'kind': 'broken-promise', 'established_scene': '', 'scene_quote': '',
+                        'established_quote': '', **over})
+        result, _ = _run(project_dir, [_answer([f])])
+        assert bool(result.findings) is ok and bool(result.unverified) is not ok
+
+    def test_a_broken_promise_quoting_its_field_verifies(self, project_dir):
+        from storyforge.elaborate import get_scene
+        outcome = get_scene(SCENE, f'{project_dir}/reference')['outcome']
+        f = _finding(kind='broken-promise', established_scene='', scene_quote='',
+                     fact_id='outcome', established_quote=outcome)
+        result, _ = _run(project_dir, [_answer([f])])
+        assert len(result.findings) == 1
+
+    def test_a_short_kept_quote_is_not_evidence(self, project_dir):
+        result, _ = _run(project_dir, [_answer(kept=[
+            {'fact_id': 'village-vanished', 'quote': 'last census'}])])
+        assert result.kept == []
+        assert result.kept_unverified[0][2] == 'fewer than 4 words'
+
+    def test_a_rejected_registry_fact_is_not_a_promise(self, project_dir):
+        from storyforge import ledger
+        rows = ledger.load(project_dir)
+        next(r for r in rows if r['id'] == 'village-vanished')['status'] = 'rejected'
+        ledger.save(project_dir, rows, command='test')
+        book = checker.Book.load(project_dir, SCENE)
+        brief = checker._brief(book, project_dir, SCENE)
+        assert 'village-vanished' not in brief.promised
+        assert 'knowledge_out: village-vanished' in brief.unknown
+
+    def test_an_api_failure_is_a_check_error(self, project_dir):
+        def boom(path, body, **k):
+            raise RuntimeError('API returned HTTP 500')
+        with patch('storyforge.api._api_request', side_effect=boom), \
+                pytest.raises(CheckError, match='HTTP 500'):
+            check_scene(project_dir, SCENE, model='m')
