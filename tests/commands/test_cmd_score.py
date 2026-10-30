@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-from storyforge.common import start_new_cycle
+from storyforge.common import get_current_cycle, start_new_cycle
 from storyforge.cmd_score import (
     parse_args,
     main,
@@ -998,6 +998,11 @@ class TestLatestSymlink:
         assert os.readlink(latest) == complete
         out = capsys.readouterr().out
         assert f'latest stays on {complete}' in out
+        marker = os.path.join(project_dir, 'working', 'scores',
+                              f'cycle-{get_current_cycle(project_dir)}',
+                              'incomplete.txt')
+        assert 'scene scores: act1-sc01' in open(marker).read()
+        assert not os.path.exists(os.path.join(latest, 'incomplete.txt'))
         commits = [c[1] for c in mock_git.calls_for('commit_and_push')]
         assert commits[-1].endswith('(incomplete)')
 

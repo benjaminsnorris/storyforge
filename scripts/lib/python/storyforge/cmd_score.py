@@ -802,6 +802,8 @@ def main(argv=None):
 
     # latest stays on the last complete cycle: an incomplete one is still
     # saved and committed, but readers of latest shouldn't see its gaps
+    from storyforge.project import mark_cycle_incomplete
+    mark_cycle_incomplete(cycle_dir, _incomplete)
     if _incomplete:
         _log_latest_kept(project_dir, cycle)
     else:
@@ -914,6 +916,7 @@ def _log_latest_kept(project_dir, cycle):
             log(f'latest stays on {kept}: cycle-{cycle} has unscored parts')
     else:
         log(f'latest not created: cycle-{cycle} has unscored parts')
+
 
 def _score_repetition(scene_ids, project_dir, cycle_dir):
     """Run deterministic repetition scoring. Returns path to scores CSV."""
