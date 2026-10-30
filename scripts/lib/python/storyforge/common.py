@@ -77,6 +77,23 @@ def get_plugin_dir() -> str:
     return str(here.parent.parent.parent.parent)
 
 
+def is_unfilled_template(path: str, plugin_dir: str | None = None) -> bool:
+    """True when a reference file is still the template init copied in.
+
+    Extraction never writes the prose reference docs (character bible,
+    story architecture, ...), so on an extracted book they stay the
+    template, whose headings and guidance would read as the book's own
+    (F-130). Compared with templates/reference/<name>, ignoring outer
+    whitespace; a file with no template counterpart is never unfilled.
+    """
+    template = os.path.join(plugin_dir or get_plugin_dir(), 'templates',
+                            'reference', os.path.basename(path))
+    if not os.path.isfile(path) or not os.path.isfile(template):
+        return False
+    with open(path, encoding='utf-8') as f, open(template, encoding='utf-8') as t:
+        return f.read().strip() == t.read().strip()
+
+
 # ============================================================================
 # YAML helpers (no pyyaml dependency)
 # ============================================================================
@@ -1042,6 +1059,8 @@ def build_shared_context(project_dir: str, model: str = '') -> list[dict]:
     tier2_blocks = []
     tier2_chars = 0
     for path, label in tier2_sources:
+        if is_unfilled_template(path, plugin_dir):
+            continue
         content = _read_if_exists(path)
         if content:
             tier2_blocks.append({'type': 'text', 'text': f'=== {label} ===\n\n{content}'})

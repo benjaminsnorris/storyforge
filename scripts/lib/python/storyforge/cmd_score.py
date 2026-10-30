@@ -28,6 +28,7 @@ from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field, select_model,
     model_for_tier, get_coaching_level, get_current_cycle,
     install_signal_handlers, get_plugin_dir, build_shared_context,
+    is_unfilled_template,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr, commit_and_push,
@@ -2068,10 +2069,10 @@ def _generate_report_and_comment(cycle, cycle_dir, project_dir, score_mode,
 
 
 def _read_reference(project_dir: str, candidates: list) -> str:
-    """Read the first existing reference file."""
+    """Read the first existing reference file that isn't still its template."""
     for ref in candidates:
         path = os.path.join(project_dir, ref)
-        if os.path.isfile(path):
+        if os.path.isfile(path) and not is_unfilled_template(path):
             with open(path) as f:
                 return f.read()
     return ''

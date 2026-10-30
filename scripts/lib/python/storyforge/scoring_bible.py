@@ -10,7 +10,7 @@ from storyforge.api import (
     extract_text_from_file, extract_usage,
     calculate_cost_from_usage, invoke_to_file,
 )
-from storyforge.common import detect_project_root, log, select_model
+from storyforge.common import detect_project_root, is_unfilled_template, log, select_model
 from storyforge.costs import log_operation
 from storyforge.scoring_state import is_override_accepted
 
@@ -32,12 +32,13 @@ BIBLES = (
 
 def _load_bibles(project_dir: str) -> dict[str, str]:
     """Read each bible from disk. Returns {label: content} for bibles that
-    exist; missing bibles are silently skipped so a partial-bibles project
+    exist; missing bibles, and bibles still identical to their template
+    (F-130), are silently skipped so a partial-bibles project
     still gets a useful pass."""
     out: dict[str, str] = {}
     for rel, label in BIBLES:
         path = os.path.join(project_dir, rel)
-        if not os.path.isfile(path):
+        if not os.path.isfile(path) or is_unfilled_template(path):
             continue
         with open(path, encoding='utf-8') as f:
             content = f.read()
