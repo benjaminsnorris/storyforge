@@ -718,7 +718,7 @@ def main(argv=None):
 
     score_start = time.time()
     scored = 0
-    failed = 0
+    failed: list[str] = []
 
     if score_mode == 'batch':
         scored, failed = _score_batch(
@@ -736,7 +736,10 @@ def main(argv=None):
         )
 
     log('')
-    log(f'Scene scoring complete: {scored} scenes scored, {failed} failures')
+    log(f'Scene scoring complete: {scored} scenes scored, {len(failed)} failures')
+    if failed:
+        log(f'WARNING: this cycle has no scene scores for {", ".join(failed)} '
+            f'(refused, cut off or failed); re-score them before relying on it')
     update_pr_task(f'Scene-level scoring ({scene_count} scenes)', project_dir)
 
     # =========================================================================
@@ -1253,7 +1256,7 @@ def _score_batch(scene_ids, eval_model, eval_template, evaluation_criteria,
                  weighted_text_str, metadata_csv, intent_csv, scenes_dir,
                  cycle_dir, log_dir, diagnostics_csv, plugin_dir,
                  project_dir, system=None):
-    """Batch mode scoring. Returns (scored, failed)."""
+    """Batch mode scoring. Returns (scored count, failed scene ids)."""
     log('')
     log(f'Building batch request for {len(scene_ids)} scenes...')
 
@@ -1277,7 +1280,7 @@ def _score_batch(scene_ids, eval_model, eval_template, evaluation_criteria,
     download_batch_results(results_url, cycle_dir, log_dir)
 
     scored = 0
-    failed = 0
+    failed: list[str] = []
     from storyforge.scoring import merge_score_files
 
     for sid in scene_ids:
@@ -1290,12 +1293,13 @@ def _score_batch(scene_ids, eval_model, eval_template, evaluation_criteria,
                      open(status_file).read().strip() == 'ok' and
                      os.path.isfile(text_file))
 
-        if status_ok:
-            # Log usage (batch=True for 50% discount pricing)
-            if os.path.isfile(json_file):
-                _log_api_usage(json_file, 'score', sid, eval_model,
-                               project_dir, batch=True)
+        # Log usage whenever there is a reply, used or not: it was paid for
+        # (batch=True for 50% discount pricing)
+        if os.path.isfile(json_file):
+            _log_api_usage(json_file, 'score', sid, eval_model,
+                           project_dir, batch=True)
 
+        if status_ok:
             text_content = open(text_file).read()
             tmp_scores = os.path.join(cycle_dir, f'.tmp-scores-{sid}.csv')
             tmp_rationale = os.path.join(cycle_dir, f'.tmp-rationale-{sid}.csv')
@@ -1307,12 +1311,12 @@ def _score_batch(scene_ids, eval_model, eval_template, evaluation_criteria,
                 scored += 1
                 log(f'  {scene_title} scored ({scored}/{len(scene_ids)})')
             else:
-                failed += 1
+                failed.append(sid)
                 log(f'  WARNING: Failed to parse {sid}')
             _safe_remove(tmp_scores)
             _safe_remove(tmp_rationale)
         else:
-            failed += 1
+            failed.append(sid)
             log(f'  WARNING: Failed {sid}')
         _safe_remove(status_file)
 
@@ -1324,14 +1328,15 @@ def _score_direct(scene_ids, eval_model, eval_template, evaluation_criteria,
                   weighted_text_str, metadata_csv, intent_csv, scenes_dir,
                   cycle_dir, log_dir, diagnostics_csv, plugin_dir,
                   parallel, score_start, project_dir, system=None):
-    """Direct mode scoring with parallel workers. Returns (scored, failed)."""
+    """Direct mode scoring with parallel workers. Returns (scored count,
+    failed scene ids)."""
     from storyforge.runner import run_batched
     from storyforge.scoring import merge_score_files
 
     log(f'Parallel workers: {parallel}')
 
     scored = 0
-    failed = 0
+    failed: list[str] = []
 
     def score_one(sid):
         prompt = _build_scene_prompt(sid, eval_template, evaluation_criteria,
@@ -1356,11 +1361,11 @@ def _score_direct(scene_ids, eval_model, eval_template, evaluation_criteria,
             return {'ok': False}
 
     def merge_one(sid, result):
-        nonlocal scored, failed
+        nonlocal scored
         scene_title = get_field(metadata_csv, sid, 'title') or sid
 
         if isinstance(result, Exception) or not result.get('ok'):
-            failed += 1
+            failed.append(sid)
             log(f'  WARNING: Failed to score {sid}')
             return
 
@@ -1412,6 +1417,14 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
         build_fidelity_prompt, parse_fidelity_response,
         write_fidelity_csv, generate_fidelity_diagnosis,
     )
+
+    # Only this run's replies are read below: an earlier run's file for a
+    # scene whose call fails now would otherwise be scored as this cycle's.
+    for sid in filtered_ids:
+        for ext in ('txt', 'json'):
+            stale = os.path.join(log_dir, f'fidelity-{sid}.{ext}')
+            if os.path.isfile(stale):
+                os.remove(stale)
 
     if score_mode == 'batch':
         fidelity_batch = os.path.join(log_dir, f'fidelity-batch-{os.getpid()}.jsonl')

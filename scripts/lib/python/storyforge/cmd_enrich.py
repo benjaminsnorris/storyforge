@@ -678,22 +678,23 @@ def main(argv=None):
                 json_file = os.path.join(log_dir, f'{sid}.json')
                 result_file = os.path.join(enrich_dir, f'.enrich-{sid}.txt')
 
+                # Log usage whenever there is a reply, used or not: it was
+                # paid for (batch pricing)
+                if os.path.isfile(json_file):
+                    try:
+                        with open(json_file) as jf:
+                            resp = json.load(jf)
+                        usage = extract_usage(resp)
+                        cost = calculate_cost_from_usage(usage, model, batch=True)
+                        log_operation(project_dir, 'enrich', model,
+                                      usage['input_tokens'], usage['output_tokens'],
+                                      cost, target=sid)
+                    except (OSError, ValueError, KeyError) as e:
+                        log(f'  WARNING: cost of {sid} not logged: {e}')
+
                 if (os.path.isfile(status_file)
                         and open(status_file).read().strip() == 'ok'
                         and os.path.isfile(text_file)):
-                    # Log usage
-                    if os.path.isfile(json_file):
-                        try:
-                            with open(json_file) as jf:
-                                resp = json.load(jf)
-                            usage = extract_usage(resp)
-                            cost = calculate_cost_from_usage(usage, model)
-                            log_operation(project_dir, 'enrich', model,
-                                          usage['input_tokens'], usage['output_tokens'],
-                                          cost, target=sid)
-                        except Exception:
-                            pass
-
                     response = open(text_file).read()
                     _parse_response(response, result_file)
                     _apply_result(sid, result_file)
