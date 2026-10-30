@@ -118,7 +118,7 @@ def test_the_drafting_prompt_reads_states_from_the_ledger(project_dir, plugin_di
     rows = ledger.load_from(ref)
     scar = next(r for r in rows if r['id'] == 'scar-left-hand-kael')
     scar.update(subject='', aliases='Garren')
-    ledger.save_to(ref, rows)
+    ledger.save_to(ref, rows, command='test')
     briefs = os.path.join(ref, 'scene-briefs.csv')
     rows = _read_csv(briefs)
     rows[0]['physical_state_in'] = 'archive-key-dorren;scar-left-hand-kael'
@@ -148,7 +148,7 @@ def test_elaborate_reports_a_gating_state_with_no_character(project_dir):
     rows = ledger.load_from(ref)
     key = next(r for r in rows if r['id'] == 'archive-key-dorren')
     key.update(subject='', aliases='Garren')
-    ledger.save_to(ref, rows)
+    ledger.save_to(ref, rows, command='test')
     flags = [c for c in validate_structure(ref)['checks']
              if c.get('check') == 'state-owner-unknown']
     assert [c['message'] for c in flags] == [
@@ -189,7 +189,7 @@ class TestSchemaAgainstTheLedger:
         ref = os.path.join(project_dir, 'reference')
         rows = ledger.load_from(ref)
         rows[0]['status'] = 'maybe'
-        ledger.save_to(ref, rows)
+        ledger.save_to(ref, rows, command='test')
         errors = [e for e in validate_schema(ref, project_dir)['errors']
                   if e['constraint'] == 'ledger']
         assert len(errors) == 1 and "status 'maybe'" in errors[0]['reason']
@@ -205,7 +205,7 @@ def test_hone_writes_change_only_their_type(project_dir):
     rows = ledger.load_from(ref)
     rows.append({**rows[0], 'id': 'day-three', 'type': 'timeline', 'statement': 'Day 3'})
     rows[0]['quote'] = 'a quote hone never sees'
-    ledger.save_to(ref, rows)
+    ledger.save_to(ref, rows, command='test')
     knowledge = read_registry(ref, 'knowledge')
     knowledge[1]['aliases'] = 'gone village'
     write_registry(ref, 'knowledge', knowledge)

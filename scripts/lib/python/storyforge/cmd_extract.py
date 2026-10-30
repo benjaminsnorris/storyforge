@@ -1073,7 +1073,7 @@ def _run_cleanup(ref_dir: str, project_dir: str) -> None:
 
             commit_and_push(project_dir,
                             f'Extract: cleanup — {total_fixes} fixes (timeline, knowledge, MICE)',
-                            ['reference/'])
+                            ['reference/', 'working/audit-log.csv'])
         else:
             log('  No cleanup fixes needed')
 

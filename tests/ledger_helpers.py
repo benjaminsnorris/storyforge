@@ -25,7 +25,7 @@ def write_facts(ref_dir, filename: str, text: str) -> None:
     ledger.write_view(ref_dir, _TYPE_OF[filename], rows, origin='author',
                       introduced_by='author')
     if not rows and not os.path.isfile(os.path.join(ref_dir, ledger.LEDGER_FILE)):
-        ledger.save_to(ref_dir, [])
+        ledger.save_to(ref_dir, [], command='test')
 
 
 def read_facts(ref_dir, filename: str) -> dict:
