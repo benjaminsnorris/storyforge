@@ -142,6 +142,15 @@ def _resolve_formats(args) -> list[str]:
 # Main
 # ============================================================================
 
+def _exit_if_incomplete(problems: list[str]) -> None:
+    """Name what the assembled book is missing and exit 1."""
+    if problems:
+        log('ERROR: the assembled book is incomplete:')
+        for problem in problems:
+            log(f'  {problem}')
+        sys.exit(1)
+
+
 def main(argv=None):
     args = parse_args(argv or [])
     formats = _resolve_formats(args)
@@ -179,15 +188,19 @@ def main(argv=None):
         log('Add chapters with scene mappings to reference/chapter-map.csv')
         sys.exit(1)
 
-    # Verify scene files
-    missing_scenes = 0
+    # Verify scene files. What the book is missing is named at the end, and
+    # (outside --draft, which previews an unfinished book) the run exits 1.
+    problems: list[str] = []
+    missing_scenes = []
     for ch in range(1, total_chapters + 1):
         for scene_id in _get_chapter_scenes(ch, project_dir):
             if not os.path.isfile(os.path.join(project_dir, 'scenes', f'{scene_id}.md')):
                 log(f'WARNING: Scene file missing: scenes/{scene_id}.md (chapter {ch})')
-                missing_scenes += 1
-    if missing_scenes > 0:
-        log(f'WARNING: {missing_scenes} scene file(s) missing. Assembly will proceed with available scenes.')
+                missing_scenes.append(scene_id)
+    if missing_scenes:
+        log(f'WARNING: {len(missing_scenes)} scene file(s) missing. Assembly will proceed with available scenes.')
+        if not args.draft:
+            problems.append(f'scene file(s) missing: {", ".join(missing_scenes)}')
 
     format_label = ','.join(formats)
 
@@ -319,6 +332,10 @@ def main(argv=None):
         )
         if r.returncode != 0:
             log(f'  WARNING: Failed to assemble chapter {ch}: {r.stderr}')
+            problems.append(f'chapter {ch} ({ch_title}) failed to assemble')
+            # An earlier run's file would otherwise go into the manuscript
+            if os.path.isfile(ch_file):
+                os.remove(ch_file)
             continue
 
         with open(ch_file, 'w') as f:
@@ -345,6 +362,7 @@ def main(argv=None):
         log(f'Manuscript: {manuscript_file}')
         elapsed = int(time.time() - session_start)
         log(f'Assembly complete in {elapsed}s')
+        _exit_if_incomplete(problems)
         return
 
     # ========================================================================
@@ -368,15 +386,21 @@ def main(argv=None):
     env = os.environ.copy()
     env['PYTHONPATH'] = python_lib
 
+    def _run_format(fmt, cmd):
+        r = subprocess.run(cmd, env=env)
+        if r.returncode != 0:
+            log(f'WARNING: {fmt} generation failed (exit {r.returncode})')
+            if optional_pdf and fmt == 'pdf':
+                log('  (PDF is optional under --format all; the other formats stand)')
+            else:
+                format_failures.append(f'{fmt} generation failed')
+
     def _generate_format(fmt):
         if fmt == 'epub':
             epub_file = os.path.join(output_dir, f'{title_slug}.epub')
-            subprocess.run(
-                [sys.executable, '-c',
+            _run_format(fmt, [sys.executable, '-c',
                  f'from storyforge.assembly import generate_epub; '
-                 f'generate_epub("{project_dir}", "{manuscript_file}", "{epub_file}", "{plugin_dir}")'],
-                env=env,
-            )
+                 f'generate_epub("{project_dir}", "{manuscript_file}", "{epub_file}", "{plugin_dir}")'])
             if not args.skip_validation and os.path.isfile(epub_file):
                 subprocess.run(
                     [sys.executable, '-c',
@@ -385,30 +409,25 @@ def main(argv=None):
                 )
         elif fmt == 'html':
             html_file = os.path.join(output_dir, f'{title_slug}.html')
-            subprocess.run(
-                [sys.executable, '-c',
+            _run_format(fmt, [sys.executable, '-c',
                  f'from storyforge.assembly import generate_html; '
-                 f'generate_html("{project_dir}", "{manuscript_file}", "{html_file}", "{plugin_dir}")'],
-                env=env,
-            )
+                 f'generate_html("{project_dir}", "{manuscript_file}", "{html_file}", "{plugin_dir}")'])
         elif fmt == 'pdf':
             pdf_file = os.path.join(output_dir, f'{title_slug}.pdf')
-            subprocess.run(
-                [sys.executable, '-c',
+            _run_format(fmt, [sys.executable, '-c',
                  f'from storyforge.assembly import generate_pdf; '
-                 f'generate_pdf("{project_dir}", "{manuscript_file}", "{pdf_file}", "{plugin_dir}")'],
-                env=env,
-            )
+                 f'generate_pdf("{project_dir}", "{manuscript_file}", "{pdf_file}", "{plugin_dir}")'])
         elif fmt == 'web':
-            subprocess.run(
-                [sys.executable, '-c',
+            _run_format(fmt, [sys.executable, '-c',
                  f'from storyforge.assembly import generate_web_book; '
-                 f'generate_web_book("{project_dir}", "{plugin_dir}", {args.annotate})'],
-                env=env,
-            )
+                 f'generate_web_book("{project_dir}", "{plugin_dir}", {args.annotate})'])
         elif fmt == 'markdown':
             log(f'Markdown manuscript already at: {manuscript_file}')
 
+    # A failed format leaves the manuscript itself whole: the run exits 1,
+    # but `manuscript` is still recorded as current
+    format_failures: list[str] = []
+    optional_pdf = 'all' in formats
     for fmt in formats:
         if fmt == 'all':
             _generate_format('markdown')
@@ -416,10 +435,7 @@ def main(argv=None):
                 _generate_format('epub')
                 _generate_format('html')
                 _generate_format('web')
-                try:
-                    _generate_format('pdf')
-                except Exception:
-                    log('WARNING: PDF generation failed (non-fatal)')
+                _generate_format('pdf')
         else:
             _generate_format(fmt)
 
@@ -442,7 +458,8 @@ def main(argv=None):
     # than the assembly. `UnicodeDecodeError` is a `ValueError`, not an
     # `OSError`, which is the `ill.sha256_of` regression (#298) — both are named.
     stamped = []
-    for artifact in ('chapter_map', 'manuscript'):
+    # An incomplete manuscript is not recorded as current
+    for artifact in ('chapter_map',) + (() if problems else ('manuscript',)):
         try:
             update_artifact_entry(project_dir, artifact,
                                   exists=True, updated=today)
@@ -494,6 +511,8 @@ def main(argv=None):
     # Git commit
     commit_and_push(
         project_dir,
-        f'Assemble: {title} ({format_label})',
+        f'Assemble: {title} ({format_label})'
+        + (' (incomplete)' if problems or format_failures else ''),
         ['manuscript/', 'storyforge.yaml', 'working/logs/', 'working/costs/'],
     )
+    _exit_if_incomplete(problems + format_failures)

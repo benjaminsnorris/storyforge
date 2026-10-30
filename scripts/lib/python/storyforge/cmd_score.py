@@ -454,10 +454,16 @@ def _print_drift_report(project_dir: str, medium: str) -> None:
         _print_level_result(result)
 
 
+# What this cycle could not score (scenes, fidelity, acts, novel-level):
+# named at the end, and the run exits 1.
+_incomplete: list[str] = []
+
+
 def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
 
     install_signal_handlers()
+    _incomplete.clear()
 
     # Elaboration entry points short-circuit the prose-scoring flow.
     # (--semantic is a modifier on --compare, not a standalone trigger.)
@@ -740,6 +746,7 @@ def main(argv=None):
     if failed:
         log(f'WARNING: this cycle has no scene scores for {", ".join(failed)} '
             f'(refused, cut off or failed); re-score them before relying on it')
+        _incomplete.append(f'scene scores: {", ".join(failed)}')
     update_pr_task(f'Scene-level scoring ({scene_count} scenes)', project_dir)
 
     # =========================================================================
@@ -839,10 +846,15 @@ def main(argv=None):
     # Improvement cycle
     # =========================================================================
 
-    _run_improvement_cycle(
-        cycle, cycle_dir, project_dir, weights_file, plugin_dir,
-        intent_csv, title, no_apply=args.no_apply,
-    )
+    if failed:
+        # Tuning craft weights from the scenes that happened to score would
+        # move them for the whole book on a partial picture
+        log(f'Skipping the improvement cycle: {len(failed)} scene(s) have no scores this cycle')
+    else:
+        _run_improvement_cycle(
+            cycle, cycle_dir, project_dir, weights_file, plugin_dir,
+            intent_csv, title, no_apply=args.no_apply,
+        )
     update_pr_task('Diagnosis and proposals', project_dir)
     update_pr_task('Improvement cycle', project_dir)
 
@@ -858,7 +870,8 @@ def main(argv=None):
     # Final commit
     log('Committing scoring results...')
     commit_and_push(project_dir,
-                    f'Score: cycle {cycle}, {scene_count} scenes ({score_mode} mode)',
+                    f'Score: cycle {cycle}, {scene_count} scenes ({score_mode} mode)'
+                    + (' (incomplete)' if _incomplete else ''),
                     ['working/scores/', 'working/craft-weights.csv', 'working/costs/',
                      'working/logs/', 'working/tuning.csv', 'working/overrides.csv',
                      'working/exemplars.csv'])
@@ -867,6 +880,11 @@ def main(argv=None):
     log(f'Scoring cycle {cycle} complete')
     log(f'Results: {cycle_dir}')
     log('============================================')
+    if _incomplete:
+        log(f'ERROR: cycle {cycle} is incomplete; re-score these before relying on it:')
+        for item in _incomplete:
+            log(f'  {item}')
+        sys.exit(1)
 
 
 # ============================================================================
@@ -1420,6 +1438,7 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
             if os.path.isfile(stale):
                 os.remove(stale)
 
+    requested: list[str] = []
     if score_mode == 'batch':
         fidelity_batch = os.path.join(log_dir, f'fidelity-batch-{os.getpid()}.jsonl')
         _safe_remove(fidelity_batch)
@@ -1430,6 +1449,7 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
             prompt = build_fidelity_prompt(sid, project_dir, plugin_dir)
             if not prompt:
                 continue
+            requested.append(sid)
             request = build_batch_request(
                 f'fidelity-{sid}', prompt, sonnet_model, 2048, system=system)
             with open(fidelity_batch, 'a') as f:
@@ -1453,6 +1473,7 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
             if not prompt:
                 continue
             fidelity_log = os.path.join(log_dir, f'fidelity-{sid}.json')
+            requested.append(sid)
             try:
                 invoke_to_file(prompt, sonnet_model, fidelity_log, 2048,
                                system=system)
@@ -1471,6 +1492,7 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
 
     # Process results
     results = []
+    scored_ids: set[str] = set()
     for sid in filtered_ids:
         for path in [os.path.join(log_dir, f'fidelity-{sid}.txt'),
                      os.path.join(log_dir, f'fidelity-{sid}.json')]:
@@ -1495,7 +1517,12 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
                 result = parse_fidelity_response(text, sid)
                 if result.get('scores'):
                     results.append(result)
+                    scored_ids.add(sid)
                 break
+    unscored = [sid for sid in requested if sid not in scored_ids]
+    if unscored:
+        log(f'  WARNING: no fidelity scores for {", ".join(unscored)}')
+        _incomplete.append(f'fidelity: {", ".join(unscored)}')
 
     if results:
         write_fidelity_csv(results, cycle_dir)
@@ -1519,6 +1546,7 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
     act_template_file = os.path.join(prompts_dir, 'act-level.md')
     if not os.path.isfile(act_template_file):
         log('WARNING: Act-level template not found, skipping')
+        _incomplete.append('act-level scoring: no template')
         return
 
     with open(act_template_file) as f:
@@ -1594,9 +1622,14 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
                     f.write(rationale_csv)
                 merge_score_files(os.path.join(cycle_dir, 'act-rationale.csv'), tmp_rationale)
                 _safe_remove(tmp_rationale)
-            log(f'  Act {act_label} scored')
+            if scores_csv:
+                log(f'  Act {act_label} scored')
+            else:
+                log(f'  WARNING: no scores could be read from act {act_label}\'s reply')
+                _incomplete.append(f'act {act_label}: unreadable reply')
         except Exception as e:
             log(f'  WARNING: Failed to score act {act_label}: {e}')
+            _incomplete.append(f'act {act_label}')
 
 
 def _run_novel_scoring(scene_count, metadata_csv, intent_csv, project_dir,
@@ -1606,6 +1639,7 @@ def _run_novel_scoring(scene_count, metadata_csv, intent_csv, project_dir,
     novel_template_file = os.path.join(prompts_dir, 'novel-level.md')
     if not os.path.isfile(novel_template_file):
         log('WARNING: Novel-level template not found, skipping')
+        _incomplete.append('novel-level scoring: no template')
         return
 
     with open(novel_template_file) as f:
@@ -1674,6 +1708,9 @@ def _run_novel_scoring(scene_count, metadata_csv, intent_csv, project_dir,
             if scores_csv:
                 with open(os.path.join(cycle_dir, f'{section}-scores.csv'), 'w') as f:
                     f.write(scores_csv)
+            else:
+                log(f'  WARNING: no {section} scores could be read from the novel-level reply')
+                _incomplete.append(f'novel-level {section} scores: unreadable reply')
             if rationale_csv:
                 with open(os.path.join(cycle_dir, f'{section}-rationale.csv'), 'w') as f:
                     f.write(rationale_csv)
@@ -1681,6 +1718,7 @@ def _run_novel_scoring(scene_count, metadata_csv, intent_csv, project_dir,
         log('  Novel-level scoring complete')
     except Exception as e:
         log(f'  WARNING: Novel-level scoring failed: {e}')
+        _incomplete.append('novel-level scoring')
 
 
 def _run_narrative_scoring(title, metadata_csv, project_dir, cycle_dir,
@@ -1690,6 +1728,7 @@ def _run_narrative_scoring(title, metadata_csv, project_dir, cycle_dir,
     narrative_template_file = os.path.join(prompts_dir, 'novel-narrative.md')
     if not os.path.isfile(narrative_template_file):
         log(f'WARNING: Narrative template not found at {narrative_template_file}, skipping')
+        _incomplete.append('narrative scoring: no template')
         return
 
     with open(narrative_template_file) as f:
@@ -1752,8 +1791,10 @@ def _run_narrative_scoring(title, metadata_csv, project_dir, cycle_dir,
             log(f'  Narrative scores saved to {os.path.basename(narr_scores)}')
         else:
             log('  WARNING: Failed to parse narrative scores')
+            _incomplete.append('narrative scoring: unreadable reply')
     except Exception as e:
         log(f'  WARNING: Narrative scoring API call failed: {e}')
+        _incomplete.append('narrative scoring')
 
 
 def _count_high_priority(diagnosis_file: str) -> int:

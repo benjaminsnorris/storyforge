@@ -1806,6 +1806,38 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
     # pass was still marked completed.
     log(f'  Extracting revised scenes...')
     python_lib = os.path.join(plugin_dir, 'scripts', 'lib', 'python')
+    try:
+        _written, skipped = _extract_scenes(step_log, project_dir, python_lib)
+    except ExtractError as e:
+        log(f'ERROR: Could not extract scenes from polish pass \'{pass_name}\': {e}')
+        log(f'The pass is not marked completed. See {step_log}')
+        sys.exit(1)
+
+    # Update word counts
+    _update_word_counts_from_dir(project_dir)
+
+    # The scenes it did write are committed either way; a pass that skipped
+    # some is not marked completed
+    commit_and_push(
+        project_dir,
+        f'Polish: loop iteration {iteration} — {pass_name}' + fallback_note(served_before),
+        ['scenes/', 'reference/', 'working/'],
+    )
+    if skipped:
+        _fail_skipped_scenes(pass_name, skipped, step_log)
+    _update_pass_field(plan_rows, 1, 'status', 'completed', csv_plan_file)
+
+
+class ExtractError(Exception):
+    """``parsing extract-scenes`` failed outright (no reply content)."""
+
+
+def _extract_scenes(step_log: str, project_dir: str,
+                    python_lib: str) -> tuple[list[str], dict[str, str]]:
+    """Write the scenes a revision reply holds (``parsing extract-scenes``)
+    and log what it says. Returns the scenes written and those the reply
+    held but that were not written (cut off, ending mid-sentence, collapsed),
+    with why. Raises ExtractError when the reply has no content at all."""
     result = subprocess.run(
         [sys.executable, '-m', 'storyforge.parsing', 'extract-scenes',
          step_log, os.path.join(project_dir, 'scenes')],
@@ -1813,27 +1845,28 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
         env={**os.environ, 'PYTHONPATH': python_lib},
     )
     if result.returncode != 0:
-        log(f'ERROR: Could not extract scenes from polish pass \'{pass_name}\': '
-            f'{result.stderr.strip()[:500]}')
-        log(f'The pass is not marked completed. See {step_log}')
-        sys.exit(1)
+        raise ExtractError(result.stderr.strip()[:500] or f'exit {result.returncode}')
+    written, skipped = [], {}
     for line in result.stdout.strip().splitlines():
         log(f'  {line}')
+        if line.startswith('Wrote: '):
+            written.append(line[len('Wrote: '):].strip())
+        elif line.startswith('Skipped: '):
+            sid, _, reason = line[len('Skipped: '):].partition(' -- ')
+            skipped[sid.strip()] = reason.strip()
+    return written, skipped
 
-    # Update word counts
-    _update_word_counts_from_dir(project_dir)
 
-    # Mark completed
-    _update_pass_field(plan_rows, 1, 'status', 'completed', csv_plan_file)
-
-    # Commit
-    import time as _time
-    elapsed = 0  # We don't track per-pass time in loop mode
-    commit_and_push(
-        project_dir,
-        f'Polish: loop iteration {iteration} — {pass_name}' + fallback_note(served_before),
-        ['scenes/', 'reference/', 'working/'],
-    )
+def _fail_skipped_scenes(pass_name: str, skipped: dict[str, str], step_log: str) -> None:
+    """Stop a pass whose reply held scenes that were not written: what it
+    did write is committed, but the pass did not do its job for these."""
+    log(f'ERROR: Pass \'{pass_name}\' did not write {len(skipped)} scene(s); '
+        f'their prose is unchanged:')
+    for sid, reason in skipped.items():
+        log(f'  {sid}: {reason}')
+    log(f'The scenes it did write are committed. The pass is not marked completed; '
+        f're-run it for these scenes. See the reply: {step_log}')
+    sys.exit(1)
 
 
 def _update_word_counts_from_dir(project_dir: str) -> None:
@@ -2611,6 +2644,10 @@ Rules:
 
         step_log = os.path.join(log_dir, f'revision-pass-{pass_num}-{pass_name}.log')
         snapshot_before = _content_snapshot(project_dir)
+        # Direct prose passes: the scenes the reply wrote, and those it held
+        # but that were not written (cut off, unsafe), with why
+        written_scenes: list[str] | None = None
+        skipped_scenes: dict[str, str] = {}
         start_time = time.time()
 
         # Select model
@@ -2674,19 +2711,14 @@ Rules:
                 else:
                     # Standard prose revision -- extract scenes from response
                     try:
-                        result = subprocess.run(
-                            [sys.executable, '-m', 'storyforge.parsing', 'extract-scenes',
-                             step_log, os.path.join(project_dir, 'scenes')],
-                            capture_output=True, text=True,
-                            env={**os.environ, 'PYTHONPATH': python_lib},
-                        )
-                        if result.stdout.strip():
-                            for line in result.stdout.strip().splitlines():
-                                log(f'  {line}')
-                        else:
-                            log('  API response received (analytical pass, no scene markers)')
-                    except Exception:
-                        log('  API response received (could not parse scene content)')
+                        written_scenes, skipped_scenes = _extract_scenes(
+                            step_log, project_dir, python_lib)
+                    except ExtractError as e:
+                        # No scene was written: the unchanged-content check below stops the pass
+                        log(f'  API response received, but no scene could be read from it: {e}')
+                        written_scenes = []
+                    if not written_scenes and not skipped_scenes:
+                        log('  API response received (analytical pass, no scene markers)')
 
                     # Register new scenes
                     if targets:
@@ -2736,6 +2768,8 @@ Rules:
                     revised_scenes = {f[:-3] for f in os.listdir(scenes_dir_path) if f.endswith('.md')}
             elif pass_targets_raw:
                 revised_scenes = set(t.strip() for t in pass_targets_raw.split(';') if t.strip())
+            if written_scenes is not None:  # only what this reply actually rewrote
+                revised_scenes &= set(written_scenes)
 
             updated_count = 0
             for ann_id, ann in ann_data.items():
@@ -2774,6 +2808,9 @@ Rules:
 
         # Push
         _git(project_dir, 'push', check=False)
+
+        if skipped_scenes:
+            _fail_skipped_scenes(pass_name, skipped_scenes, step_log)
 
         # Mark completed
         _update_pass_field(plan_rows, pass_num, 'status', 'completed', csv_plan_file)

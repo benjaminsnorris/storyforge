@@ -312,6 +312,36 @@ def entities(project_dir: str) -> list[str]:
     return sorted({t['entity'] for t in read_transitions(project_dir)})
 
 
+def rewrite_losses(project_dir: str) -> list[str]:
+    """What rewriting the log through ``read_transitions`` and
+    ``write_transitions`` would lose: rows with no entity (skipped on read),
+    columns beyond STATE_COLUMNS, and cells past the header's end. Empty when
+    a rewrite keeps everything, or the log is absent."""
+    from storyforge.illustrations import DELIMITER
+    path = state_path(project_dir)
+    if not os.path.isfile(path):
+        return []
+    with open(path, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    rows = list(csv.reader(raw.splitlines(), delimiter=DELIMITER))
+    if not rows:
+        return []
+    header = [h.strip() for h in rows[0]]
+    losses = []
+    extra = [h for h in header if h and h not in STATE_COLUMNS]
+    if extra:
+        losses.append(f'column(s) {", ".join(extra)}, which the log does not keep')
+    entity = header.index('entity') if 'entity' in header else None
+    for line, row in enumerate(rows[1:], start=2):
+        if not any(cell.strip() for cell in row):
+            continue
+        if entity is None or entity >= len(row) or not row[entity].strip():
+            losses.append(f'line {line}, which has no entity')
+        elif len(row) > len(header):
+            losses.append(f'line {line}, which has more cells than the header')
+    return losses
+
+
 def write_transitions(project_dir: str, rows: list[Transition]) -> str:
     """Write the log and return its path.
 

@@ -264,6 +264,15 @@ class TestCoachingLevel:
 # ============================================================================
 
 
+# A stage reply with one block the stage can apply
+_STAGE_REPLY = (
+    '```scenes-csv\n'
+    'id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n'
+    'act1-sc01|1|Test|1|Dorren|Office|1|morning|2 hours|scene|mapped|0|2500\n'
+    '```'
+)
+
+
 class TestStageDispatch:
     """Test that main correctly dispatches to stage runners."""
 
@@ -286,12 +295,50 @@ class TestStageDispatch:
         api_calls = mock_api.calls_for('invoke_to_file')
         assert len(api_calls) >= 1
 
+    def test_a_reply_with_no_blocks_writes_nothing_and_exits_1(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """It used to log a WARNING, then validate, commit and advance the
+        phase as if the stage had run."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_elaborate.detect_project_root',
+                            lambda: project_dir)
+        mock_api.set_response('Here is my thinking about the spine, in prose.')
+        yaml_path = os.path.join(project_dir, 'storyforge.yaml')
+        with open(yaml_path) as f:
+            before = f.read()
+
+        with pytest.raises(SystemExit) as exc:
+            main(['--stage', 'spine'])
+
+        assert exc.value.code == 1
+        assert 'held no output blocks' in capsys.readouterr().out
+        assert not mock_git.calls_for('commit_and_push')
+        with open(yaml_path) as f:
+            assert f.read() == before
+
+    def test_an_interactive_session_with_no_blocks_is_not_a_failure(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """The interactive claude session writes the reference files itself;
+        its stream log has no blocks to apply, and that is not an error."""
+        monkeypatch.setattr('storyforge.cmd_elaborate.detect_project_root',
+                            lambda: project_dir)
+
+        def session(cmd, stdout=None, **kw):
+            stdout.write('{"type": "result", "result": "Updated the spine."}\n')
+            stdout.close()
+            return type('P', (), {'wait': lambda s: None, 'returncode': 0})()
+        monkeypatch.setattr('storyforge.cmd_elaborate.subprocess.Popen', session)
+
+        main(['--stage', 'spine', '--interactive'])  # no exit 1
+
+        assert mock_git.calls_for('commit_and_push')
+
     def test_spine_creates_branch_and_pr(self, mock_api, mock_git, mock_costs,
                                           project_dir, monkeypatch):
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_elaborate.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response('No structured output blocks found')
+        mock_api.set_response(_STAGE_REPLY)
 
         main(['--stage', 'spine'])
 
@@ -308,7 +355,7 @@ class TestStageDispatch:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_elaborate.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response('No structured output')
+        mock_api.set_response(_STAGE_REPLY)
 
         main(['--stage', 'architecture'])
 
@@ -321,7 +368,7 @@ class TestStageDispatch:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_elaborate.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response('No structured output')
+        mock_api.set_response(_STAGE_REPLY)
 
         main(['--stage', 'map'])
 
@@ -333,7 +380,7 @@ class TestStageDispatch:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_elaborate.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response('No structured output')
+        mock_api.set_response(_STAGE_REPLY)
 
         main(['--stage', 'briefs'])
 
@@ -454,7 +501,7 @@ class TestResponseParsing:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_elaborate.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response('No structured output')
+        mock_api.set_response(_STAGE_REPLY)
 
         main(['--stage', 'spine'])
 

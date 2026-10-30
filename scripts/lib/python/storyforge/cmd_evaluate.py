@@ -838,9 +838,18 @@ def _write_word_count_snapshot(eval_dir: str, project_dir: str) -> None:
 # Main
 # ============================================================================
 
+# Reports kept although cut off at the token limit: marked in the file and
+# named in the session summary (a cut-off report is kept, as in direct mode,
+# but must not read as whole).
+_cut_off: list[str] = []
+_CUT_OFF_NOTE = ('\n\n> **Cut off:** this report hit the token limit; '
+                 'anything after this point is missing.\n')
+
+
 def main(argv=None):
     args = parse_args(argv or [])
     install_signal_handlers()
+    _cut_off.clear()
 
     project_dir = detect_project_root()
     plugin_dir = get_plugin_dir()
@@ -1110,13 +1119,16 @@ def main(argv=None):
                 failed.append(name)
                 continue
             if os.path.isfile(status_file) and open(status_file).read().strip() == 'ok':
-                if is_truncated(reply):
+                cut = is_truncated(reply)
+                if cut:
                     log(f'WARNING: evaluator {name} hit the 8192-token limit; '
                         f'its report is cut off')
                 if os.path.isfile(eval_txt):
                     os.makedirs(eval_dir, exist_ok=True)
                     with open(os.path.join(eval_dir, f'{name}.md'), 'w') as f:
-                        f.write(open(eval_txt).read())
+                        f.write(open(eval_txt).read() + (_CUT_OFF_NOTE if cut else ''))
+                    if cut:
+                        _cut_off.append(f'{name}.md')
 
                 report_path = os.path.join(eval_dir, f'{name}.md')
                 if os.path.isfile(report_path):
@@ -1148,14 +1160,17 @@ def main(argv=None):
             try:
                 response = invoke_to_file(prompt, model, eval_log, max_tokens=8192,
                                           system=system)
-                if is_truncated(response):
+                cut = is_truncated(response)
+                if cut:
                     log(f'WARNING: evaluator {name} hit the 8192-token limit; '
                         f'its report is cut off')
                 text = extract_text(response)
                 if text:
                     os.makedirs(eval_dir, exist_ok=True)
                     with open(os.path.join(eval_dir, f'{name}.md'), 'w') as f:
-                        f.write(text)
+                        f.write(text + (_CUT_OFF_NOTE if cut else ''))
+                    if cut:
+                        _cut_off.append(f'{name}.md')
                     return 'ok', name, model, eval_log
                 return 'fail', name, model, eval_log
             except Exception as e:
@@ -1252,7 +1267,8 @@ def main(argv=None):
             log(f'Running synthesis via direct API (model: {synth_model})...')
             response = invoke_to_file(synth_prompt, synth_model, synth_log, max_tokens=8192,
                                       system=system)
-            if is_truncated(response):
+            synth_cut = is_truncated(response)
+            if synth_cut:
                 log('WARNING: synthesis hit the 8192-token limit; it is cut off')
             synth_response = extract_text(response)
 
@@ -1265,7 +1281,9 @@ def main(argv=None):
                 )
                 synth_md = synth_md_match.group(1).strip() if synth_md_match else synth_response
                 with open(os.path.join(eval_dir, 'synthesis.md'), 'w') as f:
-                    f.write(synth_md)
+                    f.write(synth_md + (_CUT_OFF_NOTE if synth_cut else ''))
+                if synth_cut:
+                    _cut_off.append('synthesis.md')
 
                 findings_match = _re.search(
                     r'--- BEGIN findings\.yaml ---\n(.*?)--- END findings\.yaml ---',
@@ -1276,6 +1294,9 @@ def main(argv=None):
                     findings_yaml = _re.sub(r'^```yaml\s*\n', '', findings_yaml)
                     findings_yaml = _re.sub(r'\n```\s*$', '', findings_yaml)
                     with open(os.path.join(eval_dir, 'findings.yaml'), 'w') as f:
+                        if synth_cut:
+                            f.write('# Cut off: the synthesis hit the token limit; findings '
+                                    'after the last one here are missing.\n')
                         f.write(findings_yaml)
         else:
             # Interactive synthesis
@@ -1323,12 +1344,15 @@ def main(argv=None):
                 log(f'Running assessment via direct API (model: {assess_model})...')
                 response = invoke_to_file(assess_prompt, assess_model, assess_log, max_tokens=8192,
                                           system=system)
-                if is_truncated(response):
+                assess_cut = is_truncated(response)
+                if assess_cut:
                     log('WARNING: assessment hit the 8192-token limit; it is cut off')
                 assess_response = extract_text(response)
                 if assess_response:
                     with open(os.path.join(eval_dir, 'assessment.md'), 'w') as f:
-                        f.write(assess_response)
+                        f.write(assess_response + (_CUT_OFF_NOTE if assess_cut else ''))
+                    if assess_cut:
+                        _cut_off.append('assessment.md')
             else:
                 subprocess.run(
                     ['claude', assess_prompt,
@@ -1382,6 +1406,8 @@ def main(argv=None):
         log('  Assessment: yes (execution vs. intent)')
     if failed:
         log(f'  Failed: {" ".join(failed)}')
+    if _cut_off:
+        log(f'  Cut off at the token limit (kept, marked in the file): {", ".join(_cut_off)}')
     log(f'  Time: {session_mins}m{session_secs}s')
     log('============================================')
     log('')

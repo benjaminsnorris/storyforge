@@ -906,3 +906,11 @@ class TestMalformedStateOverrideIsReported:
         assert findings, 'the malformed cell must produce findings'
         for finding in findings:
             assert '|' not in finding['detail'], finding['detail']
+
+
+def test_rewrite_losses_is_empty_for_an_absent_or_clean_log(tmp_path):
+    from storyforge import visual_state as vs
+    assert vs.rewrite_losses(str(tmp_path)) == []
+    vs.write_transitions(str(tmp_path), [{'entity': 'e', 'from_scene': 's',
+                                          'state': 'x', 'evidence': ''}])
+    assert vs.rewrite_losses(str(tmp_path)) == []

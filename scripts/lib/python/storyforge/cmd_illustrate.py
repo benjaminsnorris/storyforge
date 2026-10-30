@@ -760,6 +760,15 @@ def run_state(project_dir: str, coaching: CoachingLevel,
             dry_run,
         )
 
+    # Proposing rewrites the whole log, which would lose whatever the read
+    # skipped or the writer has no column for: the author's data. Stop first.
+    losses = vs.rewrite_losses(project_dir)
+    if losses:
+        log(f'ERROR: {vs.STATE_FILE} can\'t be rewritten without losing '
+            f'{"; ".join(losses)}. Fix those rows or columns (or use --coaching coach) '
+            f'and re-run. Nothing was written.')
+        return 1
+
     if dry_run:
         log(f'[dry-run] would propose transitions from {len(scene_ids)} scene(s) '
             f'(coaching={coaching})')
