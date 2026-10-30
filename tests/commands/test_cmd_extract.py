@@ -986,6 +986,25 @@ class TestRecordPhysicalStates:
         assert rows['cough']['resolves'] == 'b'
         assert 'not-a-state' not in rows
 
+    def test_forced_run_replaces_the_last_runs_resolution(self, tmp_path):
+        """P&P, forced phase 3: the reply resolved weary-muddy-after-walk at
+        the dinner, but the seeded row kept the last run's later scene, so
+        validate flagged the state as vanishing at the dinner."""
+        from storyforge.cmd_extract import _record_physical_states
+        phys = str(tmp_path)
+        _record_physical_states(phys, 'a', [{'id': 'muddy', 'character': 'elizabeth'}], [], {})
+        _record_physical_states(phys, 'old-run-scene', [], ['muddy'], {})
+        assert self._rows(phys)['muddy']['resolves'] == 'old-run-scene'
+        this_pass = set()
+        _record_physical_states(phys, 'dinner', [], ['muddy'], {}, this_pass)
+        assert self._rows(phys)['muddy']['resolves'] == 'dinner'
+        # The pass's first resolution stands
+        _record_physical_states(phys, 'later', [], ['muddy'], {}, this_pass)
+        assert self._rows(phys)['muddy']['resolves'] == 'dinner'
+        # An unforced run keeps what is stored
+        _record_physical_states(phys, 'elsewhere', [], ['muddy'], {})
+        assert self._rows(phys)['muddy']['resolves'] == 'dinner'
+
 
 class TestKnowledgeChainOffersOnlyEarlierFacts:
     """F-123: a forced re-run seeds phase 3b from the ledger, and each scene's

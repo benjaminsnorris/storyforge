@@ -644,7 +644,8 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 # Phase 3: Briefs (scene-briefs.csv)
 # ============================================================================
 
-def _record_physical_states(ref_dir, scene_id, new_states, resolved, character_aliases):
+def _record_physical_states(ref_dir, scene_id, new_states, resolved, character_aliases,
+                            resolved_this_pass=None):
     """Add a scene's new physical states to the ledger and record where
     states resolve.
 
@@ -653,6 +654,12 @@ def _record_physical_states(ref_dir, scene_id, new_states, resolved, character_a
     ``never``, and validate flagged each one as vanishing in the scene the
     text ends it (F-057). Only physical rows change; every other fact in
     the ledger is kept.
+
+    On a forced run, pass ``resolved_this_pass`` (the states this pass has
+    resolved so far; updated here): the first scene of this pass that
+    resolves a state sets ``resolves``, replacing the previous run's scene.
+    Otherwise the stored scene blocked it, and validate flagged the state
+    as vanishing where this run ended it (P&P: weary-muddy-after-walk).
     """
     from storyforge import ledger
     from storyforge.enrich import normalize_aliases
@@ -675,7 +682,13 @@ def _record_physical_states(ref_dir, scene_id, new_states, resolved, character_a
         existing_phys[sid_key] = row
     for state_id in (r.strip() for r in resolved):
         row = existing_phys.get(state_id)
-        if row is not None and row.get('resolves', '').strip() in ('', 'never'):
+        if row is None:
+            continue
+        if resolved_this_pass is not None:
+            if state_id not in resolved_this_pass:
+                resolved_this_pass.add(state_id)
+                row['resolves'] = scene_id
+        elif row.get('resolves', '').strip() in ('', 'never'):
             row['resolves'] = scene_id
     ledger.write_view(ref_dir, 'physical', list(existing_phys.values()),
                       origin='prose', introduced_by='extract')
@@ -1028,6 +1041,8 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     phys_model = select_model('evaluation')
     phys_states = {}  # dict[str, set[str]]: character -> active state IDs
     created_states = set()   # state ids this pass declared
+    # A forced run's own resolutions replace the seeded ones from the last run
+    resolved_this_pass = set() if force else None
     phys_summaries = []
 
     for scene_id in sorted_scene_ids:
@@ -1070,7 +1085,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         new_states = result.get('_new_states', [])
         resolved = result.get('_resolved', [])
         _record_physical_states(ref_dir, scene_id, new_states, resolved,
-                                alias_maps.get('characters', {}))
+                                alias_maps.get('characters', {}), resolved_this_pass)
 
         # Accumulate state
         for ns in new_states:
