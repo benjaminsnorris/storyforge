@@ -4298,6 +4298,34 @@ def test_state_full_writes_proposed_transitions(in_project, monkeypatch):
     assert any(t['entity'] == 'nora-clothing' for t in transitions)
 
 
+@pytest.mark.parametrize('content, lost', [
+    ('entity|from_scene|state|evidence\nnora-clothing|act1-sc01|nightclothes|x\n'
+     '|act1-sc02|a row the author is still writing|y\n', 'line 3, which has no entity'),
+    ('entity|from_scene|state|evidence|note\nnora-clothing|act1-sc01|nightclothes|x|keep\n',
+     'column(s) note'),
+    ('entity|from_scene|state|evidence\nnora-clothing|act1-sc01|nightclothes|x|stray\n',
+     'line 2, which has more cells than the header'),
+])
+def test_state_full_refuses_to_rewrite_a_log_it_would_lose_data_from(
+        in_project, monkeypatch, capsys, content, lost):
+    """Full coaching rewrites the whole log. It used to skip a row with no
+    entity on read (with a WARNING) and then write the log without it, and
+    drop any column beyond its own: author data, deleted."""
+    path = os.path.join(in_project, 'reference', 'visual-state.csv')
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def _boom(*a, **k):
+        raise AssertionError('no proposal should be asked for')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', _boom)
+
+    assert cmd_illustrate.main(['--state', '--coaching', 'full']) == 1
+    assert lost in capsys.readouterr().out
+    with open(path, encoding='utf-8') as f:
+        assert f.read() == content
+
+
 def test_state_full_never_revises_an_existing_transition(in_project, monkeypatch):
     from storyforge import visual_state as vs
     vs.write_transitions(in_project, [{
