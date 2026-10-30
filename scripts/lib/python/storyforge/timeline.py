@@ -1209,7 +1209,7 @@ def extract_cues(project_dir: str, scene_ids: list[str], model: str,
     """Read time cues for *scene_ids* with direct calls in parallel, store
     them in working/timeline-cues.csv (unless *store* is false), and return
     them."""
-    from .api import invoke_to_file, extract_text
+    from .api import invoke_to_file, extract_text, is_truncated, stop_problem
     from .runner import run_parallel
     os.makedirs(log_dir, exist_ok=True)
     prompts = cue_prompts(project_dir, scene_ids)
@@ -1218,6 +1218,10 @@ def extract_cues(project_dir: str, scene_ids: list[str], model: str,
         response = invoke_to_file(prompts[sid], model,
                                   os.path.join(log_dir, f'timeline-cues-{sid}.json'),
                                   max_tokens=1024, label=f'timeline cues {sid}')
+        # A cut-off reply may lack the relation or the anchor; parsed, it
+        # would pass for this scene's cues. (A refusal raises.)
+        if is_truncated(response):
+            raise RuntimeError(stop_problem(response))
         return parse_cues(extract_text(response))
 
     results = run_parallel(list(prompts), worker, label='scene')
