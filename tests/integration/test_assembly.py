@@ -757,11 +757,18 @@ class TestResolveCoverPath:
 
     def test_absolute_path_returned_as_is(self, tmp_path):
         path = str(tmp_path / 'cover.png')
+        (tmp_path / 'cover.png').write_text('img')
         assert _resolve_cover_path(str(tmp_path), path) == path
 
     def test_relative_path_joined_with_project(self, tmp_path):
+        (tmp_path / 'assets').mkdir()
+        (tmp_path / 'assets' / 'cover.png').write_text('img')
         result = _resolve_cover_path(str(tmp_path), 'assets/cover.png')
         assert result == os.path.join(str(tmp_path), 'assets/cover.png')
+
+    def test_a_missing_explicit_path_raises(self, tmp_path):
+        with pytest.raises(ValueError, match='assets/cover.png'):
+            _resolve_cover_path(str(tmp_path), 'assets/cover.png')
 
     def test_auto_detects_production_png(self, tmp_path):
         prod = tmp_path / 'production'
@@ -816,8 +823,9 @@ class TestResolveCoverPath:
         result = _resolve_cover_path(str(tmp_path), None)
         assert result == str(custom)
 
-    def test_cover_image_yaml_missing_file_falls_back(self, tmp_path, monkeypatch, capsys):
-        """When cover_image YAML points to a missing file, warn and fall back."""
+    def test_a_configured_cover_that_is_missing_raises(self, tmp_path, monkeypatch):
+        """Decision 2 (2026-10-30): it used to warn and fall back to
+        auto-detect, so publish shipped another cover than the configured one."""
         prod = tmp_path / 'production'
         prod.mkdir()
         (prod / 'cover.jpg').write_text('fallback')
@@ -826,12 +834,11 @@ class TestResolveCoverPath:
             'storyforge.assembly.read_production_field',
             lambda pd, field: 'nonexistent/cover.png' if field == 'cover_image' else None,
         )
-        result = _resolve_cover_path(str(tmp_path), None)
-        assert result == str(prod / 'cover.jpg')
-        assert 'WARNING' in capsys.readouterr().out
+        with pytest.raises(ValueError, match='nonexistent/cover.png'):
+            _resolve_cover_path(str(tmp_path), None)
 
-    def test_cover_image_yaml_read_error_falls_back(self, tmp_path, monkeypatch):
-        """When read_production_field raises, fall back to auto-detect."""
+    def test_an_unreadable_yaml_is_not_read_as_no_cover(self, tmp_path, monkeypatch):
+        """Auto-detect could pick a cover the unread config doesn't name."""
         prod = tmp_path / 'production'
         prod.mkdir()
         (prod / 'cover.jpg').write_text('fallback')
@@ -839,8 +846,8 @@ class TestResolveCoverPath:
         def _raise(*a, **kw):
             raise OSError('permission denied')
         monkeypatch.setattr('storyforge.assembly.read_production_field', _raise)
-        result = _resolve_cover_path(str(tmp_path), None)
-        assert result == str(prod / 'cover.jpg')
+        with pytest.raises(OSError):
+            _resolve_cover_path(str(tmp_path), None)
 
     def test_no_cover_returns_none(self, tmp_path):
         assert _resolve_cover_path(str(tmp_path), None) is None
