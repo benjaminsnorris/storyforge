@@ -31,7 +31,8 @@ def _themes_reply(scene_ids, mention):
         'themes': [{'id': f't{k}', 'name': f'T{k}', 'tier': 'primary',
                     'description': 'How the book treats it.'} for k in range(1, 4)],
         'scene_themes': [{'scene_id': sid, 'themes': ['t1', 't2']} for sid in scene_ids],
-        'motifs': [{'id': 'm', 'name': 'M', 'aliases': [mention], 'tier': 'primary'}],
+        'motifs': [{'id': 'm', 'name': 'M', 'aliases': [mention], 'tier': 'primary',
+                    'mentions': [0, 1]}],
     })
 
 

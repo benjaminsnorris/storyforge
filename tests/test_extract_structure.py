@@ -11,7 +11,7 @@ import pytest
 
 from storyforge.extract_describe import (
     StructureError, build_structure_prompt, build_themes_prompt,
-    motif_candidates, parse_structure, parse_themes, structure_rows,
+    motif_mentions, parse_structure, parse_themes, structure_rows,
 )
 
 
@@ -139,19 +139,18 @@ class TestPrompts:
         assert 'spine event x has no anchor scene' in prompt
         assert 'describing a finished book' in prompt
 
-    def test_themes_prompt_says_when_no_motif_recurs(self):
+    def test_themes_prompt_says_when_the_briefs_name_no_motifs(self):
         prompt = build_themes_prompt({}, _scenes(3), [])
-        assert 'name no motif in more than one scene' in prompt
+        assert '(the briefs name no motifs)' in prompt
 
 
-class TestMotifCandidates:
-    def test_counted_by_scene_case_folded_and_recurring_only(self):
-        scenes = _scenes(8)
-        scenes[0]['motifs'] = 'the ash heap'
-        got = dict(motif_candidates(scenes))
-        assert got['green light'] == ['s04', 's08']   # 'Green Light' twice in a scene counts once
-        assert 'the ash heap' not in got
-        assert list(dict(motif_candidates(scenes)))[0] == 'eyes'   # most frequent first
+class TestMotifMentions:
+    def test_every_mention_in_reading_order(self):
+        scenes = _scenes(3)
+        scenes[0]['motifs'] = 'fog pouring through the keyhole; the cold he carries'
+        assert motif_mentions(scenes) == [
+            ('s01', 'fog pouring through the keyhole'), ('s01', 'the cold he carries'),
+            ('s02', 'eyes'), ('s03', 'eyes')]
 
 
 def _themes_reply(scenes, **over):
@@ -159,33 +158,65 @@ def _themes_reply(scenes, **over):
         'themes': [{'id': f't{k}', 'name': f'T{k}', 'tier': 'primary' if k == 1 else 'secondary',
                     'description': 'd'} for k in range(1, 4)],
         'scene_themes': [{'scene_id': s['id'], 'themes': ['t1']} for s in scenes],
-        'motifs': [{'id': 'green-light', 'name': 'The green light',
-                    'aliases': ['green light'], 'tier': 'primary'}],
+        'motifs': [{'id': 'eyes', 'name': 'Watching eyes', 'aliases': ['Eyes', 'the eyes'],
+                    'tier': 'primary', 'mentions': [0, 1]}],
     }
     reply.update(over)
     return json.dumps(reply)
 
 
+def _mentioned(n=4):
+    scenes = _scenes(n)
+    for s in scenes:
+        s['motifs'] = f'the eyes watching in scene {s["id"]}'
+    return scenes
+
+
 class TestParseThemes:
     def test_a_good_reply(self):
-        scenes = _scenes(8)
-        out = parse_themes(_themes_reply(scenes), scenes, motif_candidates(scenes))
+        scenes = _mentioned()
+        out = parse_themes(_themes_reply(scenes), scenes, motif_mentions(scenes))
         assert out['scene_themes']['s01'] == ['t1']
-        assert out['motifs'][0]['aliases'] == ['green light']
+        motif = out['motifs'][0]
+        assert motif['aliases'] == ['eyes', 'the eyes']
+        assert motif['scenes'] == ['s01', 's02']    # computed from the mentions
+
+    def test_the_prompt_numbers_and_shortens_mentions(self):
+        scenes = _mentioned(2)
+        scenes[0]['motifs'] = 'x' * 300
+        prompt = build_themes_prompt({}, scenes, motif_mentions(scenes))
+        assert '[0] s01: ' + 'x' * 100 + '\n' in prompt
+        assert '[1] s02: the eyes watching' in prompt
 
     def test_problems(self):
-        scenes = _scenes(8)
+        scenes = _mentioned()
         reply = _themes_reply(
             scenes,
             scene_themes=[{'scene_id': 's01', 'themes': ['t1', 'ghost']},
                           {'scene_id': 'invented', 'themes': []}],
-            motifs=[{'id': 'a', 'name': 'A', 'aliases': ['green light'], 'tier': 'primary'},
-                    {'id': 'b', 'name': 'B', 'aliases': ['green light', 'moon'], 'tier': 'tertiary'}])
+            motifs=[{'id': 'a', 'name': 'A', 'aliases': ['robe'], 'tier': 'primary', 'mentions': [0, 1]},
+                    {'id': 'b', 'name': 'B', 'aliases': ['Robe'], 'tier': 'tertiary', 'mentions': [1, 9]},
+                    {'id': 'c', 'name': 'C', 'aliases': [], 'tier': 'tertiary', 'mentions': [2]}])
         with pytest.raises(StructureError) as e:
-            parse_themes(reply, scenes, motif_candidates(scenes))
+            parse_themes(reply, scenes, motif_mentions(scenes))
         text = ' '.join(e.value.problems)
         assert 'unknown theme(s): ghost' in text
         assert "'invented', which is not a scene id" in text
-        assert '7 scene(s) missing from scene_themes' in text
-        assert "'green light' is claimed by both a and b" in text
-        assert "'moon' is not one of the listed mentions" in text
+        assert '3 scene(s) missing from scene_themes' in text
+        assert 'mention [1] is claimed by both a and b' in text
+        assert 'mention [9], which does not exist' in text
+        assert 'motif c is named in 1 scene(s)' in text
+        assert "alias 'robe' is given to both a and b" in text   # Carol's live run did this
+
+    def test_no_motifs_when_some_recur_is_a_problem(self):
+        scenes = _mentioned()
+        with pytest.raises(StructureError) as e:
+            parse_themes(_themes_reply(scenes, motifs=[]), scenes, motif_mentions(scenes))
+        assert 'motifs is empty' in ' '.join(e.value.problems)
+
+    def test_no_motifs_is_fine_when_the_briefs_name_none(self):
+        scenes = _scenes(3)
+        for s in scenes:
+            s['motifs'] = ''
+        out = parse_themes(_themes_reply(scenes, motifs=[]), scenes, motif_mentions(scenes))
+        assert out['motifs'] == []

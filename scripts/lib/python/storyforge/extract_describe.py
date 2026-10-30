@@ -546,21 +546,20 @@ def structure_rows(structure: dict, scenes: list[dict[str, str]],
 
 TIERS = ('primary', 'secondary', 'tertiary')
 THEME_RANGE = (3, 7)
-#: A motif the briefs name in fewer scenes than this isn't recurring.
+#: A motif must be named in at least this many scenes to be recurring.
 MOTIF_MIN_SCENES = 2
+#: Each brief mention is cut to this many characters in the prompt: briefs
+#: describe a motif at length, and the image is in the opening words.
+_MENTION_CHARS = 100
 
 
-def motif_candidates(scenes: list[dict[str, str]]) -> list[tuple[str, list[str]]]:
-    """The briefs' motif mentions that recur: `(mention, scene ids)` for each
-    lowercased mention found in at least MOTIF_MIN_SCENES scenes, most
-    frequent first. Counted here, not by the model, so the taxonomy is built
-    from what the briefs actually name."""
-    seen: dict[str, list[str]] = {}
-    for s in scenes:
-        for m in {m.strip().lower() for m in s.get('motifs', '').split(';') if m.strip()}:
-            seen.setdefault(m, []).append(s['id'])
-    recurring = [(m, ids) for m, ids in seen.items() if len(ids) >= MOTIF_MIN_SCENES]
-    return sorted(recurring, key=lambda kv: (-len(kv[1]), kv[0]))
+def motif_mentions(scenes: list[dict[str, str]]) -> list[tuple[str, str]]:
+    """Every motif mention in the briefs, as `(scene id, text)` in reading
+    order. Briefs describe motifs in their own words ("fog pouring through
+    every chink"), so the same image is never spelled the same way twice:
+    the model groups these by number, and code checks each group recurs."""
+    return [(s['id'], m.strip()) for s in scenes
+            for m in s.get('motifs', '').split(';') if m.strip()]
 
 
 THEMES_SCHEMA = {
@@ -580,26 +579,28 @@ THEMES_SCHEMA = {
                            'themes': {'type': 'array', 'items': {'type': 'string'}}}}},
         'motifs': {'type': 'array', 'items': {
             'type': 'object', 'additionalProperties': False,
-            'required': ['id', 'name', 'aliases', 'tier'],
+            'required': ['id', 'name', 'aliases', 'tier', 'mentions'],
             'properties': {'id': {'type': 'string'}, 'name': {'type': 'string'},
                            'aliases': {'type': 'array', 'items': {'type': 'string'}},
-                           'tier': {'type': 'string', 'enum': list(TIERS)}}}},
+                           'tier': {'type': 'string', 'enum': list(TIERS)},
+                           'mentions': {'type': 'array', 'items': {'type': 'integer'}}}}},
     },
 }
 
 
 def build_themes_prompt(profile: dict, scenes: list[dict[str, str]],
-                        motifs: list[tuple[str, list[str]]],
+                        mentions: list[tuple[str, str]],
                         problems: list[str] | None = None) -> str:
     """Step 5b's prompt: name the themes, tag scenes with them, and group the
-    briefs' recurring motif mentions into a taxonomy."""
+    briefs' numbered motif mentions into the book's recurring motifs."""
     lo, hi = THEME_RANGE
     scene_lines = '\n'.join(
         f'{s["id"]}: {s.get("function", "").strip() or s.get("summary", "").strip()}'
         f' [stake: {s.get("value_at_stake", "")}; shift: {s.get("value_shift", "")}]'
         for s in scenes)
-    motif_lines = '\n'.join(f'- {m} ({len(ids)} scenes)' for m, ids in motifs) \
-        or '- (the briefs name no motif in more than one scene)'
+    mention_lines = '\n'.join(
+        f'[{i}] {sid}: {" ".join(text.split())[:_MENTION_CHARS]}'
+        for i, (sid, text) in enumerate(mentions)) or '(the briefs name no motifs)'
     retry = ''
     if problems:
         retry = ('\n## Your previous answer could not be used\n\n'
@@ -615,38 +616,43 @@ def build_themes_prompt(profile: dict, scenes: list[dict[str, str]],
 
 {scene_lines}
 
-## Motifs the scene briefs name in more than one scene
+## Every motif the scene briefs name, numbered
 
-{motif_lines}
+{mention_lines}
 {retry}
 ## What to produce
 
 1. **themes**: the {lo}-{hi} abstract concerns this book argues, each phrased as
    what the book is about rather than a moral. For each: id (a 1-4 word
    lowercase-hyphenated slug), name, tier (primary for the book's central
-   concern, then secondary and tertiary), and description (one or two
+   concerns, then secondary and tertiary), and description (one or two
    sentences on how the book treats it). Themes are abstract; concrete
    recurring images are motifs, below.
 
 2. **scene_themes**: for every scene id above, the theme ids it engages
    (an empty list where a scene engages none).
 
-3. **motifs**: group the motif mentions above into the book's recurring
-   images and objects. Each: id (a slug), name, aliases (every listed mention
-   it covers, exactly as written above), tier. Leave out a mention that isn't
-   a real recurring image; don't add motifs the list doesn't contain.
+3. **motifs**: the book's recurring images and objects, found by grouping
+   the numbered mentions above that name the same image. Each: id (a 1-3
+   word slug), name, aliases (1-4 short names a reader might use for it,
+   such as "fog"; each alias names one motif only), tier, and mentions (the numbers of every mention it
+   covers). A motif must recur: its mentions must come from at least
+   {MOTIF_MIN_SCENES} different scenes. Leave out mentions that belong to no
+   recurring image; a mention belongs to at most one motif.
 """
 
 
 def parse_themes(response: str, scenes: list[dict[str, str]],
-                 motifs: list[tuple[str, list[str]]]) -> dict:
+                 mentions: list[tuple[str, str]]) -> dict:
     """Read and check step 5b's reply. Returns `{themes, scene_themes,
-    motifs}`: `scene_themes` maps every scene id to a list of theme ids.
+    motifs}`: `scene_themes` maps every scene id to a list of theme ids, and
+    each motif carries `scenes`, the scene ids its mentions come from.
 
     Raises StructureError listing every problem: a repeated or empty id, a
     theme count outside THEME_RANGE, a scene tagged with an unknown theme, a
-    scene left out or invented, a motif alias that isn't a listed mention,
-    or one mention claimed by two motifs.
+    scene left out or invented, a mention number out of range or claimed
+    twice, an alias given to two motifs, a motif that doesn't recur, or no
+    motif when the briefs name some that recur.
     """
     from .extract import _json_answer
     data = _json_answer(response, THEMES_SCHEMA)
@@ -684,8 +690,8 @@ def parse_themes(response: str, scenes: list[dict[str, str]],
         problems.append(f'{len(missing)} scene(s) missing from scene_themes: '
                         + ', '.join(missing[:5]) + ('…' if len(missing) > 5 else ''))
 
-    mentions = {m for m, _ in motifs}
-    claimed: dict[str, str] = {}
+    claimed: dict[int, str] = {}
+    alias_of: dict[str, str] = {}
     out_motifs, motif_ids = [], set()
     for m in data['motifs']:
         mid = m['id'].strip()
@@ -693,20 +699,31 @@ def parse_themes(response: str, scenes: list[dict[str, str]],
             problems.append(f'motif id {mid!r} is empty or repeated')
             continue
         motif_ids.add(mid)
-        aliases = []
-        for a in m['aliases']:
-            a = a.strip().lower()
-            if a not in mentions:
-                problems.append(f'motif {mid}\'s alias {a!r} is not one of the listed mentions')
-            elif a in claimed and claimed[a] != mid:
-                problems.append(f'mention {a!r} is claimed by both {claimed[a]} and {mid}')
+        used = []
+        for n in m['mentions']:
+            if not 0 <= n < len(mentions):
+                problems.append(f'motif {mid} names mention [{n}], which does not exist')
+            elif n in claimed and claimed[n] != mid:
+                problems.append(f'mention [{n}] is claimed by both {claimed[n]} and {mid}')
             else:
-                claimed[a] = mid
-                aliases.append(a)
-        if not aliases:
-            problems.append(f'motif {mid} covers none of the listed mentions')
+                claimed[n] = mid
+                used.append(n)
+        in_scenes = list(dict.fromkeys(mentions[n][0] for n in sorted(used)))
+        if len(in_scenes) < MOTIF_MIN_SCENES:
+            problems.append(f'motif {mid} is named in {len(in_scenes)} scene(s); a motif '
+                            f'must recur in at least {MOTIF_MIN_SCENES}')
+        aliases = list(dict.fromkeys(' '.join(a.split()).lower() for a in m['aliases']
+                                     if a.strip() and ';' not in a))
+        # An alias names one motif, or normalizing a brief against the
+        # registry can't tell which it means
+        for a in aliases:
+            if alias_of.setdefault(a, mid) != mid:
+                problems.append(f'alias {a!r} is given to both {alias_of[a]} and {mid}')
         out_motifs.append({'id': mid, 'name': ' '.join(m['name'].split()),
-                           'aliases': list(dict.fromkeys(aliases)), 'tier': m['tier']})
+                           'aliases': aliases, 'tier': m['tier'], 'scenes': in_scenes})
+    if not out_motifs and len({sid for sid, _ in mentions}) >= MOTIF_MIN_SCENES:
+        problems.append('motifs is empty; group the mentions that name the same image '
+                        'into the motifs that recur')
 
     if problems:
         raise StructureError(problems)
@@ -876,10 +893,10 @@ def run_themes(run: Run, profile: dict, scenes: list[dict[str, str]]) -> None:
     rels = ['reference/themes.csv', 'reference/motif-taxonomy.csv']
     if not _gate(run, rels, '5b (themes and motifs)'):
         return
-    motifs = motif_candidates(scenes)
+    mentions = motif_mentions(scenes)
     result = _ask(run, 'themes',
-                  lambda problems: build_themes_prompt(profile, scenes, motifs, problems),
-                  lambda text: parse_themes(text, scenes, motifs),
+                  lambda problems: build_themes_prompt(profile, scenes, mentions, problems),
+                  lambda text: parse_themes(text, scenes, mentions),
                   THEMES_SCHEMA, THEMES_MAX_TOKENS)
     _write(run, rels[0], _csv_text(result['themes'], THEMES_COLUMNS), '5b')
     motif_rows = [{**m, 'aliases': ';'.join(m['aliases'])} for m in result['motifs']]

@@ -1306,7 +1306,7 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run):
         for label, prompt in (
                 ('5a structure', describe.build_structure_prompt(profile, scenes)),
                 ('5b themes', describe.build_themes_prompt(
-                    profile, scenes, describe.motif_candidates(scenes)))):
+                    profile, scenes, describe.motif_mentions(scenes)))):
             print(f'{label}: {len(prompt)} chars')
         print('===== END DRY RUN =====')
         return
