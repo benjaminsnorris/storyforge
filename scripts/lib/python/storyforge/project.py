@@ -23,15 +23,11 @@ from .prompts import read_yaml_field, _read_csv_header_and_rows
 
 
 # ============================================================================
-# CSV helper (local, avoids HTML-escaping from visualize.csv_to_records)
+# CSV helper (local)
 # ============================================================================
 
 def _csv_to_records(csv_file: str) -> list[dict]:
-    """Read a pipe-delimited CSV file into a list of dicts.
-
-    Unlike visualize.csv_to_records, this does NOT escape HTML characters
-    since the data is used programmatically, not injected into HTML.
-    """
+    """Read a pipe-delimited CSV file into a list of dicts."""
     if not csv_file or not os.path.isfile(csv_file):
         return []
 

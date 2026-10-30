@@ -81,7 +81,7 @@ Read the `phase` field from `storyforge.yaml`. If it is one of: `spine`, `archit
   `storyforge score --story-power` to validate narrative design before the spine.
 - Route to the `elaborate` skill for most requests (scene work, drafting prep, "what's next", structural planning)
 - The `develop`, `voice`, `scenes`, and `plan-revision` skills are not used during elaboration — their work is integrated into the elaborate pipeline
-- Skills that still apply normally: `visualize`, `title`, `cover`, `press-kit`, `produce`, `score`, `publish`
+- Skills that still apply normally: `title`, `cover`, `press-kit`, `produce`, `score`, `publish`
 - If the author asks to start drafting and the phase is `briefs` (briefs are complete), check that `reference/scene-briefs.csv` has data and validation passes, then provide the write command (which will automatically detect briefs and use the brief-aware prompt builder)
 - If the author asks to evaluate or polish after drafting, those scripts work normally
 
@@ -130,7 +130,7 @@ Invoke the `score` skill.
   `--level 3-5` tiers.
 
 **"Publish" / "Push to bookshelf" / "Generate dashboard":**
-Invoke the `publish` skill. This assembles the web book, generates the dashboard, and pushes to bookshelf.
+Invoke the `publish` skill. This assembles the web book, sends the dashboard data (Bookshelf renders the dashboard), and pushes to bookshelf.
 
 **"Make an epub" / "PDF" / "Print":**
 Invoke the `produce` skill for non-web formats.
@@ -206,10 +206,10 @@ Invoke the `score` skill.
 Invoke the `scenes` skill — it handles setup (splitting manuscripts/chapters into scenes, renaming files to slugs) and enrichment (populating missing metadata).
 
 **"Show me my book" / "Visualize" / "Dashboard":**
-Invoke the `visualize` skill. If metadata is sparse, suggest running enrichment through the `scenes` skill first.
+Bookshelf renders the manuscript dashboard from the data `publish` sends: invoke the `publish` skill, then open the book's dashboard in Bookshelf. If metadata is sparse, suggest running enrichment through the `scenes` skill first.
 
 **"What should I do next?":**
-Invoke the `recommend` skill. Note: recommend should be aware that if scoring was recently run and the dashboard is stale, regenerating the dashboard (`./storyforge visualize`) is a good recommendation. Similarly, if scene metadata is sparse, enrichment via the `scenes` skill is high value.
+Invoke the `recommend` skill. Note: recommend should be aware that if scoring was recently run, publishing (`./storyforge publish`) refreshes the dashboard in Bookshelf. Similarly, if scene metadata is sparse, enrichment via the `scenes` skill is high value.
 
 **"Review revision" / "How did the revision go?" / "What changed?":**
 Invoke the `review` skill. This is the natural next step after a revision cycle completes.

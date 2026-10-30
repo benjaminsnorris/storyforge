@@ -1,10 +1,9 @@
-"""Dashboard data loading for storyforge-visualize.
+"""Dashboard data: ``load_dashboard_data`` builds ``dashboard_data``, which
+``publish`` sends and ``storyforge visualize`` writes to
+working/dashboard-data.json. Bookshelf renders it (#371); the contract is in
+docs/agent-reference.md ("Dashboard data").
 
-Replaces fragile awk-based CSV-to-JSON conversion with reliable Python
-parsing. The bash script continues to handle HTML template assembly but
-calls this module for data loading.
-
-Usage from bash:
+Usage:
     python3 -m storyforge.visualize data "$PROJECT_DIR"
 """
 
@@ -20,9 +19,8 @@ def csv_to_records(csv_file: str) -> list[dict]:
     """Read a pipe-delimited CSV file into a list of dicts.
 
     Header row becomes dict keys. Missing files or empty files return [].
-    Values are always strings (matching the awk behavior).
-    HTML-unsafe characters (<, >) are escaped for safe injection into
-    script tags.
+    Values are always strings, as the dashboard contract requires. They are
+    not escaped: escaping belongs to the renderer (Bookshelf).
     """
     if not csv_file or not os.path.isfile(csv_file):
         return []
@@ -46,10 +44,7 @@ def csv_to_records(csv_file: str) -> list[dict]:
         fields = line.split('|')
         row = {}
         for i, header in enumerate(headers):
-            val = fields[i] if i < len(fields) else ''
-            # Escape HTML-unsafe characters for safe script-tag injection
-            val = val.replace('<', '\\u003c').replace('>', '\\u003e')
-            row[header] = val
+            row[header] = fields[i] if i < len(fields) else ''
         records.append(row)
 
     return records
@@ -122,11 +117,8 @@ def _compute_brief_quality(project_dir: str) -> list[dict]:
     plus type-specific metrics (beat_count, char_count, etc.).
     Returns [] if detection fails or data is missing.
     """
-    try:
-        from storyforge.elaborate import _read_csv_as_map
-        from storyforge.hone import detect_brief_issues, detect_gaps
-    except ImportError:
-        return []
+    from storyforge.elaborate import _read_csv_as_map
+    from storyforge.hone import detect_brief_issues, detect_gaps
 
     ref_dir = os.path.join(project_dir, 'reference')
     scenes_path = os.path.join(ref_dir, 'scenes.csv')
@@ -170,20 +162,30 @@ def _compute_brief_quality(project_dir: str) -> list[dict]:
             })
 
         return results
-    except Exception:
+    except Exception as exc:
+        # An empty list would read as "no brief issues"; say it wasn't checked
+        from storyforge.common import log
+        log(f'WARNING: brief quality not checked for the dashboard: {exc}')
         return []
 
 
+# The dashboard_data contract with Bookshelf, which renders it
+# (benjaminsnorris/bookshelf#30; documented in docs/agent-reference.md). A
+# major version: adding a list or a CSV column doesn't change it; renaming
+# or removing a key, or changing a value's type, does.
+DASHBOARD_SCHEMA_VERSION = 1
+
+
 def load_dashboard_data(project_dir: str) -> dict:
-    """Load all CSV data needed for the manuscript dashboard.
+    """Load the manuscript dashboard's data (``dashboard_data``).
 
     Args:
         project_dir: Path to the novel project root.
 
     Returns:
-        Dict with keys: scenes, intents, characters, motif_taxonomy,
-        locations, scores, weights, narrative_scores, project.
-        All values are JSON-serializable.
+        Dict with ``schema_version``, ``project`` and one list of row dicts
+        per dashboard section (see docs/agent-reference.md). Every row value
+        is a string, except ``brief_quality``'s counts.
     """
     # Three-file model: scenes.csv + scene-intent.csv + scene-briefs.csv
     metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
@@ -213,7 +215,7 @@ def load_dashboard_data(project_dir: str) -> dict:
 
     scenes = csv_to_records(metadata_csv)
 
-    # Normalize 'setting' column to 'location' for dashboard JS compatibility
+    # Normalize 'setting' column to 'location' for the renderer (Bookshelf)
     for scene in scenes:
         if 'setting' in scene and 'location' not in scene:
             scene['location'] = scene['setting']
@@ -251,6 +253,7 @@ def load_dashboard_data(project_dir: str) -> dict:
     brief_quality = _compute_brief_quality(project_dir)
 
     return {
+        'schema_version': DASHBOARD_SCHEMA_VERSION,
         'scenes': scenes,
         'intents': intents,
         'briefs': briefs,

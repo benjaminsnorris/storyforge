@@ -58,11 +58,11 @@ class TestManifestMetadata:
 
 
 class TestManifestDashboard:
-    def test_includes_dashboard_html(self, tmp_path):
+    def test_sends_versioned_data_and_never_the_rendered_page(self, tmp_path):
+        """#371: Bookshelf renders the dashboard from dashboard_data; an old
+        working/dashboard.html is not sent."""
         from storyforge.assembly import generate_publish_manifest
         proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
-
-        # Create a dashboard file
         working = tmp_path / 'working'
         working.mkdir(exist_ok=True)
         (working / 'dashboard.html').write_text('<html><body>Dashboard</body></html>')
@@ -70,7 +70,8 @@ class TestManifestDashboard:
         path = generate_publish_manifest(proj, include_dashboard=True)
         with open(path) as f:
             manifest = json.load(f)
-        assert manifest['dashboard_html'] == '<html><body>Dashboard</body></html>'
+        assert 'dashboard_html' not in manifest
+        assert manifest['dashboard_data']['schema_version'] == 1
 
     def test_skips_dashboard_when_not_requested(self, tmp_path):
         from storyforge.assembly import generate_publish_manifest
@@ -85,16 +86,6 @@ class TestManifestDashboard:
             manifest = json.load(f)
         assert 'dashboard_html' not in manifest
         assert 'dashboard_data' not in manifest
-
-    def test_missing_dashboard_not_included(self, tmp_path):
-        from storyforge.assembly import generate_publish_manifest
-        proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
-        # No dashboard file exists
-        path = generate_publish_manifest(proj, include_dashboard=True)
-        with open(path) as f:
-            manifest = json.load(f)
-        assert 'dashboard_html' not in manifest
-
 
 class TestManifestCover:
     """The cover is an ordinary content-addressed asset.
@@ -349,6 +340,81 @@ class TestCmdPublishAssets:
         out = capsys.readouterr().out
         assert 'Nothing uploaded' in out
         assert '2 declared (1 cover, 1 illustration)' in out
+
+    _ENV = {'BOOKSHELF_URL': 'https://bs.example.com',
+            'BOOKSHELF_SUPABASE_URL': 'https://sb.example.com',
+            'BOOKSHELF_SUPABASE_ANON_KEY': 'anon', 'BOOKSHELF_EMAIL': 'a@b.c',
+            'BOOKSHELF_PASSWORD': 'pw'}
+
+    def _publish(self, proj, argv, publish=None):
+        from unittest.mock import patch
+        from storyforge import cmd_publish
+        sent = []
+
+        def record(*args, **kwargs):
+            sent.append(next(a for a in args if isinstance(a, dict) and 'chapters' in a))
+            if publish:
+                return publish()
+            return {'ok': True, 'book_id': 'id', 'slug': 'test-book',
+                    'published': {'chapters': 1, 'scenes': 1, 'words': 7}}
+
+        with patch('storyforge.cmd_publish.detect_project_root', return_value=proj), \
+             patch('storyforge.bookshelf.check_env', return_value=self._ENV), \
+             patch('storyforge.bookshelf.authenticate', return_value='jwt'), \
+             patch('storyforge.bookshelf.sync_assets', return_value={
+                 'declared': 2, 'objects': 2, 'uploaded': 0, 'unchanged': 2,
+                 'bytes_uploaded': 0}), \
+             patch('storyforge.bookshelf.publish', side_effect=record):
+            cmd_publish.main(argv)
+        return sent
+
+    def test_publish_sends_dashboard_data_without_rendering(self, tmp_path, capsys):
+        """#371: publish ran `storyforge visualize` to render
+        working/dashboard.html before every (non-dry) publish; it now sends the
+        data only. --skip-visualize is kept as a no-op so old invocations run."""
+        import subprocess
+        from unittest.mock import patch
+        real_run = subprocess.run
+        commands = []
+
+        def run(cmd, *a, **kw):  # pandoc still runs; record everything
+            commands.append(cmd)
+            return real_run(cmd, *a, **kw)
+
+        proj = _illustrated_project(tmp_path)
+        with patch('subprocess.run', side_effect=run):
+            sent = self._publish(proj, ['--skip-visualize'])
+
+        assert not any('visualize' in map(str, c) for c in commands if isinstance(c, list))
+        assert not os.path.exists(os.path.join(proj, 'working', 'dashboard.html'))
+        assert sent[0]['dashboard_data']['schema_version'] == 1
+        assert 'dashboard_html' not in sent[0]
+        out = capsys.readouterr().out
+        assert 'Dashboard data: included (schema version 1' in out
+        assert '--skip-visualize is a no-op' in out
+
+    def test_dashboard_data_that_cannot_be_built_stops_the_publish(self, tmp_path, capsys):
+        """SF1: it was a WARNING, and the book was published without its dashboard."""
+        from unittest.mock import patch
+        proj = _illustrated_project(tmp_path)
+
+        def boom(project_dir):
+            raise ValueError('bad row in scene-briefs.csv')
+        with patch('storyforge.visualize.load_dashboard_data', side_effect=boom), \
+                pytest.raises(SystemExit) as exit_info:
+            self._publish(proj, [])
+        assert exit_info.value.code == 1
+        out = capsys.readouterr().out
+        assert 'could not build the dashboard data (bad row in scene-briefs.csv)' in out
+        assert '--no-dashboard' in out
+
+    def test_a_refused_dashboard_explains_what_to_do(self, capsys):
+        """SF3: Bookshelf's 400 on dashboard_data named no next step."""
+        from storyforge.cmd_publish import _explain_publish_failure
+        _explain_publish_failure('Bookshelf publish failed (HTTP 400): Unsupported dashboard '
+                                 'data version 2. This Bookshelf reads version 1.')
+        out = capsys.readouterr().out
+        assert 'out of step' in out and '--no-dashboard' in out
 
     def test_dry_run_reports_a_drifted_asset(self, tmp_path, capsys):
         from unittest.mock import patch

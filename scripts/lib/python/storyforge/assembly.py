@@ -1257,8 +1257,8 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
         cover_path: Optional path to cover image (absolute or relative to
             project_dir). When None, resolves from production.cover_image then
             production/cover.* then manuscript/assets/cover.*.
-        include_dashboard: If True (default), include dashboard_html and
-            dashboard_data. Pass False to omit all dashboard fields.
+        include_dashboard: If True (default), include ``dashboard_data``
+            (Bookshelf renders the dashboard from it). Pass False to omit it.
         include_cover: Declare the cover asset. On by default, and effectively
             mandatory for an illustrated book: a manifest that declares assets
             without a cover is refused, because Bookshelf would read it as
@@ -1445,21 +1445,17 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
     require_cover_asset(manifest)
     require_asset_count_within_cap(assets)
 
-    # Embed dashboard HTML if requested
-    if include_dashboard:
-        dashboard_path = os.path.join(project_dir, 'working', 'dashboard.html')
-        if os.path.isfile(dashboard_path):
-            with open(dashboard_path) as f:
-                manifest['dashboard_html'] = f.read()
-
-    # Include structured dashboard data only when dashboard is requested
+    # The dashboard travels as data only; Bookshelf renders it (#371). Data
+    # that can't be built stops the publish: sent without it, the book would
+    # quietly lose its dashboard.
     if include_dashboard:
         try:
             from storyforge.visualize import load_dashboard_data
             manifest['dashboard_data'] = load_dashboard_data(project_dir)
         except Exception as exc:
-            from storyforge.common import log as _log
-            _log(f'WARNING: Could not load dashboard data: {exc}')
+            raise ValueError(f'could not build the dashboard data ({exc}). Fix the '
+                             f'CSV it names, or publish without the dashboard: '
+                             f'--no-dashboard') from exc
 
     output_path = os.path.join(project_dir, 'working', 'publish-manifest.json')
     os.makedirs(os.path.dirname(output_path), exist_ok=True)

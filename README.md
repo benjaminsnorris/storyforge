@@ -82,7 +82,7 @@ Seed → Spine → Architecture → Scene Map → Briefs → Draft → Evaluate 
 | `/storyforge:revise` | Plan + execute revision (upstream CSV fixes + prose polish). Absorbs planning, execution, and review. `--polish` for craft-only. |
 | `/storyforge:score` | Craft + fidelity scoring |
 | `/storyforge:hone` | CSV data quality — diagnose issues, concretize briefs, fill gaps, normalize registries. `--diagnose` for read-only assessment. |
-| `/storyforge:publish` | Assemble web book + generate dashboard + push to bookshelf |
+| `/storyforge:publish` | Assemble web book + send dashboard data + push to bookshelf |
 | `/storyforge:produce` | Epub, PDF, print formats |
 | `/storyforge:init` | Initialize a new project |
 | `/storyforge:cover` | Cover design |
@@ -116,7 +116,7 @@ Run from your project root via the `./storyforge` runner:
 # Production
 ./storyforge assemble --format epub          # Generate epub
 ./storyforge assemble --format web           # Generate web book
-./storyforge visualize                       # Generate dashboard
+./storyforge visualize                       # Write working/dashboard-data.json
 ```
 
 All scripts support `--interactive` for supervised execution, `--dry-run` for preview, and `--coaching coach|strict` for coaching level override.
@@ -143,13 +143,13 @@ See `references/scene-schema.md` for the full column reference and `references/s
 
 ## Dashboard
 
-Multi-page manuscript visualization with three views:
+Bookshelf renders a multi-page manuscript visualization from the data `publish` sends (`dashboard_data`; the contract is in `docs/agent-reference.md`). Three views:
 
 - **Overview** — spine, POV distribution, value shift arc, scene rhythm
 - **Structure** — character presence, thread weave, emotional terrain, location map, motifs, timeline, knowledge flow
 - **Scores** — craft heatmap, genre/character/act scores, narrative radar, brief fidelity, brief quality grid, structural scores
 
-Generate with `./storyforge visualize` or `/storyforge:visualize`.
+Publish the book to refresh it. `./storyforge visualize` writes the same data to `working/dashboard-data.json` for inspection.
 
 ## Coaching Levels
 

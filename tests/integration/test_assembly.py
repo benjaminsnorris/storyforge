@@ -926,7 +926,8 @@ class TestGeneratePublishManifest:
             path = generate_publish_manifest(project_dir, include_dashboard=True)
         with open(path) as f:
             manifest = json.load(f)
-        assert manifest['dashboard_html'] == '<html>dashboard</html>'
+        assert 'dashboard_html' not in manifest
+        assert manifest['dashboard_data']['schema_version'] == 1
 
     def test_manifest_with_cover(self, project_dir):
         prod = os.path.join(project_dir, 'production')

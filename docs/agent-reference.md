@@ -51,6 +51,27 @@ CSVs are pipe-delimited (`|`), arrays use `;`, header row first, no quoting, emp
 
 Scene files (`scenes/{id}.md`) are pure prose — **no frontmatter**. Filename is the scene ID; all metadata lives in CSVs.
 
+## Dashboard data (`dashboard_data`, schema version 1)
+
+Storyforge defines and sends the dashboard's data; Bookshelf renders it (benjaminsnorris/bookshelf#30; Bookshelf's copy of the contract is `src/lib/dashboard/schema.ts`). `visualize.load_dashboard_data` builds it, `publish` sends it, and `storyforge visualize` writes it to `working/dashboard-data.json`.
+
+- `schema_version`: `1` (`visualize.DASHBOARD_SCHEMA_VERSION`). Bookshelf reads a missing one as 1. It is a major version. Adding a list or a CSV column doesn't change it. Renaming or removing a key, or changing a value's type, bumps it, and Bookshelf must support the new version first, since it refuses one it can't draw. `tests/test_dashboard_data.py` pins the keys.
+- `project`: `title`, `genre`, `phase`, `scene_count`, `total_words`, `target_words`, `generated`. All strings.
+- One list of rows per section. Each row is a CSV record, every value a string, with header names as keys. Values are not escaped; the renderer escapes them.
+
+| Key | Rows from |
+|---|---|
+| `scenes` | `reference/scenes.csv`. `location` may hold several places joined with `;`, and the renderer splits it. `act` is structural, `part` the book's physical division. A `setting` column is copied to `location` when there is no `location` column |
+| `intents`, `briefs` | `reference/scene-intent.csv`, `reference/scene-briefs.csv`, in `scenes.csv` `seq` order |
+| `characters`, `motif_taxonomy`, `locations`, `values`, `mice_threads`, `knowledge` | the matching `reference/*.csv` registry |
+| `scores`, `scene_rationales`, `narrative_scores`, `narrative_rationales`, `act_scores`, `act_rationales`, `character_scores`, `character_rationales`, `genre_scores`, `genre_rationales`, `fidelity_scores`, `fidelity_rationales` | `working/scores/latest/*.csv` |
+| `repetition_scores` | `working/scores/latest/repetition-latest.csv` |
+| `structural_scores` | `working/scores/structural-latest.csv` |
+| `weights` | `working/craft-weights.csv` |
+| `brief_quality` | computed (`hone` brief issues and gaps): `scene_id`, `field` and `issue` are strings; the counts (`beat_count`, `target_words`, `char_count`, `max_chars`, `abstract_count`, `concrete_count`) may be numbers |
+
+A missing CSV gives an empty list.
+
 ## Architecture
 
 - `evals/` — eval harness and suites
@@ -74,7 +95,7 @@ Commands (`storyforge <name>`; full flag notes in `docs/history.md`):
 | `enrich`, `timeline`, `repetition` | Metadata enrichment, timeline, cross-chapter repetition |
 | `cleanup` | Project health; `--scenes`, `--csv`, `--dry-run` |
 | `assemble` | Chapters + epub/PDF/HTML (GN: artist handoff bundle) |
-| `publish`, `annotations`, `visualize` | Bookshelf publish, reader annotations, dashboard |
+| `publish`, `annotations`, `visualize` | Bookshelf publish, reader annotations, dashboard data (see Dashboard data) |
 | `cover`, `illustrate` | Cover; interior illustrations (prose only) |
 | `scenes-setup` (`scenes`), `scenes-export`, `scenes-import`, `sync` | Scene files and CSV ↔ `scenes-review.md` round-trip |
 | `migrate`, `migrate-medium` | Idempotent project migrations; novel ↔ graphic-novel conversion |

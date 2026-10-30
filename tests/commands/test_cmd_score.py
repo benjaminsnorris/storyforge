@@ -710,6 +710,29 @@ class TestMainBatch:
         dl_calls = mock_api.calls_for('download_batch_results')
         assert len(dl_calls) >= 1
 
+    def test_score_runs_no_dashboard_step(self, mock_api, mock_git, mock_costs,
+                                          project_dir, monkeypatch):
+        """#371: score ended by looking for storyforge-visualize to render a
+        dashboard; Bookshelf renders it now."""
+        import subprocess
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        mock_api.set_response(self._scoring_response())
+        real_run = subprocess.run
+        commands = []
+
+        def run(cmd, *a, **kw):
+            commands.append(cmd)
+            return real_run(cmd, *a, **kw)
+        monkeypatch.setattr('storyforge.cmd_score.subprocess.run', run)
+
+        main(['--scenes', 'act1-sc01'])
+
+        assert not any('visualize' in ' '.join(map(str, c)) for c in commands
+                       if isinstance(c, list))
+        assert not os.path.exists(os.path.join(project_dir, 'working', 'dashboard.html'))
+
     def test_direct_cut_off_reply_is_not_scored(self, mock_api, mock_git, mock_costs,
                                                 project_dir, monkeypatch, capsys):
         """A direct reply cut off at max_tokens was parsed as the scene's

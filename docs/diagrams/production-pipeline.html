@@ -25,12 +25,12 @@
 <div class="path" style="border-top:3px solid var(--teal)">
 <h3>Publish</h3>
 <div class="cmd">/storyforge:publish</div>
-<p>The one-stop "share this book" command. Assembles the web book, generates the dashboard, pushes everything to Bookshelf.</p>
+<p>The one-stop "share this book" command. Assembles the web book, sends the dashboard data, pushes everything to Bookshelf.</p>
 <ul>
 <li>→ Assemble web chapters</li>
-<li>→ Generate dashboard</li>
+<li>→ Send dashboard data</li>
 <li>→ Push to Supabase</li>
-<li>→ Copy dashboard + cover</li>
+<li>→ Upload cover and illustrations</li>
 <li>→ Commit in bookshelf repo</li>
 </ul>
 </div>
@@ -50,9 +50,9 @@
 <h2 class="sec-title">The Publish Flow</h2>
 <div class="steps">
 <div class="step"><div class="step-num">1</div><div><h4>Assemble Web Book</h4><p>Scenes mapped to chapters via chapter-map.csv. HTML output with scene breaks, chapter headings, and reader navigation.</p></div></div>
-<div class="step"><div class="step-num">2</div><div><h4>Generate Dashboard</h4><p>Multi-page visualization: overview (spine with brief quality indicators, POV, rhythm), structure (MICE threads, characters, timeline), scores (craft, fidelity, brief quality grid, structural scores, genre).</p></div></div>
+<div class="step"><div class="step-num">2</div><div><h4>Send Dashboard Data</h4><p>Versioned dashboard_data from the project's CSVs and latest scores; Bookshelf renders the multi-page visualization: overview (spine with brief quality indicators, POV, rhythm), structure (MICE threads, characters, timeline), scores (craft, fidelity, brief quality grid, structural scores, genre).</p></div></div>
 <div class="step"><div class="step-num">3</div><div><h4>Push Content</h4><p>Chapters and scenes upserted to Supabase. Existing highlights are re-anchored when content changes. Reading progress preserved.</p></div></div>
-<div class="step"><div class="step-num">4</div><div><h4>Copy Assets</h4><p>Dashboard and cover image copied to bookshelf public directory. Database updated with cover URL.</p></div></div>
+<div class="step"><div class="step-num">4</div><div><h4>Upload Assets</h4><p>The cover and any illustrations are uploaded to storage as content-addressed assets; only metadata rides in the manifest.</p></div></div>
 </div>
 
 <h2 class="sec-title">Format Options</h2>

@@ -590,7 +590,7 @@ def _log_manifest_size(manifest: dict, raw_body: bytes) -> None:
     parts = []
     # Images are not in the manifest at all — they travel as bytes via
     # sync_assets, and only their metadata rides along in `assets`.
-    for key in ('dashboard_html', 'dashboard_data'):
+    for key in ('dashboard_data',):
         val = manifest.get(key)
         if val:
             size = len(json.dumps(val, ensure_ascii=False).encode())
