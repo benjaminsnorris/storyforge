@@ -20,6 +20,7 @@ from storyforge.common import (
     detect_project_root, get_medium, get_plugin_dir, log,
     rewrite_preserving_newlines,
 )
+from storyforge.elaborate import _FILE_MAP
 from storyforge.git import commit_and_push, ensure_on_branch
 
 
@@ -202,25 +203,20 @@ def step4_update_yaml(project_dir: str, target: str, dry_run: bool) -> None:
 # ============================================================================
 
 
-# Full merged header that includes all columns from both mediums.
+# Full merged header that includes all columns from both mediums
+# (elaborate._FILE_MAP, the one column list every writer uses).
 # After migration the CSV always uses this header; irrelevant columns stay empty.
 # This lets the author immediately edit target_pages (N→GN) or target_words (GN→N)
 # without adding columns manually.
-_SCENES_FULL_HEADER = [
-    'id', 'seq', 'title', 'part', 'act', 'pov', 'location',
-    'timeline_day', 'time_of_day', 'duration', 'type', 'status',
-    'word_count', 'target_words',      # novel columns
-    'target_pages', 'panel_count', 'page_count',  # GN columns
-]
+_SCENES_FULL_HEADER = list(_FILE_MAP['scenes.csv'])
+_BRIEFS_FULL_HEADER = list(_FILE_MAP['scene-briefs.csv'])
 
-_BRIEFS_FULL_HEADER = [
-    'id', 'goal', 'conflict', 'outcome', 'crisis', 'decision',
-    'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
-    'emotions', 'motifs', 'subtext', 'continuity_deps', 'has_overflow',
-    'physical_state_in', 'physical_state_out',  # novel columns
-    'page_layout', 'panel_breakdown', 'visual_keywords',  # GN columns
-    'page_turn_beats', 'caption_strategy',                # GN columns
-]
+
+def _widened(full: list[str], header: list[str]) -> list[str]:
+    """The full header plus any column the file had beyond it (an author's
+    own, or a newer schema's), which the rewrite would otherwise drop with
+    its values: the hand-kept list once dropped every scene's `summary`."""
+    return full + [c for c in header if c not in full]
 
 
 def step5_transform_scenes_csv(
@@ -260,7 +256,7 @@ def step5_transform_scenes_csv(
 
     if not dry_run:
         # Always write the full header so target-medium columns are present.
-        _write_csv(scenes_path, _SCENES_FULL_HEADER, rows)
+        _write_csv(scenes_path, _widened(_SCENES_FULL_HEADER, header), rows)
     return f'done:{len(rows)}'
 
 
@@ -295,7 +291,7 @@ def step6_transform_briefs_csv(
 
     if not dry_run:
         # Always write the full header so both novel and GN columns are present.
-        _write_csv(briefs_path, _BRIEFS_FULL_HEADER, rows)
+        _write_csv(briefs_path, _widened(_BRIEFS_FULL_HEADER, header), rows)
     return f'done:{len(rows)}'
 
 

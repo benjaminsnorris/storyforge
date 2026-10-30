@@ -99,3 +99,44 @@ def test_read_reference_falls_through_to_next_candidate(tmp_path):
     (legacy / 'character-bible.md').write_text('Legacy bible.\n')
     assert _read_reference(project, ['reference/character-bible.md',
                                      'references/character-bible.md']) == 'Legacy bible.\n'
+
+
+def test_bom_saved_template_still_unfilled(tmp_path):
+    """A BOM made a template copy read as the author's own text (#442)."""
+    project = _project(tmp_path)
+    path = os.path.join(project, 'reference', 'voice-guide.md')
+    with open(path, 'rb') as f:
+        data = f.read()
+    with open(path, 'wb') as f:
+        f.write(b'\xef\xbb\xbf' + data)
+    assert is_unfilled_template(path)
+
+
+def test_crlf_saved_template_still_unfilled(tmp_path):
+    project = _project(tmp_path)
+    path = os.path.join(project, 'reference', 'voice-guide.md')
+    with open(path, 'rb') as f:
+        data = f.read()
+    with open(path, 'wb') as f:
+        f.write(data.replace(b'\n', b'\r\n'))
+    assert is_unfilled_template(path)
+
+
+def test_score_and_bible_check_survive_an_undecodable_doc(tmp_path, capsys):
+    """Review SF-9 on #442: both read with no guard, so a latin-1 bible
+    killed the score run with a traceback instead of a WARNING."""
+    project = _project(tmp_path, filled=('world-bible.md',))
+    (tmp_path / 'reference' / 'character-bible.md').write_bytes(b'Caf\xe9 society')
+    assert _read_reference(project, ['reference/character-bible.md']) == ''
+    assert list(_load_bibles(project)) == ['world-bible.md']
+    out = capsys.readouterr().out
+    assert 'character-bible.md could not be read' in out
+
+
+def test_a_skipped_template_is_said(tmp_path, capsys):
+    project = _project(tmp_path)
+    _read_reference(project, ['reference/story-architecture.md'])
+    _load_bibles(project)
+    out = capsys.readouterr().out
+    assert 'story-architecture.md is still its template' in out
+    assert 'character-bible.md is still its template' in out
