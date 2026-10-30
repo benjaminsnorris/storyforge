@@ -600,6 +600,9 @@ _FIDELITY_REPLY = ('SCORES:\n'
                    'scene|4|4|4|4|4|4|4|4|4\n\n'
                    'RATIONALE:\nid|element|score|evidence\nscene|goal|4|The goal lands.\n')
 _NARRATIVE_REPLY = 'SCORES:\nid|campbells_monomyth\nnarrative|4\n'
+_ACT_REPLY = 'SCORES:\nid|campbells_monomyth\nact-1|4\n'
+_NOVEL_REPLY = ('CHARACTER_SCORES:\nid|character_arc\ndorren|4\n\n'
+                'GENRE_SCORES:\nid|genre_contract\nnovel|4\n')
 
 
 def _every_part(scene_reply):
@@ -609,6 +612,10 @@ def _every_part(scene_reply):
             return _FIDELITY_REPLY
         if 'evaluating the narrative structure of' in prompt:
             return _NARRATIVE_REPLY
+        if 'You are scoring an act of a novel' in prompt:
+            return _ACT_REPLY
+        if 'You are scoring a novel against novel-level' in prompt:
+            return _NOVEL_REPLY
         return scene_reply
     return reply
 
@@ -826,6 +833,23 @@ class TestMainBatch:
         assert 'scene scores: act1-sc01' in out.split('is incomplete')[1]
         commits = [c[1] for c in mock_git.calls_for('commit_and_push')]
         assert any(m.endswith('(incomplete)') for m in commits)
+
+    def test_an_unreadable_act_reply_makes_the_cycle_incomplete(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """An act reply with no score block used to be logged as 'scored'."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        good = _every_part(self._scoring_response())
+        mock_api.set_response_fn(lambda prompt: 'The act holds together well.'
+                                 if 'You are scoring an act of a novel' in prompt
+                                 else good(prompt))
+
+        with pytest.raises(SystemExit) as exc:
+            main(['--direct', '--scenes', 'act1-sc01'])
+
+        assert exc.value.code == 1
+        assert ': unreadable reply' in capsys.readouterr().out.split('is incomplete')[1]
 
     def test_a_scene_too_short_to_score_is_not_unscored(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):

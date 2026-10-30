@@ -1622,7 +1622,11 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
                     f.write(rationale_csv)
                 merge_score_files(os.path.join(cycle_dir, 'act-rationale.csv'), tmp_rationale)
                 _safe_remove(tmp_rationale)
-            log(f'  Act {act_label} scored')
+            if scores_csv:
+                log(f'  Act {act_label} scored')
+            else:
+                log(f'  WARNING: no scores could be read from act {act_label}\'s reply')
+                _incomplete.append(f'act {act_label}: unreadable reply')
         except Exception as e:
             log(f'  WARNING: Failed to score act {act_label}: {e}')
             _incomplete.append(f'act {act_label}')
@@ -1704,6 +1708,9 @@ def _run_novel_scoring(scene_count, metadata_csv, intent_csv, project_dir,
             if scores_csv:
                 with open(os.path.join(cycle_dir, f'{section}-scores.csv'), 'w') as f:
                     f.write(scores_csv)
+            else:
+                log(f'  WARNING: no {section} scores could be read from the novel-level reply')
+                _incomplete.append(f'novel-level {section} scores: unreadable reply')
             if rationale_csv:
                 with open(os.path.join(cycle_dir, f'{section}-rationale.csv'), 'w') as f:
                     f.write(rationale_csv)
