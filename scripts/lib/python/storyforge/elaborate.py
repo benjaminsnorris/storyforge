@@ -784,13 +784,17 @@ def _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_di
 
     # Lazy-load the ledger's physical states (needed for checks 2 and 3)
     registry = None  # dict: state_id -> physical view row
+    unowned: set[str] = set()  # states whose subject is blank (an unresolved name)
 
     def _get_registry():
         nonlocal registry
         if registry is None:
             if ref_dir:
                 from storyforge import ledger
-                registry = ledger.view_map(ref_dir, 'physical')
+                rows = ledger.load_from(ref_dir)
+                registry = {r['id']: r for r in ledger.physical_view(rows) if r['id']}
+                unowned.update(r['id'] for r in rows if r.get('type') == 'physical'
+                               and not (r.get('subject') or '').strip())
             else:
                 registry = {}
         return registry
@@ -853,8 +857,20 @@ def _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_di
         for state_id, row in reg.items():
             if row.get('action_gating', '').strip().lower() == 'true':
                 char = row.get('character', '').strip()
-                if char:
-                    action_gating_by_char.setdefault(char, set()).add(state_id)
+                if state_id in unowned or not char:
+                    # Whose state it is isn't known, so whether its owner is
+                    # on stage can't be checked: say so rather than skip it
+                    checks.append(_check(
+                        'physical_state', 'state-owner-unknown', False,
+                        f"Physical state '{state_id}' gates action but has no "
+                        f"character id" + (f" (written as '{char}', not in "
+                                           f"characters.csv)" if char else '')
+                        + ': its on-stage relevance is not checked',
+                        scene_id=row.get('acquired', ''),
+                        severity='advisory',
+                    ))
+                    continue
+                action_gating_by_char.setdefault(char, set()).add(state_id)
 
         if action_gating_by_char:
             # Walk scenes again, tracking which action-gating states are currently active

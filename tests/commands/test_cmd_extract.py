@@ -998,6 +998,7 @@ class TestKnowledgeChainOffersOnlyEarlierFacts:
         view = ledger.knowledge_view(rows)
         view[0]['origin'] = 'act1-sc02'     # map-anomaly-exists
         view[1]['origin'] = 'act2-sc01'     # village-vanished: revealed later
+        view[2]['origin'] = 'burnside'      # archive-erasure: a renamed scene
         ledger.save_to(ref_dir, ledger.replace_view(rows, 'knowledge', view,
                                                     origin='author', introduced_by='author'))
         offered = {}
@@ -1026,6 +1027,7 @@ class TestKnowledgeChainOffersOnlyEarlierFacts:
     def test_a_scene_is_offered_only_facts_from_earlier_scenes(
             self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
         offered, _ = self._run(project_dir, mock_api, monkeypatch, {})
+        # Backstory, and archive-erasure, whose scene is no scene
         backstory = {'archive-erasure', 'subsidence-not-natural', 'council-dismisses-evidence'}
         assert set(offered['act1-sc01']) == backstory
         assert set(offered['act1-sc02']) == backstory          # not its own fact
@@ -1056,3 +1058,28 @@ class TestKnowledgeChainOffersOnlyEarlierFacts:
         assert facts['village-vanished']['name'] == \
             'A village has vanished from the pressure maps'
         assert 'village-vanished' in offered['act1-sc02']
+
+
+class TestFactsWithNoKnownScene:
+    """shared-dark's `burnside`, `playground`, `site-review`: a fact whose
+    scene_id names no scene was never offered, and nothing said so."""
+
+    def test_offered_like_backstory_with_a_warning(self, project_dir, mock_api, mock_git,
+                                                   mock_costs, monkeypatch, capsys):
+        offered, _ = TestKnowledgeChainOffersOnlyEarlierFacts()._run(
+            project_dir, mock_api, monkeypatch, {})
+        assert all('archive-erasure' in facts for facts in offered.values())
+        out = capsys.readouterr().out
+        assert ('WARNING: 1 knowledge fact(s) name a scene that is not in scenes.csv'
+                in out and 'archive-erasure (burnside)' in out)
+
+    def test_prune_keeps_one_a_brief_uses(self, project_dir):
+        from storyforge import ledger
+        from storyforge.cmd_extract import _prune_registries
+        ref = os.path.join(project_dir, 'reference')
+        rows = ledger.load_from(ref)
+        used = next(r for r in rows if r['id'] == 'map-anomaly-exists')
+        used['scene_id'] = 'burnside'
+        ledger.save_to(ref, rows)
+        _prune_registries(ref, set(), set())
+        assert ledger.view_map(ref, 'knowledge')['map-anomaly-exists']['origin'] == 'burnside'

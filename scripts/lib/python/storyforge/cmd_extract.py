@@ -707,24 +707,35 @@ def _prune_registries(ref_dir, created_facts, created_states):
 
 def _facts_before(registry, scene_id, order):
     """id → name of the knowledge facts established before `scene_id` in
-    reading order (`ledger.established_before`), plus backstory: a fact with
-    no scene was true before scene 1. A fact whose scene isn't in `order` (a
-    renamed or removed scene) is left out, since where it falls is unknown."""
+    reading order (`ledger.established_before`), plus the facts with no known
+    position: backstory (no scene, true before scene 1) and a scene id that
+    isn't in `order` (a renamed or removed scene; `_unplaced_facts` names
+    them for a WARNING, and validate reports them)."""
     from storyforge import ledger
     rows = ledger.replace_view([], 'knowledge', list(registry.values()),
                                origin='prose', introduced_by='extract')
     before = {r['id'] for r in ledger.established_before(rows, scene_id, order,
                                                          type_='knowledge')}
     return {fid: row.get('name', '') for fid, row in registry.items()
-            if fid in before or not (row.get('origin') or '').strip()}
+            if fid in before or _unplaced(row, order)}
 
 
 def _facts_through(registry, scene_id, order):
-    """The registry rows established before or in `scene_id` (and backstory)."""
+    """The registry rows established before or in `scene_id`, plus the facts
+    with no known position (see `_facts_before`)."""
     at = order[scene_id]
     return {fid: row for fid, row in registry.items()
-            if not (row.get('origin') or '').strip()
-            or order.get(row['origin'].strip(), at + 1) <= at}
+            if _unplaced(row, order) or order[row['origin'].strip()] <= at}
+
+
+def _unplaced(row, order):
+    return (row.get('origin') or '').strip() not in order
+
+
+def _unplaced_facts(registry, order):
+    """Facts whose scene id names no scene (blank backstory aside)."""
+    return sorted(f'{fid} ({row["origin"].strip()})' for fid, row in registry.items()
+                  if (row.get('origin') or '').strip() and _unplaced(row, order))
 
 
 def _update_chain_fields(scene_id, ref_dir, result, force, keys):
@@ -839,6 +850,12 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         project_dir, exclude=('knowledge',))
     created_facts = set()   # knowledge ids this pass declared
     reading_order = {sid: i for i, sid in enumerate(sorted_scene_ids)}
+    unplaced = _unplaced_facts(knowledge_registry, reading_order)
+    if unplaced:
+        log(f'  WARNING: {len(unplaced)} knowledge fact(s) name a scene that is not '
+            f'in scenes.csv, so where they are established is unknown; every '
+            f'scene is offered them, like backstory (fix their scene_id in '
+            f'{ledger.LEDGER_FILE}): {", ".join(unplaced)}')
 
     for scene_id in sorted_scene_ids:
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')

@@ -486,6 +486,39 @@ def _check_registry(value: str, alias_map: dict, is_array: bool) -> list[str]:
     return failures
 
 
+def _ledger_reference_problems(rows: list[dict], ref_dir: str,
+                               scene_ids: set[str]) -> list[str]:
+    """A physical state whose subject is blank or not a characters.csv id,
+    and a non-physical fact whose scene_id isn't a scene. Each would
+    otherwise drop out of the checks that use it with nothing said."""
+    chars_path = os.path.join(ref_dir, 'characters.csv')
+    char_ids = {(r.get('id') or '').strip() for r in _read_csv(chars_path)} - {''}
+    problems = []
+    if not os.path.isfile(chars_path) and any(r.get('type') == 'physical' for r in rows):
+        problems.append('no characters.csv, so the physical states\' characters '
+                        'were not checked')
+        char_ids = None
+    for row in rows:
+        rid = row.get('id', '')
+        if row.get('type') == 'physical':
+            subject = (row.get('subject') or '').strip()
+            if not subject:
+                kept = (row.get('aliases') or '').strip()
+                problems.append(
+                    f'{rid}: physical state has no character (subject is blank'
+                    + (f'; written as {kept!r}, which is not in characters.csv'
+                       if kept else '') + '): add the character, or set subject '
+                    'to its characters.csv id')
+            elif char_ids is not None and subject not in char_ids:
+                problems.append(f'{rid}: subject {subject!r} is not a characters.csv id')
+        else:
+            sid = (row.get('scene_id') or '').strip()
+            if sid and sid not in scene_ids:
+                problems.append(f'{rid}: scene_id {sid!r} is not a scene in scenes.csv '
+                                f'(renamed or removed?)')
+    return problems
+
+
 def _registry_key(spec: dict) -> str:
     """How a registry column's registry is named: its file, plus the ledger
     type for a ledger-backed column (``commitments.csv (knowledge)``)."""
@@ -603,7 +636,9 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                     continue
 
                 schema = COLUMN_SCHEMA.get(key_prefix + col)
-                if not schema:
+                if not schema or (filename == ledger.LEDGER_FILE and col == 'character'):
+                    # A physical state's character: _ledger_reference_problems,
+                    # which tells a blank subject from an unknown one
                     skipped += 1
                     continue
 
@@ -721,10 +756,14 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                             'unresolved': bad,
                         })
 
-    # The ledger's own rules (ids, enums, statements); its scene and
-    # character references are the column checks above
+    # The ledger's own rules (ids, enums, statements), each physical state's
+    # character, and every other fact's scene. A physical state's scenes
+    # (acquired, resolves) are the column checks above.
     if os.path.isfile(os.path.join(ref_dir, ledger.LEDGER_FILE)):
-        for problem in ledger.validate_ledger(ledger.load_from(ref_dir)):
+        rows = ledger.load_from(ref_dir)
+        problems = ledger.validate_ledger(rows)
+        problems += _ledger_reference_problems(rows, ref_dir, all_scene_ids)
+        for problem in problems:
             failed += 1
             errors.append({
                 'file': ledger.LEDGER_FILE, 'row': '', 'column': '',

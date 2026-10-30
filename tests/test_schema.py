@@ -255,8 +255,36 @@ class TestRegistryFileValidation:
         ref_dir = os.path.join(project_dir, 'reference')
         self._write(ref_dir, 'Somebody Unknown')
         errors = validate_schema(ref_dir, project_dir)['errors']
-        assert any(e['file'] == 'commitments.csv' and e['column'] == 'character'
-                   for e in errors)
+        assert [e['reason'] for e in errors if e['file'] == 'commitments.csv'] == [
+            "bruise: subject 'Somebody Unknown' is not a characters.csv id"]
+
+    def test_a_blank_subject_is_reported_with_the_name_kept_in_aliases(self, project_dir):
+        """The migration leaves an unresolved character's subject blank and
+        keeps the name in aliases (thornwall's Garren): validate must say so,
+        not skip a blank cell."""
+        from storyforge import ledger
+        from storyforge.schema import validate_schema
+        ref_dir = os.path.join(project_dir, 'reference')
+        rows = ledger.load_from(ref_dir)
+        state = next(r for r in rows if r['id'] == 'archive-key-dorren')
+        state.update(subject='', aliases='Garren')
+        ledger.save_to(ref_dir, rows)
+        report = validate_schema(ref_dir, project_dir)
+        assert [e['reason'] for e in report['errors'] if e['constraint'] == 'ledger'] == [
+            "archive-key-dorren: physical state has no character (subject is blank; "
+            "written as 'Garren', which is not in characters.csv): add the character, "
+            "or set subject to its characters.csv id"]
+
+    def test_a_fact_whose_scene_is_not_a_scene_is_reported(self, project_dir):
+        from storyforge import ledger
+        from storyforge.schema import validate_schema
+        ref_dir = os.path.join(project_dir, 'reference')
+        rows = ledger.load_from(ref_dir)
+        rows[0]['scene_id'] = 'burnside'
+        ledger.save_to(ref_dir, rows)
+        reasons = [e.get('reason') for e in validate_schema(ref_dir, project_dir)['errors']]
+        assert "map-anomaly-exists: scene_id 'burnside' is not a scene in scenes.csv " \
+               "(renamed or removed?)" in reasons
 
     def test_bad_category_reported(self, project_dir):
         from storyforge.schema import validate_schema
