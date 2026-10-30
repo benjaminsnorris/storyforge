@@ -139,12 +139,12 @@ def _load_custom_evaluators(project_dir):
     with open(yaml_path) as f:
         content = f.read()
 
-    names = []
-    paths = []
-
-    # Extract custom_evaluators section
+    # One dict per list item, so a name is paired with the persona_file in
+    # its own item, whichever comes first. Pairing the n-th name with the
+    # n-th file gave every later evaluator the next one's persona as soon as
+    # one item lacked a file.
+    items: list[dict] = []
     in_section = False
-    current_name = None
     for line in content.splitlines():
         stripped = line.strip()
         if stripped == 'custom_evaluators:':
@@ -152,21 +152,22 @@ def _load_custom_evaluators(project_dir):
             continue
         if in_section and not line[0:1].isspace() and stripped:
             break
-        if in_section:
-            m = re.match(r'\s*-\s*name:\s*["\']?([^"\']+)["\']?\s*$', line)
-            if m:
-                current_name = m.group(1).strip()
-                names.append(current_name)
-                continue
-            m = re.match(r'\s*persona_file:\s*["\']?([^"\']+)["\']?\s*$', line)
-            if m and current_name:
-                paths.append(os.path.join(project_dir, m.group(1).strip()))
-                current_name = None
+        if not in_section:
+            continue
+        if stripped.startswith('-'):
+            items.append({})
+            stripped = stripped[1:].strip()
+        m = re.match(r'(name|persona_file):\s*["\']?([^"\']+)["\']?\s*$', stripped)
+        if m and items:
+            items[-1][m.group(1)] = m.group(2).strip()
 
     result = []
-    for i, name in enumerate(names):
-        if i < len(paths):
-            result.append((name, paths[i]))
+    for item in items:
+        name = item.get('name')
+        if not name:
+            continue
+        if item.get('persona_file'):
+            result.append((name, os.path.join(project_dir, item['persona_file'])))
         else:
             log(f"WARNING: No persona_file found for custom evaluator '{name}', skipping")
     return result
