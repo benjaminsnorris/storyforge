@@ -309,9 +309,30 @@ class TestErrorHandling:
 # ============================================================================
 
 
+def _structured(schema_name, **fields):
+    """A structured reply for ``extract.<schema_name>``, every field empty
+    unless given."""
+    from storyforge import extract
+    schema = getattr(extract, schema_name)
+    reply = {k: [] if schema['properties'][k]['type'] == 'array' else ''
+             for k in schema['required']}
+    reply.update(fields)
+    return json.dumps(reply)
+
+
+CHARACTERIZE_REPLY = _structured('CHARACTERIZE_SCHEMA', narrative_mode='third-limited',
+                                 tone='literary')
+
+
 def _chain_or_csv_reply(prompt):
-    """Structured JSON for the sequential knowledge and physical-state
-    chains, a CSV block for everything else."""
+    """Structured JSON for the phases that ask for it, a CSV block for
+    everything else."""
+    if 'characterize its structure' in prompt:
+        return CHARACTERIZE_REPLY
+    if 'Extract the narrative intent' in prompt:
+        return _structured('INTENT_SCHEMA', function='Sets up the audit.')
+    if 'Extract the drafting contract' in prompt:
+        return _structured('BRIEF_PARALLEL_SCHEMA', goal='Finish the audit.')
     if 'Track the knowledge state' in prompt:
         return json.dumps({'knowledge_in': [], 'knowledge_out': [], 'new_facts': [],
                            'continuity_deps': [], 'scene_summary': 'Something happens.'})
@@ -331,7 +352,7 @@ class TestPhaseExecution:
                             lambda: project_dir)
 
         # Provide characterize response
-        mock_api.set_response('genre: fantasy\npov_style: third-limited\ntone: literary')
+        mock_api.set_response(CHARACTERIZE_REPLY)
 
         # Patch validate_structure
         monkeypatch.setattr('storyforge.elaborate.validate_structure', lambda ref_dir: {
@@ -349,12 +370,31 @@ class TestPhaseExecution:
         api_calls = mock_api.calls_for('invoke_to_file')
         assert len(api_calls) >= 1
 
+    @pytest.mark.parametrize('reply, stop', [
+        ('NARRATIVE_MODE: third-limited', 'end_turn'),   # not the structured answer
+        (CHARACTERIZE_REPLY, 'max_tokens'),               # cut off
+    ])
+    def test_phase_0_halts_on_a_bad_profile(self, mock_api, mock_git, mock_costs,
+                                            project_dir, monkeypatch, capsys, reply, stop):
+        """Every later phase reads the profile; a cut-off one was saved with a
+        WARNING and steered them with missing fields."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_extract.detect_project_root', lambda: project_dir)
+        mock_api.set_response_dict({'content': [{'type': 'text', 'text': reply}],
+                                    'usage': {'input_tokens': 1, 'output_tokens': 1},
+                                    'stop_reason': stop})
+        with pytest.raises(SystemExit) as exit_info:
+            main(['--phase', '0'])
+        assert exit_info.value.code == 1
+        assert 'ERROR: manuscript characterization failed' in capsys.readouterr().out
+        assert mock_api.calls_for('invoke_to_file')[0]['output_schema'] is not None
+
     def test_phase_0_creates_branch(self, mock_api, mock_git, mock_costs,
                                      project_dir, monkeypatch):
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_extract.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response('genre: fantasy')
+        mock_api.set_response(CHARACTERIZE_REPLY)
 
         # Patch validate/cleanup
         monkeypatch.setattr('storyforge.elaborate.validate_structure', lambda ref_dir: {
@@ -440,7 +480,7 @@ class TestPhaseExecution:
                             lambda *a, **kw: subprocess.CompletedProcess(
                                 a[0] if a else [], 0, stdout='', stderr=''))
 
-        mock_api.set_response('genre: fantasy')
+        mock_api.set_response(CHARACTERIZE_REPLY)
 
         # Patch validate/cleanup
         monkeypatch.setattr('storyforge.elaborate.validate_structure', lambda ref_dir: {
@@ -490,7 +530,7 @@ class TestReviewPhase:
         monkeypatch.setattr('storyforge.cmd_extract.detect_project_root',
                             lambda: project_dir)
 
-        mock_api.set_response('genre: fantasy')
+        mock_api.set_response(CHARACTERIZE_REPLY)
 
         # Patch validate/cleanup
         monkeypatch.setattr('storyforge.elaborate.validate_structure', lambda ref_dir: {
@@ -595,7 +635,8 @@ class TestMergeBatchResults:
         log_dir = tmp_path / 'logs'
         log_dir.mkdir()
         for sid in ids:
-            (log_dir / f'{sid}.txt').write_text(f'GOAL: goal of {sid}\nOUTCOME: no\n')
+            (log_dir / f'{sid}.txt').write_text(
+                _structured('BRIEF_PARALLEL_SCHEMA', goal=f'goal of {sid}', outcome='no'))
         return str(csv_path), str(log_dir)
 
     def _rows(self, csv_path):
@@ -649,6 +690,25 @@ class TestMergeBatchResults:
         assert 'WARNING: scene-briefs.csv: no usable reply for 1 scene(s)' in out
         assert 'scene-briefs.csv has no row for s2' in out
         assert cmd_extract._unanswered == {'scene-briefs.csv': ['s2']}
+
+
+    def test_unreadable_reply_is_named_and_left_alone(self, tmp_path, capsys, monkeypatch):
+        """A reply that is not the structured answer (here the old KEY: value
+        form) is reported like a missing one, never merged."""
+        from storyforge import cmd_extract
+        from storyforge.extract import parse_brief_parallel_response
+        monkeypatch.setattr(cmd_extract, '_unanswered', {})
+        csv_path, log_dir = self._setup(tmp_path, ['s1'])
+        with open(os.path.join(log_dir, 's1.txt'), 'w') as f:
+            f.write('GOAL: goal of s1\n')
+
+        count = cmd_extract._merge_batch_results(
+            csv_path, 'scene-briefs.csv', ['s1'], log_dir,
+            parse_brief_parallel_response, {}, False)
+
+        assert count == 0
+        assert 'the reply for s1 is unreadable' in capsys.readouterr().out
+        assert cmd_extract._unanswered == {'scene-briefs.csv': ['s1']}
 
 
 class TestRecordPhysicalStates:

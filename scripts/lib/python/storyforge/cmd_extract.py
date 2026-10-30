@@ -34,7 +34,7 @@ from storyforge.git import (
 from storyforge.api import (
     invoke_to_file, extract_text, extract_text_from_file, extract_usage, is_truncated,
     calculate_cost_from_usage, submit_batch, poll_batch, download_batch_results,
-    build_batch_request,
+    build_batch_request, stop_problem,
 )
 from storyforge.costs import log_operation, print_summary
 
@@ -355,7 +355,12 @@ def _merge_batch_results(csv_path, csv_name, sorted_scene_ids, log_dir, parse,
             unanswered.append(sid)
             continue
         with open(txt_file) as f:
-            result = parse(f.read(), sid)
+            try:
+                result = parse(f.read(), sid)
+            except ValueError as e:  # a structured reply that can't be read
+                log(f'  WARNING: {csv_name}: the reply for {sid} is unreadable: {e}')
+                unanswered.append(sid)
+                continue
         normalize_fields(result, alias_maps)
 
         if sid in existing:
@@ -394,7 +399,9 @@ def _run_phase_0(project_dir, scenes_dir, log_dir, profile_file, dry_run,
     log('')
     log('--- Phase 0: Characterize manuscript ---')
 
-    from storyforge.extract import build_characterize_prompt, parse_characterize_response
+    from storyforge.extract import (
+        CHARACTERIZE_SCHEMA, build_characterize_prompt, parse_characterize_response,
+    )
 
     model = select_model('synthesis')  # Opus for full-manuscript comprehension
     prompt = build_characterize_prompt(project_dir, model=model)
@@ -413,14 +420,18 @@ def _run_phase_0(project_dir, scenes_dir, log_dir, profile_file, dry_run,
 
     log(f'  Invoking {model} for manuscript characterization...')
 
-    response = invoke_to_file(prompt, model, char_log, 4096, system=system)
-    if is_truncated(response):
-        log('  WARNING: characterization hit the 4096-token limit; '
-            'the profile is cut off and may be missing fields')
-    text = extract_text(response)
+    response = invoke_to_file(prompt, model, char_log, 4096, system=system,
+                              output_schema=CHARACTERIZE_SCHEMA)
     _log_api_usage(char_log, 'extract-characterize', 'manuscript', model, project_dir)
-
-    profile = parse_characterize_response(text)
+    # Every later phase reads this profile: a cut-off or unreadable one
+    # stops the run rather than steer them with missing fields.
+    try:
+        if is_truncated(response):
+            raise ValueError(stop_problem(response))
+        profile = parse_characterize_response(extract_text(response))
+    except ValueError as e:
+        log(f'ERROR: manuscript characterization failed: {e}')
+        sys.exit(1)
     with open(profile_file, 'w') as f:
         json.dump(profile, f, indent=2)
 
@@ -544,7 +555,7 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         print('===== END DRY RUN =====')
         return
 
-    from storyforge.extract import build_intent_prompt, parse_intent_response
+    from storyforge.extract import INTENT_SCHEMA, build_intent_prompt, parse_intent_response
     from storyforge.elaborate import get_scene, _read_csv_as_map, _write_csv, _FILE_MAP
     from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps, normalize_fields
 
@@ -567,7 +578,7 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         prompt = build_intent_prompt(scene_id, scene_text, profile, skeleton,
                                       registries_text=registries)
         request = build_batch_request(scene_id, prompt, model, 1024,
-                                      system=system)
+                                      system=system, output_schema=INTENT_SCHEMA)
         with open(batch_file, 'a') as f:
             f.write(json.dumps(request) + '\n')
 
@@ -647,7 +658,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         return
 
     from storyforge.extract import (
-        build_brief_parallel_prompt, parse_brief_parallel_response,
+        BRIEF_PARALLEL_SCHEMA, build_brief_parallel_prompt, parse_brief_parallel_response,
         build_knowledge_prompt, parse_knowledge_response, KNOWLEDGE_SCHEMA,
         merge_new_knowledge_facts, resolve_knowledge_ids, KNOWLEDGE_COLUMNS,
         build_physical_state_prompt, parse_physical_state_response, PHYSICAL_STATE_SCHEMA,
@@ -686,7 +697,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                                               skeleton, intent,
                                               registries_text=registries)
         request = build_batch_request(scene_id, prompt, model, 1024,
-                                      system=system)
+                                      system=system, output_schema=BRIEF_PARALLEL_SCHEMA)
         with open(batch_file, 'a') as f:
             f.write(json.dumps(request) + '\n')
 

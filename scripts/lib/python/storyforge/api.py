@@ -474,7 +474,8 @@ def calculate_cost_from_usage(usage: dict, model: str, batch: bool = False) -> f
 
 def build_batch_request(custom_id: str, prompt: str, model: str,
                         max_tokens: int = 4096,
-                        system: list[dict] | None = None) -> dict:
+                        system: list[dict] | None = None,
+                        output_schema: dict | None = None) -> dict:
     """Build a single batch request item (one JSONL line).
 
     Args:
@@ -483,6 +484,7 @@ def build_batch_request(custom_id: str, prompt: str, model: str,
         model: Model ID.
         max_tokens: Maximum output tokens.
         system: Optional list of system content blocks with cache_control.
+        output_schema: Optional JSON schema for a structured reply (see _send).
 
     Returns:
         Dict suitable for JSON serialization as one JSONL line.
@@ -494,6 +496,8 @@ def build_batch_request(custom_id: str, prompt: str, model: str,
     }
     if system:
         params['system'] = system
+    if output_schema:
+        params['output_config'] = {'format': {'type': 'json_schema', 'schema': output_schema}}
     return {'custom_id': custom_id, 'params': params}
 
 

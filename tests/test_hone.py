@@ -1,5 +1,6 @@
 """Tests for hone CSV data quality tool (migrated from test-hone.sh)."""
 
+import json
 import os
 import shutil
 
@@ -259,21 +260,23 @@ class TestSubtext:
 
     def test_extract_parser_handles_subtext(self):
         from storyforge.extract import parse_brief_parallel_response
-        response = (
-            'GOAL: Find the map\nCONFLICT: Guards block the way\n'
-            'OUTCOME: yes-but\nCRISIS: Fight or sneak\nDECISION: Sneaks past\n'
-            'KEY_ACTIONS: Opens door; Grabs map\nKEY_DIALOGUE: Where is it?\n'
-            'EMOTIONS: tension;relief\nMOTIFS: maps;darkness\n'
-            'SUBTEXT: She tells the guard she is lost but she knows exactly where she is; '
-            'show through confident body language that contradicts her words'
-        )
+        response = json.dumps({
+            'goal': 'Find the map', 'conflict': 'Guards block the way', 'outcome': 'yes-but',
+            'crisis': 'Fight or sneak', 'decision': 'Sneaks past',
+            'key_actions': ['Opens door', 'Grabs map'], 'key_dialogue': ['Where is it?'],
+            'emotions': ['tension', 'relief'], 'motifs': ['maps', 'darkness'],
+            'subtext': 'She tells the guard she is lost but she knows exactly where she is, '
+                       'shown through confident body language that contradicts her words'})
         result = parse_brief_parallel_response(response, 'test-scene')
         assert 'subtext' in result
         assert 'confident body language' in result['subtext']
 
     def test_extract_parser_filters_none(self):
         from storyforge.extract import parse_brief_parallel_response
-        response = 'GOAL: Find the map\nSUBTEXT: NONE'
+        response = json.dumps({
+            'goal': 'Find the map', 'conflict': '', 'outcome': 'unknown', 'crisis': '',
+            'decision': '', 'key_actions': [], 'key_dialogue': [], 'emotions': [],
+            'motifs': [], 'subtext': 'NONE'})
         result = parse_brief_parallel_response(response, 'test-scene')
         assert 'subtext' not in result
 

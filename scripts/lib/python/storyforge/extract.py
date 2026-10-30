@@ -162,59 +162,34 @@ def build_characterize_prompt(project_dir: str, model: str | None = None) -> str
 
 ## Instructions
 
-Analyze this manuscript and produce a structural profile. Output each field on its own labeled line.
+Analyze this manuscript and produce a structural profile. Answer with a JSON object with these fields (a list field is a JSON array of strings):
 
-NARRATIVE_MODE: [first-person / third-limited / third-omniscient / multiple-POV / other]
-POV_CHARACTERS: [semicolon-separated list of POV characters, in order of appearance]
-TIMELINE: [linear / non-linear / fragmented / frame-narrative]
-TIMELINE_SPAN: [approximate time span of the story, e.g., "3 days", "6 months", "20 years"]
-SCENE_BREAK_STYLE: [explicit-markers / chapter-based / unmarked / mixed]
-ESTIMATED_SCENES: [approximate number of distinct scenes]
-ACT_STRUCTURE: [number of acts/parts and their approximate boundaries, e.g., "3 acts: scenes 1-12, 13-28, 29-42"]
-MAJOR_THREADS: [semicolon-separated list of major story threads/subplots]
-CENTRAL_CONFLICT: [one sentence describing the core conflict]
-PROTAGONIST_ARC: [one sentence: wound/lie → confrontation → resolution/refusal]
-TONE: [1-3 words describing the overall tone]
-CAST_SIZE: [approximate number of named characters]
-KEY_LOCATIONS: [semicolon-separated list of major locations]
-COMPRESSION_POINTS: [semicolon-separated list of moments that feel compressed or rushed — these are expansion opportunities if the work is being developed into a longer form]
-STRUCTURAL_CONCERNS: [semicolon-separated list of any structural issues visible at this level — dropped threads, pacing problems, arc gaps]
+- narrative_mode: first-person / third-limited / third-omniscient / multiple-POV / other
+- pov_characters (list): the POV characters, in order of appearance
+- timeline: linear / non-linear / fragmented / frame-narrative
+- timeline_span: approximate time span of the story, e.g., "3 days", "6 months", "20 years"
+- scene_break_style: explicit-markers / chapter-based / unmarked / mixed
+- estimated_scenes: approximate number of distinct scenes
+- act_structure: number of acts/parts and their approximate boundaries, e.g., "3 acts: scenes 1-12, 13-28, 29-42"
+- major_threads (list): major story threads/subplots
+- central_conflict: one sentence describing the core conflict
+- protagonist_arc: one sentence: wound/lie → confrontation → resolution/refusal
+- tone: 1-3 words describing the overall tone
+- cast_size: approximate number of named characters
+- key_locations (list): major locations
+- compression_points (list): moments that feel compressed or rushed — these are expansion opportunities if the work is being developed into a longer form
+- structural_concerns (list): any structural issues visible at this level — dropped threads, pacing problems, arc gaps
 
 Be precise. Base every field on what's actually in the text, not what you'd expect from the genre.{cut_note}"""
 
 
 def parse_characterize_response(response: str) -> dict[str, str]:
-    """Parse the Phase 0 characterization response into a dict.
-
-    A field may run on over bullet lines (Opus 5.5 answers ACT_STRUCTURE and
-    STRUCTURAL_CONCERNS as lists); bullet lines, or lines under an empty
-    field or one ending in a colon, join the field with semicolons (a space
-    after the colon). Other unlabeled lines are commentary and skipped.
-    """
-    parts: dict[str, list[str]] = {}
-    key = None
-    for line in response.split('\n'):
-        line = line.strip()
-        match = re.match(r'^([A-Z_]+):\s*(.*)', line)
-        if match:
-            key = match.group(1).lower()
-            parts[key] = [match.group(2).strip()] if match.group(2).strip() else []
-        elif key and line:
-            bullet = re.match(r'^(?:[-*•]|\d+[.)])\s+(.*)', line)
-            if bullet:
-                parts[key].append(bullet.group(1))
-            elif not parts[key] or parts[key][-1].endswith(':'):
-                parts[key].append(line)
-    result = {}
-    for key, items in parts.items():
-        if not items:
-            continue
-        value = items[0]
-        for item in items[1:]:
-            value += (' ' if value.endswith(':') else '; ') + item
-        if value not in ('[]', '()', 'N/A', 'none'):
-            result[key] = value
-    return result
+    """Parse Phase 0's structured reply (``CHARACTERIZE_SCHEMA``) into the
+    profile: every field a string, a list joined with ``; ``, empty fields
+    dropped. Raises ValueError on an unreadable reply."""
+    data = _json_answer(response, CHARACTERIZE_SCHEMA)
+    return {k: v for k, v in ((k, _text(data[k])) for k in CHARACTERIZE_SCHEMA['required'])
+            if v and v.lower() not in ('n/a', 'none', 'unknown')}
 
 
 # ============================================================================
@@ -360,44 +335,31 @@ Central conflict: {profile.get('central_conflict', 'unknown')}"""
 {registries_section}
 ## Instructions
 
-Output each field on its own labeled line. Use semicolons to separate list items.
+Answer with a JSON object with these fields (a list field is a JSON array of strings; "unknown" where a value cannot be determined):
 
-FUNCTION: [one sentence: why this scene exists — what it accomplishes in the story. Must be specific and testable, not vague like "develops character"]
-ACTION_SEQUEL: [action or sequel — action scenes have goal/conflict/outcome; sequel scenes have reaction/dilemma/decision]
-EMOTIONAL_ARC: [starting emotion giving way to ending emotion, e.g., "controlled competence to buried unease"]
-VALUE_AT_STAKE: [the single abstract value being tested, in one or two words: safety, love, justice, truth, freedom, honor, etc. Name only the value, with no explanation; the specifics belong in FUNCTION]
-VALUE_SHIFT: [polarity change, exactly one of these four: +/- means positive to negative, -/+ means negative to positive, +/++ means good to better, -/-- means bad to worse]
-TURNING_POINT: [action or revelation — action means a character does something that changes the situation; revelation means new information changes the situation]
-CHARACTERS: [semicolon-separated list of ALL characters present or referenced by name]
-ON_STAGE: [semicolon-separated list of characters physically present in the scene — subset of CHARACTERS]
-MICE_THREADS: [semicolon-separated MICE threads this scene affects: +thread-name only if this scene is where the thread begins, -thread-name only if this scene resolves it, and the bare thread-name if the scene advances or touches a thread that is already open. Most scenes open or close nothing. Use the thread's canonical name from the registry, not the type prefix.]
-CONFIDENCE: [high / medium / low — your overall confidence in these extractions]"""
+- function: one sentence: why this scene exists — what it accomplishes in the story. Must be specific and testable, not vague like "develops character"
+- action_sequel: action or sequel — action scenes have goal/conflict/outcome; sequel scenes have reaction/dilemma/decision
+- emotional_arc: starting emotion giving way to ending emotion, e.g., "controlled competence to buried unease"
+- value_at_stake: the single abstract value being tested, in one or two words: safety, love, justice, truth, freedom, honor, etc. Name only the value, with no explanation; the specifics belong in function
+- value_shift: polarity change, exactly one of these four: +/- means positive to negative, -/+ means negative to positive, +/++ means good to better, -/-- means bad to worse
+- turning_point: action or revelation — action means a character does something that changes the situation; revelation means new information changes the situation
+- characters (list): ALL characters present or referenced by name
+- on_stage (list): characters physically present in the scene — a subset of characters
+- mice_threads (list): MICE threads this scene affects: +thread-name only if this scene is where the thread begins, -thread-name only if this scene resolves it, and the bare thread-name if the scene advances or touches a thread that is already open. Most scenes open or close nothing. Use the thread's canonical name from the registry, not the type prefix.
+- confidence: high / medium / low — your overall confidence in these extractions"""
 
 
 def parse_intent_response(response: str, scene_id: str) -> dict[str, str]:
-    """Parse Phase 2 response into scene-intent.csv field values."""
+    """Parse Phase 2's structured reply (``INTENT_SCHEMA``) into
+    scene-intent.csv field values. Raises ValueError on an unreadable reply."""
+    data = _json_answer(response, INTENT_SCHEMA)
     result = {'id': scene_id}
-    label_map = {
-        'FUNCTION': 'function',
-        'ACTION_SEQUEL': 'action_sequel',
-        'EMOTIONAL_ARC': 'emotional_arc',
-        'VALUE_AT_STAKE': 'value_at_stake',
-        'VALUE_SHIFT': 'value_shift',
-        'TURNING_POINT': 'turning_point',
-        'CHARACTERS': 'characters',
-        'ON_STAGE': 'on_stage',
-        'MICE_THREADS': 'mice_threads',
-        'CONFIDENCE': '_confidence',
-    }
-    for line in response.split('\n'):
-        match = re.match(r'^([A-Z_]+):\s*(.*)', line.strip())
-        if match:
-            label = match.group(1)
-            value = match.group(2).strip()
-            if label == 'VALUE_AT_STAKE':
-                value = _bare_value(value)
-            if label in label_map and value and value.upper() != 'UNKNOWN':
-                result[label_map[label]] = value
+    for key in INTENT_SCHEMA['required']:
+        value = _text(data[key], ';')
+        if key == 'value_at_stake':
+            value = _bare_value(value)
+        if value and value.lower() != 'unknown':
+            result['_confidence' if key == 'confidence' else key] = value
     return _reduce_enums(result)
 
 
@@ -444,42 +406,29 @@ Emotional arc: {intent.get('emotional_arc', 'unknown')}"""
 {registries_section}
 ## Instructions
 
-Output each field on its own labeled line. Use semicolons to separate list items.
+Answer with a JSON object with these fields (a list field is a JSON array of strings; "unknown" where a value cannot be determined):
 
-GOAL: [the POV character's concrete objective entering this scene — what are they trying to do?]
-CONFLICT: [what specifically opposes the goal?]
-OUTCOME: [how does the scene end for the POV character? One of: {OUTCOME_GUIDE}]
-CRISIS: [the key dilemma — a best bad choice or irreconcilable goods that the character faces]
-DECISION: [what the character actively chooses in response to the crisis]
-KEY_ACTIONS: [semicolon-separated concrete things that happen in this scene, as the page shows them. Do not name a motive or meaning the scene leaves unstated (write "takes a phone call he cuts short", not "takes a call about criminal business")]
-KEY_DIALOGUE: [semicolon-separated specific lines or exchanges that are essential to the scene — quote directly from the text]
-EMOTIONS: [semicolon-separated emotional beats in sequence as they occur through the scene]
-MOTIFS: [semicolon-separated recurring images, symbols, or sensory details that carry thematic weight, described as they appear in this scene. Never gloss an image with facts or meanings the reader learns only in later scenes: the drafter will write them]
-SUBTEXT: [ONE sentence, max 150 characters. The gap between what a character says/does and what they mean. Format: "X says/does A but means B; don't state B." If no subtext, write NONE. Do NOT write multiple clauses or a paragraph.]"""
+- goal: the POV character's concrete objective entering this scene — what are they trying to do?
+- conflict: what specifically opposes the goal?
+- outcome: how does the scene end for the POV character? One of: {OUTCOME_GUIDE}
+- crisis: the key dilemma — a best bad choice or irreconcilable goods that the character faces
+- decision: what the character actively chooses in response to the crisis
+- key_actions (list): concrete things that happen in this scene, as the page shows them. Do not name a motive or meaning the scene leaves unstated (write "takes a phone call he cuts short", not "takes a call about criminal business")
+- key_dialogue (list): specific lines or exchanges that are essential to the scene — quote directly from the text
+- emotions (list): emotional beats in sequence as they occur through the scene
+- motifs (list): recurring images, symbols, or sensory details that carry thematic weight, described as they appear in this scene. Never gloss an image with facts or meanings the reader learns only in later scenes: the drafter will write them
+- subtext: ONE sentence, max 150 characters. The gap between what a character says/does and what they mean. Format: "X says/does A but means B; don't state B." If no subtext, write "none". Do NOT write multiple clauses or a paragraph."""
 
 
 def parse_brief_parallel_response(response: str, scene_id: str) -> dict[str, str]:
-    """Parse Phase 3a response."""
+    """Parse Phase 3a's structured reply (``BRIEF_PARALLEL_SCHEMA``). Raises
+    ValueError on an unreadable reply."""
+    data = _json_answer(response, BRIEF_PARALLEL_SCHEMA)
     result = {'id': scene_id}
-    label_map = {
-        'GOAL': 'goal',
-        'CONFLICT': 'conflict',
-        'OUTCOME': 'outcome',
-        'CRISIS': 'crisis',
-        'DECISION': 'decision',
-        'KEY_ACTIONS': 'key_actions',
-        'KEY_DIALOGUE': 'key_dialogue',
-        'EMOTIONS': 'emotions',
-        'MOTIFS': 'motifs',
-        'SUBTEXT': 'subtext',
-    }
-    for line in response.split('\n'):
-        match = re.match(r'^([A-Z_]+):\s*(.*)', line.strip())
-        if match:
-            label = match.group(1)
-            value = match.group(2).strip()
-            if label in label_map and value and value.upper() not in ('UNKNOWN', 'NONE'):
-                result[label_map[label]] = value
+    for key in BRIEF_PARALLEL_SCHEMA['required']:
+        value = _text(data[key], ';')
+        if value and value.lower() not in ('unknown', 'none'):
+            result[key] = value
     return _reduce_enums(result)
 
 
@@ -627,6 +576,60 @@ def _json_answer(response: str, schema: dict) -> dict:
 def _ids(values) -> str:
     """A list of ids as the CSV's ``;`` field, placeholders dropped."""
     return strip_placeholders(';'.join(str(v).strip() for v in values or [] if str(v).strip()))
+
+
+def _text(value, sep: str = '; ') -> str:
+    """A structured field as CSV text: a list joined with *sep*, ``;`` (the
+    CSV's array separator) stripped from inside each item."""
+    if isinstance(value, list):
+        return sep.join(str(v).replace(';', ',').strip() for v in value if str(v).strip())
+    return str(value).strip()
+
+
+OFFERED_VALUE_SHIFTS = ('+/-', '-/+', '+/++', '-/--')
+_STR = {'type': 'string'}
+_STR_LIST = {'type': 'array', 'items': _STR}
+
+
+def _enum(values) -> dict:
+    return {'type': 'string', 'enum': sorted(values) + ['unknown']}
+
+
+def _intent_schema() -> dict:
+    from .schema import VALID_ACTION_SEQUEL, VALID_TURNING_POINTS
+    return _object({
+        'function': _STR, 'action_sequel': _enum(VALID_ACTION_SEQUEL),
+        'emotional_arc': _STR, 'value_at_stake': _STR,
+        # The flat shifts (+/+, -/-) stay unoffered: offering them turned 45
+        # of Self-Control's 247 scenes flat, a craft call (F-042)
+        'value_shift': _enum(OFFERED_VALUE_SHIFTS),
+        'turning_point': _enum(VALID_TURNING_POINTS),
+        'characters': _STR_LIST, 'on_stage': _STR_LIST, 'mice_threads': _STR_LIST,
+        'confidence': {'type': 'string', 'enum': ['high', 'medium', 'low']},
+    })
+
+
+def _brief_parallel_schema() -> dict:
+    from .schema import VALID_OUTCOMES
+    return _object({
+        'goal': _STR, 'conflict': _STR, 'outcome': _enum(VALID_OUTCOMES),
+        'crisis': _STR, 'decision': _STR, 'key_actions': _STR_LIST,
+        'key_dialogue': _STR_LIST, 'emotions': _STR_LIST, 'motifs': _STR_LIST,
+        'subtext': _STR,
+    })
+
+
+# Structured-output schemas for Phase 0 (characterize), 2 (intent) and 3a
+# (brief fields); the parsers above read exactly these shapes.
+CHARACTERIZE_SCHEMA = _object({
+    'narrative_mode': _STR, 'pov_characters': _STR_LIST, 'timeline': _STR,
+    'timeline_span': _STR, 'scene_break_style': _STR, 'estimated_scenes': _STR,
+    'act_structure': _STR, 'major_threads': _STR_LIST, 'central_conflict': _STR,
+    'protagonist_arc': _STR, 'tone': _STR, 'cast_size': _STR, 'key_locations': _STR_LIST,
+    'compression_points': _STR_LIST, 'structural_concerns': _STR_LIST,
+})
+INTENT_SCHEMA = _intent_schema()
+BRIEF_PARALLEL_SCHEMA = _brief_parallel_schema()
 
 
 def parse_knowledge_response(response: str, scene_id: str) -> dict:
