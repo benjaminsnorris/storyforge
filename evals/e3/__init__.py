@@ -3,11 +3,12 @@ that later mattered?
 
 Every E1 error implies a fact the ledger should have held: its established
 side. For each non-holdout E1 prose case with a prose established span, the
-book is materialized at that span's commit and today's two ledger prompts —
-knowledge (``extract.build_knowledge_prompt``) and physical state
-(``build_physical_state_prompt``) — are run on the establishing scene. An Opus
-judge reads the established quote and both raw responses and says whether the
-fact was captured.
+book is materialized at that span's commit and today's three ledger prompts —
+knowledge (``extract.build_knowledge_prompt``), physical state
+(``build_physical_state_prompt``) and commitments, the reader-noticeable
+rubric (``build_commitments_prompt``, extract phase 4) — are run on the
+establishing scene. An Opus judge reads the established quote and the three
+raw responses and says whether the fact was captured.
 
 **Scene-local, a stated simplification.** ``storyforge extract`` runs these
 prompts as a chain, each scene seeing the knowledge and states the earlier
@@ -36,7 +37,7 @@ The fact, as the book states it in scene {scene}:
 "{quote}"
 (Context: a later scene contradicted this; the error was: {summary})
 
-Below is everything the extraction produced for that scene: a knowledge pass and a physical-state pass.
+Below is everything the extraction produced for that scene: a knowledge pass, a physical-state pass and a commitments pass.
 
 <knowledge>
 {knowledge}
@@ -45,6 +46,10 @@ Below is everything the extraction produced for that scene: a knowledge pass and
 <physical_states>
 {physical}
 </physical_states>
+
+<commitments>
+{commitments}
+</commitments>
 
 Did the extraction record this fact — the specific claim, in any wording, as a fact or a state?
 
@@ -87,14 +92,17 @@ def select(root: str | None = None) -> tuple[list[dict], dict[str, list[str]]]:
     return items, excluded
 
 
-def extract(project_dir: str, scene_id: str) -> tuple[str, str]:
-    """Today's knowledge and physical-state responses for one scene, scene-local."""
+def extract(project_dir: str, scene_id: str) -> tuple[str, str, str]:
+    """Today's knowledge, physical-state and commitments responses for one
+    scene, scene-local (the commitments pass is offered no earlier
+    commitments: the trees predate it)."""
     from storyforge.api import extract_text, invoke
     from storyforge.common import select_model
     from storyforge import ledger
     from storyforge.cmd_extract import _build_sorted_scene_ids, _facts_before
     from storyforge.elaborate import get_scene
-    from storyforge.extract import (KNOWLEDGE_SCHEMA, PHYSICAL_STATE_SCHEMA,
+    from storyforge.extract import (COMMITMENTS_SCHEMA, KNOWLEDGE_SCHEMA,
+                                    PHYSICAL_STATE_SCHEMA, build_commitments_prompt,
                                     build_knowledge_prompt, build_physical_state_prompt)
     from storyforge.enrich import format_registries_for_prompt
 
@@ -116,15 +124,20 @@ def extract(project_dir: str, scene_id: str) -> tuple[str, str]:
     physical_prompt = build_physical_state_prompt(
         scene_id, text, {k: scene.get(k, '') for k in ('title', 'pov', 'location', 'act', 'on_stage')},
         {}, [], registries_text=format_registries_for_prompt(project_dir))
+    commitments_prompt = build_commitments_prompt(
+        scene_id, text, {k: scene.get(k, '') for k in ('title', 'pov', 'location')},
+        registries_text=format_registries_for_prompt(project_dir, exclude=('knowledge',)))
     out = []
-    for prompt, kind, schema in ((knowledge_prompt, 'knowledge', KNOWLEDGE_SCHEMA),
-                                 (physical_prompt, 'physical', PHYSICAL_STATE_SCHEMA)):
-        response = extract_text(invoke(prompt, model, max_tokens=1024,
+    for prompt, kind, schema, tokens in (
+            (knowledge_prompt, 'knowledge', KNOWLEDGE_SCHEMA, 1024),
+            (physical_prompt, 'physical', PHYSICAL_STATE_SCHEMA, 1024),
+            (commitments_prompt, 'commitments', COMMITMENTS_SCHEMA, 8000)):
+        response = extract_text(invoke(prompt, model, max_tokens=tokens,
                                        label=f'e3 {kind} {scene_id}', output_schema=schema))
         if not response.strip():
             raise RuntimeError(f'empty {kind} extraction for {scene_id}')
         out.append(response)
-    return out[0], out[1]
+    return out[0], out[1], out[2]
 
 
 def parse_verdict(text: str) -> dict:
@@ -137,12 +150,13 @@ def parse_verdict(text: str) -> dict:
     return verdict
 
 
-def judge(item: dict, knowledge: str, physical: str) -> dict:
+def judge(item: dict, knowledge: str, physical: str, commitments: str) -> dict:
     from storyforge.api import extract_text, invoke
     from storyforge.common import model_for_tier
     prompt = JUDGE_PROMPT.format(scene=item['scene'], quote=item['span']['quote'],
                                  summary=item['case']['summary'],
-                                 knowledge=knowledge, physical=physical)
+                                 knowledge=knowledge, physical=physical,
+                                 commitments=commitments)
     return parse_verdict(extract_text(invoke(prompt, model_for_tier('opus'), max_tokens=512,
                                              label=f'e3 judge {item["case"]["id"]}')))
 

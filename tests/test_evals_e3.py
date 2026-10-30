@@ -26,15 +26,15 @@ def test_unreadable_verdict_raises(text):
         e3.parse_verdict(text)
 
 
-def test_judge_prompt_carries_the_fact_and_both_extractions(monkeypatch):
+def test_judge_prompt_carries_the_fact_and_all_three_extractions(monkeypatch):
     from storyforge import api
     seen = {}
     monkeypatch.setattr(api, 'invoke', lambda p, m, **k: seen.setdefault('p', p) and {
         'content': [{'type': 'text', 'text': '{"verdict": "missing", "evidence": ""}'}]})
     item = {'case': CASE, 'span': CASE['established'][0], 'scene': '44'}
-    assert e3.judge(item, 'KNOWLEDGE OUT', 'PHYS OUT')['verdict'] == 'missing'
+    assert e3.judge(item, 'KNOWLEDGE OUT', 'PHYS OUT', 'COMMIT OUT')['verdict'] == 'missing'
     assert 'Three hours. Bend to Portland.' in seen['p']
-    assert 'KNOWLEDGE OUT' in seen['p'] and 'PHYS OUT' in seen['p']
+    assert all(out in seen['p'] for out in ('KNOWLEDGE OUT', 'PHYS OUT', 'COMMIT OUT'))
 
 
 def test_select_reports_exclusions(monkeypatch, tmp_path):

@@ -701,6 +701,111 @@ def parse_knowledge_response(response: str, scene_id: str) -> dict:
     return result
 
 
+# ============================================================================
+# Phase 4: commitments (the reader-noticeable rubric, plan decision 5)
+# ============================================================================
+
+#: The rubric as decided (rethink plan, decision 5). Ben may refine the wording
+#: and add categories from his own books; a change here is an E3 re-record.
+COMMITMENT_RUBRIC = """Extract every commitment the scene makes to the reader. A commitment is a claim about the story's world that a later scene could contradict in a way a careful reader would notice. For each sentence that establishes something, ask three questions:
+
+1. **Is it specific?** Does it name or imply a particular thing: an object, a place, a time, a distance, a name, a relationship, a piece of knowledge, a trait, a stated intention? Moods, impressions, and general atmosphere are not specific.
+2. **Does it persist past this scene?** States that carry forward (an injury, who holds the key, what a character has been told, where an object is kept) count. Momentary description (hands shaking, a flush of anger, the quality of the light) does not, unless it reveals a persistent state (hands shaking because he has been poisoned is a state; capture the poisoning).
+3. **Could a later sentence break it?** If you cannot write one sentence that would contradict it, it is not a commitment.
+
+If all three are yes, record it as one declarative sentence with its quote. There is no cap. Record the claim, not the image: "Marley's ghost wears a chain made of cash-boxes, keys, padlocks, ledgers, deeds and purses," not "the chain is described vividly."
+
+Always capture: names and their spellings; pronouns and gender; ages and dates; who is related to whom and how; who knows what, and who told them; injuries, illness, possessions, and the locations of people and objects at scene end; the time of day and day the scene occurs; elapsed time stated relative to another event ("three weeks ago," "eight days ago"); counts and quantities (how many survivors, how many records, how many guards); distances and travel times; stated rules of the world; anything a character promises or threatens; anything the narrator states as fact about the past; information conveyed in dialogue.
+
+Never capture: a character's emotion in the moment; sensory texture that recurs nowhere; the narrator's opinions; metaphor read literally; dialogue that is texture rather than information.
+
+Examples: "Desta is Corvin's neighbor and friend" is a commitment. "Corvin left a note," what it said, and who found it are commitments. "The surveyor's hands are shaking" is not. From A Christmas Carol: "Scrooge's nephew is Fred and his dead sister was Fan" is three commitments; "the fog came pouring in at every chink" is none."""
+
+#: What each commitment `type` holds (plan §3.1)
+COMMITMENT_TYPE_GUIDE = (
+    ('physical', 'bodies and things: injuries, illness, possessions, clothing, where a person or object is'),
+    ('timeline', 'when: time of day, day, dates, ages, elapsed time, durations, travel times, order of events'),
+    ('knowledge', 'who knows what, and who told them'),
+    ('relationship', 'who is related to whom and how; alliances, debts, roles toward each other'),
+    ('trait', 'identity: names and spellings, pronouns, appearance, backstory, skills, habits'),
+    ('world', 'places, distances, counts, institutions, and the stated rules of the world'),
+    ('promise', 'anything a character promises, threatens or plans, and what the story sets up to pay off'),
+)
+
+COMMITMENTS_SCHEMA = _object({
+    'commitments': {'type': 'array', 'items': _object({
+        'type': {'type': 'string', 'enum': [t for t, _ in COMMITMENT_TYPE_GUIDE]},
+        'subject': {'type': 'string'},
+        'statement': {'type': 'string'},
+        'quote': {'type': 'string'},
+        'mutable': {'type': 'string', 'enum': ['state', 'fixed']},
+        'supersedes': {'type': 'string'},
+    })},
+})
+
+
+def build_commitments_prompt(scene_id: str, scene_text: str,
+                             skeleton: dict[str, str],
+                             registries_text: str = '',
+                             known: list[dict[str, str]] | None = None) -> str:
+    """Build the Phase 4 prompt: every commitment the scene makes (decision 5).
+
+    ``known`` holds earlier scenes' commitments still in force (id, type,
+    subject, statement), so a scene that changes one says which it
+    supersedes instead of restating it. The reply is structured
+    (``COMMITMENTS_SCHEMA``).
+    """
+    known = known or []
+    types = '\n'.join(f'- **{t}**: {what}' for t, what in COMMITMENT_TYPE_GUIDE)
+    if known:
+        known_text = '\n'.join(
+            f'- {k["id"]} [{k["type"]}] {k.get("subject") or "-"}: {k["statement"]}'
+            for k in known)
+    else:
+        known_text = '(none yet)'
+    registries_section = f'\n{registries_text}\n' if registries_text else ''
+    return f"""{COMMITMENT_RUBRIC}
+
+## Scene: {scene_id}
+Title: {skeleton.get('title', '')}
+POV: {skeleton.get('pov', '')}
+Location: {skeleton.get('location', '')}
+
+{scene_text}
+{registries_section}
+## Commitments earlier scenes made that are still in force
+
+{known_text}
+
+## How to record each commitment
+
+- type: one of
+{types}
+- subject: the id from the registries above of the character, location or object it is about (blank when it has no single subject; for a promise, the character who makes it)
+- statement: one declarative sentence, specific enough that a later sentence could contradict it
+- quote: the exact words from this scene that establish it, copied verbatim
+- mutable: "state" if it can change later in the story (an injury, who holds the key, where someone is, what they know), "fixed" if it should hold for the whole book (a name, an age, a sister's name, a backstory event)
+- supersedes: the id of the earlier commitment above that this one replaces (a wound healing, a key changing hands), or blank
+
+Record each commitment once. Don't restate an earlier commitment the scene only repeats. Answer with a JSON object holding the list `commitments` (an empty list is valid only when the scene truly commits to nothing)."""
+
+
+def parse_commitments_response(response: str, scene_id: str) -> list[dict[str, str]]:
+    """Phase 4's structured reply (``COMMITMENTS_SCHEMA``) as a list of
+    ``{type, subject, statement, quote, mutable, supersedes}``, dropping
+    entries with no statement. Raises ValueError on an unreadable reply."""
+    data = _json_answer(response, COMMITMENTS_SCHEMA)
+    out = []
+    for item in data['commitments']:
+        if not isinstance(item, dict):
+            continue
+        entry = {k: str(item.get(k) or '').strip()
+                 for k in ('type', 'subject', 'statement', 'quote', 'mutable', 'supersedes')}
+        if entry['statement']:
+            out.append(entry)
+    return out
+
+
 KNOWLEDGE_COLUMNS = ['id', 'name', 'aliases', 'category', 'origin']
 
 
