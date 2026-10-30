@@ -202,6 +202,27 @@ custom_evaluators:
         assert result[0][0] == 'beta-reader'
         assert result[1][0] == 'sensitivity-reader'
 
+    def test_a_missing_persona_file_does_not_shift_the_others(self, tmp_path, capsys):
+        """Names and files were paired by position: with the first item's
+        file missing, beta-reader got the sensitivity persona and
+        sensitivity-reader was dropped."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'custom_evaluators:\n'
+            '  - name: historian\n'
+            '  - name: beta-reader\n'
+            '    persona_file: reference/beta-reader.md\n'
+            '  - persona_file: reference/sensitivity.md\n'
+            '    name: sensitivity-reader\n'
+            'other: x\n')
+
+        result = _load_custom_evaluators(str(tmp_path))
+
+        assert result == [
+            ('beta-reader', str(tmp_path / 'reference' / 'beta-reader.md')),
+            ('sensitivity-reader', str(tmp_path / 'reference' / 'sensitivity.md')),
+        ]
+        assert "No persona_file found for custom evaluator 'historian'" in capsys.readouterr().out
+
 
 # ============================================================================
 # _resolve_voice_guide
