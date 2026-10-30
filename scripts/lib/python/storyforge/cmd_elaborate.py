@@ -1827,10 +1827,14 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     f.write(content + '\n')
                 written.append(filename)
 
-        if written:
-            log(f'  Updated: {", ".join(written)}')
-        else:
-            log('  WARNING: No structured output blocks found in response')
+        if not written:
+            # Validating, committing and advancing the phase over a stage
+            # that wrote nothing would read as the stage having run
+            log(f'ERROR: the {stage} reply held no output blocks Storyforge could '
+                f'apply; nothing was written and the phase is not advanced. '
+                f'See the reply: {stage_log}')
+            sys.exit(1)
+        log(f'  Updated: {", ".join(written)}')
 
     # ========================================================================
     # Validate
