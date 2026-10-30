@@ -725,7 +725,7 @@ Long files are excerpted: the start and end are shown and the middle is marked a
 
 ## Fixable Items
 
-List specific items that can be fixed automatically without author input.
+List specific mechanical fixes (typos, wrong ids, broken references) that need no author judgment. They are reported to the author, not applied.
 Format each as a checkbox:
 - [ ] {{specific file}}: {{what needs to change}}
 
@@ -740,7 +740,7 @@ If nothing is auto-fixable, write: "None — all concerns require author judgmen
 def run_review_phase(review_type: str, project_dir: str, pr_number: str = '') -> None:
     """Run the review phase at the end of an autonomous process.
 
-    Sequence: label swap -> Claude review -> cleanup -> recommend -> label swap
+    Sequence: label swap -> Claude review -> report fixable items -> recommend -> label swap
     """
     from storyforge.common import (
         get_current_cycle, update_cycle_field, get_cycle_plan_file,
@@ -824,7 +824,12 @@ def run_review_phase(review_type: str, project_dir: str, pr_number: str = '') ->
 
 
 def _run_cleanup_if_needed(review_file: str, review_type: str, project_dir: str) -> None:
-    """Run a single cleanup pass if fixable items exist."""
+    """Name the review's fixable items for the author.
+
+    They used to go to a cleanup call, but a plain API call has no file
+    tools: it changed nothing, and the run logged "Cleanup complete."
+    anyway (since the Python port). Until a pass can apply and check them,
+    they are reported, not applied."""
     with open(review_file) as f:
         content = f.read()
 
@@ -837,25 +842,8 @@ def _run_cleanup_if_needed(review_file: str, review_type: str, project_dir: str)
         return
 
     item_count = section.count('- [ ]')
-    log(f'Review found {item_count} fixable item(s). Running cleanup...')
-
-    from storyforge.api import invoke_api
-    cleanup_prompt = f"""You are performing cleanup pass 1 on a Storyforge project after a {review_type} review.
-
-Read the review report below and fix ONLY items in the "Fixable Items" section:
-
-{content}
-
-Rules:
-- Only fix items listed in "Fixable Items" — nothing else
-- Do not make subjective changes, creative edits, or prose improvements
-- Do not modify scene prose content
-- If an item is ambiguous or requires author judgment, skip it
-"""
-    model = select_model('review')
-    response = invoke_api(cleanup_prompt, model, max_tokens=16384)
-    if response:
-        log('Cleanup complete.')
+    log(f'Review found {item_count} fixable item(s), not applied: see "Fixable Items" '
+        f'in {os.path.relpath(review_file, project_dir)}')
 
 
 def _run_recommend_step(review_type: str, project_dir: str, cycle_id: int) -> None:
