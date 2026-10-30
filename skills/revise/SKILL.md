@@ -143,11 +143,13 @@ Each upstream pass automatically re-drafts affected scenes from updated briefs.
 The plan is a pipe-delimited CSV at `working/plans/revision-plan.csv`:
 
 ```
-pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location
-1|knowledge-chain-fix|Fix knowledge violations flagged in evaluation|scene-level|scene-a;scene-b|Specific guidance here|voice-quality|F001;F003|pending|sonnet|brief
-2|mice-thread-fix|Fix MICE thread operations|full||Each thread opens once and closes once, where it resolves|all-strengths|F007|pending|sonnet|intent
-3|prose-tightening|Voice consistency and AI pattern cleanup|full||Follow voice guide strictly|scene-30b|F012;F015|pending|opus|craft
+pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location|owed
+1|knowledge-chain-fix|Fix knowledge violations flagged in evaluation|scene-level|scene-a;scene-b|Specific guidance here|voice-quality|F001;F003|pending|sonnet|brief|
+2|mice-thread-fix|Fix MICE thread operations|full||Each thread opens once and closes once, where it resolves|all-strengths|F007|pending|sonnet|intent|
+3|prose-tightening|Voice consistency and AI pattern cleanup|full||Follow voice guide strictly|scene-30b|F012;F015|pending|opus|craft|
 ```
+
+Leave `owed` blank when writing a plan. `revise` fills it when a prose pass's reply held scenes it couldn't write (cut off, ending mid-sentence): the pass stops uncompleted, and re-running `storyforge revise` revises only the owed scenes.
 
 ### Writing the Plan — MANDATORY
 
