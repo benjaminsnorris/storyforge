@@ -117,7 +117,7 @@ def main(argv=None):
 - [ ] Phase 1: Extract skeleton (scenes.csv)
 - [ ] Phase 2: Extract intent (scene-intent.csv)
 - [ ] Phase 3: Extract briefs (scene-briefs.csv)
-- [ ] Phase 5: Describe the book (spine, architecture, themes, motifs)
+- [ ] Phase 5: Describe the book (spine, architecture, themes, motifs, story summary)
 - [ ] Validate
 - [ ] Review"""
         create_draft_pr(f'Extract: {title} ({scene_count} scenes)',
@@ -205,7 +205,7 @@ def main(argv=None):
     # Phase 5: Describe (after cleanup on a full run, so it reads cleaned data)
     if not args.cleanup_only and (args.phase is None or args.phase == 5):
         if _run_phase_5(project_dir, log_dir, profile_file, args.force, args.dry_run):
-            update_pr_task('Phase 5: Describe the book (spine, architecture, themes, motifs)',
+            update_pr_task('Phase 5: Describe the book (spine, architecture, themes, motifs, story summary)',
                            project_dir)
 
     # Validate
@@ -1312,8 +1312,8 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
 def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
     """Phase 5, describe (#440): the reference layers above the scenes, from
-    what phases 0-4 found. Steps 5a (structure) and 5b (themes and motifs)
-    so far; `extract_describe` holds them and the write gate. Returns
+    what phases 0-4 found. Steps 5a (structure), 5b (themes and motifs) and
+    5c (story summary and story architecture) so far; `extract_describe` holds them and the write gate. Returns
     whether any step wrote.
 
     A step whose files the author owns is skipped and says so. A step that
@@ -1336,7 +1336,9 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
         for label, prompt in (
                 ('5a structure', describe.build_structure_prompt(profile, scenes)),
                 ('5b themes', describe.build_themes_prompt(
-                    profile, scenes, describe.motif_mentions(scenes)))):
+                    profile, scenes, describe.motif_mentions(scenes))),
+                ('5c pitch', describe.build_pitch_prompt(
+                    profile, scenes, describe.pitch_evidence(project_dir, scenes)))):
             print(f'{label}: {len(prompt)} chars')
         print('===== END DRY RUN =====')
         return False
@@ -1361,9 +1363,11 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
         on_usage=lambda f, op, target, model: _log_api_usage(f, op, target, model, project_dir))
     outcomes = {}
     try:
-        # Each step re-reads the scenes: 5a may have filled blank summaries
+        # Each step re-reads the scenes: 5a may have filled blank summaries.
+        # 5c reads the spine and themes 5a and 5b wrote
         for name, step in (('spine and architecture', describe.run_structure),
-                           ('themes and motifs', describe.run_themes)):
+                           ('themes and motifs', describe.run_themes),
+                           ('story summary and architecture', describe.run_pitch)):
             outcomes[name] = step(run, profile, describe.scene_table(ref_dir))
     except Exception as e:   # anything mid-step: report and commit what is written
         for line in run.reports:

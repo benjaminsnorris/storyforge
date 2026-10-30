@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import os
 import posixpath
 import re
@@ -763,11 +764,414 @@ def parse_themes(response: str, scenes: list[dict[str, str]],
 
 
 # ============================================================================
+# Step 5c: the story summary and the story architecture (one call)
+# ============================================================================
+
+#: The L0-L2 floors (`scoring_levels.score_logline`, `score_synopsis`,
+#: `score_act_shape`), checked here with the scorer's own counters so a
+#: written summary can't fail them.
+LOGLINE_MAX_WORDS = 35
+SYNOPSIS_SENTENCES = (4, 8)
+#: `story-summary.md`'s Act-shape is always three `### Act N` sections (the
+#: L2 floor). The book's own division, whatever it is, goes in the
+#: architecture's Structure section, keyed by `scenes.csv:act`.
+ACT_SHAPE_KEYS = ('act_1', 'act_2', 'act_3')
+_STRING = {'type': 'string'}
+_STRINGS = {'type': 'array', 'items': _STRING}
+
+
+def _object(properties: dict) -> dict:
+    return {'type': 'object', 'additionalProperties': False,
+            'required': list(properties), 'properties': properties}
+
+
+PITCH_SCHEMA = _object({
+    'logline': _STRING,
+    'synopsis': _STRING,
+    'act_shape': _object({k: _STRING for k in ACT_SHAPE_KEYS}),
+    'theme': _STRING,
+    'premise': _STRING,
+    'core_theme': _STRING,
+    'motif_meanings': {'type': 'array', 'items': _object(
+        {'motif_id': _STRING, 'meaning': _STRING})},
+    'conflict': _object({k: _STRING for k in ('external', 'internal', 'thematic')}),
+    'promise': _STRINGS,
+    'structural_model': _STRING,
+    'acts': {'type': 'array', 'items': _object({
+        'act': _STRING, 'title': _STRING, 'description': _STRING,
+        'key_beats': _STRINGS, 'turning_point': _STRING})},
+    'subplots': {'type': 'array', 'items': _object(
+        {k: _STRING for k in ('name', 'characters', 'function', 'arc')})},
+    'pov': _object({'pattern': _STRING, 'excluded': _STRING}),
+    'voice': _object({'prose_style': _STRING, 'pacing': _STRING}),
+    'never_does': _STRINGS,
+    'title_meaning': _object({k: _STRING for k in ('surface', 'deeper', 'final')}),
+    'identity': _object({'pov': _STRING, 'tone': _STRING}),
+})
+
+
+@dataclass(frozen=True)
+class ActLength:
+    """One of the book's acts as scenes.csv divides it, measured by code."""
+    act: str
+    scenes: int
+    words: int
+    uncounted: int     # scenes with no numeric word_count, left out of `words`
+
+
+def act_lengths(scenes: list[dict[str, str]]) -> list[ActLength]:
+    """The book's acts in reading order, from `scenes.csv:act`, with their
+    scene and word counts. A scene with no act is grouped under ''."""
+    acts: dict[str, list[int]] = {}
+    for s in scenes:
+        counts = acts.setdefault(s.get('act', '').strip(), [0, 0, 0])
+        counts[0] += 1
+        words = s.get('word_count', '').strip()
+        if words.isdigit():
+            counts[1] += int(words)
+        else:
+            counts[2] += 1
+    return [ActLength(act, *counts) for act, counts in acts.items()]
+
+
+@dataclass(frozen=True)
+class PitchEvidence:
+    """What 5c is given beyond the profile and the scenes: the layers 5a and
+    5b wrote (or the author's, when they kept theirs) and the project's own
+    fields. Read by code, so the docs can quote them rather than restate."""
+    title: str
+    genre: str
+    spine: list[dict[str, str]]
+    themes: list[dict[str, str]]
+    motifs: list[dict[str, str]]
+    threads: list[dict[str, str]]
+    acts: list[ActLength]
+
+
+def pitch_evidence(project_dir: str, scenes: list[dict[str, str]]) -> PitchEvidence:
+    from .common import read_yaml_field
+    from .elaborate import _read_csv
+
+    def rows(name: str) -> list[dict[str, str]]:
+        path = os.path.join(project_dir, 'reference', name)
+        return _read_csv(path) if os.path.isfile(path) else []
+
+    genre = read_yaml_field('project.genre', project_dir)
+    if genre in _PROJECT_PLACEHOLDERS['genre']:
+        genre = ''
+    subgenre = read_yaml_field('project.subgenre', project_dir)
+    return PitchEvidence(
+        title=read_yaml_field('project.title', project_dir),
+        genre=f'{genre} ({subgenre})' if genre and subgenre else genre,
+        spine=rows('spine.csv'), themes=rows('themes.csv'),
+        motifs=rows('motif-taxonomy.csv'), threads=rows('mice-threads.csv'),
+        acts=act_lengths(scenes))
+
+
+def _act_label(act: str) -> str:
+    """An act value as a heading: `1` is "Act 1", `Part One` stays itself."""
+    if not act:
+        return 'Scenes with no act'
+    return f'Act {act}' if act.isdigit() else act
+
+
+def build_pitch_prompt(profile: dict, scenes: list[dict[str, str]], ev: PitchEvidence,
+                       problems: list[str] | None = None) -> str:
+    """Step 5c's prompt: the story summary and the story architecture in one
+    call, so the logline, the premise and the act shapes can't disagree.
+
+    Lengths, POV counts, the supporting themes and the motif names are
+    rendered by code from the CSVs; the model describes."""
+    lo, hi = SYNOPSIS_SENTENCES
+    spine = '\n'.join(f'{i}. {r.get("title", "")}: {r.get("summary", "")} '
+                      f'(function: {r.get("function", "")})'
+                      for i, r in enumerate(ev.spine, 1)) or '(none recorded)'
+    themes = '\n'.join(f'- {r.get("id", "")} ({r.get("tier", "")}): {r.get("name", "")}. '
+                       f'{r.get("description", "")}' for r in ev.themes) or '(none recorded)'
+    motifs = '\n'.join(f'- {r.get("id", "")}: {r.get("name", "")}' for r in ev.motifs) \
+        or '(none recorded)'
+    threads = '\n'.join(f'- {r.get("id", "")} ({r.get("type", "")}): {r.get("name", "")}'
+                        for r in ev.threads) or '(none recorded)'
+    acts = ', '.join(json.dumps(a.act) for a in ev.acts)
+    if any(not a.act for a in ev.acts):
+        acts += ' ("" is the scenes with no act)'
+    retry = ''
+    if problems:
+        retry = ('\n## Your previous answer could not be used\n\n'
+                 + '\n'.join(f'- {p}' for p in problems)
+                 + '\n\nAnswer again with these fixed.\n')
+    return f"""{_DESCRIBE_STANCE}
+
+## The book
+
+- title: {ev.title or '(untitled)'}
+- genre: {ev.genre or '(not recorded)'}
+{_profile_lines(profile, ('narrative_mode', 'timeline', 'act_structure', 'central_conflict',
+                          'protagonist_arc', 'major_threads', 'tone'))}
+
+## Its spine (the irreducible events)
+
+{spine}
+
+## Its themes
+
+{themes}
+
+## Its recurring motifs
+
+{motifs}
+
+## Its narrative threads (MICE)
+
+{threads}
+
+## Its scenes, in reading order
+
+{_scene_lines(scenes)}
+{retry}
+## What to produce
+
+Every field is plain prose on one line: no headings, no bullets, no line
+breaks. Reveal the ending everywhere; this is for the author, not a pitch.
+
+The story summary:
+1. **logline**: one sentence, at most {LOGLINE_MAX_WORDS} words: the protagonist, what
+   they want, what stands in the way, and what is at stake.
+2. **synopsis**: one paragraph of {lo}-{hi} sentences telling the whole story, ending included.
+3. **act_shape**: the story in three movements (act_1 the setup through the
+   inciting incident, act_2 the escalation and the midpoint, act_3 the climax
+   and what the resolution costs), one paragraph each, whether or not the
+   book divides itself into three.
+4. **theme**: two to four sentences on what the story argues: its central
+   question or claim.
+
+The story architecture:
+5. **premise**: one sentence saying what the novel is about.
+6. **core_theme**: the central question the book dramatizes, phrased as a question.
+7. **motif_meanings**: for every motif id listed above, motif_id and meaning
+   (one sentence on what the image carries in this book).
+8. **conflict**: external (the observable problem), internal (the
+   protagonist's inner struggle) and thematic (the values that collide).
+9. **promise**: 3-5 short statements of the experience the book delivers to a reader.
+10. **structural_model**: one or two sentences naming how the book is built
+    (three acts, four parts, a frame, braided timelines...).
+11. **acts**: one entry for each of the book's acts as its scenes divide it,
+    using these act values exactly: {acts}. For each: act, title, description
+    (one sentence on what the act does), key_beats (3-6 events, in order) and
+    turning_point (what changes at its end; for the last act, the closing
+    image), without a label in front of it.
+12. **subplots**: the threads beside the main plot. For each: name,
+    characters, function (what it does for the main story) and arc (where it
+    starts, turns and resolves). An empty list if there are none.
+13. **pov**: pattern (who narrates, and in what pattern) and excluded (who
+    never gets a point of view, and what that does; empty if not notable).
+14. **voice**: prose_style (what makes the prose distinct) and pacing (where
+    the book slows and where it accelerates).
+15. **never_does**: 2-5 things the book consistently never does (a
+    description of its restraint, not advice).
+16. **title_meaning**: surface, deeper and final (what the title means by the end).
+17. **identity**: pov (a short phrase, such as "first person, past tense,
+    Nick Carraway") and tone (a short phrase).
+"""
+
+
+def _one_line(text: str) -> str:
+    """Model prose as one markdown line that can't start a heading or a
+    list item (which would split `parse_story_summary`'s sections)."""
+    text = ' '.join(str(text).split())
+    return '\\' + text if text[:1] in ('#', '-', '*', '+', '>') else text
+
+
+def parse_pitch(response: str, ev: PitchEvidence) -> dict:
+    """Read and check step 5c's reply. Returns the reply with every string
+    on one line (`_one_line`) and `acts` in the book's act order.
+
+    Raises ReplyProblems listing every problem: the L0-L2 floors (an empty
+    or overlong logline, a synopsis outside SYNOPSIS_SENTENCES by the
+    scorer's own count, an empty act shape), an empty theme, premise or core
+    theme, an act that isn't one of the book's, repeated or left out, and a
+    motif id unknown, repeated, left out or given no meaning.
+    """
+    from .extract import _json_answer
+    from .scoring_levels import _count_sentences, _count_words
+    data = _json_answer(response, PITCH_SCHEMA)
+
+    def clean(value):
+        if isinstance(value, dict):
+            return {k: clean(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [c for c in (clean(v) for v in value) if c]
+        return _one_line(value)
+    data = clean(data)
+    problems = []
+
+    words = _count_words(data['logline'])
+    if not words:
+        problems.append('logline is empty')
+    elif words > LOGLINE_MAX_WORDS:
+        problems.append(f'logline has {words} words; at most {LOGLINE_MAX_WORDS}')
+    lo, hi = SYNOPSIS_SENTENCES
+    sentences = _count_sentences(data['synopsis'])
+    if not lo <= sentences <= hi:
+        problems.append(f'synopsis has {sentences} sentences; expected {lo}-{hi}')
+    for key in ACT_SHAPE_KEYS:
+        if not data['act_shape'][key]:
+            problems.append(f'act_shape.{key} is empty')
+    for key in ('theme', 'premise', 'core_theme'):
+        if not data[key]:
+            problems.append(f'{key} is empty')
+
+    order = {a.act: i for i, a in enumerate(ev.acts)}
+    acts, seen = [], set()
+    for a in data['acts']:
+        act = a['act']
+        if act not in order:
+            problems.append(f'acts names {act!r}, which is not one of the book\'s acts '
+                            f'({", ".join(json.dumps(x.act) for x in ev.acts)})')
+        elif act in seen:
+            problems.append(f'act {act!r} is described twice')
+        else:
+            seen.add(act)
+            acts.append(a)
+    missing = [json.dumps(a.act) for a in ev.acts if a.act not in seen]
+    if missing:
+        problems.append('acts leaves out act(s): ' + ', '.join(missing))
+    data['acts'] = sorted(acts, key=lambda a: order[a['act']])
+
+    known = [m.get('id', '') for m in ev.motifs]
+    meanings: dict[str, str] = {}
+    for m in data['motif_meanings']:
+        mid = m.get('motif_id', '')
+        if mid not in known:
+            problems.append(f'motif_meanings names {mid!r}, which is not a motif id')
+        elif mid in meanings:
+            problems.append(f'motif {mid} is given two meanings')
+        elif not m.get('meaning'):
+            problems.append(f'motif {mid} has no meaning')
+        else:
+            meanings[mid] = m['meaning']
+    unmeant = [mid for mid in known if mid not in meanings]
+    if unmeant:
+        problems.append(f'{len(unmeant)} motif(s) have no meaning: '
+                        + ', '.join(unmeant[:5]) + ('…' if len(unmeant) > 5 else ''))
+    data['motif_meanings'] = meanings
+
+    if problems:
+        raise ReplyProblems(problems)
+    return data
+
+
+def render_story_summary(pitch: dict, header: str, today: str) -> str:
+    """`story-summary.md` in the shape `common.parse_story_summary` reads:
+    the provenance comment, `_updated` stamps, and four `##` sections."""
+    stamps = '\n'.join(f'{k}_updated: {today}'
+                       for k in ('logline', 'synopsis', 'act_shape', 'theme'))
+    acts = '\n\n'.join(f'### Act {i}\n\n{pitch["act_shape"][k]}'
+                       for i, k in enumerate(ACT_SHAPE_KEYS, 1))
+    return (f'{header}\n---\n{stamps}\n---\n\n# Story summary\n\n'
+            f'## Logline\n\n{pitch["logline"]}\n\n'
+            f'## Synopsis\n\n{pitch["synopsis"]}\n\n'
+            f'## Act-shape\n\n{acts}\n\n'
+            f'## Theme\n\n{pitch["theme"]}\n')
+
+
+#: A label the model sometimes repeats at the start of a field the doc
+#: already labels ("**Closing image:** Closing image: ...", live on Carol).
+_ECHOED_LABEL = re.compile(r'^(?:closing image|turning point)\s*:\s*', re.IGNORECASE)
+
+
+def _cell_md(text: str) -> str:
+    return text.replace('|', '\\|')
+
+
+def _bullets(items: list[str]) -> str:
+    return '\n'.join(f'- {i}' for i in items) or '- (none)'
+
+
+def render_story_architecture(pitch: dict, ev: PitchEvidence, scenes: list[dict[str, str]],
+                              header: str) -> str:
+    """`story-architecture.md`, in the template's sections with its
+    prescriptive ones renamed to what they describe ("Things to Avoid" is
+    "What the book never does"). Lengths, shares, POV counts, supporting
+    themes and motif names come from the CSVs."""
+    total = sum(a.words for a in ev.acts)
+    uncounted = sum(a.uncounted for a in ev.acts)
+    meanings = pitch['motif_meanings']
+    supporting = [t for t in ev.themes if t.get('tier', '') != 'primary']
+    primary = [t for t in ev.themes if t.get('tier', '') == 'primary']
+
+    out = [header, f'# {ev.title or "Untitled"} -- Story Architecture', '', '---', '',
+           '## Premise', '', f'> {pitch["premise"]}', '', '---', '',
+           '## Theme', '', '### Core Theme', pitch['core_theme'], '']
+    if primary:
+        out += [_bullets([f'**{t.get("name", "")}**: {t.get("description", "")}'
+                          for t in primary]), '']
+    out += ['### Supporting Themes',
+            _bullets([f'**{t.get("name", "")}** ({t.get("tier", "")}): '
+                      f'{t.get("description", "")}' for t in supporting]), '',
+            '### Motifs & Symbols', '', '| Motif | Meaning |', '|---|---|']
+    out += [f'| {_cell_md(m.get("name", ""))} | {_cell_md(meanings.get(m.get("id", ""), ""))} |'
+            for m in ev.motifs] or ['| (none recorded) | |']
+    c = pitch['conflict']
+    out += ['', '---', '', '## Central Conflict', '',
+            '### External Conflict', c['external'], '',
+            '### Internal Conflict', c['internal'], '',
+            '### Thematic Conflict', c['thematic'], '', '---', '',
+            '## The Promise of the Premise', '', _bullets(pitch['promise']), '', '---', '',
+            '## Structure', '', '### Length',
+            f'{total:,} words in {len(scenes)} scenes'
+            + (f' ({uncounted} scene(s) with no word count in scenes.csv are not counted)'
+               if uncounted else ''), '',
+            '### Structural Model', pitch['structural_model'], '']
+    by_act = {a['act']: a for a in pitch['acts']}
+    for i, length in enumerate(ev.acts):
+        a = by_act[length.act]
+        share = f'{round(100 * length.words / total)}%' if total else 'an unknown share'
+        closing = 'Closing image' if i == len(ev.acts) - 1 else 'Turning point'
+        out += ['---', '', f'### {_act_label(length.act)}: {a["title"]}',
+                f'**{share} of the novel (~{length.words:,} words, {length.scenes} scenes)**',
+                f'*{a["description"]}*', '', '**Key beats:**', _bullets(a['key_beats']), '',
+                f'**{closing}:** {_ECHOED_LABEL.sub("", a["turning_point"])}', '']
+    out += ['---', '', '## Subplots', '']
+    for s in pitch['subplots']:
+        out += [f'### {s["name"]}', f'- Characters involved: {s["characters"]}',
+                f'- Function: {s["function"]}', f'- Arc: {s["arc"]}', '']
+    if not pitch['subplots']:
+        out += ['None: the book follows a single line.', '']
+    pov_counts: dict[str, list[int]] = {}
+    for s in scenes:
+        counts = pov_counts.setdefault(s.get('pov', '').strip() or '(none recorded)', [0, 0])
+        counts[0] += 1
+        counts[1] += int(s['word_count']) if s.get('word_count', '').strip().isdigit() else 0
+    out += ['---', '', '## Point of View Structure', '', '### Pattern', pitch['pov']['pattern'],
+            '', '| POV | Scenes | Words |', '|---|---|---|']
+    out += [f'| {_cell_md(p)} | {n} | {w:,} |'
+            for p, (n, w) in sorted(pov_counts.items(), key=lambda kv: -kv[1][0])]
+    if pitch['pov']['excluded']:
+        out += ['', '### Excluded POVs', pitch['pov']['excluded']]
+    v = pitch['voice']
+    t = pitch['title_meaning']
+    out += ['', '---', '', '## Voice & Pacing', '', '### Prose Style', v['prose_style'], '',
+            '### Pacing', v['pacing'], '', '### What the book never does',
+            _bullets(pitch['never_does']), '', '---', '', '## The Title', '',
+            f'1. **Surface meaning:** {t["surface"]}', f'2. **Deeper meaning:** {t["deeper"]}',
+            f'3. **Final meaning (by the end):** {t["final"]}', '', '---', '',
+            '## Novel Identity Summary', '',
+            f'**Title:** {ev.title or "Untitled"}  ', f'**Genre:** {ev.genre or "(not recorded)"}  ',
+            f'**Length:** {total:,} words, {len(scenes)} scenes  ',
+            f'**Structure:** {pitch["structural_model"]}  ',
+            f'**POV:** {pitch["identity"]["pov"]}  ', f'**Tone:** {pitch["identity"]["tone"]}  ',
+            f'**Core theme:** {pitch["core_theme"]}', '']
+    return '\n'.join(out)
+
+
+# ============================================================================
 # Running the steps
 # ============================================================================
 
 STRUCTURE_MAX_TOKENS = 12_000
 THEMES_MAX_TOKENS = 12_000
+PITCH_MAX_TOKENS = 16_000
 
 #: Every scene-CSV cell phase 5 wrote, with the value it wrote. A cell is
 #: phase 5's to replace only while it still holds exactly that value; any
@@ -865,17 +1269,18 @@ def _ask(run: Run, label: str, prompt_for, parse, schema: dict, max_tokens: int)
     raise AssertionError('unreachable')
 
 
-def _gate(run: Run, rels: list[str], step: str, also: str) -> bool:
+def _gate(run: Run, rels: list[str], step: str, also: str = '') -> bool:
     """Whether every file a step writes may be written; reports the ones
-    that can't, and what else the step then doesn't do (`also`). A step
-    writes all its files or none, so its outputs can't disagree (an
-    architecture naming a spine the author kept)."""
+    that can't, and what else the step then doesn't do (`also`, if
+    anything). A step writes all its files or none, so its outputs can't
+    disagree (an architecture naming a spine the author kept)."""
     verdicts = [decide(run.project_dir, rel, run.force, run.provenance) for rel in rels]
     kept = [v for v in verdicts if not v.write]
     if kept:
         run.reports.extend(v.report() for v in kept)
         run.reports.append(f'{step} skipped: it writes {", ".join(rels)} together, and '
-                           f'{len(kept)} of them must be kept; {also} were not filled either')
+                           f'{len(kept)} of them must be kept'
+                           + (f'; {also} were not filled either' if also else ''))
         return False
     return True
 
@@ -1115,9 +1520,42 @@ def run_themes(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOut
     return 'written'
 
 
+def run_pitch(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutcome:
+    """Step 5c: story-summary.md and story-architecture.md, from one call.
+
+    Reads the spine and themes 5a and 5b wrote, or the author's when they
+    kept theirs. Writing without them is allowed (the scenes cover the whole
+    book) but said, since the docs then rest on less."""
+    rels = ['reference/story-summary.md', 'reference/story-architecture.md']
+    if not _gate(run, rels, '5c (story summary and architecture)'):
+        return 'skipped'
+    ev = pitch_evidence(run.project_dir, scenes)
+    thin = [name for name, rows in (('spine.csv', ev.spine), ('themes.csv', ev.themes))
+            if not rows]
+    if thin:
+        run.reports.append(f'5c: reference/{" and reference/".join(thin)} has no rows, so the '
+                           f'story summary and architecture were written from the scenes alone')
+    pitch = _ask(run, 'pitch',
+                 lambda problems: build_pitch_prompt(profile, scenes, ev, problems),
+                 lambda text: parse_pitch(text, ev), PITCH_SCHEMA, PITCH_MAX_TOKENS)
+    uncounted = sum(a.uncounted for a in ev.acts)
+    if uncounted:
+        run.reports.append(f'5c: {uncounted} scene(s) have no word count in scenes.csv, so '
+                           f'story-architecture.md\'s lengths leave them out')
+    header = provenance_header(run.version, '5c', ['profile', 'scenes', 'spine', 'themes',
+                                                   'motif-taxonomy', 'mice-threads'])
+    today = datetime.now(timezone.utc).date().isoformat()
+    if not _write_all(run, [(rels[0], render_story_summary(pitch, header, today)),
+                            (rels[1], render_story_architecture(pitch, ev, scenes, header))],
+                      '5c', '5c'):
+        return 'partial'
+    return 'written'
+
+
 #: Every path phase 5 may change, for the commit. `working/` covers the
 #: provenance record, the cell record, the logs and the cost ledger.
 WRITTEN_PATHS = ['reference/spine.csv', 'reference/architecture.csv',
                  'reference/scenes.csv', 'reference/scene-intent.csv',
                  'reference/scene-briefs.csv', 'reference/themes.csv',
-                 'reference/motif-taxonomy.csv', 'storyforge.yaml', 'working/']
+                 'reference/motif-taxonomy.csv', 'reference/story-summary.md',
+                 'reference/story-architecture.md', 'storyforge.yaml', 'working/']

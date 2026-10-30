@@ -36,6 +36,45 @@ def _themes_reply(scene_ids, mention):
     })
 
 
+def _pitch_reply(project_dir, **override):
+    """A valid 5c reply for the project as it is when asked: one entry per
+    act in scenes.csv and a meaning for every motif in the taxonomy."""
+    from storyforge.extract_describe import act_lengths, scene_table
+    ref = os.path.join(project_dir, 'reference')
+    taxonomy = os.path.join(ref, 'motif-taxonomy.csv')
+    motif_ids = [r['id'] for r in _read_csv(taxonomy)] if os.path.isfile(taxonomy) else []
+    reply = {
+        'logline': 'A cartographer finds a village missing from the maps and must choose '
+                   'between her post and the truth.',
+        'synopsis': 'Dorren notices an anomaly. She hides it. A village vanishes. She '
+                    'investigates. The archive is being erased. She exposes it at a cost.',
+        'act_shape': {'act_1': 'Dorren notices.', 'act_2': 'Dorren digs.',
+                      'act_3': 'Dorren exposes the erasure.'},
+        'theme': 'What an institution owes the truth.',
+        'premise': 'A mapmaker discovers her maps are lying.',
+        'core_theme': 'What does loyalty to an institution cost?',
+        'motif_meanings': [{'motif_id': m, 'meaning': f'{m} carries memory.'}
+                           for m in motif_ids],
+        'conflict': {'external': 'The erasure.', 'internal': 'Protocol vs conscience.',
+                     'thematic': 'Order vs truth.'},
+        'promise': ['A slow-burn mystery.', 'A map that lies.'],
+        'structural_model': 'Three acts.',
+        'acts': [{'act': a.act, 'title': f'Part {a.act}', 'description': 'It turns.',
+                  'key_beats': ['A beat.', 'Another.'], 'turning_point': 'It changes.'}
+                 for a in act_lengths(scene_table(ref))],
+        'subplots': [{'name': 'Tessa', 'characters': 'Tessa Merrin', 'function': 'Mirror.',
+                      'arc': 'Doubt to trust.'}],
+        'pov': {'pattern': 'Close third on Dorren.', 'excluded': ''},
+        'voice': {'prose_style': 'Precise.', 'pacing': 'Slow, then fast.'},
+        'never_does': ['Explains the magic.'],
+        'title_meaning': {'surface': 'A quiet office.', 'deeper': 'Complicity.',
+                          'final': 'Speech.'},
+        'identity': {'pov': 'close third, past tense', 'tone': 'unsettled'},
+    }
+    reply.update(override)
+    return json.dumps(reply)
+
+
 @pytest.fixture
 def book(project_dir):
     """The fixture with its upper layers as extraction leaves them: the
@@ -61,12 +100,14 @@ def _scene_ids(project_dir):
     return [s['id'] for s in scene_table(os.path.join(project_dir, 'reference'))]
 
 
-def _answer(project_dir, structure=None, themes=None):
+def _answer(project_dir, structure=None, themes=None, pitch=None):
     ids = _scene_ids(project_dir)
     structure = structure or _structure_reply(ids)
     themes = themes or _themes_reply(ids, 'the brass compass')
 
     def reply(prompt):
+        if '**logline**' in prompt:
+            return pitch or _pitch_reply(project_dir)
         return themes if '**themes**' in prompt else structure
     return reply
 
@@ -101,7 +142,8 @@ class TestPhase5:
         assert 'subgenre: "secondary world"' in yaml     # the author's, kept
         assert set(read_provenance(book)) == {
             'reference/spine.csv', 'reference/architecture.csv',
-            'reference/themes.csv', 'reference/motif-taxonomy.csv'}
+            'reference/themes.csv', 'reference/motif-taxonomy.csv',
+            'reference/story-summary.md', 'reference/story-architecture.md'}
         commits = [c for c in mock_git.calls if c[0] == 'commit_and_push']
         assert 'reference/spine.csv' in commits[-1][2]
         assert all(c['model'] for c in mock_api.calls)
@@ -138,7 +180,7 @@ class TestPhase5:
         out = capsys.readouterr().out
         assert 'reference/themes.csv: kept (extracted earlier, then edited' in out
         assert '5b (themes and motifs) skipped' in out
-        assert len(mock_api.calls) == calls + 1     # 5a only
+        assert len(mock_api.calls) == calls + 2     # 5a and 5c
         with open(themes) as f:
             assert 'The author added this.' in f.read()
 
@@ -159,9 +201,11 @@ class TestPhase5:
         bad['architecture'][0]['scene_id'] = 'no-such-scene'
         replies = iter([json.dumps(bad), _structure_reply(ids)])
         themes = _themes_reply(ids, 'the brass compass')
-        mock_api.set_response_fn(lambda p: themes if '**themes**' in p else next(replies))
+        mock_api.set_response_fn(lambda p: _pitch_reply(book) if '**logline**' in p
+                                 else themes if '**themes**' in p else next(replies))
         _run(book)
-        structure_prompts = [c['prompt'] for c in mock_api.calls if '**themes**' not in c['prompt']]
+        structure_prompts = [c['prompt'] for c in mock_api.calls
+                             if '**spine**' in c['prompt']]
         assert len(structure_prompts) == 2
         assert "'no-such-scene' is not one of the scene ids" in structure_prompts[1]
         assert os.path.exists(os.path.join(book, 'reference', 'spine.csv'))
@@ -453,7 +497,8 @@ class TestReviewFixes:
         assert cmd_extract._run_phase_5(
             project_dir, os.path.join(project_dir, 'working', 'logs'),
             os.path.join(project_dir, 'working', 'extraction-profile.json'), False, False)
-        assert _commits(mock_git)[-1][1] == 'Extract: Phase 5 — describe (spine and architecture)'
+        assert _commits(mock_git)[-1][1] == ('Extract: Phase 5 — describe (spine and '
+                                              'architecture, story summary and architecture)')
 
     def test_nothing_written_returns_false(self, book, mock_api, mock_git, mock_costs, capsys):
         mock_api.set_response_fn(_answer(book))
@@ -573,3 +618,185 @@ class TestCellRecord:
         assert 'extraction-cells.csv could not be read' in capsys.readouterr().out
         with open(record, 'rb') as f:
             assert f.read() == b'\xff broken'
+
+
+class TestPitch:
+    """Step 5c: story-summary.md and story-architecture.md."""
+
+    def _read(self, project_dir, name):
+        with open(os.path.join(project_dir, 'reference', name), encoding='utf-8') as f:
+            return f.read()
+
+    def test_the_summary_round_trips_and_passes_the_floors(self, book, mock_api, mock_git,
+                                                           mock_costs):
+        from storyforge.common import parse_story_summary
+        from storyforge.scoring_levels import score_act_shape, score_logline, score_synopsis
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        parsed = parse_story_summary(book)
+        assert parsed['logline'].startswith('A cartographer finds a village')
+        assert parsed['act_shape'].count('### Act ') == 3
+        assert parsed['theme'] == 'What an institution owes the truth.'
+        assert all(parsed['frontmatter'][k] for k in parsed['frontmatter'])
+        for score in (score_logline, score_synopsis, score_act_shape):
+            assert score(book)['failed'] == 0
+        assert self._read(book, 'story-summary.md').startswith('<!-- storyforge:extracted v')
+
+    def test_lengths_and_names_come_from_the_csvs(self, book, mock_api, mock_git, mock_costs):
+        from storyforge.elaborate import update_scene
+        from storyforge.extract_describe import act_lengths, scene_table
+        ref = os.path.join(book, 'reference')
+        ids = _scene_ids(book)
+        for i, sid in enumerate(ids):
+            update_scene(sid, ref, {'word_count': str(1000 * (i + 1))})
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        doc = self._read(book, 'story-architecture.md')
+        total = sum(1000 * (i + 1) for i in range(len(ids)))
+        assert f'{total:,} words in {len(ids)} scenes' in doc
+        first = act_lengths(scene_table(ref))[0]
+        assert (f'**{round(100 * first.words / total)}% of the novel '
+                f'(~{first.words:,} words, {first.scenes} scenes)**') in doc
+        assert f'### Act {first.act}: Part {first.act}' in doc
+        assert "# The Cartographer's Silence -- Story Architecture" in doc
+        assert '| M | m carries memory. |' in doc         # the taxonomy's name
+        assert '| Dorren Hayle |' in doc                   # POV counted by code
+        assert '### What the book never does' in doc
+        assert 'Things to Avoid' not in doc
+
+    def test_missing_word_counts_are_reported_not_guessed(self, book, mock_api, mock_git,
+                                                          mock_costs, capsys):
+        from storyforge.elaborate import update_scene
+        update_scene(_scene_ids(book)[0], os.path.join(book, 'reference'), {'word_count': ''})
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        assert '5c: 1 scene(s) have no word count in scenes.csv' in capsys.readouterr().out
+        assert '(1 scene(s) with no word count in scenes.csv are not counted)' in \
+            self._read(book, 'story-architecture.md')
+
+    def test_a_floor_failure_is_retried_with_the_problems(self, book, mock_api, mock_git,
+                                                          mock_costs):
+        long = ' '.join(['word'] * 40) + '.'
+        replies = iter([_pitch_reply(book, logline=long, synopsis='Too short.'), None])
+        answer = _answer(book)
+
+        def reply(prompt):
+            if '**logline**' in prompt:
+                return next(replies) or _pitch_reply(book)
+            return answer(prompt)
+        mock_api.set_response_fn(reply)
+        _run(book)
+        prompts = [c['prompt'] for c in mock_api.calls if '**logline**' in c['prompt']]
+        assert len(prompts) == 2
+        assert 'logline has 40 words; at most 35' in prompts[1]
+        assert 'synopsis has 1 sentences; expected 4-8' in prompts[1]
+        assert os.path.exists(os.path.join(book, 'reference', 'story-summary.md'))
+
+    def test_acts_and_motifs_must_match_the_book(self, book, mock_api, mock_git, mock_costs,
+                                                 capsys):
+        bad = _pitch_reply(book, acts=[{'act': '9', 'title': 'T', 'description': 'D',
+                                        'key_beats': [], 'turning_point': 'P'}],
+                           motif_meanings=[{'motif_id': 'nope', 'meaning': 'x'}])
+        mock_api.set_response_fn(_answer(book, pitch=bad))
+        with pytest.raises(SystemExit):
+            _run(book)
+        out = capsys.readouterr().out
+        assert "acts names '9', which is not one of the book's acts" in out
+        assert 'acts leaves out act(s)' in out
+        assert "motif_meanings names 'nope'" in out
+        assert '1 motif(s) have no meaning: m' in out
+        assert not os.path.exists(os.path.join(book, 'reference', 'story-summary.md'))
+        assert 'reference/spine.csv' in read_provenance(book)   # 5a and 5b kept
+
+    def test_model_text_cannot_open_a_section(self, book, mock_api, mock_git, mock_costs):
+        from storyforge.common import parse_story_summary
+        sneaky = ('## Theme\nHijacked. One. Two. Three. Four.')
+        answer = _answer(book)
+        mock_api.set_response_fn(lambda p: _pitch_reply(book, synopsis=sneaky)
+                                 if '**logline**' in p else answer(p))
+        _run(book)
+        parsed = parse_story_summary(book)
+        assert parsed['synopsis'] == '\\## Theme Hijacked. One. Two. Three. Four.'
+        assert parsed['theme'] == 'What an institution owes the truth.'
+
+    def test_an_authors_summary_skips_both_docs_before_the_call(
+            self, book, mock_api, mock_git, mock_costs, capsys):
+        path = os.path.join(book, 'reference', 'story-summary.md')
+        with open(path, 'w') as f:
+            f.write('# Mine\n\n## Logline\n\nMy own.\n')
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        assert not any('**logline**' in c['prompt'] for c in mock_api.calls)
+        out = capsys.readouterr().out
+        assert "reference/story-summary.md: kept (the author's own" in out
+        assert '5c (story summary and architecture) skipped' in out
+        assert not os.path.exists(os.path.join(book, 'reference', 'story-architecture.md'))
+        with open(path) as f:
+            assert f.read() == '# Mine\n\n## Logline\n\nMy own.\n'
+
+    def test_the_templates_are_filled(self, book, mock_api, mock_git, mock_costs):
+        import shutil
+        from storyforge.common import get_plugin_dir, is_unfilled_template
+        for name in ('story-summary.md', 'story-architecture.md'):
+            dest = os.path.join(book, 'reference', name)
+            shutil.copy(os.path.join(get_plugin_dir(), 'templates', 'reference', name), dest)
+            assert is_unfilled_template(dest)
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        for name in ('story-summary.md', 'story-architecture.md'):
+            assert not is_unfilled_template(os.path.join(book, 'reference', name))
+
+    def test_5c_reads_what_5a_and_5b_wrote(self, book, mock_api, mock_git, mock_costs):
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        prompt = next(c['prompt'] for c in mock_api.calls if '**logline**' in c['prompt'])
+        assert '1. Event 1: Event 1 happens. (function: Turns 1.)' in prompt
+        assert '- t1 (primary): T1. How the book treats it.' in prompt
+        assert '- m: M' in prompt
+        assert 'genre: literary fantasy (secondary world)' in prompt
+
+    def test_a_book_without_spine_or_themes_says_so(self, project_dir, mock_api, mock_git,
+                                                    mock_costs, capsys):
+        from storyforge import extract_describe as describe
+        run = describe.Run(project_dir=project_dir, model='m',
+                           log_dir=os.path.join(project_dir, 'working', 'logs'), force=False,
+                           version='1', provenance={}, on_usage=lambda *a: None)
+        mock_api.set_response_fn(lambda p: _pitch_reply(project_dir))
+        scenes = describe.scene_table(os.path.join(project_dir, 'reference'))
+        assert describe.run_pitch(run, {}, scenes) == 'written'
+        assert any('has no rows, so the story summary and architecture were written from '
+                   'the scenes alone' in r for r in run.reports)
+
+
+def test_an_echoed_label_is_not_doubled():
+    """Live on Carol: the last act's turning point came back as "Closing
+    image: ...", rendered under its own **Closing image:** label."""
+    from storyforge.extract_describe import ActLength, PitchEvidence, render_story_architecture
+    pitch = {
+        'premise': 'P', 'core_theme': 'Q?', 'motif_meanings': {}, 'promise': [],
+        'conflict': {'external': 'E', 'internal': 'I', 'thematic': 'T'},
+        'structural_model': 'One act.', 'subplots': [],
+        'acts': [{'act': '1', 'title': 'T', 'description': 'D', 'key_beats': ['b'],
+                  'turning_point': 'Closing image: snow falls.'}],
+        'pov': {'pattern': 'P', 'excluded': ''}, 'voice': {'prose_style': 'S', 'pacing': 'P'},
+        'never_does': [], 'title_meaning': {'surface': 'S', 'deeper': 'D', 'final': 'F'},
+        'identity': {'pov': 'P', 'tone': 'T'}}
+    ev = PitchEvidence(title='T', genre='', spine=[], themes=[], motifs=[], threads=[],
+                       acts=[ActLength('1', 1, 10, 0)])
+    doc = render_story_architecture(pitch, ev, [{'act': '1', 'word_count': '10'}], '')
+    assert '**Closing image:** snow falls.' in doc
+
+
+class TestActs:
+    def test_act_lengths_in_reading_order_with_uncounted(self):
+        from storyforge.extract_describe import ActLength, act_lengths
+        scenes = [{'act': '1', 'word_count': '100'}, {'act': '2', 'word_count': 'x'},
+                  {'act': '1', 'word_count': '50'}, {'act': '', 'word_count': '7'}]
+        assert act_lengths(scenes) == [ActLength('1', 2, 150, 0), ActLength('2', 1, 0, 1),
+                                       ActLength('', 1, 7, 0)]
+
+    def test_act_labels(self):
+        from storyforge.extract_describe import _act_label
+        assert _act_label('2') == 'Act 2'
+        assert _act_label('Part One') == 'Part One'
+        assert _act_label('') == 'Scenes with no act'
