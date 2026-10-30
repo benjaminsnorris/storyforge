@@ -49,6 +49,10 @@ class TestIsEpigraphBlock:
         assert not is_epigraph_block(
             '“I cannot say who told me—Fred said so, I think.”\n')
 
+    def test_speech_broken_off_at_a_name_is_not_attribution(self):
+        assert not is_epigraph_block('“I tell you I will not go, — Fred!”\n')
+        assert not is_epigraph_block('He stopped at the door. —Rosamond.”\n')
+
     def test_short_dialogue_is_not_an_epigraph(self):
         assert not is_epigraph_block(
             '“Is he married or single?”\n\n“Oh! single, my dear, to be sure!”\n')

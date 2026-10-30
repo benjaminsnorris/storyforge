@@ -263,6 +263,10 @@ def _is_attribution(tail: str) -> bool:
     tail = tail.strip()
     if _ITALIC_TITLE_RE.match(tail) and tail[1].isupper():
         return True
+    # Speech cut off at a name ends in a quote mark or "!"/"?"; a source
+    # cited after the quotation doesn't.
+    if re.search(r'[”"’!?]$', tail):
+        return False
     words = re.findall(r"[^\W\d_][\w’'.-]*", tail)
     if not words or len(words) > 12 or words[0].lower().startswith('your'):
         return False
