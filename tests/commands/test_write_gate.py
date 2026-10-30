@@ -136,7 +136,16 @@ class TestPendingFile:
         assert not os.path.exists(os.path.join(project_dir, gate.PENDING_PATH))
 
     def test_a_passing_gate_clears_its_scene(self, project_dir, tmp_path):
-        from tests.test_gate import _gate as run_gate   # the gate on a mocked API
+        import json
+        from unittest.mock import patch
+
+        def clean(path, body, **k):
+            payload = {'findings': [], 'kept': []} if 'tools' in body else {'commitments': []}
+            return {'stop_reason': 'end_turn', 'usage': {},
+                    'content': [{'type': 'text', 'text': json.dumps(payload)}]}
         gate.mark_pending(project_dir, 'act1-sc02', 'draft', 'x')
-        assert run_gate(project_dir, tmp_path).committed
+        with patch('storyforge.api._api_request', side_effect=clean):
+            assert gate.gate_scene(project_dir, 'act1-sc02', command='draft',
+                                   log_dir=str(tmp_path), extract_model='m',
+                                   check_model='m').committed
         assert gate.pending(project_dir) == {}
