@@ -166,7 +166,8 @@ def draft(project_dir: str, scene_ids: list[str], gated: dict | None = None,
             f.write(prose)
         if gated is not None:
             out = gate.gate_and_fix(project_dir, sid, command='draft', prose=prose,
-                                    log_dir=os.path.join(log_dir, sid))
+                                    log_dir=os.path.join(log_dir or os.path.join(
+                                        project_dir, 'working', 'logs', 'gate'), sid))
             prose = out.prose
             with open(os.path.join(project_dir, 'scenes', f'{sid}.md'), 'w',
                       encoding='utf-8') as f:

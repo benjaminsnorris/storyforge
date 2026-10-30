@@ -168,6 +168,23 @@ def _statement(rows: list[dict[str, str]], rid: str) -> str:
     return next((r.get('statement', '') for r in rows if r.get('id') == rid), '')
 
 
+def leaning_on(project_dir: str, scene_id: str) -> list[str]:
+    """`fact → commitment` for each later fact that leans on (supersedes or
+    depends on) one of `scene_id`'s commitments. Non-empty means the gate
+    can't replace them (Phase 4's re-check set), so redrafting the scene
+    would be refused after the redraft was paid for: check first."""
+    rows = ledger.load(project_dir)
+    old = {r['id'] for r in rows if ledger.is_commitment(r)
+           and (r.get('scene_id') or '').strip() == scene_id}
+    return _leaning_on(rows, old)
+
+
+def has_commitments(project_dir: str, scene_id: str) -> bool:
+    """Whether the ledger holds commitments from `scene_id`'s prose."""
+    return any(ledger.is_commitment(r) and (r.get('scene_id') or '').strip() == scene_id
+               for r in ledger.load(project_dir))
+
+
 def _leaning_on(rows: list[dict[str, str]], gone: set[str]) -> list[str]:
     """Rows (not themselves going) whose supersedes or depends_on name `gone`."""
     return [f'{r["id"]} → {ref}' for r in rows if r['id'] not in gone
@@ -266,8 +283,13 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
         if ledger.fill_quote(new, rid, quote):
             result.quotes_filled.append(rid)
     ledger.save(project_dir, new, command=command)
-    clear_pending(project_dir, scene_id)
     result.committed = True
+    try:
+        clear_pending(project_dir, scene_id)
+    except GateError as e:   # the ledger is written; say why the list wasn't updated
+        from storyforge.common import log
+        log(f'WARNING: {scene_id} passed, but {PENDING_PATH} could not be updated: {e}. '
+            f'Remove its row by hand.')
     return result
 
 

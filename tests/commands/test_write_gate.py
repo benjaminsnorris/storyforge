@@ -149,3 +149,127 @@ class TestPendingFile:
                                    log_dir=str(tmp_path), extract_model='m',
                                    check_model='m').committed
         assert gate.pending(project_dir) == {}
+
+
+class TestReview443:
+    """Fixes from #443's review."""
+
+    def test_a_pending_scene_between_scenes_to_draft_stops_the_run_there(
+            self, setup, monkeypatch, capsys):
+        from storyforge import ledger
+        order = ledger.scene_order(setup)
+        middle = sorted(order, key=order.get)[1]
+        assert middle == 'act1-sc02'
+        gate.mark_pending(setup, middle, 'draft', 'two problems')
+        later = sorted(order, key=order.get)[2]
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), later: _reply(GOOD)})
+        calls = _gate(monkeypatch, {'act1-sc01': True, later: True})
+        with pytest.raises(SystemExit):
+            main(['--scenes', f'act1-sc01,{later}'])
+        assert calls == [('act1-sc01', 'draft')]
+        assert f'{later} (not attempted: an earlier scene did not pass the gate)' \
+            in capsys.readouterr().out
+
+    def test_a_redraft_later_facts_lean_on_is_refused_before_spending(
+            self, setup, monkeypatch, capsys):
+        monkeypatch.setattr(gate, 'leaning_on',
+                            lambda p, sid: ['later-fact → x'] if sid == 'act1-sc01' else [])
+        calls = _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        with pytest.raises(SystemExit):
+            main(['--force', '--scenes', 'act1-sc01'])
+        assert calls == []
+        assert 'later facts lean on its commitments' in capsys.readouterr().out
+        assert gate.pending(setup) == {}
+
+    def test_a_pending_id_that_is_no_longer_a_scene_warns_and_does_not_block(
+            self, setup, monkeypatch, capsys):
+        gate.mark_pending(setup, 'cut-long-ago', 'draft', 'x')
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        _gate(monkeypatch, {'act1-sc01': True})
+        main(['--scenes', 'act1-sc01'])
+        assert 'no longer scenes: cut-long-ago' in capsys.readouterr().out
+
+    def test_existing_prose_makes_it_a_redraft(self, setup, monkeypatch):
+        path = os.path.join(setup, 'scenes', 'act1-sc01.md')
+        with open(path, 'w') as f:
+            f.write('A few words of an old version.')
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        calls = _gate(monkeypatch, {'act1-sc01': True})
+        main(['--force', '--scenes', 'act1-sc01'])
+        assert calls == [('act1-sc01', 'redraft')]
+
+    def test_a_gate_failure_is_in_the_commit_message_and_the_task_stays_open(
+            self, setup, monkeypatch, mock_git):
+        ticked = []
+        monkeypatch.setattr('storyforge.cmd_write.update_pr_task',
+                            lambda task, p: ticked.append(task))
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        _gate(monkeypatch, {'act1-sc01': False})
+        with pytest.raises(SystemExit):
+            main(['--scenes', 'act1-sc01'])
+        assert ticked == []
+        commits = [c for c in mock_git.calls if c[0] == 'commit_and_push']
+        assert any('did not pass the gate' in c[1] for c in commits)
+        assert any(gate.PENDING_PATH in (c[2] or []) for c in commits)
+
+    def test_the_first_runs_findings_are_logged_when_the_fix_fails(
+            self, setup, monkeypatch, capsys):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+
+        def boom(*a, **k):
+            e = gate.GateError('the fix failed: bad find')
+            e.first = _result('act1-sc01', False)
+            raise e
+        monkeypatch.setattr(gate, 'gate_and_fix', boom)
+        with pytest.raises(SystemExit):
+            main(['--scenes', 'act1-sc01'])
+        out = capsys.readouterr().out
+        assert '(first check) CONTRADICTION: TIM' in out
+        assert 'act1-sc01' in gate.pending(setup)
+
+    def test_an_unexpected_gate_failure_is_pending_not_a_traceback(self, setup, monkeypatch):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+
+        def boom(*a, **k):
+            raise KeyError('bug')
+        monkeypatch.setattr(gate, 'gate_and_fix', boom)
+        with pytest.raises(SystemExit) as e:
+            main(['--scenes', 'act1-sc01'])
+        assert e.value.code == 1
+        assert 'KeyError' in gate.pending(setup)['act1-sc01']['reason']
+
+    def test_a_redraft_failing_says_its_old_facts_are_stale(self, setup, monkeypatch):
+        path = os.path.join(setup, 'scenes', 'act1-sc01.md')
+        with open(path, 'w') as f:
+            f.write('Old prose.')
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        _gate(monkeypatch, {'act1-sc01': False})
+        with pytest.raises(SystemExit):
+            main(['--force', '--scenes', 'act1-sc01'])
+        reason = gate.pending(setup)['act1-sc01']['reason']
+        assert 'earlier version' in reason and 'CONTRADICTION' in reason
+
+    @pytest.mark.parametrize('written, why', [
+        (None, 'wrote no scene file'),
+        ('same', 'left the scene file unchanged'),
+        ('too few words', 'only 3 words'),
+    ])
+    def test_interactive_output_is_checked_before_the_gate(self, written, why):
+        import tempfile
+        from storyforge.cmd_write import _interactive_problem
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 's.md')
+            if written is not None:
+                with open(path, 'w') as f:
+                    f.write(written)
+            assert why in _interactive_problem(path, 'same')
+
+    def test_batch_lists_every_scene_it_writes_as_pending(self, setup, monkeypatch):
+        from storyforge.cmd_write import _pend
+        _pend(setup, 'act1-sc01', 'draft', 'drafted with --batch, not gated')
+        assert 'batch' in gate.pending(setup)['act1-sc01']['reason']
+
+    def test_revise_redrafts_are_listed_pending(self, project_dir):
+        from storyforge.cmd_revise import _mark_ungated
+        _mark_ungated(project_dir, 'act1-sc01')
+        assert gate.pending(project_dir)['act1-sc01']['command'] == 'redraft'
