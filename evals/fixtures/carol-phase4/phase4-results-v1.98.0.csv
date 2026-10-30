@@ -1,0 +1,81 @@
+id|code|phase4|phase4_row|same_scene|migration|note
+C01|WLD|yes|marley-was-dead-narration--scrooge-knew-marley-was-dead|yes|yes|no plain Marley-is-dead row; carried by knew-he-was-dead (and burial-register P4)
+C02|REL|yes|marley-was-dead-narration--scrooge-was-marley-s-sole-executor|yes|partial|partners in a separate row
+C03|PHY|yes|marley-was-dead-narration--marley-s-name-was-never-painted|yes|no|
+C04|TRT|yes|marley-was-dead-narration--scrooge-is-old-with-a-pointed|yes|no|split: physical row; miserly/solitary in scrooge-is-a-miserly-grasping-solitary
+C05|TIM|yes|scrooge-in-counting-house--the-scene-takes-place-on-christmas|yes|no|split over three rows: Christmas Eve / three o clock dark / cold foggy
+C06|PHY|partial|scrooge-in-counting-house--the-clerk-works-in-a-dismal|yes|yes|Tank and one-coal fire present; coal-box in Scrooge room only implied by the shovel threat row; migration cratchit-no-coal-fire has it
+C07|TRT|yes|scrooge-dismisses-clerk--the-clerk-owns-no-great-coat|no|partial|no-great-coat row sits in scrooge-dismisses-clerk; migration comforter only
+C08|REL|yes|nephew-visits-scrooge--scrooge-never-visited-fred-before-fred|yes|no|split: married-for-love in a separate row
+C09|PRM|yes|nephew-visits-scrooge--fred-invited-scrooge-to-dine-with|yes|no|
+C10|TRT|yes|nephew-visits-scrooge--bob-cratchit-earns-fifteen-shillings-a|yes|no|
+C11|TRT|partial|nephew-visits-scrooge--fred-is-cheerful-with-a-ruddy|yes|no|Fred cheerful and poor; Scrooge rich only at the party scene (fred-tells-his-wife-that-scrooge)
+C12|TIM|yes|charity-collectors-visit-scrooge--jacob-marley-has-been-dead-seven|yes|no|
+C13|KNO|yes|charity-collectors-visit-scrooge--scrooge-holds-the-doctrine-that-those|yes|no|refusal in the refuse-to-donate row
+C14|KNO|yes|charity-collectors-visit-scrooge--scrooge-refuses-to-donate-anything-to|yes|no|paraphrased (supports the establishments); prisons/workhouses operating in a separate row
+C15|PRM|yes|charity-collectors-visit-scrooge--scrooge-refuses-to-donate-anything-to|yes|no|
+C16|KNO|yes|city-at-christmas-eve--scrooge-seized-a-ruler-and-the|yes|no|carol in the boy-at-keyhole row
+C17|PRM|yes|scrooge-dismisses-clerk--scrooge-grudgingly-grants-the-clerk-all|yes|no|
+C18|WLD|yes|scrooge-dismisses-clerk--the-clerk-lives-in-camden-town|yes|no|
+C19|PHY|yes|scrooge-walks-home--nobody-lives-in-the-building-but|yes|no|split: Marley chambers in a separate row; wine cellar in marley-face-on-knocker
+C20|PHY|yes|marley-face-on-knocker--at-his-own-door-with-his|yes|no|very-large knocker in a separate row
+C21|PHY|yes|marley-face-on-knocker--scrooge-has-a-cold-in-his|yes|partial|split: gruel on hob in a separate row; migration has gruel but not the cold
+C22|PHY|yes|scrooge-settles-in-chambers--scrooge-double-locked-his-door-on|yes|no|
+C23|PHY|yes|scrooge-settles-in-chambers--scrooge-puts-on-a-nightcap-in|yes|yes|
+C24|TRT|partial|marley-ghost-arrives--marley-s-ghost-wears-the-pigtail|yes|partial|pigtail/waistcoat/tights/boots only; chain, transparency and kerchief left to migration rows (no restatement); gold quote (chain clasped about his middle) not in any phase-4 row
+C25|TRT|yes|scrooge-wakes-awaits-spirit--scrooge-is-a-holder-of-bills|no|no|name stated in scrooge-wakes-awaits-spirit (bill of exchange); gold scene has only the quote of marley-s-ghost-comes-to-warn
+C26|TIM|yes|scrooge-confronts-marley-ghost--marley-tells-scrooge-the-second-spirit|yes|partial|second and third explicit; first only implied (same hour (One)); first is in migration
+C27|KNO|yes|scrooge-confronts-marley-ghost--marley-s-ghost-says-he-has|yes|no|split: chance-procured in marley-s-ghost-comes-to-warn
+C28|TRT|yes|scrooge-confronts-marley-ghost--scrooge-has-a-habit-of-putting|yes|no|
+C29|PHY|yes|ghost-departs-phantoms-appear--after-the-ghost-s-visit-scrooge|yes|no|split: leaves-by-window row
+C30|PHY|yes|ghost-departs-phantoms-appear--scrooge-went-to-bed-without-undressing|yes|yes|
+C31|TIM|yes|scrooge-wakes-awaits-spirit--scrooge-went-to-bed-after-two|yes|no|split: woke-at-midnight row
+C32|TRT|partial|scrooge-wakes-awaits-spirit--the-ghost-of-christmas-past-is|yes|yes|tunic/belt/bare legs and voice only; child-like old man, white hair, holly, light, cap under arm left to migration rows
+C33|WLD|yes|spirit-transports-scrooge-past--scrooge-was-raised-in-this-country|yes|no|market-town in a separate row
+C34|KNO|yes|scrooge-sees-boyhood-school--as-a-boy-scrooge-was-left|yes|no|Robinson Crusoe in a separate row
+C35|KNO|yes|scrooge-sees-boyhood-school--scrooge-says-a-boy-sang-a|yes|no|also restated as a promise row (scrooge-feels-regret-that-he-did)
+C36|REL|yes|scrooge-revisits-second-christmas--little-fan-came-to-take-young|yes|partial|split: younger sister in little-fan-is-scrooge-s-younger; father in scrooge-s-father-had-previously-refused
+C37|REL|yes|scrooge-revisits-second-christmas--fred-scrooge-s-nephew-is-fan|yes|yes|split: died-a-woman row (which says children, plural)
+C38|REL|yes|fezziwig-warehouse-christmas-party--dick-wilkins-was-scrooge-s-fellow|yes|no|
+C39|TIM|yes|fezziwig-warehouse-christmas-party--fezziwig-s-ball-breaks-up-at|yes|no|split: seven o clock in a separate row
+C40|PRM|yes|fezziwig-warehouse-christmas-party--scrooge-wants-to-say-a-word|yes|yes|run tried to supersede migration scrooge-wishes-kindness-to-clerk
+C41|REL|yes|belle-releases-young-scrooge--belle-tells-scrooge-that-another-idol|yes|partial|split over idol / Gain / dowerless-release rows
+C42|REL|partial|belle-family-happy-without-scrooge--belle-s-husband-passed-scrooge-s|yes|yes|husband saw Scrooge at his office; Marley lying at the point of death (the gold quote) only in migration
+C43|PHY|yes|belle-family-happy-without-scrooge--scrooge-leaves-the-extinguisher-cap-pressed|yes|partial|heavy sleep also in a separate row
+C44|TIM|yes|scrooge-awaits-second-spirit--scrooge-awakes-just-as-the-bell|yes|no|
+C45|TRT|partial|ghost-of-christmas-present-revealed--the-ghost-of-christmas-present-is|yes|yes|giant and curls only; robe, wreath, scabbard (the gold quote), torch left to migration rows
+C46|TIM|yes|ghost-of-christmas-present-revealed--scrooge-says-he-went-forth-the|yes|no|
+C47|PHY|yes|spirit-tours-christmas-morning-city--the-scene-takes-place-in-the|yes|no|
+C48|TRT|yes|cratchit-family-christmas-dinner--bob-cratchit-earns-fifteen-shillings-a|yes|no|split: four-roomed house in a separate row
+C49|REL|yes|cratchit-family-christmas-dinner--belinda-cratchit-is-the-second-of|yes|no|split over five rows
+C50|PHY|no|||yes|crutch and iron frame only in migration (not restated)
+C51|PHY|yes|cratchit-family-christmas-dinner--the-cratchit-family-dinner-is-a|yes|no|
+C52|PRM|no|||yes|only in migration tiny-tim-will-die-unless-future-changes (not restated)
+C53|KNO|no|||no|surplus population thrown back at Scrooge is in no row
+C54|REL|yes|cratchit-family-christmas-dinner--mrs-cratchit-calls-scrooge-an-odious|yes|yes|Mrs Cratchit only; Founder of the Feast toast only in migration
+C55|PRM|yes|cratchit-family-christmas-dinner--bob-cratchit-has-his-eye-on|yes|no|
+C56|KNO|no|||no|God bless us every one in no row
+C57|TRT|yes|nephew-visits-scrooge--fred-is-scrooge-s-nephew-and|no|yes|asserted at nephew-visits-scrooge where the text does not name him; same-scene rows use the name (fred-tells-his-wife-that-scrooge)
+C58|REL|yes|nephew-fred-christmas-party--the-plump-sister-with-the-lace|yes|no|split over four rows (niece by marriage, pretty, harp, Topper)
+C59|PRM|partial|nephew-fred-christmas-party--fred-hopes-scrooge-might-be-put|yes|partial|fifty pounds only; same chance every year (the gold quote) only in migration
+C60|KNO|yes|nephew-fred-christmas-party--a-simple-air-played-on-the|yes|no|
+C61|TIM|yes|spirit-ages-ignorance-and-want--the-ghost-s-life-ends-at|yes|yes|split: grey hair in scrooge-noticed-the-ghost-growing-older
+C62|KNO|yes|spirit-ages-ignorance-and-want--the-ghost-throws-scrooge-s-own|yes|partial|split: Ignorance and Want in a separate row
+C63|TRT|yes|scrooge-meets-final-phantom--the-phantom-does-not-speak-it|yes|partial|split: shrouded one hand in a separate row
+C64|KNO|yes|merchants-discuss-dead-man--the-merchants-expect-the-funeral-to|yes|partial|Scrooge not knowing only in later scenes (wealthy-men, shrouded-corpse)
+C65|PHY|yes|thieves-sell-dead-mans-belongings--the-charwoman-took-the-dead-man|yes|partial|shirt in a separate row
+C66|TRT|yes|thieves-sell-dead-mans-belongings--mrs-dilber-is-a-laundress-the|yes|no|
+C67|REL|yes|debtors-rejoice-at-creditors-death--the-couple-owe-a-debt-to|yes|yes|split: dead, relieved and owing over three rows
+C68|WLD|yes|cratchit-family-mourns-tiny-tim--tiny-tim-s-body-lies-in|yes|yes|
+C69|REL|yes|cratchit-family-mourns-tiny-tim--fred-expressed-sorrow-to-bob-cratchit|yes|no|split: met-Fred / offered-service / Peter-situation rows
+C70|KNO|yes|scrooge-reads-his-own-gravestone--scrooge-has-learned-that-the-dead|yes|yes|
+C71|PRM|yes|scrooge-reads-his-own-gravestone--scrooge-vows-to-honour-christmas-in|yes|no|
+C72|PHY|yes|scrooge-wakes-transformed--scrooge-s-bedpost-bed-and-room|yes|no|
+C73|PHY|yes|scrooge-wakes-transformed--the-scene-takes-place-on-a|yes|no|
+C74|TIM|yes|scrooge-learns-christmas-day--scrooge-believes-the-spirits-are-able|yes|yes|split: Christmas Day in scrooge-learns-from-a-boy-in
+C75|PHY|yes|scrooge-buys-prize-turkey--scrooge-intends-to-send-the-turkey|yes|no|split: Camden Town and cab in separate rows
+C76|PRM|yes|scrooge-pledges-donation-streets--scrooge-offers-a-donation-to-the|yes|partial|same-gentleman in a separate row
+C77|REL|yes|scrooge-visits-nephews-dinner--scrooge-asks-to-be-let-in|yes|yes|split: Topper and plump sister in a separate row
+C78|TIM|yes|scrooge-raises-bobs-salary--bob-cratchit-arrives-eighteen-and-a|yes|no|
+C79|PRM|yes|scrooge-raises-bobs-salary--scrooge-tells-bob-to-make-up|yes|no|split: raise and help in scrooge-announces-he-will-raise-bob
+C80|WLD|yes|scrooge-raises-bobs-salary--tiny-tim-does-not-die-scrooge|yes|no|
