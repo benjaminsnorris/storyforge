@@ -22,7 +22,7 @@ Last updated 2026-10-30 (early morning), at v1.90.x: E6 done (this PR), skeleton
 - `tests/test_hone.py::test_a_mapping_never_takes_an_alias_from_its_owner` (meridian-line `5433d3f`).
 
 **Left in Phase 1:**
-- the remaining `KEY: value` parsers. Characterize, intent and brief fields moved to structured outputs in v1.85.0 (#377), and the skeleton in v1.89.0 (#388; planned as 1.88.0): one reply fills `scenes.csv` and the timeline cues, whose texts `timeline.CUE_FIELDS` shares with the cue read. Left: extract's cleanup passes (`FIX:` lines in `parse_knowledge_cleanup_response` and `parse_mice_cleanup_response`) and the `prompts.py` consumers;
+- the remaining `KEY: value` parsers. Characterize, intent and brief fields moved to structured outputs in v1.85.0 (#377), and the skeleton in v1.89.0 (#388; planned as 1.88.0): one reply fills `scenes.csv` and the timeline cues, whose texts `timeline.CUE_FIELDS` shares with the cue read. extract's cleanup-pass parsers (`FIX:` / `UPDATE:` lines) had no callers and were removed (v1.90.4), and `prompts.py` has no reply parsers left (it reads YAML and craft sections). Line parsers outside extract remain: hone's `MENTION:` lines, scoring's `SCORES:` blocks, `scenes.py`'s `SCENE:` lines;
 - ~~the remaining warn-and-continue sites~~: the 9 that wrote wrong or incomplete output are fixed (#394, v1.90.0). The triage's undecided ones are listed in #394.
 
 **Dashboard (v1.86.0, #378, closes #371):** Storyforge sends versioned `dashboard_data` (schema version 1, contract in `docs/agent-reference.md`), and Bookshelf renders it (bookshelf#30). The renderer and `dashboard_html` are gone, and `storyforge visualize` writes `working/dashboard-data.json`. Folding the data into the Phase 2 `export` bundle is still to do.
@@ -187,7 +187,7 @@ Start by reading this doc, `CLAUDE.md` and `docs/agent-reference.md`.
 2. ~~**E6**~~ Done (see **E6** below).
 3. **Phase 1 leftovers:**
    - ~~Extract's **skeleton** phase.~~ Done in v1.89.0 (#388). A skeleton reply that is unusable for any scene now stops the calendar from being placed (it used to re-place every scene from stale or missing cues, with force).
-   - The remaining line parsers: extract's cleanup passes (`FIX:` lines) and the `prompts.py` consumers.
+   - ~~The remaining line parsers in extract and `prompts.py`.~~ The cleanup-pass ones were dead code, removed in v1.90.4; `prompts.py` has none. Still parsing lines: hone's `MENTION:` replies, scoring's `SCORES:` blocks (`scoring.parse_score_output`), and `scenes.py`'s `SCENE:` lines. They are outside the plan's Phase 1 list; move them when their phase touches them.
    - ~~The remaining **warn-and-continue** sites.~~ Done in v1.90.0 (#394). Undecided ones (triage class C) are listed in #394: evaluator/persona pairing by position, a missing configured cover falling back to auto-detect, an unreadable overrides file read as empty, and commands that report only a count of skipped items.
 4. **Follow-ups noted in PRs:**
    - ~~`hone.hone_briefs` should use the brief-fix name check.~~ Done in v1.89.4 (#393), for hone's intent rewrites too; the check is `storyforge.brief_names`. Other writers of `scene-briefs.csv` / `scene-intent.csv` (elaborate, extract, enrich) are not checked yet.
