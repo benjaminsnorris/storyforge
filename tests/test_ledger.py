@@ -8,7 +8,7 @@ import pytest
 
 from storyforge import ledger
 from storyforge.ledger import (
-    COLUMNS, active_states, established_before, migrate_registries,
+    COLUMNS, active_states, drafting_slice, established_before, migrate_registries,
     read_ledger, regenerate_knowledge, regenerate_physical,
     round_trip_differences, scene_order, validate_ledger, write_ledger,
 )
@@ -142,6 +142,65 @@ class TestEstablishedBefore:
                 _row('state', scene_id='s1')]
         found = established_before(rows, 's3', ORDER, type_='knowledge')
         assert [r['id'] for r in found] == ['first', 'here']
+
+
+class TestDraftingSlice:
+    @staticmethod
+    def _ids(by_subject):
+        return {k: [r['id'] for r in v] for k, v in by_subject.items()}
+
+    def test_fixed_facts_before_the_scene_and_states_entering_it(self):
+        rows = [_row('eyes', scene_id='s1', subject='tessa', mutable='fixed'),
+                _row('sister', scene_id='', subject='tessa', mutable='fixed'),
+                _row('later-fixed', scene_id='s4', subject='tessa', mutable='fixed'),
+                _row('ankle', scene_id='s2', subject='tessa', resolves='s4'),
+                _row('healed', scene_id='s1', subject='tessa', resolves='s2')]
+        found = drafting_slice(rows, 's3', ORDER, ['tessa'])
+        assert self._ids(found.fixed) == {'tessa': ['sister', 'eyes']}
+        assert self._ids(found.states) == {'tessa': ['ankle']}
+        assert found.scene == []
+
+    def test_the_scenes_own_facts_are_kept_apart_once(self):
+        """A redraft must keep what the scene itself established; those
+        facts are not also a state entering it."""
+        rows = [_row('coat', scene_id='s2', subject='tessa'),
+                _row('name', scene_id='s2', subject='tessa', mutable='fixed'),
+                _row('elsewhere', scene_id='s2', subject='nobody-here')]
+        found = drafting_slice(rows, 's2', ORDER, ['tessa'])
+        assert [r['id'] for r in found.scene] == ['coat', 'name', 'elsewhere']
+        assert found.fixed == {} and found.states == {}
+
+    def test_only_binding_facts_about_the_subjects(self):
+        rows = [_row('a', scene_id='s1', subject='tessa', status='rejected'),
+                _row('b', scene_id='s1', subject='tessa', status='pending'),
+                _row('c', scene_id='s1', subject='dorren'),
+                _row('d', scene_id='s1', subject='tessa', status='superseded')]
+        found = drafting_slice(rows, 's2', ORDER, ['tessa'])
+        assert found.fixed == {} and found.states == {}
+
+    def test_knowledge_about_someone_off_stage_goes_to_who_knows_it(self):
+        rows = [_row('secret', type='knowledge', scene_id='s1', subject='kael',
+                     known_by='dorren;tessa'),
+                _row('own', type='knowledge', scene_id='s1', subject='tessa',
+                     known_by='dorren')]
+        found = drafting_slice(rows, 's2', ORDER, ['tessa', 'dorren'])
+        assert self._ids(found.states) == {'tessa': ['secret', 'own']}
+
+    def test_a_superseded_fixed_fact_is_left_out(self):
+        rows = [_row('old-name', scene_id='s1', subject='tessa', mutable='fixed'),
+                _row('new-name', scene_id='s2', subject='tessa', mutable='fixed',
+                     supersedes='old-name')]
+        assert self._ids(drafting_slice(rows, 's3', ORDER, ['tessa']).fixed) == \
+            {'tessa': ['new-name']}
+        # superseded in the scene being drafted: the old one is gone there too
+        found = drafting_slice(rows, 's2', ORDER, ['tessa'])
+        assert found.fixed == {} and [r['id'] for r in found.scene] == ['new-name']
+        # not yet superseded before it
+        assert self._ids(drafting_slice(rows, 's1', ORDER, ['tessa']).fixed) == {}
+
+    def test_an_unknown_scene_raises(self):
+        with pytest.raises(KeyError):
+            drafting_slice([], 'nope', ORDER, ['tessa'])
 
 
 class TestSceneOrder:

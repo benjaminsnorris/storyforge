@@ -128,6 +128,80 @@ def test_the_drafting_prompt_reads_states_from_the_ledger(project_dir, plugin_di
     assert '- **Garren**: old scar across left palm from archive incident' in prompt
 
 
+class TestEstablishedFacts:
+    """Drafting reads the ledger as of the scene (rethink plan §3.1: derived
+    per-character state replaces the static bible as drafting context)."""
+
+    def _prompt(self, project_dir, plugin_dir, scene_id):
+        from storyforge.prompts import build_scene_prompt_from_briefs
+        return build_scene_prompt_from_briefs(scene_id, project_dir, str(plugin_dir))
+
+    def _add(self, project_dir, *new):
+        ref = os.path.join(project_dir, 'reference')
+        rows = ledger.load_from(ref)
+        for fields in new:
+            row = {c: '' for c in ledger.COLUMNS}
+            row.update(status='binding', origin='prose', mutable='state',
+                       introduced_by=ledger.COMMITMENTS_PASS)
+            row.update(fields)
+            rows.append(row)
+        ledger.save_to(ref, rows, command='test')
+
+    def test_on_stage_characters_their_place_and_the_scenes_own_facts(
+            self, project_dir, plugin_dir):
+        self._add(project_dir,
+                  dict(id='eyes', scene_id='act1-sc01', type='trait',
+                       subject='dorren-hayle', statement='Dorren has grey eyes',
+                       mutable='fixed'),
+                  dict(id='leak', scene_id='act1-sc01', type='world',
+                       subject='private-study', statement='The study roof leaks'),
+                  dict(id='lamp', scene_id='act1-sc02', type='physical',
+                       subject='dorren-hayle', statement='Dorren carries a lamp'),
+                  dict(id='pell-cut', scene_id='act1-sc01', type='physical',
+                       subject='pell', statement='Pell has a cut lip'))
+        prompt = self._prompt(project_dir, plugin_dir, 'act1-sc02')
+        block = prompt.split('## Established Facts', 1)[1].split('\n## ', 1)[0]
+        assert '### Dorren Hayle\nAlways true:\n- Dorren has grey eyes' in block
+        assert "### Dorren's study (location)\nTrue entering this scene:\n" \
+               '- The study roof leaks' in block
+        assert '### Established in this scene' in block
+        assert '- Dorren carries a lamp' in block
+        assert 'Pell' not in block   # not on stage
+        # a migrated state acquired in act1-sc02 is one of the scene's own
+        assert '- holds the restricted archive key *(action-gating)*' in block
+
+    def test_a_brief_state_listed_above_is_not_repeated(self, project_dir, plugin_dir):
+        from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP
+        briefs = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+        rows = _read_csv(briefs)
+        row = next(r for r in rows if r['id'] == 'act1-sc02')
+        row['physical_state_in'] = 'archive-key-dorren'
+        _write_csv(briefs, rows, _FILE_MAP['scene-briefs.csv'])
+        prompt = self._prompt(project_dir, plugin_dir, 'act1-sc02')
+        assert prompt.count('holds the restricted archive key') == 1
+
+    def test_pronouns_from_characters_csv(self, project_dir, plugin_dir):
+        """slipform: Pell's pronoun was fixed by hand, then undone by a
+        redraft, because no file the drafter read recorded it."""
+        path = os.path.join(project_dir, 'reference', 'characters.csv')
+        with open(path) as f:
+            lines = f.read().splitlines()
+        lines = [lines[0] + '|pronouns'] + [
+            line + ('|she/her' if line.startswith('dorren-hayle|') else '|')
+            for line in lines[1:]]
+        with open(path, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        prompt = self._prompt(project_dir, plugin_dir, 'act1-sc01')
+        assert '### Dorren Hayle\nPronouns: she/her' in prompt
+
+    def test_nothing_for_the_scene_means_no_section(self, project_dir, plugin_dir):
+        ref = os.path.join(project_dir, 'reference')
+        ledger.save_to(ref, [r for r in ledger.load_from(ref) if r['type'] != 'physical'],
+                       command='test')
+        assert '## Established Facts' not in self._prompt(project_dir, plugin_dir,
+                                                          'act1-sc02')
+
+
 def test_validate_stops_on_a_ledger_it_cannot_read(project_dir, monkeypatch, capsys):
     from storyforge import cmd_validate
     path = ledger.ledger_path(project_dir)

@@ -10,6 +10,7 @@ from those files is `docs/plans/2026-10-30-ledger-migration-proposal.md`.
 - `validate_ledger`: problems as strings; an empty list means checked and clean.
 - `scene_order`, `active_states`, `established_before`: derived state. Per-
   character state "as of scene N" is derived, never stored.
+  `drafting_slice` is a scene's share of it, for the drafting prompt.
 - `load` / `save` (and `load_from` / `save_to` for a `reference/` dir): the
   project's ledger. Every write through `save`, `save_to`, `write_view` and
   `migrate_files` is appended to the audit log (`storyforge.audit`,
@@ -596,6 +597,67 @@ def established_before(rows: list[dict[str, str]], scene_id: str,
              and r.get('scene_id', '').strip() in order
              and order[r['scene_id'].strip()] < at]
     return sorted(found, key=lambda r: order[r['scene_id'].strip()])
+
+
+@dataclass
+class DraftingSlice:
+    """What drafting `scene_id` must agree with (rethink plan §3.1, §3.3)."""
+    #: subject id → its `fixed` facts established before the scene (or with
+    #: no scene: backstory), in reading order
+    fixed: dict[str, list[dict[str, str]]] = field(default_factory=dict)
+    #: subject id → its `state` facts in force entering the scene
+    states: dict[str, list[dict[str, str]]] = field(default_factory=dict)
+    #: binding facts established in the scene itself, by its plan or by
+    #: prose it already has: a redraft must keep them
+    scene: list[dict[str, str]] = field(default_factory=list)
+
+
+def drafting_slice(rows: list[dict[str, str]], scene_id: str,
+                   order: dict[str, int], subjects: list[str]) -> DraftingSlice:
+    """The binding facts about `subjects` (the scene's characters and its
+    location) as of entering `scene_id`, and the facts the scene itself
+    established.
+
+    A fact is filed under its subject when that is one of `subjects`, else
+    under the first of `subjects` in its `known_by` (a character's knowledge
+    about someone off stage), else not at all. Each fact appears once: a fact
+    established in the scene goes to `scene` only. A fact superseded by one
+    established no later than the scene is left out.
+
+    Raises:
+        KeyError: if `scene_id` is not in `order`.
+    """
+    at = order[scene_id]
+    binding = [r for r in rows if r.get('status') == 'binding']
+
+    def pos(r: dict) -> int:
+        return order.get(r.get('scene_id', '').strip(), -1)
+
+    superseded = {old for r in binding if pos(r) <= at
+                  for old in _split(r.get('supersedes', ''))}
+
+    def owner(r: dict) -> str | None:
+        if r.get('subject', '') in subjects:
+            return r['subject']
+        knowers = _split(r.get('known_by', ''))
+        return next((s for s in subjects if s in knowers), None)
+
+    out = DraftingSlice()
+    for r in binding:
+        if r.get('scene_id', '').strip() == scene_id:
+            out.scene.append(r)
+    earlier = sorted((r for r in binding if r.get('mutable') == 'fixed'
+                      and pos(r) < at and r['id'] not in superseded),
+                     key=pos)
+    for r in earlier:
+        who = owner(r)
+        if who:
+            out.fixed.setdefault(who, []).append(r)
+    for r in sorted(active_states(binding, scene_id, order, entering=True), key=pos):
+        who = owner(r)
+        if who:
+            out.states.setdefault(who, []).append(r)
+    return out
 
 
 # ============================================================================

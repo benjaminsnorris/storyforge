@@ -10,6 +10,7 @@ from harness import Gate, Suite, SuiteOutput
 def run(ctx):
     project = e5.project(ctx.work_dir)
     scenes = e5.sample(project)
+    e5.commit_prose(project, scenes)
     by_code: Counter = Counter()
     notes = []
     for sid in scenes:
