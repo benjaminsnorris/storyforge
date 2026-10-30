@@ -28,6 +28,7 @@ def live_calls(monkeypatch):
 def tape(tmp_path, monkeypatch):
     monkeypatch.setenv('STORYFORGE_CASSETTE', str(tmp_path / 'tape'))
     monkeypatch.setenv('STORYFORGE_CASSETTE_LOG', str(tmp_path / 'log.jsonl'))
+    monkeypatch.setattr(cassette, '_recorded_here', set())
     return tmp_path
 
 
@@ -59,11 +60,66 @@ def test_record_then_replay(tape, monkeypatch, live_calls):
     assert _log(tape)[1]['usage'] == RESPONSE['usage']
 
 
-def test_record_overwrites_existing(tape, monkeypatch, live_calls):
+def test_record_overwrites_a_recording_from_an_earlier_run(tape, monkeypatch, live_calls):
     monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'record')
     api._api_request('messages', BODY, method='POST')
+    # A new run: a fresh process and log
+    monkeypatch.setattr(cassette, '_recorded_here', set())
+    monkeypatch.setenv('STORYFORGE_CASSETTE_LOG', str(tape / 'log2.jsonl'))
     api._api_request('messages', BODY, method='POST')
     assert len(live_calls) == 2
+
+
+def test_record_replays_a_request_this_run_already_recorded(tape, monkeypatch, live_calls):
+    """E6 (2026-10-30): two E3 cases share one scene, so they send the same
+    extraction request. Recording called it live twice; the second reply
+    overwrote the first, and the first case's judge prompt, built from the
+    first reply, could never replay."""
+    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'record')
+    replies = iter([RESPONSE, {**RESPONSE, 'content': [{'type': 'text', 'text': 'other'}]}])
+    monkeypatch.setattr(api, '_live_request', lambda *a: next(replies))
+    first = api._api_request('messages', BODY, method='POST')
+    assert api._api_request('messages', BODY, method='POST') == first
+    assert [e['replayed'] for e in _log(tape)] == [False, True]
+
+
+def test_a_second_run_in_the_same_process_records_again(tape, monkeypatch, live_calls):
+    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'record')
+    api._api_request('messages', BODY, method='POST')
+    monkeypatch.setenv('STORYFORGE_CASSETTE_LOG', str(tape / 'log2.jsonl'))  # the next run
+    api._api_request('messages', BODY, method='POST')
+    assert len(live_calls) == 2
+
+
+def test_a_replayed_log_entry_is_not_a_recording(tape, monkeypatch, live_calls):
+    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'auto')
+    api._api_request('messages', BODY, method='POST')     # recorded
+    monkeypatch.setattr(cassette, '_recorded_here', set())
+    monkeypatch.setenv('STORYFORGE_CASSETTE_LOG', str(tape / 'log2.jsonl'))
+    api._api_request('messages', BODY, method='POST')     # replayed in the new run
+    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'record')
+    api._api_request('messages', BODY, method='POST')     # still goes live
+    assert len(live_calls) == 2
+
+
+def test_a_recording_that_cant_be_saved_is_logged_and_raised(tape, monkeypatch, live_calls):
+    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'record')
+    def fail(*a, **k):
+        raise OSError('disk full')
+    monkeypatch.setattr(cassette.tempfile, 'mkstemp', fail)
+    with pytest.raises(cassette.CassetteError, match='disk full'):
+        api._api_request('messages', BODY, method='POST')
+    log = _log(tape)
+    assert log[0]['replayed'] is False and log[0]['usage'] == RESPONSE['usage']
+    assert 'disk full' in log[1]['error']
+
+
+def test_a_subprocess_sharing_the_runs_log_replays_it_too(tape, monkeypatch, live_calls):
+    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'record')
+    api._api_request('messages', BODY, method='POST')
+    monkeypatch.setattr(cassette, '_recorded_here', set())  # another process, same log
+    api._api_request('messages', BODY, method='POST')
+    assert len(live_calls) == 1
 
 
 def test_auto_records_only_misses(tape, monkeypatch, live_calls):

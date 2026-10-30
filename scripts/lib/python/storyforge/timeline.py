@@ -24,6 +24,7 @@ import re
 from .common import log
 from .elaborate import OFF_PRESENT_MODES
 from .enrich import update_csv_field
+from .scenes import match_scene_id
 
 
 RELATIONS = ('continues', 'later', 'earlier', 'frame', 'vision', 'unclear')
@@ -49,12 +50,19 @@ _BATCH_MAX_TOKENS = 16000
 # Cues: the prompt fields, parsing and storage
 # ============================================================================
 
-CUE_INSTRUCTIONS = """TIME_RELATION: [when this scene happens relative to the scene before it in reading order — one of: continues (picks up at the same time or moments later), later (some time after it), earlier (before it: a flashback or a recollection told as a scene, including a past that a spirit, dream or vision shows a character; also a scene whose present is only a line or a short lead-in before it mostly tells the past, such as a story a character tells or the narrator's account of someone's youth, but not one where the present has real action on the page around the telling), frame (narration from after the story, looking back), vision (events that have not happened, or may not happen, as the story tells them: a prophecy, a future a character is shown that may be averted, a dream of what might come; the past is always earlier, even when a spirit, a dream or a vision shows it), unclear]
-TIME_GAP: [how much time passed between the end of the scene before and the start of this one, in at most six words, no explanation: "an hour", "the next morning", "three weeks", "five years", "several weeks". Not how long this scene's own action lasts ("the next four days", "for a month": that is TIME_SPAN), and not a distance to some other event ("ten years since the wedding": that is TIME_REFERS); empty if none is stated or implied]
-TIME_ANCHOR: [a calendar fact pinning when THIS scene's action happens — a date, weekday, month, season, holiday or named day ("the hottest day of the summer") — quoted briefly; not a habit ("every Friday") or a date the scene only mentions; empty if none]
-TIME_REFERS: [any statement in this scene of how long ago or how long until another event in the story, quoted briefly: "that June night three months before", "five years since he'd seen her", "the funeral was on the third day"; separate several with semicolons; empty if none]
-TIME_SPAN: [when the scene summarizes a stretch of time ("all that summer", "the next four days"), how long; empty for a scene that plays out in one sitting]
-TIME_DATE: [only what this scene's own text states about the calendar date, in EDTF: "1922-07-04", "XXXX-07-04" when the year isn't given here, "1922" for a year, "1922-22" for summer 1922 (21 spring, 22 summer, 23 autumn, 24 winter), "1917~" for "around 1917", "1922-06/1922-09" for a stretch. A date the text fixes by a stated distance from a named calendar day counts as given, marked ~: "In two weeks it'll be the longest day in the year" → "XXXX-06-07~". Never fill in a part the text doesn't give; empty if the text gives no date]"""
+# What each cue asks, by its label. The cue read asks for them as labeled
+# lines (CUE_INSTRUCTIONS); extract's skeleton asks for the same fields in a
+# structured reply, keyed by the label in lower case (cues_from_fields).
+CUE_FIELDS = {
+    'TIME_RELATION': "when this scene happens relative to the scene before it in reading order — one of: continues (picks up at the same time or moments later), later (some time after it), earlier (before it: a flashback or a recollection told as a scene, including a past that a spirit, dream or vision shows a character; also a scene whose present is only a line or a short lead-in before it mostly tells the past, such as a story a character tells or the narrator's account of someone's youth, but not one where the present has real action on the page around the telling), frame (narration from after the story, looking back), vision (events that have not happened, or may not happen, as the story tells them: a prophecy, a future a character is shown that may be averted, a dream of what might come; the past is always earlier, even when a spirit, a dream or a vision shows it), unclear",
+    'TIME_GAP': 'how much time passed between the end of the scene before and the start of this one, in at most six words, no explanation: "an hour", "the next morning", "three weeks", "five years", "several weeks". Not how long this scene\'s own action lasts ("the next four days", "for a month": that is TIME_SPAN), and not a distance to some other event ("ten years since the wedding": that is TIME_REFERS); empty if none is stated or implied',
+    'TIME_ANCHOR': 'a calendar fact pinning when THIS scene\'s action happens — a date, weekday, month, season, holiday or named day ("the hottest day of the summer") — quoted briefly; not a habit ("every Friday") or a date the scene only mentions; empty if none',
+    'TIME_REFERS': 'any statement in this scene of how long ago or how long until another event in the story, quoted briefly: "that June night three months before", "five years since he\'d seen her", "the funeral was on the third day"; separate several with semicolons; empty if none',
+    'TIME_SPAN': 'when the scene summarizes a stretch of time ("all that summer", "the next four days"), how long; empty for a scene that plays out in one sitting',
+    'TIME_DATE': 'only what this scene\'s own text states about the calendar date, in EDTF: "1922-07-04", "XXXX-07-04" when the year isn\'t given here, "1922" for a year, "1922-22" for summer 1922 (21 spring, 22 summer, 23 autumn, 24 winter), "1917~" for "around 1917", "1922-06/1922-09" for a stretch. A date the text fixes by a stated distance from a named calendar day counts as given, marked ~: "In two weeks it\'ll be the longest day in the year" → "XXXX-06-07~". Never fill in a part the text doesn\'t give; empty if the text gives no date',
+}
+
+CUE_INSTRUCTIONS = '\n'.join(f'{label}: [{text}]' for label, text in CUE_FIELDS.items())
 
 _CUE_LABELS = {
     'TIME_RELATION': 'relation',
@@ -69,20 +77,29 @@ _EMPTY_ANSWERS = {'', 'none', 'n/a', 'unknown', 'empty', '-', '(none)', '(empty)
 
 
 def parse_cues(response: str) -> dict[str, str]:
-    """Parse ``TIME_*`` lines into a cue dict (keys of CUE_COLUMNS but id).
+    """Parse ``TIME_*`` lines into a cue dict (keys of CUE_COLUMNS but id),
+    normalized as ``cues_from_fields`` does."""
+    answers = {}
+    for line in (response or '').split('\n'):
+        match = re.match(r'^\s*(TIME_[A-Z]+):\s*(.*)$', line)
+        if match and match.group(1) in _CUE_LABELS:
+            answers[match.group(1).lower()] = match.group(2)
+    return cues_from_fields(answers)
+
+
+def cues_from_fields(answers: dict) -> dict[str, str]:
+    """A cue dict from answers keyed by cue label in lower case
+    (``time_relation``, ...), as a structured reply gives them.
 
     The relation is reduced to one of RELATIONS (``unclear`` when it is
     none of them); an invalid date is dropped rather than stored.
     """
     cues = {key: '' for key in _CUE_LABELS.values()}
-    for line in (response or '').split('\n'):
-        match = re.match(r'^\s*(TIME_[A-Z]+):\s*(.*)$', line)
-        if not match or match.group(1) not in _CUE_LABELS:
-            continue
-        value = match.group(2).strip().strip('"').strip()
+    for label, key in _CUE_LABELS.items():
+        value = str(answers.get(label.lower()) or '').strip().strip('"').strip()
         if value.lower().strip('[]().') in _EMPTY_ANSWERS:
             value = ''
-        cues[_CUE_LABELS[match.group(1)]] = value
+        cues[key] = value
     relation = cues['relation'].lower()
     cues['relation'] = next((r for r in RELATIONS if relation.startswith(r)), 'unclear')
     if cues['date'] and not is_valid_edtf(cues['date']):
@@ -301,6 +318,10 @@ def _month_day(value: str) -> tuple[str, int, int] | None:
 _SEASON_SPANS = {21: (105, 46), 22: (197, 46), 23: (289, 45), 24: (15, 45)}
 # Slack on top of the two spans: "early in May" on the 2nd is still May
 _ROUGH_SLACK = 7
+# A season named in prose is looser than its calendar quarter: The Plastic
+# Age's mid-September visit is "summer", and so is Gatsby's hottest day in
+# early September (F-112). Each side of a season stretches this far
+_SEASON_MARGIN = 14
 
 
 def _rough_date(value: str) -> tuple[int, int, str] | None:
@@ -315,7 +336,7 @@ def _rough_date(value: str) -> tuple[int, int, str] | None:
     month = int(m.group('month'))
     if month in _SEASON_SPANS:
         middle, half = _SEASON_SPANS[month]
-        return middle, half, _SEASONS[month]
+        return middle, half + _SEASON_MARGIN, _SEASONS[month]
     if not 1 <= month <= 12:
         return None
     return _day_of_year(month, 15), 15, _MONTHS[month - 1]
@@ -443,21 +464,19 @@ def parse_assignments(response: str, ids: list[str]) -> dict[str, tuple[int, str
 
     Days may be zero or negative. ``earlier`` given as the mode means
     ``scene``; a missing or unknown mode comes back as ``''`` for the
-    caller to decide. An id the reply extends or cuts short at a hyphen
-    counts for the one scene it matches, unless that scene has its own
-    line. Lines for other ids or with a non-integer day are ignored.
+    caller to decide. An id the reply extends or cuts short at a hyphen, or
+    gets a word wrong in, counts for the one scene it matches
+    (``match_scene_id``), unless that scene has its own line. Lines for
+    other ids or with a non-integer day are ignored.
     """
     wanted = set(ids)
     result: dict[str, tuple[int, str, str]] = {}
     exact: set[str] = set()
 
+    # Self-Control: "de-courcy-pines-and-sets-out" for
+    # "de-courcy-pines-and-sets" left the scene unplaced
     def resolve(reply_id):
-        if reply_id in wanted:
-            return reply_id
-        # Self-Control: "de-courcy-pines-and-sets-out" for
-        # "de-courcy-pines-and-sets" left the scene unplaced
-        matches = [w for w in wanted if reply_id.startswith(w + '-') or w.startswith(reply_id + '-')]
-        return matches[0] if len(matches) == 1 else None
+        return match_scene_id(reply_id, wanted)
     # Only the answer after CALENDAR: counts; reasoning above it may try out
     # days it then revises
     text = response or ''
@@ -900,6 +919,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     present = None
     last_day = None
     last_mode = ''
+    last_duration = ''
     after_frame = False
     dated: list[tuple[str, int, tuple, bool]] = []
     rough: list[tuple[str, int, tuple]] = []
@@ -935,13 +955,22 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         # cue goes back a day or more ("ten years")
         stated = _keeps_stated_date(row, cue)
         reached = last_day if at_present else present
+        # A summary's day is where its stretch starts: a scene may step back
+        # into the stretch and still land after that day (Plastic Age's
+        # wrong classroom, inside "several weeks" of other instructors).
+        # Measure from the stretch's end when its length is counted; when
+        # it isn't, there is nothing to measure from
+        if at_present and last_mode == 'summary':
+            span = gap_to_days(last_duration)
+            reached = None if span is None else last_day + span
         # A stated date the calendar keeps outranks "earlier" on a later
         # day; on the same day, a month and day that agree say nothing
         # about the year (Fezziwig's Christmas Eve, years back, on day 1)
         if relation == 'earlier' and last_day is not None and reached is not None and (
                 (day > reached and not stated)
                 or (day == reached and _goes_back_days(cue.get('gap', '')))):
-            before = (f'the previous scene\'s ({last_day})' if at_present
+            before = (f'the previous scene\'s ({last_day})' if at_present and reached == last_day
+                      else f'the end of the previous summary (day {reached})' if at_present
                       else f'the story\'s present (day {present})')
             findings.append({'scene_id': sid, 'check': 'flashback_not_earlier',
                              'message': f'reads as set earlier, but its day ({day}) is not before '
@@ -982,6 +1011,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
             weekdays.append((sid, day, weekday))
         last_day = day
         last_mode = mode
+        last_duration = row.get('duration', '')
         if relation != 'earlier' and (present is None or day > present):
             present = day
 

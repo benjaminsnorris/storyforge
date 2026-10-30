@@ -236,6 +236,17 @@ def _run_registry_domain(domain: str, ref_dir: str, project_dir: str,
                     ['reference/', 'working/logs/'])
 
 
+def _log_rejected(result: dict) -> None:
+    """Name the scenes with a brief or intent rewrite refused for naming
+    someone or something the book never mentions; the fields that rewrite
+    would have changed are as they were."""
+    rejected = result.get('rejected') or {}
+    if rejected:
+        log(f'  Rewrites refused in {len(rejected)} scene(s): they named words the book never uses')
+        for sid, reasons in rejected.items():
+            log(f'    {sid}: {"; ".join(reasons)}')
+
+
 def _run_briefs_domain(ref_dir: str, project_dir: str, log_dir: str,
                        model: str, coaching: str, scene_filter: list[str] | None,
                        threshold: float, dry_run: bool,
@@ -291,6 +302,7 @@ def _run_briefs_domain(ref_dir: str, project_dir: str, log_dir: str,
     rewritten = result.get('scenes_rewritten', 0)
     fields = result.get('fields_rewritten', 0)
     log(f'  Rewritten: {rewritten} scenes, {fields} fields')
+    _log_rejected(result)
 
     if rewritten > 0:
         commit_and_push(project_dir,
@@ -348,6 +360,7 @@ def _run_intent_domain(ref_dir: str, project_dir: str, log_dir: str,
     rewritten = result.get('scenes_rewritten', 0)
     fields = result.get('fields_rewritten', 0)
     log(f'  Rewritten: {rewritten} scenes, {fields} fields')
+    _log_rejected(result)
 
     if rewritten > 0 or fields > 0:
         commit_and_push(project_dir,
@@ -473,6 +486,7 @@ def _run_loop(ref_dir: str, project_dir: str, log_dir: str, model: str,
         rewritten = result.get('scenes_rewritten', 0)
         fields = result.get('fields_rewritten', 0)
         log(f'  Rewritten: {rewritten} scenes, {fields} fields')
+        _log_rejected(result)
 
         if rewritten > 0:
             commit_and_push(project_dir,
@@ -480,7 +494,10 @@ def _run_loop(ref_dir: str, project_dir: str, log_dir: str, model: str,
                             ['reference/', 'working/'])
 
         if rewritten == 0:
-            log('  Nothing rewritten — converged')
+            if result.get('rejected'):
+                log('  Nothing rewritten: every rewrite was refused (above). Stopping.')
+            else:
+                log('  Nothing rewritten — converged')
             break
     else:
         log(f'\n  Reached max iterations ({max_loops})')

@@ -166,6 +166,10 @@ def count_chapters(project_dir: str) -> int:
     return sum(1 for row in rows if len(row) > key_idx and row[key_idx])
 
 
+# The chapter map's heading formats, as Bookshelf accepts them
+_CHAPTER_HEADINGS = ('none', 'numbered', 'titled', 'numbered-titled')
+
+
 def read_chapter_field(chapter_num: int, project_dir: str,
                        field: str) -> str:
     """Read a field from a chapter row.
@@ -1349,11 +1353,17 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
                 used_illustrations.update(p['key'] for p in placements)
             scenes.append(scene_entry)
 
-        chapters.append({
+        chapter_entry = {
             'number': ch_num,
             'title': ch_title,
             'scenes': scenes,
-        })
+        }
+        # Bookshelf heads each chapter itself unless told how: a classic
+        # whose text opens on "# Chapter I" ('none') read the heading twice
+        heading = read_chapter_field(ch_num, project_dir, 'heading').strip()
+        if heading in _CHAPTER_HEADINGS:
+            chapter_entry['heading'] = heading
+        chapters.append(chapter_entry)
 
     # Read optional metadata from storyforge.yaml
     genre = _common_read_yaml_field('project.genre', project_dir) or ''

@@ -320,7 +320,9 @@ def _structured(schema_name, **fields):
     return json.dumps(reply)
 
 
-SKELETON_REPLY = 'TITLE: Test\nPOV: Dorren Hayle\nLOCATION: Office\nTIME_RELATION: continues\n'
+SKELETON_REPLY = _structured('SKELETON_SCHEMA', title='Test', pov='Dorren Hayle',
+                             location=['Office'], time_relation='continues',
+                             time_gap='an hour')
 
 CHARACTERIZE_REPLY = _structured('CHARACTERIZE_SCHEMA', narrative_mode='third-limited',
                                  tone='literary')
@@ -443,6 +445,171 @@ class TestPhaseExecution:
 
         batch_calls = mock_api.calls_for('submit_batch')
         assert len(batch_calls) >= 1
+        # One structured reply feeds both scenes.csv and the timeline cues
+        from storyforge.extract import SKELETON_SCHEMA
+        requests = [r for c in batch_calls for r in c['requests']]
+        assert requests and all(
+            r['params']['output_config']['format']['schema'] == SKELETON_SCHEMA
+            for r in requests)
+        from storyforge.elaborate import _read_csv_as_map
+        from storyforge.timeline import read_cues
+        scenes = _read_csv_as_map(os.path.join(project_dir, 'reference', 'scenes.csv'))
+        cues = read_cues(project_dir)
+        for r in requests:
+            sid = r['custom_id']
+            assert scenes[sid]['location']  # filled, or the fixture's own value kept
+            assert (cues[sid]['relation'], cues[sid]['gap']) == ('continues', 'an hour')
+
+    def test_phase_1_names_an_unreadable_reply_and_stores_no_cues_for_it(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """A reply in the old labeled-line shape (or any reply that isn't the
+        schema's JSON) is no reply: the scene is named, the run exits 1, and
+        no empty cues pass for a fresh read."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_extract.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_extract._run_hone',
+                            lambda plugin_dir, phase: None)
+        mock_api.set_response('TITLE: Test\nTIME_RELATION: continues\n')
+        monkeypatch.setattr('storyforge.elaborate.validate_structure', lambda ref_dir: {
+            'passed': True, 'failures': [], 'checks': [],
+        })
+        monkeypatch.setattr('storyforge.cmd_extract.get_coaching_level',
+                            lambda pd: 'full')
+
+        from storyforge.elaborate import _read_csv_as_map
+        scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+        days_before = {sid: (r.get('timeline_day') or '', r.get('time_mode') or '')
+                       for sid, r in _read_csv_as_map(scenes_csv).items()}
+
+        def placed(*a, **kw):
+            raise AssertionError('the calendar was placed without fresh cues')
+        monkeypatch.setattr('storyforge.timeline.run_assignment', placed)
+
+        with pytest.raises(SystemExit) as exc:
+            main(['--phase', '1'])
+
+        assert exc.value.code == 1
+        assert 'scenes.csv: the reply for act1-sc01 is unreadable' in capsys.readouterr().out
+        from storyforge.timeline import read_cues
+        assert read_cues(project_dir) == {}
+        # The calendar is one piece: no scene's day moves when any scene's
+        # cues are missing
+        assert {sid: (r.get('timeline_day') or '', r.get('time_mode') or '')
+                for sid, r in _read_csv_as_map(scenes_csv).items()} == days_before
+
+    @staticmethod
+    def _phase_1_env(project_dir, monkeypatch):
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_extract.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_extract._run_hone',
+                            lambda plugin_dir, phase: None)
+        monkeypatch.setattr('storyforge.elaborate.validate_structure', lambda ref_dir: {
+            'passed': True, 'failures': [], 'checks': [],
+        })
+        monkeypatch.setattr('storyforge.cmd_extract.get_coaching_level',
+                            lambda pd: 'full')
+
+    def test_phase_1_answers_reach_scenes_csv_normalized(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """With --force every skeleton answer replaces the row's value: places
+        joined with ';' and, like names, mapped to their registry ids."""
+        self._phase_1_env(project_dir, monkeypatch)
+        monkeypatch.setattr('storyforge.timeline.run_assignment',
+                            lambda *a, **kw: {'assigned': 0, 'unplaced': 0})
+        mock_api.set_response(_structured(
+            'SKELETON_SCHEMA', title='Test', pov='Dorren',
+            location=['the office', 'The Deep Archive', 'unknown'],
+            time_relation='later'))
+
+        main(['--phase', '1', '--force'])
+
+        from storyforge.elaborate import _read_csv_as_map
+        rows = _read_csv_as_map(os.path.join(project_dir, 'reference', 'scenes.csv'))
+        sent = [r['custom_id'] for c in mock_api.calls_for('submit_batch')
+                for r in c['requests']]
+        assert sent
+        for sid in sent:
+            assert (rows[sid]['title'], rows[sid]['pov'], rows[sid]['location']) == (
+                'Test', 'dorren-hayle', 'cartography-office;deep-archive')
+
+    def test_phase_1_takes_cues_only_from_this_batchs_answers(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """A scene the batch didn't answer (refused, cut off, failed) gets no
+        cues even if an earlier run's reply file is still in the log dir; it
+        is named and no calendar is placed."""
+        self._phase_1_env(project_dir, monkeypatch)
+        log_dir = os.path.join(project_dir, 'working', 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        for sid in ('act1-sc01', 'act1-sc02'):
+            with open(os.path.join(log_dir, f'{sid}.txt'), 'w') as f:
+                f.write(SKELETON_REPLY)
+        mock_api._batch_results = ['act1-sc01']
+        calls = []
+        monkeypatch.setattr('storyforge.timeline.run_assignment',
+                            lambda *a, **kw: calls.append(a))
+
+        with pytest.raises(SystemExit) as exc:
+            main(['--phase', '1'])
+
+        assert exc.value.code == 1
+        from storyforge.timeline import read_cues
+        assert set(read_cues(project_dir)) == {'act1-sc01'}
+        assert calls == []
+
+    def test_phase_1_stores_no_cues_from_a_reply_with_no_scene_values(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """Cues alone don't make a usable reply: the scene is named as holding
+        no values, its cues aren't stored, and no calendar is placed."""
+        self._phase_1_env(project_dir, monkeypatch)
+        mock_api.set_response(_structured('SKELETON_SCHEMA', title='unknown',
+                                          time_relation='later', time_gap='a week'))
+        calls = []
+        monkeypatch.setattr('storyforge.timeline.run_assignment',
+                            lambda *a, **kw: calls.append(a))
+
+        with pytest.raises(SystemExit) as exc:
+            main(['--phase', '1'])
+
+        assert exc.value.code == 1
+        assert 'scenes.csv: the reply for act1-sc01 holds no values' in capsys.readouterr().out
+        from storyforge.timeline import read_cues
+        assert read_cues(project_dir) == {}
+        assert calls == []
+
+    def test_phase_1_places_no_calendar_when_one_scene_lacks_cues(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """One unreadable reply among good ones: the good scenes' cues are
+        stored, but placing the calendar without the bad scene's would move
+        its neighbours, so no day is placed and the run exits 1."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_extract.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_extract._run_hone',
+                            lambda plugin_dir, phase: None)
+        monkeypatch.setattr('storyforge.elaborate.validate_structure', lambda ref_dir: {
+            'passed': True, 'failures': [], 'checks': [],
+        })
+        monkeypatch.setattr('storyforge.cmd_extract.get_coaching_level',
+                            lambda pd: 'full')
+        from storyforge.cmd_extract import _build_sorted_scene_ids
+        first = _build_sorted_scene_ids(os.path.join(project_dir, 'scenes'),
+                                        os.path.join(project_dir, 'reference'))[0]
+        mock_api.set_response_fn(
+            lambda prompt: 'not json' if f'## Scene: {first}\n' in prompt else SKELETON_REPLY)
+        calls = []
+        monkeypatch.setattr('storyforge.timeline.run_assignment',
+                            lambda *a, **kw: calls.append(a))
+
+        with pytest.raises(SystemExit) as exc:
+            main(['--phase', '1'])
+
+        assert exc.value.code == 1
+        assert calls == []
+        from storyforge.timeline import read_cues
+        cues = read_cues(project_dir)
+        assert first not in cues and cues  # the others' cues are kept
 
     def test_all_phases_run_when_no_phase_flag(self, mock_api, mock_git,
                                                  mock_costs, project_dir,
@@ -483,6 +650,9 @@ class TestPhaseExecution:
         intent = schemas_for('Extract the narrative intent')
         briefs = schemas_for('Extract the drafting contract')
         assert intent and all(s == INTENT_SCHEMA for s in intent)
+        from storyforge.extract import SKELETON_SCHEMA
+        skeleton = schemas_for('Extract structural metadata')
+        assert skeleton and all(s == SKELETON_SCHEMA for s in skeleton)
         assert briefs and all(s == BRIEF_PARALLEL_SCHEMA for s in briefs)
         from storyforge.elaborate import _read_csv_as_map
         ref = os.path.join(project_dir, 'reference')

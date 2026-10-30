@@ -17,7 +17,8 @@ def _log(msg: str) -> None:
 
 
 def extract_scenes_from_response(response: str, scene_dir: str,
-                                  stop_reason: str = 'end_turn') -> list[str]:
+                                  stop_reason: str = 'end_turn',
+                                  skipped: dict[str, str] | None = None) -> list[str]:
     """Extract scene blocks from a Claude response and write them to files.
 
     Args:
@@ -25,10 +26,14 @@ def extract_scenes_from_response(response: str, scene_dir: str,
         scene_dir: Path to the scenes/ directory where files are written.
         stop_reason: The API stop_reason. When 'max_tokens', the last scene
             without an end marker is discarded as likely truncated.
+        skipped: If given, filled with each scene the response held but that
+            was not written (unsafe or truncated), and why.
 
     Returns:
         List of scene IDs that were written.
     """
+    if skipped is None:
+        skipped = {}
     start_pattern = re.compile(r'^=== SCENE:\s*(.+?)\s*===$', re.MULTILINE)
     end_pattern = re.compile(r'^=== END SCENE:', re.MULTILINE)
 
@@ -43,7 +48,7 @@ def extract_scenes_from_response(response: str, scene_dir: str,
         if start_match and not line.startswith('=== END SCENE:'):
             # Write previous scene if any
             if current_id and current_lines:
-                _write_scene(current_id, current_lines, scene_dir, scenes_written)
+                _write_scene(current_id, current_lines, scene_dir, scenes_written, skipped)
 
             new_id = start_match.group(1).strip()
 
@@ -58,7 +63,7 @@ def extract_scenes_from_response(response: str, scene_dir: str,
 
         elif end_match:
             if current_id and current_lines:
-                _write_scene(current_id, current_lines, scene_dir, scenes_written)
+                _write_scene(current_id, current_lines, scene_dir, scenes_written, skipped)
             current_id = None
             current_lines = []
 
@@ -70,8 +75,9 @@ def extract_scenes_from_response(response: str, scene_dir: str,
         if stop_reason == 'max_tokens':
             _log(f'WARNING: Discarding truncated scene "{current_id}" '
                  f'(API response hit max_tokens limit)')
+            skipped[current_id] = 'cut off: the reply hit max_tokens'
         else:
-            _write_scene(current_id, current_lines, scene_dir, scenes_written)
+            _write_scene(current_id, current_lines, scene_dir, scenes_written, skipped)
 
     return scenes_written
 
@@ -160,7 +166,8 @@ def unsafe_scene_reason(content: str, old_text: str | None = None) -> str:
     return ''
 
 
-def _write_scene(scene_id: str, lines: list[str], scene_dir: str, written: list[str]):
+def _write_scene(scene_id: str, lines: list[str], scene_dir: str, written: list[str],
+                 skipped: dict[str, str]):
     """Write a scene's content to its file, with pre-write safety checks."""
     content = _trim_blank_lines('\n'.join(lines))
     if not content:
@@ -175,6 +182,7 @@ def _write_scene(scene_id: str, lines: list[str], scene_dir: str, written: list[
     reason = unsafe_scene_reason(content, old_text)
     if reason:
         _log(f'WARNING: Skipping "{scene_id}" -- {reason}')
+        skipped[scene_id] = reason
         return
 
     with open(path, 'w') as f:
@@ -289,10 +297,13 @@ def main():
             print('No response content found', file=sys.stderr)
             sys.exit(1)
 
+        skipped: dict[str, str] = {}
         written = extract_scenes_from_response(response, scene_dir,
-                                                stop_reason=stop_reason)
+                                                stop_reason=stop_reason, skipped=skipped)
         for sid in written:
             print(f'Wrote: {sid}')
+        for sid, reason in skipped.items():
+            print(f'Skipped: {sid} -- {reason}')
         print(f'Total: {len(written)} scene(s)')
 
     elif command == 'extract-single':

@@ -592,6 +592,34 @@ class TestScoreSinglePrinciple:
 # ============================================================================
 
 
+# Replies for the parts of a cycle besides scene scoring. Without them the
+# fidelity and narrative passes can't read their replies, the cycle is
+# incomplete, and score exits 1.
+_FIDELITY_REPLY = ('SCORES:\n'
+                   'id|goal|conflict|outcome|crisis|decision|key_actions|key_dialogue|emotions|knowledge\n'
+                   'scene|4|4|4|4|4|4|4|4|4\n\n'
+                   'RATIONALE:\nid|element|score|evidence\nscene|goal|4|The goal lands.\n')
+_NARRATIVE_REPLY = 'SCORES:\nid|campbells_monomyth\nnarrative|4\n'
+_ACT_REPLY = 'SCORES:\nid|campbells_monomyth\nact-1|4\n'
+_NOVEL_REPLY = ('CHARACTER_SCORES:\nid|character_arc\ndorren|4\n\n'
+                'GENRE_SCORES:\nid|genre_contract\nnovel|4\n')
+
+
+def _every_part(scene_reply):
+    """A reply fn answering each scoring prompt in its own format."""
+    def reply(prompt):
+        if 'Brief Fidelity Evaluation' in prompt:
+            return _FIDELITY_REPLY
+        if 'evaluating the narrative structure of' in prompt:
+            return _NARRATIVE_REPLY
+        if 'You are scoring an act of a novel' in prompt:
+            return _ACT_REPLY
+        if 'You are scoring a novel against novel-level' in prompt:
+            return _NOVEL_REPLY
+        return scene_reply
+    return reply
+
+
 class TestMainDirect:
     """Test main() in direct API mode with mocked dependencies."""
 
@@ -609,7 +637,7 @@ class TestMainDirect:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response(self._scoring_response())
+        mock_api.set_response_fn(_every_part(self._scoring_response()))
 
         main(['--direct', '--scenes', 'act1-sc01'])
 
@@ -622,7 +650,7 @@ class TestMainDirect:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response(self._scoring_response())
+        mock_api.set_response_fn(_every_part(self._scoring_response()))
 
         main(['--direct', '--scenes', 'act1-sc01'])
 
@@ -637,7 +665,7 @@ class TestMainDirect:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response(self._scoring_response())
+        mock_api.set_response_fn(_every_part(self._scoring_response()))
 
         main(['--direct', '--scenes', 'act1-sc01'])
 
@@ -651,7 +679,7 @@ class TestMainDirect:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response(self._scoring_response())
+        mock_api.set_response_fn(_every_part(self._scoring_response()))
 
         main(['--direct', '--scenes', 'act1-sc01'])
 
@@ -679,7 +707,7 @@ class TestMainBatch:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response(self._scoring_response())
+        mock_api.set_response_fn(_every_part(self._scoring_response()))
 
         main(['--scenes', 'act1-sc01'])  # default mode is batch
 
@@ -691,7 +719,7 @@ class TestMainBatch:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response(self._scoring_response())
+        mock_api.set_response_fn(_every_part(self._scoring_response()))
 
         main(['--scenes', 'act1-sc01'])
 
@@ -703,7 +731,7 @@ class TestMainBatch:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response(self._scoring_response())
+        mock_api.set_response_fn(_every_part(self._scoring_response()))
 
         main(['--scenes', 'act1-sc01'])
 
@@ -718,7 +746,7 @@ class TestMainBatch:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response(self._scoring_response())
+        mock_api.set_response_fn(_every_part(self._scoring_response()))
         real_run = subprocess.run
         commands = []
 
@@ -744,8 +772,10 @@ class TestMainBatch:
                                     'usage': {'input_tokens': 1, 'output_tokens': 1},
                                     'stop_reason': 'max_tokens'})
 
-        main(['--direct', '--scenes', 'act1-sc01'])
+        with pytest.raises(SystemExit) as exc:
+            main(['--direct', '--scenes', 'act1-sc01'])
 
+        assert exc.value.code == 1
         out = capsys.readouterr().out
         assert '[act1-sc01] FAILED: the reply was cut off at max_tokens' in out
         assert 'no scene scores for act1-sc01' in out
@@ -772,10 +802,94 @@ class TestMainBatch:
         monkeypatch.setattr('storyforge.cmd_score._log_api_usage',
                             lambda path, op, target, *a, **kw: costed.append((op, target)))
 
-        main(['--scenes', 'act1-sc01'])
+        with pytest.raises(SystemExit) as exc:
+            main(['--scenes', 'act1-sc01'])
 
+        assert exc.value.code == 1
         assert ('score', 'act1-sc01') in costed
-        assert 'no scene scores for act1-sc01' in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert 'no scene scores for act1-sc01' in out
+        assert 'scene scores: act1-sc01' in out.split('is incomplete')[1]
+
+    def test_a_cycle_missing_scene_scores_tunes_no_weights_and_exits_1(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """A failed scene used to be named once mid-run; the improvement
+        cycle then tuned the craft weights from the scenes that happened to
+        score, and the run exited 0."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        mock_api.set_response_fn(_every_part('not a score table'))
+        tuned = []
+        monkeypatch.setattr('storyforge.cmd_score._run_improvement_cycle',
+                            lambda *a, **kw: tuned.append(a))
+
+        with pytest.raises(SystemExit) as exc:
+            main(['--direct', '--scenes', 'act1-sc01'])
+
+        assert exc.value.code == 1 and tuned == []
+        out = capsys.readouterr().out
+        assert 'Skipping the improvement cycle' in out
+        assert 'scene scores: act1-sc01' in out.split('is incomplete')[1]
+        commits = [c[1] for c in mock_git.calls_for('commit_and_push')]
+        assert any(m.endswith('(incomplete)') for m in commits)
+
+    def test_an_unreadable_act_reply_makes_the_cycle_incomplete(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """An act reply with no score block used to be logged as 'scored'."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        good = _every_part(self._scoring_response())
+        mock_api.set_response_fn(lambda prompt: 'The act holds together well.'
+                                 if 'You are scoring an act of a novel' in prompt
+                                 else good(prompt))
+
+        with pytest.raises(SystemExit) as exc:
+            main(['--direct', '--scenes', 'act1-sc01'])
+
+        assert exc.value.code == 1
+        assert ': unreadable reply' in capsys.readouterr().out.split('is incomplete')[1]
+
+    def test_a_scene_too_short_to_score_is_not_unscored(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """Scenes under MIN_SCENE_WORDS are left out of scoring on purpose
+        (build_scene_list); they must not make the cycle incomplete."""
+        from storyforge.csv_cli import update_field
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        update_field(os.path.join(project_dir, 'reference', 'scenes.csv'),
+                     'act1-sc02', 'word_count', '12')
+        good = _every_part(self._scoring_response())
+
+        def reply(prompt):
+            # Were act1-sc02 scored, its scene reply would be unreadable and
+            # the cycle incomplete (with 60 words, this test fails)
+            answer = good(prompt)
+            if answer == self._scoring_response() and 'act1-sc02' in prompt:
+                return 'not a score table'
+            return answer
+        mock_api.set_response_fn(reply)
+
+        main(['--direct', '--scenes', 'act1-sc01,act1-sc02'])  # no exit 1
+
+        assert 'is incomplete' not in capsys.readouterr().out
+
+    def test_unreadable_fidelity_and_narrative_replies_make_the_cycle_incomplete(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        mock_api.set_response(self._scoring_response())  # every prompt gets a scene table
+
+        with pytest.raises(SystemExit) as exc:
+            main(['--direct', '--scenes', 'act1-sc01'])
+
+        assert exc.value.code == 1
+        tail = capsys.readouterr().out.split('is incomplete')[1]
+        assert 'fidelity: act1-sc01' in tail
+        assert 'narrative scoring: unreadable reply' in tail
 
 
 # ============================================================================
@@ -857,8 +971,8 @@ class TestScoreModeResolution:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response('principle|score|deficits|evidence_lines\n'
-                              'voice_consistency|5|None|—\n')
+        mock_api.set_response_fn(_every_part('principle|score|deficits|evidence_lines\n'
+                                             'voice_consistency|5|None|—\n'))
 
         main(['--scenes', 'act1-sc01'])
 
@@ -871,8 +985,8 @@ class TestScoreModeResolution:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
                             lambda: project_dir)
-        mock_api.set_response('principle|score|deficits|evidence_lines\n'
-                              'voice_consistency|5|None|—\n')
+        mock_api.set_response_fn(_every_part('principle|score|deficits|evidence_lines\n'
+                                             'voice_consistency|5|None|—\n'))
 
         main(['--direct', '--scenes', 'act1-sc01'])
 

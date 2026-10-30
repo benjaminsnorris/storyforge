@@ -210,16 +210,11 @@ class TestParseSkeletonResponse:
     """Tests for parse_skeleton_response."""
 
     def test_parses_all_fields(self):
-        response = """TITLE: The Finest Cartographer
-POV: Dorren Hayle
-LOCATION: Pressure Cartography Office
-TIME_RELATION: later
-TIME_DATE: 1922-06
-TIME_OF_DAY: morning
-DURATION: 2 hours
-TYPE: character
-TARGET_WORDS: 2500
-ACT: 1"""
+        response = _reply(
+            'SKELETON_SCHEMA', title='The Finest Cartographer', pov='Dorren Hayle',
+            location=['Pressure Cartography Office'], time_relation='later',
+            time_date='1922-06', time_of_day='morning', duration='2 hours',
+            type='character', target_words='2500', act='1')
 
         result = parse_skeleton_response(response, 'act1-sc01')
         assert result['id'] == 'act1-sc01'
@@ -234,25 +229,26 @@ ACT: 1"""
         assert result['act'] == '1'
 
     def test_skips_unknown_values(self):
-        response = """TITLE: A Scene
-POV: UNKNOWN
-LOCATION: Some Place"""
-
-        result = parse_skeleton_response(response, 'test-scene')
+        result = parse_skeleton_response(
+            _reply('SKELETON_SCHEMA', title='A Scene', pov='unknown', location=['Some Place']),
+            'test-scene')
         assert result['id'] == 'test-scene'
         assert result['title'] == 'A Scene'
         assert 'pov' not in result
         assert result['location'] == 'Some Place'
 
-    def test_ignores_unknown_labels(self):
-        response = """TITLE: Test
-BOGUS_FIELD: should be ignored
-POV: Alice"""
+    def test_ignores_fields_outside_the_schema(self):
+        response = json.dumps({**json.loads(_reply('SKELETON_SCHEMA', title='Test', pov='Alice')),
+                               'bogus_field': 'should be ignored'})
 
         result = parse_skeleton_response(response, 's1')
         assert 'bogus_field' not in result
         assert result['title'] == 'Test'
         assert result['pov'] == 'Alice'
+
+    def test_an_invalid_date_is_dropped(self):
+        result = parse_skeleton_response(_reply('SKELETON_SCHEMA', title='T', time_date='June-ish'), 's1')
+        assert 'timeline_date' not in result
 
 
 class TestParseIntentResponse:

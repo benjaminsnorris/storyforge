@@ -205,11 +205,12 @@ def _parse_findings(response_text, persona_name, scene_id):
     Tries:
       1. Direct json.loads
       2. Fenced block extraction (```json ... ``` or ``` ... ```)
-      3. Log warning and return [] on failure
+      3. Log a warning and return None on failure: an unreadable reply is
+         not a persona that found nothing
     """
     if not response_text:
         log(f'  WARNING [{persona_name}]: empty response for {scene_id}')
-        return []
+        return None
 
     # Attempt 1: direct parse
     try:
@@ -218,7 +219,7 @@ def _parse_findings(response_text, persona_name, scene_id):
         if not isinstance(findings, list):
             log(f'  WARNING [{persona_name}]: findings is not a list for {scene_id}; '
                 f'got {type(findings).__name__}')
-            return []
+            return None
         # Ensure scene_id is stamped on each finding
         for f in findings:
             f.setdefault('scene_id', scene_id)
@@ -236,7 +237,7 @@ def _parse_findings(response_text, persona_name, scene_id):
             if not isinstance(findings, list):
                 log(f'  WARNING [{persona_name}]: findings is not a list for {scene_id}; '
                     f'got {type(findings).__name__}')
-                return []
+                return None
             for f in findings:
                 f.setdefault('scene_id', scene_id)
             return findings
@@ -245,7 +246,7 @@ def _parse_findings(response_text, persona_name, scene_id):
 
     log(f'  WARNING [{persona_name}]: could not parse JSON findings for {scene_id} '
         f'— skipping this persona\'s contribution')
-    return []
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +314,7 @@ def _evaluate_scene(scene_id, project_dir, metadata_csv, personas, model,
 
     all_findings = []
     personas_run = []
+    personas_failed = []
 
     for persona_name, prompt_path in personas:
         # Read persona system prompt
@@ -342,10 +344,14 @@ def _evaluate_scene(scene_id, project_dir, metadata_csv, personas, model,
             )
         except Exception as e:
             log(f'  WARNING [{persona_name}]: API call failed for {scene_id}: {e}')
+            personas_failed.append(persona_name)
             continue
 
         response_text = extract_text_from_file(log_file)
         findings = _parse_findings(response_text, persona_name, scene_id)
+        if findings is None:
+            personas_failed.append(persona_name)
+            continue
 
         # Tag each finding with the persona that produced it
         for finding in findings:
@@ -378,6 +384,7 @@ def _evaluate_scene(scene_id, project_dir, metadata_csv, personas, model,
         'scene_id': scene_id,
         'evaluated_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         'personas_run': personas_run,
+        'personas_failed': personas_failed,
         'findings': all_findings,
     }
 
@@ -526,6 +533,16 @@ def main(argv=None):
     _print_summary(results)
 
     log(f'Evaluation complete. Results in {output_dir}')
+    # A persona with no usable reply did not review the scene: its silence
+    # is not a clean bill
+    gaps = [f'{r["scene_id"]}: {", ".join(r["personas_failed"])}'
+            for r in results if r['personas_failed']]
+    if gaps:
+        log('ERROR: some personas did not review their scene (API failure or '
+            'unreadable reply); re-run evaluate for these:')
+        for gap in gaps:
+            log(f'  {gap}')
+        sys.exit(1)
 
 
 if __name__ == '__main__':

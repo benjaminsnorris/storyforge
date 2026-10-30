@@ -749,6 +749,7 @@ def _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_di
                 registry = {}
         return registry
 
+    position = {s: i for i, s in enumerate(sorted_ids)}
     for sid in sorted_ids:
         brief = briefs_map.get(sid, {})
         state_in_raw = brief.get('physical_state_in', '').strip()
@@ -771,13 +772,20 @@ def _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_di
 
         # Check 2 — state disappearance (advisory)
         # A state that appears in state_in but not state_out silently vanishes,
-        # unless the registry says it resolves in this scene.
+        # unless the registry says it resolves in this scene. The registry
+        # names one resolving scene, so a state that recurs (sleep, a coat)
+        # ends again after it: once that scene has passed, a later ending is
+        # a recurrence, not a vanishing (Carol: Scrooge asleep again after
+        # Belle, awake "in the middle of a prodigiously tough snore", F-110)
         for state_id in states_in:
             if state_id not in states_out:
                 reg = _get_registry()
                 reg_row = reg.get(state_id, {})
-                resolves_here = reg_row.get('resolves', '').strip() == sid
-                if not resolves_here:
+                resolves_at = reg_row.get('resolves', '').strip()
+                resolves_here = resolves_at == sid
+                resolved_before = (resolves_at in position
+                                   and position[resolves_at] < position[sid])
+                if not (resolves_here or resolved_before):
                     checks.append(_check(
                         'physical_state', 'state-disappearance', False,
                         f"Scene {sid}: state '{state_id}' is in physical_state_in but not "

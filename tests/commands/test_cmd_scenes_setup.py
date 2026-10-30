@@ -984,6 +984,25 @@ class TestMarkdownHeadingsWithoutChapterWord:
             assert '## A letter' in f.read()
 
 
+    def test_prelude_and_finale_are_chapters(self, mock_api, mock_git, mock_costs,
+                                             project_dir, monkeypatch):
+        """F-117 (Middlemarch): among chapter headings, "# Prelude" was
+        dropped as front matter and "# Finale" ran on inside the last
+        chapter."""
+        text = ('# Prelude\n\nSaint Theresa set out.\n\n# Book I: Miss Brooke\n\n'
+                '# Chapter I\n\nMiss Brooke had beauty.\n\n# Chapter II\n\nDinner.\n\n'
+                '# Finale\n\nEvery limit is a beginning.\n')
+        rows = self._split(project_dir, monkeypatch, text)
+        assert [_opening(project_dir, r['id']) for r in rows] == [
+            '# Prelude', '# Chapter I', '# Chapter II', '# Finale']
+        assert [r['part'] for r in rows] == ['', '1', '1', '1']
+
+    def test_prose_starting_with_prologue_is_not_a_heading(self):
+        from storyforge.cmd_scenes_setup import _OTHER_CHAPTER_RE
+        assert not _OTHER_CHAPTER_RE.match('Prologue to the tale was long, and dull.')
+        assert _OTHER_CHAPTER_RE.match('PRELUDE.')
+        assert _OTHER_CHAPTER_RE.match('Epilogue: Ten Years Later')
+
 class TestSetextUnderlineIsNotABreak:
     def test_dash_under_text_is_heading_not_break(self, mock_api, mock_git, mock_costs,
                                                   project_dir, monkeypatch):

@@ -952,6 +952,35 @@ class TestPassThatChangesNothing:
         assert self._status(plan_file) != 'completed'
         assert not mock_git.calls_for('commit_and_push')
 
+    def test_prose_pass_that_skipped_a_scene_commits_the_rest_and_halts(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """The scene it skipped is named, the scenes it wrote are committed,
+        and the pass is not marked completed."""
+        import subprocess as sp
+        plan_file = _run_pass_setup(project_dir, monkeypatch, 'craft')
+        mock_api.set_response('=== SCENE: act1-sc01 === ...')
+
+        def run(cmd, **kwargs):
+            joined = ' '.join(str(c) for c in cmd)
+            if 'build-prompt' in joined:
+                return sp.CompletedProcess(cmd, 0, stdout='Revision prompt.', stderr='')
+            if 'extract-scenes' in joined:
+                with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md'), 'w') as f:
+                    f.write('Revised prose.\n')
+                return sp.CompletedProcess(
+                    cmd, 0, stdout='Wrote: act1-sc01\n'
+                    'Skipped: act1-sc02 -- appears to end mid-sentence\nTotal: 1 scene(s)\n',
+                    stderr='')
+            return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
+        monkeypatch.setattr('subprocess.run', run)
+
+        with pytest.raises(SystemExit) as exc:
+            main([])
+        assert exc.value.code == 1
+        assert self._status(plan_file) != 'completed'
+        assert mock_git.calls_for('commit_and_push')
+        assert 'act1-sc02: appears to end mid-sentence' in capsys.readouterr().out
+
     def test_structural_pass_that_applies_is_completed(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
         plan_file = _run_pass_setup(project_dir, monkeypatch, 'structural')
@@ -1066,6 +1095,31 @@ class TestPolishLoopPass:
                                            'revision-plan.csv'))
         assert rows[0]['status'] == 'in_progress'
 
+    def test_a_scene_it_could_not_write_stops_the_pass(self, project_dir, monkeypatch, capsys):
+        """A scene ending mid-sentence used to be skipped with a WARNING on
+        the subprocess's stderr, never shown, and the pass marked completed.
+        What it did write is committed; the pass is not completed."""
+        _ensure_scene_files(project_dir)
+        sc02 = os.path.join(project_dir, 'scenes', 'act1-sc02.md')
+        with open(sc02) as f:
+            before = f.read()
+        prose = 'The rain kept on. ' * 50
+        with pytest.raises(SystemExit) as exc:
+            self._run(project_dir, monkeypatch,
+                      f'=== SCENE: act1-sc01 ===\n{prose}\n=== END SCENE: act1-sc01 ===\n'
+                      f'=== SCENE: act1-sc02 ===\nShe turned toward the\n'
+                      f'=== END SCENE: act1-sc02 ===')
+        assert exc.value.code == 1
+        with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md')) as f:
+            assert f.read().strip() == prose.strip()
+        with open(sc02) as f:
+            assert f.read() == before
+        out = capsys.readouterr().out
+        assert 'act1-sc02: appears to end mid-sentence' in out
+        rows = _read_csv_plan(os.path.join(project_dir, 'working', 'plans',
+                                           'revision-plan.csv'))
+        assert rows[0]['status'] == 'in_progress'
+
 
 
 class TestPassFallback:
@@ -1118,3 +1172,34 @@ class TestLogUsage:
         log.write_text('{not json')
         _log_usage(project_dir, str(log), 'revise', 'pass-a', 'm')
         assert 'WARNING: could not log the cost of revise pass-a' in capsys.readouterr().out
+
+
+class TestHoneDelegationRedraftsOnlyChangedScenes:
+    """A brief pass delegated to hone redrafted every target, including a
+    scene whose rewrite hone refused: its prose was redrafted from the brief
+    it already had."""
+
+    def test_a_refused_scene_is_not_redrafted(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        from storyforge import cmd_revise
+        plan_file = _run_pass_setup(project_dir, monkeypatch, 'brief')
+        rows = _read_csv_plan(plan_file)
+        rows[0]['targets'] = 'act1-sc01;act1-sc02'
+        rows[0]['scope'] = 'targeted'
+        _write_plan(project_dir, rows)
+        briefs_csv = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+
+        def hone(**kw):
+            from storyforge.csv_cli import update_field
+            update_field(briefs_csv, 'act1-sc01', 'goal', 'A sharper goal')
+            return {'scenes_rewritten': 1, 'fields_rewritten': 1, 'changed': ['act1-sc01'],
+                    'rejected': {'act1-sc02': ['evaluation rewrite of goal named Ruzek']}}
+        monkeypatch.setattr('storyforge.hone.hone_briefs', hone)
+        redrafted = []
+        monkeypatch.setattr(cmd_revise, '_redraft_from_briefs',
+                            lambda pd, ids, *a, **kw: redrafted.append(list(ids)))
+
+        main([])
+
+        assert redrafted == [['act1-sc01']]
+        assert 'Rewrite refused for act1-sc02' in capsys.readouterr().out

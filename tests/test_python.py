@@ -30,6 +30,20 @@ class TestParsing:
         assert 'First scene content' in content
         assert '=== SCENE:' not in content
 
+    def test_skipped_scenes_are_reported(self, tmp_path):
+        from storyforge.parsing import extract_scenes_from_response
+        scenes_dir = str(tmp_path / 'scenes')
+        os.makedirs(scenes_dir)
+        skipped = {}
+        written = extract_scenes_from_response(
+            '=== SCENE: a ===\nShe left.\n=== END SCENE: a ===\n'
+            '=== SCENE: b ===\nShe turned toward the\n=== END SCENE: b ===\n'
+            '=== SCENE: c ===\nHe waited, and', scenes_dir,
+            stop_reason='max_tokens', skipped=skipped)
+        assert written == ['a']
+        assert set(skipped) == {'b', 'c'}
+        assert 'mid-sentence' in skipped['b'] and 'max_tokens' in skipped['c']
+
     def test_skip_parenthetical_entries(self, tmp_path):
         from storyforge.parsing import extract_scenes_from_response
 

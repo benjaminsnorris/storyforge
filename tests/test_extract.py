@@ -55,16 +55,62 @@ class TestParseCharacterizeResponse:
 class TestParseSkeletonResponse:
     def test_extracts_fields(self):
         from storyforge.extract import parse_skeleton_response
-        response = (
-            'TITLE: The Arranged Dead\nPOV: Emmett Slade\n'
-            'LOCATION: Alkali Flat\nTIMELINE_DAY: 1\n'
-            'TIME_OF_DAY: afternoon\nDURATION: 2 hours\n'
-            'TARGET_WORDS: 1300\nPART: 1'
-        )
+        response = _reply('SKELETON_SCHEMA',
+            title='The Arranged Dead', pov='Emmett Slade',
+            location=['Alkali Flat', 'Orcutt ranch'], time_relation='later',
+            time_of_day='afternoon', duration='2 hours', type='plot',
+            target_words='1300', act='1')
         result = parse_skeleton_response(response, 'arranged-dead')
         assert result['id'] == 'arranged-dead'
         assert result['title'] == 'The Arranged Dead'
         assert result['pov'] == 'Emmett Slade'
+        assert result['location'] == 'Alkali Flat;Orcutt ranch'
+        assert (result['time_of_day'], result['type'], result['act']) == ('afternoon', 'plot', '1')
+
+    def test_unknown_values_are_dropped(self):
+        from storyforge.extract import parse_skeleton_response
+        result = parse_skeleton_response(
+            _reply('SKELETON_SCHEMA', title='T', pov='unknown', act='UNKNOWN'), 's1')
+        assert result == {'id': 's1', 'title': 'T'}
+
+    def test_an_unreadable_reply_raises(self):
+        """A reply that isn't the schema's JSON must not read as a scene
+        with no metadata: the merge names it and the run exits 1."""
+        from storyforge.extract import parse_skeleton_response, skeleton_cues
+        for reply in ('TITLE: T\nPOV: Nick', '{"title": "T"}', ''):
+            with pytest.raises(ValueError):
+                parse_skeleton_response(reply, 's1')
+            with pytest.raises(ValueError):
+                skeleton_cues(reply)
+
+    def test_a_value_of_the_wrong_type_is_unreadable_not_mangled(self):
+        """A null would be stored as "None" and a list as its repr."""
+        from storyforge.extract import parse_skeleton_response, skeleton_cues
+        for fields in ({'title': None}, {'time_refers': ['a', 'b']}, {'location': 'Office'}):
+            reply = _reply('SKELETON_SCHEMA', **fields)
+            with pytest.raises(ValueError):
+                parse_skeleton_response(reply, 's1')
+            with pytest.raises(ValueError):
+                skeleton_cues(reply)
+
+    def test_list_items_and_text_are_csv_safe(self):
+        """A ';' inside a place would split it into two; a '|' would break
+        the row; a newline would start a new one. An "unknown" or blank item
+        is no place."""
+        from storyforge.extract import parse_skeleton_response
+        result = parse_skeleton_response(_reply(
+            'SKELETON_SCHEMA', title='a\nb',
+            location=['Hall; east wing', 'Yard|gate', ' ', 'unknown']), 's1')
+        assert result['location'] == 'Hall, east wing;Yard/gate'
+        assert result['title'] == 'a b'
+
+    def test_cues_come_from_the_same_reply(self):
+        from storyforge.extract import skeleton_cues
+        cues = skeleton_cues(_reply('SKELETON_SCHEMA', time_relation='later',
+                                    time_gap='three weeks', time_anchor='none',
+                                    time_date='1922-07-04'))
+        assert cues == {'relation': 'later', 'gap': 'three weeks', 'anchor': '',
+                        'refers': '', 'span': '', 'date': '1922-07-04'}
 
 
 class TestParseIntentResponse:
@@ -146,7 +192,17 @@ class TestBuildPrompts:
         from storyforge.extract import build_skeleton_prompt
         prompt = build_skeleton_prompt('act1-sc01', 'Some scene prose here.',
                                        {'pov_characters': 'Alice', 'timeline': 'linear'})
-        assert 'POV' in prompt and 'TITLE' in prompt and 'LOCATION' in prompt
+        assert '- pov:' in prompt and '- title:' in prompt and '- location (list):' in prompt
+        assert 'Answer with a JSON object' in prompt
+
+    def test_skeleton_schema_offers_the_csv_enums(self):
+        from storyforge.extract import SKELETON_SCHEMA
+        from storyforge.schema import VALID_TIMES, VALID_TYPES
+        from storyforge.timeline import RELATIONS
+        props = SKELETON_SCHEMA['properties']
+        assert set(props['time_of_day']['enum']) == set(VALID_TIMES) | {'unknown'}
+        assert set(props['type']['enum']) == set(VALID_TYPES) | {'unknown'}
+        assert props['time_relation']['enum'] == list(RELATIONS)
 
     def test_skeleton_prompt_asks_for_act_not_part(self):
         """Book parts come from the manuscript's part headings
@@ -154,12 +210,16 @@ class TestBuildPrompts:
         from storyforge.extract import build_skeleton_prompt
         prompt = build_skeleton_prompt('act1-sc01', 'Some scene prose here.',
                                        {'pov_characters': 'Alice'})
-        assert '\nACT: ' in prompt
-        assert 'PART:' not in prompt
+        assert '\n- act: ' in prompt
+        assert '- part' not in prompt
+        from storyforge.extract import SKELETON_SCHEMA
+        assert 'part' not in SKELETON_SCHEMA['properties']
 
     def test_skeleton_response_maps_act_and_ignores_part(self):
         from storyforge.extract import parse_skeleton_response
-        result = parse_skeleton_response('TITLE: T\nACT: 2\nPART: 1', 's1')
+        result = parse_skeleton_response(
+            json.dumps({**json.loads(_reply('SKELETON_SCHEMA', title='T', act='2')), 'part': '1'}),
+            's1')
         assert result['act'] == '2'
         assert 'part' not in result
 
@@ -376,7 +436,8 @@ class TestEnumAnswersReduced:
 
     def test_skeleton_time_of_day(self):
         from storyforge.extract import parse_skeleton_response
-        r = parse_skeleton_response('TIME_OF_DAY: Evening (after dinner)\n', 's1')
+        r = parse_skeleton_response(
+            _reply('SKELETON_SCHEMA', time_of_day='Evening (after dinner)'), 's1')
         assert r['time_of_day'] == 'evening'
 
 
@@ -654,3 +715,43 @@ class TestForcedPhase3PrunesRegistries:
         from storyforge import cmd_extract
         src = inspect.getsource(cmd_extract._run_phase_3)
         assert 'if force:\n        _prune_registries(' in src
+
+
+class TestContinuityDepsResolved:
+    """F-106: 3b's continuity_deps named scenes that don't exist (Plastic Age
+    "henley-indicts-college-conformity", Gatsby "tom-drives-accident"), and
+    nothing checked them until validate reported schema errors."""
+
+    IDS = ['tom-drives-toward-accident', 'henley-lectures-class-on-conformity',
+           'nick-meets-gatsby', 'nick-meets-gatsby-again']
+
+    def test_near_misses_land_on_their_scene(self):
+        from storyforge.scenes import match_scene_id
+        assert match_scene_id('tom-drives-accident', self.IDS) == 'tom-drives-toward-accident'
+        assert match_scene_id('tom-drives-toward-the-accident', self.IDS) == 'tom-drives-toward-accident'
+        assert match_scene_id('tom-rides-toward-accident', self.IDS) == 'tom-drives-toward-accident'
+        # A changed word in a three-word id is too much of it
+        assert match_scene_id('nick-greets-gatsby', self.IDS) is None
+        assert match_scene_id('henley-lectures-class-on-conformity-sharply', self.IDS) \
+            == 'henley-lectures-class-on-conformity'
+
+    def test_exact_wins_and_ambiguous_or_distant_match_nothing(self):
+        from storyforge.scenes import match_scene_id
+        assert match_scene_id('nick-meets-gatsby', self.IDS) == 'nick-meets-gatsby'
+        # Cut short at a hyphen from two scenes
+        assert match_scene_id('nick-meets', self.IDS) is None
+        assert match_scene_id('henley-indicts-college-conformity', self.IDS) is None
+
+    def test_resolve_keeps_order_and_reports_drops(self):
+        from storyforge.extract import resolve_scene_deps
+        value, dropped = resolve_scene_deps(
+            'tom-drives-accident;invented-scene-here;(none);tom-drives-toward-accident;'
+            'nick-meets-gatsby', self.IDS)
+        assert value == 'tom-drives-toward-accident;nick-meets-gatsby'
+        assert dropped == ['invented-scene-here']
+
+    def test_phase_3b_resolves_deps_before_writing(self):
+        import inspect
+        from storyforge import cmd_extract
+        src = inspect.getsource(cmd_extract._run_phase_3)
+        assert src.index('resolve_scene_deps(') < src.index('_update_chain_fields(scene_id, ref_dir, result, force,\n                             (\'knowledge_in\'')

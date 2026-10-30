@@ -153,14 +153,19 @@ def _run_from_pages(project_dir: str, dry_run: bool) -> None:
 
     by_scene: dict[str, _SceneCounts] = {}
     pages_missing_panel_count: dict[str, list[str]] = {}
+    # Anything that leaves a count unknown or partial: named at the end, and
+    # the run exits 1
+    problems: list[str] = []
     for p in page_paths:
         page = parse_page_file(p)
         if page is None:
             log(f'  WARNING: {p} has no frontmatter; skipping')
+            problems.append(f'{os.path.basename(p)}: no frontmatter, so its scene is unknown')
             continue
         sid = page.get('scene_id')
         if not sid:
             log(f'  WARNING: {p} has no scene_id; skipping')
+            problems.append(f'{os.path.basename(p)}: no scene_id')
             continue
         bucket = by_scene.setdefault(sid, {'panels': 0, 'pages': 0})
         panel_count = page.get('panel_count')
@@ -176,8 +181,8 @@ def _run_from_pages(project_dir: str, dry_run: bool) -> None:
 
     for sid, files in pages_missing_panel_count.items():
         log(f'  WARNING: scene {sid}: {len(files)} page(s) lack a valid '
-            f'integer panel_count ({", ".join(files)}); panel_count sum '
-            f'is partial')
+            f'integer panel_count ({", ".join(files)}); its counts are not written')
+        problems.append(f'scene {sid}: no valid panel_count in {", ".join(files)}')
 
     known_ids = set(list_ids(scenes_csv))
 
@@ -186,7 +191,10 @@ def _run_from_pages(project_dir: str, dry_run: bool) -> None:
         if sid not in known_ids:
             log(f'  WARNING: {sid} referenced by page files but not in '
                 f'scenes.csv; skipping')
+            problems.append(f'scene {sid}: in page files but not in scenes.csv')
             continue
+        if sid in pages_missing_panel_count:
+            continue  # a partial sum is an undercount, not a count
         log(f'  {sid}: {counts["pages"]} page(s), {counts["panels"]} panel(s)')
         if dry_run:
             continue
@@ -198,6 +206,11 @@ def _run_from_pages(project_dir: str, dry_run: bool) -> None:
         log(f'DRY RUN — would update {len(by_scene)} scene row(s).')
     else:
         log(f'Updated panel_count / page_count for {written} scene(s).')
+    if problems:
+        log('ERROR: some page counts are unknown or partial; fix these pages and re-run:')
+        for problem in problems:
+            log(f'  {problem}')
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------

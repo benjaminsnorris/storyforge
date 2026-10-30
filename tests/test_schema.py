@@ -331,7 +331,7 @@ class TestMultipleLocations:
     def test_extraction_asks_for_places_in_order(self):
         from storyforge.extract import build_skeleton_prompt
         prompt = build_skeleton_prompt('s1', 'Scene prose.', {})
-        assert 'in order, semicolon-separated' in prompt
+        assert '- location (list):' in prompt and 'in order' in prompt
         assert 'never "X to Y" as one place' in prompt
 
 

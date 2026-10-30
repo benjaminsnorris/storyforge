@@ -1,5 +1,6 @@
 """Tests for timeline functions (migrated from test-timeline.sh)."""
 
+import json
 import os
 import shutil
 
@@ -114,13 +115,38 @@ class TestCues:
         from storyforge.extract import build_skeleton_prompt
         prompt = build_skeleton_prompt('s1', 'Text.', {}, previous_tail='...the end of it.')
         assert 'TIMELINE_DAY' not in prompt
-        assert 'TIME_RELATION' in prompt and 'TIME_DATE' in prompt
+        assert '- time_relation:' in prompt and '- time_date:' in prompt
         assert '...the end of it.' in prompt
+        # The cue texts' cross-references name the JSON fields, not the labels
+        assert 'that is time_span' in prompt and 'TIME_SPAN' not in prompt
+
+    def test_cue_instructions_are_the_fields_as_labeled_lines(self):
+        """The cue read's wording and extract's skeleton share CUE_FIELDS,
+        so a wording change reaches both."""
+        from storyforge.timeline import CUE_FIELDS, CUE_INSTRUCTIONS
+        lines = CUE_INSTRUCTIONS.split('\n')
+        assert [l.split(':', 1)[0] for l in lines] == list(CUE_FIELDS)
+        assert lines[0] == f"TIME_RELATION: [{CUE_FIELDS['TIME_RELATION']}]"
+
+    def test_structured_and_labeled_cues_normalize_alike(self):
+        from storyforge.timeline import cues_from_fields, parse_cues
+        labeled = parse_cues('TIME_RELATION: Later, weeks on\nTIME_GAP: "three weeks"\n'
+                             'TIME_ANCHOR: (none)\nTIME_DATE: not a date\n')
+        structured = cues_from_fields({'time_relation': 'Later, weeks on',
+                                       'time_gap': '"three weeks"', 'time_anchor': '(none)',
+                                       'time_date': 'not a date'})
+        assert labeled == structured == {'relation': 'later', 'gap': 'three weeks',
+                                         'anchor': '', 'refers': '', 'span': '', 'date': ''}
 
     def test_skeleton_parser_keeps_only_the_date(self):
         from storyforge.extract import parse_skeleton_response
-        result = parse_skeleton_response('TITLE: T\nTIMELINE_DAY: 73\nTIME_RELATION: later\n'
-                                         'TIME_DATE: XXXX-07-04\n', 's1')
+        from storyforge.extract import SKELETON_SCHEMA
+        reply = {k: [] if SKELETON_SCHEMA['properties'][k]['type'] == 'array' else ''
+                 for k in SKELETON_SCHEMA['required']}
+        reply.update(title='T', timeline_day='73', time_relation='later',
+                     time_gap='a week', time_span='all summer', time_date='XXXX-07-04')
+        result = parse_skeleton_response(json.dumps(reply), 's1')
+        assert not {k for k in result if k.startswith('time_')}
         assert 'timeline_day' not in result
         assert result['timeline_date'] == 'XXXX-07-04'
 
@@ -269,6 +295,18 @@ class TestAssignment:
         for response in ('s1-out | 7 | scene | loose\ns1 | 5 | scene | exact\n',
                          's1 | 5 | scene | exact\ns1-out | 7 | scene | loose\n'):
             assert parse_assignments(response, ['s1']) == {'s1': (5, 'scene', 'exact')}
+
+    def test_id_with_a_word_dropped_or_changed(self):
+        """F-101: a reply id with a word dropped or swapped left the scene
+        unplaced; only extended or cut ids were matched."""
+        from storyforge.timeline import parse_assignments
+        ids = ['tom-drives-toward-accident', 'laura-refuses-hargrave-at-dawn', 'nick-meets-gatsby']
+        result = parse_assignments(
+            'tom-drives-accident | 90 | scene | dropped\n'
+            'laura-rejects-hargrave-at-dawn | 4 | scene | swapped\n'
+            'nick-greets-gatsby | 7 | scene | swapped in three words\n', ids)
+        assert result == {'tom-drives-toward-accident': (90, 'scene', 'dropped'),
+                          'laura-refuses-hargrave-at-dawn': (4, 'scene', 'swapped')}
 
     def test_only_lines_after_calendar_count(self):
         from storyforge.timeline import parse_assignments
@@ -800,6 +838,32 @@ class TestChecks:
         findings = check_timeline(rows, {'all-this-time': {'relation': 'earlier'}})
         assert [f['check'] for f in findings] == ['flashback_not_earlier']
 
+    def test_a_step_back_into_a_summarys_stretch_is_earlier(self):
+        """F-108, The Plastic Age: the wrong classroom (day 6) steps back
+        into "several weeks" of other instructors summarised from day 5, and
+        was flagged as an earlier scene that isn't earlier."""
+        from storyforge.timeline import check_timeline
+        rows = [{'id': 'instructors', 'timeline_day': '5', 'time_mode': 'summary',
+                 'timeline_date': '', 'duration': 'several weeks'},
+                {'id': 'wrong-classroom', 'timeline_day': '6', 'time_mode': 'scene',
+                 'timeline_date': '', 'duration': '15 minutes'}]
+        assert check_timeline(rows, {'wrong-classroom': {'relation': 'earlier'}}) == []
+
+    def test_a_step_back_past_a_counted_summary_is_still_flagged(self):
+        from storyforge.timeline import check_timeline
+        rows = [{'id': 'term', 'timeline_day': '5', 'time_mode': 'summary',
+                 'timeline_date': '', 'duration': 'three weeks'},
+                {'id': 'inside', 'timeline_day': '20', 'time_mode': 'scene',
+                 'timeline_date': '', 'duration': ''},
+                {'id': 'term-2', 'timeline_day': '30', 'time_mode': 'summary',
+                 'timeline_date': '', 'duration': 'three weeks'},
+                {'id': 'past-it', 'timeline_day': '60', 'time_mode': 'scene',
+                 'timeline_date': '', 'duration': ''}]
+        cues = {'inside': {'relation': 'earlier'}, 'past-it': {'relation': 'earlier'}}
+        findings = check_timeline(rows, cues)
+        assert [(f['scene_id'], f['check']) for f in findings] == [('past-it', 'flashback_not_earlier')]
+        assert 'end of the previous summary (day 51)' in findings[0]['message']
+
     def test_an_approximate_date_has_slack(self):
         """The Brimming Cup: "here we are the first of June and past", said at
         the June 10 supper, was dated XXXX-06-01~ and compared to the day."""
@@ -888,6 +952,19 @@ class TestChecks:
         from storyforge.timeline import check_timeline
         rows = self._rows(('march', '550', 'scene', 'XXXX-03'),
                           ('poker', '640', 'scene', 'XXXX-23~'))
+        assert [f['check'] for f in check_timeline(rows, {})] == ['date_mismatch']
+
+    def test_a_season_reaches_past_its_quarter(self):
+        """F-112 (The Plastic Age): a visit in mid-September, told as
+        summer, was flagged against the July scene before it: the summer
+        window ended on 31 August."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('arrives', '0', 'scene', 'XXXX-07-01'),
+                          ('visit-ends', '80', 'scene', 'XXXX-22'))
+        assert check_timeline(rows, {}) == []
+        # Well into autumn is still not summer
+        rows = self._rows(('arrives', '0', 'scene', 'XXXX-07-01'),
+                          ('visit-ends', '120', 'scene', 'XXXX-22'))
         assert [f['check'] for f in check_timeline(rows, {})] == ['date_mismatch']
 
     def test_month_and_season_dates_years_apart_still_agree(self):

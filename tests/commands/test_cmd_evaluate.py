@@ -486,6 +486,13 @@ class TestBatchMode:
         assert f'WARNING: evaluator {cut} hit the 8192-token limit' in out
         assert f'SUCCESS: {cut}' in out
         assert f'FAILED: {refused} (model refused the request' in out
+        # Kept, but it must not read as whole: marked in the file and named
+        # in the summary
+        import glob
+        report, = glob.glob(os.path.join(project_dir, 'working', 'evaluations', '*', f'{cut}.md'))
+        with open(report) as f:
+            assert '**Cut off:**' in f.read()
+        assert f'Cut off at the token limit (kept, marked in the file): {cut}.md' in out
 
 
 # ============================================================================

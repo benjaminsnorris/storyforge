@@ -208,7 +208,7 @@ def build_skeleton_prompt(scene_id: str, scene_text: str,
     end of the previous scene, *previous_tail*), and the timeline pass places
     every scene afterwards.
     """
-    from .timeline import CUE_INSTRUCTIONS
+    from .timeline import CUE_FIELDS
     context = f"""POV characters in this manuscript: {profile.get('pov_characters', 'unknown')}
 Timeline: {profile.get('timeline', 'unknown')}
 Key locations: {profile.get('key_locations', 'unknown')}"""
@@ -223,6 +223,14 @@ Key locations: {profile.get('key_locations', 'unknown')}"""
     registries_section = f'\n{registries_text}\n' if registries_text else ''
     previous = (f'## End of the Previous Scene (for time cues only)\n\n{previous_tail}\n\n'
                 if previous_tail else '## Previous Scene\n\n(this is the first scene)\n\n')
+    # The cue texts name each other by label ("that is TIME_SPAN"); here the
+    # fields are the labels in lower case
+    cue_lines = []
+    for label, text in CUE_FIELDS.items():
+        for other in CUE_FIELDS:
+            text = text.replace(other, other.lower())
+        cue_lines.append(f'- {label.lower()}: {text}')
+    cues = '\n'.join(cue_lines)
 
     return f"""Extract structural metadata from this scene.
 
@@ -237,17 +245,17 @@ Key locations: {profile.get('key_locations', 'unknown')}"""
 {registries_section}
 ## Instructions
 
-Output each field on its own labeled line. If a value cannot be determined, output UNKNOWN.
+Answer with a JSON object with these fields (a list field is a JSON array of strings; "unknown" where a value cannot be determined, and an empty string for a time cue the text doesn't give, except time_relation, which is "unclear" then):
 
-TITLE: [a short evocative title for this scene, 3-7 words]
-POV: [the POV character's full name]
-LOCATION: [the places where this scene's action happens on the page, in order, semicolon-separated — usually just one. Use consistent canonical names. Only places the action is in, not places mentioned or remembered; a journey lists the places it passes through, never "X to Y" as one place]
-{CUE_INSTRUCTIONS}
-TIME_OF_DAY: [morning / afternoon / evening / night / dawn / dusk]
-DURATION: [approximate in-story duration, e.g., "2 hours", "30 minutes", "an afternoon"]
-TYPE: [the scene's primary narrative purpose — one of: character, plot, world, action, transition, confrontation, dialogue, introspection, revelation]
-TARGET_WORDS: [current word count is a reasonable target — output the approximate word count]
-ACT: [which structural act this scene belongs to, as an integer (1, 2, 3, ...), based on its position in the story's dramatic shape — not a book part or section heading]"""
+- title: a short evocative title for this scene, 3-7 words
+- pov: the POV character's full name
+- location (list): the places where this scene's action happens on the page, in order — usually just one. Use consistent canonical names. Only places the action is in, not places mentioned or remembered; a journey lists the places it passes through, never "X to Y" as one place
+{cues}
+- time_of_day: when in the day the scene happens
+- duration: approximate in-story duration, e.g., "2 hours", "30 minutes", "an afternoon"
+- type: the scene's primary narrative purpose
+- target_words: current word count is a reasonable target — the approximate word count
+- act: which structural act this scene belongs to, as an integer (1, 2, 3, ...), based on its position in the story's dramatic shape — not a book part or section heading"""
 
 
 def _reduce_enums(result: dict[str, str]) -> dict[str, str]:
@@ -276,34 +284,35 @@ def _reduce_enums(result: dict[str, str]) -> dict[str, str]:
 
 
 def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
-    """Parse Phase 1 response into scenes.csv field values."""
+    """Parse Phase 1's structured reply (``SKELETON_SCHEMA``) into
+    scenes.csv field values. Raises ValueError on an unreadable reply.
+
+    Of the time cues only the date the scene's own text states is kept
+    (``timeline_date``); the others go to the timeline pass
+    (``skeleton_cues``), never straight into scenes.csv. No part: book parts
+    come from the manuscript's part headings (scenes-setup), never from the
+    model.
+    """
+    data = _json_answer(response, SKELETON_SCHEMA)
     result = {'id': scene_id}
-    label_map = {
-        'TITLE': 'title',
-        'POV': 'pov',
-        'LOCATION': 'location',
-        'TIME_OF_DAY': 'time_of_day',
-        'DURATION': 'duration',
-        'TYPE': 'type',
-        'TARGET_WORDS': 'target_words',
-        # No PART: book parts come from the manuscript's part headings
-        # (scenes-setup), never from the model.
-        'ACT': 'act',
-    }
-    for line in response.split('\n'):
-        match = re.match(r'^([A-Z_]+):\s*(.*)', line.strip())
-        if match:
-            label = match.group(1)
-            value = match.group(2).strip()
-            if label in label_map and value and value.upper() != 'UNKNOWN':
-                result[label_map[label]] = value
-    # The date the scene's own text states; the other time cues go to the
-    # timeline pass (timeline.parse_cues), never straight into scenes.csv
-    from .timeline import parse_cues
-    date = parse_cues(response).get('date')
+    for key in _SKELETON_FIELDS:
+        answer = data[key]
+        if isinstance(answer, list):  # an "unknown" place is no place
+            answer = [v for v in answer if str(v).strip().lower() != 'unknown']
+        value = _text(answer, ';')
+        if value and value.lower() != 'unknown':
+            result[key] = value
+    date = skeleton_cues(response)['date']
     if date:
         result['timeline_date'] = date
     return _reduce_enums(result)
+
+
+def skeleton_cues(response: str) -> dict[str, str]:
+    """The time cues in Phase 1's structured reply, as ``timeline.parse_cues``
+    gives them. Raises ValueError on an unreadable reply."""
+    from .timeline import cues_from_fields
+    return cues_from_fields(_json_answer(response, SKELETON_SCHEMA))
 
 
 # ============================================================================
@@ -570,6 +579,16 @@ def _json_answer(response: str, schema: dict) -> dict:
     missing = [k for k in schema['required'] if k not in data]
     if missing:
         raise ValueError(f'reply has no {", ".join(missing)}')
+    # A value of the wrong type would be stored as its repr ("None",
+    # "['a', 'b']"): structured outputs shouldn't send one, but if one
+    # comes the reply is unreadable, not quietly mangled
+    for key in schema['required']:
+        kind = schema['properties'][key].get('type')
+        value = data[key]
+        if kind == 'string' and not isinstance(value, str):
+            raise ValueError(f'reply\'s {key} is not a string: {value!r:.80}')
+        if kind == 'array' and not isinstance(value, list):
+            raise ValueError(f'reply\'s {key} is not a list: {value!r:.80}')
     return data
 
 
@@ -635,6 +654,26 @@ CHARACTERIZE_SCHEMA = _object({
     'compression_points': _STR_LIST, 'structural_concerns': _STR_LIST,
 })
 INTENT_SCHEMA = _intent_schema()
+
+
+_SKELETON_FIELDS = ('title', 'pov', 'location', 'time_of_day', 'duration', 'type',
+                    'target_words', 'act')
+
+
+def _skeleton_schema() -> dict:
+    from .schema import VALID_TIMES, VALID_TYPES
+    from .timeline import CUE_FIELDS, RELATIONS
+    cues = {label.lower(): _STR for label in CUE_FIELDS}
+    cues['time_relation'] = {'type': 'string', 'enum': list(RELATIONS)}
+    return _object({
+        'title': _STR, 'pov': _STR, 'location': _STR_LIST, **cues,
+        'time_of_day': _enum(VALID_TIMES), 'duration': _STR, 'type': _enum(VALID_TYPES),
+        'target_words': _STR, 'act': _STR,
+    })
+
+
+# Phase 1 (skeleton): scenes.csv fields plus the timeline's cue fields
+SKELETON_SCHEMA = _skeleton_schema()
 BRIEF_PARALLEL_SCHEMA = _brief_parallel_schema()
 
 
@@ -704,6 +743,26 @@ def resolve_knowledge_ids(registry: dict[str, dict[str, str]], value: str) -> st
             if key.strip():
                 alias_map.setdefault(key.strip().lower(), fid)
     return normalize_aliases(alias_map, strip_placeholders(value))
+
+
+def resolve_scene_deps(value: str, scene_ids) -> tuple[str, list[str]]:
+    """Map each ``continuity_deps`` entry to a scene id in *scene_ids*.
+
+    A near miss (an extended, cut or one-word-changed id) lands on the scene
+    it means; an entry that matches no scene is dropped, since no later pass
+    can resolve it. Returns the ``;`` field and the dropped entries.
+    """
+    from .scenes import match_scene_id
+    kept, dropped = [], []
+    for dep in (d.strip() for d in strip_placeholders(value).split(';')):
+        if not dep:
+            continue
+        sid = match_scene_id(dep, scene_ids)
+        if sid is None:
+            dropped.append(dep)
+        elif sid not in kept:
+            kept.append(sid)
+    return ';'.join(kept), dropped
 
 
 # ============================================================================
