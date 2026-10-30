@@ -192,7 +192,12 @@ Start by reading this doc, `CLAUDE.md` and `docs/agent-reference.md`.
      - **Evaluator/persona pairing by position:** a real bug, fixed in v1.90.6 (#403).
      - **Unreadable `working/scoring-overrides.csv` read as empty:** checked, left as is. Nothing rewrites the file from that read (it is append-only), so the only effect is that accepted findings show again, with a WARNING.
      - **`production.cover_image` set but missing** (`assembly._resolve_cover_path`): falls back to auto-detecting `cover.*`, which can ship an older cover with only a WARNING. **Ben's call.** Recommendation: treat a configured cover that's missing as an error (assemble and publish exit 1 naming it), since falling back is a silent repair of the author's setting.
-     - **Commands that report only a count of skipped items** (`enrich`, `scenes_export`, `script_package`, `revise_gn`, `scoring_story_power`): not yet reviewed one by one.
+     - **Commands that report only a count of skipped items**, reviewed one by one:
+       - `enrich`: fixed in v1.90.7 (#405). Unenriched scenes are named and the run exits 1. Its timeline step had been dead since v1.0.0, when the script it called was removed; it now says enrich doesn't run the timeline. **Ben's call:** whether enrich should run `storyforge timeline` again (API spend, rewrites days).
+       - `scenes_export`: left as is. Malformed CSV rows are skipped with a WARNING only in the derived `outline.md` / export view; `scenes-import` updates changed fields only, so a missing row deletes nothing.
+       - `script_package`: left as is. A missing scene file becomes a visible `[scene … not found]` in the bundle, with a WARNING.
+       - `revise_gn`: left as is. Malformed (non-dict) findings are dropped with a WARNING naming how many.
+       - `scoring_story_power`: not reviewed.
 4. **Follow-ups noted in PRs:**
    - ~~`hone.hone_briefs` should use the brief-fix name check.~~ Done in v1.89.4 (#393), for hone's intent rewrites too; the check is `storyforge.brief_names`. Other writers of `scene-briefs.csv` / `scene-intent.csv` (elaborate, extract, enrich) are not checked yet.
    - Re-running a revise pass that stopped over skipped scenes redrafts every target, not only the skipped ones (#394 review): needs per-scene pass state.
@@ -212,6 +217,11 @@ Ben asked for work to continue overnight without waiting on him, and approved E6
 | #393 | 1.89.4 | `hone`'s brief and intent rewrites get revise's invented-name check (`storyforge.brief_names`). A delegated revise pass now redrafts only the scenes hone changed. |
 | #394 | 1.90.0 | Nine warn-and-continue sites that wrote wrong or incomplete output (table in the PR). **Behaviour change:** `score`, `assemble`, `elaborate`, `revise` and the GN commands now exit 1 on incomplete output. The worst was `illustrate --state` deleting author rows it couldn't read. |
 | #397 | — | Eval record mode no longer re-calls a request the run already recorded (found by E6). |
+| #400 | 1.90.4 | Removed extract's unused cleanup-pass parsers (Phase 1's last parser item). |
+| #401 | — | Ledger migration proposal (Phase 2 start): mapping and the decisions it needs. |
+| #402 | 1.90.5 | forge routed to skills that don't exist; test for every skill a SKILL.md names. |
+| #403 | 1.90.6 | evaluate paired custom evaluators with persona files by position (class C, a real bug). |
+| #405 | 1.90.7 | enrich: unenriched scenes named and exit 1; its dead timeline step now says so. |
 | this PR | — | E6: runs 2 and 3, `evals/consistency.py`, the spread. |
 
 **Coordination:** evals-79 and evals-1e also merged Storyforge PRs overnight (1.89.1–1.89.3, 1.90.1+). Versions were agreed by message each time.
@@ -221,6 +231,9 @@ Ben asked for work to continue overnight without waiting on him, and approved E6
 - **#394's class C sites:** listed in the PR.
 - **Score's `latest` symlink** on an incomplete cycle.
 - **Re-running only a pass's skipped scenes:** needs per-scene pass state.
+- **Phase 2's ledger migration:** seven decisions in `docs/plans/2026-10-30-ledger-migration-proposal.md`; nothing is built until then.
+- **Cover fallback:** whether a configured but missing `production.cover_image` should fail assemble and publish (see the class-C list).
+- **enrich and the timeline:** whether enrich should run `storyforge timeline` again.
 
 ## E6 (2026-10-30)
 
