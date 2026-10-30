@@ -1,6 +1,6 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-29, at v1.86.0. Start here when resuming the rethink in a new session. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`.
+Last updated 2026-10-29 (evening), at v1.86.0. Handoff for the next session: **Decisions** and **Next steps** below. Start here when resuming the rethink in a new session. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`.
 
 ## Where we are
 
@@ -149,19 +149,42 @@ Same 49 facts, extraction model forced with `STORYFORGE_MODEL`, Opus judge uncha
 
 **Decision: no routing change.** Sonnet is within one or two facts of Opus on a single run of 49 cases, which is inside run-to-run noise (E6 hasn't measured that noise yet), at half the cost. Haiku misses clearly more (13 vs 7). So `cmd_extract`'s fact phases stay on Sonnet (`evaluation`), and `select_revision_model`'s continuity branch stays on Sonnet. `_TASK_TIER['extraction']` (Haiku: timeline cue reads, `enrich`) isn't measured by E3. Moving it to Sonnet would mean re-recording `e2-corpus-drift` (~$16 at Sonnet) while evals-56 is changing the timeline prompt, so it's left for Ben with this evidence: E3 says Haiku drops facts.
 
-## Open decisions for Ben
+## Decisions (Ben, 2026-10-29 evening)
 
-1. **E6.** Two more independent E4 runs plus the paid E2 suites under separate recording keys: ~$40. Not approved; leave for Ben.
-2. **`author-labeled` strictness.** Cases drawn from Claude-written continuity reports carry `label_source` but not the tag (counting them adds 12 governor cases). Kept strict unless Ben says otherwise.
-3. **Missing pieces of E8**: hone physical-states replay; 13 March-era revision-plan cases are unreplayable.
+1. **E6 is approved** (about $40). Estimate it first, and stop if it would pass $45.
+2. **Shared-dark's original briefs:** leave them. HEAD keeps the rewritten briefs. E4 and E5 are pinned to 5e9bdf39, from before the bad briefs, so the evals don't depend on HEAD.
+3. **`author-labeled` stays strict** (Claude's call, delegated by Ben). Cases taken from Claude-written continuity reports keep `label_source` but don't get the tag. `author-labeled` is the subset where a person confirmed the error. A model-written report is evidence, not a human label, and counting it would mix the two kinds of ground truth (it would add 12 governor cases). Revisit only if a gate needs more author-labeled cases than the strict set has.
+4. **Close the E8 gaps.** Ben wants every E8 case that today's Storyforge can meaningfully run to be replayed.
 
-## Next steps, in order
+## Next steps, in order (handoff for a new session)
 
-0. **Verify main first.** v1.80.0 merged right after main moved to 1.79.3 (evals-56's timeline spike repair, post-processing only), and the post-merge checks didn't finish. Run `python -m pytest tests/` and `python3 evals/run.py`; every suite should replay with no errors and match `baseline.json`. If the drift suite's numbers moved because of the spike repair, refresh the baseline with `--baseline` and note it here. Fix anything broken before step 1.
-1. **E4** (plan §4.2, decision 7): draft shared-dark Act 1 (23 scenes) end to end with today's `write`, judge it (CP10k, BPS), record under a cassette, add to `baseline.json`. Earlier estimate was ~$14 at old prices; re-estimate first. This is the "before" picture for Phase 3, so build it before Phase 1 changes the drafting prompts.
-2. **Phase 1 bug checklist** (plan, Phase 1): the five unchecked items. Deterministic, no spend; each gets a regression test.
-3. **Fact-work tier comparison on E3** (plan, "Model selection"): run E3 with fact work on opus, sonnet and haiku (`STORYFORGE_MODEL` or the `_TASK_TIER` map) and keep the cheapest that matches opus. Then route `_TASK_TIER['extraction']` and `select_revision_model`'s continuity branch accordingly.
-4. **Structured outputs** (knowledge and physical-state chains done in v1.83.0; the rest open) replacing `KEY: value` parsers (`extract.py`, parser consumers in `prompts.py`); current Opus writes `**VERDICT: yes.**`, so line-anchored parsers are fragile now. Then **warn-and-continue → halt** (plan Phase 1 success criteria, including the three silent-failure regression tests). Re-record affected suites within budget.
+Start by reading this doc, `CLAUDE.md` and `docs/agent-reference.md`.
+- **Checks:** run `python -m pytest tests/` and `python3 evals/run.py`. Main should replay every suite with no errors and no deltas. At v1.86.0 it did: 7,046+ tests, and only the gates that already failed still fail.
+- **Coordination:**
+  - Message **evals-56** (SendMessage) before touching `timeline.py` or claiming a version.
+  - evals-56 is testing the TIME_GAP wording in `timeline.CUE_INSTRUCTIONS` on branch `exp/cue-gap-wording`.
+  - Never touch `~/Developer/evals` or evals-56's worktrees (`~/Developer/storyforge-*`).
+- **Process:** one PR per step, followed by the 5-agent review (CLAUDE.md). Then wait for Ben's "fix all of them in logical commits", and merge in order once the checks pass.
+- **Spending:** estimate before any recording.
+
+1. **E8 gaps** (Ben's priority). `python3 evals/e8/cli.py plan` lists every case and why each is excluded; it makes no API calls. At v1.86.0: 23 cases replayed, about $9.70 if recorded live, and these excluded:
+   - **15 "pre-pass project predates `reference/scenes.csv`"** (governor-011, -013, -014, shared-dark-018, -023, -030, and more). These trees use the old metadata layout. The plan was to report them, not migrate them. To close the gap, migrate the materialized copy in the eval work dir to the three-file CSV model before replaying, never the book repo. See if `storyforge` already has a migration path (`cmd_cleanup`, `migrate`, `extract`'s skeleton). If a tree can't be migrated faithfully, say why per case.
+   - **5 "introducing commit changed none of the contradicted scenes"** (lantern-folk-027, thornwall-002, -015, -021, -028). Check whether E1's `introduced_by` points at the wrong commit or names the wrong scene, or whether the error came in through a reference file. Fix the case data (E1 `verify` must still pass) or replay the right scene.
+   - **1 hone pass, `governor-020`** (registries/physical-states). Add a `hone` family to `evals/e8`. It replays `hone`'s physical-state path on the case's project, and the judge reads the resulting CSV fact instead of prose.
+   - **9 CSV-level** (lantern-folk-029 to -034, …). There's no prose to redraft, so judge the CSV the pass writes, the same way as hone.
+   - **14 holdout:** these stay excluded by design.
+   - **Bug: the suite's notes never list the unreplayable cases.** `evals/suites/e8_revision_safety.py` builds `notes` from `sel.excluded` before the loop adds them. Move it after the loop.
+   - **Recording:** record the new cases with `--mode auto` after estimating. Each case costs about $0.41, so up to 30 more is about $12. Then refresh the baseline.
+2. **E6** (approved, about $40): two more independent E4 runs plus the paid E2 suites, under separate recording keys, to measure run-to-run variance. Plan §4.2 has the design. E3's tier comparison and E3's recall moves are both "inside noise until E6"; report them against E6's spread.
+3. **Phase 1 leftovers:**
+   - Extract's **skeleton** phase still parses `KEY: value` lines. It shares the cue lines with `timeline.parse_cues`, so move it to a structured output only after evals-56's CUE_INSTRUCTIONS experiment settles.
+   - Then the remaining **warn-and-continue** sites. Grep for `WARNING` followed by `continue` in paths that write output.
+4. **Follow-ups noted in PRs:**
+   - `hone.hone_briefs` also rewrites briefs and should use the brief-fix name check (`cmd_revise._invented_names`; move it to a shared module).
+   - `skills/forge` routes to `scenes` and `recommend` skills that don't exist.
+   - `dashboard_data` should fold into the Phase 2 `export` bundle.
+
+Then **Phase 2** (plan §5): ledger, `commitments.csv`, per-character state, `export`.
 
 ## Key paths
 
