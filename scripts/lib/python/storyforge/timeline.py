@@ -49,12 +49,19 @@ _BATCH_MAX_TOKENS = 16000
 # Cues: the prompt fields, parsing and storage
 # ============================================================================
 
-CUE_INSTRUCTIONS = """TIME_RELATION: [when this scene happens relative to the scene before it in reading order — one of: continues (picks up at the same time or moments later), later (some time after it), earlier (before it: a flashback or a recollection told as a scene, including a past that a spirit, dream or vision shows a character; also a scene whose present is only a line or a short lead-in before it mostly tells the past, such as a story a character tells or the narrator's account of someone's youth, but not one where the present has real action on the page around the telling), frame (narration from after the story, looking back), vision (events that have not happened, or may not happen, as the story tells them: a prophecy, a future a character is shown that may be averted, a dream of what might come; the past is always earlier, even when a spirit, a dream or a vision shows it), unclear]
-TIME_GAP: [how much time passed between the end of the scene before and the start of this one, in at most six words, no explanation: "an hour", "the next morning", "three weeks", "five years", "several weeks". Not how long this scene's own action lasts ("the next four days", "for a month": that is TIME_SPAN), and not a distance to some other event ("ten years since the wedding": that is TIME_REFERS); empty if none is stated or implied]
-TIME_ANCHOR: [a calendar fact pinning when THIS scene's action happens — a date, weekday, month, season, holiday or named day ("the hottest day of the summer") — quoted briefly; not a habit ("every Friday") or a date the scene only mentions; empty if none]
-TIME_REFERS: [any statement in this scene of how long ago or how long until another event in the story, quoted briefly: "that June night three months before", "five years since he'd seen her", "the funeral was on the third day"; separate several with semicolons; empty if none]
-TIME_SPAN: [when the scene summarizes a stretch of time ("all that summer", "the next four days"), how long; empty for a scene that plays out in one sitting]
-TIME_DATE: [only what this scene's own text states about the calendar date, in EDTF: "1922-07-04", "XXXX-07-04" when the year isn't given here, "1922" for a year, "1922-22" for summer 1922 (21 spring, 22 summer, 23 autumn, 24 winter), "1917~" for "around 1917", "1922-06/1922-09" for a stretch. A date the text fixes by a stated distance from a named calendar day counts as given, marked ~: "In two weeks it'll be the longest day in the year" → "XXXX-06-07~". Never fill in a part the text doesn't give; empty if the text gives no date]"""
+# What each cue asks, by its label. The cue read asks for them as labeled
+# lines (CUE_INSTRUCTIONS); extract's skeleton asks for the same fields in a
+# structured reply, keyed by the label in lower case (cues_from_fields).
+CUE_FIELDS = {
+    'TIME_RELATION': "when this scene happens relative to the scene before it in reading order — one of: continues (picks up at the same time or moments later), later (some time after it), earlier (before it: a flashback or a recollection told as a scene, including a past that a spirit, dream or vision shows a character; also a scene whose present is only a line or a short lead-in before it mostly tells the past, such as a story a character tells or the narrator's account of someone's youth, but not one where the present has real action on the page around the telling), frame (narration from after the story, looking back), vision (events that have not happened, or may not happen, as the story tells them: a prophecy, a future a character is shown that may be averted, a dream of what might come; the past is always earlier, even when a spirit, a dream or a vision shows it), unclear",
+    'TIME_GAP': 'how much time passed between the end of the scene before and the start of this one, in at most six words, no explanation: "an hour", "the next morning", "three weeks", "five years", "several weeks". Not how long this scene\'s own action lasts ("the next four days", "for a month": that is TIME_SPAN), and not a distance to some other event ("ten years since the wedding": that is TIME_REFERS); empty if none is stated or implied',
+    'TIME_ANCHOR': 'a calendar fact pinning when THIS scene\'s action happens — a date, weekday, month, season, holiday or named day ("the hottest day of the summer") — quoted briefly; not a habit ("every Friday") or a date the scene only mentions; empty if none',
+    'TIME_REFERS': 'any statement in this scene of how long ago or how long until another event in the story, quoted briefly: "that June night three months before", "five years since he\'d seen her", "the funeral was on the third day"; separate several with semicolons; empty if none',
+    'TIME_SPAN': 'when the scene summarizes a stretch of time ("all that summer", "the next four days"), how long; empty for a scene that plays out in one sitting',
+    'TIME_DATE': 'only what this scene\'s own text states about the calendar date, in EDTF: "1922-07-04", "XXXX-07-04" when the year isn\'t given here, "1922" for a year, "1922-22" for summer 1922 (21 spring, 22 summer, 23 autumn, 24 winter), "1917~" for "around 1917", "1922-06/1922-09" for a stretch. A date the text fixes by a stated distance from a named calendar day counts as given, marked ~: "In two weeks it\'ll be the longest day in the year" → "XXXX-06-07~". Never fill in a part the text doesn\'t give; empty if the text gives no date',
+}
+
+CUE_INSTRUCTIONS = '\n'.join(f'{label}: [{text}]' for label, text in CUE_FIELDS.items())
 
 _CUE_LABELS = {
     'TIME_RELATION': 'relation',
@@ -69,20 +76,29 @@ _EMPTY_ANSWERS = {'', 'none', 'n/a', 'unknown', 'empty', '-', '(none)', '(empty)
 
 
 def parse_cues(response: str) -> dict[str, str]:
-    """Parse ``TIME_*`` lines into a cue dict (keys of CUE_COLUMNS but id).
+    """Parse ``TIME_*`` lines into a cue dict (keys of CUE_COLUMNS but id),
+    normalized as ``cues_from_fields`` does."""
+    answers = {}
+    for line in (response or '').split('\n'):
+        match = re.match(r'^\s*(TIME_[A-Z]+):\s*(.*)$', line)
+        if match and match.group(1) in _CUE_LABELS:
+            answers[match.group(1).lower()] = match.group(2)
+    return cues_from_fields(answers)
+
+
+def cues_from_fields(answers: dict) -> dict[str, str]:
+    """A cue dict from answers keyed by cue label in lower case
+    (``time_relation``, ...), as a structured reply gives them.
 
     The relation is reduced to one of RELATIONS (``unclear`` when it is
     none of them); an invalid date is dropped rather than stored.
     """
     cues = {key: '' for key in _CUE_LABELS.values()}
-    for line in (response or '').split('\n'):
-        match = re.match(r'^\s*(TIME_[A-Z]+):\s*(.*)$', line)
-        if not match or match.group(1) not in _CUE_LABELS:
-            continue
-        value = match.group(2).strip().strip('"').strip()
+    for label, key in _CUE_LABELS.items():
+        value = str(answers.get(label.lower()) or '').strip().strip('"').strip()
         if value.lower().strip('[]().') in _EMPTY_ANSWERS:
             value = ''
-        cues[_CUE_LABELS[match.group(1)]] = value
+        cues[key] = value
     relation = cues['relation'].lower()
     cues['relation'] = next((r for r in RELATIONS if relation.startswith(r)), 'unclear')
     if cues['date'] and not is_valid_edtf(cues['date']):
