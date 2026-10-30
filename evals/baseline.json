@@ -1,15 +1,15 @@
 {
   "cost": {
     "calls": 2265,
-    "input_tokens": 9369662,
-    "output_tokens": 2559633,
+    "input_tokens": 9390455,
+    "output_tokens": 2554958,
     "replayed_calls": 2265,
     "unpriced_calls": 0,
-    "usd_if_live": 23.31,
+    "usd_if_live": 22.9728,
     "usd_spent": 0.0
   },
   "git_dirty": false,
-  "git_sha": "43d6f5e44d7de3a70286190adce61cdb29042626",
+  "git_sha": "4a86046730b88b2111aa795a7b71118f6eb7b1b7",
   "mode": "replay",
   "results": [
     {
@@ -82,7 +82,7 @@
       },
       "mode": "replay",
       "notes": [],
-      "started_at": "2026-10-30T19:01:23+00:00",
+      "started_at": "2026-10-30T19:45:50+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -140,7 +140,7 @@
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 9.22,
+      "duration_s": 8.35,
       "error": null,
       "gates": [
         {
@@ -204,7 +204,7 @@
         "missed 37 of 37: e2-carol-001, e2-carol-002, e2-carol-003, e2-carol-004, e2-carol-005, e2-carol-006, e2-carol-007, e2-carol-008, e2-carol-009, e2-carol-010, e2-carol-011, e2-carol-012, e2-carol-013, e2-carol-014, e2-carol-015, e2-carol-016, e2-carol-017, e2-carol-018, e2-carol-019, e2-carol-020, e2-carol-021, e2-carol-022, e2-carol-023, e2-carol-024, e2-carol-025, e2-carol-026, e2-carol-027, e2-carol-028, e2-carol-029, e2-carol-030, e2-carol-031, e2-carol-032, e2-carol-033, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
-      "started_at": "2026-10-30T19:01:23+00:00",
+      "started_at": "2026-10-30T19:45:50+00:00",
       "status": "fail",
       "suite": "e2-carol"
     },
@@ -252,7 +252,7 @@
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 245.91,
+      "duration_s": 183.06,
       "error": null,
       "gates": [
         {
@@ -316,7 +316,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-30T19:01:32+00:00",
+      "started_at": "2026-10-30T19:45:58+00:00",
       "status": "fail",
       "suite": "e2-corpus-drift"
     },
@@ -366,7 +366,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 143.22,
+      "duration_s": 126.34,
       "error": null,
       "gates": [
         {
@@ -430,7 +430,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-30T19:05:38+00:00",
+      "started_at": "2026-10-30T19:49:01+00:00",
       "status": "fail",
       "suite": "e2-corpus-validate"
     },
@@ -454,24 +454,24 @@
         },
         "TRT": {
           "facts": 14,
-          "recall": 1.0
+          "recall": 0.9286
         },
         "WLD": {
           "facts": 5,
-          "recall": 1.0
+          "recall": 0.8
         }
       },
       "cost": {
         "calls": 196,
-        "input_tokens": 1381671,
-        "output_tokens": 184101,
+        "input_tokens": 1397366,
+        "output_tokens": 185566,
         "replayed_calls": 196,
         "unpriced_calls": 0,
-        "usd_if_live": 5.0436,
+        "usd_if_live": 5.0701,
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 54.4,
+      "duration_s": 47.83,
       "error": null,
       "gates": [
         {
@@ -482,7 +482,7 @@
           "threshold": 20
         },
         {
-          "actual": 0.898,
+          "actual": 0.8571,
           "name": "recall",
           "op": ">=",
           "passed": true,
@@ -490,12 +490,12 @@
         }
       ],
       "metrics": {
-        "captured": 44,
+        "captured": 42,
         "facts": 49,
-        "missing": 0,
-        "partial": 5,
-        "recall": 0.898,
-        "recall_with_partial": 1.0
+        "missing": 1,
+        "partial": 6,
+        "recall": 0.8571,
+        "recall_with_partial": 0.9796
       },
       "mode": "replay",
       "notes": [
@@ -503,7 +503,7 @@
         "excluded 3: no prose established span",
         "excluded 53: tree predates reference/scenes.csv",
         "governor-015 (routine-maintenance): captured",
-        "governor-016 (routine-maintenance): captured",
+        "governor-016 (routine-maintenance): missing",
         "governor-018 (haddons-reckoning): captured",
         "governor-019 (finest-cartographer): captured",
         "governor-020 (ashward-breach): captured",
@@ -516,20 +516,20 @@
         "governor-028 (order): captured",
         "lantern-folk-001 (a07-the-cold-sleep): captured",
         "lantern-folk-002 (a03-the-little-voices): captured",
-        "lantern-folk-003 (a12-the-remembering): partial",
+        "lantern-folk-003 (a12-the-remembering): captured",
         "lantern-folk-004 (a14-the-keepers-flame): partial",
-        "lantern-folk-005 (a11-in-the-dark): captured",
+        "lantern-folk-005 (a11-in-the-dark): partial",
         "lantern-folk-006 (a08-what-the-folk-fear): captured",
         "lantern-folk-008 (a03-the-little-voices): captured",
         "lantern-folk-011 (a07-the-cold-sleep): captured",
         "lantern-folk-012 (a04-the-great-lamp): captured",
-        "lantern-folk-013 (a12-the-remembering): captured",
+        "lantern-folk-013 (a12-the-remembering): partial",
         "lantern-folk-014 (a03-the-little-voices): captured",
         "lantern-folk-015 (a03-the-little-voices): captured",
         "lantern-folk-016 (a05-the-pledge): captured",
         "lantern-folk-018 (a01-moving-night): partial",
         "lantern-folk-019 (a02-into-the-trees): captured",
-        "lantern-folk-020 (a08-what-the-folk-fear): captured",
+        "lantern-folk-020 (a08-what-the-folk-fear): partial",
         "lantern-folk-025 (a13-through-the-woods): captured",
         "lantern-folk-027 (a11-in-the-dark): captured",
         "lantern-folk-028 (a11-in-the-dark): captured",
@@ -541,7 +541,7 @@
         "shared-dark-043 (keisha-argument): captured",
         "shared-dark-044 (keisha-argument): captured",
         "thornwall-002 (garrens-ledger): partial",
-        "thornwall-021 (garrens-ledger): partial",
+        "thornwall-021 (garrens-ledger): captured",
         "thornwall-022 (lone-rider): captured",
         "thornwall-023 (journals-of-the-east-wing): captured",
         "thornwall-024 (not-alone): captured",
@@ -552,7 +552,7 @@
         "thornwall-029 (journals-of-the-east-wing): captured",
         "thornwall-030 (ivra-visits-sera): captured"
       ],
-      "started_at": "2026-10-30T19:08:01+00:00",
+      "started_at": "2026-10-30T19:51:07+00:00",
       "status": "pass",
       "suite": "e3-extraction"
     },
@@ -587,7 +587,7 @@
         "usd_spent": 0.0
       },
       "description": "Draft shared-dark Act 1 with write; CP10k, BPS, length, voice",
-      "duration_s": 6.8,
+      "duration_s": 7.64,
       "error": null,
       "gates": [
         {
@@ -641,7 +641,7 @@
         "checker plan: a Saturday 1 day(s) after voicemail's Thursday",
         "Judge stands in for the plan's human spot-check (still owed). Drafted in direct mode; batch mode is refused under a cassette."
       ],
-      "started_at": "2026-10-30T19:08:56+00:00",
+      "started_at": "2026-10-30T19:51:55+00:00",
       "status": "pass",
       "suite": "e4-generation"
     },
@@ -651,10 +651,7 @@
           "mismatches": 3
         },
         "PHY": {
-          "mismatches": 15
-        },
-        "TIM": {
-          "mismatches": 4
+          "mismatches": 25
         },
         "TRT": {
           "mismatches": 1
@@ -662,15 +659,15 @@
       },
       "cost": {
         "calls": 30,
-        "input_tokens": 260774,
-        "output_tokens": 72002,
+        "input_tokens": 265872,
+        "output_tokens": 65862,
         "replayed_calls": 30,
         "unpriced_calls": 0,
-        "usd_if_live": 2.6069,
+        "usd_if_live": 2.2432,
         "usd_spent": 0.0
       },
       "description": "Redraft from plan + ledger; facts the redraft changes",
-      "duration_s": 3.65,
+      "duration_s": 3.77,
       "error": null,
       "gates": [
         {
@@ -682,24 +679,24 @@
         }
       ],
       "metrics": {
-        "mismatches": 23,
-        "mismatches_per_scene": 2.3,
+        "mismatches": 29,
+        "mismatches_per_scene": 2.9,
         "scenes": 10
       },
       "mode": "replay",
       "notes": [
-        "claires-cold: 2 mismatch(es)\n    PHY: In the original the door hinges creak audibly when he enters; in the redraft the hinges make no sound at all.\n    TIM: He holds his palm between her shoulder blades for three seconds in the original, but for about fifteen seconds in the redraft.",
-        "harmons-hands: 1 mismatch(es)\n    PHY: In the original the space heater is sitting unplugged in the corner when he arrives and he plugs it in and moves it to four feet from her; i",
-        "waking-maren: 2 mismatch(es)\n    PHY: When she wakes at 2:47, the original has Maren already sitting up, while the redraft has her lying on her back and only sitting up later.\n    PHY: Her spoken voice saying \"Third night\" is clinical in the original but scraped raw in the redraft.",
-        "waking-hank: 1 mismatch(es)\n    PHY: In the original the pencil sits beside the facedown legal pad; in the redraft the pencil lies across the top sheet of the pad.",
-        "the-school: 1 mismatch(es)\n    PHY: In the original the crossed-out sentence is struck through with a single line and stays legible; in the redraft he strikes it twice, hard en",
-        "advocate: 3 mismatch(es)\n    KNO: In the original Maren can already see the grip mark on Sofia's right wrist and has noted it; in the redraft the wrist is hidden under a slee\n    KNO: In the original Delgado himself comes on the line and confirms receipt; in the redraft Delgado never speaks to Maren and the clerk relays hi\n    TIM: In the original Maren's finger tremor begins when Sofia's account reaches 12:15; in the redraft it begins earlier, while Sofia is describing",
-        "maren-runs: 4 mismatch(es)\n    PHY: The foot that caught at stride 231 differs: left in the original, right in the redraft.\n    PHY: During the flinch her hands were splayed at her sides in the original, but came up in front of her face in the redraft.\n    PHY: After the stop, her stride count reset to zero in the original, but in the redraft it continued from 232.\n    PHY: The Willamette is gray in the original but brown in the redraft.",
-        "engineer: 5 mismatch(es)\n    PHY: The mortar joint depths Danny calls out differ: shallow in the original, three-quarter inch to a full inch in the redraft.\n    PHY: Hank records his notes in a field book in the original but on a clipboard in the redraft.\n    PHY: Danny removes the stucco with a masonry hammer in the original but with a flat bar in the redraft.\n    PHY: The east entrance door frame is wood in the original but steel or metal in the redraft.\n    KNO: Danny says \"Hell\" on seeing the missing anchors in the original, whereas Hank says it in the redraft and Danny stays silent.",
-        "name-surfaces: 0 mismatch(es)",
-        "voicemail: 4 mismatch(es)\n    TIM: In the original, Marie reports finding Claire's car in the apartment lot in the fourth message; the redraft puts it in the third message.\n    PHY: In the original, the hinge sound is heard in a gap when Marie's voice cracks and she pulls away from the phone; in the redraft, Marie keeps \n    TIM: In the original, the seventh message cuts off right after \"Nobody will\u2014\"; in the redraft, it runs another twenty seconds after the sound bef\n    TRT: In the original, Marie's steadiness is gone by message five and she is angry in message six; in the redraft, her calm is still there in mess"
+        "claires-cold: 2 mismatch(es)\n    PHY: In the original she has stopped shivering entirely, while the redraft says her shivering has become intermittent.\n    PHY: In the original he tilts the hood fabric away from her mouth so she can drink, while in the redraft she drinks water that soaks through the ",
+        "harmons-hands: 2 mismatch(es)\n    PHY: In the original he cuts and replaces the zip tie on the right wrist too; in the redraft he checks it and leaves it as it is.\n    PHY: In the original the dream-body's hands stay steady through the whole scene; in the redraft the right hand trembles as he leaves.",
+        "waking-maren: 2 mismatch(es)\n    PHY: In the original Maren is already sitting up when she comes awake; in the redraft she is lying on her back and only sits up afterward.\n    PHY: The 3:02 reading comes from the bedroom clock in the original but from the stove clock in the kitchen in the redraft.",
+        "waking-hank: 1 mismatch(es)\n    PHY: At the end of the scene Rook stands in the kitchen doorway with her tail against the doorframe in the original, but in the redraft she is ly",
+        "the-school: 5 mismatch(es)\n    PHY: In the original the gym lights are off and the room is lit only by gray daylight from the clerestory windows; in the redraft the overhead li\n    PHY: The gym floor is rubber in the original but hardwood in the redraft.\n    PHY: The 'stress field' sentence is written and crossed out on the clipboard inside the gym in the original, but in the truck after the assessmen\n    PHY: In the original the sentence is crossed out with a single line and stays legible; in the redraft it is struck over repeatedly until the grap\n    PHY: In the original the truck's heater is running while he sits in it; in the redraft the engine is off.",
+        "advocate: 5 mismatch(es)\n    PHY: Where the folder was that Maren pressed her thumb against while Sofia described the deadbolt.\n    PHY: Where Maren made the call to the DA's office: from the hallway while Sofia was still there, or from back inside the suite after Sofia had le\n    KNO: Who answered the call and said the docket was full: a clerk who picked up instead of Delgado, or Delgado himself.\n    PHY: Where Maren parted from Sofia and where she gave her the after-hours card: at the lobby glass doors, or the card at the interview table and \n    PHY: Maren's position in the bathroom: down on the floor with her knuckles on the floor tile, or leaning forward with her knuckles on the tile ab",
+        "maren-runs: 5 mismatch(es)\n    PHY: Her running breath pattern differs: the original has three strides in and three out, the redraft has in for three and out for two.\n    PHY: Which foot falls on which count differs: in the original the left foot is 'one' (odd numbers), in the redraft the left foot is on the evens.\n    PHY: During the flinch, her hands splay open at her sides in the original but rise toward her face in the redraft.\n    TRT: After the stop, her stride count resets to zero and restarts at one in the original, but in the redraft it continues from 232.\n    PHY: She passes the sleeping man before the mid-span flinch in the original, but after it in the redraft.",
+        "engineer: 4 mismatch(es)\n    PHY: The east entrance door frame is wood in the original but steel in the redraft.\n    KNO: The original has Danny say \"Hell\" on seeing the missing anchors; the redraft gives the line to Hank.\n    PHY: Danny probes the west-wall mortar joints with a flathead screwdriver in the original, but holds a pick and flashlight in the redraft.\n    PHY: Hank scores the slab concrete with his thumbnail in the original but with the tip of his knife in the redraft.",
+        "name-surfaces: 1 mismatch(es)\n    PHY: Hank writes the name in pen in the original, but in pencil in the redraft.",
+        "voicemail: 2 mismatch(es)\n    KNO: The message in which Marie mentions the coworker Jennifer and the 11:15 departure is the fifth in the original but the fourth in the redraft\n    PHY: The unfiled case intake form is beside the laptop with the Post-it in the original, but lies on the counter in the redraft."
       ],
-      "started_at": "2026-10-30T19:09:03+00:00",
+      "started_at": "2026-10-30T19:52:03+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -727,7 +724,7 @@
         "usd_spent": 0.0
       },
       "description": "Continuity flags raised on classics with no known errors",
-      "duration_s": 0.29,
+      "duration_s": 0.21,
       "error": null,
       "gates": [
         {
@@ -761,7 +758,7 @@
         "christmas-carol/run2: 25 flag(s)",
         "christmas-carol/run1: 25 flag(s)"
       ],
-      "started_at": "2026-10-30T19:09:06+00:00",
+      "started_at": "2026-10-30T19:52:07+00:00",
       "status": "fail",
       "suite": "e7-classics"
     },
@@ -802,7 +799,7 @@
         "usd_spent": 0.0
       },
       "description": "Current revision passes vs the E1 errors past passes introduced",
-      "duration_s": 76.84,
+      "duration_s": 90.41,
       "error": null,
       "gates": [
         {
@@ -890,13 +887,13 @@
         "thornwall-035 (riders-approach): consistent",
         "thornwall-037 (evening-visit): consistent"
       ],
-      "started_at": "2026-10-30T19:09:06+00:00",
+      "started_at": "2026-10-30T19:52:07+00:00",
       "status": "fail",
       "suite": "e8-revision-safety"
     }
   ],
   "schema_version": 1,
   "status": "fail",
-  "storyforge_version": "1.97.0",
+  "storyforge_version": "1.98.0",
   "suite_count": 9
 }
