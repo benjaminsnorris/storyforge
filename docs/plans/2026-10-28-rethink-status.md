@@ -78,7 +78,7 @@ Last updated 2026-10-30 (evening), at v1.96.0 (#424, extract phase 4, is the lat
 | #421 | 1.93.2 | `commit_and_push` pushes a branch with no upstream with `-u`, and warns when a push fails (migrate's branch had stayed local) |
 | #422 | 1.94.0 | `storyforge export` (bundle contract in agent-reference); `evals/export_check.py` |
 | #423 | 1.95.0 | audit log, `storyforge audit`, `audit.halting_conditions` |
-| #424 | 1.96.0 | extract phase 4 (the decision-5 rubric) and evals-b5's F-123 fix (forced 3b offers what this run showed; declared facts placed in `knowledge_out`; live P&P forced 3b 32 → 2 flags). E3 0.286 → 0.898 ($3.12 recorded) |
+| #424 | 1.96.0 | extract phase 4 (the decision-5 rubric) and evals-b5's F-123 fix (forced 3b offers what this run showed; declared facts placed in `knowledge_out`; live P&P forced 3b: 32 knowledge flags on 1.93.0, 2 with the offer fix alone, 0 with both commits). E3 0.286 → 0.898 ($3.12 recorded) |
 
 **Books:** all seven ledger PRs were merged (shared-dark#88, thornwall#71, lantern-folk#15, governor#82, meridian-line#86, understory#36, slipform#24). Understory then got the full `migrate` (#37), which normalized 15 cells and left 16 for hand edits.
 
