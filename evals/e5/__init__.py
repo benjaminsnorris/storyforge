@@ -23,7 +23,8 @@ commitments its own prose made. That is the point of the suite: a fact the
 ledger pins should survive a redraft. It also means the number is not
 like-for-like with runs before v1.97.0, when the redraft had only the brief
 and the bibles: part of a fall comes from the redraft being shown facts read
-off the very prose it is judged against.
+off the very prose it is judged against. Any change to phase 4 (its rubric,
+what it is offered: F-127, F-128 in v1.98.0) moves the number too.
 """
 
 from __future__ import annotations

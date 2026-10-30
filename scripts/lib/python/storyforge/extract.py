@@ -15,6 +15,7 @@ from typing import Any
 from .enrich import load_registry_alias_maps, normalize_fields  # noqa: F401
 from .enrich import is_placeholder, normalize_aliases, reduce_boolean, strip_placeholders
 from .common import log
+from .ledger import COMMITMENTS_PASS
 from .prompts import read_yaml_field
 
 
@@ -721,13 +722,13 @@ If all three are yes, record it as one declarative sentence with its quote. Ther
 Always capture: names and their spellings; pronouns and gender; ages and dates; who is related to whom and how; who knows what, and who told them; injuries, illness, and possessions; where a person or object is when it carries past the scene (who holds the key, where the body lies, where someone is held or has gone); the time of day and day the scene occurs; elapsed time stated relative to another event ("three weeks ago," "eight days ago"); counts and quantities (how many survivors, how many records, how many guards); distances and travel times; stated rules of the world; anything a character promises or threatens; anything the narrator states as fact about the past; information conveyed in dialogue.
 
 Never capture:
-- staging: who stands, sits, crosses the room or turns to the door, where people are as the scene ends, unless a later scene depends on it;
-- set dressing: furniture, weather, light, food on the table, unless it is a named object, a stated rule, or something the story returns to;
+- staging: who stands, sits, crosses the room or turns to the door, where people are as the scene ends, unless it carries past the scene (someone locked in, left behind, hiding, gone to another place);
+- set dressing: furniture, decor, food on the table, passing weather and light, unless it is a named object, a stated rule, something the story returns to, or what fixes the time of day;
 - a character's emotion in the moment, or a passing physical reaction to it;
 - sensory texture that recurs nowhere;
 - the narrator's opinions, jokes and asides;
-- figurative language read literally: a figure of speech, a nickname for the devil, an imagined scene, a simile ("Old Scratch has got his own at last" is not about a character called Old Scratch);
-- a time, date or duration the text does not state: never infer one;
+- figurative language read literally: a figure of speech, a nickname for the devil, a daydream or hypothetical, a simile ("Old Scratch has got his own at last" is not about a character called Old Scratch). What a vision or a ghost shows as the story's past or future is a commitment;
+- a time, date or duration the text neither states nor plainly shows: never guess one;
 - dialogue that is texture rather than information.
 
 Examples: "Desta is Corvin's neighbor and friend" is a commitment. "Corvin left a note," what it said, and who found it are commitments. "The surveyor's hands are shaking" is not. From A Christmas Carol: "Scrooge's nephew is Fred and his dead sister was Fan" is three commitments; "the fog came pouring in at every chink" is none."""
@@ -775,13 +776,17 @@ def build_commitments_prompt(scene_id: str, scene_text: str,
     def listing(rows):
         if not rows:
             return '(none yet)'
-        return '\n'.join(f'- {k["id"]} [{k["type"]}] {k.get("subject") or "-"}: {k["statement"]}'
-                         for k in rows)
+        return '\n'.join(
+            f'- {k["id"]} [{k["type"]}, {k.get("mutable") or "state"}'
+            + ('' if k.get('introduced_by') == COMMITMENTS_PASS else ', registry')
+            + f'] {k.get("subject") or "-"}: {k["statement"]}' for k in rows)
     known_text = listing(known)
     recorded_section = (
         '\n## Facts already recorded for this scene\n\n'
-        "Don't restate these. Record only what the scene adds to them, or "
-        'what it says differently (then name the one it supersedes).\n\n'
+        "Don't restate these. Record only what the scene adds to them. If the "
+        "scene's prose says something different from one, record what the prose "
+        'says and name that id in supersedes: the difference is reported to '
+        'the author, not replaced.\n\n'
         + listing(recorded) + '\n') if recorded else ''
     registries_section = f'\n{registries_text}\n' if registries_text else ''
     return f"""{COMMITMENT_RUBRIC}
@@ -806,7 +811,7 @@ Location: {skeleton.get('location', '')}
 - quote: the exact words from this scene that establish it, copied verbatim
 - mutable: "state" if it can change later in the story (an injury, who holds the key, where someone is, what they know), "fixed" if it should hold for the whole book (a name, an age, a sister's name, a backstory event)
 - supersedes: the id of the earlier commitment above that this one replaces with a new value (a key changing hands, a new location), or blank
-- ends: the ids of other earlier "state" commitments above that stop being true because of this one (he can grip a rope again once the wound has healed; she has left the house), or an empty list
+- ends: the ids of other earlier commitments above marked "state" that stop being true because of this one (he can grip a rope again once the wound has healed; she has left the house), or an empty list. A "registry" one you name is reported to the author rather than ended
 
 Record each commitment once. Don't restate an earlier or already-recorded commitment the scene only repeats. Answer with a JSON object holding the list `commitments` (an empty list is valid only when the scene truly commits to nothing)."""
 

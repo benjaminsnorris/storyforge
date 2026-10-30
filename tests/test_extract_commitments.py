@@ -26,7 +26,7 @@ class TestPrompt:
                  'statement': 'Fred has a cold.'}])
         assert COMMITMENT_RUBRIC in prompt
         assert "Fred is Scrooge's nephew." in prompt
-        assert '- k1 [physical] fred: Fred has a cold.' in prompt
+        assert '- k1 [physical, state, registry] fred: Fred has a cold.' in prompt
         assert 'There is no cap' in prompt
 
     def test_says_when_nothing_is_known(self):
@@ -39,7 +39,7 @@ class TestPrompt:
             {'id': 'marley-is-dead', 'type': 'knowledge', 'subject': '',
              'statement': 'Marley is dead'}])
         assert "## Facts already recorded for this scene\n\nDon't restate these." in prompt
-        assert '- marley-is-dead [knowledge] -: Marley is dead' in prompt
+        assert '- marley-is-dead [knowledge, state, registry] -: Marley is dead' in prompt
 
     def test_the_rubric_leaves_out_staging_asides_and_invented_times(self):
         """F-127: on A Christmas Carol 44% of rows were incidental, mostly
@@ -47,7 +47,7 @@ class TestPrompt:
         literally or invented a time."""
         assert 'locations of people and objects at scene end' not in COMMITMENT_RUBRIC
         for words in ('staging:', 'set dressing:', 'jokes and asides',
-                      'figurative language read literally', 'never infer one'):
+                      'figurative language read literally', 'never guess one'):
             assert words in COMMITMENT_RUBRIC
 
 
@@ -92,7 +92,7 @@ class TestViews:
 
 
 class TestPhase4:
-    def _run(self, project_dir, monkeypatch, replies, force=False):
+    def _run(self, project_dir, monkeypatch, replies, force=False, only=None):
         from storyforge import cmd_extract
         calls = []
 
@@ -109,7 +109,7 @@ class TestPhase4:
         monkeypatch.setattr(cmd_extract, 'commit_and_push', lambda *a, **k: True)
         ref = os.path.join(project_dir, 'reference')
         scenes = os.path.join(project_dir, 'scenes')
-        order = cmd_extract._build_sorted_scene_ids(scenes, ref)
+        order = only or cmd_extract._build_sorted_scene_ids(scenes, ref)
         log_dir = os.path.join(project_dir, 'working', 'logs')
         os.makedirs(log_dir, exist_ok=True)
         cmd_extract._run_phase_4(order, project_dir, scenes, ref, log_dir, force, False)
@@ -159,8 +159,8 @@ class TestPhase4:
                        'type': 'physical', 'supersedes': key},
                       {'statement': 'x', 'supersedes': 'ghost'})}, force=True)
         prompt_b = dict(calls)[b]
-        assert f'- {key} [physical]' in prompt_b
-        assert f'- {key} [physical]' not in dict(calls)[a]
+        assert f'- {key} [physical, state]' in prompt_b
+        assert f'- {key} [physical' not in dict(calls)[a]
         mine = self._mine(project_dir)
         assert len([r for r in mine if r['scene_id'] == a]) == 1  # replaced, not doubled
         assert [r['supersedes'] for r in mine if r['scene_id'] == b] == [key, '']
@@ -181,16 +181,84 @@ class TestPhase4:
              'type': 'physical', 'supersedes': 'map-anomaly-exists',
              'ends': [bleeding, 'scar-left-hand-kael', 'ghost']})})
         prompt_b = dict(calls)[b]
-        assert '- map-anomaly-exists [knowledge]' in prompt_b   # backstory, offered
-        assert f'- {bleeding} [physical]' in prompt_b
+        assert '- map-anomaly-exists [knowledge, state, registry]' in prompt_b   # backstory, offered
+        assert f'- {bleeding} [physical, state]' in prompt_b
         rows = {r['id']: r for r in ledger.load(project_dir)}
         assert rows[bleeding]['resolves'] == b
         assert rows['scar-left-hand-kael']['resolves'] == 'never'   # registry: untouched
         new = next(r for r in self._mine(project_dir) if r['scene_id'] == b)
         assert new['supersedes'] == 'map-anomaly-exists'
         out = capsys.readouterr().out
-        assert '1 "ends" naming a registry state' in out
+        assert '1 registry state(s) the prose ends' in out
+        assert 'scar-left-hand-kael (resolves: never)' in out
         assert '1 "ends" naming no offered state' in out
+
+    def test_prose_that_disagrees_with_the_scenes_registry_fact_is_reported(
+            self, project_dir, monkeypatch, capsys):
+        """A registry fact recorded for the same scene is a disagreement,
+        not a change over time: linking it would hide it from drafting while
+        the registry views still hold it."""
+        from storyforge.cmd_extract import _build_sorted_scene_ids
+        ref = os.path.join(project_dir, 'reference')
+        b = _build_sorted_scene_ids(os.path.join(project_dir, 'scenes'), ref)[1]
+        assert b == 'act1-sc02'   # archive-key-dorren is recorded here
+        _, calls = self._run(project_dir, monkeypatch, {b: _reply(
+            {'statement': 'Dorren has no key.', 'mutable': 'state', 'type': 'physical',
+             'supersedes': 'archive-key-dorren'})})
+        assert '## Facts already recorded for this scene' in dict(calls)[b]
+        new = next(r for r in self._mine(project_dir) if r['scene_id'] == b)
+        assert new['supersedes'] == ''
+        assert 'whose prose disagrees with a registry fact' in capsys.readouterr().out
+
+    def _own(self, project_dir, rid, **fields):
+        rows = ledger.load(project_dir)
+        rows.append(dict({c: '' for c in ledger.COLUMNS}, id=rid, type='physical',
+                         statement=rid, origin='prose', status='binding', mutable='state',
+                         introduced_by=ledger.COMMITMENTS_PASS, **fields))
+        ledger.save(project_dir, rows, command='test')
+
+    def test_ends_that_are_already_so_or_already_ended_elsewhere(
+            self, project_dir, monkeypatch, capsys):
+        """A registry state whose resolves is this scene is no finding; this
+        pass's state already ending in a later scene keeps that end, said."""
+        from storyforge.cmd_extract import _build_sorted_scene_ids
+        ref = os.path.join(project_dir, 'reference')
+        a, b, c = _build_sorted_scene_ids(os.path.join(project_dir, 'scenes'), ref)[:3]
+        rows = ledger.load(project_dir)
+        rows.append(dict({k: '' for k in ledger.COLUMNS}, id='tired', type='physical',
+                         statement='Tessa is tired', origin='prose', status='binding',
+                         mutable='state', introduced_by='extract', scene_id=a, resolves=b))
+        ledger.save(project_dir, rows, command='test')
+        self._own(project_dir, 'bleeding', scene_id='', resolves=c)
+        self._run(project_dir, monkeypatch, {b: _reply(
+            {'statement': 'Tessa rested and the cut closed.', 'ends': ['tired', 'bleeding']})},
+            only=[a, b, c])
+        out = capsys.readouterr().out
+        assert 'registry state(s) the prose ends' not in out
+        assert '1 state(s) the prose ends that already end elsewhere' in out
+        assert {r['id']: r for r in ledger.load(project_dir)}['bleeding']['resolves'] == c
+
+    def test_a_forced_run_clears_an_end_set_in_a_scene_it_redoes(
+            self, project_dir, monkeypatch):
+        """A row kept from outside the run must not keep last run's end."""
+        from storyforge.cmd_extract import _build_sorted_scene_ids
+        ref = os.path.join(project_dir, 'reference')
+        a, b, c = _build_sorted_scene_ids(os.path.join(project_dir, 'scenes'), ref)[:3]
+        self._own(project_dir, 'ended-in-b', scene_id='', resolves=b)
+        self._own(project_dir, 'ended-elsewhere', scene_id='', resolves=a)
+        self._run(project_dir, monkeypatch, {}, force=True, only=[b, c])
+        rows = {r['id']: r for r in ledger.load(project_dir)}
+        assert rows['ended-in-b']['resolves'] == ''
+        assert rows['ended-elsewhere']['resolves'] == a
+
+    def test_registry_facts_tied_to_no_scene_in_the_run_are_named(
+            self, project_dir, monkeypatch, capsys):
+        rows = ledger.load(project_dir)
+        rows[0]['scene_id'] = 'renamed-scene'
+        ledger.save(project_dir, rows, command='test')
+        self._run(project_dir, monkeypatch, {})
+        assert f'name a scene not in this run, so no scene is offered them: {rows[0]["id"]}' \
+            in capsys.readouterr().out
 
     def test_a_scene_already_extracted_is_skipped_without_force(
             self, project_dir, monkeypatch):
@@ -285,7 +353,7 @@ class TestKnown:
 
     def _known(self, rows, scene='s2', subjects=frozenset()):
         from storyforge.cmd_extract import _phase4_known
-        known, recorded = _phase4_known(rows, scene, self.ORDER, set(subjects))
+        known, recorded, _ = _phase4_known(rows, scene, self.ORDER, set(subjects))
         return [r['id'] for r in known], [r['id'] for r in recorded]
 
     def test_registry_and_commitment_rows_in_force_and_what_the_scene_has(self):
@@ -310,9 +378,12 @@ class TestKnown:
     def test_past_the_limit_the_scenes_people_and_place_come_first(self, monkeypatch):
         from storyforge import cmd_extract
         monkeypatch.setattr(cmd_extract, 'MAX_KNOWN_COMMITMENTS', 3)
+        from storyforge.cmd_extract import _phase4_known
         rows = [_ledger_row('tessa-early', scene_id='', subject='tessa'),
                 _ledger_row('knows', scene_id='', known_by='kael;tessa'),
+                _ledger_row('pell-name', scene_id='', subject='pell', mutable='fixed'),
                 _ledger_row('other-1', scene_id='s1', subject='pell'),
-                _ledger_row('other-2', scene_id='s1', subject='pell'),
-                _ledger_row('other-3', scene_id='s1', subject='pell')]
-        assert self._known(rows, subjects={'tessa'})[0] == ['tessa-early', 'knows', 'other-3']
+                _ledger_row('other-2', scene_id='s1', subject='pell')]
+        # about the scene first, then a fixed fact before a more recent state
+        assert self._known(rows, subjects={'tessa'})[0] == ['tessa-early', 'knows', 'pell-name']
+        assert _phase4_known(rows, 's2', self.ORDER, {'tessa'})[2] == 2
