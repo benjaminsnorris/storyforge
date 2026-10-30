@@ -564,3 +564,37 @@ class TestExtractValidation:
         assert not passed
         # The structural report passes; its advisories aren't failures
         assert failures == schema_failures
+
+
+class TestForcedChainClearsStaleFields:
+    """A forced re-extraction kept the last run's knowledge and physical
+    states wherever 3b/3c now found none: the parsers drop empty fields, so
+    Gatsby's lunch with Wolfshiem still carried Myrtle's broken nose."""
+
+    def _brief(self, project_dir, field):
+        from storyforge.elaborate import get_scene
+        return get_scene('act1-sc01', os.path.join(project_dir, 'reference'))[field]
+
+    def _reply(self, project_dir, force):
+        from storyforge.cmd_extract import _update_chain_fields
+        ref = os.path.join(project_dir, 'reference')
+        _update_chain_fields('act1-sc01', ref, {'id': 'act1-sc01'}, force,
+                             ('knowledge_in', 'knowledge_out', 'continuity_deps'))
+
+    def test_forced_empty_reply_clears_the_field(self, project_dir):
+        assert self._brief(project_dir, 'knowledge_out') == 'map-anomaly-exists'
+        self._reply(project_dir, force=True)
+        assert self._brief(project_dir, 'knowledge_out') == ''
+
+    def test_unforced_empty_reply_keeps_the_field(self, project_dir):
+        self._reply(project_dir, force=False)
+        assert self._brief(project_dir, 'knowledge_out') == 'map-anomaly-exists'
+
+    def test_forced_reply_with_values_writes_them(self, project_dir):
+        from storyforge.cmd_extract import _update_chain_fields
+        ref = os.path.join(project_dir, 'reference')
+        _update_chain_fields('act1-sc01', ref,
+                             {'id': 'act1-sc01', 'physical_state_out': 'cut-hand'},
+                             True, ('physical_state_in', 'physical_state_out'))
+        assert self._brief(project_dir, 'physical_state_out') == 'cut-hand'
+        assert self._brief(project_dir, 'physical_state_in') == ''
