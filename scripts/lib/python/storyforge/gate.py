@@ -257,3 +257,172 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     ledger.save(project_dir, new, command=command)
     result.committed = True
     return result
+
+
+# ============================================================================
+# Fix (plan §3.2 step 3): targeted edits, then one re-check
+# ============================================================================
+
+FIX_SCHEMA = {
+    'type': 'object',
+    'properties': {'edits': {'type': 'array', 'items': {
+        'type': 'object',
+        'properties': {'problem': {'type': 'integer'}, 'find': {'type': 'string'},
+                       'replace': {'type': 'string'}},
+        'required': ['problem', 'find', 'replace'],
+        'additionalProperties': False,
+    }}},
+    'required': ['edits'],
+    'additionalProperties': False,
+}
+
+
+def problems_to_fix(result: GateResult) -> list[str]:
+    """What a fix should address, one line each: halts, contradictions and
+    broken promises, unverified findings (the checker may be right). An
+    extraction problem isn't a prose problem, so it isn't here: the re-check
+    extracts again."""
+    lines = [f'Stop: {h.detail} (fact {h.fact_id})' for h in result.halts]
+    for f in result.findings + result.unverified:
+        if f.kind == 'contradiction':
+            where = f.established_scene or 'the ledger'
+            lines.append(f'{f.code} contradiction: the scene says "{f.scene_quote}", but '
+                         f'{where} establishes "{f.established_quote}". {f.explanation}')
+        else:
+            lines.append(f'Broken promise ({f.fact_id}): the brief promises '
+                         f'"{f.established_quote}". {f.explanation}'
+                         + (f' Nearest words: "{f.scene_quote}".' if f.scene_quote else ''))
+    return lines
+
+
+def build_fix_prompt(scene_id: str, prose: str, problems: list[str]) -> str:
+    listing = '\n'.join(f'{n}. {p}' for n, p in enumerate(problems, start=1))
+    return f"""A continuity check found these problems in scene {scene_id}. Fix each with the smallest edit to the scene's prose that resolves it.
+
+## Problems
+
+{listing}
+
+## Rules
+
+- Change the scene so it agrees with what the book established; never assume the established fact is the one that is wrong.
+- A broken promise: add or change the fewest words that deliver it, in the scene's voice, where it fits the action.
+- Each edit replaces `find`, words copied exactly from the scene that occur in it once, with `replace`. Keep `find` short: the sentence or clause that changes. Edits must not overlap.
+- Change nothing else: no polishing, no other improvements. `problem` is the number of the problem the edit fixes.
+- If a problem is a false alarm (the scene does not actually contradict anything), make no edit for it.
+
+## Scene {scene_id}
+
+{prose}"""
+
+
+def apply_edits(prose: str, edits: list[dict]) -> str:
+    """`prose` with each edit's `find` (exactly once in `prose`) replaced.
+
+    Raises:
+        GateError: a `find` is missing, occurs more than once, or overlaps
+            another edit's; nothing is applied then.
+    """
+    spans = []
+    for e in edits:
+        find = e.get('find') or ''
+        count = prose.count(find) if find else 0
+        if count != 1:
+            raise GateError(f'a fix edit\'s text occurs {count} times in the scene: '
+                            f'{find[:80]!r}')
+        start = prose.index(find)
+        spans.append((start, start + len(find), e.get('replace') or ''))
+    spans.sort()
+    for (_, end, _), (start, _, _) in zip(spans, spans[1:]):
+        if start < end:
+            raise GateError('two fix edits overlap')
+    for start, end, replace in reversed(spans):
+        prose = prose[:start] + replace + prose[end:]
+    return prose
+
+
+def fix_scene(scene_id: str, prose: str, result: GateResult, *, log_dir: str,
+              model: str | None = None) -> str:
+    """The scene with targeted edits for `result`'s problems (one model call).
+
+    Raises:
+        GateError: the call failed, the reply was cut off or not the schema,
+            or an edit can't be applied (`apply_edits`).
+    """
+    import json
+    from storyforge.api import extract_text, invoke_to_file, is_truncated
+    from storyforge.common import select_model
+    problems = problems_to_fix(result)
+    if not problems:
+        return prose
+    log_file = os.path.join(log_dir, f'gate-fix-{scene_id}.json')
+    try:
+        response = invoke_to_file(build_fix_prompt(scene_id, prose, problems),
+                                  model or select_model('revision'), log_file, 8000,
+                                  output_schema=FIX_SCHEMA, label=f'fix {scene_id}')
+        if is_truncated(response):
+            raise ValueError('the reply hit its token limit')
+        edits = json.loads(extract_text(response))['edits']
+    except (RuntimeError, ValueError, KeyError, TypeError) as e:
+        raise GateError(f'{scene_id}: the fix failed: {e}') from e
+    return apply_edits(prose, edits)
+
+
+@dataclass
+class GatedScene:
+    """`gate_and_fix`'s answer: the prose to keep and the gate's last word."""
+    prose: str
+    result: GateResult          # the last gate run (the re-check when fixed)
+    first: GateResult           # the first gate run
+    fixed: bool = False         # whether the fix changed the prose
+
+
+def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
+                 log_dir: str, extract_model: str | None = None,
+                 check_model: str | None = None, fix_model: str | None = None) -> GatedScene:
+    """Gate `prose`; if it doesn't pass, fix it once and gate the fixed prose
+    (plan §3.2 step 3). The caller writes `.prose` to the scene file: the
+    ledger is committed only when `.result.passed`. A first run that fails
+    only on extraction problems is re-gated without an edit.
+
+    Raises:
+        GateError: from either gate run or the fix.
+    """
+    os.makedirs(log_dir, exist_ok=True)
+    first = gate_scene(project_dir, scene_id, command=command, prose=prose, log_dir=log_dir,
+                       extract_model=extract_model, check_model=check_model)
+    if first.passed:
+        return GatedScene(prose, first, first)
+    fixed = fix_scene(scene_id, prose, first, log_dir=log_dir, model=fix_model)
+    again = gate_scene(project_dir, scene_id, command=command, prose=fixed,
+                       log_dir=os.path.join(log_dir, 'recheck'),
+                       extract_model=extract_model, check_model=check_model)
+    return GatedScene(fixed, again, first, fixed=fixed != prose)
+
+
+def report_lines(result: GateResult) -> list[str]:
+    """The gate's verdict on a scene as log lines: everything that stopped
+    the commit, then what is reported either way. Empty only for a pass
+    with nothing to report."""
+    from storyforge.common import csv_safe
+    lines = []
+    for h in result.halts:
+        lines.append(f'HALT ({h.kind}): {csv_safe(str(h))}')
+    for item in result.unresolved:
+        lines.append(f'EXTRACTION: {csv_safe(item)}')
+    for f in result.findings:
+        lines.append(f'{f.kind.upper()}: {csv_safe(f.message())}')
+    for f in result.unverified:
+        lines.append(f'UNVERIFIED ({f.problem}): {csv_safe(f.message())}')
+    for kind in REPORTED:
+        items = result.problems.get(kind, [])
+        if items:
+            lines.append(f'NOTE ({kind}): ' + '; '.join(csv_safe(i) for i in items[:20])
+                         + (' ...' if len(items) > 20 else ''))
+    if result.check:
+        for rid, quote, why in result.check.kept_unverified:
+            lines.append(f'NOTE (kept, not filled): {rid}: {why}')
+        if result.check.unknown_brief_items:
+            lines.append('NOTE (brief items no binding fact matches, not checked): '
+                         + '; '.join(result.check.unknown_brief_items))
+    return lines
