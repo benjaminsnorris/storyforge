@@ -1027,12 +1027,20 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         summary = result.get('_summary', '')
         if summary:
             summaries.append(f'{scene_id}: {summary}')
-            # Kept as the scene's outline sentence (#440): it was used only as
-            # rolling context and dropped, so scenes.csv:summary stayed blank.
-            # Never replaces one already there, forced or not: it's the
-            # author's outline tier
-            if not scene_data.get('summary', '').strip():
-                update_scene(scene_id, ref_dir, {'summary': csv_safe(summary)})
+            # Fills a blank `summary` only, forced or not: a filled cell may
+            # be the author's outline, and nothing records which ones
+            # extraction wrote. A scene with no scenes.csv row gets none: a
+            # row written here would have no seq or status
+            if not scene_data:
+                log(f'  WARNING: {scene_id} has no scenes.csv row, so its summary '
+                    f'was not recorded (run extract --phase 1)')
+            elif not scene_data.get('summary', '').strip():
+                try:
+                    update_scene(scene_id, ref_dir, {'summary': csv_safe(summary)})
+                except OSError as e:
+                    _halt_chain(project_dir, '3b — knowledge chain', scene_id, e,
+                                ['reference/scenes.csv', 'reference/scene-briefs.csv',
+                                 'reference/commitments.csv', 'working/'])
 
         log(f'  {scene_id}: knowledge extracted')
 

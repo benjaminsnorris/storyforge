@@ -580,3 +580,17 @@ class TestUnmigratedActReportedOnce:
         notices = [c for c in report['failures'] if c['check'] == 'act-migration']
         assert act_missing == []
         assert len(notices) == 1 and 'storyforge cleanup' in notices[0]['message']
+
+
+def test_update_scene_keeps_columns_the_schema_does_not_know(tmp_path):
+    """Review I-3 on #442: update_scene rewrote the file with the schema's
+    columns only, so an author's own column was dropped from every row."""
+    from storyforge.elaborate import _read_csv, update_scene
+    ref = tmp_path
+    (ref / 'scenes.csv').write_text('id|seq|title|my_notes\na|1|A|keep me\nb|2|B|\n')
+    for name in ('scene-intent.csv', 'scene-briefs.csv'):
+        (ref / name).write_text('id\n')
+    update_scene('a', str(ref), {'summary': 'Something happens.'})
+    rows = {r['id']: r for r in _read_csv(str(ref / 'scenes.csv'))}
+    assert rows['a']['my_notes'] == 'keep me'
+    assert rows['a']['summary'] == 'Something happens.'

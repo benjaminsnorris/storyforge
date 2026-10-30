@@ -1,6 +1,6 @@
 # Extract the upper reference layers (#440, F-130 part 2)
 
-Status: plan approved 2026-10-30; PR 0 in progress. Written 2026-10-30 at v1.99.x, on branch `storyforge/extract-upper-layers-20261030-1525`.
+Status: plan approved 2026-10-30. PR 0 is #442 (groundwork and review fixes); PR 1 (5a/5b) is in progress. Written 2026-10-30 at v1.99.x, on branch `storyforge/extract-upper-layers-20261030-1525`.
 
 ## Goal
 
@@ -19,10 +19,10 @@ Start from a finished book and end with every file a Storyforge project normally
 |---|---|---|
 | `story-summary.md` | `scoring_levels` (L0–L2 floors), `scoring_story_power`, `scoring_coverage`, `cmd_illustrate` | Parsed by `common.parse_story_summary` (four `##` sections plus `_updated` frontmatter) |
 | `story-architecture.md` | `cmd_score`, `cmd_evaluate`, `prompts_elaborate` | Read whole |
-| `character-bible.md` | `cmd_score`, `scoring_bible`, `hone`, `prompts` (`build_shared_context`, so **every drafting call**) | Read whole |
-| `world-bible.md` | `scoring_bible`, `common`/`prompts` shared context, GN prompts | Read whole |
+| `character-bible.md` | `cmd_score`, `scoring_bible`, `hone`, `prompts`, and `common.build_shared_context`, so **every drafting, revision and scoring call** | Read whole |
+| `world-bible.md` | `scoring_bible`, `common.build_shared_context`, GN prompts | Read whole |
 | `voice-guide.md` | `prompts`, `scoring`, `revision`, `hone`, `cmd_evaluate`, `scoring_bible` | Read whole |
-| `voice-profile.csv` | `prompts`, `prompts_elaborate`, GN | **Missing from the issue's table.** Elaborate's voice stage writes it next to the voice guide |
+| `voice-profile.csv` | `prompts`, `prompts_elaborate`, `common.build_shared_context`, GN | **Missing from the issue's table.** Elaborate's voice stage writes it next to the voice guide |
 | `spine.csv`, `architecture.csv` | `scoring_levels` (L3/L4: 5–10 and 15–25 rows, summaries), `status`, `scoring_story_power`, `scoring_boundary`, `scoring_consistency`, `cmd_sync`, `illustrations` | Header only |
 | `themes.csv` | `schema` (the `theme_threads` registry), `elaborate`, `cmd_illustrate` | Header only, and no scene has `theme_threads` |
 | `motif-taxonomy.csv` | `enrich`, `cleanup`, `canon`, `illustrations`, `visualize`, `export` | Header only, while briefs already name motifs freely |
@@ -35,8 +35,8 @@ Start from a finished book and end with every file a Storyforge project normally
 
 **Gaps found that the issue doesn't list:**
 
-- **`scenes.csv:summary` is blank on extracted books.** Phase 3b writes a one-sentence `_summary` for every scene (`cmd_extract.py` around line 1026), uses it as rolling context, then drops it. The L5 floor, `outline.md`, the dashboard and this plan's structure pass all need it. Fixing this costs nothing.
-- **Template headers lag the schema.** `templates/reference/spine.csv` and `architecture.csv` lack `summary`, `scenes.csv` lacks `summary` and `architecture_scene`, and `scene-intent.csv` lacks `theme_threads`. `elaborate.py` and `cmd_migrate` define the real columns. Writers have to write the canonical header, not reuse whatever header is on disk.
+- **`scenes.csv:summary` was blank on extracted books** (fixed in PR 0). Phase 3b wrote a one-sentence summary for every scene, used it as rolling context, then dropped it. It now fills a blank cell, never an existing one. Books extracted before that still have blank summaries.
+- **Template headers lagged the schema** (fixed in PR 0, together with cleanup's expected schemas, `migrate-medium`'s headers, `scenes.py` and the init skill, which now all follow `elaborate._FILE_MAP`). Writers write the canonical header, never whatever header is on disk; `update_scene` and `migrate-medium` keep columns beyond it.
 - **`elaborate --stage voice` is prescriptive.** It asks for style rules, prohibited patterns and `banned_words`, which is right for a seed but wrong here (the issue's describe-don't-prescribe constraint). Extraction needs its own prompt. It should reuse elaborate's *output formats* (fenced `voice-guide` and `voice-profile-csv` blocks, CSV columns) so consumers see one shape.
 - **Eval projects predate the ledger.** Gatsby's still has `knowledge.csv` / `physical-states.csv`. The bible step has to handle `NotMigratedError` (use the briefs' knowledge instead, and say so).
 
@@ -44,7 +44,7 @@ Start from a finished book and end with every file a Storyforge project normally
 
 ### One new phase, 5 ("describe"), in its own module
 
-New code goes in **`storyforge/extract_describe.py`**: prompt builders, JSON schemas, parsers, the fillable predicate, and renderers. `cmd_extract.py` only gains `--phase 5`, a `_run_phase_5` dispatcher, and a call after phase 4. That keeps the overlap with #439 (which moves phase 4's code into `extract.py`) to a few lines in `main`.
+New code goes in **`storyforge/extract_describe.py`**: prompt builders, JSON schemas, parsers, the write gate, and renderers. `cmd_extract.py` only gains `--phase 5`, a `_run_phase_5` dispatcher, and a call after phase 4. That keeps the overlap with #439 (which moves phase 4's code into `extract.py`) to a few lines in `main`.
 
 Phase 5 runs direct (not batch): it's about seven calls, several of which depend on each other. Independent steps run through `runner.run_parallel`, with exceptions checked. Every call goes through `api` with a JSON schema, like phases 0–4.
 
@@ -54,10 +54,10 @@ The pattern throughout: **the model labels and code computes** (the #351 lesson)
 
 | Step | Output | Model's job | Code's job | Model |
 |---|---|---|---|---|
-| **5a structure** | `spine.csv`, `architecture.csv`, `scenes.csv:architecture_scene`, `scenes.csv:summary` where blank, `project.genre` / `subgenre` | Choose 5–10 spine events, each with title, function and a one-sentence summary, plus the scene ids it spans. Choose 15–25 anchor scenes from the **existing** scene ids, each assigned to a spine event. Name the genre. | Validate ids against `scenes.csv` (an unknown id fails the step). Copy `act`, `pov`, `action_sequel`, `emotional_arc`, `value_at_stake`, `value_shift` and `turning_point` from `scene-intent.csv` into `architecture.csv`. Anchor scenes get `architecture_scene` = their own id; interstitial scenes take the model's assignment or stay blank (the schema allows it). Run the L3/L4 floors (`score_spine` / `score_architecture`) and retry once with the findings if they fail. | Opus |
+| **5a structure** | `spine.csv`, `architecture.csv`, `scenes.csv:architecture_scene`, `scenes.csv:summary` where blank, `project.genre` / `subgenre` | Choose 5–10 spine events, each with title, function and a one-sentence summary, plus the scene ids it spans. Choose 15–25 anchor scenes from the **existing** scene ids, each assigned to a spine event. Name the genre. | Validate ids against `scenes.csv` (an unknown id fails the step). Copy `act`, `pov`, `action_sequel`, `emotional_arc`, `value_at_stake`, `value_shift` and `turning_point` from the scene CSVs into `architecture.csv`. Anchor scenes get `architecture_scene` = their own id; interstitial scenes stay blank (the schema allows it, and assigning them would be a guess). Retry once on the **mechanical** floors only (counts, ids, summaries of at most 35 words). The L4 action/sequel balance is a fact about the book and is never retried for: if *Gatsby*'s anchors fail it, the scorer reports it. | Opus |
 | **5b themes & motifs** | `themes.csv`, `motif-taxonomy.csv`, `scene-intent.csv:theme_threads`, normalized `scene-briefs.csv:motifs` | Name 3–7 themes as questions the book dramatizes, with tiers, and tag each scene with them. Group the briefs' free-text motifs into a taxonomy with aliases and tiers. | Count motif mentions in the briefs first. A motif in fewer than 2 scenes isn't offered as a candidate. Then normalize brief cells through the aliases, the same way `enrich` does. | Opus |
 | **5c pitch & architecture** | `story-summary.md`, `story-architecture.md` | Write both from the profile, the spine, themes, `mice-threads.csv` and the scene summaries in reading order. One call for both, so the logline and the premise can't disagree. | Render `story-summary.md` in the exact shape `parse_story_summary` reads, with `_updated` stamps. Run the L0–L2 floors and retry once. Structure section word counts come from `scenes.csv`, never from the model. | Opus |
-| **5d characters** | `character-bible.md` | Describe primary and secondary characters, the relationship map, voice notes and POV decisions, from the evidence it's given. | Build the evidence per character: `characters.csv`, the ledger's binding `fixed` facts (`trait`, `relationship`) with quotes, the arc from the scenes where they're POV or on stage, and 5–8 dialogue samples via `prose_analysis.extract_dialogue`. Order: POV characters, then by on-stage count. | Opus |
+| **5d characters** | `character-bible.md` | Describe primary and secondary characters, the relationship map, voice notes and POV decisions, from the evidence it's given. | Build the evidence per character: `characters.csv`, the ledger's binding `fixed` facts (`trait`, `relationship`) with quotes, the arc from the scenes where they're POV or on stage, and 5–8 dialogue samples, cut from `prose_analysis._DIALOGUE_RE` matches by a new helper (`extract_dialogue` joins every line into one string, so it can't give samples). Order: POV characters, then by on-stage count. | Opus |
 | **5e world** | `world-bible.md`, plus `systems-bible.md` only if the book has a formal system | Describe the world from the evidence. Say whether there's a formal system (magic, technology with rules); for *Gatsby*, there isn't. | Build the evidence: `locations.csv` with scene counts, the ledger's `world` facts with quotes, and the profile's `key_locations`. | Opus |
 | **5f voice** | `voice-guide.md`, `voice-profile.csv` | Describe the voice from sampled prose: opening, middle, close, and the three scenes with the most dialogue, about 30k tokens in total. Describe the book's habits; don't write rules. | Pick samples deterministically (by `seq` and dialogue ratio). Measure what's measurable (sentence-length spread, dialogue share, contraction rate) and give the numbers to the model rather than letting it guess. `banned_words` stays empty: absence isn't a ban. | Opus |
 | **5g deterministic** | `timeline.md`, `chapter-map.csv` if missing, provenance | none | Render `timeline.md` from `timeline_day` / `timeline_date` / `time_mode`, the profile's `timeline_span`, and flashback scenes (described, never flagged). Build the chapter map from the chapter headings scenes-setup left in each chapter's first scene. If there are none, report that rather than guessing. | none |
@@ -66,21 +66,21 @@ The pattern throughout: **the model labels and code computes** (the #351 lesson)
 
 ### The never-overwrite rule
 
-One predicate, `fillable(path, force) -> Fillable | Refusal`, used by every writer. A file is fillable if it is:
+One gate, `extract_describe.write_described`, is the only way phase 5 writes: it decides, writes, and records the hash. `_POLICY` holds the rule for every `FileState`, with a totality test. A file is written if it is:
 
 - missing,
 - empty,
-- a CSV with only a header row (any header, since templates lag the schema),
+- a CSV whose one line looks like a header (any header, since older projects carry older ones; `grief|Grief|core` is a row, not a header),
 - `is_unfilled_template`, or
 - **under `--force` only:** a file whose current content hash matches the provenance record, meaning extraction wrote it and nobody has edited it since.
 
-Anything else is **reported**, never overwritten, including an extracted doc an author has since edited, with or without `--force`. This follows the codebase's report-don't-mutate posture. The refusal names the file and why (`author-edited since extraction`), so silence means it was written.
+Anything else is **reported**, never overwritten, including an extracted doc an author has since edited, with or without `--force`. This follows the codebase's report-don't-mutate posture. So is a symlink (never written through), an unreadable file, and any file with content while the provenance record itself can't be read (`unverified`). The verdict names the file and why, so silence means it was written. An unusable provenance record is never rewritten: `write_described` raises `ProvenanceError` instead, because rewriting it from nothing would erase every other row.
 
 ### Provenance
 
 There are two records because CSVs can't carry comments:
 
-- Markdown docs start with `<!-- storyforge:extracted v1.x.y phase=5c from=profile,spine,themes -->`, so a person reading the file knows where it came from.
+- Markdown docs start with `<!-- storyforge:extracted v1.x.y step=5c from=profile,spine,themes -->`, so a person reading the file knows where it came from.
 - `working/extraction-provenance.csv` (`file|version|step|written_at|sha256`) is what the code trusts. The header alone isn't enough, because an author can edit the body and keep the header line.
 
 Files a book doesn't use (`systems-bible.md` for *Gatsby*) get a one-paragraph extracted stub ("No formal system: …", with provenance), not the template. The scorers then see "checked, not applicable" rather than "never looked".
@@ -99,8 +99,9 @@ Each PR has its own reviewer. Re-recording eval cassettes doesn't need a separat
 
 0. **Groundwork (patch, can start now; doesn't touch `cmd_extract`'s phase 4 region).**
    - Bring the template CSV headers in line with `elaborate.py`.
-   - Persist phase 3b's `_summary` into `scenes.csv:summary` where blank. This is a one-line write in the phase 3 region; check with #439's session first.
-   - Add `extract_describe.fillable` and the provenance read/write, with tests: every fillable case, the author-edited refusal with and without `--force`, CRLF and BOM files, and an unreadable file (reported, not treated as fillable).
+   - Persist phase 3b's `_summary` into `scenes.csv:summary` where blank (never for a scene with no row).
+   - Add the write gate (`extract_describe.write_described`) and the provenance record, with tests for every state, with and without `--force`.
+   - **Done, plus review fixes** (#442): the stale column lists, `migrate-medium` dropping summaries, the scorers' unguarded reads.
 1. **5a + 5b (minor).** Structure, themes and motifs. Tests: parsers on recorded replies, an unknown scene id failing the step, columns copied by code (not the model), the floor retry. **Needs #439 merged** for the `cmd_extract` dispatch.
 2. **5c (minor).** Pitch and story architecture. Tests: round-trip through `parse_story_summary`, the L0–L2 floors on the output, word counts taken from CSVs.
 3. **5d + 5e + 5f (minor).** Bibles and voice. Tests: evidence builders (fixed facts only, quotes kept, the `NotMigratedError` fallback stated), the no-imperatives lint, the `voice-profile.csv` schema, the systems-bible stub.

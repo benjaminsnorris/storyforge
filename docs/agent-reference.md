@@ -6,7 +6,7 @@ Lookup tables and subsystem rules moved out of `CLAUDE.md` on 2026-10-28 so that
 
 | Module | Use for |
 |---|---|
-| `common` | `detect_project_root`, `log`, `read_yaml_field(field, project_dir)`, `parse_yaml_scalar`, `yaml_single_quote`, `yaml_scalar_issue`, `detect_newline`, `update_artifact_entry`, `select_model`, `select_revision_model`, `get_coaching_level`, `check_chapter_map_freshness`, `get_plugin_dir`, `extract_craft_sections`, `install_signal_handlers`, `csv_safe`, pipeline manifest (`get_current_cycle`, `start_new_cycle`, `update_cycle_field`) |
+| `common` | `detect_project_root`, `log`, `read_yaml_field(field, project_dir)`, `parse_yaml_scalar`, `yaml_single_quote`, `yaml_scalar_issue`, `detect_newline`, `update_artifact_entry`, `select_model`, `select_revision_model`, `get_coaching_level`, `check_chapter_map_freshness`, `get_plugin_dir`, `extract_craft_sections`, `install_signal_handlers`, `csv_safe`, `is_unfilled_template` (a reference doc still its template: readers skip it, extract phase 5 may fill it), pipeline manifest (`get_current_cycle`, `start_new_cycle`, `update_cycle_field`) |
 | `git` | `create_branch`, `ensure_branch_pushed`, `create_draft_pr`, `update_pr_task`, `commit_and_push`, `run_review_phase` |
 | `cli` | `base_parser`, `add_scene_filter_args`, `resolve_filter_args` |
 | `runner` | `run_parallel(items, fn, max_workers, label)` returns `{item: result-or-Exception}` — check for exceptions; `run_batched`; `HealingZone` |
