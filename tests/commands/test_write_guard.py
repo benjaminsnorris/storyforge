@@ -326,7 +326,7 @@ class TestReviseRedraftFromBriefs:
         def hone(**k):  # rewrite a brief, as hone would
             with open(os.path.join(project_dir, 'reference', 'scene-briefs.csv'), 'a') as f:
                 f.write('\n')
-            return {'fields_rewritten': 1, 'scenes_rewritten': 1}
+            return {'fields_rewritten': 1, 'scenes_rewritten': 1, 'changed': k['scene_ids']}
         monkeypatch.setattr('storyforge.hone.hone_briefs', hone)
 
         def failing(*a, **k):
