@@ -4,6 +4,7 @@ Replaces api.sh — provides reliable JSON handling, HTTP calls, and
 cost calculation without jq/curl/awk compatibility issues.
 """
 
+import copy
 import json
 import os
 import sys
@@ -389,7 +390,13 @@ class ToolInputError(ValueError):
 
 
 class ToolLoopError(RuntimeError):
-    """The model was still calling tools after ``max_turns`` requests."""
+    """The exchange ended without an answer: the model was still calling
+    tools after ``max_turns`` requests, or stopped for a reason that leaves
+    no answer (``pause_turn``; ``tool_use`` with no tool call)."""
+
+#: Stop reasons that end an exchange with the reply returned (``max_tokens``
+#: is returned so the caller can check ``is_truncated``)
+_ANSWER_STOPS = ('end_turn', 'max_tokens', 'stop_sequence')
 
 
 @dataclass
@@ -399,7 +406,8 @@ class ToolRun:
     ``response``: the last reply (its text is the answer). ``responses``:
     every reply in order. ``calls``: ``(tool name, input, is_error)`` for
     each tool call made. ``usage``: the replies' token counts summed, in the
-    API's usage shape, so ``extract_usage`` and the cost helpers take it.
+    API's ``usage`` shape: ``extract_usage({'usage': run.usage})`` gives what
+    ``calculate_cost_from_usage`` takes. ``cost(model)`` is that.
     """
     response: dict
     responses: list[dict] = field(default_factory=list)
@@ -411,6 +419,10 @@ class ToolRun:
                 'cache_creation_input_tokens')
         return {k: sum((r.get('usage') or {}).get(k, 0) or 0 for r in self.responses)
                 for k in keys}
+
+    def cost(self, model: str) -> float:
+        """What the replies cost, priced on the summed usage."""
+        return calculate_cost_from_usage(extract_usage({'usage': self.usage}), model)
 
 
 def converse(prompt: str, model: str, tools: list[dict], handlers: dict,
@@ -431,12 +443,21 @@ def converse(prompt: str, model: str, tools: list[dict], handlers: dict,
     ``max_tokens`` is per reply (``THINKING_ALLOWANCE`` is added). A reply cut
     off at ``max_tokens`` ends the exchange and is returned: check
     ``is_truncated(run.response)``. ``log_file``, if given, gets every reply
-    as a JSON list, written after each turn so a failure leaves the trail.
+    as a JSON list, written after each turn so a failure leaves the trail
+    (``extract_text_from_file`` doesn't read it; use the returned run).
+
+    Each handler gets its own copy of the call's input, so the history sent
+    back stays as the model wrote it. Handlers must be deterministic (no set
+    ordering in their text): an eval cassette keys each request on the whole
+    conversation, results included.
 
     Raises:
         RefusalError: the model refused (the log is written first).
-        ToolLoopError: no answer after ``max_turns`` requests.
+        ToolLoopError: no answer after ``max_turns`` requests, or a stop that
+            leaves none.
         Whatever a handler raises other than ``ToolInputError``.
+        Each carries the exchange so far as ``.run``, so its spend can be
+        accounted for.
     """
     tools = [{**t, 'strict': True} for t in tools]
     missing = [t['name'] for t in tools if t['name'] not in handlers]
@@ -466,29 +487,42 @@ def converse(prompt: str, model: str, tools: list[dict], handlers: dict,
         run.response = response
         if log_file:
             _write_log(log_file, run.responses)
-        _check_refusal(response)
+        stop = response.get('stop_reason')
         uses = [b for b in response.get('content', []) if b.get('type') == 'tool_use']
-        if response.get('stop_reason') != 'tool_use' or not uses:
-            return run
+        try:
+            _check_refusal(response)
+            if stop in _ANSWER_STOPS:
+                return run
+            if stop != 'tool_use' or not uses:
+                raise ToolLoopError(f'{label or "tool exchange"}: stopped with '
+                                    f'{stop!r} and no tool call to run')
+        except (RefusalError, ToolLoopError) as e:
+            e.run = run
+            raise
         messages = messages + [{'role': 'assistant', 'content': response['content']}]
         results = []
         for use in uses:
-            name, args = use.get('name', ''), use.get('input') or {}
+            name, args = use.get('name', ''), copy.deepcopy(use.get('input') or {})
             handler = handlers.get(name)
             try:
                 if handler is None:
                     raise ToolInputError(f'there is no tool named {name!r}')
-                content, is_error = str(handler(args)), False
+                content, is_error = str(handler(copy.deepcopy(args))), False
             except ToolInputError as e:
                 content, is_error = str(e), True
+            except Exception as e:
+                e.run = run
+                raise
             run.calls.append((name, args, is_error))
             result = {'type': 'tool_result', 'tool_use_id': use['id'], 'content': content}
             if is_error:
                 result['is_error'] = True
             results.append(result)
         messages = messages + [{'role': 'user', 'content': results}]
-    raise ToolLoopError(f'{label or "tool exchange"}: still calling tools after '
-                        f'{max_turns} requests')
+    error = ToolLoopError(f'{label or "tool exchange"}: still calling tools after '
+                          f'{max_turns} requests')
+    error.run = run
+    raise error
 
 
 def is_truncated(response) -> bool:

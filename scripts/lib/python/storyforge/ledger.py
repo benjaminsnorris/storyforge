@@ -399,8 +399,12 @@ def replace_view(rows: list[dict[str, str]], type_: str,
 
     Raises:
         ValueError: if a new id is already a fact of another type (the ledger
-            would hold one id twice).
+            would hold one id twice), or `introduced_by` is a commitment
+            writer (its rows would drop out of the view it just wrote).
     """
+    if introduced_by.strip() in COMMITMENT_WRITERS:
+        raise ValueError(f'{introduced_by!r} writes commitments, not registry facts: '
+                         f'a view write needs a registry writer\'s name')
     wanted: dict[str, dict] = {}
     for vr in view_rows:
         rid = (vr.get('id') or '').strip()
@@ -468,9 +472,13 @@ def fill_quote(rows: list[dict[str, str]], fact_id: str, quote: str) -> bool:
     brief's promised fact, confirmed in the prose, gains its evidence
     (`docs/plans/2026-10-30-gate-ledger-design.md`).
 
+    The quote is not checked against the prose here: the gate passes only
+    quotes the checker found verbatim in the scene.
+
     Raises:
-        ValueError: `fact_id` is not in `rows`, is a commitment rather than a
-            registry fact, or `quote` is blank.
+        ValueError: `fact_id` is not in `rows`; is a commitment, not a binding
+            knowledge or physical registry fact (what a brief can name); or
+            `quote` is blank.
     """
     if not quote.strip():
         raise ValueError(f'{fact_id}: no quote to fill')
@@ -480,6 +488,9 @@ def fill_quote(rows: list[dict[str, str]], fact_id: str, quote: str) -> bool:
     if is_commitment(row):
         raise ValueError(f'{fact_id}: a commitment, not a registry fact; its quote '
                          f'is the one extraction recorded')
+    if row.get('status') != 'binding' or row.get('type') not in VIEW_COLUMNS:
+        raise ValueError(f'{fact_id}: not a binding knowledge or physical registry fact '
+                         f'(status {row.get("status")!r}, type {row.get("type")!r})')
     if (row.get('quote') or '').strip():
         return False
     row['quote'] = ' '.join(quote.split())

@@ -757,6 +757,12 @@ class TestCommitmentsAndRegistry:
         out = ledger.replace_view(rows, 'knowledge', [], origin='plan', introduced_by='hone')
         assert out == [rows[1]]
 
+    @pytest.mark.parametrize('writer', ledger.COMMITMENT_WRITERS)
+    def test_a_view_write_refuses_a_commitment_writer(self, writer):
+        with pytest.raises(ValueError, match='writes commitments'):
+            ledger.replace_view([], 'knowledge', [{'id': 'k1', 'name': 'K'}],
+                                origin='plan', introduced_by=writer)
+
     def test_a_blank_introduced_by_is_a_registry_fact(self):
         assert not ledger.is_commitment(_row('k1', introduced_by=''))
         assert ledger.is_commitment(_row('k1', introduced_by=' draft '))
@@ -777,8 +783,20 @@ class TestFillQuote:
         ('nope', 'q', 'not in commitments.csv'),
         ('c1', 'q', 'a commitment'),
         ('p1', '  ', 'no quote'),
+        ('r1', 'q', 'not a binding knowledge or physical'),
+        ('t1', 'q', 'not a binding knowledge or physical'),
     ])
     def test_refuses(self, rid, quote, needle):
-        rows = [_row('p1', introduced_by='hone'), _row('c1', introduced_by='draft')]
+        rows = [_row('p1', introduced_by='hone'), _row('c1', introduced_by='draft'),
+                _row('r1', status='rejected'), _row('t1', type='trait')]
         with pytest.raises(ValueError, match=needle):
             ledger.fill_quote(rows, rid, quote)
+
+
+@pytest.mark.parametrize('writer, flagged', [('draft', False), ('hone', True), ('', True)])
+def test_only_a_registry_physical_state_needs_a_character(tmp_path, writer, flagged):
+    from storyforge.schema import _ledger_reference_problems
+    (tmp_path / 'characters.csv').write_text('id|name\ntessa|Tessa\n')
+    rows = [_row('p1', subject='', introduced_by=writer)]
+    problems = _ledger_reference_problems(rows, str(tmp_path), set())
+    assert bool(problems) is flagged

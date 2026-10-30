@@ -41,6 +41,13 @@ class TestPrompt:
         assert "## Facts already recorded for this scene\n\nDon't restate these." in prompt
         assert '- marley-is-dead [knowledge, state, registry] -: Marley is dead' in prompt
 
+    @pytest.mark.parametrize('writer', ledger.COMMITMENT_WRITERS)
+    def test_a_commitment_from_any_writer_is_not_marked_registry(self, writer):
+        prompt = build_commitments_prompt('sc1', 'x', {}, known=[
+            {'id': 'k', 'type': 'world', 'subject': '', 'statement': 'S',
+             'introduced_by': writer}])
+        assert '- k [world, state] -: S' in prompt
+
     def test_the_rubric_leaves_out_staging_asides_and_invented_times(self):
         """F-127: on A Christmas Carol 44% of rows were incidental, mostly
         staging at scene end, and the wrong ones read a figure of speech
@@ -189,7 +196,7 @@ class TestPhase4:
         new = next(r for r in self._mine(project_dir) if r['scene_id'] == b)
         assert new['supersedes'] == 'map-anomaly-exists'
         out = capsys.readouterr().out
-        assert '1 registry state(s) the prose ends' in out
+        assert '1 state(s) recorded by another writer (the registry or the gate)' in out
         assert 'scar-left-hand-kael (resolves: never)' in out
         assert '1 "ends" naming no offered state' in out
 
@@ -209,6 +216,27 @@ class TestPhase4:
         new = next(r for r in self._mine(project_dir) if r['scene_id'] == b)
         assert new['supersedes'] == ''
         assert 'whose prose disagrees with a registry fact' in capsys.readouterr().out
+
+    def test_a_gate_commitment_is_recorded_for_the_scene_and_never_edited(
+            self, project_dir, monkeypatch, capsys):
+        """Review of #437: phase 4 must not restate the gate's rows for a
+        scene, and its `ends` must not set `resolves` on them (its --force
+        reset only clears its own rows)."""
+        from storyforge.cmd_extract import _build_sorted_scene_ids
+        ref = os.path.join(project_dir, 'reference')
+        a, b = _build_sorted_scene_ids(os.path.join(project_dir, 'scenes'), ref)[:2]
+        rows = ledger.load(project_dir)
+        for rid, sid in (('drafted-here', b), ('drafted-earlier', a)):
+            rows.append(dict({k: '' for k in ledger.COLUMNS}, id=rid, type='physical',
+                             statement=rid, origin='prose', status='binding',
+                             mutable='state', introduced_by='draft', scene_id=sid))
+        ledger.save(project_dir, rows, command='test')
+        _, calls = self._run(project_dir, monkeypatch, {b: _reply(
+            {'statement': 'It healed.', 'ends': ['drafted-earlier']})}, only=[a, b])
+        recorded = dict(calls)[b].split('## Facts already recorded for this scene')[1]
+        assert '- drafted-here [physical, state]' in recorded
+        assert {r['id']: r for r in ledger.load(project_dir)}['drafted-earlier']['resolves'] == ''
+        assert '1 state(s) recorded by another writer' in capsys.readouterr().out
 
     def _own(self, project_dir, rid, **fields):
         rows = ledger.load(project_dir)
@@ -234,7 +262,7 @@ class TestPhase4:
             {'statement': 'Tessa rested and the cut closed.', 'ends': ['tired', 'bleeding']})},
             only=[a, b, c])
         out = capsys.readouterr().out
-        assert 'registry state(s) the prose ends' not in out
+        assert 'recorded by another writer' not in out
         assert '1 state(s) the prose ends that already end elsewhere' in out
         assert {r['id']: r for r in ledger.load(project_dir)}['bleeding']['resolves'] == c
 

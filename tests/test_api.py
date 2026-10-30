@@ -490,3 +490,94 @@ class TestConverse:
         converse('q', 'claude-opus-5-5', self.TOOLS, {'lookup': lambda a: ''},
                  output_schema=schema)
         assert mock_req.call_args[0][1]['output_config']['format']['schema'] == schema
+
+
+class TestConverseReview:
+    """Review of #437: what a ToolRun carries, and the stops that aren't
+    answers."""
+    TOOLS = TestConverse.TOOLS
+    _tool_reply = staticmethod(TestConverse._tool_reply)
+
+    @patch('storyforge.api._api_request')
+    def test_the_history_is_the_reply_unchanged_even_if_a_handler_mutates(self, mock_req):
+        from storyforge.api import converse
+        first = self._tool_reply(('lookup', {'word': 'fog'}))
+        snapshot = json.loads(json.dumps(first['content']))
+        replies = [first, TestConverse.ANSWER]
+        bodies = []
+        mock_req.side_effect = lambda path, body, **k: (
+            bodies.append(json.loads(json.dumps(body))), replies.pop(0))[1]
+
+        def lookup(args):
+            args['word'] = 'changed'
+            return 'ok'
+        run = converse('q', 'claude-opus-5-5', self.TOOLS, {'lookup': lookup})
+        assert bodies[1]['messages'][1]['content'] == snapshot
+        assert run.calls[0][1] == {'word': 'fog'}
+
+    @patch('storyforge.api._api_request')
+    def test_a_reply_cut_off_mid_tool_call_runs_no_tool(self, mock_req):
+        from storyforge.api import converse, is_truncated
+        reply = self._tool_reply(('lookup', {'word': 'x'}))
+        reply['stop_reason'] = 'max_tokens'
+        mock_req.return_value = reply
+        ran = []
+        run = converse('q', 'claude-opus-5-5', self.TOOLS, {'lookup': ran.append})
+        assert ran == [] and is_truncated(run.response)
+
+    @patch('storyforge.api._api_request')
+    def test_an_unknown_tool_is_an_error_result(self, mock_req):
+        from storyforge.api import converse
+        replies = [self._tool_reply(('nope', {})), TestConverse.ANSWER]
+        bodies = []
+        mock_req.side_effect = lambda path, body, **k: (bodies.append(body), replies.pop(0))[1]
+        run = converse('q', 'claude-opus-5-5', self.TOOLS, {'lookup': lambda a: ''})
+        assert bodies[1]['messages'][2]['content'][0]['is_error'] is True
+        assert run.calls == [('nope', {}, True)]
+
+    @pytest.mark.parametrize('reply', [
+        {'stop_reason': 'pause_turn', 'content': [], 'usage': {'input_tokens': 3}},
+        {'stop_reason': 'tool_use', 'content': [], 'usage': {'input_tokens': 3}},
+    ])
+    @patch('storyforge.api._api_request')
+    def test_a_stop_with_no_answer_and_no_call_raises(self, mock_req, reply):
+        from storyforge.api import ToolLoopError, converse
+        mock_req.return_value = reply
+        with pytest.raises(ToolLoopError, match='no tool call') as e:
+            converse('q', 'claude-opus-5-5', self.TOOLS, {'lookup': lambda a: ''})
+        assert e.value.run.usage['input_tokens'] == 3
+
+    @patch('storyforge.api._api_request')
+    def test_failures_carry_the_run_so_far(self, mock_req, tmp_path):
+        from storyforge.api import RefusalError, ToolLoopError, converse
+        mock_req.return_value = self._tool_reply(('lookup', {'word': 'x'}))
+        with pytest.raises(ToolLoopError) as e:
+            converse('q', 'claude-opus-5-5', self.TOOLS, {'lookup': lambda a: ''}, max_turns=2)
+        assert e.value.run.usage['input_tokens'] == 20
+
+        mock_req.return_value = {'stop_reason': 'refusal', 'content': [],
+                                 'usage': {'input_tokens': 4}}
+        log = tmp_path / 'log.json'
+        with pytest.raises(RefusalError) as e:
+            converse('q', 'claude-opus-5-5', self.TOOLS, {'lookup': lambda a: ''},
+                     log_file=str(log))
+        assert e.value.run.usage['input_tokens'] == 4
+        assert json.loads(log.read_text())[0]['stop_reason'] == 'refusal'
+
+        def boom(args):
+            raise KeyError('bug')
+        mock_req.return_value = self._tool_reply(('lookup', {'word': 'x'}))
+        with pytest.raises(KeyError) as e:
+            converse('q', 'claude-opus-5-5', self.TOOLS, {'lookup': boom})
+        assert e.value.run.usage['input_tokens'] == 10
+
+    def test_cost_prices_the_summed_usage(self):
+        from storyforge.api import ToolRun, calculate_cost_from_usage, extract_usage
+        replies = [{'usage': {'input_tokens': 1000, 'output_tokens': 100,
+                              'cache_read_input_tokens': 5000}}] * 2
+        run = ToolRun(response=replies[-1], responses=replies)
+        expected = calculate_cost_from_usage(
+            {'input_tokens': 2000, 'output_tokens': 200, 'cache_read': 10000,
+             'cache_create': 0}, 'claude-opus-5-5')
+        assert run.cost('claude-opus-5-5') == expected > 0
+        assert extract_usage({'usage': run.usage})['cache_read'] == 10000
