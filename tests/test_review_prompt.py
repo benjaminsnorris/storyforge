@@ -337,3 +337,25 @@ class TestFillLevel:
         _, contents = review_file_sections(no_base_repo, ['storyforge.yaml', 'reference/scenes.csv', 'scenes/marley-was-dead.md'])
         assert contents.count('=== FILE:') == 3
         assert 'omitted' not in contents
+
+
+class TestFixableItemsAreReported:
+    """The cleanup pass sent the review to the API with no file tools,
+    dropped the reply and logged "Cleanup complete." (storyforge-evals:
+    Carol's 8 fixable items, none applied). Nothing can apply them there,
+    so they are named for the author instead, with no call."""
+
+    def test_no_call_and_no_claim(self, tmp_path, monkeypatch, capsys):
+        import storyforge.api
+        import storyforge.git as sfgit
+        calls = []
+        monkeypatch.setattr(storyforge.api, 'invoke_api', lambda *a, **kw: calls.append(a))
+        review = tmp_path / 'pipeline-review-1.md'
+        review.write_text('## Summary\n\nok\n\n## Fixable Items\n\n'
+                          '- [ ] fix a typo\n- [ ] set a subject\n')
+        sfgit._run_cleanup_if_needed(str(review), 'extraction', str(tmp_path))
+        out = capsys.readouterr().out
+        assert calls == []
+        assert 'Cleanup complete' not in out
+        assert '2 fixable item(s)' in out and 'not applied' in out
+        assert 'pipeline-review-1.md' in out
