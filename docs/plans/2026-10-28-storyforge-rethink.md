@@ -252,7 +252,7 @@ None. Ben can reopen any of the above.
 
 Each chunk is independently verifiable. Do them in order.
 
-**Progress (2026-10-30):** chunks 0–5 are done and merged, with E4 and E6. Chunk 6 (Phase 2) is next: its migration mapping was decided in `docs/plans/2026-10-30-ledger-migration-proposal.md`, and §3.1's columns gain `category`, `aliases`, `resolves` and `action_gating`. Current state, baseline numbers and how to resume: `docs/plans/2026-10-28-rethink-status.md`.
+**Progress (2026-10-30, evening):** chunks 0–5 are done. Chunk 6 (Phase 2) is built: the ledger, the migration (all seven books migrated), the rubric extraction (extract phase 4; E3 recall 0.898), the audit log and digest, and `export`. Its E5 criterion is still open, because drafting doesn't read the ledger yet. Chunk 7 (Phase 3) follows. Current state, baseline numbers and how to resume: `docs/plans/2026-10-28-rethink-status.md`.
 
 0. **Corpus survey.** Done; see `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Read its per-repo data-quality notes before touching any repo.
 1. `evals/harness` — runner, fixture recording, result schema, baseline command. Verify: runs on an empty suite.
