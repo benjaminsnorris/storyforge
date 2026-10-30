@@ -294,12 +294,22 @@ def _cell(row: dict, column: str) -> str:
 #: View columns per type. A physical view's `character` is the subject id.
 VIEW_COLUMNS = {'knowledge': KNOWLEDGE_COLUMNS, 'physical': PHYSICAL_COLUMNS}
 
+#: `introduced_by` of the rubric pass (extract phase 4). Its knowledge and
+#: physical facts are not registry entries: briefs don't reference them by
+#: id, so the views leave them out and view writes leave them as they are
+#: (Phase 3's gate is where the two meet).
+COMMITMENTS_PASS = 'commitments'
+
+
+def _in_view(row: dict, type_: str) -> bool:
+    return row.get('type') == type_ and row.get('introduced_by') != COMMITMENTS_PASS
+
 
 def view(rows: list[dict[str, str]], type_: str) -> list[dict[str, str]]:
-    """`type_`'s rows in its view's columns, in ledger order."""
+    """`type_`'s registry rows in its view's columns, in ledger order."""
     file = _FILE_OF[type_]
     return [{c: _old_cells(r, file, 'standard')[c] for c in VIEW_COLUMNS[type_]}
-            for r in rows if r.get('type') == type_]
+            for r in rows if _in_view(r, type_)]
 
 
 def knowledge_view(rows: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -353,11 +363,13 @@ def replace_view(rows: list[dict[str, str]], type_: str,
                  introduced_by: str) -> list[dict[str, str]]:
     """The ledger with `type_`'s rows replaced by `view_rows`.
 
-    Rows of every other type stay as they are, where they are. A `type_` row
-    whose id is still in `view_rows` keeps its place and every column the
-    view doesn't carry (quote, known_by, status, ...), and only the cells
-    whose view value changed are rewritten; one whose id is gone is dropped. A new id becomes a binding `state` fact with `origin` and
-    `introduced_by`, placed after the type's last row.
+    Rows of every other type, and the rubric pass's rows (`COMMITMENTS_PASS`),
+    stay as they are, where they are. A `type_` row whose id is still in
+    `view_rows` keeps its place and every column the view doesn't carry
+    (quote, known_by, status, ...), and only the cells whose view value
+    changed are rewritten; one whose id is gone is dropped. A new id becomes
+    a binding `state` fact with `origin` and `introduced_by`, placed after
+    the type's last row.
 
     Raises:
         ValueError: if a new id is already a fact of another type (the ledger
@@ -372,7 +384,7 @@ def replace_view(rows: list[dict[str, str]], type_: str,
     placed: set[str] = set()
     insert_at = None
     for row in rows:
-        if row.get('type') != type_:
+        if not _in_view(row, type_):
             out.append(row)
             continue
         vr = wanted.get(row.get('id', ''))
@@ -392,14 +404,15 @@ def replace_view(rows: list[dict[str, str]], type_: str,
         out.append(updated)
         placed.add(row['id'])
         insert_at = len(out)
-    other_ids = {r.get('id', '') for r in rows if r.get('type') != type_}
+    other_ids = {r.get('id', '') for r in rows if not _in_view(r, type_)}
     new = []
     for rid, vr in wanted.items():
         if rid in placed:
             continue
         if rid in other_ids:
             raise ValueError(f'{rid}: already in {LEDGER_FILE} as another type '
-                             f'of fact; a {type_} fact needs its own id')
+                             f'of fact (or a commitment); a {type_} fact needs '
+                             f'its own id')
         row = _base_row(rid, type_)
         row.update(origin=origin, introduced_by=introduced_by)
         row.update(_from_view(type_, vr))

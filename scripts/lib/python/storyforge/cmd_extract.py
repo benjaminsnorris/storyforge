@@ -9,6 +9,7 @@ Usage:
     storyforge extract --phase 1              # Skeleton only
     storyforge extract --phase 2              # Intent only (needs phase 1)
     storyforge extract --phase 3              # Briefs only (needs phases 1-2)
+    storyforge extract --phase 4              # Commitments (the reader-noticeable rubric) only
     storyforge extract --expand               # Run expansion analysis after extraction
     storyforge extract --dry-run              # Print prompts without invoking
 """
@@ -45,7 +46,8 @@ def parse_args(argv):
         description='Extract structural data from existing prose.',
     )
     parser.add_argument('--phase', type=int, default=None,
-                        help='Run only phase N (0=characterize, 1=skeleton, 2=intent, 3=briefs)')
+                        help='Run only phase N (0=characterize, 1=skeleton, 2=intent, '
+                             '3=briefs, 4=commitments)')
     parser.add_argument('--cleanup', action='store_true',
                         help='Run cleanup after extraction')
     parser.add_argument('--cleanup-only', action='store_true',
@@ -185,6 +187,13 @@ def main(argv=None):
                 log('')
                 log('--- Reconciling Phase 3 registries ---')
                 _run_hone(plugin_dir, phase=3)
+
+        # Phase 4: Commitments
+        if args.phase is None or args.phase == 4:
+            _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir,
+                         log_dir, args.force, args.dry_run, system=system)
+            if not args.dry_run:
+                update_pr_task('Phase 4: Extract commitments', project_dir)
 
     # Cleanup
     if not args.dry_run and (args.cleanup or (args.phase is None and not args.cleanup_only)):
@@ -705,27 +714,67 @@ def _prune_registries(ref_dir, created_facts, created_states):
             f'(left from the previous extraction): {", ".join(dropped)}')
 
 
-def _facts_before(registry, scene_id, order):
-    """id → name of the knowledge facts established before `scene_id` in
-    reading order (`ledger.established_before`), plus the facts with no known
+def _facts_before(registry, shown, order):
+    """id → name of the knowledge facts the book has established before a
+    scene: those an earlier scene's `knowledge_out` holds or an earlier
+    scene declared (`shown`, see `_shown_ids`), plus the facts with no known
     position: backstory (no scene, true before scene 1) and a scene id that
     isn't in `order` (a renamed or removed scene; `_unplaced_facts` names
-    them for a WARNING, and validate reports them)."""
-    from storyforge import ledger
-    rows = ledger.replace_view([], 'knowledge', list(registry.values()),
-                               origin='prose', introduced_by='extract')
-    before = {r['id'] for r in ledger.established_before(rows, scene_id, order,
-                                                         type_='knowledge')}
+    them for a WARNING, and validate reports them).
+
+    Not the ledger's stored scene (F-123): on a forced re-run that is where
+    the last run put the fact, so a scene that no longer establishes it was
+    skipped while later scenes were offered an id nothing in this run had
+    shown."""
     return {fid: row.get('name', '') for fid, row in registry.items()
-            if fid in before or _unplaced(row, order)}
+            if fid in shown or _unplaced(row, order)}
 
 
-def _facts_through(registry, scene_id, order):
-    """The registry rows established before or in `scene_id`, plus the facts
-    with no known position (see `_facts_before`)."""
-    at = order[scene_id]
+def _facts_through(registry, shown, scene_id, order):
+    """The registry rows a reply for `scene_id` may name: those offered it
+    (`_facts_before`), plus the facts the scene declared or that the ledger
+    places at this scene, so its own facts' wording lands on their ids."""
     return {fid: row for fid, row in registry.items()
-            if _unplaced(row, order) or order[row['origin'].strip()] <= at}
+            if fid in shown or _unplaced(row, order)
+            or (row.get('origin') or '').strip() == scene_id}
+
+
+def _place_declared_facts(result, declared, shown_before):
+    """Keep a reply's lists consistent with the facts it declared (F-123).
+
+    A fact the scene declares is established there, so it belongs in its
+    knowledge_out, and in its knowledge_in only if an earlier scene already
+    showed it. A reply that declared a fact but left it out of
+    knowledge_out made the next scene's knowledge_in name a fact no
+    knowledge_out had established (P&P: `bennet-estate-entailed`); one
+    that listed it in its own knowledge_in had the scene know it before it
+    happened. Returns a note of what moved, or ''.
+    """
+    def ids(value):
+        return [i.strip() for i in (value or '').split(';') if i.strip()]
+    k_in, k_out = ids(result.get('knowledge_in')), ids(result.get('knowledge_out'))
+    early = [i for i in k_in if i in declared and i not in shown_before]
+    missing = sorted(declared - set(k_out))
+    if early:
+        result['knowledge_in'] = ';'.join(i for i in k_in if i not in early)
+    if missing:
+        result['knowledge_out'] = ';'.join(k_out + missing)
+    notes = []
+    if missing:
+        notes.append(f'declared but not in knowledge_out, added: {", ".join(missing)}')
+    if early:
+        notes.append(f'declared here but in knowledge_in, removed: {", ".join(early)}')
+    return '; '.join(notes)
+
+
+def _shown_ids(scene_ids, ref_dir):
+    """Every knowledge id the briefs of `scene_ids` hold in `knowledge_out`."""
+    from storyforge.elaborate import get_scene
+    shown = set()
+    for sid in scene_ids:
+        out = (get_scene(sid, ref_dir) or {}).get('knowledge_out', '')
+        shown.update(i.strip() for i in out.split(';') if i.strip())
+    return shown
 
 
 def _unplaced(row, order):
@@ -857,7 +906,16 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             f'scene is offered them, like backstory (fix their scene_id in '
             f'{ledger.LEDGER_FILE}): {", ".join(unplaced)}')
 
+    # Facts the scenes so far established in this pass (F-123): each earlier
+    # scene's knowledge_out as it now stands (this run's reply; on an
+    # unforced run, what the brief already held where the reply was empty)
+    # and the facts it declared
+    shown = set()
+    previous = None
     for scene_id in sorted_scene_ids:
+        if previous is not None:
+            shown |= _shown_ids([previous], ref_dir)
+        previous = scene_id
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
         if not os.path.isfile(scene_path):
             continue
@@ -872,11 +930,11 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
         # Only what the book has shown before this scene (F-123): a forced
         # re-run seeded from the last run must not offer a fact a later
-        # scene reveals
+        # scene reveals, nor one only the last run established
         prompt = build_knowledge_prompt(
             scene_id, scene_text, skeleton, intent, knowledge_state, summaries,
             registries_text=knowledge_registries,
-            known_facts=_facts_before(knowledge_registry, scene_id, reading_order))
+            known_facts=_facts_before(knowledge_registry, shown, reading_order))
 
         knowledge_log = os.path.join(log_dir, f'extract-knowledge-{scene_id}.json')
 
@@ -902,13 +960,20 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                                           result.get('_new_facts', []), scene_id,
                                           reading_order)
         created_facts.update(added)
+        declared = {f.get('id', '').strip() for f in result.get('_new_facts', [])
+                    if f.get('id', '').strip()}
+        shown_before = set(shown)
+        shown |= declared
         # Writes only when a fact was added or moved earlier
         ledger.write_view(ref_dir, 'knowledge', list(knowledge_registry.values()),
                           origin='prose', introduced_by='extract')
-        visible = _facts_through(knowledge_registry, scene_id, reading_order)
+        visible = _facts_through(knowledge_registry, shown, scene_id, reading_order)
         for k in ('knowledge_in', 'knowledge_out'):
             if result.get(k):
                 result[k] = resolve_knowledge_ids(visible, result[k])
+        moved = _place_declared_facts(result, declared, shown_before)
+        if moved:
+            log(f'  {scene_id}: {moved}')
         # Plastic Age: "henley-indicts-college-conformity" named no scene
         if result.get('continuity_deps'):
             result['continuity_deps'], dropped = resolve_scene_deps(
@@ -1021,6 +1086,146 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                     'Extract: Phase 3c — physical state chain',
                     ['reference/scene-briefs.csv', 'reference/commitments.csv',
                      'working/'])
+
+
+#: Earlier commitments offered to a scene's prompt, most recent first
+MAX_KNOWN_COMMITMENTS = 200
+
+
+def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
+                 force, dry_run, system=None):
+    """Phase 4: every commitment each scene makes, by the reader-noticeable
+    rubric (plan decision 5), into the ledger.
+
+    Sequential: each scene is offered the earlier scenes' commitments still in
+    force, so one that changes says which it supersedes. Rows are binding,
+    `origin=prose`, `introduced_by=commitments` (`ledger.COMMITMENTS_PASS`),
+    with the establishing quote. A scene that already has rows from this pass
+    is skipped unless `force`, which replaces them. A quote not found in the
+    scene, a subject not in the registries, or a `supersedes` naming no
+    offered commitment is kept as given and counted in a WARNING.
+    """
+    from storyforge import ledger
+    from storyforge.common import csv_safe
+    from storyforge.elaborate import get_scene
+    from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps
+    from storyforge.extract import (COMMITMENTS_SCHEMA, build_commitments_prompt,
+                                    parse_commitments_response)
+
+    log('')
+    log('--- Phase 4: Extract commitments (sequential) ---')
+    model = select_model('evaluation')
+    registries = format_registries_for_prompt(project_dir, exclude=('knowledge',))
+    alias_maps = load_registry_alias_maps(project_dir)
+    subjects = {**alias_maps.get('locations', {}), **alias_maps.get('characters', {})}
+    order = {sid: i for i, sid in enumerate(sorted_scene_ids)}
+    rows = ledger.load_from(ref_dir)
+    if force and not dry_run:
+        # Every scene is re-extracted, so last run's rows go up front: a run
+        # that stops part-way leaves the later scenes with none (an unforced
+        # re-run fills them), never last run's rows superseding ids this run
+        # no longer has
+        rows = [r for r in rows if not (r.get('introduced_by') == ledger.COMMITMENTS_PASS
+                                        and r.get('scene_id') in order)]
+    done = {r['scene_id'] for r in rows if r.get('introduced_by') == ledger.COMMITMENTS_PASS}
+    problems = {'quote': [], 'no quote': [], 'subject': [], 'supersedes': []}
+    written = 0
+
+    for scene_id in sorted_scene_ids:
+        scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
+        if not os.path.isfile(scene_path):
+            continue
+        with open(scene_path, encoding='utf-8') as f:
+            scene_text = f.read()
+        if not scene_text.strip():
+            continue
+        if scene_id in done and not force:
+            continue
+        scene = get_scene(scene_id, ref_dir) or {}
+        skeleton = {k: scene.get(k, '') for k in ('title', 'pov', 'location')}
+        mine = [r for r in rows if r.get('introduced_by') == ledger.COMMITMENTS_PASS]
+        known = ledger.established_before(mine, scene_id, order)
+        superseded = {s for r in known for s in ledger._split(r.get('supersedes', ''))}
+        known = [r for r in known if r['id'] not in superseded][-MAX_KNOWN_COMMITMENTS:]
+        prompt = build_commitments_prompt(scene_id, scene_text, skeleton,
+                                          registries_text=registries, known=known)
+        if dry_run:
+            print(f'===== DRY RUN: Phase 4 (commitments), first of '
+                  f'{len(sorted_scene_ids)} scenes: {scene_id} =====')
+            print(prompt)
+            print('===== END DRY RUN =====')
+            return
+
+        log_file = os.path.join(log_dir, f'extract-commitments-{scene_id}.json')
+        try:
+            response = invoke_to_file(prompt, model, log_file, 8000, system=system,
+                                      output_schema=COMMITMENTS_SCHEMA)
+            _log_api_usage(log_file, 'extract-commitments', scene_id, model, project_dir)
+            if is_truncated(response):
+                raise ValueError('the reply hit its token limit')
+            found = parse_commitments_response(extract_text(response), scene_id)
+        except Exception as e:
+            _halt_chain(project_dir, '4 — commitments', scene_id, e,
+                        ['reference/commitments.csv', 'working/'])
+
+        taken = {r['id'] for r in rows}
+        known_ids = {r['id'] for r in known}
+        flat = ' '.join(scene_text.split())
+        for n, item in enumerate(found, start=1):
+            row = {c: '' for c in ledger.COLUMNS}
+            row.update(id=_commitment_id(scene_id, item['statement'], taken),
+                       scene_id=scene_id, type=item['type'] or 'world',
+                       statement=item['statement'], quote=item['quote'],
+                       origin='prose', status='binding',
+                       mutable=item['mutable'] or 'state',
+                       introduced_by=ledger.COMMITMENTS_PASS)
+            # A `|` or line break would corrupt the row (write_ledger refuses it)
+            subject = ' '.join(item['subject'].replace('|', ',').split())
+            if subject:
+                resolved = subjects.get(subject.lower())
+                if resolved:
+                    subject = resolved
+                else:
+                    problems['subject'].append(f'{scene_id}: {csv_safe(subject)}')
+            row['subject'] = subject
+            if item['supersedes']:
+                if item['supersedes'] in known_ids:
+                    row['supersedes'] = item['supersedes']
+                else:
+                    problems['supersedes'].append(f'{scene_id}: {item["supersedes"]}')
+            if not item['quote']:
+                problems['no quote'].append(f'{scene_id}: {row["id"]}')
+            elif ' '.join(item['quote'].split()) not in flat:
+                problems['quote'].append(f'{scene_id}: {row["id"]}')
+            taken.add(row['id'])
+            rows.append(row)
+            written += 1
+        ledger.save_to(ref_dir, rows, command=ledger.COMMITMENTS_PASS)
+        log(f'  {scene_id}: {len(found)} commitment(s)')
+
+    for kind, what in (('quote', 'quote(s) not found verbatim in their scene'),
+                       ('no quote', 'commitment(s) with no quote'),
+                       ('subject', 'subject(s) not a character or location id, kept as '
+                                   'written (an object has no registry)'),
+                       ('supersedes', '"supersedes" naming no earlier commitment, dropped')):
+        if problems[kind]:
+            log(f'  WARNING: {len(problems[kind])} {what}: '
+                + '; '.join(problems[kind][:20])
+                + (' ...' if len(problems[kind]) > 20 else ''))
+    log(f'  Phase 4: {written} commitment(s) written')
+    commit_and_push(project_dir, 'Extract: Phase 4 — commitments',
+                    ['reference/commitments.csv', 'working/'])
+
+
+def _commitment_id(scene_id: str, statement: str, taken: set[str]) -> str:
+    """`{scene_id}--{first words of the statement}`, unique in the ledger."""
+    import re
+    words = re.sub(r'[^a-z0-9]+', '-', statement.lower()).strip('-').split('-')
+    base = f'{scene_id}--{"-".join(words[:6])}'.rstrip('-')
+    rid, n = base, 2
+    while rid in taken:
+        rid, n = f'{base}-{n}', n + 1
+    return rid
 
 
 # ============================================================================

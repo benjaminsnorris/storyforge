@@ -345,6 +345,8 @@ def _chain_or_csv_reply(prompt):
     if 'Track the physical state' in prompt:
         return json.dumps({'physical_state_in': [], 'physical_state_out': [],
                            'new_states': [], 'resolved_states': []})
+    if 'Extract every commitment the scene makes' in prompt:
+        return json.dumps({'commitments': []})
     return 'id|seq|title\nact1-sc01|1|Test\n'
 
 
@@ -991,7 +993,7 @@ class TestKnowledgeChainOffersOnlyEarlierFacts:
     fact the book reveals later. Only facts established before the scene in
     reading order (plus backstory) are offered, or resolved."""
 
-    def _run(self, project_dir, mock_api, monkeypatch, replies):
+    def _run(self, project_dir, mock_api, monkeypatch, replies, force=True):
         from storyforge import cmd_extract, extract, ledger
         ref_dir = os.path.join(project_dir, 'reference')
         rows = ledger.load_from(ref_dir)
@@ -1022,20 +1024,76 @@ class TestKnowledgeChainOffersOnlyEarlierFacts:
         cmd_extract._run_phase_3(order, project_dir, os.path.join(project_dir, 'scenes'),
                                  ref_dir, os.path.join(project_dir, 'working', 'logs'),
                                  os.path.join(project_dir, 'working', 'profile.json'),
-                                 force=True, dry_run=False)
+                                 force=force, dry_run=False)
         return offered, ledger.view_map(ref_dir, 'knowledge')
+
+    BACKSTORY = {'archive-erasure', 'subsidence-not-natural', 'council-dismisses-evidence'}
 
     def test_a_scene_is_offered_only_facts_from_earlier_scenes(
             self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
-        offered, _ = self._run(project_dir, mock_api, monkeypatch, {})
+        replies = {'act1-sc02': _structured(
+            'KNOWLEDGE_SCHEMA', knowledge_out=['A map anomaly exists in the pressure records'])}
+        offered, _ = self._run(project_dir, mock_api, monkeypatch, replies)
         # Backstory, and archive-erasure, whose scene is no scene
-        backstory = {'archive-erasure', 'subsidence-not-natural', 'council-dismisses-evidence'}
-        assert set(offered['act1-sc01']) == backstory
-        assert set(offered['act1-sc02']) == backstory          # not its own fact
-        assert set(offered['new-x1']) == backstory | {'map-anomaly-exists'}
+        assert set(offered['act1-sc01']) == self.BACKSTORY
+        assert set(offered['act1-sc02']) == self.BACKSTORY     # not its own fact
+        assert set(offered['new-x1']) == self.BACKSTORY | {'map-anomaly-exists'}
         assert 'village-vanished' not in offered['act2-sc01']   # established there
         assert offered['new-x1']['map-anomaly-exists'] == \
             'A map anomaly exists in the pressure records'
+
+    def test_a_fact_this_run_never_established_is_not_offered(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        """F-123 on v1.93.0: the ledger places map-anomaly-exists at act1-sc02
+        (the last run's answer). A forced run whose act1-sc02 reply omits it
+        must not offer it to later scenes: nothing in this run has shown it,
+        and a later knowledge_in naming it would be flagged (P&P: 32 flags)."""
+        offered, _ = self._run(project_dir, mock_api, monkeypatch, {})
+        assert set(offered['new-x1']) == self.BACKSTORY
+        assert 'map-anomaly-exists' not in offered['act2-sc01']
+
+    def test_a_declared_fact_is_placed_in_its_scenes_knowledge_out(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        """P&P on the fix's first run: a scene declared a fact but left it
+        out of knowledge_out (the next scene's knowledge_in then named an
+        unestablished fact), and another listed its own new fact in
+        knowledge_in."""
+        from storyforge.elaborate import get_scene
+        fact = {'id': 'estate-entailed', 'name': 'The estate is entailed',
+                'category': 'state-change'}
+        replies = {
+            'act1-sc01': _structured('KNOWLEDGE_SCHEMA', knowledge_out=[],
+                                     new_facts=[fact]),
+            'act1-sc02': _structured('KNOWLEDGE_SCHEMA', knowledge_in=['tower-sealed'],
+                                     knowledge_out=['tower-sealed'],
+                                     new_facts=[{'id': 'tower-sealed',
+                                                 'name': 'The tower is sealed',
+                                                 'category': 'state-change'}]),
+        }
+        self._run(project_dir, mock_api, monkeypatch, replies)
+        ref_dir = os.path.join(project_dir, 'reference')
+        assert 'estate-entailed' in get_scene('act1-sc01', ref_dir)['knowledge_out'].split(';')
+        sc02 = get_scene('act1-sc02', ref_dir)
+        assert 'tower-sealed' not in sc02['knowledge_in'].split(';')
+        assert 'tower-sealed' in sc02['knowledge_out'].split(';')
+
+    def test_place_declared_facts_keeps_a_fact_shown_earlier(self):
+        from storyforge.cmd_extract import _place_declared_facts
+        result = {'knowledge_in': 'old-fact', 'knowledge_out': ''}
+        note = _place_declared_facts(result, {'old-fact'}, shown_before={'old-fact'})
+        assert result['knowledge_in'] == 'old-fact'
+        assert result['knowledge_out'] == 'old-fact'
+        assert 'added: old-fact' in note
+
+    def test_an_unforced_run_counts_what_earlier_briefs_already_hold(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        """Without force an empty reply keeps the brief's knowledge_out, so
+        the fact it holds counts as shown for the scenes after it."""
+        from storyforge.elaborate import update_scene
+        update_scene('act1-sc02', os.path.join(project_dir, 'reference'),
+                     {'knowledge_out': 'map-anomaly-exists'})
+        offered, _ = self._run(project_dir, mock_api, monkeypatch, {}, force=False)
+        assert 'map-anomaly-exists' in offered['new-x1']
 
     def test_a_later_facts_wording_is_not_resolved_to_its_id(
             self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):

@@ -15,8 +15,9 @@ def run(ctx):
     by_code: dict[str, Counter] = {}
     notes = [f'excluded {len(ids)}: {reason}' for reason, ids in sorted(excluded.items())]
     for item in items:
-        knowledge, physical = e3.extract(e3.project_for(item, ctx.work_dir), item['scene'])
-        verdict = e3.judge(item, knowledge, physical)['verdict']
+        knowledge, physical, commitments = e3.extract(
+            e3.project_for(item, ctx.work_dir), item['scene'])
+        verdict = e3.judge(item, knowledge, physical, commitments)['verdict']
         counts[verdict] += 1
         by_code.setdefault(item['case']['code'], Counter())[verdict] += 1
         notes.append(f'{item["case"]["id"]} ({item["scene"]}): {verdict}')
