@@ -34,7 +34,7 @@ Last updated 2026-10-30 (afternoon), at v1.93.0 (#417, the ledger consumer switc
 - `tests/test_redraft_guard.py` (thornwall `19530d5`; the "reference doc" was `scenes/council.md`, a scene file);
 - `tests/test_hone.py::test_a_mapping_never_takes_an_alias_from_its_owner` (meridian-line `5433d3f`).
 
-**Dashboard (v1.86.0, #378, closes #371):** Storyforge sends versioned `dashboard_data` (schema version 1, contract in `docs/agent-reference.md`), and Bookshelf renders it (bookshelf#30). Folding it into the Phase 2 `export` bundle is still to do.
+**Dashboard (v1.86.0, #378, closes #371):** Storyforge sends versioned `dashboard_data` (schema version 1, contract in `docs/agent-reference.md`), and Bookshelf renders it (bookshelf#30). It folds into the Phase 2 `export` bundle unchanged, as `dashboard_data` (contract in `docs/agent-reference.md`, "Export bundle"); `evals/export_check.py` round-trips all seven books.
 
 **E2 recall:** the Phase 1 criterion "E2 recall improves over baseline" is not met. E2-Carol finds 0 of 37, and e2-corpus-drift recall is about 0.06 (E6's three runs: 0.078, 0.059, 0.020). Most of Carol's injected errors (physical state, knowledge, numbers) are outside what the timeline check reads, so real recall depends on the Phase 2 ledger and the Phase 3 checker.
 

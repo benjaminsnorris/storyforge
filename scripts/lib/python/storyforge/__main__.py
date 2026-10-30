@@ -74,6 +74,7 @@ COMMANDS = {
     'extract': 'storyforge.cmd_extract',
     'elaborate': 'storyforge.cmd_elaborate',
     'visualize': 'storyforge.cmd_visualize',
+    'export': 'storyforge.cmd_export',
     'timeline': 'storyforge.cmd_timeline',
     'assemble': 'storyforge.cmd_assemble',
     'cleanup': 'storyforge.cmd_cleanup',
