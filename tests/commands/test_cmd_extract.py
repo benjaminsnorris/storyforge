@@ -1119,6 +1119,40 @@ class TestKnowledgeChainOffersOnlyEarlierFacts:
         assert 'village-vanished' in offered['act1-sc02']
 
 
+class TestFactsNoBriefLists:
+    """F-125: since F-123, 3b offers a scene the facts earlier briefs'
+    knowledge_out hold, not the ledger's stored scene, so a fact an author
+    gave a scene but no brief lists is never offered. Nothing said so."""
+
+    def _unlist(self, project_dir, scene_ids):
+        from storyforge.elaborate import update_scene
+        for sid in scene_ids:
+            update_scene(sid, os.path.join(project_dir, 'reference'), {'knowledge_out': ''})
+
+    def test_warned_at_the_start_of_3b(self, project_dir, mock_api, mock_git,
+                                       mock_costs, monkeypatch, capsys):
+        self._unlist(project_dir, ['act1-sc01', 'act1-sc02'])
+        TestKnowledgeChainOffersOnlyEarlierFacts()._run(
+            project_dir, mock_api, monkeypatch, {}, force=False)
+        out = capsys.readouterr().out
+        assert ('WARNING: 2 knowledge fact(s) have a scene but no brief lists them '
+                'in knowledge_out' in out)
+        assert 'map-anomaly-exists (act1-sc02)' in out and 'village-vanished (act2-sc01)' in out
+        # A fact with no known scene has its own warning; backstory has none
+        warning = next(l for l in out.splitlines() if 'no brief lists them' in l)
+        assert 'archive-erasure' not in warning and 'subsidence-not-natural' not in warning
+
+    def test_a_listed_fact_is_not_named(self, project_dir, mock_api, mock_git,
+                                        mock_costs, monkeypatch, capsys):
+        # act1-sc01 still lists map-anomaly-exists
+        self._unlist(project_dir, ['act1-sc02'])
+        TestKnowledgeChainOffersOnlyEarlierFacts()._run(
+            project_dir, mock_api, monkeypatch, {}, force=False)
+        warning = next(l for l in capsys.readouterr().out.splitlines()
+                       if 'no brief lists them' in l)
+        assert 'WARNING: 1 knowledge fact(s)' in warning and 'map-anomaly-exists' not in warning
+
+
 class TestFactsWithNoKnownScene:
     """shared-dark's `burnside`, `playground`, `site-review`: a fact whose
     scene_id names no scene was never offered, and nothing said so."""
