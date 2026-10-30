@@ -15,7 +15,7 @@ Lookup tables and subsystem rules moved out of `CLAUDE.md` on 2026-10-28 so that
 | `scene_filter` | `build_scene_list`, `apply_scene_filter` |
 | `csv_cli` | `get_field`, `get_row`, `get_column`, `list_ids`, `update_field`, `append_row` |
 | `history` | `append_cycle`, `get_scene_history`, `detect_stalls`, `detect_regressions` |
-| `brief_names` | `invented_names(fields, known_text)` (capitalized words a rewrite brings in that the book never uses), `reference_text(project_dir)` (reference docs and registries, without `scene-briefs.csv`). Every model rewrite of a brief checks it: revise's upstream brief fix, `hone` briefs |
+| `brief_names` | `invented_names(fields, known_text)` (capitalized words a rewrite brings in that the book never uses), `reference_text(project_dir, rewritten=...)` (reference docs and registries, without the file being rewritten). Every model rewrite of a brief or intent checks it: revise's upstream brief fix, `hone` briefs and intent (`hone._apply_checked_rewrites`) |
 
 ## Skills
 

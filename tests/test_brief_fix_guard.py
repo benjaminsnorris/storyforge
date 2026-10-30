@@ -245,3 +245,27 @@ class TestHoneBriefsGuard:
                             'goal: Dorren files the Deep Archive audit by nightfall')
         assert result['fields_rewritten'] == 1 and result['rejected'] == {}
         assert self._goal(project_dir) == 'Dorren files the Deep Archive audit by nightfall'
+
+    def test_an_intent_rewrite_naming_someone_new_is_refused(self, project_dir, monkeypatch):
+        from storyforge import api
+        from storyforge.elaborate import _read_csv_as_map
+        from storyforge.hone import hone_intent
+        findings = os.path.join(project_dir, 'working', 'findings.csv')
+        os.makedirs(os.path.dirname(findings), exist_ok=True)
+        with open(findings, 'w') as f:
+            f.write('scene_id|target_file|fields|guidance\n')
+            f.write('act1-sc01|scene-intent.csv|function|Sharpen the function\n')
+        monkeypatch.setattr(api, 'invoke_to_file', lambda *a, **kw: None)
+        monkeypatch.setattr(api, 'extract_text_from_file',
+                            lambda path: 'function: shows Mallen taking over the office')
+        intent_csv = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+        before = _read_csv_as_map(intent_csv)['act1-sc01']['function']
+
+        result = hone_intent(os.path.join(project_dir, 'reference'), project_dir,
+                             scene_ids=['act1-sc01'], model='m',
+                             log_dir=os.path.join(project_dir, 'working', 'logs'),
+                             coaching_level='full', findings_file=findings)
+
+        assert result['rejected'] == {
+            'act1-sc01': ['evaluation rewrite of function named Mallen']}
+        assert _read_csv_as_map(intent_csv)['act1-sc01']['function'] == before

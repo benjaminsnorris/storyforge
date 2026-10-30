@@ -237,8 +237,8 @@ def _run_registry_domain(domain: str, ref_dir: str, project_dir: str,
 
 
 def _log_rejected(result: dict) -> None:
-    """Name the scenes whose brief rewrite was refused for naming someone or
-    something the book never mentions; their briefs are unchanged."""
+    """Name the scenes whose brief or intent rewrite was refused for naming
+    someone or something the book never mentions; those fields are unchanged."""
     rejected = result.get('rejected') or {}
     if rejected:
         log(f'  Left unchanged ({len(rejected)} scene(s)): the rewrite named words the book never uses')
@@ -359,6 +359,7 @@ def _run_intent_domain(ref_dir: str, project_dir: str, log_dir: str,
     rewritten = result.get('scenes_rewritten', 0)
     fields = result.get('fields_rewritten', 0)
     log(f'  Rewritten: {rewritten} scenes, {fields} fields')
+    _log_rejected(result)
 
     if rewritten > 0 or fields > 0:
         commit_and_push(project_dir,
