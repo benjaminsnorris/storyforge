@@ -15,6 +15,7 @@ Lookup tables and subsystem rules moved out of `CLAUDE.md` on 2026-10-28 so that
 | `scene_filter` | `build_scene_list`, `apply_scene_filter` |
 | `csv_cli` | `get_field`, `get_row`, `get_column`, `list_ids`, `update_field`, `append_row` |
 | `history` | `append_cycle`, `get_scene_history`, `detect_stalls`, `detect_regressions` |
+| `ledger` | `reference/commitments.csv` (plan §3.1): `read_ledger` / `write_ledger` (LF, prose through `csv_safe`), `validate_ledger`, `scene_order`, `active_states(rows, scene_id, order, subject=, entering=)` (derived per-character state), `established_before` (facts from earlier scenes only, F-123), and the migration from `knowledge.csv` / `physical-states.csv` (`migrate_registries` with reported quirks, `round_trip_differences`). `evals/ledger_check.py` runs the migration on copies of the book repos. No command reads it yet (Phase 2 PR 2) |
 | `brief_names` | `invented_names(fields, known_text)` (capitalized words a rewrite brings in that the book never uses), `reference_text(project_dir, exclude=...)` (reference docs and registries, without the files model rewrites write). Checked by revise's upstream brief fix and `hone`'s brief and intent rewrites (`hone._apply_checked_rewrites`, which trusts neither `scene-briefs.csv` nor `scene-intent.csv`); other writers of those files are not checked yet |
 
 ## Skills

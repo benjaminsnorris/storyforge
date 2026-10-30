@@ -182,6 +182,28 @@ class TestManifestCover:
         assert 'assets' not in manifest
         assert 'no cover image found' in capsys.readouterr().out
 
+    def test_a_configured_cover_that_is_missing_fails_the_manifest(self, tmp_path):
+        """Decision 2 (2026-10-30): publish used to warn and auto-detect, so it
+        shipped production/cover.png in place of the configured cover."""
+        from storyforge.assembly import generate_publish_manifest
+        proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
+        with open(os.path.join(proj, 'storyforge.yaml'), 'a') as f:
+            f.write('production:\n  cover_image: manuscript/assets/final.png\n')
+        production = tmp_path / 'production'
+        production.mkdir(exist_ok=True)
+        (production / 'cover.png').write_bytes(b'PNG data')
+
+        with pytest.raises(ValueError, match='manuscript/assets/final.png'):
+            generate_publish_manifest(proj, include_cover=True)
+
+    def test_a_configured_cover_is_not_checked_under_no_cover(self, tmp_path):
+        from storyforge.assembly import generate_publish_manifest
+        proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
+        with open(os.path.join(proj, 'storyforge.yaml'), 'a') as f:
+            f.write('production:\n  cover_image: manuscript/assets/final.png\n')
+
+        generate_publish_manifest(proj, include_cover=False)  # no raise
+
     def test_svg_cover_is_refused_as_an_asset(self, tmp_path, capsys):
         """The asset bucket takes png/jpg/jpeg/webp. An SVG is not publishable.
 
@@ -245,11 +267,14 @@ class TestResolveCoverPath:
 
     def test_absolute_path_passthrough(self, tmp_path):
         from storyforge.assembly import _resolve_cover_path
-        result = _resolve_cover_path(str(tmp_path), '/abs/path/cover.png')
-        assert result == '/abs/path/cover.png'
+        (tmp_path / 'cover.png').write_bytes(b'PNG')
+        result = _resolve_cover_path(str(tmp_path), str(tmp_path / 'cover.png'))
+        assert result == str(tmp_path / 'cover.png')
 
     def test_relative_path_resolved(self, tmp_path):
         from storyforge.assembly import _resolve_cover_path
+        (tmp_path / 'custom').mkdir()
+        (tmp_path / 'custom' / 'cover.svg').write_text('<svg/>')
         result = _resolve_cover_path(str(tmp_path), 'custom/cover.svg')
         assert result == os.path.join(str(tmp_path), 'custom/cover.svg')
 

@@ -365,6 +365,37 @@ class TestDeterministicScore:
         assert os.path.isdir(cycle_dir)
 
 
+class TestLightweightScore:
+    def test_failed_scenes_leave_latest_where_it_was(self, project_dir, monkeypatch):
+        """A polish-loop re-score with a refused scene used to repoint latest
+        at a cycle without that scene's scores."""
+        from storyforge.cmd_revise import _run_lightweight_score
+        scores_base = os.path.join(project_dir, 'working', 'scores')
+        os.makedirs(os.path.join(scores_base, 'cycle-1'))
+        os.symlink('cycle-1', os.path.join(scores_base, 'latest'))
+        monkeypatch.setattr('storyforge.cmd_score._score_direct',
+                            lambda *a, **kw: (1, ['act1-sc02']))
+        monkeypatch.setattr('storyforge.scoring.generate_diagnosis',
+                            lambda *a, **kw: None)
+
+        cycle_dir, _ = _run_lightweight_score(project_dir, ['act1-sc01', 'act1-sc02'])
+
+        assert os.readlink(os.path.join(scores_base, 'latest')) == 'cycle-1'
+        assert 'act1-sc02' in open(os.path.join(cycle_dir, 'incomplete.txt')).read()
+
+    def test_a_complete_re_score_moves_latest(self, project_dir, monkeypatch):
+        from storyforge.cmd_revise import _run_lightweight_score
+        scores_base = os.path.join(project_dir, 'working', 'scores')
+        monkeypatch.setattr('storyforge.cmd_score._score_direct',
+                            lambda *a, **kw: (1, []))
+        monkeypatch.setattr('storyforge.scoring.generate_diagnosis',
+                            lambda *a, **kw: None)
+
+        cycle_dir, _ = _run_lightweight_score(project_dir, ['act1-sc01'])
+
+        assert os.path.realpath(os.path.join(scores_base, 'latest')) == os.path.realpath(cycle_dir)
+
+
 class TestPolishLoopOrchestration:
     """Integration tests for _run_polish_loop two-phase orchestration."""
 

@@ -354,6 +354,140 @@ class TestValidateStructure:
         assert len(failed) > 0
 
 
+class TestTimelineOrderGroupsSteppingBack:
+    """F-122: on a multi-plot novel (Middlemarch) validate gave one
+    timeline-order note per scene, so two crosscuts alone gave 44 lines and
+    buried every other finding. A contiguous run of scenes set before the
+    story's present is one finding naming its first and last scene and the
+    count; every scene stays listed in the finding's ``scenes``."""
+
+    @staticmethod
+    def _scenes(rows):
+        return {sid: {'seq': str(i + 1), 'timeline_day': day, 'pov': pov,
+                      'time_mode': mode}
+                for i, (sid, day, pov, mode) in enumerate(rows)}
+
+    @staticmethod
+    def _failures(scenes):
+        from storyforge.elaborate import _validate_timeline
+        checks = []
+        _validate_timeline(scenes, checks)
+        return [c for c in checks if c['check'] == 'timeline-order' and not c['passed']]
+
+    def test_a_crosscut_run_is_one_finding(self):
+        scenes = self._scenes([
+            ('rome', '30', 'dorothea', ''),
+            ('fred-debt', '10', 'fred', ''),
+            ('horse-fair', '11', 'fred', ''),
+            ('confesses', '12', 'fred', ''),
+            ('rome-again', '31', 'dorothea', ''),
+        ])
+        failures = self._failures(scenes)
+        assert len(failures) == 1
+        f = failures[0]
+        assert f['severity'] == 'advisory'
+        assert f['scene_id'] == 'fred-debt'
+        assert f['scenes'] == ['fred-debt', 'horse-fair', 'confesses']
+        assert f['message'].startswith('Crosscut: 3 scenes, fred-debt (day 10) to confesses (day 12),')
+        assert "story's present (day 30, reached in rome)" in f['message']
+
+    def test_a_single_scene_keeps_its_one_line_message(self):
+        scenes = self._scenes([
+            ('rome', '30', 'dorothea', ''),
+            ('childhood', '5', 'dorothea', ''),
+            ('rome-again', '31', 'dorothea', ''),
+        ])
+        failures = self._failures(scenes)
+        assert [f['message'] for f in failures] == [
+            "Flashback: childhood (day 5) is set before the story's present "
+            "(day 30, reached in rome)"]
+        assert failures[0]['scene_id'] == 'childhood'
+        assert failures[0]['scenes'] == ['childhood']
+
+    def test_runs_split_where_the_present_returns(self):
+        scenes = self._scenes([
+            ('a', '30', 'x', ''), ('b', '10', 'y', ''), ('c', '11', 'y', ''),
+            ('d', '30', 'x', ''), ('e', '12', 'y', ''), ('f', '13', 'y', ''),
+        ])
+        failures = self._failures(scenes)
+        assert [f['scenes'] for f in failures] == [['b', 'c'], ['e', 'f']]
+        assert 'reached in a' in failures[0]['message']
+        assert 'reached in d' in failures[1]['message']
+
+    def test_a_mixed_run_counts_its_crosscut_and_flashback_scenes(self):
+        scenes = self._scenes([
+            ('present', '64', 'lydgate', ''),
+            ('vincys', '15', 'fred', ''),
+            ('paris', '-1100', 'lydgate', ''),
+            ('vote', '52', 'lydgate', ''),
+        ])
+        [f] = self._failures(scenes)
+        assert f['scenes'] == ['vincys', 'paris', 'vote']
+        assert f['message'].startswith('Crosscut: 3 scenes, vincys (day 15) to vote (day 52),')
+        assert '1 crosscut, 2 flashback' in f['message']
+        assert 'reaching back to day -1100' in f['message']
+
+    def test_a_scene_without_a_day_breaks_the_run_and_a_frame_does_not(self):
+        scenes = self._scenes([
+            ('a', '30', 'x', ''), ('b', '10', 'y', ''), ('frame', '99', 'n', 'frame'),
+            ('c', '11', 'y', ''), ('undated', '', 'y', ''), ('d', '12', 'y', ''),
+        ])
+        failures = self._failures(scenes)
+        assert [f['scenes'] for f in failures] == [['b', 'c'], ['d']]
+
+    def test_findings_match_the_flashback_passages(self):
+        from storyforge.structural import assess_flashbacks
+        scenes = self._scenes([
+            ('a', '30', 'x', ''), ('b', '10', 'y', ''), ('frame', '99', 'n', 'frame'),
+            ('c', '11', 'x', ''), ('undated', '', 'y', ''), ('d', '12', 'y', ''),
+            ('e', '40', 'x', ''), ('f', '39', 'x', ''), ('g', '41', 'y', ''),
+        ])
+        passages = [p['scenes'] for p in assess_flashbacks(scenes, {})]
+        assert [f['scenes'] for f in self._failures(scenes)] == passages
+        # Every scene set before the present is still listed: nothing is lost
+        listed = [sid for f in self._failures(scenes) for sid in f['scenes']]
+        assert listed == ['b', 'c', 'd', 'f']
+
+
+    def test_reaching_back_is_left_out_when_the_earliest_day_ends_the_run(self):
+        first = self._scenes([('p', '30', 'x', ''), ('a', '5', 'y', ''),
+                              ('b', '9', 'y', ''), ('c', '12', 'y', '')])
+        last = self._scenes([('p', '30', 'x', ''), ('a', '12', 'y', ''),
+                             ('b', '9', 'y', ''), ('c', '5', 'y', '')])
+        middle = self._scenes([('p', '30', 'x', ''), ('a', '12', 'y', ''),
+                               ('b', '5', 'y', ''), ('c', '9', 'y', '')])
+        assert 'reaching back' not in self._failures(first)[0]['message']
+        assert 'reaching back' not in self._failures(last)[0]['message']
+        assert self._failures(middle)[0]['message'].endswith('; reaching back to day 5')
+
+    def test_cut_and_merged_scenes_still_count_in_the_order(self):
+        """As the docstring says, unlike assess_flashbacks: a cut scene with a
+        later day still moves the present, and so ends a run."""
+        scenes = self._scenes([('p', '30', 'x', ''), ('a', '10', 'y', ''),
+                               ('gone', '40', 'x', ''), ('b', '11', 'y', '')])
+        scenes['gone']['status'] = 'cut'
+        failures = self._failures(scenes)
+        assert [f['scenes'] for f in failures] == [['a'], ['b']]
+        assert 'reached in gone' in failures[1]['message']
+
+    def test_finding_scene_list_names_every_scene_of_a_longer_run(self):
+        from storyforge.elaborate import finding_scene_list
+        assert finding_scene_list({'scenes': ['a', 'b', 'c']}) == 'scenes: a, b, c'
+        assert finding_scene_list({'scenes': ['a', 'b']}) == ''   # the message names both
+        assert finding_scene_list({'scene_id': 'a'}) == ''
+
+    def test_validate_text_report_lists_the_scenes_between(self, capsys):
+        from storyforge.cmd_validate import _print_human_readable
+        scenes = self._scenes([('p', '30', 'x', ''), ('a', '10', 'y', ''),
+                               ('mid', '11', 'y', ''), ('b', '12', 'y', '')])
+        failures = self._failures(scenes)
+        _print_human_readable({'structural': {'passed': False, 'checks': failures,
+                                              'failures': failures},
+                               'schema': None})
+        out = capsys.readouterr().out
+        assert 'scenes: a, mid, b' in out
+
+
 class TestComputeDraftingWaves:
     def test_waves(self, fixture_dir):
         from storyforge.elaborate import compute_drafting_waves
