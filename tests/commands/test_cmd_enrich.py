@@ -618,8 +618,8 @@ class TestFreeEnrichment:
 
 
 class TestIncompleteEnrichment:
-    """A scene with no usable reply used to be a
-    count in the summary (or 'non-fatal, continuing') with exit 0."""
+    """A scene with no usable reply used to be a count in the summary (or
+    'non-fatal, continuing') with exit 0."""
 
     def _env(self, project_dir, monkeypatch):
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
@@ -649,4 +649,4 @@ class TestIncompleteEnrichment:
 
         main(['--force', '--scenes', 'act1-sc01', '--fields', 'type'])
 
-        assert 'imeline' not in capsys.readouterr().out
+        assert 'timeline' not in capsys.readouterr().out.lower()
