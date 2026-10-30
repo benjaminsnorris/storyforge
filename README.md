@@ -186,7 +186,8 @@ my-novel/
 │   ├── world-bible.md
 │   ├── story-architecture.md
 │   ├── voice-guide.md
-│   └── characters.csv, locations.csv, motif-taxonomy.csv, values.csv, knowledge.csv, mice-threads.csv
+│   └── characters.csv, locations.csv, motif-taxonomy.csv, values.csv, mice-threads.csv,
+│       commitments.csv (the ledger: knowledge facts and physical states)
 ├── scenes/                  # Scene prose (pure markdown, no frontmatter)
 ├── briefs/                  # Extended briefs for complex scenes (optional)
 ├── manuscript/

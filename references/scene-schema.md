@@ -106,8 +106,8 @@ print(dump_schema_markdown())
 | `outcome` | enum: yes, no, yes-but, no-and, no-but | brief | How the scene ends for the POV character: yes (gets the goal) / no (fails) / yes-but (gets the goal, with a new complication or cost) / no-and (fails, and things get worse) / no-but (fails, but something genuinely goes their way). Bickham's scene disasters plus Kowal's no-but; see structural-craft.md §2. |
 | `crisis` | free_text | brief | The dilemma: best bad choice or irreconcilable goods (Story Grid). |
 | `decision` | free_text | brief | What the character actively chooses in response to the crisis. |
-| `knowledge_in` | registry: knowledge.csv (array) | brief | Fact IDs the POV character knows entering. Normalized against reference/knowledge.csv. See knowledge-guidelines.md for fact selection criteria. |
-| `knowledge_out` | registry: knowledge.csv (array) | brief | Fact IDs the POV character knows leaving. Includes knowledge_in plus new facts learned. Target 0.5-1.5 new facts per scene. See knowledge-guidelines.md. |
+| `knowledge_in` | registry: commitments.csv, type knowledge (array) | brief | Fact IDs the POV character knows entering. Normalized against the knowledge facts in reference/commitments.csv (the commitments ledger). See knowledge-guidelines.md for fact selection criteria. |
+| `knowledge_out` | registry: commitments.csv, type knowledge (array) | brief | Fact IDs the POV character knows leaving. Includes knowledge_in plus new facts learned. Target 0.5-1.5 new facts per scene. See knowledge-guidelines.md. |
 | `key_actions` | free_text | brief | Concrete things that happen in this scene. |
 | `key_dialogue` | free_text | brief | Specific lines or exchanges that must appear. |
 | `emotions` | free_text | brief | Emotional beats in sequence as they occur through the scene. |

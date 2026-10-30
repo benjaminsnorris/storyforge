@@ -30,7 +30,7 @@ Read all registry files in `reference/` to know canonical IDs for normalized fie
 - `reference/characters.csv` — canonical character IDs
 - `reference/locations.csv` — canonical location IDs
 - `reference/values.csv` — canonical value IDs
-- `reference/knowledge.csv` — canonical knowledge fact IDs
+- `reference/commitments.csv` — the commitments ledger: canonical knowledge fact IDs (`type` `knowledge`) and physical state IDs (`type` `physical`)
 - `reference/motif-taxonomy.csv` — canonical motif IDs
 - `reference/mice-threads.csv` — canonical MICE thread IDs
 

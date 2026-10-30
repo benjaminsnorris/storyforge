@@ -33,7 +33,7 @@ Read all registry files in `reference/` to know the canonical IDs for normalized
 - `reference/characters.csv` — canonical character IDs
 - `reference/locations.csv` — canonical location IDs
 - `reference/values.csv` — canonical value IDs
-- `reference/knowledge.csv` — canonical knowledge fact IDs
+- `reference/commitments.csv` — the commitments ledger: canonical knowledge fact IDs (`type` `knowledge`) and physical state IDs (`type` `physical`)
 - `reference/motif-taxonomy.csv` — canonical motif IDs
 - `reference/mice-threads.csv` — canonical MICE thread IDs
 
@@ -44,7 +44,8 @@ Read all registry files in `reference/` to know the canonical IDs for normalized
 | `pov`, `characters`, `on_stage` | characters.csv |
 | `location` | locations.csv |
 | `value_at_stake` | values.csv |
-| `knowledge_in`, `knowledge_out` | knowledge.csv |
+| `knowledge_in`, `knowledge_out` | commitments.csv, `type` `knowledge` |
+| `physical_state_in`, `physical_state_out` | commitments.csv, `type` `physical` |
 | `motifs` | motif-taxonomy.csv |
 | `mice_threads` | mice-threads.csv (format: `+type:id` or `-type:id`) |
 
@@ -246,7 +247,7 @@ In graphic-novel mode, the scene-map stage asks for `target_pages` per scene ins
 
 1. Read full scene map and all reference materials
 2. For each scene, define: goal, conflict, outcome, crisis, decision, knowledge_in, knowledge_out, key_actions, key_dialogue, emotions, motifs, continuity_deps
-   - **Use canonical IDs from registries** for knowledge_in, knowledge_out (knowledge.csv), motifs (motif-taxonomy.csv). Add new registry entries for any new knowledge facts or motifs introduced at this stage.
+   - **Use canonical IDs from registries** for knowledge_in, knowledge_out (the ledger's knowledge facts in commitments.csv), motifs (motif-taxonomy.csv). Add new registry entries for any new knowledge facts or motifs introduced at this stage: a new fact is a row of `reference/commitments.csv`, the commitments ledger, with `type` `knowledge`: `id`, the `scene_id` that establishes it (blank for backstory), the fact as one sentence in `statement`, `origin` `author` (or `plan` for a brief), `status` `binding`, `mutable` `state`; leave the other columns empty.
 3. **Knowledge wording must be exact** — knowledge_out from scene N becomes knowledge_in for later scenes, matched literally. Use registry IDs rather than free-text to ensure exact matching.
 4. Maximize scenes with no continuity_deps (these can be drafted in parallel)
 5. Write updates
