@@ -1028,6 +1028,13 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
             # simply cross into the next year
             if 'X' in y1 and between < 0:
                 between = (date(year + 1, m2, dd2) - date(year, m1, dd1)).days
+            # ... and a step back may cross into the year before:
+            # Middlemarch's Christmas Eve recalled after New Year's Day is a
+            # week back, not "357 days after" (F-118)
+            elif 'X' in y1 and d2 < d1:
+                back = (date(year - 1, m2, dd2) - date(year, m1, dd1)).days
+                if abs(back - (d2 - d1)) < abs(between - (d2 - d1)):
+                    between = back
         except ValueError:
             continue
         off = abs(between - (d2 - d1))
@@ -1040,7 +1047,11 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
             # A year-less date that steps back reads as going back, with the
             # turn of the year as the other reading: Carol's Christmas Eve
             # after Christmas Day isn't "364 days after" (F-059)
-            if between != same_year:
+            if between < 0 < same_year:
+                message = (f'its date ({dd2} {_MONTHS[m2 - 1]}) is {-between} day(s) before '
+                           f'{s1}\'s ({dd1} {_MONTHS[m1 - 1]}) if the year turned back, or '
+                           f'{same_year} day(s) after, but its day is {d2 - d1} day(s) after')
+            elif between != same_year:
                 message = (f'its date ({dd2} {_MONTHS[m2 - 1]}) is {-same_year} day(s) before '
                            f'{s1}\'s ({dd1} {_MONTHS[m1 - 1]}), or {between} day(s) after if the '
                            f'year turned, but its day is {d2 - d1} day(s) after')
