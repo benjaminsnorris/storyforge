@@ -1121,8 +1121,65 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                      'working/'])
 
 
-#: Earlier commitments offered to a scene's prompt, most recent first
+#: Facts in force offered to a scene's prompt. Past it, those about the
+#: scene's characters and location are kept first (F-128), fixed facts
+#: before states, then the most recent.
 MAX_KNOWN_COMMITMENTS = 200
+
+
+def _phase4_known(rows, scene_id, order, scene_subjects):
+    """What phase 4 offers `scene_id` (F-128): `(known, recorded, left_out)`.
+
+    `known`: binding facts in force entering the scene, from earlier scenes
+    or with no scene (backstory), registry and commitment rows alike: not
+    superseded by then, and no `state` whose `resolves` scene is already
+    past. A fact tied to a scene id that isn't in `order` is left out (it
+    may come later; F-123; `unplaced_registry_rows` names them). Over
+    `MAX_KNOWN_COMMITMENTS`, the facts about `scene_subjects` (subject or
+    `known_by`) are kept first, `fixed` before `state`, then the most recent;
+    the result is in reading order, and `left_out` counts the rest.
+
+    `recorded`: registry facts (not this pass's) already recorded for the
+    scene itself, which the scene must not restate.
+    """
+    from storyforge import ledger
+    at = order[scene_id]
+
+    def pos(r):
+        sid = r.get('scene_id', '').strip()
+        return -1 if not sid else order.get(sid)
+
+    binding = [r for r in rows if r.get('status') == 'binding' and pos(r) is not None]
+    earlier = [r for r in binding if pos(r) < at]
+    superseded = {old for r in earlier for old in ledger._split(r.get('supersedes', ''))}
+
+    def in_force(r):
+        if r['id'] in superseded:
+            return False
+        ends = r.get('resolves', '').strip()
+        return not (r.get('mutable') == 'state' and ends in order and order[ends] < at)
+    known = sorted((r for r in earlier if in_force(r)), key=pos)
+    left_out = max(0, len(known) - MAX_KNOWN_COMMITMENTS)
+    if left_out:
+        def about_scene(r):
+            return (r.get('subject', '') in scene_subjects
+                    or bool(set(ledger._split(r.get('known_by', ''))) & scene_subjects))
+        ranked = sorted(range(len(known)),
+                        key=lambda i: (not about_scene(known[i]),
+                                       known[i].get('mutable') != 'fixed', -i))
+        keep = set(ranked[:MAX_KNOWN_COMMITMENTS])
+        known = [r for i, r in enumerate(known) if i in keep]
+    recorded = [r for r in binding if pos(r) == at
+                and r.get('introduced_by') != ledger.COMMITMENTS_PASS]
+    return known, recorded, left_out
+
+
+def _unplaced_registry_rows(rows, order):
+    """Binding rows whose scene id is neither blank nor in `order`: phase 4
+    can't tell when they hold, so it offers them to no scene."""
+    return [r['id'] for r in rows if r.get('status') == 'binding'
+            and r.get('scene_id', '').strip()
+            and r['scene_id'].strip() not in order]
 
 
 def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
@@ -1130,8 +1187,14 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     """Phase 4: every commitment each scene makes, by the reader-noticeable
     rubric (plan decision 5), into the ledger.
 
-    Sequential: each scene is offered the earlier scenes' commitments still in
-    force, so one that changes says which it supersedes. Rows are binding,
+    Sequential: each scene is offered the facts in force entering it and the
+    registry facts already recorded for it (`_phase4_known`, F-128), so one
+    that changes a fact says which it supersedes or ends instead of restating
+    it. `ends` sets `resolves` on this pass's own earlier states. Reported in
+    WARNINGs for the author, never applied: a `supersedes` naming a registry
+    fact recorded for the same scene (the prose and the registry disagree),
+    an `ends` naming a registry state, or this pass's state already ended
+    elsewhere. Rows are binding,
     `origin=prose`, `introduced_by=commitments` (`ledger.COMMITMENTS_PASS`),
     with the establishing quote. A scene that already has rows from this pass
     is skipped unless `force`, which replaces them. A quote not found in the
@@ -1160,8 +1223,21 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         # no longer has
         rows = [r for r in rows if not (r.get('introduced_by') == ledger.COMMITMENTS_PASS
                                         and r.get('scene_id') in order)]
+        # ... and a kept row (an earlier scene, outside this run) loses an
+        # end that last run's `ends` set in a scene this run redoes
+        for r in rows:
+            if r.get('introduced_by') == ledger.COMMITMENTS_PASS \
+                    and r.get('resolves', '').strip() in order:
+                r['resolves'] = ''
     done = {r['scene_id'] for r in rows if r.get('introduced_by') == ledger.COMMITMENTS_PASS}
-    problems = {'quote': [], 'no quote': [], 'subject': [], 'supersedes': []}
+    problems = {'quote': [], 'no quote': [], 'subject': [], 'supersedes': [],
+                'disagrees': [], 'ends': [], 'ends registry': [], 'ends again': [],
+                'cap': []}
+    unplaced = _unplaced_registry_rows(rows, order)
+    if unplaced and not dry_run:
+        log(f'  WARNING: {len(unplaced)} ledger fact(s) name a scene not in this '
+            'run, so no scene is offered them: ' + ', '.join(unplaced[:20])
+            + (' ...' if len(unplaced) > 20 else ''))
     written = 0
 
     for scene_id in sorted_scene_ids:
@@ -1176,12 +1252,16 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             continue
         scene = get_scene(scene_id, ref_dir) or {}
         skeleton = {k: scene.get(k, '') for k in ('title', 'pov', 'location')}
-        mine = [r for r in rows if r.get('introduced_by') == ledger.COMMITMENTS_PASS]
-        known = ledger.established_before(mine, scene_id, order)
-        superseded = {s for r in known for s in ledger._split(r.get('supersedes', ''))}
-        known = [r for r in known if r['id'] not in superseded][-MAX_KNOWN_COMMITMENTS:]
+        names = [scene.get('pov', ''), scene.get('location', '')] \
+            + scene.get('on_stage', '').split(';')
+        scene_subjects = {subjects[n.strip().lower()] for n in names
+                          if n.strip().lower() in subjects}
+        known, recorded, left_out = _phase4_known(rows, scene_id, order, scene_subjects)
+        if left_out:
+            problems['cap'].append(f'{scene_id} ({left_out})')
         prompt = build_commitments_prompt(scene_id, scene_text, skeleton,
-                                          registries_text=registries, known=known)
+                                          registries_text=registries, known=known,
+                                          recorded=recorded)
         if dry_run:
             print(f'===== DRY RUN: Phase 4 (commitments), first of '
                   f'{len(sorted_scene_ids)} scenes: {scene_id} =====')
@@ -1202,7 +1282,8 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                         ['reference/commitments.csv', 'working/'])
 
         taken = {r['id'] for r in rows}
-        known_ids = {r['id'] for r in known}
+        offered = {r['id']: r for r in known}
+        here = {r['id']: r for r in recorded}
         flat = ' '.join(scene_text.split())
         for n, item in enumerate(found, start=1):
             row = {c: '' for c in ledger.COLUMNS}
@@ -1222,10 +1303,27 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                     problems['subject'].append(f'{scene_id}: {csv_safe(subject)}')
             row['subject'] = subject
             if item['supersedes']:
-                if item['supersedes'] in known_ids:
+                if item['supersedes'] in offered:
                     row['supersedes'] = item['supersedes']
+                elif item['supersedes'] in here:
+                    problems['disagrees'].append(f'{scene_id}: {item["supersedes"]} '
+                                                 f'(prose: {row["id"]})')
                 else:
                     problems['supersedes'].append(f'{scene_id}: {item["supersedes"]}')
+            for gone in item['ends']:
+                old = offered.get(gone)
+                ends = (old or {}).get('resolves', '').strip()
+                if old is None or old.get('mutable') != 'state':
+                    problems['ends'].append(f'{scene_id}: {gone}')
+                elif ends == scene_id:
+                    pass   # already ends here
+                elif old.get('introduced_by') != ledger.COMMITMENTS_PASS:
+                    problems['ends registry'].append(
+                        f'{scene_id}: {gone} (resolves: {ends or "blank"})')
+                elif ends:
+                    problems['ends again'].append(f'{scene_id}: {gone} (resolves: {ends})')
+                else:
+                    old['resolves'] = scene_id
             if not item['quote']:
                 problems['no quote'].append(f'{scene_id}: {row["id"]}')
             elif ' '.join(item['quote'].split()) not in flat:
@@ -1240,7 +1338,17 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                        ('no quote', 'commitment(s) with no quote'),
                        ('subject', 'subject(s) not a character or location id, kept as '
                                    'written (an object has no registry)'),
-                       ('supersedes', '"supersedes" naming no earlier commitment, dropped')):
+                       ('supersedes', '"supersedes" naming no earlier commitment, dropped'),
+                       ('disagrees', 'commitment(s) whose prose disagrees with a '
+                                     'registry fact recorded for the same scene; kept '
+                                     'both, unlinked: check which is right'),
+                       ('ends', '"ends" naming no offered state, dropped'),
+                       ('ends registry', 'registry state(s) the prose ends in a scene '
+                                         'its resolves doesn\'t say; check resolves'),
+                       ('ends again', 'state(s) the prose ends that already end '
+                                      'elsewhere; kept the first'),
+                       ('cap', f'scene(s) offered only {MAX_KNOWN_COMMITMENTS} of the '
+                               'facts in force (left out in brackets)')):
         if problems[kind]:
             log(f'  WARNING: {len(problems[kind])} {what}: '
                 + '; '.join(problems[kind][:20])

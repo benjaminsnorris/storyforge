@@ -94,8 +94,12 @@ def select(root: str | None = None) -> tuple[list[dict], dict[str, list[str]]]:
 
 def extract(project_dir: str, scene_id: str) -> tuple[str, str, str]:
     """Today's knowledge, physical-state and commitments responses for one
-    scene, scene-local (the commitments pass is offered no earlier
-    commitments: the trees predate it)."""
+    scene, scene-local. The commitments pass is offered nothing as known:
+    `storyforge extract` offers it the registry facts in force and those
+    already recorded for the scene (F-128, so it doesn't restate them), but
+    E3 asks whether the rubric itself captures the fact, so it measures the
+    pass with nothing to lean on. The migrated trees do hold registry rows;
+    E5 is where phase 4 runs with them."""
     from storyforge.api import extract_text, invoke
     from storyforge.common import select_model
     from storyforge import ledger

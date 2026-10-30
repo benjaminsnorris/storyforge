@@ -15,6 +15,7 @@ from typing import Any
 from .enrich import load_registry_alias_maps, normalize_fields  # noqa: F401
 from .enrich import is_placeholder, normalize_aliases, reduce_boolean, strip_placeholders
 from .common import log
+from .ledger import COMMITMENTS_PASS
 from .prompts import read_yaml_field
 
 
@@ -707,6 +708,9 @@ def parse_knowledge_response(response: str, scene_id: str) -> dict:
 
 #: The rubric as decided (rethink plan, decision 5). Ben may refine the wording
 #: and add categories from his own books; a change here is an E3 re-record.
+#: F-127 (2026-10-30, A Christmas Carol: 44% of rows incidental, mostly
+#: staging at scene end) narrowed "locations at scene end" to locations that
+#: carry forward and named staging, set dressing, asides and invented times.
 COMMITMENT_RUBRIC = """Extract every commitment the scene makes to the reader. A commitment is a claim about the story's world that a later scene could contradict in a way a careful reader would notice. For each sentence that establishes something, ask three questions:
 
 1. **Is it specific?** Does it name or imply a particular thing: an object, a place, a time, a distance, a name, a relationship, a piece of knowledge, a trait, a stated intention? Moods, impressions, and general atmosphere are not specific.
@@ -715,9 +719,17 @@ COMMITMENT_RUBRIC = """Extract every commitment the scene makes to the reader. A
 
 If all three are yes, record it as one declarative sentence with its quote. There is no cap. Record the claim, not the image: "Marley's ghost wears a chain made of cash-boxes, keys, padlocks, ledgers, deeds and purses," not "the chain is described vividly."
 
-Always capture: names and their spellings; pronouns and gender; ages and dates; who is related to whom and how; who knows what, and who told them; injuries, illness, possessions, and the locations of people and objects at scene end; the time of day and day the scene occurs; elapsed time stated relative to another event ("three weeks ago," "eight days ago"); counts and quantities (how many survivors, how many records, how many guards); distances and travel times; stated rules of the world; anything a character promises or threatens; anything the narrator states as fact about the past; information conveyed in dialogue.
+Always capture: names and their spellings; pronouns and gender; ages and dates; who is related to whom and how; who knows what, and who told them; injuries, illness, and possessions; where a person or object is when it carries past the scene (who holds the key, where the body lies, where someone is held or has gone); the time of day and day the scene occurs; elapsed time stated relative to another event ("three weeks ago," "eight days ago"); counts and quantities (how many survivors, how many records, how many guards); distances and travel times; stated rules of the world; anything a character promises or threatens; anything the narrator states as fact about the past; information conveyed in dialogue.
 
-Never capture: a character's emotion in the moment; sensory texture that recurs nowhere; the narrator's opinions; metaphor read literally; dialogue that is texture rather than information.
+Never capture:
+- staging: who stands, sits, crosses the room or turns to the door, where people are as the scene ends, unless it carries past the scene (someone locked in, left behind, hiding, gone to another place);
+- set dressing: furniture, decor, food on the table, passing weather and light, unless it is a named object, a stated rule, something the story returns to, or what fixes the time of day;
+- a character's emotion in the moment, or a passing physical reaction to it;
+- sensory texture that recurs nowhere;
+- the narrator's opinions, jokes and asides;
+- figurative language read literally: a figure of speech, a nickname for the devil, a daydream or hypothetical, a simile ("Old Scratch has got his own at last" is not about a character called Old Scratch). What a vision or a ghost shows as the story's past or future is a commitment;
+- a time, date or duration the text neither states nor plainly shows: never guess one;
+- dialogue that is texture rather than information.
 
 Examples: "Desta is Corvin's neighbor and friend" is a commitment. "Corvin left a note," what it said, and who found it are commitments. "The surveyor's hands are shaking" is not. From A Christmas Carol: "Scrooge's nephew is Fred and his dead sister was Fan" is three commitments; "the fog came pouring in at every chink" is none."""
 
@@ -740,6 +752,7 @@ COMMITMENTS_SCHEMA = _object({
         'quote': {'type': 'string'},
         'mutable': {'type': 'string', 'enum': ['state', 'fixed']},
         'supersedes': {'type': 'string'},
+        'ends': _ID_LIST,
     })},
 })
 
@@ -747,22 +760,34 @@ COMMITMENTS_SCHEMA = _object({
 def build_commitments_prompt(scene_id: str, scene_text: str,
                              skeleton: dict[str, str],
                              registries_text: str = '',
-                             known: list[dict[str, str]] | None = None) -> str:
+                             known: list[dict[str, str]] | None = None,
+                             recorded: list[dict[str, str]] | None = None) -> str:
     """Build the Phase 4 prompt: every commitment the scene makes (decision 5).
 
-    ``known`` holds earlier scenes' commitments still in force (id, type,
-    subject, statement), so a scene that changes one says which it
-    supersedes instead of restating it. The reply is structured
+    ``known`` holds the facts in force entering the scene (id, type, subject,
+    statement): earlier scenes' commitments and the registry facts (F-128),
+    so a scene that changes one says which it supersedes or ends instead of
+    restating it. ``recorded`` holds registry facts already recorded for this
+    scene, which the reply must not restate. The reply is structured
     (``COMMITMENTS_SCHEMA``).
     """
-    known = known or []
     types = '\n'.join(f'- **{t}**: {what}' for t, what in COMMITMENT_TYPE_GUIDE)
-    if known:
-        known_text = '\n'.join(
-            f'- {k["id"]} [{k["type"]}] {k.get("subject") or "-"}: {k["statement"]}'
-            for k in known)
-    else:
-        known_text = '(none yet)'
+
+    def listing(rows):
+        if not rows:
+            return '(none yet)'
+        return '\n'.join(
+            f'- {k["id"]} [{k["type"]}, {k.get("mutable") or "state"}'
+            + ('' if k.get('introduced_by') == COMMITMENTS_PASS else ', registry')
+            + f'] {k.get("subject") or "-"}: {k["statement"]}' for k in rows)
+    known_text = listing(known)
+    recorded_section = (
+        '\n## Facts already recorded for this scene\n\n'
+        "Don't restate these. Record only what the scene adds to them. If the "
+        "scene's prose says something different from one, record what the prose "
+        'says and name that id in supersedes: the difference is reported to '
+        'the author, not replaced.\n\n'
+        + listing(recorded) + '\n') if recorded else ''
     registries_section = f'\n{registries_text}\n' if registries_text else ''
     return f"""{COMMITMENT_RUBRIC}
 
@@ -776,7 +801,7 @@ Location: {skeleton.get('location', '')}
 ## Commitments earlier scenes made that are still in force
 
 {known_text}
-
+{recorded_section}
 ## How to record each commitment
 
 - type: one of
@@ -785,15 +810,17 @@ Location: {skeleton.get('location', '')}
 - statement: one declarative sentence, specific enough that a later sentence could contradict it
 - quote: the exact words from this scene that establish it, copied verbatim
 - mutable: "state" if it can change later in the story (an injury, who holds the key, where someone is, what they know), "fixed" if it should hold for the whole book (a name, an age, a sister's name, a backstory event)
-- supersedes: the id of the earlier commitment above that this one replaces (a wound healing, a key changing hands), or blank
+- supersedes: the id of the earlier commitment above that this one replaces with a new value (a key changing hands, a new location), or blank
+- ends: the ids of other earlier commitments above marked "state" that stop being true because of this one (he can grip a rope again once the wound has healed; she has left the house), or an empty list. A "registry" one you name is reported to the author rather than ended
 
-Record each commitment once. Don't restate an earlier commitment the scene only repeats. Answer with a JSON object holding the list `commitments` (an empty list is valid only when the scene truly commits to nothing)."""
+Record each commitment once. Don't restate an earlier or already-recorded commitment the scene only repeats. Answer with a JSON object holding the list `commitments` (an empty list is valid only when the scene truly commits to nothing)."""
 
 
 def parse_commitments_response(response: str, scene_id: str) -> list[dict[str, str]]:
     """Phase 4's structured reply (``COMMITMENTS_SCHEMA``) as a list of
-    ``{type, subject, statement, quote, mutable, supersedes}``, dropping
-    entries with no statement. Raises ValueError on an unreadable reply."""
+    ``{type, subject, statement, quote, mutable, supersedes, ends}`` (``ends``
+    a list of ids), dropping entries with no statement. Raises ValueError on
+    an unreadable reply."""
     data = _json_answer(response, COMMITMENTS_SCHEMA)
     out = []
     for item in data['commitments']:
@@ -801,6 +828,9 @@ def parse_commitments_response(response: str, scene_id: str) -> list[dict[str, s
             continue
         entry = {k: str(item.get(k) or '').strip()
                  for k in ('type', 'subject', 'statement', 'quote', 'mutable', 'supersedes')}
+        ends = item.get('ends') or []
+        entry['ends'] = [str(e).strip() for e in ends if str(e).strip()] \
+            if isinstance(ends, list) else []
         if entry['statement']:
             out.append(entry)
     return out
