@@ -44,6 +44,7 @@ One new file, `commitments.csv`, joined to scenes by scene ID. It is the single 
 - `depends_on` — ids this commitment relies on
 - `reviewed` — blank | `seen` | timestamp of Ben's audit (see decision 2)
 - `introduced_by` — the command or pass that wrote the establishing text (`draft`, `redraft`, `polish`, `continuity-audit`, `author`, …). The survey showed Storyforge's own revision passes introduce or reintroduce many errors; this column makes that measurable.
+- `category`, `aliases`, `resolves`, `action_gating`: added 2026-10-30 (decided with the migration mapping, `docs/plans/2026-10-30-ledger-migration-proposal.md`) so the migration loses nothing. They hold the old files' category, the knowledge rewordings used to match `knowledge_in` / `knowledge_out`, the scene where a `state` ends (or `never`), and whether a state gates action.
 
 Per-character state "as of scene N" is derived, not stored: the latest unsuperseded `state` facts for that subject up to N. This replaces the static character bible as drafting context; the bible becomes the `fixed` facts plus voice.
 
@@ -251,7 +252,7 @@ None. Ben can reopen any of the above.
 
 Each chunk is independently verifiable. Do them in order.
 
-**Progress (2026-10-28):** chunks 0–4 done and merged; E4 and E6 not started; Phase 1 (chunk 5) next. Current state, baseline numbers, open decisions and how to resume: `docs/plans/2026-10-28-rethink-status.md`.
+**Progress (2026-10-30):** chunks 0–5 are done and merged, with E4 and E6. Chunk 6 (Phase 2) is next: its migration mapping was decided in `docs/plans/2026-10-30-ledger-migration-proposal.md`, and §3.1's columns gain `category`, `aliases`, `resolves` and `action_gating`. Current state, baseline numbers and how to resume: `docs/plans/2026-10-28-rethink-status.md`.
 
 0. **Corpus survey.** Done; see `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Read its per-repo data-quality notes before touching any repo.
 1. `evals/harness` — runner, fixture recording, result schema, baseline command. Verify: runs on an empty suite.

@@ -1,33 +1,44 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-30 (early morning), at v1.90.x: E6 done (this PR), skeleton parser done (#388, v1.89.0), hone name check (#393, v1.89.4), warn-and-continue sites (#394, v1.90.0), cassette record fix (#397). Overnight summary for Ben: **Overnight run (2026-10-29 → 30)** below. Handoff for the next session: **Decisions** and **Next steps** below. Start here when resuming the rethink in a new session. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`.
+Last updated 2026-10-30 (morning), at v1.90.8 (evals-1e's F-118, #407, is the latest merge). **A fresh session starts here:** read **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
 
-## Where we are
+## Start here
 
-**Phase 0 (evals and baseline) is done, E6 included** (see **E6** below). Chunks 0–4 of plan §7 and E4 are merged. **Phase 1 is mostly done:**
-- **Models:** tiers resolve at runtime, with a thinking allowance.
-- **Bugs:** the whole bug checklist is fixed.
-- **E3 tier comparison:** no routing change.
-- **Structured outputs:** the knowledge and physical-state chains use them.
-- **Loud failures for bad replies:**
-  - cut-off drafts (#364);
-  - refusals, via the fallback (#368);
-  - invented names in brief rewrites (#373);
-  - refused, cut-off and errored batch replies (#374);
-  - cut-off replies in direct-mode score, timeline cues and scenes-setup (v1.84.5).
+**Where the rethink is:**
+- **Phase 0 (evals and baseline): done**, E6 included (see **E6** below).
+- **Phase 1 (cheap fixes): done.**
+  - **Models:** tiers resolve at runtime, with a thinking allowance.
+  - **Bugs:** the whole bug checklist is fixed.
+  - **Structured outputs:** the `KEY: value` reply parsers in extract are gone (#363, #377, #388; the dead cleanup ones removed in #400).
+  - **Warn-and-continue sites that wrote wrong output are fixed** (#394, follow-ups #403 and #405).
+  - **The three silent-failure regression tests exist** (listed below).
+  - **E2 recall did not improve.** That criterion waits on the Phase 2 ledger and the Phase 3 checker (see the note below).
+- **Phase 2 (ledger and export): next.** Ben accepted the ledger migration mapping on 2026-10-30. Before Phase 2 there are four small decided fixes (Next steps 1–4).
 
-**Phase 1 regression tests.** The three silent-failure tests from the success criteria exist:
+**Ben's decisions, 2026-10-30 morning** (on the overnight run's open questions):
+1. **Ledger migration mapping:** accepted as proposed in `docs/plans/2026-10-30-ledger-migration-proposal.md`. That includes:
+   - four added columns (`category`, `aliases`, `resolves`, `action_gating`);
+   - `origin = migrated` and `introduced_by = migration` for migrated rows;
+   - unresolved physical `character` names reported, `subject` left blank;
+   - understory's statement taken from the first alias;
+   - `backstory` and blank `origin` left as a blank `scene_id`, reported;
+   - **two PRs:** `ledger.py` plus the migration first, then the consumer switch.
+   The re-record spend for the consumer switch (about $20) was not separately approved: estimate it and confirm with Ben before recording.
+2. **A configured cover that's missing fails:** `production.cover_image` set but the file absent makes `assemble` and `publish` exit 1 naming it, with no fallback to auto-detect.
+3. **Remove enrich's timeline references:** step 8's message and the `--skip-timeline` flag. enrich does not run the timeline.
+4. **Score's `latest` stays on the last complete cycle:** an incomplete cycle is still saved and committed, but `working/scores/latest` doesn't move to it.
+5. **Per-scene pass state:** a revise pass that stopped over skipped scenes re-runs only those scenes, not every target.
+
+**Phase 1 regression tests** (the plan's three silent-failure cases):
 - `tests/commands/test_cmd_revise.py::TestPassThatChangesNothing` (understory `5ac1c26`);
 - `tests/test_redraft_guard.py` (thornwall `19530d5`; the "reference doc" was `scenes/council.md`, a scene file);
 - `tests/test_hone.py::test_a_mapping_never_takes_an_alias_from_its_owner` (meridian-line `5433d3f`).
 
-**Left in Phase 1:**
-- the remaining `KEY: value` parsers. Characterize, intent and brief fields moved to structured outputs in v1.85.0 (#377), and the skeleton in v1.89.0 (#388; planned as 1.88.0): one reply fills `scenes.csv` and the timeline cues, whose texts `timeline.CUE_FIELDS` shares with the cue read. extract's cleanup-pass parsers (`FIX:` / `UPDATE:` lines) had no callers and were removed (v1.90.4), and `prompts.py` has no reply parsers left (it reads YAML and craft sections). Line parsers outside extract remain: hone's `MENTION:` lines, scoring's `SCORES:` blocks, `scenes.py`'s `SCENE:` lines;
-- ~~the remaining warn-and-continue sites~~: the 9 that wrote wrong or incomplete output are fixed (#394, v1.90.0). The triage's undecided ones are listed in #394.
+**Dashboard (v1.86.0, #378, closes #371):** Storyforge sends versioned `dashboard_data` (schema version 1, contract in `docs/agent-reference.md`), and Bookshelf renders it (bookshelf#30). Folding it into the Phase 2 `export` bundle is still to do.
 
-**Dashboard (v1.86.0, #378, closes #371):** Storyforge sends versioned `dashboard_data` (schema version 1, contract in `docs/agent-reference.md`), and Bookshelf renders it (bookshelf#30). The renderer and `dashboard_html` are gone, and `storyforge visualize` writes `working/dashboard-data.json`. Folding the data into the Phase 2 `export` bundle is still to do.
+**E2 recall:** the Phase 1 criterion "E2 recall improves over baseline" is not met. E2-Carol finds 0 of 37, and e2-corpus-drift recall is about 0.06 (E6's three runs: 0.078, 0.059, 0.020). Most of Carol's injected errors (physical state, knowledge, numbers) are outside what the timeline check reads, so real recall depends on the Phase 2 ledger and the Phase 3 checker.
 
-**E2 recall:** the Phase 1 criterion "E2 recall improves over baseline" is not met. E2-Carol finds 0 of 37, and e2-corpus-drift recall is about 0.10. Most of Carol's injected errors (physical state, knowledge, numbers) are outside what the timeline check reads, so real recall depends on the Phase 2 ledger and the Phase 3 checker.
+**Line parsers outside extract** (not on Phase 1's list; move them when their phase touches them): hone's `MENTION:` replies, scoring's `SCORES:` blocks (`scoring.parse_score_output`), `scenes.py`'s `SCENE:` lines.
 
 | Plan chunk | State | PRs |
 |---|---|---|
@@ -36,9 +47,49 @@ Last updated 2026-10-30 (early morning), at v1.90.x: E6 done (this PR), skeleton
 | 2 E1 corpus | done: 144 cases (130 prose), 30 held out | #340 |
 | 3 E2 / E7 / E8 | done: E2 Carol (evals-56), E2 on E1, E7 Carol, E8 (seven pass families, 37 cases run) | #341, #342, #343, #344, #346, #383 |
 | 4 E3 / E5 | done | #346 |
-| — E4 | done (overnight): shared-dark Act 1 drafted with today's `write`, judged; see the E4 notes below | #361 (v1.81.0), re-recorded in #363 |
-| — E6 | done: three runs of E2, E3, E4 and E8; $34.82 | this PR, #397 |
-| 5 Phase 1 | mostly done (see above); the other `KEY: value` parsers and the remaining warn-and-continue sites to go | v1.80.0 PR, #359, #361, #363, #364, #368, #373, #374 |
+| — E4 | done: shared-dark Act 1 drafted with today's `write`, judged | #361, re-recorded in #363 |
+| — E6 | done: three runs of E2, E3, E4 and E8; $34.82 | #397, #399 |
+| 5 Phase 1 | done | v1.80.0 PR, #359–#405 (see the two overnight sections) |
+| 6 Phase 2 | next: decided mapping; nothing built yet | #401 (proposal) |
+
+## Next steps, in order (handoff for a new session)
+
+**Before starting:**
+- **Environment:** use `~/.venvs/storyforge` (Python 3.12, has pytest); the system `python3` is 3.9. The book repos are under `~/Developer` and are read-only: never commit, check out or migrate anything in them; work on copies.
+- **Checks:** run `python -m pytest tests/` (about 5 to 8 minutes, serially; 7,176+ tests at v1.90.7) and `python3 evals/run.py` (6 to 10 minutes; no API key needed). Main should replay every suite with no errors and the baseline metrics; only the gates that already fail (E2, E3 recall, E7 noise, E8 reintroduced) fail.
+- **Coordination:** other sessions open Storyforge PRs and claim versions. Overnight that was **evals-1e** (timeline, scenes-setup, classics fixes) and **evals-79** (extract, publish); find live ones with ListAgents. Agree a version by SendMessage before merging, and say when you touch `timeline.py` or `cmd_extract.py`. Eval-only and test-only PRs bump nothing. Never touch `~/Developer/evals` or other sessions' worktrees (`~/Developer/storyforge-*`).
+- **Process:** one PR per step, branch `storyforge/{name}-{timestamp}`, then the review (CLAUDE.md's 5-agent review; the `pr-review-toolkit` agents aren't installed here, so use one to three general reviewers covering correctness, silent failures, tests, comments and types). Unless Ben says otherwise, wait for his "fix all of them in logical commits" before fixing and merging. Overnight he waived that and asked for findings to be fixed directly.
+- **Spending:** estimate before any recording and confirm with Ben unless it's already approved.
+
+**1. Score: keep `latest` on the last complete cycle** (decision 4). `cmd_score.main` repoints `working/scores/latest` (`cmd_score.py`, "Update latest symlink") before it knows the cycle is incomplete (`_incomplete`, added in #394). Move the symlink update after the check, and skip it when `_incomplete` is non-empty, with a log line naming the cycle `latest` stays on. Test: an incomplete cycle leaves `latest` where it was; a complete one moves it. Patch version.
+
+**2. Assemble and publish: a configured cover that's missing fails** (decision 2). `assembly._resolve_cover_path` logs a WARNING and falls back to auto-detect when `production.cover_image` names a missing file. Make it an error that names the path. `cover_manifest_asset` (publish) and the epub/PDF builds (assemble) must exit 1, not quietly ship another cover or none. Check every caller (`assembly.py:1600`, the epub/PDF paths, `cmd_illustrate.py:2505` has its own resolution in the same shape). Tests for each path. Patch version.
+
+**3. enrich: remove the timeline references** (decision 3). Remove step 8's "not run by enrich" message (added in #405) and the hidden `--skip-timeline` flag; 13 tests in `tests/commands/test_cmd_enrich.py` pass the flag. Check the docs and skills for mentions. Patch version.
+
+**4. Per-scene pass state for revise** (decision 5). Since #394, a direct prose pass or polish-loop pass whose reply skipped scenes commits what it wrote and exits 1 without marking the pass completed (`cmd_revise._fail_skipped_scenes`). Re-running it re-revises every target. Record the scenes a pass has written. The likely shape is a column in `working/plans/revision-plan.csv`, written in the same commit as the scenes. A re-run then targets only the scenes still owed, and the pass is completed when none remain. Design the column with the plan CSV's readers in mind (`revision.py`, `cmd_revise._read_pass_field`). The GN briefs stage (`cmd_elaborate._briefs_handler_gn`) picks scenes by `status` (mapped, architecture, spine or blank), not by whether a brief was written. Check whether a re-run after a partial failure redoes the briefs it already wrote, and give it the same treatment if so. Minor version.
+
+**5. Phase 2, PR 1: `ledger.py` and the migration** (decision 1; plan chunk 6). Mapping and data quirks: `docs/plans/2026-10-30-ledger-migration-proposal.md`. Build:
+- **`storyforge/ledger.py`:** `commitments.csv` columns (plan §3.1 plus `category`, `aliases`, `resolves`, `action_gating`), read and write (pipe-delimited, LF, `common.csv_safe` for prose), validation, and derived per-character state as of a scene (plan §3.1).
+- **A migration function:** `knowledge.csv` + `physical-states.csv` → `commitments.csv`, reporting every quirk the proposal lists rather than guessing.
+- **A round-trip test** that regenerates both old files from `commitments.csv` byte for byte, except the reported quirks.
+- **A check script** that runs the migration on a temporary copy of each of the seven book repos and reports. No consumer, prompt or author-data change in this PR.
+
+Also add `pronouns` to the `characters.csv` schema (plan §3.1) if it fits here without touching prompts; otherwise do it in PR 2.
+
+**6. Phase 2, PR 2: switch the consumers.**
+- **The switch:** the 15 modules that read `knowledge.csv` / `physical-states.csv` (listed in the proposal) read `commitments.csv`. The briefs' `knowledge_in/out` and `physical_state_in/out` still hold the same ids. The old files are deleted.
+- **Migration command:** a `storyforge` command (or `cleanup` step) runs the migration on a book. Running it on Ben's books is his call: test on copies.
+- **Re-records:** prompts that embed the registries change, so E2, E3, E5 and E8 need re-recording (about $20; estimate first and confirm with Ben).
+- **Verify:** E3 and E5 against the baseline, and the migration on all seven books (on copies).
+
+**7. Then the rest of Phase 2** (plan §5, chunk 6): the rubric-driven extraction prompt (plan decision 5; Ben may refine its wording), the audit log and digest (decision 2), and `export` with `schema_version` (§3.5), into which `dashboard_data` folds. Success: E3 recall ≥ 0.85, E5 mismatches below baseline, export round-trips across the seven books.
+
+**Open follow-ups, not scheduled:**
+- **Other writers of briefs and intent** (elaborate, extract) don't go through `storyforge.brief_names`' invented-name check yet (#393).
+- **`scoring_story_power`** wasn't reviewed for warn-and-continue sites (6,700+ lines; it already tracks dropped rows).
+- **E8 as a gate:** measure over three runs, since one run moves by 5 cases (E6). Do this before Phase 4 relies on it.
+- **The 10 YAML-era E8 trees** are excluded (see **E8 gaps** below); replaying them is Ben's call.
 
 ## Baseline (`evals/baseline.json`)
 
@@ -156,57 +207,6 @@ Same 49 facts, extraction model forced with `STORYFORGE_MODEL`, Opus judge uncha
 3. **`author-labeled` stays strict** (Claude's call, delegated by Ben). Cases taken from Claude-written continuity reports keep `label_source` but don't get the tag. `author-labeled` is the subset where a person confirmed the error. A model-written report is evidence, not a human label, and counting it would mix the two kinds of ground truth (it would add 12 governor cases). Revisit only if a gate needs more author-labeled cases than the strict set has.
 4. **Close the E8 gaps.** Ben wants every E8 case that today's Storyforge can meaningfully run to be replayed.
 
-## Next steps, in order (handoff for a new session)
-
-Start by reading this doc, `CLAUDE.md` and `docs/agent-reference.md`.
-- **Checks:** run `python -m pytest tests/` and `python3 evals/run.py`. Main should replay every suite with no errors and no deltas. At v1.87.1 (#383) it did: 7,096 tests, and only the gates that already failed still fail. Replay needs no API key. Expect about 5 minutes for the tests and 6 to 10 for the evals; most of the eval time is e2-corpus-drift and e2-corpus-validate. pytest-xdist doesn't help (the time is file I/O, not CPU), so run the tests serially.
-- **Coordination:**
-  - Two other sessions open Storyforge PRs and claim versions: **evals-56** (timeline, classics) and **evals-79** (extract, publish fixes). Message them (SendMessage) before claiming a version or touching `timeline.py`. Eval-only and test-only PRs bump nothing.
-  - evals-56's TIME_GAP/TIME_SPAN wording for `timeline.CUE_INSTRUCTIONS` merged in v1.86.1 (#380).
-  - Never touch `~/Developer/evals` or evals-56's worktrees (`~/Developer/storyforge-*`).
-- **Process:** one PR per step, followed by the 5-agent review (CLAUDE.md). The `pr-review-toolkit` agents it names aren't installed here; #383 used three available reviewers covering the same five angles (correctness, silent failures, tests, comments, types). Then wait for Ben's "fix all of them in logical commits", and merge in order once the checks pass.
-- **Spending:** estimate before any recording.
-
-1. ~~**E8 gaps.**~~ Done (#383; $3.88 recorded, $0.70 re-recorded after the review). 37 cases are run, up from 23. 35 are judged and 2 halt, as before (a refused redraft and a naturalness redraft with no reply). Of the 35, 6 are reintroduced (was 5 of 21). What changed:
-   - **Scene metadata migrated:** a pre-pass tree with `scene-metadata.csv` gets a port of the scenes.csv step of Storyforge's removed `storyforge-migrate-elaborate` (e22a58c4), applied in the copy. It approximates the books' history: they actually got `scenes.csv` from `extract`'s skeleton phase. This adds governor-013 and -014, shared-dark-030, -037 and -038, and thornwall-020.
-   - **Data passes judged on what they write:** brief fix (thornwall-033, -035), `hone` physical-states (governor-020, thornwall-037), `illustrate --state` (lantern-folk-029 to -032) and `illustrate --prompts` (lantern-folk-033). A separate judge prompt reads what the pass wrote. The prose judge prompt is unchanged.
-   - **Renamed scenes** are found through E1's id-maps.
-   - **The suite's notes** now list every unreplayable case.
-   - **Case data:**
-     - thornwall-028's introducing commit is 749a82b, which wrote both "six" and "nine" years (7919d1a only reworded "six").
-     - thornwall-015's error dates from s20's first draft (6456a04), not pattern-thinning.
-   - **New reintroduction:** thornwall-020 (revision plan, a newly migrated tree). The data passes reintroduced nothing.
-   - **Review fixes:** a data pass that exits non-zero errors the suite, a cut-off hone batch halts, and a keyless replay works (illustrate checks the key itself). `written()` diffs CSVs by row id, so a brief fix shows only its row. `errors_per_10k_words` counts prose hits only. A `not_present` that was never judged says so.
-   - **Still excluded (14 holdout, plus):**
-     - **10 YAML-era trees** (governor-011, thornwall-002, -005, -008, -011, -013, -014, -015, -019, -021). Today's `revise` refuses YAML plans, and Storyforge's YAML-to-CSV migration was lost in #13's squash. Replaying them would mean inventing both conversions. Ben's call if he wants that.
-     - **shared-dark-018 and -023:** redrafted from an outline before briefs existed. Today's redraft needs briefs, and none are invented.
-     - **lantern-folk-027 (PRM):** the pass wrote only the promise (a11). The missing payoff is in a scene it never touched.
-     - **lantern-folk-034:** no introducing commit, because the prompt files were untracked render output.
-     - **lantern-folk-032:** the `--state` pass logged the prose of the time faithfully; the log went stale after a later prose fix, which a replay can't show (`EXCLUDED_CASES`).
-     - **thornwall-028:** its introducing commit wrote both sides, so the pre-pass tree has no established fact to contradict (`EXCLUDED_CASES`).
-2. ~~**E6**~~ Done (see **E6** below).
-3. **Phase 1 leftovers:**
-   - ~~Extract's **skeleton** phase.~~ Done in v1.89.0 (#388). A skeleton reply that is unusable for any scene now stops the calendar from being placed (it used to re-place every scene from stale or missing cues, with force).
-   - ~~The remaining line parsers in extract and `prompts.py`.~~ The cleanup-pass ones were dead code, removed in v1.90.4; `prompts.py` has none. Still parsing lines: hone's `MENTION:` replies, scoring's `SCORES:` blocks (`scoring.parse_score_output`), and `scenes.py`'s `SCENE:` lines. They are outside the plan's Phase 1 list; move them when their phase touches them.
-   - ~~The remaining **warn-and-continue** sites.~~ Done in v1.90.0 (#394). Triage class C (listed in #394), followed up:
-     - **Evaluator/persona pairing by position:** a real bug, fixed in v1.90.6 (#403).
-     - **Unreadable `working/scoring-overrides.csv` read as empty:** checked, left as is. Nothing rewrites the file from that read (it is append-only), so the only effect is that accepted findings show again, with a WARNING.
-     - **`production.cover_image` set but missing** (`assembly._resolve_cover_path`): falls back to auto-detecting `cover.*`, which can ship an older cover with only a WARNING. **Ben's call.** Recommendation: treat a configured cover that's missing as an error (assemble and publish exit 1 naming it), since falling back is a silent repair of the author's setting.
-     - **Commands that report only a count of skipped items**, reviewed one by one:
-       - `enrich`: fixed in v1.90.7 (#405). Unenriched scenes are named and the run exits 1. Its timeline step had been dead since v1.0.0, when the script it called was removed; it now says enrich doesn't run the timeline. **Ben's call:** whether enrich should run `storyforge timeline` again (API spend, rewrites days).
-       - `scenes_export`: left as is. Malformed CSV rows are skipped with a WARNING only in the derived `outline.md` / export view; `scenes-import` updates changed fields only, so a missing row deletes nothing.
-       - `script_package`: left as is. A missing scene file becomes a visible `[scene … not found]` in the bundle, with a WARNING.
-       - `revise_gn`: left as is. Malformed (non-dict) findings are dropped with a WARNING naming how many.
-       - `scoring_story_power`: not reviewed.
-4. **Follow-ups noted in PRs:**
-   - ~~`hone.hone_briefs` should use the brief-fix name check.~~ Done in v1.89.4 (#393), for hone's intent rewrites too; the check is `storyforge.brief_names`. Other writers of `scene-briefs.csv` / `scene-intent.csv` (elaborate, extract, enrich) are not checked yet.
-   - Re-running a revise pass that stopped over skipped scenes redrafts every target, not only the skipped ones (#394 review): needs per-scene pass state.
-   - Score's `latest` symlink moves to an incomplete cycle (#394 review): whether it should stay on the last complete one is a design call.
-   - ~~`skills/forge` routes to `scenes` and `recommend` skills that don't exist.~~ Fixed in v1.90.5, with `review` and `plan-revision`; `tests/test_skill_routes.py` checks every skill a SKILL.md names.
-   - `dashboard_data` should fold into the Phase 2 `export` bundle.
-
-Then **Phase 2** (plan §5): ledger, `commitments.csv`, per-character state, `export`. **Start with `docs/plans/2026-10-30-ledger-migration-proposal.md`.** The plan's `commitments.csv` columns can't hold everything `knowledge.csv` and `physical-states.csv` carry, so the migration needs seven decisions from Ben before any code changes author data. That doc surveys the seven book repos and proposes a mapping.
-
 ## Overnight run (2026-10-29 → 30)
 
 Ben asked for work to continue overnight without waiting on him, and approved E6 at whatever it cost. Every PR got a review (one to three reviewer agents covering the five angles), and every finding I verified was fixed before merging. The review comments on each PR list what was found and what was left.
@@ -222,18 +222,17 @@ Ben asked for work to continue overnight without waiting on him, and approved E6
 | #402 | 1.90.5 | forge routed to skills that don't exist; test for every skill a SKILL.md names. |
 | #403 | 1.90.6 | evaluate paired custom evaluators with persona files by position (class C, a real bug). |
 | #405 | 1.90.7 | enrich: unenriched scenes named and exit 1; its dead timeline step now says so. |
-| this PR | — | E6: runs 2 and 3, `evals/consistency.py`, the spread. |
+| #399 | — | E6: runs 2 and 3, `evals/consistency.py`, the spread. |
+| #404, #406 | — | Status updates: the class-C and count-only follow-ups. |
 
-**Coordination:** evals-79 and evals-1e also merged Storyforge PRs overnight (1.89.1–1.89.3, 1.90.1+). Versions were agreed by message each time.
+**Coordination:** evals-79 and evals-1e also merged Storyforge PRs overnight (1.89.1–1.89.3, 1.90.1–1.90.3, 1.90.8). Versions were agreed by message each time.
 
-**For Ben to decide:**
-- **E8 as a gate:** measure over three runs (see E6), since one run moves by 5 cases.
-- **#394's class C sites:** listed in the PR.
-- **Score's `latest` symlink** on an incomplete cycle.
-- **Re-running only a pass's skipped scenes:** needs per-scene pass state.
-- **Phase 2's ledger migration:** seven decisions in `docs/plans/2026-10-30-ledger-migration-proposal.md`; nothing is built until then.
-- **Cover fallback:** whether a configured but missing `production.cover_image` should fail assemble and publish (see the class-C list).
-- **enrich and the timeline:** whether enrich should run `storyforge timeline` again.
+**Class-C and count-only sites** from #394's triage, as followed up overnight:
+- **Fixed:** evaluator/persona pairing by position (#403); enrich (#405).
+- **Left as is:** an unreadable `scoring-overrides.csv` (it's append-only, so accepted findings just show again, with a WARNING); `scenes_export`, `script_package` and `revise_gn` (their skips are visible or affect only derived views).
+- **Decided by Ben, now Next steps 2 and 3:** the cover fallback, and enrich's timeline step.
+
+**Ben decided the open questions the next morning:** see **Start here**.
 
 ## E6 (2026-10-30)
 
@@ -268,6 +267,26 @@ Run-to-run variance of the paid suites: three independent live runs of the same 
 **A harness bug it found (#397):** `--mode record` called a request live twice when two cases sent it (two E3 facts from one scene), and the second reply overwrote the first, so the first case's judge prompt could never replay. Record mode now replays a key the run already recorded. Runs 2 and 3 were patched in `auto` mode ($0.26; 33 judge and extraction calls). The E3 and E8 numbers above are the replayable ones; the record-time values differed by one fact (E3 run 2: 0.265) and one case (E8 run 2: 11).
 
 **Spend:** $34.82 (run 2 $17.56, run 3 $16.30, run 3's drift retry $0.70, the patch $0.26). Ben's approval was "about $40", later "whatever it costs".
+
+## E8 gaps (2026-10-29, #383)
+
+Done (#383; $3.88 recorded, $0.70 re-recorded after the review). 37 cases are run, up from 23. 35 are judged and 2 halt, as before (a refused redraft and a naturalness redraft with no reply). Of the 35, 6 are reintroduced (was 5 of 21). What changed:
+   - **Scene metadata migrated:** a pre-pass tree with `scene-metadata.csv` gets a port of the scenes.csv step of Storyforge's removed `storyforge-migrate-elaborate` (e22a58c4), applied in the copy. It approximates the books' history: they actually got `scenes.csv` from `extract`'s skeleton phase. This adds governor-013 and -014, shared-dark-030, -037 and -038, and thornwall-020.
+   - **Data passes judged on what they write:** brief fix (thornwall-033, -035), `hone` physical-states (governor-020, thornwall-037), `illustrate --state` (lantern-folk-029 to -032) and `illustrate --prompts` (lantern-folk-033). A separate judge prompt reads what the pass wrote. The prose judge prompt is unchanged.
+   - **Renamed scenes** are found through E1's id-maps.
+   - **The suite's notes** now list every unreplayable case.
+   - **Case data:**
+     - thornwall-028's introducing commit is 749a82b, which wrote both "six" and "nine" years (7919d1a only reworded "six").
+     - thornwall-015's error dates from s20's first draft (6456a04), not pattern-thinning.
+   - **New reintroduction:** thornwall-020 (revision plan, a newly migrated tree). The data passes reintroduced nothing.
+   - **Review fixes:** a data pass that exits non-zero errors the suite, a cut-off hone batch halts, and a keyless replay works (illustrate checks the key itself). `written()` diffs CSVs by row id, so a brief fix shows only its row. `errors_per_10k_words` counts prose hits only. A `not_present` that was never judged says so.
+   - **Still excluded (14 holdout, plus):**
+     - **10 YAML-era trees** (governor-011, thornwall-002, -005, -008, -011, -013, -014, -015, -019, -021). Today's `revise` refuses YAML plans, and Storyforge's YAML-to-CSV migration was lost in #13's squash. Replaying them would mean inventing both conversions. Ben's call if he wants that.
+     - **shared-dark-018 and -023:** redrafted from an outline before briefs existed. Today's redraft needs briefs, and none are invented.
+     - **lantern-folk-027 (PRM):** the pass wrote only the promise (a11). The missing payoff is in a scene it never touched.
+     - **lantern-folk-034:** no introducing commit, because the prompt files were untracked render output.
+     - **lantern-folk-032:** the `--state` pass logged the prose of the time faithfully; the log went stale after a later prose fix, which a replay can't show (`EXCLUDED_CASES`).
+     - **thornwall-028:** its introducing commit wrote both sides, so the pre-pass tree has no established fact to contradict (`EXCLUDED_CASES`).
 
 ## Key paths
 
