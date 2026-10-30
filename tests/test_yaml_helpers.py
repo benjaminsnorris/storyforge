@@ -828,12 +828,10 @@ class TestEpubMetadataEscaping:
         assert parsed['belongs-to-collection'] == 'The Mapmaker Trilogy'
         assert parsed['group-position'] == '2'
 
-    def test_a_declared_but_missing_cover_warns(self, tmp_path, capsys):
-        """It was dropped in silence — the one quiet cover consumer in the repo.
-
-        `_resolve_cover_path` warns and `require_cover_asset` refuses, because an
-        epub built without the cover the author declared is a wrong artifact that
-        looks like a right one.
+    def test_a_declared_but_missing_cover_fails(self, tmp_path):
+        """It was dropped in silence, later with a WARNING; an epub built
+        without the cover the author declared is a wrong artifact that looks
+        like a right one (decision 2, 2026-10-30).
         """
         project = self._write_project_yaml(tmp_path, (
             'project:\n'
@@ -842,10 +840,26 @@ class TestEpubMetadataEscaping:
             '  author: Ben Norris\n'
             '  cover_image: production/nope.png\n'))
 
-        metadata = generate_epub_metadata(project)
-        assert 'cover-image' not in metadata
-        out = capsys.readouterr().out
-        assert 'WARNING' in out and 'production/nope.png' in out
+        with pytest.raises(ValueError, match='production/nope.png'):
+            generate_epub_metadata(project)
+
+    def test_the_epub_build_stops_before_pandoc_on_a_missing_cover(
+            self, tmp_path, monkeypatch):
+        """assemble runs generate_epub in a subprocess, so the raise is a
+        failed format and the run exits 1."""
+        from storyforge.assembly import generate_epub
+        project = self._write_project_yaml(tmp_path, (
+            'project:\n'
+            '  title: "A Book"\n'
+            'production:\n'
+            '  cover_image: production/nope.png\n'))
+        ran = []
+        monkeypatch.setattr('subprocess.run', lambda *a, **kw: ran.append(a))
+
+        with pytest.raises(ValueError, match='production/nope.png'):
+            generate_epub(project, str(tmp_path / 'm.md'),
+                          str(tmp_path / 'b.epub'), str(tmp_path))
+        assert ran == []
 
     def test_a_cover_that_exists_is_emitted_without_a_warning(self, tmp_path):
         (tmp_path / 'production').mkdir()

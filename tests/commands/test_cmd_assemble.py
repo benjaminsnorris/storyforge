@@ -447,6 +447,59 @@ class TestMainAssembly:
         assert os.path.isdir(chapters_dir)
 
 
+    def test_a_configured_cover_that_is_missing_fails_epub_and_web(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """Decision 2 (2026-10-30): the epub was built with no cover and the
+        web book shipped production/cover.* (or a generated placeholder)."""
+        monkeypatch.setattr('storyforge.cmd_assemble.detect_project_root',
+                            lambda: project_dir)
+        plugin_dir = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.dirname(
+                os.path.dirname(__file__)))))
+        monkeypatch.setattr('storyforge.cmd_assemble.get_plugin_dir',
+                            lambda: plugin_dir)
+        monkeypatch.setattr('storyforge.cmd_assemble._check_pandoc',
+                            lambda: '3.1')
+        _ensure_scene_files(project_dir)
+        yaml_path = os.path.join(project_dir, 'storyforge.yaml')
+        with open(yaml_path) as f:
+            text = f.read()
+        with open(yaml_path, 'w') as f:
+            f.write(text.replace('  cover_image:\n',
+                                 '  cover_image: manuscript/assets/final.png\n', 1))
+
+        def mock_assembly_cmd(*args):
+            args_str = ' '.join(str(a) for a in args)
+            if 'count-chapters' in args_str:
+                return '1'
+            if 'chapter-scenes' in args_str:
+                return 'act1-sc01'
+            if 'read-chapter-field' in args_str:
+                return 'Chapter One'
+            if args_str.startswith('assemble'):
+                return '1000'
+            return ''
+        monkeypatch.setattr('storyforge.cmd_assemble._run_assembly_cmd',
+                            mock_assembly_cmd)
+        calls = []
+
+        def mock_subprocess_run(cmd, **kwargs):
+            calls.append(' '.join(str(c) for c in cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout='Content.', stderr='')
+        monkeypatch.setattr('subprocess.run', mock_subprocess_run)
+
+        with pytest.raises(SystemExit) as exc:
+            main(['--format', 'epub', '--format', 'web', '--format', 'html', '--no-pr'])
+
+        assert exc.value.code == 1
+        assert not any('generate_epub' in c or 'generate_web_book' in c
+                       or 'generate_cover_if_missing' in c for c in calls)
+        assert any('generate_html' in c for c in calls)
+        out = capsys.readouterr().out
+        assert 'epub not generated: production.cover_image names' in out
+        assert 'manuscript/assets/final.png' in out
+
+
 # ============================================================================
 # main() -- git workflow
 # ============================================================================

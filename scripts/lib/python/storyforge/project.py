@@ -86,11 +86,27 @@ def current_cycle(project_dir: str) -> dict | None:
 # Latest artifact paths
 # ============================================================================
 
+#: Written into a score cycle directory that has unscored parts (one item per
+#: line); its presence keeps the cycle from being read as the latest.
+INCOMPLETE_MARKER = 'incomplete.txt'
+
+
+def mark_cycle_incomplete(cycle_dir: str, items: list[str]) -> None:
+    """Record a score cycle's unscored parts, or clear the record when none."""
+    marker = os.path.join(cycle_dir, INCOMPLETE_MARKER)
+    if items:
+        with open(marker, 'w', newline='\n') as f:
+            f.write(''.join(f'{item}\n' for item in items))
+    elif os.path.isfile(marker):
+        os.remove(marker)
+
+
 def latest_scores(project_dir: str) -> str | None:
     """Return path to the latest scores directory.
 
     Checks ``working/scores/latest`` symlink first, then falls back to
-    the highest-numbered ``working/scores/cycle-N/`` directory.
+    the highest-numbered ``working/scores/cycle-N/`` directory that isn't
+    marked incomplete (``INCOMPLETE_MARKER``).
 
     Returns:
         Absolute path string, or None if no scores exist.
@@ -111,7 +127,8 @@ def latest_scores(project_dir: str) -> str | None:
         m = re.match(r'^cycle-(\d+)$', entry)
         if m:
             full = os.path.join(scores_dir, entry)
-            if os.path.isdir(full):
+            if (os.path.isdir(full)
+                    and not os.path.isfile(os.path.join(full, INCOMPLETE_MARKER))):
                 cycle_dirs.append((int(m.group(1)), full))
 
     if not cycle_dirs:
