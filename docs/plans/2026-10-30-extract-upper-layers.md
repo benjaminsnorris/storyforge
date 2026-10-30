@@ -1,6 +1,6 @@
 # Extract the upper reference layers (#440, F-130 part 2)
 
-Status: plan approved 2026-10-30. PR 0 is #442. PR 1 (5a/5b) is #444; live on *Carol* it wrote an 8-event spine, 20 anchors, 6 themes and 26 motifs for $0.37, and the L3/L4 floors pass. Written 2026-10-30 at v1.99.x, on branch `storyforge/extract-upper-layers-20261030-1525`.
+Status (2026-10-30): PR 0 (#442, v1.101.1) and PR 1 (#444, v1.102.0) are merged: the write gate, and steps 5a and 5b. Next is PR 2 (5c). Live on *Carol*, 5a/5b wrote an 8-event spine, 20 anchors, 6 themes and 26 motifs for $0.79 across three runs, and the L3/L4 floors pass. Handoff: `docs/plans/2026-10-28-rethink-status.md`, Next steps 2.
 
 ## Goal
 

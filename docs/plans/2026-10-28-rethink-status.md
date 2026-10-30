@@ -1,6 +1,6 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-30 (late), at v1.98.0. **Phase 3 is next and nothing is in flight.** **A fresh session starts here:** read **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-10-30 (late), at v1.102.0 (#440's phase 5 steps 5a/5b added; see Next steps 2). **Phase 3 is next and nothing is in flight.** **A fresh session starts here:** read **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
 
 ## Start here
 
@@ -35,7 +35,7 @@ Last updated 2026-10-30 (late), at v1.98.0. **Phase 3 is next and nothing is in 
 
 **Before starting:**
 - **Environment:** use `~/.venvs/storyforge` (Python 3.12, has pytest). Put it first on `PATH` for the suite, because three `test_illustrate_cmd.py` tests shell out to `python3`, which is 3.9 here. The book repos under `~/Developer` are read-only unless Ben says otherwise: work on copies.
-- **Checks:** `PATH=~/.venvs/storyforge/bin:$PATH python -m pytest tests/` (5 to 10 minutes; 7,564 tests at v1.98.0) and `python evals/run.py` (6 to 10 minutes, replay, no key). Main replays every suite with no errors. The gates that fail are E2 (all three), E7 noise and E8 reintroduced; E3, E4 and E5 pass.
+- **Checks:** `PATH=~/.venvs/storyforge/bin:$PATH python -m pytest tests/` (5 to 10 minutes; 7,854 tests at v1.102.0; where the venv is missing, `python3 -m pytest tests/ --no-cov -p no:cacheprovider` runs in about a minute). A stale, gitignored `tests/fixtures/test-project/working/dashboard.html` in a checkout fails `test_score_runs_no_dashboard_step` and `test_renders_no_html_and_commits_nothing`; move it aside and `python evals/run.py` (6 to 10 minutes, replay, no key). Main replays every suite with no errors. The gates that fail are E2 (all three), E7 noise and E8 reintroduced; E3, E4 and E5 pass.
 - **Coordination:** other sessions open Storyforge PRs and claim versions; on 2026-10-30 that was evals-b5 and evals-9a (the F-numbers are storyforge-evals' `FINDINGS.md`, which is in `~/Developer/evals`). Find live ones with ListAgents, agree a version by SendMessage before merging, and say when you touch `cmd_extract.py`, `ledger.py` or `cmd_validate.py`. Eval-only and test-only PRs bump nothing. Never touch `~/Developer/evals` or other sessions' worktrees.
 - **Process:** one PR per step, on branch `storyforge/{name}-{timestamp}`. Work in a scratchpad worktree when a suite is running in the main checkout: switching branches under a running suite breaks it. Get one to three general reviewers covering correctness, silent failures, tests and comments. Fix every verified finding before merging (Ben's standing instruction this session), and list them in a PR comment.
 - **Spending:** re-records don't need asking (Ben, 2026-10-30: "just do it"); estimate from the `if live` figures or `evals/e8/cli.py plan` and report what was spent.
@@ -71,8 +71,41 @@ Suggested order, one PR each (each with a reviewer, evals re-recorded without as
 
 E4 (`evals/e4`) drafts with `cmd_write._build_prompt` in direct mode today; it must follow the gated loop once it ships (it is the success measure). Budget: E4 live is $5.29; a gated E4 adds extract + check (+ fix) per scene, likely 2–3×.
 
+**2. #440 / F-130: extraction writes the upper reference layers** (a separate track from Phase 3; plan `docs/plans/2026-10-30-extract-upper-layers.md`, which has the design, the step table, the PR order, the costs and Ben's five decisions). The goal is to go from a finished book to every file a Storyforge project has, describing the book as written, so the classics can validate the scorers. New code goes in `storyforge/extract_describe.py` as extract **phase 5**, with only a thin dispatcher (`_run_phase_5`) in `cmd_extract.py`.
+- **Done (v1.101.1 #442, v1.102.0 #444):**
+  - The write gate: `write_described`, provenance in `working/extraction-provenance.csv`, and the cell record in `working/extraction-cells.csv`. A file or cell is replaced only while it still holds what phase 5 wrote.
+  - **5a** writes `spine.csv` and `architecture.csv`, plus blank scene summaries, `architecture_scene` and a placeholder genre.
+  - **5b** writes `themes.csv` and `motif-taxonomy.csv`, plus `theme_threads`. Brief `motifs` become ids, and every description moves to the new free-text brief column `motif_details` (Ben: ids in the brief, nothing lost).
+  - Fixes on the way:
+    - template headers now match `elaborate._FILE_MAP` (and cleanup, migrate-medium, `scenes.py` and the init skill derive from it);
+    - phase 3b keeps its scene summaries;
+    - extracted scenes get `status=drafted`;
+    - `update_scene` keeps unknown columns.
+  - Both PRs had the 5-agent review, with every finding fixed (see their PR comments).
+- **Live on *Carol*** (the E7 fixture copy, migrated; $0.79 in all):
+  - an 8-event spine, 20 anchors, 6 themes and 26 motifs;
+  - the L3/L4 floors pass;
+  - no motif or `architecture_scene` validate errors.
+- **Next, one PR each** (plan "PRs, in order"):
+  1. **5c:** `story-summary.md` (in the shape `common.parse_story_summary` reads; the L0–L2 floors) and `story-architecture.md`, in one call.
+  2. **5d/5e/5f:** character bible, world bible (a systems-bible stub when the book has no formal system), voice guide plus `voice-profile.csv`.
+     - Describe, never prescribe: elaborate's voice prompt is prescriptive, so don't reuse it.
+     - Dialogue samples need a new helper (`prose_analysis.extract_dialogue` joins every line).
+     - Books with an unmigrated ledger need a stated fallback.
+  3. **5g:** `timeline.md`, `chapter-map.csv` (when missing), and the **E9 replay suite** on *Carol*:
+     - every reference file is filled, except `key-decisions.md`, `visual-style.md` and `canon/` (Ben's decision 1);
+     - `score --all-levels` passes;
+     - `status` gets past the ladder;
+     - a rerun writes nothing.
+
+     This is the first recording of phase 5's prompts, at about $0.40 for 5a+5b plus the later steps.
+  4. **Hand-off to storyforge-evals:** gold reference notes per book and a re-score of *Carol* and *Gatsby*.
+- **Each step reuses:** `Run`, `_ask` (one retry with the parser's problems), `_gate` (a step writes all its files or none), `_write_all`, `_set_cells` and `_csv_text` (unquoted; model text never goes through a quoting writer). Each step returns `written` / `skipped` / `partial`. Add each new path to `WRITTEN_PATHS`; a test checks every changed file is committed.
+- **Deferred:** tell 3b's prompt its summary is kept (≤35 words). That's a prompt change, so it re-records E3; fold it into a recording you're making anyway.
+
 **Open follow-ups, not scheduled:**
-- **F-130 (evals-8b; Ben approved): extraction never fills the reference docs.** On all eight classics `story-architecture.md`, `world-bible.md`, `voice-guide.md`, `character-bible.md`, `story-summary.md` (and `spine.csv`, `themes.csv`, `motif-taxonomy.csv`) are untouched templates, yet score's character and narrative passes and `scoring_bible.py` read them. evals-8b is adding the guard (a file identical to its template counts as absent; `cmd_score.py`, `scoring_bible.py`, about v1.98.1). **The real fix is ours:** an extract phase that writes those docs from the Phase 0 profile (`working/extraction-profile.json`: narrative_mode, act_structure, major_threads, central_conflict, protagonist_arc, tone, key_locations) and the CSVs. It fits the plan's "bible = fixed facts + voice" (the bible could be generated from the ledger's `fixed` facts). Also check `build_shared_context`, which sends `character-bible.md` and `world-bible.md` to every drafting call: a template there is noise in E4, E5 and E8.
+- **E3 fails its gate on main since #443:** recall 0.841 < 0.85, with 49 → 44 facts. Replaying on a clean worktree of main gives the same result, so it isn't #442 or #444. Check with whoever owns #443's re-baseline.
+- **F-130 (evals-8b; Ben approved): extraction never fills the reference docs.** *In progress as Next steps 2 (#440); 5a/5b are done.* On all eight classics `story-architecture.md`, `world-bible.md`, `voice-guide.md`, `character-bible.md`, `story-summary.md` (and `spine.csv`, `themes.csv`, `motif-taxonomy.csv`) are untouched templates, yet score's character and narrative passes and `scoring_bible.py` read them. evals-8b is adding the guard (a file identical to its template counts as absent; `cmd_score.py`, `scoring_bible.py`, about v1.98.1). **The real fix is ours:** an extract phase that writes those docs from the Phase 0 profile (`working/extraction-profile.json`: narrative_mode, act_structure, major_threads, central_conflict, protagonist_arc, tone, key_locations) and the CSVs. It fits the plan's "bible = fixed facts + voice" (the bible could be generated from the ledger's `fixed` facts). Also check `build_shared_context`, which sends `character-bible.md` and `world-bible.md` to every drafting call: a template there is noise in E4, E5 and E8.
 - **The books' validate findings** are the author's. Thornwall's Garren (16 states) and governor's `governor` (9) have no `characters.csv` entry. Briefs name physical states the ledger doesn't hold, in the hundreds for shared-dark, governor and meridian-line. Understory has 16 cells with parenthetical text that `migrate` step 5 left for hand edits.
 - **Rejected facts are still used** by consumers, because the views don't filter on `status`. This is Phase 4's reject flow.
 - **F-123 limitation:** a hand-added fact that no brief's `knowledge_out` lists isn't offered to later 3b scenes.
