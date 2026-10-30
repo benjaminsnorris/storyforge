@@ -296,7 +296,10 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
     data = _json_answer(response, SKELETON_SCHEMA)
     result = {'id': scene_id}
     for key in _SKELETON_FIELDS:
-        value = _text(data[key], ';')
+        answer = data[key]
+        if isinstance(answer, list):  # an "unknown" place is no place
+            answer = [v for v in answer if str(v).strip().lower() != 'unknown']
+        value = _text(answer, ';')
         if value and value.lower() != 'unknown':
             result[key] = value
     date = skeleton_cues(response)['date']

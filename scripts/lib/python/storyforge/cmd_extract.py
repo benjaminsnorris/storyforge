@@ -537,10 +537,13 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     # on one calendar. Nobody authored these days, so they are replaced.
     from storyforge.timeline import write_cues, run_assignment
     cues = {}
+    rejected = set(_unanswered.get('scenes.csv', []))
     for sid in sorted_scene_ids:
         txt_file = os.path.join(log_dir, f'{sid}.txt')
-        # Only this batch's answers: never a stale file from an earlier run
-        if sid in succeeded and os.path.isfile(txt_file):
+        # Only this batch's answers (never a stale file from an earlier run),
+        # and only those the scenes.csv merge accepted: a reply with cues but
+        # no scene values was named as unusable there
+        if sid in succeeded and sid not in rejected and os.path.isfile(txt_file):
             with open(txt_file) as f:
                 try:
                     cues[sid] = skeleton_cues(f.read())
