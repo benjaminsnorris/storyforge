@@ -10,6 +10,7 @@ import os
 
 import pytest
 
+from storyforge.common import start_new_cycle
 from storyforge.cmd_score import (
     parse_args,
     main,
@@ -956,6 +957,73 @@ class TestLatestSymlink:
         assert os.path.islink(latest)
         target = os.readlink(latest)
         assert target.startswith('cycle-')
+
+    _SCENE_REPLY = ('principle|score|deficits|evidence_lines\n'
+                    'prose_naturalness|4|Some stiff phrasing|12,45\n')
+
+    def _run_direct(self, monkeypatch, project_dir):
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        main(['--direct', '--scenes', 'act1-sc01'])
+
+    def test_a_complete_cycle_moves_latest(self, mock_api, mock_git, mock_costs,
+                                           project_dir, monkeypatch):
+        mock_api.set_response_fn(_every_part(self._SCENE_REPLY))
+        self._run_direct(monkeypatch, project_dir)
+        first = os.readlink(os.path.join(project_dir, 'working', 'scores', 'latest'))
+        start_new_cycle(project_dir)
+
+        self._run_direct(monkeypatch, project_dir)
+
+        second = os.readlink(os.path.join(project_dir, 'working', 'scores', 'latest'))
+        assert first != second and second.startswith('cycle-')
+
+    def test_an_incomplete_cycle_leaves_latest_on_the_last_complete_one(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """Decision 4 (2026-10-30): latest used to move to an incomplete
+        cycle, so revise and the dashboard read its gaps."""
+        mock_api.set_response_fn(_every_part(self._SCENE_REPLY))
+        self._run_direct(monkeypatch, project_dir)
+        latest = os.path.join(project_dir, 'working', 'scores', 'latest')
+        complete = os.readlink(latest)
+        start_new_cycle(project_dir)
+        capsys.readouterr()
+
+        mock_api.set_response_fn(_every_part('not a score table'))
+        with pytest.raises(SystemExit) as exc:
+            self._run_direct(monkeypatch, project_dir)
+
+        assert exc.value.code == 1
+        assert os.readlink(latest) == complete
+        out = capsys.readouterr().out
+        assert f'latest stays on {complete}' in out
+        commits = [c[1] for c in mock_git.calls_for('commit_and_push')]
+        assert commits[-1].endswith('(incomplete)')
+
+    def test_an_incomplete_re_score_of_the_latest_cycle_says_so(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """Within one pipeline cycle, a re-score writes into the directory
+        latest already names, so latest can't stay clear of the gaps."""
+        mock_api.set_response_fn(_every_part(self._SCENE_REPLY))
+        self._run_direct(monkeypatch, project_dir)
+        capsys.readouterr()
+
+        mock_api.set_response_fn(_every_part('not a score table'))
+        with pytest.raises(SystemExit):
+            self._run_direct(monkeypatch, project_dir)
+
+        assert 're-scored only in part' in capsys.readouterr().out
+
+    def test_an_incomplete_first_cycle_creates_no_latest(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        mock_api.set_response_fn(_every_part('not a score table'))
+        with pytest.raises(SystemExit):
+            self._run_direct(monkeypatch, project_dir)
+
+        assert not os.path.lexists(
+            os.path.join(project_dir, 'working', 'scores', 'latest'))
+        assert 'latest not created' in capsys.readouterr().out
 
 
 # ============================================================================
