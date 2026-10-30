@@ -51,6 +51,7 @@ CSVs are pipe-delimited (`|`), arrays use `;`, header row first, no quoting, emp
 | `working/annotations.csv` | Bookshelf reader annotations |
 | `working/craft-weights.csv` | Principle weights (keyed by `principle`) |
 | `working/costs/ledger.csv` | Per-invocation costs |
+| `working/export/bundle.json` | `storyforge export`'s output (see Export bundle) |
 
 Scene files (`scenes/{id}.md`) are pure prose — **no frontmatter**. Filename is the scene ID; all metadata lives in CSVs.
 
@@ -76,6 +77,28 @@ Storyforge defines and sends the dashboard's data; Bookshelf renders it (benjami
 
 A missing CSV gives an empty list.
 
+## Export bundle (`storyforge export`, schema version 1)
+
+`export.build_bundle(project_dir)` builds one JSON bundle of the book's structured state (plan §3.5); `storyforge export` writes it to `working/export/bundle.json` (`--output PATH`, `--stdout`), as UTF-8 with sorted keys and LF. Storygild and Bookshelf read the bundle and pin its `schema_version`. No API calls. An unmigrated project or a malformed ledger exits 1 (`ledger.LedgerError`). `tests/test_export.py` pins the keys; `evals/export_check.py` exports a copy of each book and checks the round trip.
+
+- `schema_version`: `1` (`export.SCHEMA_VERSION`), a major version. Adding a key, a table or a table kind doesn't change it. Renaming or removing a key, or changing a value's type, bumps it, in the same commit, with the tests.
+- `storyforge_version`: the plugin version that wrote it (`.claude-plugin/plugin.json`).
+- `project`: `title`, `genre`, `medium`, `phase` from `storyforge.yaml`. All strings.
+- `score_cycle`: the latest complete score cycle (`project.latest_scores`) relative to the project, or `null`.
+- `tables`: `{relative path: table}`. A table is `kind`, `header` (list of strings), `rows` (lists of strings), `line_ending` (`"\n"` or `"\r\n"`), `final_newline`, `bom`. Cells are exactly the text between `|`s, unstripped; blank lines are rows of one empty cell. `export.tables_from_bundle(bundle)` returns `{path: text}`, and writing each text as UTF-8 with `newline=''` gives back the original bytes. A file with mixed line endings is split on LF (its CRs stay in cells) and named in `warnings`.
+
+| `kind` | Files |
+|---|---|
+| `reference` | every `reference/*.csv`: scenes, intent, briefs, registries, `commitments.csv`, chapter map, voice profile, spine, architecture, visual state. The timeline calendar is `scenes.csv`'s `timeline_day` / `time_mode` |
+| `scores` | the CSVs in `score_cycle`, and `working/scores/structural-latest.csv` |
+| `timeline` | `working/timeline*.csv` (the timeline's stored cues) |
+| `audit` | **provisional**: `working/audit*.csv` and the CSVs under `working/audit/`, as raw rows, until the audit log is defined. Other files there are named in `warnings` |
+
+- `dashboard_data`: `visualize.load_dashboard_data`'s output, unchanged, with its own `schema_version` (see Dashboard data); `null`, with a warning, if it couldn't be built.
+- `warnings`: every file the bundle meant to carry and couldn't (unreadable, not UTF-8), and anything a consumer should know about a table. Empty means everything was read.
+
+Left out: scene prose and manuscripts (`assemble` / `produce`), score history before the latest cycle, and eval results (evals measure Storyforge, not the book).
+
 ## Architecture
 
 - `evals/` — eval harness and suites
@@ -100,6 +123,7 @@ Commands (`storyforge <name>`; full flag notes in `docs/history.md`):
 | `cleanup` | Project health; `--scenes`, `--csv`, `--dry-run` |
 | `assemble` | Chapters + epub/PDF/HTML (GN: artist handoff bundle) |
 | `publish`, `annotations`, `visualize` | Bookshelf publish, reader annotations, dashboard data (see Dashboard data) |
+| `export` | The book's structured state as one versioned JSON bundle (see Export bundle) |
 | `cover`, `illustrate` | Cover; interior illustrations (prose only) |
 | `scenes-setup` (`scenes`), `scenes-export`, `scenes-import`, `sync` | Scene files and CSV ↔ `scenes-review.md` round-trip |
 | `migrate`, `migrate-medium` | Idempotent project migrations; novel ↔ graphic-novel conversion |

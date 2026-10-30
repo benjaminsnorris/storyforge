@@ -489,7 +489,7 @@ Check whether `reference/canon/` exists in the project. The canon tree is the so
 - **If `reference/canon/` exists but `storyforge cleanup --csv` reports unfilled-template findings on the four root files (`style-foundation.md`, `lighting-laws.md`, `panel-registers.md`, `page-rhythm-rules.md`):** suggest filling them. `page-architecture` needs panel-registers + page-rhythm; the `prompts` stage distills style-foundation + lighting-laws into the page prompt.
 - **If `storyforge cleanup --csv` reports canon drift findings:** a canon block changed; refresh the reference images it describes (and any `canon_referenced` page frontmatter) so the rendered pages stay consistent. The cleanup report's "Canon Files" section names the specific canon to look at.
 
-These commands and skills work in GN mode: `elaborate`, `hone`, `validate`, `cleanup`, `write`, `evaluate`, `score`, `revise`, `extract`, `script-package`. Not yet supported: `publish`, `annotations` (Bookshelf integration — tracked as #215).
+These commands and skills work in GN mode: `elaborate`, `hone`, `validate`, `cleanup`, `write`, `evaluate`, `score`, `revise`, `extract`, `script-package`, `export`. Not yet supported: `publish`, `annotations` (Bookshelf integration — tracked as #215).
 
 If the author asks for an unsupported action, explain the limit and offer to help with what is supported.
 
