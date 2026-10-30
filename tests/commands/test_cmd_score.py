@@ -827,6 +827,31 @@ class TestMainBatch:
         commits = [c[1] for c in mock_git.calls_for('commit_and_push')]
         assert any(m.endswith('(incomplete)') for m in commits)
 
+    def test_a_scene_too_short_to_score_is_not_unscored(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """Scenes under MIN_SCENE_WORDS are left out of scoring on purpose
+        (build_scene_list); they must not make the cycle incomplete."""
+        from storyforge.csv_cli import update_field
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        update_field(os.path.join(project_dir, 'reference', 'scenes.csv'),
+                     'act1-sc02', 'word_count', '12')
+        good = _every_part(self._scoring_response())
+
+        def reply(prompt):
+            # Were act1-sc02 scored, its scene reply would be unreadable and
+            # the cycle incomplete (with 60 words, this test fails)
+            answer = good(prompt)
+            if answer == self._scoring_response() and 'act1-sc02' in prompt:
+                return 'not a score table'
+            return answer
+        mock_api.set_response_fn(reply)
+
+        main(['--direct', '--scenes', 'act1-sc01,act1-sc02'])  # no exit 1
+
+        assert 'is incomplete' not in capsys.readouterr().out
+
     def test_unreadable_fidelity_and_narrative_replies_make_the_cycle_incomplete(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
