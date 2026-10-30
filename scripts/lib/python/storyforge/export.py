@@ -22,9 +22,10 @@ What goes in:
       report) are not tables and are left out.
     - `working/timeline*.csv` (kind `timeline`): the timeline's stored cues.
     - `working/audit*.csv` and the CSVs under `working/audit/` (kind
-      `audit`), as raw rows. PROVISIONAL: the audit log is still being
-      defined; until it is, the bundle passes through whatever CSVs are
-      there, and names any non-CSV file under `working/audit/` in `warnings`.
+      `audit`), as raw rows. PROVISIONAL: empty until the audit log
+      (`working/audit-log.csv`, another PR) exists; the bundle passes through
+      whatever CSVs are there, and names any non-CSV file under
+      `working/audit/` in `warnings`.
 - `dashboard_data`: `visualize.load_dashboard_data`'s output, unchanged,
   with its own `schema_version`.
 - `project`: title, genre, medium and phase from storyforge.yaml;
@@ -35,8 +36,8 @@ What goes in:
 
 What stays out: scene prose (`scenes/*.md`) and manuscripts (`produce` and
 `assemble` own those), score history beyond the latest cycle, and eval
-results — evals measure Storyforge, not the book, so they are not part of a
-book's state.
+results, though plan §3.5 lists them — evals measure Storyforge, not the
+book, and their results belong to the Storyforge repo (`evals/results/`).
 
 `schema_version` is a major version. Adding a key, a table kind or a table
 doesn't change it. Renaming or removing a key, or changing a value's type,

@@ -85,19 +85,19 @@ A missing CSV gives an empty list.
 - `storyforge_version`: the plugin version that wrote it (`.claude-plugin/plugin.json`).
 - `project`: `title`, `genre`, `medium`, `phase` from `storyforge.yaml`. All strings.
 - `score_cycle`: the latest complete score cycle (`project.latest_scores`) relative to the project, or `null`.
-- `tables`: `{relative path: table}`. A table is `kind`, `header` (list of strings), `rows` (lists of strings), `line_ending` (`"\n"` or `"\r\n"`), `final_newline`, `bom`. Cells are exactly the text between `|`s, unstripped; blank lines are rows of one empty cell. `export.tables_from_bundle(bundle)` returns `{path: text}`, and writing each text as UTF-8 with `newline=''` gives back the original bytes. A file with mixed line endings is split on LF (its CRs stay in cells) and named in `warnings`.
+- `tables`: `{relative path: table}`. A table is `kind`, `header` (list of strings), `rows` (lists of strings), `line_ending` (`"\n"` or `"\r\n"`), `final_newline`, `bom`. Cells are exactly the text between `|`s, unstripped; blank lines are rows of one empty cell. `export.tables_from_bundle(bundle)` returns `{path: text}`, and writing each text as UTF-8 with `newline=''` gives back the original bytes. A file with mixed line endings is split on LF (its CRs stay in cells), and a CRLF file with a CR that doesn't end a line keeps it inside its cell; both are named in `warnings`. The bundle is written atomically (a temporary file beside it, then a rename); an unwritable output path exits 1.
 
 | `kind` | Files |
 |---|---|
 | `reference` | every `reference/*.csv`: scenes, intent, briefs, registries, `commitments.csv`, chapter map, voice profile, spine, architecture, visual state. The timeline calendar is `scenes.csv`'s `timeline_day` / `time_mode` |
 | `scores` | the CSVs in `score_cycle`, and `working/scores/structural-latest.csv` |
 | `timeline` | `working/timeline*.csv` (the timeline's stored cues) |
-| `audit` | **provisional**: `working/audit*.csv` and the CSVs under `working/audit/`, as raw rows, until the audit log is defined. Other files there are named in `warnings` |
+| `audit` | **provisional**: `working/audit*.csv` and the CSVs under `working/audit/`, as raw rows. Empty until the audit log (`working/audit-log.csv`, another PR) exists; it fills from then with no code change. Other files under `working/audit/` are named in `warnings` |
 
 - `dashboard_data`: `visualize.load_dashboard_data`'s output, unchanged, with its own `schema_version` (see Dashboard data); `null`, with a warning, if it couldn't be built.
 - `warnings`: every file the bundle meant to carry and couldn't (unreadable, not UTF-8), and anything a consumer should know about a table. Empty means everything was read.
 
-Left out: scene prose and manuscripts (`assemble` / `produce`), score history before the latest cycle, and eval results (evals measure Storyforge, not the book).
+Left out: scene prose and manuscripts (`assemble` / `produce`) and score history before the latest cycle. **Eval results are not in a book's bundle**, though plan §3.5 lists them: evals measure Storyforge, not the book, and their results belong to the Storyforge repo (`evals/results/`).
 
 ## Architecture
 
