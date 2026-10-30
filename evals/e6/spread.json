@@ -1,16 +1,16 @@
 {
   "claims": [
     {
-      "claim": "structured outputs: recall 0.245 -> 0.286 (v1.83.0)",
-      "claimed_delta": 0.041,
+      "claim": "structured outputs: recall 0.245 -> 0.286 (12 -> 14 of 49; v1.83.0)",
+      "claimed_delta": 0.04081632653061224,
       "metric": "recall",
       "range": 0.0204,
       "suite": "e3-extraction",
       "within_noise": false
     },
     {
-      "claim": "structured outputs: with partial 0.816 -> 0.755 (v1.83.0)",
-      "claimed_delta": 0.061,
+      "claim": "structured outputs: with partial 0.816 -> 0.755 (40 -> 37 of 49; v1.83.0)",
+      "claimed_delta": 0.061224489795918366,
       "metric": "recall_with_partial",
       "range": 0.0612,
       "suite": "e3-extraction",
@@ -33,12 +33,12 @@
       "within_noise": false
     },
     {
-      "claim": "v1.80.0 re-record on new models: recall 0.16 -> 0.10",
-      "claimed_delta": 0.06,
+      "claim": "v1.80.0 re-record on new models: recall 0.16 -> 0.10 (8 -> 5 of 51)",
+      "claimed_delta": 0.058823529411764705,
       "metric": "recall",
       "range": 0.0588,
       "suite": "e2-corpus-drift",
-      "within_noise": false
+      "within_noise": true
     },
     {
       "claim": "v1.80.0 re-record on new models: precision 0.30 -> 0.40",
@@ -67,9 +67,9 @@
   ],
   "errored": {},
   "git_sha": {
-    "run1": "3c01088d44598167018f5e23fb331fa15ebab8d6",
-    "run2": "3c01088d44598167018f5e23fb331fa15ebab8d6",
-    "run3": "3c01088d44598167018f5e23fb331fa15ebab8d6"
+    "run1": "3fb62cd707582d5c11fda49ac55599e25ca08749",
+    "run2": "3fb62cd707582d5c11fda49ac55599e25ca08749",
+    "run3": "3fb62cd707582d5c11fda49ac55599e25ca08749"
   },
   "runs": [
     "run1",
