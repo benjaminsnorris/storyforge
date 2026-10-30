@@ -77,3 +77,25 @@ def test_shared_context_skips_template(tmp_path):
     assert '=== Voice Guide ===' in text
     assert '=== Character Bible ===' not in text
     assert '=== World Bible ===' not in text
+
+
+def test_unreadable_file_is_not_unfilled_and_doesnt_crash(tmp_path):
+    project = _project(tmp_path, filled=('voice-guide.md',))
+    path = tmp_path / 'reference' / 'character-bible.md'
+    path.write_bytes(b'Caf\xe9 society')  # cp1252, not UTF-8
+    assert not is_unfilled_template(str(path))
+    _shared_context_cache.clear()
+    try:
+        text = '\n'.join(b['text'] for b in build_shared_context(project))
+    finally:
+        _shared_context_cache.clear()
+    assert '=== Voice Guide ===' in text
+
+
+def test_read_reference_falls_through_to_next_candidate(tmp_path):
+    project = _project(tmp_path)
+    legacy = tmp_path / 'references'
+    legacy.mkdir()
+    (legacy / 'character-bible.md').write_text('Legacy bible.\n')
+    assert _read_reference(project, ['reference/character-bible.md',
+                                     'references/character-bible.md']) == 'Legacy bible.\n'
