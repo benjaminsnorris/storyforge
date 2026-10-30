@@ -1400,7 +1400,7 @@ def cleanup_answer_formats(ref_dir: str) -> list[dict]:
             fixes.append({'state_id': row.get('id', ''), 'field': 'action_gating',
                           'old_value': old, 'new_value': new})
     if fixes:
-        ledger.save_to(ref_dir, rows)
+        ledger.save_to(ref_dir, rows, command='extract-cleanup')
 
     briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
     briefs = _read_csv(briefs_path)

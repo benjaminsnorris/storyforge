@@ -208,6 +208,9 @@ Provide the commands: `storyforge scenes-setup` splits manuscripts or chapters i
 **"Show me my book" / "Visualize" / "Dashboard":**
 Bookshelf renders the manuscript dashboard from the data `publish` sends: invoke the `publish` skill, then open the book's dashboard in Bookshelf. If metadata is sparse, suggest `storyforge enrich` first.
 
+**"Audit the facts" / "What has the book committed to?" / "Review new facts" / "Digest":**
+Provide `storyforge audit`: the per-act digest of new ledger facts (`reference/commitments.csv`) not yet reviewed, fixed facts first, then relationship and knowledge, then physical state. Scope it with `--act N`, `--character ID`, `--scenes A..B` or `--thread ID`. The author marks what they've read with `storyforge audit --mark seen all` (or named ids), and a wrong fact with `--mark rejected ID`, which lists the scenes whose briefs lean on it. Every ledger change is also recorded in `working/audit-log.csv`, readable at any pace. Don't mark facts on the author's behalf: the marking is the audit.
+
 **"What should I do next?":**
 Use the `storyforge status --json` verdict from Step 1 and recommend its `next.command`. Also: if scoring was recently run, publishing (`./storyforge publish`) refreshes the dashboard in Bookshelf; if scene metadata is sparse, `storyforge enrich` is high value.
 
@@ -489,7 +492,7 @@ Check whether `reference/canon/` exists in the project. The canon tree is the so
 - **If `reference/canon/` exists but `storyforge cleanup --csv` reports unfilled-template findings on the four root files (`style-foundation.md`, `lighting-laws.md`, `panel-registers.md`, `page-rhythm-rules.md`):** suggest filling them. `page-architecture` needs panel-registers + page-rhythm; the `prompts` stage distills style-foundation + lighting-laws into the page prompt.
 - **If `storyforge cleanup --csv` reports canon drift findings:** a canon block changed; refresh the reference images it describes (and any `canon_referenced` page frontmatter) so the rendered pages stay consistent. The cleanup report's "Canon Files" section names the specific canon to look at.
 
-These commands and skills work in GN mode: `elaborate`, `hone`, `validate`, `cleanup`, `write`, `evaluate`, `score`, `revise`, `extract`, `script-package`. Not yet supported: `publish`, `annotations` (Bookshelf integration — tracked as #215).
+These commands and skills work in GN mode: `elaborate`, `hone`, `validate`, `cleanup`, `write`, `evaluate`, `score`, `revise`, `extract`, `script-package`, `export`. Not yet supported: `publish`, `annotations` (Bookshelf integration — tracked as #215).
 
 If the author asks for an unsupported action, explain the limit and offer to help with what is supported.
 

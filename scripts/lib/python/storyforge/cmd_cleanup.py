@@ -35,6 +35,7 @@ from storyforge.common import (
 )
 from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge import ledger
+from storyforge.audit import COLUMNS as AUDIT_COLUMNS
 from storyforge.parsing import clean_scene_content, extract_single_scene
 from storyforge.visual_state import STATE_COLUMNS
 
@@ -137,12 +138,17 @@ EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
     # visual_state.prepass. Also always optional — most books track no
     # changing visual state.
     'reference/visual-state.csv': list(STATE_COLUMNS),
+    # The audit log (`storyforge.audit`): registered so a malformed header or
+    # CRLF endings are caught; optional, since a project that has never
+    # written the ledger has no log yet.
+    'working/audit-log.csv': list(AUDIT_COLUMNS),
 }
 
 #: Registered for header checking but never required to exist, in any medium.
 ALWAYS_OPTIONAL_CSV_FILES: set[str] = {
     'reference/illustration-plan.csv',
     'reference/visual-state.csv',
+    'working/audit-log.csv',
 }
 
 #: Columns a registered CSV may legally lack — schema additions that older
@@ -198,7 +204,7 @@ GN_OPTIONAL_CSV_FILES: set[str] = {
 # dashboard (#371); an author's copy is left alone, never flagged or removed.
 EXPECTED_WORKING_FILES = set(
     'pipeline.csv craft-weights.csv overrides.csv exemplars.csv dashboard.html '
-    'dashboard-data.json cleanup-report.csv'.split()
+    'dashboard-data.json cleanup-report.csv audit-log.csv .audit-snapshot.csv'.split()
 )
 
 

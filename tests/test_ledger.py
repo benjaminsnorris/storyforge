@@ -568,7 +568,7 @@ def _odd_ledger(project_dir):
 class TestUntouchedRowsAreByteIdentical:
     def test_read_and_write_back(self, project_dir):
         before = _odd_ledger(project_dir)
-        ledger.save(project_dir, ledger.load(project_dir))
+        ledger.save(project_dir, ledger.load(project_dir), command='test')
         assert _ledger_text(project_dir) == before
 
     @pytest.mark.parametrize('type_', ['knowledge', 'physical'])
@@ -616,7 +616,7 @@ class TestUntouchedRowsAreByteIdentical:
         rows = ledger.load(project_dir)
         rows.append(dict(rows[-1], id='padded-cut', subject='', aliases=' Garren ',
                          type='physical'))
-        ledger.save(project_dir, rows)
+        ledger.save(project_dir, rows, command='test')
         view = ledger.read_view(ref, 'physical')
         for row in view:
             row['character'] = row['character'].strip()

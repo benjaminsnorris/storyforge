@@ -15,7 +15,8 @@ Lookup tables and subsystem rules moved out of `CLAUDE.md` on 2026-10-28 so that
 | `scene_filter` | `build_scene_list`, `apply_scene_filter` |
 | `csv_cli` | `get_field`, `get_row`, `get_column`, `list_ids`, `update_field`, `append_row` |
 | `history` | `append_cycle`, `get_scene_history`, `detect_stalls`, `detect_regressions` |
-| `ledger` | `reference/commitments.csv` (plan §3.1), the one store of knowledge facts and physical states (it replaced `knowledge.csv` and `physical-states.csv`). `load(project_dir)` / `load_from(ref_dir)` raise `NotMigratedError` while either old file is on disk, and `LedgerError` (its parent) when `file_problems` finds a header that isn't exactly `COLUMNS`, a row with the wrong cell count, a blank id or a duplicate id, rather than silently fixing them on the next write; commands call `exit_if_not_migrated(project_dir)` first, and the dispatcher turns a late `NotMigratedError` into exit 1. `save` / `save_to`. Typed views in the old files' shapes: `knowledge_view` (id/name/aliases/category/origin = scene) and `physical_view` (id/character = subject id/description/category/acquired/resolves/action_gating), `read_view(ref_dir, type)`, `view_map`, `alias_map`. Write a view back with `write_view(ref_dir, type, rows, origin=, introduced_by=)` (`replace_view`): only the cells the writer changed are rewritten; every other row goes back byte-identical. A physical view's `character` is the subject id, or for a subject the migration couldn't resolve (left blank) the name it kept in `aliases`; validate reports such rows. Never write the old files. Also `read_ledger` / `write_ledger` (LF, prose through `csv_safe`), `validate_ledger`, `scene_order`, `active_states(rows, scene_id, order, subject=, entering=)` (derived per-character state), `established_before` (facts from earlier scenes only, F-123: extract's phase 3b offers a scene only these, plus backstory), and the migration (`migrate_registries`, `round_trip_differences`, and `migrate_files`, the whole step `storyforge migrate` runs as step 4). `evals/ledger_check.py` runs the migration on copies of the book repos; `evals/harness.migrate_tree` migrates every eval tree before Storyforge reads it |
+| `ledger` | `reference/commitments.csv` (plan §3.1), the one store of knowledge facts and physical states (it replaced `knowledge.csv` and `physical-states.csv`). `load(project_dir)` / `load_from(ref_dir)` raise `NotMigratedError` while either old file is on disk, and `LedgerError` (its parent) when `file_problems` finds a header that isn't exactly `COLUMNS`, a row with the wrong cell count, a blank id or a duplicate id, rather than silently fixing them on the next write; commands call `exit_if_not_migrated(project_dir)` first, and the dispatcher turns a late `NotMigratedError` into exit 1. `save(project_dir, rows, command=)` / `save_to(ref_dir, rows, command=)`: `command` (the writer's name) is required, since every write is audit-logged (see `audit`); `write_ledger` is the bare file writer and logs nothing. Typed views in the old files' shapes: `knowledge_view` (id/name/aliases/category/origin = scene) and `physical_view` (id/character = subject id/description/category/acquired/resolves/action_gating), `read_view(ref_dir, type)`, `view_map`, `alias_map`. Write a view back with `write_view(ref_dir, type, rows, origin=, introduced_by=, command=None)` (`replace_view`; the audit entries carry `command`, defaulting to `introduced_by`): only the cells the writer changed are rewritten; every other row goes back byte-identical. A physical view's `character` is the subject id, or for a subject the migration couldn't resolve (left blank) the name it kept in `aliases`; validate reports such rows. Never write the old files. Also `read_ledger` / `write_ledger` (LF, prose through `csv_safe`), `validate_ledger`, `scene_order`, `active_states(rows, scene_id, order, subject=, entering=)` (derived per-character state), `established_before` (facts from earlier scenes only, F-123: extract's phase 3b offers a scene only these, plus backstory), and the migration (`migrate_registries`, `round_trip_differences`, and `migrate_files`, the whole step `storyforge migrate` runs as step 4). `evals/ledger_check.py` runs the migration on copies of the book repos; `evals/harness.migrate_tree` migrates every eval tree before Storyforge reads it |
+| `audit` | The audit log, digest and immediate tier (plan decision 2). `ledger.save_to` (so `save`, `write_view`) diffs the ledger file before and after each write and appends one entry per added/changed/removed fact to `working/audit-log.csv` (`record`, `diff_entries`); `migrate_files` appends one `migrated` summary entry instead of one per row. A log that can't be written is a WARNING naming the file and the lost fact ids; the ledger write stands (the digest reads the ledger's `reviewed`, never the log). Edits that bypass the writers (by hand, or a skill editing commitments.csv) are caught from `working/.audit-snapshot.csv`, the ledger as last logged: `log_hand_edits` logs the snapshot-to-disk difference as `command=hand-edit` before every logged save and on every `storyforge audit` run. The snapshot is committed with the log; a project without one starts one and logs nothing. Digest: `select(rows, project_dir, Scope, order)`, `group`, `tier_of`; `mark(rows, ids, 'seen'/'rejected')` stamps `reviewed` `seen:<date>` / `rejected:<date>` (rejected also sets `status=rejected`); `leaning_scenes` (briefs naming a fact). `halting_conditions(proposed, rows)` returns the `Halt`s Phase 3's gate stops on: `supersedes-fixed`, `changes-fixed`, `low-confidence` (a `confidence` key on the proposal, not a ledger column); a contradiction with the plan needs the Phase 3 checker |
 | `brief_names` | `invented_names(fields, known_text)` (capitalized words a rewrite brings in that the book never uses), `reference_text(project_dir, exclude=...)` (reference docs and registries, without the files model rewrites write). Checked by revise's upstream brief fix and `hone`'s brief and intent rewrites (`hone._apply_checked_rewrites`, which trusts neither `scene-briefs.csv` nor `scene-intent.csv`); other writers of those files are not checked yet |
 
 ## Skills
@@ -51,6 +52,9 @@ CSVs are pipe-delimited (`|`), arrays use `;`, header row first, no quoting, emp
 | `working/annotations.csv` | Bookshelf reader annotations |
 | `working/craft-weights.csv` | Principle weights (keyed by `principle`) |
 | `working/costs/ledger.csv` | Per-invocation costs |
+| `working/audit-log.csv` | Append-only audit log of the ledger (`storyforge.audit`): `timestamp\|scene_id\|fact_id\|change\|command\|type\|subject\|columns\|statement`, LF, cells through `csv_safe`. `change`: added, changed (`columns` names what), removed, superseded, rejected, reviewed (an audit mark), migrated (one summary entry for `storyforge migrate`). `command`: the row's `introduced_by` for an added fact, else the writer. Written only by ledger writes (and `hand-edit` entries for changes made outside them); commit it with `reference/commitments.csv` and `working/.audit-snapshot.csv` |
+| `working/.audit-snapshot.csv` | The ledger as the audit log last recorded it (`storyforge.audit`), so a hand edit to commitments.csv is logged as `hand-edit`. Committed; never edit it |
+| `working/export/bundle.json` | `storyforge export`'s output (see Export bundle) |
 
 Scene files (`scenes/{id}.md`) are pure prose — **no frontmatter**. Filename is the scene ID; all metadata lives in CSVs.
 
@@ -76,6 +80,28 @@ Storyforge defines and sends the dashboard's data; Bookshelf renders it (benjami
 
 A missing CSV gives an empty list.
 
+## Export bundle (`storyforge export`, schema version 1)
+
+`export.build_bundle(project_dir)` builds one JSON bundle of the book's structured state (plan §3.5); `storyforge export` writes it to `working/export/bundle.json` (`--output PATH`, `--stdout`), as UTF-8 with sorted keys and LF. Storygild and Bookshelf read the bundle and pin its `schema_version`. No API calls. An unmigrated project or a malformed ledger exits 1 (`ledger.LedgerError`). `tests/test_export.py` pins the keys; `evals/export_check.py` exports a copy of each book and checks the round trip.
+
+- `schema_version`: `1` (`export.SCHEMA_VERSION`), a major version. Adding a key, a table or a table kind doesn't change it. Renaming or removing a key, or changing a value's type, bumps it, in the same commit, with the tests.
+- `storyforge_version`: the plugin version that wrote it (`.claude-plugin/plugin.json`).
+- `project`: `title`, `genre`, `medium`, `phase` from `storyforge.yaml`. All strings.
+- `score_cycle`: the latest complete score cycle (`project.latest_scores`) relative to the project, or `null`.
+- `tables`: `{relative path: table}`. A table is `kind`, `header` (list of strings), `rows` (lists of strings), `line_ending` (`"\n"` or `"\r\n"`), `final_newline`, `bom`. Cells are exactly the text between `|`s, unstripped; blank lines are rows of one empty cell. `export.tables_from_bundle(bundle)` returns `{path: text}`, and writing each text as UTF-8 with `newline=''` gives back the original bytes. A file with mixed line endings is split on LF (its CRs stay in cells), and a CRLF file with a CR that doesn't end a line keeps it inside its cell; both are named in `warnings`. The bundle is written atomically (a temporary file beside it, then a rename); an unwritable output path exits 1.
+
+| `kind` | Files |
+|---|---|
+| `reference` | every `reference/*.csv`: scenes, intent, briefs, registries, `commitments.csv`, chapter map, voice profile, spine, architecture, visual state. The timeline calendar is `scenes.csv`'s `timeline_day` / `time_mode` |
+| `scores` | the CSVs in `score_cycle`, and `working/scores/structural-latest.csv` |
+| `timeline` | `working/timeline*.csv` (the timeline's stored cues) |
+| `audit` | **provisional**: `working/audit*.csv` and the CSVs under `working/audit/`, as raw rows. Empty until the audit log (`working/audit-log.csv`, another PR) exists; it fills from then with no code change. Other files under `working/audit/` are named in `warnings` |
+
+- `dashboard_data`: `visualize.load_dashboard_data`'s output, unchanged, with its own `schema_version` (see Dashboard data); `null`, with a warning, if it couldn't be built.
+- `warnings`: every file the bundle meant to carry and couldn't (unreadable, not UTF-8), and anything a consumer should know about a table. Empty means everything was read.
+
+Left out: scene prose and manuscripts (`assemble` / `produce`) and score history before the latest cycle. **Eval results are not in a book's bundle**, though plan §3.5 lists them: evals measure Storyforge, not the book, and their results belong to the Storyforge repo (`evals/results/`).
+
 ## Architecture
 
 - `evals/` — eval harness and suites
@@ -87,6 +113,7 @@ Commands (`storyforge <name>`; full flag notes in `docs/history.md`):
 | Command | Purpose |
 |---|---|
 | `status` | Deterministic next-step verdict; `--json` for tooling (forge routes on `next.stage`) |
+| `audit` | Ledger digest (plan decision 2): binding facts with blank `reviewed`, tiered fixed → relationship/knowledge → physical → other, grouped by subject. Default is per act: the earliest act with an unreviewed fact, plus facts with no scene. Scopes `--act`, `--character` (subject or `known_by`), `--scenes A..B` (reading order), `--thread` (facts from scenes whose `mice_threads` carry it: threads map to scenes, not facts), `--all`; `--include-reviewed`, `--include-migrated` (migrated facts are left out by default, said in a note). Acts come from scenes.csv `act`, else `part` (said in a note). A scope naming a missing scene, character, thread or act exits 1. `--mark seen\|rejected IDS\|all` writes through the ledger and commits (a failed commit exits 1); `all` marks exactly what the same scope lists, and the listing's hint is that command; explicit ids ignore scope flags (WARNING). Re-marking is a no-op; a superseded fact can't be rejected. `--dry-run`; `--json` (stdout is the JSON only, logs go to stderr) |
 | `elaborate` | Stages: spine / architecture / map / briefs / page-architecture / prompts |
 | `propose-summaries` | Draft `summary` cells from the level above (`--level 3/4/5`) |
 | `write` | Draft scenes (brief-aware, parallel waves) |
@@ -100,6 +127,7 @@ Commands (`storyforge <name>`; full flag notes in `docs/history.md`):
 | `cleanup` | Project health; `--scenes`, `--csv`, `--dry-run` |
 | `assemble` | Chapters + epub/PDF/HTML (GN: artist handoff bundle) |
 | `publish`, `annotations`, `visualize` | Bookshelf publish, reader annotations, dashboard data (see Dashboard data) |
+| `export` | The book's structured state as one versioned JSON bundle (see Export bundle) |
 | `cover`, `illustrate` | Cover; interior illustrations (prose only) |
 | `scenes-setup` (`scenes`), `scenes-export`, `scenes-import`, `sync` | Scene files and CSV ↔ `scenes-review.md` round-trip |
 | `migrate`, `migrate-medium` | Idempotent project migrations; novel ↔ graphic-novel conversion |
@@ -126,7 +154,7 @@ Pipeline: Seed → Pitch (Logline → Synopsis → Act-shape) → Spine → Arch
 - Declare `IllustrationFindingKind` names bare; `cmd_cleanup` adds the `illus_` prefix.
 
 ## Commit Message Prefixes
-Plugin work: `Add` / `Update` / `Fix` / `Remove`, and `Bump version to X.Y.Z`. Book work: `Draft scene:`, `Develop:`, `Voice:`, `Evaluate:`, `Revision:`, `Produce:`, `Review:`, `Title:`, `Press kit:`, `Cover:`, `Elaborate:`, `Extract:`, `Score:`, `Polish:`, `Enrich:`, `Visualize:`.
+Plugin work: `Add` / `Update` / `Fix` / `Remove`, and `Bump version to X.Y.Z`. Book work: `Audit:`, `Draft scene:`, `Develop:`, `Voice:`, `Evaluate:`, `Revision:`, `Produce:`, `Review:`, `Title:`, `Press kit:`, `Cover:`, `Elaborate:`, `Extract:`, `Score:`, `Polish:`, `Enrich:`, `Visualize:`.
 
 ## PR Review Workflow
 

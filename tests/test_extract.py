@@ -716,7 +716,7 @@ class TestForcedPhase3PrunesRegistries:
         key = next(r for r in rows if r['id'] == 'archive-key-dorren')
         key['quote'] = 'the key was cold in his hand'
         rows.append({**key, 'id': 'a-timeline-fact', 'type': 'timeline'})
-        ledger.save_to(ref_dir, rows)
+        ledger.save_to(ref_dir, rows, command='test')
         _prune_registries(ref_dir, set(), set())
         after = {r['id']: r for r in ledger.load_from(ref_dir)}
         assert after['archive-key-dorren'] == key
