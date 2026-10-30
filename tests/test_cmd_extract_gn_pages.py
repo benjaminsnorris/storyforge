@@ -110,7 +110,9 @@ def test_from_pages_errors_when_target_columns_missing(tmp_path, monkeypatch, ca
 
 def test_from_pages_warns_when_panel_count_missing(tmp_path, monkeypatch, capsys):
     """SF-4: a page without panel_count is silently treated as 0; the
-    aggregator should surface this so authors notice partial sums."""
+    aggregator should surface this so authors notice partial sums. The
+    partial sum used to be written anyway, with exit 0; now the scene's
+    counts are left as they were and the run exits 1."""
     _seed_gn_project(str(tmp_path))
     # Add a page with no panel_count
     pages = tmp_path / 'pages'
@@ -121,10 +123,16 @@ def test_from_pages_warns_when_panel_count_missing(tmp_path, monkeypatch, capsys
     # Update total_pages_in_scene in the other files
     monkeypatch.chdir(str(tmp_path))
     from storyforge.cmd_extract_gn import main
-    main(['--from-pages'])
+    with pytest.raises(SystemExit) as exc:
+        main(['--from-pages'])
+    assert exc.value.code == 1
     out = capsys.readouterr().out
     assert 'lack a valid integer panel_count' in out
     assert 's01-p3.md' in out
+    from storyforge.csv_cli import get_field
+    scenes_csv = str(tmp_path / 'reference' / 'scenes.csv')
+    assert get_field(scenes_csv, 's01-studio', 'panel_count') == ''
+    assert get_field(scenes_csv, 's01-studio', 'page_count') == ''
 
 
 def test_from_pages_warns_when_scene_id_missing(tmp_path, monkeypatch, capsys):
@@ -145,7 +153,9 @@ def test_from_pages_warns_when_scene_id_missing(tmp_path, monkeypatch, capsys):
     )
     monkeypatch.chdir(str(tmp_path))
     from storyforge.cmd_extract_gn import main
-    main(['--from-pages'])
+    with pytest.raises(SystemExit) as exc:
+        main(['--from-pages'])
+    assert exc.value.code == 1
     out = capsys.readouterr().out
     assert 'has no scene_id' in out
 
@@ -168,7 +178,9 @@ def test_from_pages_warns_when_scene_id_unknown(tmp_path, monkeypatch, capsys):
     )
     monkeypatch.chdir(str(tmp_path))
     from storyforge.cmd_extract_gn import main
-    main(['--from-pages'])
+    with pytest.raises(SystemExit) as exc:
+        main(['--from-pages'])
+    assert exc.value.code == 1
     out = capsys.readouterr().out
     assert 's99-ghost' in out
     assert 'not in' in out and 'scenes.csv' in out
