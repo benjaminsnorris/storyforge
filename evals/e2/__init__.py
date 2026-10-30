@@ -296,4 +296,28 @@ def drift_check(project_dir: str, scenes: list[str], log_dir: str) -> list[dict]
              'message': f['message']} for f in findings]
 
 
+class GateChecker:
+    """Detector: the gate's checker (``storyforge.checker``) on each changed
+    scene, contradictions only (E2's books have no promises to keep that an
+    injected error is about). A flag's ``check`` is its kind and the scene's
+    words, so a control flag cancels only the same complaint about the same
+    words. Findings whose quotes don't hold up (``unverified``) are not
+    flags; they are counted in ``unverified`` for the suite's notes."""
+
+    def __init__(self):
+        self.unverified: list[str] = []
+
+    def __call__(self, project_dir: str, scenes: list[str], log_dir: str) -> list[dict]:
+        from storyforge.checker import _norm, check_scene
+        flags = []
+        for scene in scenes:
+            result = check_scene(project_dir, scene, promises=False,
+                                 log_file=os.path.join(log_dir, f'check-{scene}.json'))
+            self.unverified += [f'{scene}: {f.problem}' for f in result.unverified]
+            flags += [{'scene_id': scene, 'code': f.code,
+                       'check': f'{f.kind}: {_norm(f.scene_quote)[:120]}',
+                       'message': f.message()} for f in result.findings]
+        return flags
+
+
 DETECTORS: dict[str, Detector] = {'drift-check': drift_check}
