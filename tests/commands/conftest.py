@@ -271,15 +271,18 @@ def mock_api(monkeypatch):
             return '\n'.join(texts)
 
         def _submit_batch(self, batch_file):
-            self.calls.append({'fn': 'submit_batch', 'batch_file': batch_file})
-            # Remember the requests: the download answers each one, as the
-            # real Batches API does.
+            # Remember the requests (kept in the call, for assertions on their
+            # params): the download answers each one, as the real API does.
             self._batch_requests = []
+            requests = []
+            self.calls.append({'fn': 'submit_batch', 'batch_file': batch_file,
+                               'requests': requests})
             if os.path.isfile(batch_file):
                 with open(batch_file) as f:
                     for line in f:
                         if line.strip():
                             req = json.loads(line)
+                            requests.append(req)
                             content = req['params']['messages'][0]['content']
                             prompt = content if isinstance(content, str) else ''.join(
                                 b.get('text', '') for b in content)

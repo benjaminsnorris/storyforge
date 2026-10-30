@@ -787,3 +787,13 @@ def test_only_write_and_evaluate_keep_incomplete_batch_replies():
                      if os.path.basename(p) != 'api.py'
                      and re.search(r'keep_incomplete\s*=\s*True', open(p).read()))
     assert keeping == ['cmd_evaluate.py', 'cmd_write.py']
+
+
+def test_a_batch_request_can_carry_an_output_schema(monkeypatch):
+    from storyforge import api
+    from storyforge.api import build_batch_request
+    monkeypatch.setattr(api, 'max_output_tokens', lambda model: 64000)  # no live catalog
+    schema = {'type': 'object', 'properties': {}, 'required': [], 'additionalProperties': False}
+    req = build_batch_request('s1', 'p', 'claude-x', 100, output_schema=schema)
+    assert req['params']['output_config'] == {'format': {'type': 'json_schema', 'schema': schema}}
+    assert 'output_config' not in build_batch_request('s1', 'p', 'claude-x', 100)['params']

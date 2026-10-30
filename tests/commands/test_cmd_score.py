@@ -733,6 +733,25 @@ class TestMainBatch:
                        if isinstance(c, list))
         assert not os.path.exists(os.path.join(project_dir, 'working', 'dashboard.html'))
 
+    def test_direct_cut_off_reply_is_not_scored(self, mock_api, mock_git, mock_costs,
+                                                project_dir, monkeypatch, capsys):
+        """A direct reply cut off at max_tokens was parsed as the scene's
+        scores (some principles missing, the rest taken as complete)."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        mock_api.set_response_dict({'content': [{'type': 'text', 'text': self._scoring_response()}],
+                                    'usage': {'input_tokens': 1, 'output_tokens': 1},
+                                    'stop_reason': 'max_tokens'})
+
+        main(['--direct', '--scenes', 'act1-sc01'])
+
+        out = capsys.readouterr().out
+        assert '[act1-sc01] FAILED: the reply was cut off at max_tokens' in out
+        assert 'no scene scores for act1-sc01' in out
+        scores = os.path.join(project_dir, 'working', 'scores', 'latest', 'scene-scores.csv')
+        assert not os.path.isfile(scores) or 'act1-sc01|' not in open(scores).read()
+
     def test_failed_item_is_costed_and_named_in_the_summary(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
         """SF-3/SF-5: a cut-off reply was paid for but left out of the cost
