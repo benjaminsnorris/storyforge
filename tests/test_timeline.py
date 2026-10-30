@@ -731,6 +731,90 @@ class TestChecks:
         return [{'id': sid, 'timeline_day': day, 'time_mode': mode, 'timeline_date': date}
                 for sid, day, mode, date in rows]
 
+    def test_a_stated_date_the_calendar_keeps_outranks_a_gap_cue(self):
+        """The Brimming Cup: Chapter XII is headed "June 20." and the calendar
+        has it there, but its cue read "same evening" against the June 10
+        supper before it."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('supper', '88', 'scene', 'XXXX-06-10'),
+                          ('study', '98', 'scene', 'XXXX-06-20'))
+        cues = {'study': {'relation': 'continues', 'gap': 'same evening', 'date': 'XXXX-06-20'}}
+        assert check_timeline(rows, cues) == []
+
+    def test_a_gap_cue_still_counts_when_the_calendar_moved_the_date(self):
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('supper', '88', 'scene', 'XXXX-06-10'),
+                          ('study', '98', 'scene', 'XXXX-06-20'))
+        cues = {'study': {'relation': 'continues', 'gap': 'same evening', 'date': 'XXXX-06-12'}}
+        assert [f['check'] for f in check_timeline(rows, cues)] == ['gap_mismatch']
+
+    def test_a_stated_date_the_calendar_keeps_outranks_an_earlier_cue(self):
+        """The Brimming Cup: Chapter XXIX opens "August 20.", ten days after
+        Eugenia's good-bye, and its cue read the vignette as "earlier"."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('goodbye', '149', 'scene', 'XXXX-08-10'),
+                          ('berries', '159', 'scene', 'XXXX-08-20'))
+        cues = {'berries': {'relation': 'earlier', 'date': 'XXXX-08-20'}}
+        assert check_timeline(rows, cues) == []
+
+    def test_a_step_back_within_the_same_day_is_not_flagged(self):
+        """Self-Control: "Scarcely had Hargrave quitted Laura" steps back
+        minutes on the same night; the check wanted an earlier day."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('laura', '4', 'scene', ''), ('hargrave', '4', 'scene', ''))
+        assert check_timeline(rows, {'hargrave': {'relation': 'earlier'}}) == []
+
+    def test_a_memory_years_back_left_on_the_same_day_is_still_flagged(self):
+        """A Christmas Carol (run 1): Stave II's memories were left on day 1,
+        cued "many years" and "years later" back."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('bell', '1', 'scene', ''), ('school', '1', 'scene', ''))
+        findings = check_timeline(rows, {'school': {'relation': 'earlier', 'gap': 'many years'}})
+        assert [f['check'] for f in findings] == ['flashback_not_earlier']
+
+    def test_a_step_back_within_the_day_in_words_is_not_flagged(self):
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('a', '4', 'scene', ''), ('b', '4', 'scene', ''))
+        for gap in ('earlier that same day', 'an hour ago', 'minutes ago', 'that morning'):
+            assert check_timeline(rows, {'b': {'relation': 'earlier', 'gap': gap}}) == [], gap
+
+    def test_two_earlier_scenes_at_the_start_do_not_crash(self):
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('a', '4', 'scene', ''), ('b', '4', 'scene', ''))
+        cues = {'a': {'relation': 'earlier'}, 'b': {'relation': 'earlier', 'gap': 'ten years'}}
+        check_timeline(rows, cues)
+
+    def test_a_month_and_day_say_nothing_about_the_year(self):
+        """A Christmas Carol (run 1): Fezziwig's party, a Christmas Eve years
+        back, was dated December 24 on the present's day."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('bell', '1', 'scene', ''), ('fezziwig', '1', 'scene', 'XXXX-12-24'))
+        cues = {'fezziwig': {'relation': 'earlier', 'gap': 'years later', 'date': 'XXXX-12-24'}}
+        assert [f['check'] for f in check_timeline(rows, cues)] == ['flashback_not_earlier']
+
+    def test_an_earlier_scene_put_on_a_later_day_is_still_flagged(self):
+        """Self-Control: "During all this time" sums up the weeks before, but
+        the calendar put it 35 days after the scene it follows."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('return', '575', 'scene', ''), ('all-this-time', '610', 'scene', ''))
+        findings = check_timeline(rows, {'all-this-time': {'relation': 'earlier'}})
+        assert [f['check'] for f in findings] == ['flashback_not_earlier']
+
+    def test_an_approximate_date_has_slack(self):
+        """The Brimming Cup: "here we are the first of June and past", said at
+        the June 10 supper, was dated XXXX-06-01~ and compared to the day."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('arrival', '88', 'scene', 'XXXX-06-10'),
+                          ('talk', '88', 'scene', 'XXXX-06-01~'),
+                          ('study', '98', 'scene', 'XXXX-06-20'))
+        assert check_timeline(rows, {}) == []
+
+    def test_an_approximate_date_far_off_is_still_flagged(self):
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('arrival', '88', 'scene', 'XXXX-06-10'),
+                          ('talk', '90', 'scene', 'XXXX-09-01~'))
+        assert [f['check'] for f in check_timeline(rows, {})] == ['date_mismatch']
+
     def test_consistent_book_has_no_findings(self):
         from storyforge.timeline import check_timeline
         rows = self._rows(('a', '1', 'scene', ''), ('b', '2', 'scene', ''),
@@ -868,7 +952,7 @@ class TestChecks:
     def test_a_flashback_that_does_not_go_back_is_found(self):
         from storyforge.timeline import check_timeline
         rows = self._rows(('a', '5', 'scene', ''), ('memory', '5', 'scene', ''))
-        found = check_timeline(rows, {'memory': {'relation': 'earlier'}})
+        found = check_timeline(rows, {'memory': {'relation': 'earlier', 'gap': 'ten years'}})
         assert [f['check'] for f in found] == ['flashback_not_earlier']
 
     def test_gap_after_a_flashback_counts_from_the_present(self):
