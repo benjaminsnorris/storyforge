@@ -320,7 +320,9 @@ def _structured(schema_name, **fields):
     return json.dumps(reply)
 
 
-SKELETON_REPLY = 'TITLE: Test\nPOV: Dorren Hayle\nLOCATION: Office\nTIME_RELATION: continues\n'
+SKELETON_REPLY = _structured('SKELETON_SCHEMA', title='Test', pov='Dorren Hayle',
+                             location=['Office'], time_relation='continues',
+                             time_gap='an hour')
 
 CHARACTERIZE_REPLY = _structured('CHARACTERIZE_SCHEMA', narrative_mode='third-limited',
                                  tone='literary')
@@ -443,6 +445,44 @@ class TestPhaseExecution:
 
         batch_calls = mock_api.calls_for('submit_batch')
         assert len(batch_calls) >= 1
+        # One structured reply feeds both scenes.csv and the timeline cues
+        from storyforge.extract import SKELETON_SCHEMA
+        requests = [r for c in batch_calls for r in c['requests']]
+        assert requests and all(
+            r['params']['output_config']['format']['schema'] == SKELETON_SCHEMA
+            for r in requests)
+        from storyforge.elaborate import _read_csv_as_map
+        from storyforge.timeline import read_cues
+        scenes = _read_csv_as_map(os.path.join(project_dir, 'reference', 'scenes.csv'))
+        cues = read_cues(project_dir)
+        for r in requests:
+            sid = r['custom_id']
+            assert scenes[sid]['location']  # filled, or the fixture's own value kept
+            assert (cues[sid]['relation'], cues[sid]['gap']) == ('continues', 'an hour')
+
+    def test_phase_1_names_an_unreadable_reply_and_stores_no_cues_for_it(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """A reply in the old labeled-line shape (or any reply that isn't the
+        schema's JSON) is no reply: the scene is named, the run exits 1, and
+        no empty cues pass for a fresh read."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_extract.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_extract._run_hone',
+                            lambda plugin_dir, phase: None)
+        mock_api.set_response('TITLE: Test\nTIME_RELATION: continues\n')
+        monkeypatch.setattr('storyforge.elaborate.validate_structure', lambda ref_dir: {
+            'passed': True, 'failures': [], 'checks': [],
+        })
+        monkeypatch.setattr('storyforge.cmd_extract.get_coaching_level',
+                            lambda pd: 'full')
+
+        with pytest.raises(SystemExit) as exc:
+            main(['--phase', '1'])
+
+        assert exc.value.code == 1
+        from storyforge.timeline import read_cues
+        assert read_cues(project_dir) == {}
 
     def test_all_phases_run_when_no_phase_flag(self, mock_api, mock_git,
                                                  mock_costs, project_dir,
@@ -483,6 +523,9 @@ class TestPhaseExecution:
         intent = schemas_for('Extract the narrative intent')
         briefs = schemas_for('Extract the drafting contract')
         assert intent and all(s == INTENT_SCHEMA for s in intent)
+        from storyforge.extract import SKELETON_SCHEMA
+        skeleton = schemas_for('Extract structural metadata')
+        assert skeleton and all(s == SKELETON_SCHEMA for s in skeleton)
         assert briefs and all(s == BRIEF_PARALLEL_SCHEMA for s in briefs)
         from storyforge.elaborate import _read_csv_as_map
         ref = os.path.join(project_dir, 'reference')

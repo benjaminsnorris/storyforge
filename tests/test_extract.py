@@ -55,16 +55,41 @@ class TestParseCharacterizeResponse:
 class TestParseSkeletonResponse:
     def test_extracts_fields(self):
         from storyforge.extract import parse_skeleton_response
-        response = (
-            'TITLE: The Arranged Dead\nPOV: Emmett Slade\n'
-            'LOCATION: Alkali Flat\nTIMELINE_DAY: 1\n'
-            'TIME_OF_DAY: afternoon\nDURATION: 2 hours\n'
-            'TARGET_WORDS: 1300\nPART: 1'
-        )
+        response = _reply('SKELETON_SCHEMA',
+            title='The Arranged Dead', pov='Emmett Slade',
+            location=['Alkali Flat', 'Orcutt ranch'], time_relation='later',
+            time_of_day='afternoon', duration='2 hours', type='plot',
+            target_words='1300', act='1')
         result = parse_skeleton_response(response, 'arranged-dead')
         assert result['id'] == 'arranged-dead'
         assert result['title'] == 'The Arranged Dead'
         assert result['pov'] == 'Emmett Slade'
+        assert result['location'] == 'Alkali Flat;Orcutt ranch'
+        assert (result['time_of_day'], result['type'], result['act']) == ('afternoon', 'plot', '1')
+
+    def test_unknown_values_are_dropped(self):
+        from storyforge.extract import parse_skeleton_response
+        result = parse_skeleton_response(
+            _reply('SKELETON_SCHEMA', title='T', pov='unknown', act='UNKNOWN'), 's1')
+        assert result == {'id': 's1', 'title': 'T'}
+
+    def test_an_unreadable_reply_raises(self):
+        """A reply that isn't the schema's JSON must not read as a scene
+        with no metadata: the merge names it and the run exits 1."""
+        from storyforge.extract import parse_skeleton_response, skeleton_cues
+        for reply in ('TITLE: T\nPOV: Nick', '{"title": "T"}', ''):
+            with pytest.raises(ValueError):
+                parse_skeleton_response(reply, 's1')
+            with pytest.raises(ValueError):
+                skeleton_cues(reply)
+
+    def test_cues_come_from_the_same_reply(self):
+        from storyforge.extract import skeleton_cues
+        cues = skeleton_cues(_reply('SKELETON_SCHEMA', time_relation='later',
+                                    time_gap='three weeks', time_anchor='none',
+                                    time_date='1922-07-04'))
+        assert cues == {'relation': 'later', 'gap': 'three weeks', 'anchor': '',
+                        'refers': '', 'span': '', 'date': '1922-07-04'}
 
 
 class TestParseIntentResponse:
@@ -146,7 +171,17 @@ class TestBuildPrompts:
         from storyforge.extract import build_skeleton_prompt
         prompt = build_skeleton_prompt('act1-sc01', 'Some scene prose here.',
                                        {'pov_characters': 'Alice', 'timeline': 'linear'})
-        assert 'POV' in prompt and 'TITLE' in prompt and 'LOCATION' in prompt
+        assert '- pov:' in prompt and '- title:' in prompt and '- location (list):' in prompt
+        assert 'Answer with a JSON object' in prompt
+
+    def test_skeleton_schema_offers_the_csv_enums(self):
+        from storyforge.extract import SKELETON_SCHEMA
+        from storyforge.schema import VALID_TIMES, VALID_TYPES
+        from storyforge.timeline import RELATIONS
+        props = SKELETON_SCHEMA['properties']
+        assert set(props['time_of_day']['enum']) == set(VALID_TIMES) | {'unknown'}
+        assert set(props['type']['enum']) == set(VALID_TYPES) | {'unknown'}
+        assert props['time_relation']['enum'] == list(RELATIONS)
 
     def test_skeleton_prompt_asks_for_act_not_part(self):
         """Book parts come from the manuscript's part headings
@@ -154,12 +189,16 @@ class TestBuildPrompts:
         from storyforge.extract import build_skeleton_prompt
         prompt = build_skeleton_prompt('act1-sc01', 'Some scene prose here.',
                                        {'pov_characters': 'Alice'})
-        assert '\nACT: ' in prompt
-        assert 'PART:' not in prompt
+        assert '\n- act: ' in prompt
+        assert '- part' not in prompt
+        from storyforge.extract import SKELETON_SCHEMA
+        assert 'part' not in SKELETON_SCHEMA['properties']
 
     def test_skeleton_response_maps_act_and_ignores_part(self):
         from storyforge.extract import parse_skeleton_response
-        result = parse_skeleton_response('TITLE: T\nACT: 2\nPART: 1', 's1')
+        result = parse_skeleton_response(
+            json.dumps({**json.loads(_reply('SKELETON_SCHEMA', title='T', act='2')), 'part': '1'}),
+            's1')
         assert result['act'] == '2'
         assert 'part' not in result
 
@@ -376,7 +415,8 @@ class TestEnumAnswersReduced:
 
     def test_skeleton_time_of_day(self):
         from storyforge.extract import parse_skeleton_response
-        r = parse_skeleton_response('TIME_OF_DAY: Evening (after dinner)\n', 's1')
+        r = parse_skeleton_response(
+            _reply('SKELETON_SCHEMA', time_of_day='Evening (after dinner)'), 's1')
         assert r['time_of_day'] == 'evening'
 
 
