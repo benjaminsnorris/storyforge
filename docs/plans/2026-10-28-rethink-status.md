@@ -1,16 +1,17 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-30 (evening), at v1.96.0 (#424, extract phase 4, is the latest merge). **A fresh session starts here:** read **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-10-30 (late), at v1.97.0 (drafting from the ledger; Phase 2 done). **A fresh session starts here:** read **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
 
 ## Start here
 
 **Where the rethink is:**
 - **Phase 0 (evals and baseline): done**, E6 included.
 - **Phase 1 (cheap fixes): done** (E2 recall didn't improve; that waits on the Phase 3 checker).
-- **Phase 2 (ledger and export): built, one success criterion open.**
+- **Phase 2 (ledger and export): done** (v1.97.0).
   - **Done:** `reference/commitments.csv` (`storyforge/ledger.py`) replaces `knowledge.csv` and `physical-states.csv`, and every consumer uses it (#416, #417). All seven books are migrated and merged on their `main`. Derived per-character state exists (`ledger.active_states`). The rubric-driven extraction is extract **phase 4** (#424). The audit log and `storyforge audit` exist (#423). `storyforge export` writes the versioned bundle with `dashboard_data` folded in (#422).
-  - **Success criteria (plan §5):** E3 recall ≥ 0.85: **met, 0.898** (was 0.286). Export round-trips: **met** (`evals/export_check.py`: 7 of 7 books byte-identical). E5 mismatches below baseline: **not met, not yet attempted.** Drafting doesn't use the ledger yet. The plan's Phase 2 line "Rebuild: … character context assembly. Keep: registries, bible (slimmed to fixed facts + voice)" is the unbuilt part (Next steps 1).
-- **Phase 3 (the gate and sequential loop): next after that.**
+  - **Success criteria (plan §5):** E3 recall ≥ 0.85: **met, 0.898** (was 0.286). Export round-trips: **met** (`evals/export_check.py`: 7 of 7 books byte-identical). E5 mismatches below baseline: **met, 64 → 23** (6.4 → 2.3 per scene; v1.97.0). E4 did not get worse (CP10k 16.1 → 14.2, contradictions 35 → 31, 23/23 drafted). E8 unchanged (reintroduced 6, per 10k words 1.74 → 1.69).
+  - **Drafting reads the ledger** (v1.97.0): `build_scene_prompt_from_briefs` (write and revise's redraft-from-brief) has an "Established Facts" section from `ledger.drafting_slice`: for the POV, on-stage characters and location, `pronouns` from characters.csv, `fixed` facts before the scene, states entering it (at most `prompts.MAX_STATES_PER_SUBJECT` = 25 each, the rest named), and the scene's own facts ("the brief wins where they differ"). E5 now runs extract phase 4 over its sample first (10 Sonnet calls), so the redraft sees the prose's commitments. **Not like-for-like with the old E5 number:** part of the fall is the redraft being shown facts read off the prose it is judged against, which is the design (a pinned fact should survive a redraft). The character bible is still sent whole: slimming it to fixed facts + voice is author data, left for Ben.
+- **Phase 3 (the gate and sequential loop): next**, after F-127/F-128 (Next steps 1).
 
 **What exists now, for orientation** (contracts in `docs/agent-reference.md`):
 - **Ledger:** `ledger.load`/`save(…, command=)` (every save appends to `working/audit-log.csv`); typed views `knowledge_view`/`physical_view` (registry rows only, which briefs reference by id); `active_states`, `established_before`, `scene_order`; `LedgerError` / `NotMigratedError`.
@@ -36,16 +37,13 @@ Last updated 2026-10-30 (evening), at v1.96.0 (#424, extract phase 4, is the lat
 - **Checks:** `PATH=~/.venvs/storyforge/bin:$PATH python -m pytest tests/` (5 to 10 minutes; 7,525+ tests at v1.96.0) and `python evals/run.py` (6 to 10 minutes, replay, no key). Main replays every suite with no errors. The gates that fail are E2 (all three), E7 noise and E8 reintroduced; E3, E4 and E5 pass.
 - **Coordination:** other sessions open Storyforge PRs and claim versions; today that was **evals-b5** (F-122 to F-124, F-123's forced-3b fix). Find live ones with ListAgents, agree a version by SendMessage before merging, and say when you touch `cmd_extract.py`, `ledger.py` or `cmd_validate.py`. Eval-only and test-only PRs bump nothing. Never touch `~/Developer/evals` or other sessions' worktrees.
 - **Process:** one PR per step, on branch `storyforge/{name}-{timestamp}`. Work in a scratchpad worktree when a suite is running in the main checkout: switching branches under a running suite breaks it. Get one to three general reviewers covering correctness, silent failures, tests and comments. Fix every verified finding before merging (Ben's standing instruction this session), and list them in a PR comment.
-- **Spending:** estimate before any recording, from the `if live` figures or `evals/e8/cli.py plan`. Ben approved re-records for the ledger and Phase 2 work. Confirm anything new or large with him.
+- **Spending:** re-records don't need asking (Ben, 2026-10-30: "just do it"); estimate from the `if live` figures or `evals/e8/cli.py plan` and report what was spent.
 
-**1. Finish Phase 2: drafting context from the ledger** (the open success criterion: E5 mismatches below baseline).
-- **The plan line:** "Rebuild: knowledge extraction, character context assembly. Keep: registries, bible (slimmed to fixed facts + voice)."
-- **What to build:** `write` and revise's redraft-from-brief get, for each on-stage character, the ledger's `fixed` facts and `active_states(…, entering=True)` as of the scene, plus the commitments in force for its location. That replaces (or slims) the static character-bible text they send today.
-- **Where to look first:** `cmd_write._build_prompt`, `prompts.py`'s character and registry blocks, and `build_shared_context`.
-- **Measure it:** E5 (redraft-from-brief fact changes, `evals/e5`), whose replay will miss and needs re-recording (about $1.70 live), and E4, which must not get worse (about $5.25). The ledger in E4/E5's pinned tree (shared-dark 5e9bdf39) holds only migrated registry facts. To give drafting real commitments, run phase 4 on that tree inside the suite (about 23 Sonnet calls, under $2). Without it, the change only has the migrated facts to work with.
-- **Also, in the same area:**
-  - Fill `characters.csv` `pronouns` (plan §3.1, slipform's Pell regression): add it to phase 4's output or a hone gap, and show it in the drafting context.
-  - Measure over-extraction, E3's secondary metric (commitments per 1,000 words, and the share a judge calls not a commitment).
+**1. Phase 4 rubric: F-127 and F-128** (Ben approved, 2026-10-30; storyforge-evals FINDINGS #34; evals-9a's Carol run at v1.96.1 is the evidence: 558 rows for 40 scenes, recall 0.98 (0.82 one row per fact), precision 52% commitments / 44% incidental / 4% wrong).
+- **F-127, tighten the rubric:** the incidental rows are mostly staging at scene end ("locations of people and objects at scene end" invites them; `physical` is 163 of 558), set dressing, narrator jokes, momentary feelings. Wrong rows read figurative language literally or invent a time.
+- **F-128, link to migrated rows:** offer phase 4 the migrated (registry) rows as known, so it links with `aliases`/`supersedes` instead of restating them; keep migrated rows (briefs reference their ids); on long books choose known rows by relevance (same subjects and location), not the latest `MAX_KNOWN_COMMITMENTS` = 200. Today a phase-4 "Tim does not die" supersedes phase 4's own "Tim has died" but not migrated `tiny-tim-has-died`, and drafting (v1.97.0) shows both.
+- **Measure:** re-record E3 and E5 (re-records no longer need asking: just report the cost). Real-book check: `gold/christmas-carol/commitments.csv` in storyforge-evals (baselines `phase4-results.csv`, `phase4-precision.csv`); evals-9a will rerun Carol after merge. Ben wants phase 4 run on the seven books only after both land.
+- **Still open from Phase 2:** fill `characters.csv` `pronouns` (phase 4 output or a hone gap; drafting already shows it); phase 4 never sets `resolves`, so states end only by `supersedes` (drafting caps them at 25 per subject).
 
 **2. Phase 3: the gate and sequential loop** (plan §3.2–3.3 and §5 Phase 3; chunk 7).
 - **The gate:** extract, check, fix, commit after every draft, redraft or revision.
@@ -65,6 +63,10 @@ Last updated 2026-10-30 (evening), at v1.96.0 (#424, extract phase 4, is the lat
 - **Export bundle size:** governor's is 46 MB, mostly its score rationale CSV, which `dashboard_data` repeats.
 - **Phase 4 model:** it runs on the `evaluation` tier (Sonnet). The plan says "strongest model", but Sonnet passes the gate; switch only on evidence.
 - **From before today, still open:** other writers of briefs and intent don't use `brief_names`' check (#393); `scoring_story_power` hasn't been reviewed for warn-and-continue; measure E8 over three runs before Phase 4 gates on it; replaying the 10 YAML-era E8 trees is Ben's call.
+
+## 2026-10-30 late (storyforge-25)
+
+Ben: "pick up and carry on"; re-records approved without asking. One PR: drafting from the ledger (v1.97.0, Phase 2's last criterion). One reviewer (3 high, 5 medium, 1 low); all fixed except phase 4's missing `resolves` (a prompt change, folded into F-127). Spend: $11.52 (E5 $2.61 with phase 4, E4 $5.29, E8 $3.62). evals-9a merged 1.96.1–1.96.3 (F-125, F-119, F-126) in the same window.
 
 ## 2026-10-30 afternoon and evening (storyforge-59)
 
@@ -144,7 +146,7 @@ All eight suites replay offline: 2106 recorded calls, $0 to rerun, $10.80 if run
 | `e2-corpus-validate` | deterministic continuity checks vs 51 real E1 errors | code-matched recall 0.12 (likely incidental), precision 0.035 (unchanged: no model) | same |
 | `e2-corpus-drift` | timeline drift check vs the same 51 | recall 0.10 (0.16), precision 0.40 (0.30) | same |
 | `e3-extraction` | extraction captures the fact behind each E1 error | **0.898** with extract phase 4 (v1.96.0; was 0.29 with 3b/3c alone); 1.0 with partial | ≥ 0.85 (passes) |
-| `e5-roundtrip` | facts a redraft-from-brief changes (10 shared-dark Act 1 scenes) | 3.2 per scene (7.2) | coverage only (trend metric) |
+| `e5-roundtrip` | facts a redraft-from-brief changes (10 shared-dark Act 1 scenes) | **2.3 per scene** with the ledger in the drafting prompt (v1.97.0; 6.4 at the 5e9bdf39 pin before it) | coverage only (trend metric) |
 | `e7-classics` | continuity flags on *A Christmas Carol* (2 runs) and *The Plastic Age* (1 run); no real errors | 115 flags, all noise: 96 FP, 7 deliberate, 12 extraction errors (Carol alone: 60) | 0 noise, 0 unreviewed |
 | `e8-revision-safety` | today's passes reintroduce E1 tool-introduced errors | 6 of 35, 2 halted (a naturalness redraft with no reply and a refused redraft-from-brief); 15 unreplayable, each with its reason (5 of 21 before the E8 gaps work) | 0 |
 | `e4-generation` | draft shared-dark Act 1 (23 scenes) with today's `write`, judge it | 22 drafted, 1 refused; CP10k 18.2 (judge), 0.49 (shipped checker); BPS 2.86; length drift 0.054; voice 4.69 (author 4.75). $5.77 if live | every scene drafted (fails: 1 refused) |
