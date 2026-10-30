@@ -118,7 +118,7 @@ class TestPhase4:
         assert [r for r in ledger.load(project_dir) if r not in mine] == before
         out = capsys.readouterr().out
         assert '1 quote(s) not found verbatim' in out
-        assert "1 subject(s) not in the registries" in out
+        assert "1 subject(s) not a character or location id" in out
 
     def test_later_scenes_are_offered_earlier_commitments_and_supersede_them(
             self, project_dir, monkeypatch):
@@ -161,3 +161,60 @@ class TestPhase4:
         with pytest.raises(SystemExit):
             self._run(project_dir, monkeypatch, {first: 'garbage'})
         assert self._mine(project_dir) == []
+
+
+class TestReviewFixes:
+    """PR #424's review."""
+
+    def _first_two(self, project_dir):
+        from storyforge.cmd_extract import _build_sorted_scene_ids
+        ref = os.path.join(project_dir, 'reference')
+        return _build_sorted_scene_ids(os.path.join(project_dir, 'scenes'), ref)[:2]
+
+    def test_validate_accepts_a_physical_commitment_about_a_place_or_no_one(
+            self, project_dir, monkeypatch):
+        from storyforge.schema import _ledger_reference_problems
+        a, _ = self._first_two(project_dir)
+        TestPhase4()._run(project_dir, monkeypatch, {a: _reply(
+            {'statement': 'The office roof leaks.', 'type': 'physical',
+             'subject': 'cartography-office', 'mutable': 'state'},
+            {'statement': 'The bridge is down.', 'type': 'physical', 'mutable': 'state'})})
+        ref = os.path.join(project_dir, 'reference')
+        problems = _ledger_reference_problems(ledger.load(project_dir), ref,
+                                              set(ledger.scene_order(project_dir)))
+        assert not [p for p in problems if '--' in p.split(':')[0]]
+
+    def test_a_forced_run_that_stops_leaves_no_rows_from_the_last_run(
+            self, project_dir, monkeypatch):
+        """A reworded statement got a new id; later scenes kept last run's rows,
+        whose supersedes named the old id."""
+        a, b = self._first_two(project_dir)
+        p4 = TestPhase4()
+        p4._run(project_dir, monkeypatch, {
+            a: _reply({'statement': 'Dorren keeps the key.', 'type': 'physical'})})
+        old_key = p4._mine(project_dir)[0]['id']
+        p4._run(project_dir, monkeypatch, {
+            b: _reply({'statement': 'Tessa has the key.', 'type': 'physical',
+                       'supersedes': old_key})})
+        assert {r['scene_id'] for r in p4._mine(project_dir)} == {a, b}
+        with pytest.raises(SystemExit):
+            p4._run(project_dir, monkeypatch, {
+                a: _reply({'statement': 'Dorren holds the brass key.', 'type': 'physical'}),
+                b: 'garbage'}, force=True)
+        mine = p4._mine(project_dir)
+        assert [r['scene_id'] for r in mine] == [a]
+        assert mine[0]['id'] != old_key
+        assert ledger.validate_ledger(ledger.load(project_dir)) == []
+
+    def test_a_commitment_with_no_quote_is_counted(self, project_dir, monkeypatch, capsys):
+        a, _ = self._first_two(project_dir)
+        TestPhase4()._run(project_dir, monkeypatch, {a: _reply({'statement': 'x'})})
+        assert '1 commitment(s) with no quote' in capsys.readouterr().out
+
+    def test_a_subject_with_a_pipe_or_line_break_is_written_safely(
+            self, project_dir, monkeypatch):
+        a, _ = self._first_two(project_dir)
+        p4 = TestPhase4()
+        p4._run(project_dir, monkeypatch, {a: _reply(
+            {'statement': 'x', 'subject': 'the | map\ncase'})})
+        assert p4._mine(project_dir)[0]['subject'] == 'the , map case'

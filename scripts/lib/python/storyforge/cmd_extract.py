@@ -1087,8 +1087,15 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     subjects = {**alias_maps.get('locations', {}), **alias_maps.get('characters', {})}
     order = {sid: i for i, sid in enumerate(sorted_scene_ids)}
     rows = ledger.load_from(ref_dir)
+    if force and not dry_run:
+        # Every scene is re-extracted, so last run's rows go up front: a run
+        # that stops part-way leaves the later scenes with none (an unforced
+        # re-run fills them), never last run's rows superseding ids this run
+        # no longer has
+        rows = [r for r in rows if not (r.get('introduced_by') == ledger.COMMITMENTS_PASS
+                                        and r.get('scene_id') in order)]
     done = {r['scene_id'] for r in rows if r.get('introduced_by') == ledger.COMMITMENTS_PASS}
-    problems = {'quote': [], 'subject': [], 'supersedes': []}
+    problems = {'quote': [], 'no quote': [], 'subject': [], 'supersedes': []}
     written = 0
 
     for scene_id in sorted_scene_ids:
@@ -1128,9 +1135,6 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             _halt_chain(project_dir, '4 — commitments', scene_id, e,
                         ['reference/commitments.csv', 'working/'])
 
-        # A forced re-run replaces this scene's rows from the last run
-        rows = [r for r in rows if not (r.get('introduced_by') == ledger.COMMITMENTS_PASS
-                                        and r.get('scene_id') == scene_id)]
         taken = {r['id'] for r in rows}
         known_ids = {r['id'] for r in known}
         flat = ' '.join(scene_text.split())
@@ -1142,7 +1146,8 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                        origin='prose', status='binding',
                        mutable=item['mutable'] or 'state',
                        introduced_by=ledger.COMMITMENTS_PASS)
-            subject = item['subject']
+            # A `|` or line break would corrupt the row (write_ledger refuses it)
+            subject = ' '.join(item['subject'].replace('|', ',').split())
             if subject:
                 resolved = subjects.get(subject.lower())
                 if resolved:
@@ -1155,7 +1160,9 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                     row['supersedes'] = item['supersedes']
                 else:
                     problems['supersedes'].append(f'{scene_id}: {item["supersedes"]}')
-            if item['quote'] and ' '.join(item['quote'].split()) not in flat:
+            if not item['quote']:
+                problems['no quote'].append(f'{scene_id}: {row["id"]}')
+            elif ' '.join(item['quote'].split()) not in flat:
                 problems['quote'].append(f'{scene_id}: {row["id"]}')
             taken.add(row['id'])
             rows.append(row)
@@ -1164,7 +1171,9 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         log(f'  {scene_id}: {len(found)} commitment(s)')
 
     for kind, what in (('quote', 'quote(s) not found verbatim in their scene'),
-                       ('subject', 'subject(s) not in the registries, kept as written'),
+                       ('no quote', 'commitment(s) with no quote'),
+                       ('subject', 'subject(s) not a character or location id, kept as '
+                                   'written (an object has no registry)'),
                        ('supersedes', '"supersedes" naming no earlier commitment, dropped')):
         if problems[kind]:
             log(f'  WARNING: {len(problems[kind])} {what}: '
