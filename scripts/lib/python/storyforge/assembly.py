@@ -1292,7 +1292,10 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
         raise ValueError(f'Chapter map is stale — {"; ".join(parts)}')
 
     title = _common_read_yaml_field('project.title', project_dir) or 'Untitled'
-    author = _common_read_yaml_field('project.author', project_dir) or 'Unknown'
+    # The schema keeps the author under production (as the cover reads it);
+    # older projects have it under project.
+    author = (_common_read_yaml_field('production.author', project_dir)
+              or _common_read_yaml_field('project.author', project_dir) or 'Unknown')
     slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
 
     scenes_dir = os.path.join(project_dir, 'scenes')
