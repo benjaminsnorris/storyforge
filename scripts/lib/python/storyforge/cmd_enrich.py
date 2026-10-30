@@ -204,8 +204,8 @@ def parse_args(argv):
                         help='Comma-separated fields to enrich (default: all)')
     parser.add_argument('--force', action='store_true',
                         help='Re-enrich scenes that already have data')
-    parser.add_argument('--skip-timeline', action='store_true',
-                        help='Skip the timeline_day analysis pass')
+    # Deprecated no-op: enrich does not run the timeline (step 8)
+    parser.add_argument('--skip-timeline', action='store_true', help=argparse.SUPPRESS)
     # Deprecated no-op: enrich no longer renders a dashboard (#371)
     parser.add_argument('--skip-dashboard', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--dry-run', action='store_true',
@@ -500,7 +500,7 @@ def main(argv=None):
 
     claude_count = len(claude_ids)
     enriched = 0
-    failed = 0
+    failed: list[str] = []  # scenes with no usable enrichment: named, and the run exits 1
 
     if claude_count == 0:
         log('All remaining fields populated by free enrichment. No Claude calls needed.')
@@ -607,11 +607,11 @@ def main(argv=None):
 
         # Apply result helper
         def _apply_result(sid, result_file):
-            nonlocal enriched, failed
+            nonlocal enriched
             local_title = _get_csv_field(metadata_csv, sid, 'title')
 
             if not os.path.isfile(result_file):
-                failed += 1
+                failed.append(sid)
                 log(f'  WARNING: No results for {sid}')
                 return
 
@@ -626,7 +626,7 @@ def main(argv=None):
                     result_map[key] = val
 
             if result_map.get('STATUS') != 'ok':
-                failed += 1
+                failed.append(sid)
                 log(f'  WARNING: Failed to enrich {sid}')
                 if os.path.isfile(result_file):
                     os.remove(result_file)
@@ -702,7 +702,7 @@ def main(argv=None):
                     _parse_response(response, result_file)
                     _apply_result(sid, result_file)
                 else:
-                    failed += 1
+                    failed.append(sid)
                     log(f'  WARNING: Failed {sid}')
 
                 # Clean up temp files
@@ -808,34 +808,18 @@ def main(argv=None):
                     _apply_result(sid, result_file)
 
         log('')
-        log(f'Enrichment complete: {enriched} scenes enriched, {failed} failures')
+        log(f'Enrichment complete: {enriched} scenes enriched, {len(failed)} failures')
 
     # ========================================================================
-    # Step 8: Timeline pass
+    # Step 8: Timeline
     # ========================================================================
-    if not args.skip_timeline and not args.dry_run:
+    # This step ran scripts/storyforge-timeline, removed with the shell
+    # scripts in v1.0.0 (#123); since then it only ever logged "not found,
+    # skipping". It is not run from here: say so, rather than imply a check.
+    if not args.dry_run:
         log('')
-        log('Step 8: Timeline analysis (delegating to storyforge-timeline)...')
-        from storyforge.common import get_plugin_dir
-        timeline_script = os.path.join(get_plugin_dir(), 'scripts', 'storyforge-timeline')
-        if os.path.isfile(timeline_script) and os.access(timeline_script, os.X_OK):
-            timeline_args = ['--embedded']
-            if args.force:
-                timeline_args.append('--force')
-            if args.scenes:
-                timeline_args.extend(['--scenes', args.scenes])
-            elif args.act:
-                timeline_args.extend(['--act', args.act])
-            elif args.from_seq:
-                timeline_args.extend(['--from-seq', args.from_seq])
-            r = subprocess.run([timeline_script] + timeline_args, capture_output=True, text=True)
-            if r.returncode != 0:
-                log('WARNING: Timeline analysis failed (non-fatal, continuing)')
-        else:
-            log(f'WARNING: storyforge-timeline not found, skipping timeline')
-    elif args.skip_timeline:
-        log('')
-        log('Step 8: Timeline analysis (skipped via --skip-timeline)')
+        log('Step 8: Timeline: not run by enrich. Run `storyforge timeline` to read '
+            'time cues and place scenes on the calendar.')
 
     # ========================================================================
     # Update PR tasks
@@ -884,9 +868,13 @@ def main(argv=None):
     log('============================================')
     log('Enrichment complete')
     log(f'  Scenes enriched: {enriched}')
-    log(f'  Failures: {failed}')
+    log(f'  Failures: {len(failed)}')
     log(f'  Fields: {args.fields}')
     log('============================================')
+    if failed:
+        log(f'ERROR: enrichment is incomplete; re-run enrich for these scenes '
+            f'(no usable reply): {", ".join(failed)}')
+        sys.exit(1)
 
 
 def _seed_alias_csv(csv_file: str, source_csv: str, source_field: str, header: str) -> None:
