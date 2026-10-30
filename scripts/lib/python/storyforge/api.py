@@ -551,15 +551,20 @@ def download_batch_results(results_url: str, output_dir: str, log_dir: str,
         log_dir/{custom_id}.json        — API response (for log_usage)
         log_dir/{custom_id}.txt         — text content, only when "ok"
 
-    A reply the model refused or that was cut off at ``max_tokens``
-    (``stop_problem``) is not an answer: it is marked "fail", gets no .txt
-    (a stale one from an earlier run is removed, as for an errored item) and
-    is named in a WARNING. Its .json is still written, since it was paid
-    for. ``keep_incomplete=True`` treats such replies as "ok", for a caller
-    that checks ``stop_problem`` itself (``write`` retries refusals).
+    An item that errored, expired or was canceled is marked "fail", named in
+    a WARNING, and left with neither file (stale ones from an earlier run are
+    removed, so no caller reads an old answer or bills an old reply). A reply
+    the model refused or that was cut off at ``max_tokens``
+    (``stop_problem``) is not an answer either: it is marked "fail", gets no
+    .txt and is named in a WARNING, but its .json is written, since it was
+    paid for. Unlike ``invoke``, which returns a cut-off reply, this rejects
+    it; ``keep_incomplete=True`` treats such replies as "ok", for a caller
+    that checks ``stop_problem`` itself (``write`` retries refusals,
+    ``evaluate`` keeps a cut-off report).
 
     Returns:
-        List of custom_ids that succeeded.
+        The custom_ids marked "ok": refused and cut-off replies are left out
+        unless ``keep_incomplete``.
     """
     headers = {
         'x-api-key': get_api_key(),
@@ -587,8 +592,15 @@ def download_batch_results(results_url: str, output_dir: str, log_dir: str,
             txt_path = os.path.join(log_dir, f'{cid}.txt')
 
             if rtype != 'succeeded':
-                if os.path.isfile(txt_path):
-                    os.remove(txt_path)
+                from storyforge.common import log
+                error = (result.get('error') or {})
+                error = error.get('error', error) if isinstance(error, dict) else {}
+                why = error.get('message') or error.get('type') or ''
+                log(f'WARNING: batch item {cid}: the request {rtype or "failed"}'
+                    f'{f" ({why})" if why else ""}; there is no reply.')
+                for stale in (txt_path, os.path.join(log_dir, f'{cid}.json')):
+                    if os.path.isfile(stale):
+                        os.remove(stale)
                 with open(os.path.join(output_dir, f'.status-{cid}'), 'w') as f:
                     f.write('fail')
                 continue

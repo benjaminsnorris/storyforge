@@ -10,7 +10,7 @@ Lookup tables and subsystem rules moved out of `CLAUDE.md` on 2026-10-28 so that
 | `git` | `create_branch`, `ensure_branch_pushed`, `create_draft_pr`, `update_pr_task`, `commit_and_push`, `run_review_phase` |
 | `cli` | `base_parser`, `add_scene_filter_args`, `resolve_filter_args` |
 | `runner` | `run_parallel(items, fn, max_workers, label)` returns `{item: result-or-Exception}` — check for exceptions; `run_batched`; `HealingZone` |
-| `api` | `invoke_api` (text, `''` on failure), `invoke`, `invoke_to_file`, `extract_text`, `submit_batch` / `poll_batch` / `download_batch_results`. Prose calls pass `fallback=True` (server-side refusal fallback, WARNING naming the model that wrote the reply; not on the Batches API); `fallback_model(response)` names that model |
+| `api` | `invoke_api` (text, `''` on failure), `invoke`, `invoke_to_file`, `extract_text`, `submit_batch` / `poll_batch` / `download_batch_results` (refused, cut-off and errored items are marked `fail` with no `.txt` and a WARNING; `keep_incomplete=True` keeps refused/cut-off replies for a caller that checks `stop_problem` itself). Prose calls pass `fallback=True` (server-side refusal fallback, WARNING naming the model that wrote the reply; not on the Batches API); `fallback_model(response)` names that model |
 | `costs` | `calculate_cost`, `estimate_cost`, `check_threshold`, `log_operation`, `print_summary` |
 | `scene_filter` | `build_scene_list`, `apply_scene_filter` |
 | `csv_cli` | `get_field`, `get_row`, `get_column`, `list_ids`, `update_field`, `append_row` |

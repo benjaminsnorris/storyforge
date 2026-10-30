@@ -684,6 +684,30 @@ class TestDownloadBatchResults:
         assert 'WARNING: batch item cut: the reply was cut off at max_tokens' in out
         assert 'WARNING: batch item refused: model refused the request (cyber)' in out
 
+    def test_errored_item_is_named_and_its_stale_files_removed(self, tmp_path, monkeypatch,
+                                                               capsys):
+        from storyforge import api
+
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        output_dir = str(tmp_path / 'output')
+        log_dir = str(tmp_path / 'logs')
+        os.makedirs(log_dir)
+        for ext in ('txt', 'json'):  # an earlier run's complete answer
+            with open(os.path.join(log_dir, f'gone.{ext}'), 'w') as f:
+                f.write('{}')
+        body = json.dumps({'custom_id': 'gone', 'result': {'type': 'errored', 'error': {
+            'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}}}})
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = body.encode()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch('storyforge.api.urlopen', return_value=mock_resp):
+            assert api.download_batch_results('https://example.com/r', output_dir, log_dir) == []
+
+        assert os.listdir(log_dir) == []
+        assert 'WARNING: batch item gone: the request errored (Overloaded)' in capsys.readouterr().out
+
     def test_skips_malformed_lines(self, tmp_path, monkeypatch):
         from storyforge import api
 
