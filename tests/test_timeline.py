@@ -838,6 +838,32 @@ class TestChecks:
         findings = check_timeline(rows, {'all-this-time': {'relation': 'earlier'}})
         assert [f['check'] for f in findings] == ['flashback_not_earlier']
 
+    def test_a_step_back_into_a_summarys_stretch_is_earlier(self):
+        """F-108, The Plastic Age: the wrong classroom (day 6) steps back
+        into "several weeks" of other instructors summarised from day 5, and
+        was flagged as an earlier scene that isn't earlier."""
+        from storyforge.timeline import check_timeline
+        rows = [{'id': 'instructors', 'timeline_day': '5', 'time_mode': 'summary',
+                 'timeline_date': '', 'duration': 'several weeks'},
+                {'id': 'wrong-classroom', 'timeline_day': '6', 'time_mode': 'scene',
+                 'timeline_date': '', 'duration': '15 minutes'}]
+        assert check_timeline(rows, {'wrong-classroom': {'relation': 'earlier'}}) == []
+
+    def test_a_step_back_past_a_counted_summary_is_still_flagged(self):
+        from storyforge.timeline import check_timeline
+        rows = [{'id': 'term', 'timeline_day': '5', 'time_mode': 'summary',
+                 'timeline_date': '', 'duration': 'three weeks'},
+                {'id': 'inside', 'timeline_day': '20', 'time_mode': 'scene',
+                 'timeline_date': '', 'duration': ''},
+                {'id': 'term-2', 'timeline_day': '30', 'time_mode': 'summary',
+                 'timeline_date': '', 'duration': 'three weeks'},
+                {'id': 'past-it', 'timeline_day': '60', 'time_mode': 'scene',
+                 'timeline_date': '', 'duration': ''}]
+        cues = {'inside': {'relation': 'earlier'}, 'past-it': {'relation': 'earlier'}}
+        findings = check_timeline(rows, cues)
+        assert [(f['scene_id'], f['check']) for f in findings] == [('past-it', 'flashback_not_earlier')]
+        assert 'end of the previous summary (day 51)' in findings[0]['message']
+
     def test_an_approximate_date_has_slack(self):
         """The Brimming Cup: "here we are the first of June and past", said at
         the June 10 supper, was dated XXXX-06-01~ and compared to the day."""
