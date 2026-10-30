@@ -2,9 +2,7 @@
 
 init copies templates/reference/ into a new project, and every writer
 (elaborate, migrate, extract) writes the columns in elaborate._FILE_MAP. A
-template that lags them starts a project on a header no writer produces:
-spine.csv and architecture.csv had no `summary`, scenes.csv no `summary` or
-`architecture_scene`, scene-intent.csv no `theme_threads`.
+template that lags them starts a project on a header no writer produces.
 """
 
 import os
