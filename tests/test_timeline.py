@@ -772,6 +772,18 @@ class TestChecks:
         findings = check_timeline(rows, {'school': {'relation': 'earlier', 'gap': 'many years'}})
         assert [f['check'] for f in findings] == ['flashback_not_earlier']
 
+    def test_a_step_back_within_the_day_in_words_is_not_flagged(self):
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('a', '4', 'scene', ''), ('b', '4', 'scene', ''))
+        for gap in ('earlier that same day', 'an hour ago', 'minutes ago', 'that morning'):
+            assert check_timeline(rows, {'b': {'relation': 'earlier', 'gap': gap}}) == [], gap
+
+    def test_two_earlier_scenes_at_the_start_do_not_crash(self):
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('a', '4', 'scene', ''), ('b', '4', 'scene', ''))
+        cues = {'a': {'relation': 'earlier'}, 'b': {'relation': 'earlier', 'gap': 'ten years'}}
+        check_timeline(rows, cues)
+
     def test_a_month_and_day_say_nothing_about_the_year(self):
         """A Christmas Carol (run 1): Fezziwig's party, a Christmas Eve years
         back, was dated December 24 on the present's day."""

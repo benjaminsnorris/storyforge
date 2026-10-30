@@ -858,14 +858,19 @@ _OTHER_DAY = re.compile(r'\b(to-?morrow|yesterday)\b')
 _APPROXIMATE_SLACK = 10
 
 
-_DAYS_OR_MORE = re.compile(r'\b(days?|weeks?|fortnights?|months?|years?|ago)\b', re.I)
+_DAYS_OR_MORE = re.compile(r'\b(days?|weeks?|fortnights?|months?|years?|long ago)\b', re.I)
+_WITHIN_A_DAY = re.compile(r'\b((same|that|this) (day|morning|afternoon|evening|night)|hours?|'
+                           r'minutes?|moments?)\b', re.I)
 
 
 def _goes_back_days(gap: str) -> bool:
     """A gap of a day or more, counted ("ten years") or vague ("many
-    years", "long ago"), as against minutes or hours."""
+    years", "long ago"), as against minutes or hours ("earlier that same
+    day", "an hour ago")."""
     days = gap_to_days(gap or '')
-    return (days or 0) >= 1 or bool(_DAYS_OR_MORE.search(gap or ''))
+    if days is not None:
+        return days >= 1
+    return bool(_DAYS_OR_MORE.search(gap or '')) and not _WITHIN_A_DAY.search(gap or '')
 
 
 def _keeps_stated_date(row: dict, cue: dict) -> bool:
@@ -926,7 +931,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         # A stated date the calendar keeps outranks "earlier" on a later
         # day; on the same day, a month and day that agree say nothing
         # about the year (Fezziwig's Christmas Eve, years back, on day 1)
-        if relation == 'earlier' and last_day is not None and (
+        if relation == 'earlier' and last_day is not None and reached is not None and (
                 (day > reached and not stated)
                 or (day == reached and _goes_back_days(cue.get('gap', '')))):
             before = (f'the previous scene\'s ({last_day})' if at_present
