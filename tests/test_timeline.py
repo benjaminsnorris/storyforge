@@ -296,6 +296,18 @@ class TestAssignment:
                          's1 | 5 | scene | exact\ns1-out | 7 | scene | loose\n'):
             assert parse_assignments(response, ['s1']) == {'s1': (5, 'scene', 'exact')}
 
+    def test_id_with_a_word_dropped_or_changed(self):
+        """F-101: a reply id with a word dropped or swapped left the scene
+        unplaced; only extended or cut ids were matched."""
+        from storyforge.timeline import parse_assignments
+        ids = ['tom-drives-toward-accident', 'laura-refuses-hargrave-at-dawn', 'nick-meets-gatsby']
+        result = parse_assignments(
+            'tom-drives-accident | 90 | scene | dropped\n'
+            'laura-rejects-hargrave-at-dawn | 4 | scene | swapped\n'
+            'nick-greets-gatsby | 7 | scene | swapped in three words\n', ids)
+        assert result == {'tom-drives-toward-accident': (90, 'scene', 'dropped'),
+                          'laura-refuses-hargrave-at-dawn': (4, 'scene', 'swapped')}
+
     def test_only_lines_after_calendar_count(self):
         from storyforge.timeline import parse_assignments
         result = parse_assignments('REASONING:\ns1 | 76 | scene | first try\n'

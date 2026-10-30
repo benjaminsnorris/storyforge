@@ -24,6 +24,7 @@ import re
 from .common import log
 from .elaborate import OFF_PRESENT_MODES
 from .enrich import update_csv_field
+from .scenes import match_scene_id
 
 
 RELATIONS = ('continues', 'later', 'earlier', 'frame', 'vision', 'unclear')
@@ -459,21 +460,19 @@ def parse_assignments(response: str, ids: list[str]) -> dict[str, tuple[int, str
 
     Days may be zero or negative. ``earlier`` given as the mode means
     ``scene``; a missing or unknown mode comes back as ``''`` for the
-    caller to decide. An id the reply extends or cuts short at a hyphen
-    counts for the one scene it matches, unless that scene has its own
-    line. Lines for other ids or with a non-integer day are ignored.
+    caller to decide. An id the reply extends or cuts short at a hyphen, or
+    gets a word wrong in, counts for the one scene it matches
+    (``match_scene_id``), unless that scene has its own line. Lines for
+    other ids or with a non-integer day are ignored.
     """
     wanted = set(ids)
     result: dict[str, tuple[int, str, str]] = {}
     exact: set[str] = set()
 
+    # Self-Control: "de-courcy-pines-and-sets-out" for
+    # "de-courcy-pines-and-sets" left the scene unplaced
     def resolve(reply_id):
-        if reply_id in wanted:
-            return reply_id
-        # Self-Control: "de-courcy-pines-and-sets-out" for
-        # "de-courcy-pines-and-sets" left the scene unplaced
-        matches = [w for w in wanted if reply_id.startswith(w + '-') or w.startswith(reply_id + '-')]
-        return matches[0] if len(matches) == 1 else None
+        return match_scene_id(reply_id, wanted)
     # Only the answer after CALENDAR: counts; reasoning above it may try out
     # days it then revises
     text = response or ''

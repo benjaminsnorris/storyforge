@@ -735,7 +735,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     from storyforge.extract import (
         BRIEF_PARALLEL_SCHEMA, build_brief_parallel_prompt, parse_brief_parallel_response,
         build_knowledge_prompt, parse_knowledge_response, KNOWLEDGE_SCHEMA,
-        merge_new_knowledge_facts, resolve_knowledge_ids, KNOWLEDGE_COLUMNS,
+        merge_new_knowledge_facts, resolve_knowledge_ids, resolve_scene_deps, KNOWLEDGE_COLUMNS,
         build_physical_state_prompt, parse_physical_state_response, PHYSICAL_STATE_SCHEMA,
     )
     from storyforge.elaborate import (
@@ -862,6 +862,13 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         for k in ('knowledge_in', 'knowledge_out'):
             if result.get(k):
                 result[k] = resolve_knowledge_ids(knowledge_registry, result[k])
+        # Plastic Age: "henley-indicts-college-conformity" named no scene
+        if result.get('continuity_deps'):
+            result['continuity_deps'], dropped = resolve_scene_deps(
+                result['continuity_deps'], sorted_scene_ids)
+            if dropped:
+                log(f'  {scene_id}: continuity_deps dropped (no such scene): '
+                    + '; '.join(dropped))
 
         # Update briefs CSV
         _update_chain_fields(scene_id, ref_dir, result, force,
