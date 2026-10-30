@@ -358,6 +358,9 @@ class TestMainCheck:
                             lambda r: 'TIME_RELATION: earlier\nTIME_GAP: three days\n')
         main(['--check', '--scenes', 'act1-sc01'])
         assert open(cues_file).read() == before
+        # The check's own cues are kept, apart, for inspection and replay
+        checked = tl.read_cues(project_dir, tl.CHECK_CUES_FILE)
+        assert checked['act1-sc01']['relation'] == 'earlier'
 
     def test_force_is_passed_through(self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
         monkeypatch.setattr('storyforge.cmd_timeline.detect_project_root', lambda: project_dir)
