@@ -221,6 +221,9 @@ def parse_args(argv):
 def main(argv=None):
     args = parse_args(argv or [])
     session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    if args.skip_dashboard:
+        log('Note: --skip-dashboard is a no-op — enrich no longer builds a dashboard; '
+            'Bookshelf renders it from the data publish sends.')
 
     install_signal_handlers()
     project_dir = detect_project_root()

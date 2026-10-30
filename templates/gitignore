@@ -17,3 +17,6 @@ working/scores/**/.markers-*
 # Temporary flag files (cleaned up by scripts)
 working/.autopilot
 working/.interactive
+
+# Dashboard data snapshot (storyforge visualize; publish rebuilds it)
+working/dashboard-data.json

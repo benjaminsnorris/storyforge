@@ -490,6 +490,29 @@ class TestMainBatchMode:
 
         assert ('enrich', 'act1-sc01') in costed
 
+    def test_enrich_runs_no_dashboard_step(self, mock_api, mock_git, mock_costs,
+                                           project_dir, monkeypatch, capsys):
+        """#371: step 9 looked for storyforge-visualize to render a dashboard;
+        Bookshelf renders it now. --skip-dashboard is a no-op."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_enrich.detect_project_root',
+                            lambda: project_dir)
+        commands = []
+        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run',
+                            lambda *a, **kw: commands.append(a[0] if a else []) or
+                            subprocess.CompletedProcess(a[0] if a else [], 0, stdout='{}',
+                                                        stderr=''))
+        mock_api.set_response('TYPE|scene')
+
+        main(['--force', '--scenes', 'act1-sc01', '--fields', 'type', '--skip-timeline'])
+        main(['--force', '--scenes', 'act1-sc01', '--fields', 'type', '--skip-timeline',
+              '--skip-dashboard'])
+
+        assert not any('visualize' in ' '.join(map(str, c)) for c in commands)
+        out = capsys.readouterr().out
+        assert 'Dashboard' not in out
+        assert '--skip-dashboard is a no-op' in out
+
     def test_batch_commits_results(self, mock_api, mock_git, mock_costs,
                                      project_dir, monkeypatch):
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
