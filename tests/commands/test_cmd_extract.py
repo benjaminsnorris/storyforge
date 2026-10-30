@@ -1049,6 +1049,39 @@ class TestKnowledgeChainOffersOnlyEarlierFacts:
         assert set(offered['new-x1']) == self.BACKSTORY
         assert 'map-anomaly-exists' not in offered['act2-sc01']
 
+    def test_a_declared_fact_is_placed_in_its_scenes_knowledge_out(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        """P&P on the fix's first run: a scene declared a fact but left it
+        out of knowledge_out (the next scene's knowledge_in then named an
+        unestablished fact), and another listed its own new fact in
+        knowledge_in."""
+        from storyforge.elaborate import get_scene
+        fact = {'id': 'estate-entailed', 'name': 'The estate is entailed',
+                'category': 'state-change'}
+        replies = {
+            'act1-sc01': _structured('KNOWLEDGE_SCHEMA', knowledge_out=[],
+                                     new_facts=[fact]),
+            'act1-sc02': _structured('KNOWLEDGE_SCHEMA', knowledge_in=['tower-sealed'],
+                                     knowledge_out=['tower-sealed'],
+                                     new_facts=[{'id': 'tower-sealed',
+                                                 'name': 'The tower is sealed',
+                                                 'category': 'state-change'}]),
+        }
+        self._run(project_dir, mock_api, monkeypatch, replies)
+        ref_dir = os.path.join(project_dir, 'reference')
+        assert 'estate-entailed' in get_scene('act1-sc01', ref_dir)['knowledge_out'].split(';')
+        sc02 = get_scene('act1-sc02', ref_dir)
+        assert 'tower-sealed' not in sc02['knowledge_in'].split(';')
+        assert 'tower-sealed' in sc02['knowledge_out'].split(';')
+
+    def test_place_declared_facts_keeps_a_fact_shown_earlier(self):
+        from storyforge.cmd_extract import _place_declared_facts
+        result = {'knowledge_in': 'old-fact', 'knowledge_out': ''}
+        note = _place_declared_facts(result, {'old-fact'}, shown_before={'old-fact'})
+        assert result['knowledge_in'] == 'old-fact'
+        assert result['knowledge_out'] == 'old-fact'
+        assert 'added: old-fact' in note
+
     def test_an_unforced_run_counts_what_earlier_briefs_already_hold(
             self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
         """Without force an empty reply keeps the brief's knowledge_out, so
