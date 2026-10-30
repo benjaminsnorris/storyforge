@@ -1259,3 +1259,25 @@ class TestKnowledgeChainKeepsSceneSummaries:
             'KNOWLEDGE_SCHEMA', scene_summary='The model wrote this.')}
         self._run(project_dir, mock_api, monkeypatch, replies, force=True)
         assert get_scene('act1-sc01', ref_dir)['summary'] == 'The author wrote this.'
+
+
+class TestMarkDrafted:
+    """#440: scenes-setup creates the rows before extraction, and phase 1 set
+    `drafted` only on rows it created, so every extracted book's scenes had a
+    blank status and read as unstarted."""
+
+    def test_blank_status_with_prose_becomes_drafted_and_others_are_kept(self, project_dir):
+        from storyforge.cmd_extract import _mark_drafted
+        from storyforge.elaborate import get_scene, update_scene
+        ref = os.path.join(project_dir, 'reference')
+        scenes = os.path.join(project_dir, 'scenes')
+        update_scene('act1-sc01', ref, {'status': ''})
+        update_scene('act1-sc02', ref, {'status': 'briefed'})
+        update_scene('new-x1', ref, {'status': ''})
+        with open(os.path.join(scenes, 'new-x1.md'), 'w') as f:
+            f.write('\n  \n')                     # no prose yet
+        n = _mark_drafted(ref, scenes, ['act1-sc01', 'act1-sc02', 'new-x1', 'no-row'])
+        assert n == 1
+        assert get_scene('act1-sc01', ref)['status'] == 'drafted'
+        assert get_scene('act1-sc02', ref)['status'] == 'briefed'
+        assert get_scene('new-x1', ref)['status'] == ''

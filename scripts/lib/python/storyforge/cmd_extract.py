@@ -553,6 +553,9 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         log_dir, parse_skeleton_response, alias_maps, force,
         new_row=new_skeleton_row, sort_key=lambda r: int(r.get('seq') or 0))
     _log_merge('scenes.csv', count, len(sorted_scene_ids))
+    marked = _mark_drafted(ref_dir, scenes_dir, sorted_scene_ids)
+    if marked:
+        log(f'  status: {marked} scene(s) with prose and no status marked drafted')
 
     # The timeline pass: store each scene's time cues, then place every scene
     # on one calendar. Nobody authored these days, so they are replaced.
@@ -586,6 +589,31 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     _safe_remove(batch_file)
     _safe_rmdir(skel_output)
+
+
+def _mark_drafted(ref_dir, scenes_dir, scene_ids) -> int:
+    """Mark `drafted` every scene that has prose and a blank status (#440).
+
+    Phase 1 set the status only on rows it created, and scenes-setup creates
+    them first, so an extracted book's scenes all had a blank status: the
+    scene-map floor, `storyforge status` and drafting then read a finished
+    book as unstarted. A status already set is never replaced. Returns how
+    many were marked.
+    """
+    from storyforge.elaborate import _read_csv_as_map, update_scene
+    rows = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    marked = 0
+    for sid in scene_ids:
+        row = rows.get(sid)
+        path = os.path.join(scenes_dir, f'{sid}.md')
+        if row is None or row.get('status', '').strip() or not os.path.isfile(path):
+            continue
+        with open(path, encoding='utf-8', errors='replace') as f:
+            if not f.read().strip():
+                continue
+        update_scene(sid, ref_dir, {'status': 'drafted'})
+        marked += 1
+    return marked
 
 
 # ============================================================================
@@ -1310,6 +1338,12 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run):
             print(f'{label}: {len(prompt)} chars')
         print('===== END DRY RUN =====')
         return
+
+    # Books extracted before phase 1 did this have every status blank
+    marked = _mark_drafted(ref_dir, os.path.join(project_dir, 'scenes'),
+                           [s['id'] for s in scenes])
+    if marked:
+        log(f'  status: {marked} scene(s) with prose and no status marked drafted')
 
     provenance = describe.read_provenance(project_dir)
     if provenance is None:

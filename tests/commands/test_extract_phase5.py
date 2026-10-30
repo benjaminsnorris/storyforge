@@ -106,6 +106,15 @@ class TestPhase5:
         assert 'reference/spine.csv' in commits[-1][2]
         assert all(c['model'] for c in mock_api.calls)
 
+    def test_blank_statuses_on_an_already_extracted_book_are_marked(
+            self, book, mock_api, mock_git, mock_costs):
+        from storyforge.elaborate import get_scene, update_scene
+        ref = os.path.join(book, 'reference')
+        update_scene('act1-sc01', ref, {'status': ''})
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        assert get_scene('act1-sc01', ref)['status'] == 'drafted'
+
     def test_a_rerun_writes_nothing_and_calls_nothing(self, book, mock_api, mock_git,
                                                       mock_costs, capsys):
         mock_api.set_response_fn(_answer(book))
