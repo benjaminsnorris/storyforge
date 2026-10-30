@@ -225,6 +225,8 @@ def main(argv=None):
 
     install_signal_handlers()
     project_dir = detect_project_root()
+    from storyforge.ledger import exit_if_not_migrated
+    exit_if_not_migrated(project_dir)  # the registries live in the ledger
     log(f'Project root: {project_dir}')
 
     # Resolve mode
@@ -843,7 +845,7 @@ def main(argv=None):
             'reference/scenes.csv', 'reference/scene-intent.csv',
             'reference/scene-briefs.csv', 'reference/characters.csv',
             'reference/motif-taxonomy.csv', 'reference/locations.csv',
-            'reference/values.csv', 'reference/knowledge.csv',
+            'reference/values.csv', 'reference/commitments.csv',
             'reference/mice-threads.csv', 'working/costs/', 'working/logs/',
             'working/enrich/',
         ],

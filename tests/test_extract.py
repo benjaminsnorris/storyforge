@@ -667,12 +667,19 @@ class TestForcedPhase3PrunesRegistries:
     keep what a brief uses or the pass declared; drop the rest."""
 
     def _ids(self, project_dir, name):
-        from storyforge.elaborate import _read_csv_as_map
-        return set(_read_csv_as_map(os.path.join(project_dir, 'reference', name)))
+        from ledger_helpers import read_facts
+        return set(read_facts(os.path.join(project_dir, 'reference'), name))
 
     def _add_rows(self, project_dir, name, rows):
-        with open(os.path.join(project_dir, 'reference', name), 'a') as f:
-            f.writelines(r + '\n' for r in rows)
+        from storyforge import ledger
+        from ledger_helpers import write_facts
+        ref_dir = os.path.join(project_dir, 'reference')
+        type_ = 'knowledge' if name == 'knowledge.csv' else 'physical'
+        view = ledger.read_view(ref_dir, type_)
+        header = '|'.join(ledger.VIEW_COLUMNS[type_])
+        write_facts(ref_dir, name, '\n'.join(
+            [header] + ['|'.join(r[c] for c in ledger.VIEW_COLUMNS[type_]) for r in view]
+            + rows))
 
     def test_drops_only_entries_nothing_uses(self, project_dir):
         from storyforge.cmd_extract import _prune_registries
@@ -699,16 +706,21 @@ class TestForcedPhase3PrunesRegistries:
         assert before_p - states == {'broken-nose-old', 'sprained-ankle-tessa',
                                      'scar-left-hand-kael'}
 
-    def test_keeps_columns_and_rows_of_kept_entries(self, project_dir):
+    def test_keeps_kept_rows_whole_and_other_facts(self, project_dir):
+        """A kept entry keeps every ledger column (a quote, who knows it),
+        and pruning one type never touches the other's rows."""
+        from storyforge import ledger
         from storyforge.cmd_extract import _prune_registries
-        path = os.path.join(project_dir, 'reference', 'physical-states.csv')
-        with open(path) as f:
-            header = f.readline()
-        _prune_registries(os.path.join(project_dir, 'reference'), set(), set())
-        with open(path) as f:
-            assert f.readline() == header
-            assert any(l.startswith('archive-key-dorren|Dorren Hayle|holds the restricted')
-                       for l in f)
+        ref_dir = os.path.join(project_dir, 'reference')
+        rows = ledger.load_from(ref_dir)
+        key = next(r for r in rows if r['id'] == 'archive-key-dorren')
+        key['quote'] = 'the key was cold in his hand'
+        rows.append({**key, 'id': 'a-timeline-fact', 'type': 'timeline'})
+        ledger.save_to(ref_dir, rows)
+        _prune_registries(ref_dir, set(), set())
+        after = {r['id']: r for r in ledger.load_from(ref_dir)}
+        assert after['archive-key-dorren'] == key
+        assert 'a-timeline-fact' in after
 
     def test_unforced_run_does_not_prune(self):
         import inspect

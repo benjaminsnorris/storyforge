@@ -38,7 +38,8 @@ call. These families:
   rewritten brief row. A rewrite the fix's own guard rejects halts.
 - ``hone-physical-states``: ``hone.reconcile_domain('physical-states')``, what
   ``storyforge hone --domain physical-states`` runs, with hone's model; the
-  judge reads the rows it added to or changed in ``physical-states.csv``.
+  judge reads the rows it added to or changed in the ledger
+  (``commitments.csv``, which holds the physical states).
 - ``illustrate-state``: ``cmd_illustrate.run_state`` at ``full`` coaching (the
   old pass proposed transitions; coach and strict write no content); the judge
   reads the rows it added to the visual-state log.
@@ -73,6 +74,7 @@ import io
 from dataclasses import dataclass, field
 
 import e1
+from harness import migrate_tree
 
 # families whose pass writes data, judged on what it wrote (see written())
 DATA_FAMILIES = ('brief-fix', 'hone-physical-states', 'illustrate-state', 'illustrate-prompts')
@@ -198,7 +200,8 @@ def _git(repo_dir: str, *args: str) -> str:
 
 
 def materialize(repo_dir: str, commit: str, dest: str) -> str:
-    """Write the tree at ``commit`` to ``dest`` (once) and return ``dest``."""
+    """Write the tree at ``commit`` to ``dest`` (once) and return ``dest``,
+    its registries moved into the ledger (``harness.migrate_tree``)."""
     if os.path.isdir(dest):
         return dest
     archive = subprocess.run(['git', '-C', repo_dir, 'archive', commit], capture_output=True)
@@ -211,6 +214,7 @@ def materialize(repo_dir: str, commit: str, dest: str) -> str:
             tar.extractall(dest, filter='data')
         except TypeError:  # Python before 3.10.12 / 3.11.4 has no extraction filters
             tar.extractall(dest)
+    migrate_tree(dest, f'{os.path.basename(repo_dir)}@{commit[:12]}')
     return dest
 
 
@@ -545,12 +549,12 @@ def brief_fix(project_dir: str, scene_id: str) -> str:
 
 
 def hone_physical_states(project_dir: str) -> str:
-    """Reconcile the physical-states registry as ``storyforge hone`` does;
-    return what it wrote to the registry and to the briefs' state columns."""
+    """Reconcile the physical states as ``storyforge hone`` does; return what
+    it wrote to the ledger and to the briefs' state columns."""
     from storyforge import hone
     from storyforge.common import select_model
     ref_dir = os.path.join(project_dir, 'reference')
-    rels = (os.path.join('reference', 'physical-states.csv'),
+    rels = (os.path.join('reference', 'commitments.csv'),
             os.path.join('reference', 'scene-briefs.csv'))
     before = _snapshot(project_dir, *rels)
     log_dir = os.path.join(project_dir, 'working', 'logs')

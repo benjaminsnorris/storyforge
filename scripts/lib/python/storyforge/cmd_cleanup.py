@@ -34,6 +34,7 @@ from storyforge.common import (
     csv_safe, detect_project_root, get_medium, log, read_yaml_field,
 )
 from storyforge.git import commit_and_push, ensure_on_branch
+from storyforge import ledger
 from storyforge.parsing import clean_scene_content, extract_single_scene
 from storyforge.visual_state import STATE_COLUMNS
 
@@ -92,16 +93,16 @@ EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
         'physical_state_in', 'physical_state_out',
     ],
     # Registry CSVs (reference/)
-    'reference/characters.csv': ['id', 'name', 'aliases', 'role', 'death_scene'],
+    'reference/characters.csv': ['id', 'name', 'aliases', 'role', 'death_scene',
+                                 'pronouns'],
     'reference/locations.csv': ['id', 'name', 'aliases'],
     'reference/values.csv': ['id', 'name', 'aliases'],
-    'reference/knowledge.csv': ['id', 'name', 'aliases', 'category', 'origin'],
     'reference/mice-threads.csv': ['id', 'name', 'type', 'aliases'],
     'reference/motif-taxonomy.csv': ['id', 'name', 'aliases', 'tier'],
-    'reference/physical-states.csv': [
-        'id', 'character', 'description', 'category', 'acquired',
-        'resolves', 'action_gating',
-    ],
+    # The commitments ledger: knowledge facts and physical states (it
+    # replaced knowledge.csv and physical-states.csv: a project that still has
+    # them gets a LEGACY_REGISTRY finding from report_csv_schema)
+    f'reference/{ledger.LEDGER_FILE}': list(ledger.COLUMNS),
     'reference/chapter-map.csv': [
         'chapter', 'title', 'heading', 'part', 'scenes',
     ],
@@ -152,6 +153,10 @@ ALWAYS_OPTIONAL_CSV_FILES: set[str] = {
 #: broken. Sourced from the owning module so the two cannot drift.
 OPTIONAL_CSV_COLUMNS: dict[str, set[str]] = {
     'reference/illustration-plan.csv': set(OPTIONAL_PLAN_COLUMNS),
+    # Plan §3.1 adds it; no book has it yet, and no writer fills it, so its
+    # absence is not a finding (an author's `pronouns` column is no longer
+    # an unexpected one)
+    'reference/characters.csv': {'pronouns'},
 }
 EXPECTED_WORKING_DIRS = set(
     'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup'.split()
@@ -184,10 +189,9 @@ GN_OPTIONAL_CSV_FILES: set[str] = {
     'reference/characters.csv',
     'reference/locations.csv',
     'reference/values.csv',
-    'reference/knowledge.csv',
+    f'reference/{ledger.LEDGER_FILE}',
     'reference/mice-threads.csv',
     'reference/motif-taxonomy.csv',
-    'reference/physical-states.csv',
     'reference/chapter-map.csv',
 }
 # dashboard.html is what visualize wrote before Bookshelf rendered the
@@ -1508,6 +1512,8 @@ def report_csv_schema(project_dir: str) -> list[str]:
             if col not in expected_set:
                 issues.append(f'EXTRA_COLUMN:{rel_path}:{col}')
 
+    issues += [f'LEGACY_REGISTRY:reference/{f}' for f in
+               ledger.legacy_files(os.path.join(project_dir, 'reference'))]
     return issues
 
 
@@ -1797,6 +1803,19 @@ def _classify_issue(issue: str, rename_pairs: dict[str, list[tuple[str, str]]]) 
             'action': f'Copy from templates/ or run storyforge elaborate',
             'command': f'cp templates/{path.removeprefix("reference/")} {path}',
             'severity': 'warning',
+        }
+
+    if issue.startswith('LEGACY_REGISTRY:'):
+        # Every command that reads the facts stops on these until they move
+        path = issue.split(':', 1)[1]
+        return {
+            'type': 'legacy_registry', 'file': path,
+            'detail': f'{path} was replaced by reference/{ledger.LEDGER_FILE}',
+            'action': (f'Run storyforge migrate: it moves the file into '
+                       f'reference/{ledger.LEDGER_FILE}, or, when the ledger '
+                       f'already exists, stops and says what to check'),
+            'command': 'storyforge migrate',
+            'severity': 'error',
         }
 
     if issue.startswith('UNREADABLE_CSV:'):

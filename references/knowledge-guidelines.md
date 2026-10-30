@@ -10,7 +10,7 @@ The `knowledge_in` and `knowledge_out` columns in scene-briefs.csv serve three f
 2. **Drafting contracts** — the writer knows exactly what a character is aware of entering a scene
 3. **Parallel drafting** — scenes with matching knowledge states can be drafted simultaneously
 
-Facts are registered in `reference/knowledge.csv` and referenced by ID in scene briefs.
+Facts are registered in `reference/commitments.csv`, the commitments ledger, as rows with `type` `knowledge` (the fact in `statement`, the scene that establishes it in `scene_id`, rewordings in `aliases`), and referenced by ID in scene briefs. (`knowledge.csv` held them before the ledger; `storyforge migrate` moves an old project's file in.)
 
 ## Six Categories
 

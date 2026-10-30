@@ -706,17 +706,28 @@ KNOWLEDGE_COLUMNS = ['id', 'name', 'aliases', 'category', 'origin']
 
 def merge_new_knowledge_facts(registry: dict[str, dict[str, str]],
                               new_facts: list[dict[str, str]],
-                              scene_id: str) -> list[str]:
+                              scene_id: str,
+                              order: dict[str, int] | None = None) -> list[str]:
     """Add facts declared in a reply's ``new_facts`` to the running knowledge registry.
 
-    ``registry`` maps id -> knowledge.csv row and is updated in place; a new
-    fact's origin is the scene that declared it. An id already registered
-    keeps its existing row (first declaration wins). Returns the ids added.
+    ``registry`` maps id -> knowledge view row (`ledger.knowledge_view`) and
+    is updated in place; a new fact's origin is the scene that declared it.
+    An id already registered keeps its existing row (first declaration
+    wins), except that with ``order`` (scene id -> reading position) a fact
+    a forced re-run declares earlier than its recorded origin (or whose
+    origin is no scene in ``order``) moves its origin to this scene, so the
+    scenes in between are offered it. Returns the ids added.
     """
     added = []
     for fact in new_facts:
         fid = fact.get('id', '').strip()
-        if not fid or fid in registry:
+        if not fid:
+            continue
+        if fid in registry:
+            origin = (registry[fid].get('origin') or '').strip()
+            if (order is not None and origin and scene_id in order
+                    and order.get(origin, len(order)) > order[scene_id]):
+                registry[fid]['origin'] = scene_id
             continue
         registry[fid] = {
             'id': fid,
@@ -1270,10 +1281,13 @@ def cleanup_answer_formats(ref_dir: str) -> list[dict]:
     the field empty never overwrites. Returns a list of fixes applied."""
     from .elaborate import _read_csv, _write_csv, _FILE_MAP
 
+    from . import ledger
+
     fixes = []
-    phys_path = os.path.join(ref_dir, 'physical-states.csv')
-    phys = _read_csv(phys_path)
-    for row in phys:
+    rows = ledger.load_from(ref_dir)
+    for row in rows:
+        if row.get('type') != 'physical':
+            continue
         old = row.get('action_gating', '')
         new = reduce_boolean(old)
         if new != old:
@@ -1281,9 +1295,7 @@ def cleanup_answer_formats(ref_dir: str) -> list[dict]:
             fixes.append({'state_id': row.get('id', ''), 'field': 'action_gating',
                           'old_value': old, 'new_value': new})
     if fixes:
-        # The file's own columns, so nothing an author added is dropped; a
-        # stray '|' in a row (DictReader's None key) never becomes a column
-        _write_csv(phys_path, phys, [c for c in _header(phys_path) if c])
+        ledger.save_to(ref_dir, rows)
 
     briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
     briefs = _read_csv(briefs_path)

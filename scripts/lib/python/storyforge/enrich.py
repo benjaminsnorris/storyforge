@@ -489,15 +489,23 @@ def format_registries_for_prompt(project_dir: str,
     Reads all registry files and returns a formatted string showing
     canonical IDs that Claude should use in its output.  Registries
     whose files don't exist or contain only a header row are skipped.
+    Knowledge facts come from the ledger (``reference/commitments.csv``).
 
     Args:
         project_dir: Root directory of the novel project.
-        exclude: Registry filenames to leave out (e.g. ``('knowledge.csv',)``
-            for a prompt that renders that registry itself).
+        exclude: Registries to leave out, by filename or ``'knowledge'``
+            (e.g. ``('knowledge',)`` for a prompt that renders the facts
+            itself).
 
     Returns:
         Formatted markdown string, or empty string if no registries exist.
+
+    Raises:
+        ledger.NotMigratedError: if knowledge.csv or physical-states.csv is
+            still on disk.
     """
+    from storyforge import ledger
+
     ref_dir = os.path.join(project_dir, 'reference')
 
     # Registry definitions: (filename, section_title, extra_columns)
@@ -508,7 +516,6 @@ def format_registries_for_prompt(project_dir: str,
         ('values.csv', 'Values', []),
         ('mice-threads.csv', 'MICE Threads', ['type']),
         ('motif-taxonomy.csv', 'Motifs', []),
-        ('knowledge.csv', 'Knowledge Facts', []),
     ]
 
     sections: list[str] = []
@@ -566,6 +573,13 @@ def format_registries_for_prompt(project_dir: str,
             sections.append(f'### {title} (reference/{filename})\n' +
                             '\n'.join(entries))
 
+    if 'knowledge' not in exclude:
+        facts = [f'- {r["id"]} ({r["name"]})'
+                 for r in ledger.knowledge_view(ledger.load_from(ref_dir)) if r['id']]
+        if facts:
+            sections.append(f'### Knowledge Facts (reference/{ledger.LEDGER_FILE})\n'
+                            + '\n'.join(facts))
+
     if not sections:
         return ''
 
@@ -581,8 +595,11 @@ def load_registry_alias_maps(project_dir: str) -> dict[str, dict[str, str]]:
     dicts.  Missing registry files produce empty dicts.
 
     The 'mice_threads' key holds a name→id alias map.  The 'mice_types' key
-    holds an id→type map for MICE type correction.
+    holds an id→type map for MICE type correction.  Knowledge comes from the
+    ledger (raises ``ledger.NotMigratedError`` while the old files remain).
     """
+    from storyforge import ledger
+
     ref_dir = os.path.join(project_dir, 'reference')
     mice_alias, mice_types = load_mice_registry(
         os.path.join(ref_dir, 'mice-threads.csv'))
@@ -591,7 +608,7 @@ def load_registry_alias_maps(project_dir: str) -> dict[str, dict[str, str]]:
         'locations': load_alias_map(os.path.join(ref_dir, 'locations.csv')),
         'motifs': load_alias_map(os.path.join(ref_dir, 'motif-taxonomy.csv')),
         'values': load_alias_map(os.path.join(ref_dir, 'values.csv')),
-        'knowledge': load_alias_map(os.path.join(ref_dir, 'knowledge.csv')),
+        'knowledge': ledger.alias_map(ledger.knowledge_view(ledger.load_from(ref_dir))),
         'mice_threads': mice_alias,
         'mice_types': mice_types,
     }
@@ -985,7 +1002,7 @@ def _field_instruction(field: str) -> str:
         ),
         'knowledge_in': (
             'KNOWLEDGE_IN: <semicolon-separated ids of STRUCTURALLY USEFUL facts '
-            '(knowledge.csv ids, kebab-case, 2-5 words: reuse an existing id for a fact already established; give a genuinely new fact a new id) the POV character knows entering — only facts that gate this '
+            '(knowledge fact ids, kebab-case, 2-5 words: reuse an existing id for a fact already established; give a genuinely new fact a new id) the POV character knows entering — only facts that gate this '
             "scene's decisions. Categories: identity reveals, motive/intent "
             'reveals, capability/constraints, state changes, stakes/threats, '
             'relationship shifts. Omit ordinary plot details.>'

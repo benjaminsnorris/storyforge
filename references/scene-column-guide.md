@@ -119,9 +119,9 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to improve:** If the decision feels passive, restructure so the character must act — even if the action is choosing not to act.
 
 ### knowledge_in / knowledge_out — Information State
-**Why it matters:** This is the continuity backbone. If a character acts on information they haven't received, or fails to act on information they have, the reader loses trust. Fact IDs from knowledge.csv enable automated validation. Knowledge facts should track things that **change what a scene can do** — not every plot detail.
+**Why it matters:** This is the continuity backbone. If a character acts on information they haven't received, or fails to act on information they have, the reader loses trust. Fact IDs from the ledger's knowledge facts (`reference/commitments.csv`, `type` `knowledge`) enable automated validation. Knowledge facts should track things that **change what a scene can do** — not every plot detail.
 **How to check:** Run validation — it flags knowledge_in facts that don't match any prior knowledge_out. Check that knowledge_out includes everything the character learned during the scene.
-**How to improve:** Ensure fact IDs are registered in reference/knowledge.csv. If validation flags a mismatch, check whether the fact IDs match the canonical entries in knowledge.csv or whether it's a genuine continuity error (fix the scene order or add a scene where the character learns the fact).
+**How to improve:** Ensure fact IDs are registered as knowledge facts in reference/commitments.csv. If validation flags a mismatch, check whether the fact IDs match the canonical entries there or whether it's a genuine continuity error (fix the scene order or add a scene where the character learns the fact).
 
 See `references/knowledge-guidelines.md` for the full framework on selecting and designing knowledge facts.
 

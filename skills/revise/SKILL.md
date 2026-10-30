@@ -126,7 +126,7 @@ Categorize each finding by where the fix belongs:
 
 ### Registry-Backed Fields
 
-When fixing CSV fields interactively (upstream passes), all registry-backed fields must use canonical IDs from `reference/` registries (characters.csv, locations.csv, values.csv, knowledge.csv, motif-taxonomy.csv, mice-threads.csv). Read the registries before making CSV edits. If a fix introduces a new entity, add it to the appropriate registry first.
+When fixing CSV fields interactively (upstream passes), all registry-backed fields must use canonical IDs from `reference/` registries (characters.csv, locations.csv, values.csv, motif-taxonomy.csv, mice-threads.csv, and the knowledge facts and physical states in commitments.csv, the commitments ledger). Read the registries before making CSV edits. If a fix introduces a new entity, add it to the appropriate registry first; a new knowledge fact is a row of `reference/commitments.csv`, the commitments ledger, with `type` `knowledge`: `id`, the `scene_id` that establishes it (blank for backstory), the fact as one sentence in `statement`, `origin` `author` (or `plan` for a brief), `status` `binding`, `mutable` `state`; leave the other columns empty.
 
 ### Ordering Principles (upstream first)
 

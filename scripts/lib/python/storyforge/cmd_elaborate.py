@@ -2001,6 +2001,8 @@ def main(argv=None):
     session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     project_dir = detect_project_root()
+    from storyforge.ledger import exit_if_not_migrated
+    exit_if_not_migrated(project_dir)  # the registries live in the ledger
     ref_dir = os.path.join(project_dir, 'reference')
 
     if args.stage not in VALID_STAGES:

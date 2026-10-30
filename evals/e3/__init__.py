@@ -13,7 +13,9 @@ fact was captured.
 prompts as a chain, each scene seeing the knowledge and states the earlier
 scenes produced. Replaying the chain up to every establishing scene would cost
 the whole book per case, so each prompt here starts from an empty chain (the
-tree's own knowledge registry is still offered as known ids). A fact the chain
+tree's own knowledge facts established before the scene, plus backstory, are
+still offered as known ids, as extract offers them since F-123). The tree's
+registries are moved into the ledger first (``harness.migrate_tree``). A fact the chain
 would have carried in from earlier scenes may therefore read as missing.
 
 Gate (plan, Phase 2): recall >= 0.85.
@@ -89,7 +91,9 @@ def extract(project_dir: str, scene_id: str) -> tuple[str, str]:
     """Today's knowledge and physical-state responses for one scene, scene-local."""
     from storyforge.api import extract_text, invoke
     from storyforge.common import select_model
-    from storyforge.elaborate import _read_csv_as_map, get_scene
+    from storyforge import ledger
+    from storyforge.cmd_extract import _build_sorted_scene_ids, _facts_before
+    from storyforge.elaborate import get_scene
     from storyforge.extract import (KNOWLEDGE_SCHEMA, PHYSICAL_STATE_SCHEMA,
                                     build_knowledge_prompt, build_physical_state_prompt)
     from storyforge.enrich import format_registries_for_prompt
@@ -99,12 +103,15 @@ def extract(project_dir: str, scene_id: str) -> tuple[str, str]:
         text = f.read()
     scene = get_scene(scene_id, ref_dir) or {}
     model = select_model('evaluation')
-    known = {fid: row.get('name', '') for fid, row in
-             _read_csv_as_map(os.path.join(ref_dir, 'knowledge.csv')).items() if fid}
+    # The facts `storyforge extract` would offer this scene: established
+    # before it in reading order, plus backstory (F-123)
+    order = {sid: i for i, sid in enumerate(
+        _build_sorted_scene_ids(os.path.join(project_dir, 'scenes'), ref_dir))}
+    known = _facts_before(ledger.view_map(ref_dir, 'knowledge'), scene_id, order)
     knowledge_prompt = build_knowledge_prompt(
         scene_id, text, {k: scene.get(k, '') for k in ('title', 'pov', 'location', 'act')},
         {k: scene.get(k, '') for k in ('function', 'action_sequel')}, {}, [],
-        registries_text=format_registries_for_prompt(project_dir, exclude=('knowledge.csv',)),
+        registries_text=format_registries_for_prompt(project_dir, exclude=('knowledge',)),
         known_facts=known)
     physical_prompt = build_physical_state_prompt(
         scene_id, text, {k: scene.get(k, '') for k in ('title', 'pov', 'location', 'act', 'on_stage')},

@@ -5,6 +5,8 @@ is present."""
 
 import os
 
+from ledger_helpers import read_facts, write_facts
+
 from storyforge.elaborate import _read_csv_as_map, present_in_scene, state_owner_absent
 
 
@@ -17,8 +19,8 @@ def _ref(tmp_path, states):
     (ref / 'scene-briefs.csv').write_text(
         'id|physical_state_in|physical_state_out\nfire||\nafter||\nlater||\n')
     (ref / 'characters.csv').write_text('id|name|role|aliases\ntessa|Tessa|lead|\nelias|Elias|lead|\n')
-    (ref / 'physical-states.csv').write_text(
-        'id|character|description|category|acquired|resolves|action_gating\n' + states)
+    write_facts(ref, 'physical-states.csv',
+                'id|character|description|category|acquired|resolves|action_gating\n' + states)
     return str(ref)
 
 

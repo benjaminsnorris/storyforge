@@ -949,13 +949,13 @@ class TestRecordPhysicalStates:
     had said resolves the state, and Elizabeth's Hunsford headache gated 69
     later scenes."""
 
-    def _rows(self, path):
-        from storyforge.elaborate import _read_csv_as_map
-        return _read_csv_as_map(str(path))
+    def _rows(self, ref_dir):
+        from storyforge import ledger
+        return ledger.view_map(str(ref_dir), 'physical')
 
     def test_resolution_written_to_registry(self, tmp_path):
         from storyforge.cmd_extract import _record_physical_states
-        phys = tmp_path / 'physical-states.csv'
+        phys = tmp_path
         _record_physical_states(str(phys), 'proposal', [
             {'id': 'elizabeth-headache', 'character': 'elizabeth-bennet',
              'description': 'a headache', 'category': 'fatigue',
@@ -968,7 +968,7 @@ class TestRecordPhysicalStates:
 
     def test_state_resolved_in_scene_that_acquires_it(self, tmp_path):
         from storyforge.cmd_extract import _record_physical_states
-        phys = tmp_path / 'physical-states.csv'
+        phys = tmp_path
         _record_physical_states(str(phys), 'lambton-news',
                                 [{'id': 'trembling', 'character': 'elizabeth-bennet'}],
                                 ['trembling'], {})
@@ -976,10 +976,110 @@ class TestRecordPhysicalStates:
 
     def test_first_resolution_kept_and_unknown_ignored(self, tmp_path):
         from storyforge.cmd_extract import _record_physical_states
-        phys = tmp_path / 'physical-states.csv'
+        phys = tmp_path
         _record_physical_states(str(phys), 'a', [{'id': 'cough', 'character': 'kitty'}], [], {})
         _record_physical_states(str(phys), 'b', [], ['cough', 'not-a-state'], {})
         _record_physical_states(str(phys), 'c', [], ['cough'], {})
         rows = self._rows(phys)
         assert rows['cough']['resolves'] == 'b'
         assert 'not-a-state' not in rows
+
+
+class TestKnowledgeChainOffersOnlyEarlierFacts:
+    """F-123: a forced re-run seeds phase 3b from the ledger, and each scene's
+    prompt offered every fact in it, so a scene's knowledge_in could name a
+    fact the book reveals later. Only facts established before the scene in
+    reading order (plus backstory) are offered, or resolved."""
+
+    def _run(self, project_dir, mock_api, monkeypatch, replies):
+        from storyforge import cmd_extract, extract, ledger
+        ref_dir = os.path.join(project_dir, 'reference')
+        rows = ledger.load_from(ref_dir)
+        view = ledger.knowledge_view(rows)
+        view[0]['origin'] = 'act1-sc02'     # map-anomaly-exists
+        view[1]['origin'] = 'act2-sc01'     # village-vanished: revealed later
+        view[2]['origin'] = 'burnside'      # archive-erasure: a renamed scene
+        ledger.save_to(ref_dir, ledger.replace_view(rows, 'knowledge', view,
+                                                    origin='author', introduced_by='author'))
+        offered = {}
+
+        def knowledge_prompt(scene_id, *args, known_facts=None, **kw):
+            offered[scene_id] = dict(known_facts or {})
+            return f'KNOWLEDGE {scene_id}'
+        monkeypatch.setattr(extract, 'build_knowledge_prompt', knowledge_prompt)
+        monkeypatch.setattr(extract, 'build_physical_state_prompt',
+                            lambda scene_id, *a, **kw: f'PHYSICAL {scene_id}')
+
+        def reply(prompt):
+            if prompt.startswith('KNOWLEDGE '):
+                return replies.get(prompt.split()[1], _structured('KNOWLEDGE_SCHEMA'))
+            if prompt.startswith('PHYSICAL '):
+                return _structured('PHYSICAL_STATE_SCHEMA')
+            return _structured('BRIEF_PARALLEL_SCHEMA')
+        mock_api.set_response_fn(reply)
+        order = cmd_extract._build_sorted_scene_ids(os.path.join(project_dir, 'scenes'), ref_dir)
+        cmd_extract._run_phase_3(order, project_dir, os.path.join(project_dir, 'scenes'),
+                                 ref_dir, os.path.join(project_dir, 'working', 'logs'),
+                                 os.path.join(project_dir, 'working', 'profile.json'),
+                                 force=True, dry_run=False)
+        return offered, ledger.view_map(ref_dir, 'knowledge')
+
+    def test_a_scene_is_offered_only_facts_from_earlier_scenes(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        offered, _ = self._run(project_dir, mock_api, monkeypatch, {})
+        # Backstory, and archive-erasure, whose scene is no scene
+        backstory = {'archive-erasure', 'subsidence-not-natural', 'council-dismisses-evidence'}
+        assert set(offered['act1-sc01']) == backstory
+        assert set(offered['act1-sc02']) == backstory          # not its own fact
+        assert set(offered['new-x1']) == backstory | {'map-anomaly-exists'}
+        assert 'village-vanished' not in offered['act2-sc01']   # established there
+        assert offered['new-x1']['map-anomaly-exists'] == \
+            'A map anomaly exists in the pressure records'
+
+    def test_a_later_facts_wording_is_not_resolved_to_its_id(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        from storyforge.elaborate import get_scene
+        replies = {'act1-sc01': _structured(
+            'KNOWLEDGE_SCHEMA', knowledge_out=['missing village', 'archive-erasure'])}
+        self._run(project_dir, mock_api, monkeypatch, replies)
+        ref_dir = os.path.join(project_dir, 'reference')
+        assert get_scene('act1-sc01', ref_dir)['knowledge_out'] == \
+            'missing village;archive-erasure'
+
+    def test_an_earlier_declaration_moves_the_facts_origin(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        replies = {'act1-sc01': _structured(
+            'KNOWLEDGE_SCHEMA', knowledge_out=['village-vanished'],
+            new_facts=[{'id': 'village-vanished', 'name': 'A village vanished',
+                        'category': 'state-change'}])}
+        offered, facts = self._run(project_dir, mock_api, monkeypatch, replies)
+        assert facts['village-vanished']['origin'] == 'act1-sc01'
+        # The first declaration's row is kept: only its scene moved
+        assert facts['village-vanished']['name'] == \
+            'A village has vanished from the pressure maps'
+        assert 'village-vanished' in offered['act1-sc02']
+
+
+class TestFactsWithNoKnownScene:
+    """shared-dark's `burnside`, `playground`, `site-review`: a fact whose
+    scene_id names no scene was never offered, and nothing said so."""
+
+    def test_offered_like_backstory_with_a_warning(self, project_dir, mock_api, mock_git,
+                                                   mock_costs, monkeypatch, capsys):
+        offered, _ = TestKnowledgeChainOffersOnlyEarlierFacts()._run(
+            project_dir, mock_api, monkeypatch, {})
+        assert all('archive-erasure' in facts for facts in offered.values())
+        out = capsys.readouterr().out
+        assert ('WARNING: 1 knowledge fact(s) name a scene that is not in scenes.csv'
+                in out and 'archive-erasure (burnside)' in out)
+
+    def test_prune_keeps_one_a_brief_uses(self, project_dir):
+        from storyforge import ledger
+        from storyforge.cmd_extract import _prune_registries
+        ref = os.path.join(project_dir, 'reference')
+        rows = ledger.load_from(ref)
+        used = next(r for r in rows if r['id'] == 'map-anomaly-exists')
+        used['scene_id'] = 'burnside'
+        ledger.save_to(ref, rows)
+        _prune_registries(ref, set(), set())
+        assert ledger.view_map(ref, 'knowledge')['map-anomaly-exists']['origin'] == 'burnside'

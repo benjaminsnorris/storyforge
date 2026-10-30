@@ -39,6 +39,7 @@ class TestCarolFixtures:
         assert sum(1 for c in e2.load_cases('carol') if c.get('benign')) >= 5
 
     def test_the_ledger_is_present(self):
+        # The frozen book predates the ledger; copy_book migrates each copy
         for name in ('scenes.csv', 'knowledge.csv', 'physical-states.csv'):
             assert os.path.isfile(os.path.join(BOOK_DIR, 'reference', name))
         assert os.path.isfile(os.path.join(BOOK_DIR, 'working', 'timeline-cues.csv'))
@@ -240,3 +241,29 @@ def test_a_perfect_detector_passes(tmp_path, monkeypatch):
     assert out.metrics['recall_code_match'] == 1.0
     assert out.metrics['precision'] == 1.0
     assert all(g.passed for g in out.gates)
+
+
+class TestLedgerMigration:
+    def test_a_copy_of_the_book_has_its_registries_in_the_ledger(self, tmp_path):
+        from storyforge import ledger
+        dest = e2.copy_book(BOOK_DIR, str(tmp_path / 'book'))
+        ref = os.path.join(dest, 'reference')
+        assert ledger.legacy_files(ref) == []
+        rows = ledger.load_from(ref)
+        assert {r['type'] for r in rows} == {'knowledge', 'physical'}
+        # The frozen fixture itself is untouched
+        assert ledger.legacy_files(os.path.join(BOOK_DIR, 'reference')) == list(ledger.LEGACY_FILES)
+
+    def test_a_tree_that_cannot_migrate_is_named_in_the_notes(self, tmp_path):
+        import harness
+        ref = tmp_path / 'reference'
+        ref.mkdir()
+        (ref / 'knowledge.csv').write_text('id|name|aliases|category|origin\n'
+                                           'a|One||\na|Two||\n')
+        harness._MIGRATION_NOTES.clear()
+        harness.migrate_tree(str(tmp_path), 'book@abc')
+        assert len(harness._MIGRATION_NOTES) == 1
+        assert harness._MIGRATION_NOTES[0].startswith('ledger migration stopped for book@abc')
+        assert "id 'a' is on two rows that differ" in harness._MIGRATION_NOTES[0]
+        assert (ref / 'knowledge.csv').exists()
+        harness._MIGRATION_NOTES.clear()

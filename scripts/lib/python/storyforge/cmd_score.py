@@ -485,6 +485,8 @@ def main(argv=None):
         score_mode = 'batch'
 
     project_dir = detect_project_root()
+    from storyforge.ledger import exit_if_not_migrated
+    exit_if_not_migrated(project_dir)  # the registries live in the ledger
     log(f'Project root: {project_dir}')
 
     title = (read_yaml_field('project.title', project_dir)

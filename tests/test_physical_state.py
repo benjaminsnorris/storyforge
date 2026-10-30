@@ -3,6 +3,8 @@
 import os
 import shutil
 
+from storyforge import ledger
+
 
 class TestEnumValidation:
     def test_valid_categories(self):
@@ -24,7 +26,8 @@ class TestSchemaDefinition:
         assert psi is not None
         assert pso is not None
         assert psi['type'] == 'registry'
-        assert psi['registry'] == 'physical-states.csv'
+        assert psi['registry'] == 'commitments.csv'
+        assert psi['ledger_type'] == 'physical'
         assert psi['array'] is True
         assert psi['file'] == 'scene-briefs.csv'
 
@@ -81,13 +84,12 @@ class TestValidation:
                 r['physical_state_out'] = 'archive-key-dorren'
         _write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
 
-        states_path = os.path.join(ref, 'physical-states.csv')
-        states_rows = _read_csv(states_path)
+        states_rows = ledger.read_view(ref, 'physical')
         for r in states_rows:
             if r['id'] == 'exhaustion-tessa':
                 r['resolves'] = 'never'
-        _write_csv(states_path, states_rows,
-                   ['id', 'character', 'description', 'category', 'acquired', 'resolves', 'action_gating'])
+        ledger.write_view(ref, 'physical', states_rows, origin='author',
+                          introduced_by='author')
 
         result = validate_structure(ref)
         phys_fails = [c for c in result['checks']
@@ -112,13 +114,12 @@ class TestValidation:
                 r['physical_state_out'] = 'archive-key-dorren'
         _write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
 
-        states_path = os.path.join(ref, 'physical-states.csv')
-        states_rows = _read_csv(states_path)
+        states_rows = ledger.read_view(ref, 'physical')
         for r in states_rows:
             if r['id'] == 'exhaustion-tessa':
                 r['resolves'] = 'act1-sc02'   # ended once, earlier
-        _write_csv(states_path, states_rows,
-                   ['id', 'character', 'description', 'category', 'acquired', 'resolves', 'action_gating'])
+        ledger.write_view(ref, 'physical', states_rows, origin='author',
+                          introduced_by='author')
 
         result = validate_structure(ref)
         assert not any(c.get('check') == 'state-disappearance' and 'exhaustion-tessa' in c.get('message', '')
@@ -138,16 +139,14 @@ class TestGranularity:
         ref = str(tmp_path / 'reference')
         shutil.copytree(os.path.join(fixture_dir, 'reference'), ref)
 
-        path = os.path.join(ref, 'physical-states.csv')
-        rows = _read_csv(path)
+        rows = ledger.read_view(ref, 'physical')
         rows.append({
             'id': 'verbose-state', 'character': 'Dorren Hayle',
             'description': 'a really quite extraordinarily long and overly detailed description of a minor bruise on the left side of the upper right forearm near the elbow joint area',
             'category': 'injury', 'acquired': 'act1-sc01',
             'resolves': 'never', 'action_gating': 'false',
         })
-        _write_csv(path, rows, ['id', 'character', 'description', 'category',
-                                'acquired', 'resolves', 'action_gating'])
+        ledger.write_view(ref, 'physical', rows, origin='author', introduced_by='author')
 
         result = validate_physical_state_granularity(ref)
         assert any(w['type'] == 'long_description' for w in result['warnings'])
