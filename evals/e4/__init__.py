@@ -3,7 +3,7 @@ today's ``write`` and measure what a reader would trip over.
 
 The test text is Act 1 of shared-dark (decision 7) at the commit E5 pins, so
 E1, E4, E5 and E8 share a world. Every Act 1 scene's prose is removed, then
-the scenes are drafted in reading order the way ``storyforge write --direct``
+the scenes are drafted in reading order the way ``storyforge write``
 drafts them: one shared, cached system context, ``cmd_write._build_prompt``
 with briefs, each prompt built after the scenes before it exist, so a scene's
 ``continuity_deps`` read the new drafts, not the author's prose. A scene the
@@ -24,9 +24,13 @@ Metrics (plan §4.2):
   adverbs; 1–5) over the drafts; ``voi_author`` is the same over the author's
   Act 1 prose at the pinned commit, for scale.
 
-Stated simplifications: direct mode, not the default batch mode (the Batch
-API is refused under a cassette; batch builds every prompt before drafting,
-so its deps read the author's prose where they exist). The judge stands in
+Each draft is gated as ``write`` gates it (``gate.gate_and_fix``) before
+the next prompt is built; ``gate_fixed`` and ``gate_failed`` count the
+scenes the fix changed and those still failing after it.
+
+Stated simplifications: a scene still failing the gate doesn't stop E4 as it
+stops ``write``; its fixed prose is judged and drafting goes on. The judge
+stands in
 for the plan's human spot-check, which is still owed. Act 2 onward keeps the
 author's prose; only Act 1 is drafted.
 """
@@ -113,7 +117,8 @@ def clear_prose(project_dir: str, scene_ids: list[str]) -> dict[str, str]:
     return original
 
 
-def draft(project_dir: str, scene_ids: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+def draft(project_dir: str, scene_ids: list[str], gated: dict | None = None,
+          log_dir: str = '') -> tuple[dict[str, str], dict[str, str]]:
     """Draft the scenes in order as ``write --direct`` does. Returns (prose by
     id, refusal reason by id). Like ``write``, E4 records a refused scene and
     drafts on; a refused scene has no prose and is not judged. Unlike
@@ -121,7 +126,16 @@ def draft(project_dir: str, scene_ids: list[str]) -> tuple[dict[str, str], dict[
     model counts as ``refused`` (a cassette strips the fallback anyway). Unlike
     ``write``, E4 does not apply the cut-off guard
     (``cmd_write._extract_scene_from_response``), so it can judge a draft that
-    ``write`` would refuse to save; no recorded draft has been cut off."""
+    ``write`` would refuse to save; no recorded draft has been cut off.
+
+    With ``gated`` (a dict to fill), each draft goes through ``write``'s gate
+    (``gate.gate_and_fix``: extract, check, fix once, re-check, commit to the
+    ledger when clean) before the next scene's prompt is built, and
+    ``gated[scene_id]`` is its ``GatedScene``. Unlike ``write``, a scene that
+    still fails doesn't stop E4: the fixed prose is judged and the next scene
+    drafted (``write`` would stop and wait for the author), and the count is
+    reported. A ``GateError`` errors the suite."""
+    from storyforge import gate
     from storyforge.api import RefusalError, extract_text, invoke
     from storyforge.cmd_write import _build_prompt
     from storyforge.common import build_shared_context, select_model
@@ -150,6 +164,16 @@ def draft(project_dir: str, scene_ids: list[str]) -> tuple[dict[str, str], dict[
             raise RuntimeError(f'draft of {sid} is {words} words')
         with open(os.path.join(project_dir, 'scenes', f'{sid}.md'), 'w', encoding='utf-8') as f:
             f.write(prose)
+        if gated is not None:
+            out = gate.gate_and_fix(project_dir, sid, command='draft', prose=prose,
+                                    log_dir=os.path.join(log_dir or os.path.join(
+                                        project_dir, 'working', 'logs', 'gate'), sid))
+            prose = out.prose
+            with open(os.path.join(project_dir, 'scenes', f'{sid}.md'), 'w',
+                      encoding='utf-8') as f:
+                f.write(prose)
+            words = len(prose.split())
+            gated[sid] = out
         update_field(metadata_csv, sid, 'word_count', str(words))
         update_field(metadata_csv, sid, 'status', 'drafted')
         drafts[sid] = prose

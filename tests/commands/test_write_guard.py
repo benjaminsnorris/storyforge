@@ -95,18 +95,20 @@ class TestDirectMode:
         (_reply('', 'refusal', stop_details={'type': 'refusal', 'category': 'cyber'}),
          'refused the request (cyber)'),
     ])
-    def test_bad_reply_skips_scene_and_drafts_the_rest(self, setup, monkeypatch,
-                                                       capsys, bad, reason):
+    def test_bad_reply_is_not_written_and_stops_the_gated_run(self, setup, monkeypatch,
+                                                              capsys, bad, reason):
+        """A gated run (coaching full) stops at a bad reply: later scenes
+        would be drafted from a ledger without its facts (review of #443)."""
         _direct_replies(monkeypatch, {'act1-sc01': bad, 'act1-sc02': _reply(GOOD)})
         with pytest.raises(SystemExit) as exc:
             main(['--direct', '--scenes', 'act1-sc01,act1-sc02'])
         assert exc.value.code == 1
         assert _scene(setup, 'act1-sc01') is None
         assert _status(setup, 'act1-sc01') == 'briefed'
-        assert _scene(setup, 'act1-sc02').strip() == GOOD
-        assert _status(setup, 'act1-sc02') == 'drafted'
+        assert _scene(setup, 'act1-sc02') is None
         out = capsys.readouterr().out
         assert 'not drafted' in out and reason in out
+        assert 'act1-sc02 (not attempted: the run stopped at act1-sc01)' in out
 
     def test_cut_off_redraft_keeps_existing_prose(self, setup, monkeypatch):
         old = ' '.join(['original'] * 300) + '.'
@@ -204,10 +206,10 @@ class TestBatchMode:
             return [sid for sid, r in results.items() if r != 'errored']
         monkeypatch.setattr('storyforge.cmd_write.download_batch_results', fake_download)
         if code is None:
-            main(['--scenes', ','.join(results)])
+            main(['--batch', '--scenes', ','.join(results)])
             return
         with pytest.raises(SystemExit) as exc:
-            main(['--scenes', ','.join(results)])
+            main(['--batch', '--scenes', ','.join(results)])
         assert exc.value.code == code
 
     @pytest.mark.parametrize('bad, reason', [

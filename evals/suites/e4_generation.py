@@ -1,9 +1,11 @@
 """E4 generation: draft shared-dark Act 1 with today's write, judge it.
 See ``evals/e4``."""
 
+import os
 from collections import Counter
 
 import e4
+from storyforge.gate import report_lines as gate_lines
 from harness import Gate, Suite, SuiteOutput
 
 
@@ -12,7 +14,9 @@ def run(ctx):
     rows = e4.act_scenes(project)
     scene_ids = [r['id'] for r in rows]
     original = e4.clear_prose(project, scene_ids)
-    drafts, refused = e4.draft(project, scene_ids)
+    gated = {}
+    drafts, refused = e4.draft(project, scene_ids, gated=gated,
+                               log_dir=os.path.join(ctx.work_dir, 'gate-logs'))
     judged = e4.judge(project, scene_ids, drafts)
     flags = e4.checker_flags(project, scene_ids)
 
@@ -37,8 +41,26 @@ def run(ctx):
                      + ''.join(f'\n    PRM {p["field"]}: {p.get("why", "")[:160]}'
                                for p in found['broken_promises']))
     notes += [f'checker {f["scene_id"]}: {f["message"][:160]}' for f in flags]
+    gate_failed = [s for s, g in gated.items() if not g.result.passed]
+    # write stops at the first scene that fails the gate; E4 drafts on, so
+    # the scenes after it are drafted from a ledger without its facts
+    first_fail = next((i for i, s in enumerate(scene_ids) if s in gate_failed), len(scene_ids))
+    before_fail = [s for s in scene_ids[:first_fail + 1] if s in drafts]
+    words_before = sum(len(drafts[s].split()) for s in before_fail)
+    contradictions_before = sum(len(judged[s]['contradictions']) for s in before_fail)
+    gate_fixed = [s for s, g in gated.items() if g.fixed]
+    notes.append(f'gate: {len(gated)} scene(s) gated, {len(gate_fixed)} fixed, '
+                 f'{len(gate_failed)} still failing after the fix (write would stop at '
+                 f'the first; E4 drafts on): {", ".join(gate_failed) or "none"}')
+    for sid in gate_failed:
+        notes += [f'  {sid}: {line[:200]}' for line in gate_lines(gated[sid].result)]
+    notes.append('The gate\'s checker and the judge are both Opus continuity reviews, so '
+                 'part of a CP10k drop may be the two agreeing; the human spot-check is '
+                 'still owed. cp10k_to_first_gate_failure counts the scenes write would '
+                 'have drafted (through the first gate failure).')
     notes.append('Judge stands in for the plan\'s human spot-check (still owed). '
-                 'Drafted in direct mode; batch mode is refused under a cassette.')
+                 'Drafted sequentially and gated, as write does by default; batch mode '
+                 'is refused under a cassette.')
     contradictions = sum(by_code.values())
     code_counts = {code: {'contradictions': n} for code, n in by_code.items()}
     code_counts['PRM'] = {'broken_promises': promises}
@@ -53,6 +75,9 @@ def run(ctx):
             'checker_flags': len(flags),
             'cp10k_checker': e4.per_10k(len(flags), words),
             'broken_promises': promises,
+            'gate_fixed': len(gate_fixed),
+            'gate_failed': len(gate_failed),
+            'cp10k_to_first_gate_failure': e4.per_10k(contradictions_before, words_before),
             'bps': round(promises / len(drafts), 3) if drafts else 0.0,
             'length_drift': e4.length_drift(rows, drafts),
             'voi': e4.mean_voice(list(drafts.values())),
