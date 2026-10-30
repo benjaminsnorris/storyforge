@@ -477,12 +477,58 @@ class TestPhaseExecution:
         monkeypatch.setattr('storyforge.cmd_extract.get_coaching_level',
                             lambda pd: 'full')
 
+        from storyforge.elaborate import _read_csv_as_map
+        scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+        days_before = {sid: (r.get('timeline_day') or '', r.get('time_mode') or '')
+                       for sid, r in _read_csv_as_map(scenes_csv).items()}
+
+        def placed(*a, **kw):
+            raise AssertionError('the calendar was placed without fresh cues')
+        monkeypatch.setattr('storyforge.timeline.run_assignment', placed)
+
         with pytest.raises(SystemExit) as exc:
             main(['--phase', '1'])
 
         assert exc.value.code == 1
         from storyforge.timeline import read_cues
         assert read_cues(project_dir) == {}
+        # The calendar is one piece: no scene's day moves when any scene's
+        # cues are missing
+        assert {sid: (r.get('timeline_day') or '', r.get('time_mode') or '')
+                for sid, r in _read_csv_as_map(scenes_csv).items()} == days_before
+
+    def test_phase_1_places_no_calendar_when_one_scene_lacks_cues(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """One unreadable reply among good ones: the good scenes' cues are
+        stored, but placing the calendar without the bad scene's would move
+        its neighbours, so no day is placed and the run exits 1."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_extract.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_extract._run_hone',
+                            lambda plugin_dir, phase: None)
+        monkeypatch.setattr('storyforge.elaborate.validate_structure', lambda ref_dir: {
+            'passed': True, 'failures': [], 'checks': [],
+        })
+        monkeypatch.setattr('storyforge.cmd_extract.get_coaching_level',
+                            lambda pd: 'full')
+        from storyforge.cmd_extract import _build_sorted_scene_ids
+        first = _build_sorted_scene_ids(os.path.join(project_dir, 'scenes'),
+                                        os.path.join(project_dir, 'reference'))[0]
+        mock_api.set_response_fn(
+            lambda prompt: 'not json' if f'## Scene: {first}\n' in prompt else SKELETON_REPLY)
+        calls = []
+        monkeypatch.setattr('storyforge.timeline.run_assignment',
+                            lambda *a, **kw: calls.append(a))
+
+        with pytest.raises(SystemExit) as exc:
+            main(['--phase', '1'])
+
+        assert exc.value.code == 1
+        assert calls == []
+        from storyforge.timeline import read_cues
+        cues = read_cues(project_dir)
+        assert first not in cues and cues  # the others' cues are kept
 
     def test_all_phases_run_when_no_phase_flag(self, mock_api, mock_git,
                                                  mock_costs, project_dir,

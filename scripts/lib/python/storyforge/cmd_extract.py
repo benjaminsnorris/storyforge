@@ -219,8 +219,8 @@ def main(argv=None):
 
     print_summary(project_dir, 'extract', session_start=session_start)
     if _unanswered:
-        log('ERROR: some scenes got no usable extraction reply (refused, cut off or '
-            'failed); re-run extract for them:')
+        log('ERROR: some scenes got no usable extraction reply (refused, cut off, '
+            'failed, unreadable or empty); re-run extract for them:')
         for csv_name, ids in _unanswered.items():
             log(f'  {csv_name}: {", ".join(ids)}')
         sys.exit(1)
@@ -487,6 +487,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     log(f'  Building batch for {len(sorted_scene_ids)} scenes...')
     from storyforge.timeline import tail_words
     previous_text = ''
+    batched = []
     for scene_id in sorted_scene_ids:
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
         if not os.path.isfile(scene_path):
@@ -495,6 +496,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             scene_text = f.read()
         if not scene_text:
             continue
+        batched.append(scene_id)
 
         prompt = build_skeleton_prompt(scene_id, scene_text, profile,
                                         registries_text=registries,
@@ -543,11 +545,20 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                 try:
                     cues[sid] = skeleton_cues(f.read())
                 except ValueError:
-                    pass  # the scenes.csv merge above named it and the run exits 1
+                    pass  # the scenes.csv merge above named it; no cues for it below
     write_cues(project_dir, cues)
-    log('  Placing scenes on the calendar...')
-    result = run_assignment(project_dir, select_model('evaluation'), log_dir, force=True)
-    log(f'  Timeline: {result["assigned"]} value(s) set, {result["unplaced"]} scene(s) unplaced')
+    # A calendar is one piece: placing it without one scene's fresh cues
+    # (an earlier run's, or none) would move its neighbours too, and with
+    # force the wrong days would replace every scene's.
+    no_cues = [sid for sid in batched if sid not in cues]
+    if no_cues:
+        log(f'  ERROR: timeline not placed: no fresh time cues for {len(no_cues)} scene(s) '
+            f'({", ".join(no_cues)}); every day is left as it was')
+        _unanswered.setdefault('timeline (not placed)', []).extend(no_cues)
+    else:
+        log('  Placing scenes on the calendar...')
+        result = run_assignment(project_dir, select_model('evaluation'), log_dir, force=True)
+        log(f'  Timeline: {result["assigned"]} value(s) set, {result["unplaced"]} scene(s) unplaced')
 
     _safe_remove(batch_file)
     _safe_rmdir(skel_output)
