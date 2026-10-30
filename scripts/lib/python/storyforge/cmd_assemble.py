@@ -390,7 +390,10 @@ def main(argv=None):
         r = subprocess.run(cmd, env=env)
         if r.returncode != 0:
             log(f'WARNING: {fmt} generation failed (exit {r.returncode})')
-            problems.append(f'{fmt} generation failed')
+            if optional_pdf and fmt == 'pdf':
+                log('  (PDF is optional under --format all; the other formats stand)')
+            else:
+                format_failures.append(f'{fmt} generation failed')
 
     def _generate_format(fmt):
         if fmt == 'epub':
@@ -421,6 +424,10 @@ def main(argv=None):
         elif fmt == 'markdown':
             log(f'Markdown manuscript already at: {manuscript_file}')
 
+    # A failed format leaves the manuscript itself whole: the run exits 1,
+    # but `manuscript` is still recorded as current
+    format_failures: list[str] = []
+    optional_pdf = 'all' in formats
     for fmt in formats:
         if fmt == 'all':
             _generate_format('markdown')
@@ -504,7 +511,8 @@ def main(argv=None):
     # Git commit
     commit_and_push(
         project_dir,
-        f'Assemble: {title} ({format_label})' + (' (incomplete)' if problems else ''),
+        f'Assemble: {title} ({format_label})'
+        + (' (incomplete)' if problems or format_failures else ''),
         ['manuscript/', 'storyforge.yaml', 'working/logs/', 'working/costs/'],
     )
-    _exit_if_incomplete(problems)
+    _exit_if_incomplete(problems + format_failures)
