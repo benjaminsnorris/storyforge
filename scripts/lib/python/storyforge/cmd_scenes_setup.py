@@ -67,6 +67,27 @@ def _natural_key(path):
     return [int(t) if t.isdigit() else t for t in re.split(r'(\d+)', name)]
 
 
+def _chapter_map_row(chapter_text, heading_text, file_stem, part_num, scene_ids):
+    """One chapter-map row: (title, heading format, part, scene ids).
+
+    The chapter's heading line stays in its first scene's text, so the map
+    asks assembly for no heading of its own (`none`) and would otherwise
+    print it twice. A chapter file with no heading is titled by its file
+    name and gets a numbered heading.
+    """
+    if not heading_text:
+        first = next((l.strip() for l in chapter_text.splitlines() if l.strip()), '')
+        if re.match(r'^#{1,2}\s+\S', first):
+            heading_text = first
+    if heading_text:
+        ch_title = re.sub(r'^#+\s*', '', heading_text).replace('|', '-').strip()
+        heading = 'none'
+    else:
+        ch_title = re.sub(r'^\d{4}-', '', file_stem)
+        heading = 'numbered'
+    return ch_title, heading, part_num, scene_ids
+
+
 def _row_for_header(csv_path, values):
     """Build a pipe-delimited row in the column order of csv_path's header.
 
@@ -161,6 +182,8 @@ def main(argv=None):
     # manuscript's own part headings. A book without parts leaves `part`
     # empty rather than having parts invented for it.
     chapter_parts = {}
+    # Chapter title per temp chapter file, from the manuscript's own heading.
+    chapter_titles = {}
 
     # ==================================================================
     # Shared utilities
@@ -403,6 +426,23 @@ def main(argv=None):
         if is_truncated(response_data):
             raise RuntimeError(stop_problem(response_data))
         return response
+
+    def write_chapter_map(map_rows):
+        """Write reference/chapter-map.csv from the chapters just split, so
+        assembly and publish have a map. An existing map is the author's and
+        is left alone; the new scenes are named so they can be added to it."""
+        if not map_rows:
+            return
+        if os.path.isfile(chapter_map_csv):
+            log('NOTE: reference/chapter-map.csv already exists and was not changed; '
+                'add the new scenes to it before assembling or publishing')
+            return
+        lines = ['chapter|title|heading|part|scenes']
+        for n, (ch_title, heading, part_num, ids) in enumerate(map_rows, 1):
+            lines.append(f'{n}|{ch_title}|{heading}|{part_num}|{";".join(ids)}')
+        with open(chapter_map_csv, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        log(f'Created reference/chapter-map.csv ({len(map_rows)} chapters)')
 
     # ==================================================================
     # Mode 1: Rename existing scenes
@@ -680,6 +720,7 @@ def main(argv=None):
         # Now process all chapters sequentially
         chapter_num = 0
         total_new_scenes = 0
+        map_rows = []   # chapter-map rows for the chapters actually split
 
         for chapter_file in chapter_files:
             chapter_num += 1
@@ -740,6 +781,13 @@ def main(argv=None):
                     continue
                 written = write_scene_files(chapter_text, chapter_num, part_num, seq_start, splits)
                 total_new_scenes += len(written)
+                if written:
+                    map_rows.append(_chapter_map_row(
+                        chapter_text, chapter_titles.get(os.path.basename(chapter_file)),
+                        ch_name, part_num, written))
+
+        if not args.dry_run:
+            write_chapter_map(map_rows)
 
         log(f'\nSplit complete: {total_new_scenes} new scenes created from {len(chapter_files)} chapters')
         return total_new_scenes, len(chapter_files)
@@ -902,6 +950,7 @@ def main(argv=None):
             # sort into reading order.
             ch_file = os.path.join(tmp_chapters_dir, f'{c + 1:04d}-{ch_slug}.md')
             chapter_parts[os.path.basename(ch_file)] = part_num
+            chapter_titles[os.path.basename(ch_file)] = ch_name
             ch_text = '\n'.join(lines)
             with open(ch_file, 'w') as f:
                 f.write(ch_text + '\n')
@@ -995,7 +1044,7 @@ def main(argv=None):
             commit_and_push(project_dir,
                             f'Scenes setup: split chapters into {total_new_scenes} scenes',
                             ['scenes/', 'reference/scenes.csv', 'reference/scene-intent.csv',
-                             'working/'])
+                             'reference/chapter-map.csv', 'working/'])
 
             pr_body = f"""## Chapter Split into Scenes
 
@@ -1007,7 +1056,8 @@ def main(argv=None):
 - [x] Detect scene break markers
 - [x] Claude scene boundary detection (where needed)
 - [x] Write scene files
-- [x] Update metadata.csv and intent.csv"""
+- [x] Update metadata.csv and intent.csv
+- [x] Write chapter-map.csv (if the project had none)"""
 
             create_draft_pr('Scenes setup: split chapters into scenes',
                             pr_body, project_dir, 'drafting')
@@ -1028,7 +1078,7 @@ def main(argv=None):
             commit_and_push(project_dir,
                             'Scenes setup: split manuscript into scenes',
                             ['scenes/', 'reference/scenes.csv', 'reference/scene-intent.csv',
-                             'working/'])
+                             'reference/chapter-map.csv', 'working/'])
 
             pr_body = f"""## Manuscript Split into Scenes
 
@@ -1039,7 +1089,8 @@ def main(argv=None):
 - [x] Detect chapter boundaries
 - [x] Split chapters into scenes
 - [x] Write scene files
-- [x] Update metadata.csv and intent.csv"""
+- [x] Update metadata.csv and intent.csv
+- [x] Write chapter-map.csv (if the project had none)"""
 
             create_draft_pr('Scenes setup: split manuscript into scenes',
                             pr_body, project_dir, 'drafting')
