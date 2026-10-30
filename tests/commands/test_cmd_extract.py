@@ -631,6 +631,26 @@ class TestMergeBatchResults:
         assert set(self._rows(csv_path)) == {'s1', 's2'}
 
 
+    def test_scene_without_a_reply_is_named_and_left_alone(self, tmp_path, capsys,
+                                                            monkeypatch):
+        """SF-2: a refused, cut-off or errored reply leaves no .txt; the scene
+        was skipped without a word, and on a new project it had no row."""
+        from storyforge import cmd_extract
+        from storyforge.extract import parse_brief_parallel_response
+        monkeypatch.setattr(cmd_extract, '_unanswered', {})
+        csv_path, log_dir = self._setup(tmp_path, ['s1', 's3'])
+
+        count = cmd_extract._merge_batch_results(
+            csv_path, 'scene-briefs.csv', ['s1', 's2', 's3'], log_dir,
+            parse_brief_parallel_response, {}, False)
+
+        assert count == 2 and set(self._rows(csv_path)) == {'s1', 's3'}
+        out = capsys.readouterr().out
+        assert 'WARNING: scene-briefs.csv: no usable reply for 1 scene(s)' in out
+        assert 'scene-briefs.csv has no row for s2' in out
+        assert cmd_extract._unanswered == {'scene-briefs.csv': ['s2']}
+
+
 class TestRecordPhysicalStates:
     """Phase 3c parsed the states a scene resolves but never wrote them to
     the registry, so every state stayed resolves=never (F-057). On Pride and
