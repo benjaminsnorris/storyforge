@@ -21,12 +21,11 @@ This project uses [Storyforge](https://github.com/benjaminsnorris/storyforge). A
 - `/storyforge:revise` — Plan and execute revision passes, review results
 - `/storyforge:score` — Craft scoring, weight calibration, author assessment
 - `/storyforge:produce` — Book production: chapter mapping, epub/PDF generation, formatting
-- `/storyforge:publish` — Publish to Bookshelf: web book, dashboard, Supabase
+- `/storyforge:publish` — Publish to Bookshelf: web book, dashboard data (Bookshelf renders the dashboard), Supabase
 - `/storyforge:title` — Title and subtitle development, refinement, assessment
 - `/storyforge:press-kit` — Blurbs, jacket copy, author bio, social media, marketing materials
 - `/storyforge:cover` — Cover design: Claude-designed SVG artwork or AI-generated illustrations
 - `/storyforge:score` — Review scores, calibrate craft weights, author scoring
-- `/storyforge:visualize` — Manuscript dashboard with 10 interconnected visualizations
 - `/storyforge:annotate` — Import annotations from web book export, generate revision plan
 - `/storyforge:cleanup` — Project cleanup: fix structural drift, prune working files, resolve integrity issues
 
@@ -41,7 +40,7 @@ Scripts (via project runner — all support `--dry-run`; write/evaluate/revise a
 - `./storyforge cleanup` — Fix structural drift, prune working directory, report integrity issues
 - `./storyforge enrich` — Populate missing scene metadata automatically
 - `./storyforge timeline` — Analyze and assign timeline days to scenes
-- `./storyforge visualize` — Generate manuscript dashboard HTML
+- `./storyforge visualize` — Write the dashboard's data to `working/dashboard-data.json` (Bookshelf renders it)
 
 ## Suggested Next Steps
 

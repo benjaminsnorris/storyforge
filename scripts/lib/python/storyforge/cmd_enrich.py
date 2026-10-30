@@ -1,7 +1,7 @@
 """storyforge enrich — Metadata enrichment for Storyforge projects.
 
 Reads scene prose files and uses Claude to extract missing metadata,
-populating the CSV files that power the manuscript dashboard.
+populating the CSV files the manuscript dashboard's data comes from.
 
 Usage:
     storyforge enrich                        # All scenes, batch mode (50% off)
@@ -206,8 +206,8 @@ def parse_args(argv):
                         help='Re-enrich scenes that already have data')
     parser.add_argument('--skip-timeline', action='store_true',
                         help='Skip the timeline_day analysis pass')
-    parser.add_argument('--skip-dashboard', action='store_true',
-                        help='Skip the dashboard generation')
+    # Deprecated no-op: enrich no longer renders a dashboard (#371)
+    parser.add_argument('--skip-dashboard', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--dry-run', action='store_true',
                         help='Show what would be enriched without invoking Claude')
 
@@ -833,24 +833,6 @@ def main(argv=None):
     elif args.skip_timeline:
         log('')
         log('Step 8: Timeline analysis (skipped via --skip-timeline)')
-
-    # ========================================================================
-    # Step 9: Dashboard generation
-    # ========================================================================
-    if not args.skip_dashboard and not args.dry_run:
-        log('')
-        log('Step 9: Generating manuscript dashboard...')
-        from storyforge.common import get_plugin_dir
-        viz_script = os.path.join(get_plugin_dir(), 'scripts', 'storyforge-visualize')
-        if os.path.isfile(viz_script) and os.access(viz_script, os.X_OK):
-            r = subprocess.run([viz_script], capture_output=True, text=True)
-            if r.returncode != 0:
-                log('WARNING: Dashboard generation failed (non-fatal, continuing)')
-        else:
-            log('WARNING: storyforge-visualize not found, skipping dashboard')
-    elif args.skip_dashboard:
-        log('')
-        log('Step 9: Dashboard generation (skipped via --skip-dashboard)')
 
     # ========================================================================
     # Update PR tasks

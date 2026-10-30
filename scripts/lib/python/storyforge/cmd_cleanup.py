@@ -190,8 +190,11 @@ GN_OPTIONAL_CSV_FILES: set[str] = {
     'reference/physical-states.csv',
     'reference/chapter-map.csv',
 }
+# dashboard.html is what visualize wrote before Bookshelf rendered the
+# dashboard (#371); an author's copy is left alone, never flagged or removed.
 EXPECTED_WORKING_FILES = set(
-    'pipeline.csv craft-weights.csv overrides.csv exemplars.csv dashboard.html cleanup-report.csv'.split()
+    'pipeline.csv craft-weights.csv overrides.csv exemplars.csv dashboard.html '
+    'dashboard-data.json cleanup-report.csv'.split()
 )
 
 

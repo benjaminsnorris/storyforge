@@ -855,15 +855,6 @@ def main(argv=None):
     )
     update_pr_task('Review', project_dir)
 
-    # Regenerate dashboard
-    visualize_script = os.path.join(scripts_dir, 'storyforge-visualize')
-    if os.path.isfile(visualize_script) and os.access(visualize_script, os.X_OK):
-        log('Regenerating manuscript dashboard...')
-        try:
-            subprocess.run([visualize_script], capture_output=True, cwd=project_dir)
-        except Exception:
-            log('WARNING: Dashboard generation failed')
-
     # Final commit
     log('Committing scoring results...')
     commit_and_push(project_dir,

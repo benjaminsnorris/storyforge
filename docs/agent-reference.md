@@ -95,7 +95,7 @@ Commands (`storyforge <name>`; full flag notes in `docs/history.md`):
 | `enrich`, `timeline`, `repetition` | Metadata enrichment, timeline, cross-chapter repetition |
 | `cleanup` | Project health; `--scenes`, `--csv`, `--dry-run` |
 | `assemble` | Chapters + epub/PDF/HTML (GN: artist handoff bundle) |
-| `publish`, `annotations`, `visualize` | Bookshelf publish, reader annotations, dashboard |
+| `publish`, `annotations`, `visualize` | Bookshelf publish, reader annotations, dashboard data (see Dashboard data) |
 | `cover`, `illustrate` | Cover; interior illustrations (prose only) |
 | `scenes-setup` (`scenes`), `scenes-export`, `scenes-import`, `sync` | Scene files and CSV ↔ `scenes-review.md` round-trip |
 | `migrate`, `migrate-medium` | Idempotent project migrations; novel ↔ graphic-novel conversion |
