@@ -361,6 +361,12 @@ def _merge_batch_results(csv_path, csv_name, sorted_scene_ids, log_dir, parse,
                 log(f'  WARNING: {csv_name}: the reply for {sid} is unreadable: {e}')
                 unanswered.append(sid)
                 continue
+        if not any(v for k, v in result.items() if k != 'id' and not k.startswith('_')):
+            # Every field unknown or empty, or (skeleton) no labeled line at
+            # all: nothing was extracted, which is not "nothing changed"
+            log(f'  WARNING: {csv_name}: the reply for {sid} holds no values')
+            unanswered.append(sid)
+            continue
         normalize_fields(result, alias_maps)
 
         if sid in existing:
@@ -429,6 +435,8 @@ def _run_phase_0(project_dir, scenes_dir, log_dir, profile_file, dry_run,
         if is_truncated(response):
             raise ValueError(stop_problem(response))
         profile = parse_characterize_response(extract_text(response))
+        if not profile:
+            raise ValueError('every field is empty or unknown')
     except ValueError as e:
         log(f'ERROR: manuscript characterization failed: {e}')
         sys.exit(1)
@@ -1046,11 +1054,23 @@ def _run_expansion(ref_dir: str) -> None:
 # ============================================================================
 
 def _load_profile(profile_file: str) -> dict:
-    """Load extraction profile if it exists."""
-    if os.path.isfile(profile_file):
+    """Load the extraction profile (Phase 0). A missing one is reported, since
+    the later phases' prompts then go without the manuscript's context; an
+    unreadable one stops the run."""
+    if not os.path.isfile(profile_file):
+        log(f'  WARNING: no manuscript profile at {profile_file}; this phase runs '
+            f'without it. Run extract --phase 0 first for better results.')
+        return {}
+    try:
         with open(profile_file) as f:
-            return json.load(f)
-    return {}
+            profile = json.load(f)
+        if not isinstance(profile, dict):
+            raise ValueError('not a JSON object')
+        return profile
+    except ValueError as e:
+        log(f'ERROR: the manuscript profile at {profile_file} is unreadable ({e}); '
+            f're-run extract --phase 0')
+        sys.exit(1)
 
 
 def _safe_remove(path: str) -> None:
