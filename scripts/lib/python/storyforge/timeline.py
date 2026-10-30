@@ -31,6 +31,9 @@ TIME_MODES = ('scene', 'summary', 'frame', 'vision')
 
 CUE_COLUMNS = ['id', 'relation', 'gap', 'anchor', 'refers', 'span', 'date']
 CUES_FILE = os.path.join('working', 'timeline-cues.csv')
+# What the last `timeline --check` read, kept apart from the cues the
+# calendar was built from, so a check can be inspected and replayed
+CHECK_CUES_FILE = os.path.join('working', 'timeline-check-cues.csv')
 PROPOSED_FILE = os.path.join('working', 'timeline-proposed.csv')
 
 _BATCH_SIZE = 40
@@ -87,20 +90,22 @@ def parse_cues(response: str) -> dict[str, str]:
     return cues
 
 
-def read_cues(project_dir: str) -> dict[str, dict[str, str]]:
-    path = os.path.join(project_dir, CUES_FILE)
+def read_cues(project_dir: str, name: str = CUES_FILE) -> dict[str, dict[str, str]]:
+    path = os.path.join(project_dir, name)
     if not os.path.isfile(path):
         return {}
     with open(path, newline='', encoding='utf-8') as f:
         return {row['id']: row for row in csv.DictReader(f, delimiter='|') if row.get('id')}
 
 
-def write_cues(project_dir: str, cues: dict[str, dict[str, str]]) -> None:
-    """Merge *cues* (scene id → cue dict) into working/timeline-cues.csv."""
-    merged = read_cues(project_dir)
+def write_cues(project_dir: str, cues: dict[str, dict[str, str]],
+               name: str = CUES_FILE) -> None:
+    """Merge *cues* (scene id → cue dict) into working/timeline-cues.csv (or
+    *name*)."""
+    merged = read_cues(project_dir, name)
     for sid, cue in cues.items():
         merged[sid] = {'id': sid, **{k: cue.get(k, '') for k in CUE_COLUMNS[1:]}}
-    path = os.path.join(project_dir, CUES_FILE)
+    path = os.path.join(project_dir, name)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', newline='', encoding='utf-8') as f:
         w = csv.DictWriter(f, fieldnames=CUE_COLUMNS, delimiter='|', lineterminator='\n')
@@ -848,6 +853,26 @@ def _int(value) -> int | None:
 WEEKDAY_SPAN = 31
 # Narrow on purpose: "Saturday, the day after the party" is still Saturday
 _OTHER_DAY = re.compile(r'\b(to-?morrow|yesterday)\b')
+# An approximate date (``~``, ``?``: "the first of June and past", said on
+# June 10) may be this many days off before it contradicts the days
+_APPROXIMATE_SLACK = 10
+
+
+_DAYS_OR_MORE = re.compile(r'\b(days?|weeks?|fortnights?|months?|years?|ago)\b', re.I)
+
+
+def _goes_back_days(gap: str) -> bool:
+    """A gap of a day or more, counted ("ten years") or vague ("many
+    years", "long ago"), as against minutes or hours."""
+    days = gap_to_days(gap or '')
+    return (days or 0) >= 1 or bool(_DAYS_OR_MORE.search(gap or ''))
+
+
+def _keeps_stated_date(row: dict, cue: dict) -> bool:
+    """The scene's cue names its own month and day, and the calendar puts
+    it there: a gap or "earlier" read from the same prose counts for less."""
+    stated, kept = _month_day(cue.get('date', '')), _month_day(row.get('timeline_date', ''))
+    return bool(stated and kept and stated[1:] == kept[1:])
 
 
 def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
@@ -864,7 +889,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     last_day = None
     last_mode = ''
     after_frame = False
-    dated: list[tuple[str, int, tuple]] = []
+    dated: list[tuple[str, int, tuple, bool]] = []
     rough: list[tuple[str, int, tuple]] = []
     weekdays: list[tuple[str, int, int]] = []
     for row in scenes:
@@ -893,8 +918,17 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         # A step back from the present must go back. Inside a flashback an
         # "earlier" cue may move on through the past (Carol's Stave II runs
         # from Scrooge's boyhood to Belle's family), but not out of it
+        # The same day may hold a step back of minutes or hours ("Scarcely
+        # had Hargrave quitted Laura"); it contradicts the cue only when the
+        # cue goes back a day or more ("ten years")
+        stated = _keeps_stated_date(row, cue)
+        reached = last_day if at_present else present
+        # A stated date the calendar keeps outranks "earlier" on a later
+        # day; on the same day, a month and day that agree say nothing
+        # about the year (Fezziwig's Christmas Eve, years back, on day 1)
         if relation == 'earlier' and last_day is not None and (
-                day >= last_day if at_present else day >= present):
+                (day > reached and not stated)
+                or (day == reached and _goes_back_days(cue.get('gap', '')))):
             before = (f'the previous scene\'s ({last_day})' if at_present
                       else f'the story\'s present (day {present})')
             findings.append({'scene_id': sid, 'check': 'flashback_not_earlier',
@@ -904,7 +938,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         # After a summary the gap counts from the end of a stretch whose
         # length is only roughly known, so it isn't checked
         if (last_day is not None and gap is not None and last_mode != 'summary'
-                and relation in ('continues', 'later')):
+                and relation in ('continues', 'later') and not stated):
             # Back from a flashback, "the next morning" counts from the
             # present, not from the remembered scene before it
             base = present if (present is not None and last_day < present <= day) else last_day
@@ -915,7 +949,8 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
                                             f'but the calendar puts it {actual} day(s) on'})
         md = _month_day(row.get('timeline_date', ''))
         if md:
-            dated.append((sid, day, md))
+            approximate = bool(re.search(r'[~?%]', row['timeline_date']))
+            dated.append((sid, day, md, approximate))
             rough.append((sid, day, (_day_of_year(md[1], md[2]), 0, f'{md[2]} {_MONTHS[md[1] - 1]}')))
         elif mode == 'scene' and _rough_date(row.get('timeline_date', '')):
             # A month or season, on a scene that happens on one day: a
@@ -939,7 +974,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
             present = day
 
     from datetime import date
-    for (s1, d1, (y1, m1, dd1)), (s2, d2, (y2, m2, dd2)) in zip(dated, dated[1:]):
+    for (s1, d1, (y1, m1, dd1), a1), (s2, d2, (y2, m2, dd2), a2) in zip(dated, dated[1:]):
         # Compare within one stated year, or within an unstated one when the
         # days are less than a year apart
         if y1 != y2 or ('X' in y1 and abs(d2 - d1) >= 365):
@@ -953,7 +988,13 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
                 between = (date(year + 1, m2, dd2) - date(year, m1, dd1)).days
         except ValueError:
             continue
-        if abs(between - (d2 - d1)) > 1:
+        off = abs(between - (d2 - d1))
+        if a1 or a2:
+            # An approximate date may sit either side of the other
+            off, slack = min(off, abs(same_year - (d2 - d1))), _APPROXIMATE_SLACK
+        else:
+            slack = 1
+        if off > slack:
             # A year-less date that steps back reads as going back, with the
             # turn of the year as the other reading: Carol's Christmas Eve
             # after Christmas Day isn't "364 days after" (F-059)

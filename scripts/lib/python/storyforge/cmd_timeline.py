@@ -46,7 +46,7 @@ from storyforge.api import (
     submit_batch, poll_batch, download_batch_results, build_batch_request,
 )
 from storyforge.timeline import (
-    CUES_FILE, cue_prompts, extract_cues, parse_cues, write_cues, read_cues,
+    CUES_FILE, CHECK_CUES_FILE, cue_prompts, extract_cues, parse_cues, write_cues, read_cues,
     run_assignment, check_timeline, report_findings, reading_order,
 )
 
@@ -302,9 +302,12 @@ def _extract_cues_batch(project_dir, scene_ids, model, log_dir):
 
 def _run_check(project_dir, scene_ids, model, log_dir):
     """--check: read cues from the current prose, compare with the calendar.
-    The stored cues, which the calendar was built from, are left alone."""
+    The stored cues, which the calendar was built from, are left alone; the
+    check's own go to working/timeline-check-cues.csv."""
     from storyforge.elaborate import _read_csv
-    cues = {**read_cues(project_dir), **extract_cues(project_dir, scene_ids, model, log_dir, store=False)}
+    fresh = extract_cues(project_dir, scene_ids, model, log_dir, store=False)
+    write_cues(project_dir, fresh, CHECK_CUES_FILE)
+    cues = {**read_cues(project_dir), **fresh}
     order = reading_order(project_dir)
     rows = {r['id']: r for r in _read_csv(os.path.join(project_dir, 'reference', 'scenes.csv'))}
     findings = check_timeline([rows[s] for s in order if s in rows], cues)
