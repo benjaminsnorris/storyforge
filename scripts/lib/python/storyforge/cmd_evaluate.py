@@ -39,6 +39,7 @@ from storyforge.git import (
 )
 from storyforge.api import (
     invoke_to_file, extract_text, extract_text_from_file, is_truncated,
+    is_refusal, stop_problem,
     extract_usage, calculate_cost_from_usage,
     submit_batch, poll_batch, download_batch_results,
     get_api_key, invoke_api, build_batch_request,
@@ -1086,7 +1087,9 @@ def main(argv=None):
         results_url = poll_batch(batch_id, log_fn=log)
         log('Batch complete. Downloading results...')
 
-        download_batch_results(results_url, eval_dir, log_dir)
+        # A cut-off report is kept, with a WARNING, as in direct mode;
+        # a refusal is a failure, checked below.
+        download_batch_results(results_url, eval_dir, log_dir, keep_incomplete=True)
 
         # Process results
         for i, name in enumerate(eval_names):
@@ -1098,7 +1101,18 @@ def main(argv=None):
                 _log_usage(project_dir, eval_json, 'evaluate', name, eval_models[i],
                            batch=True)
 
+            reply = {}
+            if os.path.isfile(eval_json):
+                with open(eval_json) as f:
+                    reply = json.load(f)
+            if is_refusal(reply):
+                log(f'FAILED: {name} ({stop_problem(reply)})')
+                failed.append(name)
+                continue
             if os.path.isfile(status_file) and open(status_file).read().strip() == 'ok':
+                if is_truncated(reply):
+                    log(f'WARNING: evaluator {name} hit the 8192-token limit; '
+                        f'its report is cut off')
                 if os.path.isfile(eval_txt):
                     os.makedirs(eval_dir, exist_ok=True)
                     with open(os.path.join(eval_dir, f'{name}.md'), 'w') as f:

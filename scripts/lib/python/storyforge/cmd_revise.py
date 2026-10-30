@@ -1145,7 +1145,7 @@ def _run_lightweight_score(project_dir: str, scene_ids: list[str],
         parallel, _time.time(), project_dir,
     )
 
-    log(f'  Scored: {scored}, failed: {failed}')
+    log(f'  Scored: {scored}, failed: {len(failed)}' + (f' ({", ".join(failed)})' if failed else ''))
 
     # Generate diagnosis
     prev_dir = ''

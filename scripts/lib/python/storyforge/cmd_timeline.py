@@ -212,6 +212,7 @@ def main(argv=None):
         create_draft_pr(f'Enrich: timeline for {title}', pr_body, project_dir, 'enrichment')
 
     # --- Cues ---
+    stale_cues: list[str] = []
     if args.skip_phase1:
         cached = sum(1 for sid in scene_ids if sid in read_cues(project_dir))
         log(f'Skipping cue extraction: {cached} of {scene_count} scenes have stored cues')
@@ -219,9 +220,12 @@ def main(argv=None):
         log('')
         log(f'Cues: reading time cues ({scene_count} scenes, mode: {timeline_mode})')
         if timeline_mode == 'batch':
-            _extract_cues_batch(project_dir, scene_ids, cue_model, log_dir)
+            fresh = _extract_cues_batch(project_dir, scene_ids, cue_model, log_dir)
         else:
-            extract_cues(project_dir, scene_ids, cue_model, log_dir)
+            fresh = extract_cues(project_dir, scene_ids, cue_model, log_dir)
+        # A scene whose read failed keeps its earlier stored cues, if any,
+        # which may describe older prose.
+        stale_cues = [sid for sid in scene_ids if sid not in fresh]
 
     if args.phase1_only:
         log(f'Cues stored in {CUES_FILE}. Review or edit them, then run:')
@@ -264,6 +268,9 @@ def main(argv=None):
     log(f'  Proposed (already set, not changed): {result["proposed"]}')
     log(f'  Unplaced: {result["unplaced"]}')
     log(f'  Inconsistencies reported: {result["findings"]}')
+    if stale_cues:
+        log(f'  WARNING: no fresh cues for {len(stale_cues)} scene(s); the calendar '
+            f'used their earlier cues, if any: {", ".join(stale_cues)}')
     log('============================================')
 
     if not args.embedded:
@@ -271,11 +278,11 @@ def main(argv=None):
 
 
 def _extract_cues_batch(project_dir, scene_ids, model, log_dir):
-    """Cues via the Batch API (half price, slower)."""
+    """Cues via the Batch API (half price, slower). Returns the cues read."""
     prompts = cue_prompts(project_dir, scene_ids)
     if not prompts:
         log('No scenes with prose or a summary to read')
-        return
+        return {}
     batch_file = os.path.join(log_dir, 'timeline-cues-batch.jsonl')
     with open(batch_file, 'w') as bf:
         for sid, prompt in prompts.items():
@@ -298,6 +305,7 @@ def _extract_cues_batch(project_dir, scene_ids, model, log_dir):
             log(f'  WARNING: no cue result for {sid}')
     write_cues(project_dir, cues)
     log(f'Cues stored for {len(cues)} of {len(prompts)} scenes')
+    return cues
 
 
 def _run_check(project_dir, scene_ids, model, log_dir):
@@ -312,3 +320,7 @@ def _run_check(project_dir, scene_ids, model, log_dir):
     rows = {r['id']: r for r in _read_csv(os.path.join(project_dir, 'reference', 'scenes.csv'))}
     findings = check_timeline([rows[s] for s in order if s in rows], cues)
     report_findings(findings, limit=100)
+    unread = [sid for sid in scene_ids if sid not in fresh]
+    if unread:
+        log(f'WARNING: no fresh cues for {len(unread)} scene(s), so they were checked '
+            f'against their stored cues, which may describe older prose: {", ".join(unread)}')

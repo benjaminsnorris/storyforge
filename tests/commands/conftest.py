@@ -272,20 +272,50 @@ def mock_api(monkeypatch):
 
         def _submit_batch(self, batch_file):
             self.calls.append({'fn': 'submit_batch', 'batch_file': batch_file})
+            # Remember the requests: the download answers each one, as the
+            # real Batches API does.
+            self._batch_requests = []
+            if os.path.isfile(batch_file):
+                with open(batch_file) as f:
+                    for line in f:
+                        if line.strip():
+                            req = json.loads(line)
+                            content = req['params']['messages'][0]['content']
+                            prompt = content if isinstance(content, str) else ''.join(
+                                b.get('text', '') for b in content)
+                            self._batch_requests.append((req['custom_id'], prompt))
             return 'batch-test-123'
 
         def _poll_batch(self, batch_id, log_fn=None):
             self.calls.append({'fn': 'poll_batch', 'batch_id': batch_id})
             return 'https://example.com/batch-results'
 
-        def _download_batch_results(self, results_url, output_dir, log_dir):
+        def _download_batch_results(self, results_url, output_dir, log_dir,
+                                    keep_incomplete=False):
             self.calls.append({
                 'fn': 'download_batch_results',
                 'results_url': results_url,
                 'output_dir': output_dir,
                 'log_dir': log_dir,
             })
-            return self._batch_results
+            if self._batch_results:
+                return self._batch_results
+            # Answer every submitted request with the configured response,
+            # writing the files the real download writes.
+            os.makedirs(output_dir, exist_ok=True)
+            os.makedirs(log_dir, exist_ok=True)
+            done = []
+            for cid, prompt in getattr(self, '_batch_requests', []):
+                response = self._get_response_dict(prompt)
+                with open(os.path.join(log_dir, f'{cid}.json'), 'w') as f:
+                    json.dump(response, f)
+                with open(os.path.join(log_dir, f'{cid}.txt'), 'w') as f:
+                    f.write(''.join(b.get('text', '') for b in response.get('content', [])
+                                    if b.get('type') == 'text'))
+                with open(os.path.join(output_dir, f'.status-{cid}'), 'w') as f:
+                    f.write('ok')
+                done.append(cid)
+            return done
 
         @property
         def call_count(self) -> int:

@@ -710,6 +710,31 @@ class TestMainBatch:
         dl_calls = mock_api.calls_for('download_batch_results')
         assert len(dl_calls) >= 1
 
+    def test_failed_item_is_costed_and_named_in_the_summary(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """SF-3/SF-5: a cut-off reply was paid for but left out of the cost
+        ledger, and the summary gave only a failure count."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+
+        def cut_off(results_url, output_dir, log_dir, keep_incomplete=False):
+            with open(os.path.join(output_dir, '.status-act1-sc01'), 'w') as f:
+                f.write('fail')
+            with open(os.path.join(log_dir, 'act1-sc01.json'), 'w') as f:
+                json.dump({'usage': {'input_tokens': 9, 'output_tokens': 9},
+                           'content': [], 'stop_reason': 'max_tokens'}, f)
+            return []
+        costed = []
+        monkeypatch.setattr('storyforge.cmd_score.download_batch_results', cut_off)
+        monkeypatch.setattr('storyforge.cmd_score._log_api_usage',
+                            lambda path, op, target, *a, **kw: costed.append((op, target)))
+
+        main(['--scenes', 'act1-sc01'])
+
+        assert ('score', 'act1-sc01') in costed
+        assert 'no scene scores for act1-sc01' in capsys.readouterr().out
+
 
 # ============================================================================
 # main — error handling
@@ -843,3 +868,60 @@ class TestMultiSceneScoring:
         main(['--dry-run', '--scenes', 'act1-sc01,act1-sc02'])
         # Should succeed without errors
         assert mock_api.call_count == 0
+
+
+class TestFidelityIncompleteReply:
+    """A cut-off fidelity reply (direct mode keeps it in the .json log, and
+    the batch download writes only that) was parsed as a score."""
+
+    def test_cut_off_reply_is_named_and_not_scored(self, project_dir, tmp_path,
+                                                   monkeypatch, capsys):
+        from storyforge import cmd_score
+        reply = ('SCORES\nid|goal|conflict|outcome|crisis|decision|key_actions|'
+                 'key_dialogue|emotions|knowledge\n{sid}|4|3|4|3|4|5|4|3|4\n')
+
+        def fake_invoke(prompt, model, log_file, max_tokens, system=None):
+            sid = os.path.basename(log_file)[len('fidelity-'):-len('.json')]
+            with open(log_file, 'w') as f:
+                json.dump({'content': [{'type': 'text', 'text': reply.format(sid=sid)}],
+                           'usage': {'input_tokens': 1, 'output_tokens': 1},
+                           'stop_reason': 'max_tokens' if sid == 'act1-sc01'
+                           else 'end_turn'}, f)
+        monkeypatch.setattr(cmd_score, 'invoke_to_file', fake_invoke)
+        monkeypatch.setattr(cmd_score, '_log_api_usage', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.scoring.build_fidelity_prompt', lambda *a: 'p')
+        log_dir = str(tmp_path / 'logs')
+        os.makedirs(log_dir)
+
+        cmd_score._run_fidelity_scoring(
+            ['act1-sc01', 'act1-sc02'], project_dir, os.path.join(project_dir, 'scenes'),
+            log_dir, str(tmp_path), os.path.join(project_dir, 'reference', 'scene-briefs.csv'),
+            'direct', 'm', '')
+
+        out = capsys.readouterr().out
+        assert ('WARNING: Fidelity scoring of act1-sc01 not used: '
+                'the reply was cut off at max_tokens') in out
+        assert 'Fidelity: 1 scenes scored' in out
+
+    def test_an_earlier_runs_reply_is_not_scored(self, project_dir, tmp_path,
+                                                 monkeypatch, capsys):
+        """C-2: a call that fails now left an earlier run's fidelity file to
+        be read as this cycle's score."""
+        from storyforge import cmd_score
+        log_dir = str(tmp_path / 'logs')
+        os.makedirs(log_dir)
+        with open(os.path.join(log_dir, 'fidelity-act1-sc01.txt'), 'w') as f:
+            f.write('SCORES\nid|goal|conflict|outcome|crisis|decision|key_actions|'
+                    'key_dialogue|emotions|knowledge\nact1-sc01|4|3|4|3|4|5|4|3|4\n')
+
+        def fail(*a, **kw):
+            raise RuntimeError('overloaded')
+        monkeypatch.setattr(cmd_score, 'invoke_to_file', fail)
+        monkeypatch.setattr('storyforge.scoring.build_fidelity_prompt', lambda *a: 'p')
+
+        cmd_score._run_fidelity_scoring(
+            ['act1-sc01'], project_dir, os.path.join(project_dir, 'scenes'), log_dir,
+            str(tmp_path), os.path.join(project_dir, 'reference', 'scene-briefs.csv'),
+            'direct', 'm', '')
+
+        assert 'No fidelity results to process' in capsys.readouterr().out

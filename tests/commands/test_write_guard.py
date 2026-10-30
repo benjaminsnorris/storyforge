@@ -193,7 +193,8 @@ class TestBatchMode:
     def _run(self, monkeypatch, results, code=1):
         """``results[scene_id]`` is a reply dict, 'errored' (the batch request
         failed) or None (status ok but no response file)."""
-        def fake_download(results_url, output_dir, log_dir):
+        def fake_download(results_url, output_dir, log_dir, keep_incomplete=False):
+            assert keep_incomplete  # write retries refusals itself
             for sid, response in results.items():
                 with open(os.path.join(output_dir, f'.status-{sid}'), 'w') as f:
                     f.write('fail' if response == 'errored' else 'ok')

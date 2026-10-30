@@ -417,7 +417,7 @@ class TestBatchMode:
 
         original_download = mock_api._download_batch_results
 
-        def fake_download(results_url, output_dir, log_dir):
+        def fake_download(results_url, output_dir, log_dir, keep_incomplete=False):
             original_download(results_url, output_dir, log_dir)
             # Create evaluator report files and status files so synthesis runs
             for name in CORE_EVALUATORS:
@@ -449,6 +449,43 @@ class TestBatchMode:
 
         assert len(mock_api.calls_for('submit_batch')) == 1
         assert len(mock_api.calls_for('poll_batch')) == 1
+
+
+    def test_batch_keeps_a_cut_off_report_and_fails_a_refusal(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """CR-1: batch mode treats replies as direct mode does: a report cut
+        off at max_tokens is kept with a WARNING, a refusal is a failure."""
+        self._setup_project(project_dir, monkeypatch)
+        cut, refused = CORE_EVALUATORS[0], CORE_EVALUATORS[1]
+
+        def fake_download(results_url, output_dir, log_dir, keep_incomplete=False):
+            assert keep_incomplete
+            for name in CORE_EVALUATORS:
+                stop = {cut: 'max_tokens', refused: 'refusal'}.get(name, 'end_turn')
+                text = '' if name == refused else f'## {name} Report\nGood work.'
+                with open(os.path.join(output_dir, f'.status-{name}'), 'w') as f:
+                    f.write('ok')
+                with open(os.path.join(log_dir, f'{name}.txt'), 'w') as f:
+                    f.write(text)
+                with open(os.path.join(log_dir, f'{name}.json'), 'w') as f:
+                    json.dump({'usage': {'input_tokens': 1, 'output_tokens': 1},
+                               'content': [{'type': 'text', 'text': text}],
+                               'stop_reason': stop}, f)
+            return list(CORE_EVALUATORS)
+
+        monkeypatch.setattr('storyforge.cmd_evaluate.download_batch_results', fake_download)
+        mock_api.set_response('--- BEGIN synthesis.md ---\n## Consensus\nGood.\n'
+                              '--- END synthesis.md ---\n--- BEGIN findings.yaml ---\n'
+                              'findings: []\n--- END findings.yaml ---\n')
+        try:
+            main(['--scene', 'act1-sc01'])
+        except SystemExit:
+            pass
+
+        out = capsys.readouterr().out
+        assert f'WARNING: evaluator {cut} hit the 8192-token limit' in out
+        assert f'SUCCESS: {cut}' in out
+        assert f'FAILED: {refused} (model refused the request' in out
 
 
 # ============================================================================

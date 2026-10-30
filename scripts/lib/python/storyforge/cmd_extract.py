@@ -128,6 +128,7 @@ def main(argv=None):
 
     validate_passed = None
     validate_failures = 0
+    _unanswered.clear()
 
     if not args.cleanup_only:
         # Phase 0: Characterize
@@ -217,6 +218,12 @@ def main(argv=None):
     log('============================================')
 
     print_summary(project_dir, 'extract', session_start=session_start)
+    if _unanswered:
+        log('ERROR: some scenes got no usable extraction reply (refused, cut off or '
+            'failed); re-run extract for them:')
+        for csv_name, ids in _unanswered.items():
+            log(f'  {csv_name}: {", ".join(ids)}')
+        sys.exit(1)
 
 
 # ============================================================================
@@ -329,8 +336,11 @@ def _merge_batch_results(csv_path, csv_name, sorted_scene_ids, log_dir, parse,
     """Merge per-scene batch responses ({log_dir}/{scene_id}.txt) into a scene CSV.
 
     Scenes with a row are merged per _merge_fields; scenes without one get a
-    new row (new_row(row, index, scene_id) can fill extra columns). Returns
-    the number of scenes added or changed.
+    new row (new_row(row, index, scene_id) can fill extra columns). A .txt
+    exists only for a reply the batch download marked ok (it removes a stale
+    one), so a scene without one had no usable reply: it is left as it was
+    and named in a WARNING, and the run exits 1 at the end. Returns the
+    number of scenes added or changed.
     """
     from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
     from storyforge.enrich import normalize_fields
@@ -338,9 +348,11 @@ def _merge_batch_results(csv_path, csv_name, sorted_scene_ids, log_dir, parse,
     columns = _FILE_MAP[csv_name]
     existing = _read_csv_as_map(csv_path)
     count = 0
+    unanswered = []
     for i, sid in enumerate(sorted_scene_ids):
         txt_file = os.path.join(log_dir, f'{sid}.txt')
         if not os.path.isfile(txt_file):
+            unanswered.append(sid)
             continue
         with open(txt_file) as f:
             result = parse(f.read(), sid)
@@ -358,7 +370,19 @@ def _merge_batch_results(csv_path, csv_name, sorted_scene_ids, log_dir, parse,
             count += 1
 
     _write_csv(csv_path, sorted(existing.values(), key=sort_key), columns)
+    if unanswered:
+        missing = [sid for sid in unanswered if sid not in existing]
+        log(f'  WARNING: {csv_name}: no usable reply for {len(unanswered)} scene(s), '
+            f'left as they were: {", ".join(unanswered)}')
+        if missing:
+            log(f'  WARNING: {csv_name} has no row for {", ".join(missing)}')
+        _unanswered.setdefault(csv_name, []).extend(unanswered)
     return count
+
+
+# Scenes each CSV merge got no usable reply for in this run (csv -> ids);
+# the final summary names them and the run exits 1.
+_unanswered: dict[str, list[str]] = {}
 
 
 def _log_merge(csv_name: str, changed: int, total: int, suffix: str = '') -> None:

@@ -463,6 +463,33 @@ class TestMainBatchMode:
         dl_calls = mock_api.calls_for('download_batch_results')
         assert len(dl_calls) >= 1
 
+    def test_failed_item_is_still_costed(self, mock_api, mock_git, mock_costs,
+                                         project_dir, monkeypatch):
+        """SF-3: a cut-off reply was paid for but its cost was never logged."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_enrich.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run',
+                            lambda *a, **kw: subprocess.CompletedProcess(
+                                a[0] if a else [], 0, stdout='{}', stderr=''))
+
+        def cut_off(results_url, output_dir, log_dir, keep_incomplete=False):
+            with open(os.path.join(output_dir, '.status-act1-sc01'), 'w') as f:
+                f.write('fail')
+            with open(os.path.join(log_dir, 'act1-sc01.json'), 'w') as f:
+                json.dump({'usage': {'input_tokens': 9, 'output_tokens': 9},
+                           'content': [], 'stop_reason': 'max_tokens'}, f)
+            return []
+        costed = []
+        monkeypatch.setattr('storyforge.cmd_enrich.download_batch_results', cut_off)
+        monkeypatch.setattr('storyforge.cmd_enrich.log_operation',
+                            lambda pd, op, model, *a, target='', **kw: costed.append((op, target)))
+
+        main(['--force', '--scenes', 'act1-sc01', '--fields', 'type',
+              '--skip-timeline', '--skip-dashboard'])
+
+        assert ('enrich', 'act1-sc01') in costed
+
     def test_batch_commits_results(self, mock_api, mock_git, mock_costs,
                                      project_dir, monkeypatch):
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
