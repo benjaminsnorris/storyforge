@@ -188,7 +188,11 @@ Start by reading this doc, `CLAUDE.md` and `docs/agent-reference.md`.
 3. **Phase 1 leftovers:**
    - ~~Extract's **skeleton** phase.~~ Done in v1.89.0 (#388). A skeleton reply that is unusable for any scene now stops the calendar from being placed (it used to re-place every scene from stale or missing cues, with force).
    - ~~The remaining line parsers in extract and `prompts.py`.~~ The cleanup-pass ones were dead code, removed in v1.90.4; `prompts.py` has none. Still parsing lines: hone's `MENTION:` replies, scoring's `SCORES:` blocks (`scoring.parse_score_output`), and `scenes.py`'s `SCENE:` lines. They are outside the plan's Phase 1 list; move them when their phase touches them.
-   - ~~The remaining **warn-and-continue** sites.~~ Done in v1.90.0 (#394). Undecided ones (triage class C) are listed in #394: evaluator/persona pairing by position, a missing configured cover falling back to auto-detect, an unreadable overrides file read as empty, and commands that report only a count of skipped items.
+   - ~~The remaining **warn-and-continue** sites.~~ Done in v1.90.0 (#394). Triage class C (listed in #394), followed up:
+     - **Evaluator/persona pairing by position:** a real bug, fixed in v1.90.6 (#403).
+     - **Unreadable `working/scoring-overrides.csv` read as empty:** checked, left as is. Nothing rewrites the file from that read (it is append-only), so the only effect is that accepted findings show again, with a WARNING.
+     - **`production.cover_image` set but missing** (`assembly._resolve_cover_path`): falls back to auto-detecting `cover.*`, which can ship an older cover with only a WARNING. **Ben's call.** Recommendation: treat a configured cover that's missing as an error (assemble and publish exit 1 naming it), since falling back is a silent repair of the author's setting.
+     - **Commands that report only a count of skipped items** (`enrich`, `scenes_export`, `script_package`, `revise_gn`, `scoring_story_power`): not yet reviewed one by one.
 4. **Follow-ups noted in PRs:**
    - ~~`hone.hone_briefs` should use the brief-fix name check.~~ Done in v1.89.4 (#393), for hone's intent rewrites too; the check is `storyforge.brief_names`. Other writers of `scene-briefs.csv` / `scene-intent.csv` (elaborate, extract, enrich) are not checked yet.
    - Re-running a revise pass that stopped over skipped scenes redrafts every target, not only the skipped ones (#394 review): needs per-scene pass state.
