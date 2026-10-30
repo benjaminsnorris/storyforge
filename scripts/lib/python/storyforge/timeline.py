@@ -342,6 +342,44 @@ def _rough_date(value: str) -> tuple[int, int, str] | None:
     return _day_of_year(month, 15), 15, _MONTHS[month - 1]
 
 
+
+def _days_in_year(value: str) -> set[int] | None:
+    """The days of the year (2001's calendar) a single date can fall on,
+    without the slack prose gets: a season is its quarter (winter is
+    December to February), a month its own days, a day itself (``~``/``?``
+    loosen it by a few days). None without a known month or season."""
+    md = _month_day(value)
+    if md:
+        doy = _day_of_year(md[1], md[2])
+        slack = _APPROXIMATE_SLACK if re.search(r'[~?%]', value) else 0
+        return {(doy - 1 + k) % 365 + 1 for k in range(-slack, slack + 1)}
+    m = _EDTF_DATE.match((value or '').strip())
+    if not m or not m.group('month') or 'X' in m.group('month'):
+        return None
+    if m.group('day') and 'X' not in m.group('day'):
+        return None
+    month = int(m.group('month'))
+    months = {21: (3, 4, 5), 22: (6, 7, 8), 23: (9, 10, 11), 24: (12, 1, 2)}.get(
+        month, (month,) if 1 <= month <= 12 else ())
+    return {_day_of_year(mo, d) for mo in months for d in range(1, 32)
+            if d <= (28 if mo == 2 else 30 if mo in (4, 6, 9, 11) else 31)} or None
+
+
+def date_contradicts(stored: str, cue: str) -> bool:
+    """Whether a cue's date and a stored ``timeline_date`` can't both be
+    right: their known year digits differ, or they fall in parts of the
+    year that don't meet (winter and autumn, January and February, two
+    days). A coarser cue ("1829" for "December 1829") agrees. Intervals
+    and invalid dates are never compared."""
+    stored, cue = (stored or '').strip(), (cue or '').strip()
+    if not (is_valid_edtf(stored) and is_valid_edtf(cue)) or '/' in stored + cue:
+        return False
+    ys, yc = _EDTF_DATE.match(stored).group('year'), _EDTF_DATE.match(cue).group('year')
+    if any(a != b for a, b in zip(ys, yc) if 'X' not in (a, b)):
+        return True
+    ds, dc = _days_in_year(stored), _days_in_year(cue)
+    return bool(ds and dc) and not ds & dc
+
 # ============================================================================
 # Assignment: the running-present walk, then batches
 # ============================================================================
@@ -1133,10 +1171,11 @@ def run_assignment(project_dir: str, model: str, log_dir: str, force: bool) -> d
     """Assign every scene a day and a time_mode from the stored cues, then
     run the checks.
 
-    Empty fields are filled. A day or mode already set is replaced only with
-    *force* (extraction, where nobody authored them); otherwise the full
-    proposal goes to working/timeline-proposed.csv and the differences are
-    reported. Returns counts: assigned, proposed, unplaced, findings.
+    Empty days and modes are filled. A day or mode already set, or a
+    timeline_date the scene's own date cue contradicts, is replaced only
+    with *force* (extraction, where nobody authored them); otherwise the
+    full proposal goes to working/timeline-proposed.csv and the differences
+    are reported. Returns counts: assigned, proposed, unplaced, findings.
     """
     from .elaborate import _read_csv, _write_csv, _FILE_MAP
     os.makedirs(log_dir, exist_ok=True)
@@ -1176,6 +1215,7 @@ def run_assignment(project_dir: str, model: str, log_dir: str, force: bool) -> d
             log(f'  Timeline: proposals aligned to your calendar (shifted {-shift:+d} days)')
     assigned = 0
     differences = []
+    redated = []
     for row in rows:
         sid = row.get('id', '')
         if sid not in placed:
@@ -1190,6 +1230,20 @@ def run_assignment(project_dir: str, model: str, log_dir: str, force: bool) -> d
                 assigned += 1
             else:
                 differences.append((sid, col, old, new, basis))
+        # The cue re-reads the date the scene states: where that contradicts
+        # timeline_date, the cue wins. A date with no cue date stays (F-119)
+        old, new = (row.get('timeline_date') or '').strip(), cues.get(sid, {}).get('date', '')
+        if date_contradicts(old, new):
+            if write:
+                row['timeline_date'] = new
+                redated.append((sid, old, new))
+                assigned += 1
+            else:
+                differences.append((sid, 'timeline_date', old, new, 'date stated in the scene'))
+    if redated:
+        log(f'  Timeline: {len(redated)} date(s) replaced by the date the scene states:')
+        for sid, old, new in redated:
+            log(f'    {sid}: {old} -> {new}')
     if assigned:
         _write_csv(scenes_path, rows, _FILE_MAP['scenes.csv'])
 

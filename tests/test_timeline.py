@@ -1254,3 +1254,80 @@ def test_a_failed_cue_read_keeps_the_stored_cues(project_dir, tmp_path, monkeypa
     assert timeline.read_cues(project_dir)['act1-sc01']['gap'] == 'next morning'
     assert 'time cues failed for act1-sc01: the reply has no TIME_RELATION line' \
         in capsys.readouterr().out
+
+
+class TestCueDates:
+    """F-119: the timeline pass re-read every scene's date but wrote only
+    days and modes, so a wrong Phase 1 date stayed: Middlemarch's "breezy
+    autumn day" kept winter (``XXXX-24~``) though its cue said autumn."""
+
+    def test_contradiction_is_a_different_year_or_place_in_the_year(self):
+        from storyforge.timeline import date_contradicts
+        assert date_contradicts('XXXX-24~', 'XXXX-23')       # winter, autumn
+        assert date_contradicts('1831-10~', '1832-05')       # years differ
+        assert date_contradicts('XXXX-01', 'XXXX-02')
+        assert date_contradicts('XXXX-07-04', 'XXXX-06-30')  # exact days apart
+        assert date_contradicts('XXXX-21', 'XXXX-22')        # every pair of seasons
+        assert date_contradicts('XXXX-24', 'XXXX-21')
+        assert date_contradicts('XXXX-12-31', 'XXXX-01')
+        # A coarser or matching cue is no contradiction
+        assert not date_contradicts('1829-12~', '1829')
+        assert not date_contradicts('1906-09-12', 'XXXX-09')
+        assert not date_contradicts('XXXX-21', 'XXXX-04')    # April is spring
+        assert not date_contradicts('XXXX-24', 'XXXX-01-15')
+        assert not date_contradicts('1829-01-31', '1829-01')  # a month's last day
+        assert not date_contradicts('XXXX-02-29', 'XXXX-02')
+        assert not date_contradicts('XXXX-01-03~', 'XXXX-12-28~')  # across the new year
+        assert not date_contradicts('187X-04', '1874-04')
+        # Approximate days may sit a few days apart
+        assert not date_contradicts('XXXX-07-04~', 'XXXX-06-30~')
+        # Nothing to compare: empty, invalid, or an interval
+        assert not date_contradicts('', 'XXXX-03')
+        assert not date_contradicts('XXXX-03', '')
+        assert not date_contradicts('XXXX-04~', 'XXXX-04-01/XXXX-04-07')
+
+    def _dated(self, project_dir, dates):
+        from storyforge.elaborate import _write_csv, _FILE_MAP
+        _write_csv(os.path.join(project_dir, 'reference', 'scenes.csv'),
+                   [{'id': sid, 'seq': str(i + 1), 'title': sid, 'timeline_day': '',
+                     'time_mode': '', 'timeline_date': date, 'status': 'drafted'}
+                    for i, (sid, date) in enumerate(dates)],
+                   _FILE_MAP['scenes.csv'])
+
+    def _run(self, project_dir, monkeypatch, force):
+        import storyforge.timeline as tl
+        tl.write_cues(project_dir, {
+            'a': {'relation': 'later', 'date': 'XXXX-23'},
+            'b': {'relation': 'later', 'date': '1829'},
+            'c': {'relation': 'later', 'date': 'XXXX-03'},
+            'd': {'relation': 'later'}})
+        monkeypatch.setattr(tl, '_invoke_assignment', lambda model: (
+            lambda prompt, log_file, label: 'CALENDAR:\na | 1 | scene | x\nb | 2 | scene | x\n'
+                                            'c | 3 | scene | x\nd | 4 | scene | x\n'))
+        return tl.run_assignment(project_dir, 'm', os.path.join(project_dir, 'working', 'logs'),
+                                 force=force)
+
+    def test_a_contradicted_date_is_replaced_and_reported(self, project_dir, monkeypatch, capsys):
+        self._dated(project_dir, [('a', 'XXXX-24~'), ('b', '1829-12~'), ('c', ''), ('d', '1831-10~')])
+        self._run(project_dir, monkeypatch, force=True)
+        # Only a's cue contradicts its date; an empty date is not filled and
+        # a date without a cue date is never cleared
+        assert _column(project_dir, 'timeline_date') == {
+            'a': 'XXXX-23', 'b': '1829-12~', 'c': '', 'd': '1831-10~'}
+        out = capsys.readouterr().out
+        assert 'a: XXXX-24~ -> XXXX-23' in out
+
+    def test_an_authored_calendar_only_gets_a_proposal(self, project_dir, monkeypatch):
+        import storyforge.timeline as tl
+        self._dated(project_dir, [('a', 'XXXX-24~'), ('b', ''), ('c', ''), ('d', '')])
+        from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP
+        path = os.path.join(project_dir, 'reference', 'scenes.csv')
+        rows = _read_csv(path)
+        for i, r in enumerate(rows):
+            r['timeline_day'] = str(i + 1)
+        _write_csv(path, rows, _FILE_MAP['scenes.csv'])
+        result = self._run(project_dir, monkeypatch, force=False)
+        assert _column(project_dir, 'timeline_date')['a'] == 'XXXX-24~'
+        with open(os.path.join(project_dir, tl.PROPOSED_FILE)) as f:
+            assert 'a|timeline_date|XXXX-24~|XXXX-23|' in f.read()
+        assert result['proposed'] >= 1

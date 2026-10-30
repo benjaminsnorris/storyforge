@@ -787,6 +787,18 @@ def _unplaced_facts(registry, order):
                   if (row.get('origin') or '').strip() and _unplaced(row, order))
 
 
+def _unlisted_facts(registry, order, ref_dir):
+    """Facts placed at a scene that no brief's `knowledge_out` lists (F-125).
+
+    3b offers a fact once an earlier brief holds it or a reply declares it
+    (`_facts_before`), not from its stored scene, so one an author gave a
+    scene but no brief lists is never offered unless that scene's reply
+    declares it again."""
+    listed = _shown_ids(order, ref_dir)
+    return sorted(f'{fid} ({row["origin"].strip()})' for fid, row in registry.items()
+                  if not _unplaced(row, order) and fid not in listed)
+
+
 def _update_chain_fields(scene_id, ref_dir, result, force, keys):
     """Write a 3b/3c chain reply's fields to the scene's brief.
 
@@ -905,6 +917,12 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             f'in scenes.csv, so where they are established is unknown; every '
             f'scene is offered them, like backstory (fix their scene_id in '
             f'{ledger.LEDGER_FILE}): {", ".join(unplaced)}')
+    unlisted = _unlisted_facts(knowledge_registry, reading_order, ref_dir)
+    if unlisted:
+        log(f'  WARNING: {len(unlisted)} knowledge fact(s) have a scene but no brief '
+            f'lists them in knowledge_out, so no later scene is offered them unless '
+            f'their scene declares them again (add each to its scene\'s '
+            f'knowledge_out): {", ".join(unlisted)}')
 
     # Facts the scenes so far established in this pass (F-123): each earlier
     # scene's knowledge_out as it now stands (this run's reply; on an
