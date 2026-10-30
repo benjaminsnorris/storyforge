@@ -652,6 +652,21 @@ def _record_physical_states(phys_csv, scene_id, new_states, resolved, character_
     _write_csv(phys_csv, list(existing_phys.values()), columns)
 
 
+def _update_chain_fields(scene_id, ref_dir, result, force, keys):
+    """Write a 3b/3c chain reply's fields to the scene's brief.
+
+    The parsers leave out empty fields, so without force an empty answer
+    keeps what the brief had. With force the reply is the scene's whole
+    answer: an empty field clears the old value. Otherwise a re-extraction
+    keeps the last run's knowledge and states wherever the new reply found
+    none (Gatsby's lunch with Wolfshiem kept Myrtle's broken nose).
+    """
+    from storyforge.elaborate import update_scene
+    updates = {k: result.get(k, '') for k in keys if force or result.get(k)}
+    if updates:
+        update_scene(scene_id, ref_dir, updates)
+
+
 def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                  profile_file, force, dry_run, system=None):
     """Run Phase 3a (parallel briefs) + 3b (knowledge chain) + 3c (physical state)."""
@@ -794,12 +809,8 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                 result[k] = resolve_knowledge_ids(knowledge_registry, result[k])
 
         # Update briefs CSV
-        updates = {}
-        for k in ('knowledge_in', 'knowledge_out', 'continuity_deps'):
-            if result.get(k):
-                updates[k] = result[k]
-        if updates:
-            update_scene(scene_id, ref_dir, updates)
+        _update_chain_fields(scene_id, ref_dir, result, force,
+                             ('knowledge_in', 'knowledge_out', 'continuity_deps'))
 
         # Accumulate state
         pov = scene_data.get('pov', '')
@@ -860,12 +871,8 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                          'working/'])
 
         # Update briefs CSV
-        updates = {}
-        for k in ('physical_state_in', 'physical_state_out'):
-            if result.get(k):
-                updates[k] = result[k]
-        if updates:
-            update_scene(scene_id, ref_dir, updates)
+        _update_chain_fields(scene_id, ref_dir, result, force,
+                             ('physical_state_in', 'physical_state_out'))
 
         new_states = result.get('_new_states', [])
         resolved = result.get('_resolved', [])
