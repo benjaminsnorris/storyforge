@@ -35,7 +35,7 @@ from storyforge.common import (
 )
 from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge import ledger
-from storyforge.elaborate import _FILE_MAP
+from storyforge.elaborate import _FILE_MAP, _MOTIF_COLS, _THEMES_COLS
 from storyforge.audit import COLUMNS as AUDIT_COLUMNS
 from storyforge.parsing import clean_scene_content, extract_single_scene
 from storyforge.visual_state import STATE_COLUMNS
@@ -99,7 +99,8 @@ EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
     'reference/locations.csv': ['id', 'name', 'aliases'],
     'reference/values.csv': ['id', 'name', 'aliases'],
     'reference/mice-threads.csv': ['id', 'name', 'type', 'aliases'],
-    'reference/motif-taxonomy.csv': ['id', 'name', 'aliases', 'tier'],
+    'reference/motif-taxonomy.csv': list(_MOTIF_COLS),
+    'reference/themes.csv': list(_THEMES_COLS),
     # The commitments ledger: knowledge facts and physical states (it
     # replaced knowledge.csv and physical-states.csv: a project that still has
     # them gets a LEGACY_REGISTRY finding from report_csv_schema)
@@ -149,6 +150,8 @@ ALWAYS_OPTIONAL_CSV_FILES: set[str] = {
     'reference/illustration-plan.csv',
     'reference/visual-state.csv',
     'working/audit-log.csv',
+    # Written by elaborate or extract phase 5; projects predating both lack it
+    'reference/themes.csv',
 }
 
 #: Columns a registered CSV may legally lack — schema additions that older
@@ -167,6 +170,7 @@ OPTIONAL_CSV_COLUMNS: dict[str, set[str]] = {
     # them on their next write of the file
     'reference/scenes.csv': {'summary', 'time_mode', 'timeline_date', 'architecture_scene'},
     'reference/scene-intent.csv': {'theme_threads'},
+    'reference/scene-briefs.csv': {'motif_details'},
 }
 EXPECTED_WORKING_DIRS = set(
     'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup'.split()

@@ -1,0 +1,301 @@
+"""Extract phase 5, steps 5a (structure) and 5b (themes and motifs) (#440).
+
+The model only selects and names; these tests pin what code does with its
+reply: every id checked against the scenes, every column copied from the
+scene CSVs, and every problem collected for the one retry.
+"""
+
+import json
+
+import pytest
+
+from storyforge.extract_describe import (
+    ReplyProblems, build_structure_prompt, build_themes_prompt,
+    motif_mentions, parse_structure, parse_themes, structure_rows,
+)
+
+
+def _scenes(n=20):
+    return [{'id': f's{i:02d}', 'seq': str(i), 'title': f'Scene {i}',
+             'summary': f'Thing {i} happens.', 'act': str(1 + (i - 1) * 3 // n),
+             'pov': 'nick', 'action_sequel': 'action' if i % 2 else 'sequel',
+             'emotional_arc': 'calm to dread', 'value_at_stake': 'trust',
+             'value_shift': '+/-', 'turning_point': 'revelation',
+             'function': f'Does {i}.', 'word_count': '1000',
+             'motifs': 'green light;Green Light' if i % 4 == 0 else 'eyes'}
+            for i in range(1, n + 1)]
+
+
+def _spine(n=5):
+    return [{'id': f'event-{k}', 'title': f'Event {k}', 'summary': f'Event {k} happens.',
+             'function': f'Turns {k}.'} for k in range(1, n + 1)]
+
+
+def _reply(spine=None, arch=None, genre='literary fiction', summaries=None):
+    spine = _spine() if spine is None else spine
+    if arch is None:
+        arch = [{'scene_id': f's{i:02d}', 'spine_event': f'event-{1 + (i - 1) // 4}'}
+                for i in range(1, 21)]
+    return json.dumps({'genre': genre, 'subgenre': '', 'scene_summaries': summaries or [],
+                       'spine': spine, 'architecture': arch})
+
+
+class TestParseStructure:
+    def test_a_good_reply(self):
+        s = parse_structure(_reply(), _scenes())
+        assert [e['id'] for e in s['spine']] == [f'event-{k}' for k in range(1, 6)]
+        assert len(s['architecture']) == 20
+        assert s['genre'] == 'literary fiction'
+
+    def test_every_problem_is_collected_for_the_retry(self):
+        spine = _spine()
+        spine[1]['summary'] = ' '.join(['word'] * 36)
+        arch = [{'scene_id': 'nowhere', 'spine_event': 'event-1'},
+                {'scene_id': 's01', 'spine_event': 'event-9'},
+                {'scene_id': 's02', 'spine_event': 'event-1'},
+                {'scene_id': 's02', 'spine_event': 'event-1'}]
+        with pytest.raises(ReplyProblems) as e:
+            parse_structure(_reply(spine, arch), _scenes())
+        text = ' '.join(e.value.problems)
+        assert "'nowhere' is not one of the scene ids" in text
+        assert "event-9" in text
+        assert 's02 is anchored twice' in text
+        assert '36 words' in text
+        assert 'event-3 has no anchor scene' in text
+        assert 'architecture has 1 entries; expected 15-20' in text
+
+    def test_ranges_shrink_to_a_short_book(self):
+        scenes = _scenes(6)
+        arch = [{'scene_id': f's{i:02d}', 'spine_event': f'event-{min(i, 5)}'}
+                for i in range(1, 7)]
+        s = parse_structure(_reply(arch=arch), scenes)
+        assert len(s['architecture']) == 6
+
+    def test_spine_is_ordered_by_where_it_first_lands(self):
+        arch = json.loads(_reply())['architecture']
+        swap = {'s01': 's17', 's02': 's18', 's03': 's19', 's04': 's20',
+                's17': 's01', 's18': 's02', 's19': 's03', 's20': 's04'}
+        for a in arch:   # event-1 and event-5 trade scenes: event-1 now lands last
+            a['scene_id'] = swap.get(a['scene_id'], a['scene_id'])
+        s = parse_structure(_reply(arch=arch), _scenes())
+        assert [e['id'] for e in s['spine']][-1] == 'event-1'
+        assert [a['scene_id'] for a in s['architecture']] == \
+            sorted(a['scene_id'] for a in s['architecture'])
+
+    def test_unreadable_reply_is_an_error_not_an_empty_structure(self):
+        with pytest.raises(ValueError):
+            parse_structure('not json', _scenes())
+
+
+class TestSceneSummaries:
+    """Books extracted before 3b kept its summaries have none; 5a asks for
+    exactly those, and never replaces one a scene has."""
+
+    def test_blank_scenes_are_asked_for_and_filled(self):
+        scenes = _scenes()
+        scenes[0]['summary'] = scenes[2]['summary'] = ''
+        prompt = build_structure_prompt({}, scenes)
+        assert 'which have none yet: s01, s03.' in prompt
+        reply = _reply(summaries=[{'scene_id': 's01', 'summary': 'Nick arrives.'},
+                                  {'scene_id': 's03', 'summary': 'Gatsby waves.'},
+                                  {'scene_id': 's02', 'summary': 'Not asked for.'}])
+        s = parse_structure(reply, scenes)
+        assert s['scene_summaries'] == {'s01': 'Nick arrives.', 's03': 'Gatsby waves.'}
+        _, arch = structure_rows(s, scenes)
+        assert arch[0]['summary'] == 'Nick arrives.'
+        assert arch[1]['summary'] == 'Thing 2 happens.'
+
+    def test_a_blank_scene_left_without_one_is_a_problem(self):
+        scenes = _scenes()
+        scenes[0]['summary'] = ''
+        with pytest.raises(ReplyProblems) as e:
+            parse_structure(_reply(), scenes)
+        assert '1 scene(s) still have no summary: s01' in ' '.join(e.value.problems)
+
+    def test_no_blank_scenes_asks_for_none(self):
+        assert 'an empty list (every scene has one)' in build_structure_prompt({}, _scenes())
+
+
+class TestStructureRows:
+    def test_columns_come_from_the_scenes_not_the_model(self):
+        scenes = _scenes()
+        spine, arch = structure_rows(parse_structure(_reply(), scenes), scenes)
+        first = arch[0]
+        assert first['id'] == 's01'
+        assert first['summary'] == 'Thing 1 happens.'
+        assert first['value_shift'] == '+/-'
+        assert first['act'] == '1'
+        assert spine[0]['seq'] == '1'
+        # A spine event's act is its first anchor's
+        last_event = spine[-1]['id']
+        assert spine[-1]['act'] == next(a['act'] for a in arch if a['spine_event'] == last_event)
+
+
+class TestPrompts:
+    def test_structure_prompt_lists_scenes_and_carries_retry_problems(self):
+        prompt = build_structure_prompt({'tone': 'elegiac'}, _scenes(),
+                                        problems=['spine event x has no anchor scene'])
+        assert 's20' in prompt and 'elegiac' in prompt
+        assert 'spine event x has no anchor scene' in prompt
+        assert 'describing a finished book' in prompt
+
+    def test_themes_prompt_says_when_the_briefs_name_no_motifs(self):
+        prompt = build_themes_prompt({}, _scenes(3), [])
+        assert '(the briefs name no motifs)' in prompt
+
+
+class TestMotifMentions:
+    def test_every_mention_in_reading_order(self):
+        scenes = _scenes(3)
+        scenes[0]['motifs'] = 'fog pouring through the keyhole; the cold he carries'
+        assert motif_mentions(scenes) == [
+            ('s01', 'fog pouring through the keyhole'), ('s01', 'the cold he carries'),
+            ('s02', 'eyes'), ('s03', 'eyes')]
+
+
+def _themes_reply(scenes, **over):
+    reply = {
+        'themes': [{'id': f't{k}', 'name': f'T{k}', 'tier': 'primary' if k == 1 else 'secondary',
+                    'description': 'd'} for k in range(1, 4)],
+        'scene_themes': [{'scene_id': s['id'], 'themes': ['t1']} for s in scenes],
+        'motifs': [{'id': 'eyes', 'name': 'Watching eyes', 'aliases': ['Eyes', 'the eyes'],
+                    'tier': 'primary', 'mentions': [0, 1]}],
+    }
+    reply.update(over)
+    return json.dumps(reply)
+
+
+def _mentioned(n=4):
+    scenes = _scenes(n)
+    for s in scenes:
+        s['motifs'] = f'the eyes watching in scene {s["id"]}'
+    return scenes
+
+
+class TestParseThemes:
+    def test_a_good_reply(self):
+        scenes = _mentioned()
+        out = parse_themes(_themes_reply(scenes), scenes, motif_mentions(scenes))
+        assert out['scene_themes']['s01'] == ['t1']
+        motif = out['motifs'][0]
+        assert motif['aliases'] == ['eyes', 'the eyes']
+        assert motif['scenes'] == ['s01', 's02']    # computed from the mentions
+
+    def test_the_prompt_numbers_and_shortens_mentions(self):
+        scenes = _mentioned(2)
+        scenes[0]['motifs'] = 'x' * 300
+        prompt = build_themes_prompt({}, scenes, motif_mentions(scenes))
+        assert '[0] s01: ' + 'x' * 100 + '\n' in prompt
+        assert '[1] s02: the eyes watching' in prompt
+
+    def test_problems(self):
+        scenes = _mentioned()
+        reply = _themes_reply(
+            scenes,
+            scene_themes=[{'scene_id': 's01', 'themes': ['t1', 'ghost']},
+                          {'scene_id': 'invented', 'themes': []}],
+            motifs=[{'id': 'a', 'name': 'A', 'aliases': ['robe'], 'tier': 'primary', 'mentions': [0, 1]},
+                    {'id': 'b', 'name': 'B', 'aliases': ['Robe'], 'tier': 'tertiary', 'mentions': [1, 9]},
+                    {'id': 'c', 'name': 'C', 'aliases': [], 'tier': 'tertiary', 'mentions': [2]}])
+        with pytest.raises(ReplyProblems) as e:
+            parse_themes(reply, scenes, motif_mentions(scenes))
+        text = ' '.join(e.value.problems)
+        assert 'unknown theme(s): ghost' in text
+        assert "'invented', which is not a scene id" in text
+        assert '3 scene(s) missing from scene_themes' in text
+        assert 'mention [1] is claimed by both a and b' in text
+        assert 'mention [9], which does not exist' in text
+        assert 'motif c is named in 1 scene(s)' in text
+        assert "alias 'robe' is given to both a and b" in text   # Carol's live run did this
+
+    def test_no_motifs_when_some_recur_is_a_problem(self):
+        scenes = _mentioned()
+        with pytest.raises(ReplyProblems) as e:
+            parse_themes(_themes_reply(scenes, motifs=[]), scenes, motif_mentions(scenes))
+        assert 'motifs is empty' in ' '.join(e.value.problems)
+
+    def test_no_motifs_is_fine_when_the_briefs_name_none(self):
+        scenes = _scenes(3)
+        for s in scenes:
+            s['motifs'] = ''
+        out = parse_themes(_themes_reply(scenes, motifs=[]), scenes, motif_mentions(scenes))
+        assert out['motifs'] == []
+
+
+class TestReviewFixes:
+    """Regression tests for the #444 review."""
+
+    def test_row_keys_are_exactly_the_columns(self):
+        """TD: a key typo wrote a blank column with no error
+        (DictWriter's extrasaction='ignore')."""
+        from storyforge.elaborate import _ARCHITECTURE_COLS, _SPINE_COLS
+        scenes = _scenes()
+        spine, arch = structure_rows(parse_structure(_reply(), scenes), scenes)
+        assert set(spine[0]) == set(_SPINE_COLS)
+        assert set(arch[0]) == set(_ARCHITECTURE_COLS)
+
+    @pytest.mark.parametrize('words,ok', [(35, True), (36, False)])
+    def test_summary_length_boundary(self, words, ok):
+        scenes = _scenes()
+        scenes[0]['summary'] = ''
+        spine = _spine()
+        spine[0]['summary'] = ' '.join(['w'] * words)
+        reply = _reply(spine, summaries=[{'scene_id': 's01', 'summary': ' '.join(['w'] * words)}])
+        if ok:
+            parse_structure(reply, scenes)
+        else:
+            with pytest.raises(ReplyProblems) as e:
+                parse_structure(reply, scenes)
+            text = ' '.join(e.value.problems)
+            assert '36 words' in text and "s01's summary is empty or over 35 words" in text
+
+    def test_spine_ids_must_be_slugs_and_unique(self):
+        spine = _spine()
+        spine[1]['id'] = 'event-1'
+        spine[2]['id'] = 'Event Three'
+        with pytest.raises(ReplyProblems) as e:
+            parse_structure(_reply(spine), _scenes())
+        text = ' '.join(e.value.problems)
+        assert "'event-1' is empty, repeated, or not a lowercase-hyphenated slug" in text
+        assert "'Event Three' is empty, repeated" in text
+
+    def test_spine_act_is_its_first_anchors(self):
+        scenes = _scenes()
+        # event-2 anchors s05-s08, which start in act 1 and end in act 2
+        s = parse_structure(_reply(), scenes)
+        spine, _ = structure_rows(s, scenes)
+        assert scenes[4]['act'] == '1' and scenes[7]['act'] == '2'
+        assert spine[1]['act'] == '1'
+
+    def test_tiers_slugs_and_semicolon_aliases_in_themes(self):
+        from storyforge.extract_describe import TIERS, Tier
+        from typing import get_args
+        assert TIERS == get_args(Tier)
+        scenes = _mentioned()
+        reply = json.loads(_themes_reply(scenes))
+        reply['themes'][0]['tier'] = 'core'
+        reply['themes'][1]['id'] = 'two words'
+        reply['motifs'][0]['aliases'] = ['eyes; gaze']
+        with pytest.raises(ReplyProblems) as e:
+            parse_themes(json.dumps(reply), scenes, motif_mentions(scenes))
+        text = ' '.join(e.value.problems)
+        assert "theme t1's tier 'core' is not one of primary, secondary, tertiary" in text
+        assert "theme id 'two words' is empty, repeated" in text
+        assert "alias(es) contain a semicolon: 'eyes; gaze'" in text
+
+    def test_mention_numbers_that_are_not_integers_are_problems(self):
+        scenes = _mentioned()
+        reply = json.loads(_themes_reply(scenes))
+        reply['motifs'][0]['mentions'] = ['0', 1, 2]
+        with pytest.raises(ReplyProblems) as e:
+            parse_themes(json.dumps(reply), scenes, motif_mentions(scenes))
+        assert "names mention [0], which does not exist" in ' '.join(e.value.problems)
+
+    def test_the_mention_to_motif_map_is_returned(self):
+        scenes = _mentioned()
+        out = parse_themes(_themes_reply(scenes), scenes, motif_mentions(scenes))
+        assert out['mention_motif'] == {0: 'eyes', 1: 'eyes'}
+
+    def test_reply_problems_is_not_a_value_error(self):
+        """TD: _ask told the two apart only by handler order."""
+        assert not issubclass(ReplyProblems, ValueError)

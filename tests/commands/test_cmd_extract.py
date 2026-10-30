@@ -636,7 +636,14 @@ class TestPhaseExecution:
             'total_fixes': 0,
         })
 
+        # Phase 5 has its own tests (test_extract_phase5.py); here, only that
+        # a full run reaches it
+        phase5 = []
+        monkeypatch.setattr('storyforge.cmd_extract._run_phase_5',
+                            lambda *a, **k: phase5.append(a))
+
         main(['--force'])  # --force: the answers replace the fixture's values
+        assert len(phase5) == 1 and phase5[0][3] is True   # force reaches it
 
         # Should have submitted batches for phases 1, 2, and 3a at minimum
         batch_calls = mock_api.calls_for('submit_batch')
@@ -1252,3 +1259,25 @@ class TestKnowledgeChainKeepsSceneSummaries:
             'KNOWLEDGE_SCHEMA', scene_summary='The model wrote this.')}
         self._run(project_dir, mock_api, monkeypatch, replies, force=True)
         assert get_scene('act1-sc01', ref_dir)['summary'] == 'The author wrote this.'
+
+
+class TestMarkDrafted:
+    """#440: scenes-setup creates the rows before extraction, and phase 1 set
+    `drafted` only on rows it created, so every extracted book's scenes had a
+    blank status and read as unstarted."""
+
+    def test_blank_status_with_prose_becomes_drafted_and_others_are_kept(self, project_dir):
+        from storyforge.cmd_extract import _mark_drafted
+        from storyforge.elaborate import get_scene, update_scene
+        ref = os.path.join(project_dir, 'reference')
+        scenes = os.path.join(project_dir, 'scenes')
+        update_scene('act1-sc01', ref, {'status': ''})
+        update_scene('act1-sc02', ref, {'status': 'briefed'})
+        update_scene('new-x1', ref, {'status': ''})
+        with open(os.path.join(scenes, 'new-x1.md'), 'w') as f:
+            f.write('\n  \n')                     # no prose yet
+        n = _mark_drafted(ref, scenes, ['act1-sc01', 'act1-sc02', 'new-x1', 'no-row'])
+        assert n == 1
+        assert get_scene('act1-sc01', ref)['status'] == 'drafted'
+        assert get_scene('act1-sc02', ref)['status'] == 'briefed'
+        assert get_scene('new-x1', ref)['status'] == ''

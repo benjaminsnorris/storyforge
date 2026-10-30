@@ -41,7 +41,7 @@ When extracting data interactively, use canonical IDs from these registries for 
 Based on project state:
 
 - **No scene files** → Author needs to split their manuscript first. Route to `/storyforge:scenes` (setup mode) or help them split interactively.
-- **Scene files exist, no CSV data or old metadata CSV** → Full extraction needed (all 4 phases). The extraction will read the prose and build all three CSVs from scratch.
+- **Scene files exist, no CSV data or old metadata CSV** → Full extraction needed (all phases). The extraction will read the prose and build the scene CSVs, the registries and the ledger from scratch, then describe the spine, architecture, themes and motifs.
 - **Scene files + partial elaboration data** → Targeted extraction — only run phases for missing data.
 
 ## Step 3: Execute Extraction
@@ -59,11 +59,16 @@ Options:
 - `--phase 1` — Extract skeleton (scenes.csv) only
 - `--phase 2` — Extract intent only (needs phase 1)
 - `--phase 3` — Extract briefs only (needs phases 1-2)
+- `--phase 4` — Extract commitments only (needs phases 1-3)
+- `--phase 5` — Describe the book: spine, architecture, themes, motifs (needs phases 1-3; see below)
+- `--force` — Overwrite extracted values (phase 5: regenerate only files it wrote that nobody has edited since)
 - `--expand` — Include expansion analysis (for novella-to-novel work)
 - `--dry-run` — Print prompts without calling the API
 
-For full extraction with cleanup: `./storyforge extract` (runs all phases + cleanup)
+For full extraction with cleanup: `./storyforge extract` (runs all phases + cleanup, then phase 5)
 For expansion planning: `./storyforge extract --expand`
+
+**Phase 5, describe.** Describes the book as written, from what phases 0-4 found: `spine.csv` and `architecture.csv` (the irreducible events, and the anchor scenes that carry them, chosen from existing scenes), `themes.csv` and `motif-taxonomy.csv`, plus blank scene summaries, `architecture_scene`, `theme_threads` and a placeholder `project.genre` / `subgenre`. Each brief's `motifs` cell becomes the motif ids its descriptions were grouped into, and the descriptions themselves (every one, including images that recur nowhere else) move to the brief's `motif_details` column, which drafting reads beside the ids. The story summary, bibles and voice guide follow in later steps (#440). It never replaces the author's work: a step whose files are the author's (or are extracted files the author has since edited) is skipped and says so, and `--force` regenerates only files it wrote that nobody has edited since (`working/extraction-provenance.csv`). It commits itself. About $0.40 on a 40-scene book. Present what it wrote as a description to check, not a plan to follow: if the book's structure fails a floor check, that is a finding about the book or the rubric.
 For cleanup only (on already-extracted data): `./storyforge extract --cleanup-only`
 
 Cleanup runs automatically after full extraction. It normalizes knowledge wording (fuzzy-matches mismatched facts), fills timeline gaps (interpolates from adjacent scenes), and fixes MICE thread issues (removes duplicates and orphaned closes). In full/coach mode, fixes are applied automatically. In strict mode, issues are reported for the author to fix.
