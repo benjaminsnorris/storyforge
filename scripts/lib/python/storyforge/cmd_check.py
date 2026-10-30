@@ -14,7 +14,9 @@ Nothing in the prose is ever edited.
 
 A scene that passes has its commitments committed to the ledger (and any
 brief fact it was found to establish gets its quote); one that doesn't
-leaves the ledger as it was, and its findings are the report. Later scenes
+leaves the ledger as it was, its findings are the report, and it is listed
+in `working/gate-pending.csv` (`write` won't draft past it until a check or
+redraft passes). Later scenes
 are still checked, but without a failing scene's facts in the ledger: the
 report says so. The report is written to `working/check-report.md` and
 committed with the ledger. Exit 1 when any scene did not pass.
@@ -27,6 +29,8 @@ import os
 import sys
 
 from storyforge.common import detect_project_root, install_signal_handlers, log, set_log_file
+
+REPORT_PATH = 'working/check-report.md'
 
 
 def parse_args(argv):
@@ -87,6 +91,7 @@ def main(argv=None):
         except gate.GateError as e:
             log(f'ERROR: {e}')
             report += [f'## {scene_id}: not checked', '', f'- {e}', '']
+            gate.mark_pending(project_dir, scene_id, 'advisor', f'not checked: {e}')
             failed.append(scene_id)
             continue
         lines = gate.report_lines(result)
@@ -101,12 +106,14 @@ def main(argv=None):
             if failed:
                 unchecked_after.append(scene_id)
         else:
+            gate.mark_pending(project_dir, scene_id, 'advisor',
+                              f'{len(lines)} problem(s); see {REPORT_PATH}')
             failed.append(scene_id)
 
     if unchecked_after:
         report += ['## Note', '', f'Checked without the facts of the scene(s) that did not '
                    f'pass ({", ".join(failed)}): {", ".join(unchecked_after)}.', '']
-    path = os.path.join(project_dir, 'working', 'check-report.md')
+    path = os.path.join(project_dir, REPORT_PATH)
     with open(path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(report))
     log(f'Report: {path}')

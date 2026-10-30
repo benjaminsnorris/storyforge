@@ -255,6 +255,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
         if ledger.fill_quote(new, rid, quote):
             result.quotes_filled.append(rid)
     ledger.save(project_dir, new, command=command)
+    clear_pending(project_dir, scene_id)
     result.committed = True
     return result
 
@@ -426,3 +427,63 @@ def report_lines(result: GateResult) -> list[str]:
             lines.append('NOTE (brief items no binding fact matches, not checked): '
                          + '; '.join(result.check.unknown_brief_items))
     return lines
+
+
+# ============================================================================
+# Scenes waiting on the gate: working/gate-pending.csv
+# ============================================================================
+
+#: Scenes whose prose is on disk but didn't pass the gate, so their facts
+#: aren't in the ledger. `write` won't draft a scene after one (it would be
+#: drafted from an incomplete ledger); a pass, through `write` or
+#: `storyforge check`, takes it off.
+PENDING_PATH = 'working/gate-pending.csv'
+_PENDING_COLUMNS = ['scene_id', 'command', 'reason']
+
+
+def _pending_file(project_dir: str) -> str:
+    return os.path.join(project_dir, PENDING_PATH)
+
+
+def pending(project_dir: str) -> dict[str, dict[str, str]]:
+    """Scene id → {scene_id, command, reason} for each scene waiting on the gate."""
+    path = _pending_file(project_dir)
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding='utf-8') as f:
+        lines = [line.rstrip('\n') for line in f if line.strip()]
+    if not lines or lines[0].split('|') != _PENDING_COLUMNS:
+        raise GateError(f'{PENDING_PATH}: the header must be {"|".join(_PENDING_COLUMNS)}')
+    out = {}
+    for line in lines[1:]:
+        cells = line.split('|')
+        if len(cells) != len(_PENDING_COLUMNS):
+            raise GateError(f'{PENDING_PATH}: a row with {len(cells)} cells: {line[:80]!r}')
+        out[cells[0]] = dict(zip(_PENDING_COLUMNS, cells))
+    return out
+
+
+def _write_pending(project_dir: str, rows: dict[str, dict[str, str]]) -> None:
+    path = _pending_file(project_dir)
+    if not rows:
+        if os.path.isfile(path):
+            os.remove(path)
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        f.write('|'.join(_PENDING_COLUMNS) + '\n')
+        for row in rows.values():
+            f.write('|'.join(row[c] for c in _PENDING_COLUMNS) + '\n')
+
+
+def mark_pending(project_dir: str, scene_id: str, command: str, reason: str) -> None:
+    from storyforge.common import csv_safe
+    rows = pending(project_dir)
+    rows[scene_id] = {'scene_id': scene_id, 'command': command, 'reason': csv_safe(reason)}
+    _write_pending(project_dir, rows)
+
+
+def clear_pending(project_dir: str, scene_id: str) -> None:
+    rows = pending(project_dir)
+    if rows.pop(scene_id, None) is not None:
+        _write_pending(project_dir, rows)

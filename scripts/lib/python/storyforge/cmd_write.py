@@ -1,7 +1,14 @@
 """storyforge write — Autonomous scene drafting.
 
-Drafts scenes using Claude via direct API or batch API. Supports parallel
-wave drafting, coaching level adaptation, and brief-aware prompts.
+Drafts scenes one at a time in reading order (rethink plan §3.3), each
+from its brief and the ledger as of that scene, and gates each before the
+next (plan §3.2, `storyforge.gate`): its facts are extracted and checked
+against the book and its brief, fixed once if needed, and committed to the
+ledger only when clean. A scene that still fails is kept, listed in
+`working/gate-pending.csv`, and stops the run. `--batch` drafts every scene
+at once through the Batch API, ungated, until the E4 comparison of parallel
+and sequential drafting decides whether it stays. Coaching levels coach and
+strict write briefs or constraints, not prose, and are not gated.
 
 Usage:
     storyforge write                        # Draft all remaining scenes
@@ -9,6 +16,7 @@ Usage:
     storyforge write act1-sc01 act1-sc15    # Draft a range (by position)
     storyforge write --act 2                # Draft all scenes in act 2
     storyforge write --dry-run act1-sc01    # Build prompt without invoking
+    storyforge write --batch --act 2        # Batch API, ungated (WARNING)
 """
 
 import argparse
@@ -51,7 +59,11 @@ def parse_args(argv):
     parser.add_argument('--force', action='store_true',
                         help='Re-draft scenes even if already drafted')
     parser.add_argument('--direct', action='store_true',
-                        help='Use direct API calls (not batch)')
+                        help='Draft one scene at a time, each gated (the default; '
+                             'kept for scripts that pass it)')
+    parser.add_argument('--batch', action='store_true',
+                        help='Draft through the Batch API: half price, but no scene '
+                             'is gated (nothing checks it against the book)')
     parser.add_argument('--coaching', choices=['full', 'coach', 'strict'],
                         help='Set coaching level')
     parser.add_argument('--interactive', '-i', action='store_true',
@@ -91,10 +103,10 @@ def main(argv=None):
     # Resolve write mode
     if args.interactive:
         write_mode = 'interactive'
-    elif args.direct:
-        write_mode = 'direct'
-    else:
+    elif args.batch:
         write_mode = 'batch'
+    else:
+        write_mode = 'direct'
 
     # API key check for non-interactive modes
     if not args.dry_run and write_mode != 'interactive':
@@ -125,6 +137,14 @@ def main(argv=None):
             f'already drafted ({skipped} skipped).')
         return
 
+    # A scene that didn't pass the gate has no facts in the ledger: drafting
+    # after it would draft from an incomplete ledger
+    if coaching == 'full' and not args.dry_run:
+        _exit_if_gate_pending(project_dir, pending_ids)
+    if write_mode == 'batch' and coaching == 'full':
+        log('WARNING: --batch drafts every scene at once, so no scene is gated: nothing '
+            'checks the prose against the book or its brief, and no facts are added to '
+            'the ledger. Run `storyforge check` on the scenes afterwards.')
     # Cost forecasting
     if not args.dry_run:
         model = select_model('drafting')
@@ -271,6 +291,63 @@ def _resolve_filter(args) -> tuple:
         return ('range', positional[0], positional[1])
     log('ERROR: Too many positional arguments')
     sys.exit(1)
+
+
+def _exit_if_gate_pending(project_dir: str, to_draft: list[str]) -> None:
+    """Exit 1 when a scene waiting on the gate (`gate.pending`) comes before
+    any scene to draft, in reading order. Drafting the waiting scene itself
+    is allowed: that is how it gets through."""
+    from storyforge import gate, ledger
+    try:
+        waiting = gate.pending(project_dir)
+    except gate.GateError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    if not waiting:
+        return
+    order = ledger.scene_order(project_dir)
+    first = min(order.get(s, 0) for s in to_draft)
+    blocking = sorted((s for s in waiting if s not in to_draft
+                       and order.get(s, -1) < first), key=lambda s: order.get(s, -1))
+    if blocking:
+        log(f'ERROR: {len(blocking)} earlier scene(s) did not pass the gate, so their '
+            f'facts are not in the ledger: {", ".join(blocking)}')
+        for s in blocking:
+            log(f'  {s}: {waiting[s]["reason"]}')
+        log('Fix the prose and run `storyforge check <id>`, or redraft it with '
+            '`storyforge write --scenes <id> --force`.')
+        sys.exit(1)
+
+
+def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, command: str,
+                        log_dir: str) -> tuple[bool, str]:
+    """Gate the scene just written to `scene_file` (fix once, re-check; plan
+    §3.2), writing the fixed prose back. Returns (passed, why not). A scene
+    that doesn't pass is listed in `gate.pending`; its prose stays."""
+    from storyforge import gate
+    with open(scene_file, encoding='utf-8') as f:
+        prose = f.read()
+    log(f'Gating scene {scene_id}...')
+    try:
+        out = gate.gate_and_fix(project_dir, scene_id, command=command, prose=prose,
+                                log_dir=os.path.join(log_dir, 'gate'))
+    except gate.GateError as e:
+        gate.mark_pending(project_dir, scene_id, command, f'not gated: {e}')
+        return False, f'the gate could not finish: {e}'
+    if out.fixed:
+        with open(scene_file, 'w', encoding='utf-8') as f:
+            f.write(out.prose)
+        log(f'  The gate fixed {len(gate.problems_to_fix(out.first))} problem(s) and re-checked.')
+    for line in gate.report_lines(out.result):
+        log(f'  {line}')
+    if out.result.passed:
+        log(f'  Gate passed: {len(out.result.proposed)} fact(s) added to the ledger.')
+        return True, ''
+    problems = sum(1 for line in gate.report_lines(out.result)
+                   if not line.startswith('NOTE'))
+    gate.mark_pending(project_dir, scene_id, command,
+                      f'{problems} problem(s) after one fix; see working/logs/drafting-log.txt')
+    return False, f'{problems} problem(s) left after one fix (listed above)'
 
 
 def _filter_pending(filtered_ids, project_dir, metadata_csv, force, filter_mode):
@@ -429,6 +506,11 @@ def _extract_scene_from_response(log_file: str, out_file: str,
 _MIN_SCENE_WORDS = 100
 
 
+def gate_pending_path() -> str:
+    from storyforge.gate import PENDING_PATH
+    return PENDING_PATH
+
+
 def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
                              metadata_csv: str, coaching: str,
                              head_before: str, written_by: str = '') -> tuple:
@@ -469,7 +551,9 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
             paths = ['working/coaching/', 'working/logs/']
             msg = f'{coaching.capitalize()}: {scene_id}'
         else:
-            paths = [f'scenes/{scene_id}.md', 'reference/', 'working/logs/']
+            paths = [f'scenes/{scene_id}.md', 'reference/', 'working/logs/',
+                     'working/audit-log.csv', 'working/.audit-snapshot.csv',
+                     gate_pending_path()]
             msg = f'Draft scene {scene_id}'
         if written_by:
             msg += f' (refusal fallback: written by {written_by})'
@@ -643,7 +727,10 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
     failed), ``failed`` naming each scene not drafted and why. A bad reply
     (refused, cut off, unsafe) skips only its scene; any other API failure
     ends the loop, and that scene and every later one go into ``failed``.
-    Interactive replies are written by the CLI and are not checked."""
+    Interactive replies are written by the CLI and are not checked for
+    safety. At coaching ``full`` each scene is then gated (plan §3.2: fix
+    once, re-check); one that doesn't pass is committed, listed in
+    ``gate.pending`` and ends the loop (Ben, 2026-10-30)."""
     drafted_count = 0
     total_words = 0
     failed: list[str] = []
@@ -689,6 +776,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
         r = _git(project_dir, 'rev-parse', 'HEAD', check=False)
         head_before = r.stdout.strip() if r.returncode == 0 else 'none'
+        # The gate records which command wrote the prose
+        command = 'redraft' if os.path.isfile(scene_file) else 'draft'
 
         scene_log = os.path.join(log_dir, f'drafting-{scene_id}.json')
         model = select_model('drafting')
@@ -740,10 +829,25 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             failed.append(f'{scene_id} ({reason.rstrip(".")})')
             continue
 
+        gate_problem = ''
+        if coaching == 'full' and os.path.isfile(scene_file):
+            passed, gate_problem = _gate_drafted_scene(project_dir, scene_id, scene_file,
+                                                       command, log_dir)
+
+        # The prose is committed either way: a scene the gate stopped is kept
+        # for the author, in gate.pending, with its facts out of the ledger
         wc, ok = _verify_and_commit_scene(
             scene_id, project_dir, scenes_dir, metadata_csv, coaching,
             head_before, written_by=_written_by(scene_log),
         )
+        if gate_problem:
+            log(f'ERROR: Scene {scene_id} did not pass the gate: {gate_problem}.')
+            log('Stopping: later scenes would be drafted without its facts in the ledger.')
+            failed.append(f'{scene_id} (did not pass the gate: {gate_problem}; its prose '
+                          f'is kept, listed in {gate_pending_path()})')
+            failed.extend(f'{sid} (not attempted: the run stopped at {scene_id})'
+                          for sid in pending_ids[i + 1:])
+            break
         if ok:
             drafted_count += 1
             total_words += wc

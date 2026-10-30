@@ -204,10 +204,10 @@ class TestBatchMode:
             return [sid for sid, r in results.items() if r != 'errored']
         monkeypatch.setattr('storyforge.cmd_write.download_batch_results', fake_download)
         if code is None:
-            main(['--scenes', ','.join(results)])
+            main(['--batch', '--scenes', ','.join(results)])
             return
         with pytest.raises(SystemExit) as exc:
-            main(['--scenes', ','.join(results)])
+            main(['--batch', '--scenes', ','.join(results)])
         assert exc.value.code == code
 
     @pytest.mark.parametrize('bad, reason', [
