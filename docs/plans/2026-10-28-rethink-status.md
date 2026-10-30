@@ -1,6 +1,6 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-29 (evening), at v1.86.0. Handoff for the next session: **Decisions** and **Next steps** below. Start here when resuming the rethink in a new session. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`.
+Last updated 2026-10-29 (night), at v1.86.2 (E8 gaps done). Handoff for the next session: **Decisions** and **Next steps** below. Start here when resuming the rethink in a new session. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`.
 
 ## Where we are
 
@@ -22,7 +22,7 @@ Last updated 2026-10-29 (evening), at v1.86.0. Handoff for the next session: **D
 - `tests/test_hone.py::test_a_mapping_never_takes_an_alias_from_its_owner` (meridian-line `5433d3f`).
 
 **Left in Phase 1:**
-- the remaining `KEY: value` parsers. Characterize, intent and brief fields moved to structured outputs in v1.85.0 (#377). Extract's skeleton phase is next: it shares the time-cue lines with `timeline.parse_cues`, whose wording evals-56 is testing;
+- the remaining `KEY: value` parsers. Characterize, intent and brief fields moved to structured outputs in v1.85.0 (#377). Extract's skeleton phase is next: it shares the time-cue lines with `timeline.parse_cues`, whose wording settled in v1.86.1 (#380);
 - the remaining warn-and-continue sites.
 
 **Dashboard (v1.86.0, #378, closes #371):** Storyforge sends versioned `dashboard_data` (schema version 1, contract in `docs/agent-reference.md`), and Bookshelf renders it (bookshelf#30). The renderer and `dashboard_html` are gone, and `storyforge visualize` writes `working/dashboard-data.json`. Folding the data into the Phase 2 `export` bundle is still to do.
@@ -53,7 +53,7 @@ All eight suites replay offline: 2106 recorded calls, $0 to rerun, $10.80 if run
 | `e3-extraction` | extraction captures the fact behind each E1 error | 0.29 with structured outputs (0.24 before, v1.80.0); 0.76 with partial (0.82) | ≥ 0.85 |
 | `e5-roundtrip` | facts a redraft-from-brief changes (10 shared-dark Act 1 scenes) | 3.2 per scene (7.2) | coverage only (trend metric) |
 | `e7-classics` | continuity flags on *A Christmas Carol* (2 runs) and *The Plastic Age* (1 run); no real errors | 115 flags, all noise: 96 FP, 7 deliberate, 12 extraction errors (Carol alone: 60) | 0 noise, 0 unreviewed |
-| `e8-revision-safety` | today's passes reintroduce E1 tool-introduced errors | 5 of 21, 2 halted (a cut-off naturalness redraft and a refused redraft-from-brief now halt) | 0 |
+| `e8-revision-safety` | today's passes reintroduce E1 tool-introduced errors | 6 of 35, 2 halted (a naturalness redraft with no reply and a refused redraft-from-brief); 15 unreplayable, each with its reason (5 of 21 before the E8 gaps work) | 0 |
 | `e4-generation` | draft shared-dark Act 1 (23 scenes) with today's `write`, judge it | 22 drafted, 1 refused; CP10k 18.2 (judge), 0.49 (shipped checker); BPS 2.86; length drift 0.054; voice 4.69 (author 4.75). $5.77 if live | every scene drafted (fails: 1 refused) |
 
 Read the exact numbers from `evals/baseline.json`; compare a run with `python3 evals/run.py` (deltas are printed).
@@ -167,17 +167,26 @@ Start by reading this doc, `CLAUDE.md` and `docs/agent-reference.md`.
 - **Process:** one PR per step, followed by the 5-agent review (CLAUDE.md). Then wait for Ben's "fix all of them in logical commits", and merge in order once the checks pass.
 - **Spending:** estimate before any recording.
 
-1. **E8 gaps** (Ben's priority). `python3 evals/e8/cli.py plan` lists every case and why each is excluded; it makes no API calls. At v1.86.0: 23 cases replayed, about $9.70 if recorded live, and these excluded:
-   - **15 "pre-pass project predates `reference/scenes.csv`"** (governor-011, -013, -014, shared-dark-018, -023, -030, and more). These trees use the old metadata layout. The plan was to report them, not migrate them. To close the gap, migrate the materialized copy in the eval work dir to the three-file CSV model before replaying, never the book repo. See if `storyforge` already has a migration path (`cmd_cleanup`, `migrate`, `extract`'s skeleton). If a tree can't be migrated faithfully, say why per case.
-   - **5 "introducing commit changed none of the contradicted scenes"** (lantern-folk-027, thornwall-002, -015, -021, -028). Check whether E1's `introduced_by` points at the wrong commit or names the wrong scene, or whether the error came in through a reference file. Fix the case data (E1 `verify` must still pass) or replay the right scene.
-   - **1 hone pass, `governor-020`** (registries/physical-states). Add a `hone` family to `evals/e8`. It replays `hone`'s physical-state path on the case's project, and the judge reads the resulting CSV fact instead of prose.
-   - **9 CSV-level** (lantern-folk-029 to -034, …). There's no prose to redraft, so judge the CSV the pass writes, the same way as hone.
-   - **14 holdout:** these stay excluded by design.
-   - **Bug: the suite's notes never list the unreplayable cases.** `evals/suites/e8_revision_safety.py` builds `notes` from `sel.excluded` before the loop adds them. Move it after the loop.
-   - **Recording:** record the new cases with `--mode auto` after estimating. Each case costs about $0.41, so up to 30 more is about $12. Then refresh the baseline.
+1. ~~**E8 gaps.**~~ Done (#383; $3.88 recorded, $0.70 re-recorded after the review). 37 cases are run, up from 23. 35 are judged and 2 halt, as before (a refused redraft and a naturalness redraft with no reply). Of the 35, 6 are reintroduced (was 5 of 21). What changed:
+   - **Scene metadata migrated:** a pre-pass tree with `scene-metadata.csv` gets a port of the scenes.csv step of Storyforge's removed `storyforge-migrate-elaborate` (e22a58c4), applied in the copy. It approximates the books' history: they actually got `scenes.csv` from `extract`'s skeleton phase. This adds governor-013 and -014, shared-dark-030, -037 and -038, and thornwall-020.
+   - **Data passes judged on what they write:** brief fix (thornwall-033, -035), `hone` physical-states (governor-020, thornwall-037), `illustrate --state` (lantern-folk-029 to -032) and `illustrate --prompts` (lantern-folk-033). A separate judge prompt reads what the pass wrote. The prose judge prompt is unchanged.
+   - **Renamed scenes** are found through E1's id-maps.
+   - **The suite's notes** now list every unreplayable case.
+   - **Case data:**
+     - thornwall-028's introducing commit is 749a82b, which wrote both "six" and "nine" years (7919d1a only reworded "six").
+     - thornwall-015's error dates from s20's first draft (6456a04), not pattern-thinning.
+   - **New reintroduction:** thornwall-020 (revision plan, a newly migrated tree). The data passes reintroduced nothing.
+   - **Review fixes:** a data pass that exits non-zero errors the suite, a cut-off hone batch halts, and a keyless replay works (illustrate checks the key itself). `written()` diffs CSVs by row id, so a brief fix shows only its row. `errors_per_10k_words` counts prose hits only. A `not_present` that was never judged says so.
+   - **Still excluded (14 holdout, plus):**
+     - **10 YAML-era trees** (governor-011, thornwall-002, -005, -008, -011, -013, -014, -015, -019, -021). Today's `revise` refuses YAML plans, and Storyforge's YAML-to-CSV migration was lost in #13's squash. Replaying them would mean inventing both conversions. Ben's call if he wants that.
+     - **shared-dark-018 and -023:** redrafted from an outline before briefs existed. Today's redraft needs briefs, and none are invented.
+     - **lantern-folk-027 (PRM):** the pass wrote only the promise (a11). The missing payoff is in a scene it never touched.
+     - **lantern-folk-034:** no introducing commit, because the prompt files were untracked render output.
+     - **lantern-folk-032:** the `--state` pass logged the prose of the time faithfully; the log went stale after a later prose fix, which a replay can't show (`EXCLUDED_CASES`).
+     - **thornwall-028:** its introducing commit wrote both sides, so the pre-pass tree has no established fact to contradict (`EXCLUDED_CASES`).
 2. **E6** (approved, about $40): two more independent E4 runs plus the paid E2 suites, under separate recording keys, to measure run-to-run variance. Plan §4.2 has the design. E3's tier comparison and E3's recall moves are both "inside noise until E6"; report them against E6's spread.
 3. **Phase 1 leftovers:**
-   - Extract's **skeleton** phase still parses `KEY: value` lines. It shares the cue lines with `timeline.parse_cues`, so move it to a structured output only after evals-56's CUE_INSTRUCTIONS experiment settles.
+   - Extract's **skeleton** phase still parses `KEY: value` lines. It shares the cue lines with `timeline.parse_cues`. The CUE_INSTRUCTIONS experiment settled in v1.86.1 (#380, TIME_GAP/TIME_SPAN wording), so the skeleton can move now, with that wording.
    - Then the remaining **warn-and-continue** sites. Grep for `WARNING` followed by `continue` in paths that write output.
 4. **Follow-ups noted in PRs:**
    - `hone.hone_briefs` also rewrites briefs and should use the brief-fix name check (`cmd_revise._invented_names`; move it to a shared module).

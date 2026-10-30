@@ -4,7 +4,7 @@ See evals/e8/__init__.py. Gate (plan §5, Phase 4): zero errors reintroduced.
 """
 
 from e1 import load_cases, load_holdout
-from e8 import PassHalted, family, judge, prepare, replay, select
+from e8 import DATA_FAMILIES, PassHalted, family, judge, prepare, replay, select
 from harness import Gate, Suite, SuiteOutput
 
 MIN_REPLAYED = 15  # below this the rate is too noisy to gate on
@@ -12,10 +12,10 @@ MIN_REPLAYED = 15  # below this the rate is too noisy to gate on
 
 def run(ctx):
     sel = select(load_cases(), load_holdout())
-    notes = [f'excluded {len(ids)}: {reason}' for reason, ids in sorted(sel.excluded.items())]
+    notes = []
     by_code: dict[str, dict[str, float]] = {}
     by_family: dict[str, list[int]] = {}
-    reintroduced = replayed = words = halted = 0
+    reintroduced = replayed = words = prose_hits = halted = 0
     for case in sel.cases:
         try:
             project, scene_id = prepare(case, ctx.work_dir)
@@ -23,16 +23,25 @@ def run(ctx):
             sel.exclude(f'unreplayable: {e}', case['id'])
             continue
         try:
-            prose = replay(case, project, scene_id)
+            output = replay(case, project, scene_id)
         except PassHalted as e:
             halted += 1
             notes.append(f'{case["id"]} ({scene_id}): halted, nothing written — {str(e)[:160]}')
             continue
-        verdict = judge(case, prose)
+        data = family(case) in DATA_FAMILIES
+        unjudged = data and not output.strip()
+        if unjudged:  # a data pass that wrote nothing cannot have reintroduced anything
+            verdict = {'verdict': 'not_present', 'evidence': ''}
+        elif not output.strip():  # prose replays raise rather than return nothing
+            raise RuntimeError(f'{case["id"]}: the replay returned no prose')
+        else:
+            verdict = judge(case, output)
         replayed += 1
-        words += len(prose.split())
         hit = verdict['verdict'] == 'reintroduced'
         reintroduced += hit
+        if not data:  # errors per 10k words counts prose only, on both sides
+            words += len(output.split())
+            prose_hits += hit
         code = by_code.setdefault(case['code'], {'replayed': 0, 'reintroduced': 0})
         code['replayed'] += 1
         code['reintroduced'] += hit
@@ -40,12 +49,16 @@ def run(ctx):
         fam[0] += 1
         fam[1] += hit
         notes.append(f'{case["id"]} ({scene_id}): {verdict["verdict"]}'
+                     + (' (wrote nothing; not judged)' if unjudged else '')
                      + (f' — "{verdict.get("evidence", "")[:120]}"' if hit else ''))
+    # after the loop, which adds the cases prepare() could not replay
+    notes[:0] = [f'excluded {len(ids)}: {reason} ({", ".join(ids)})'
+                 for reason, ids in sorted(sel.excluded.items())]
     unreplayable = sum(len(v) for k, v in sel.excluded.items() if k.startswith('unreplayable'))
     return SuiteOutput(
         metrics={'replayed': replayed, 'reintroduced': reintroduced,
                  'reintroduction_rate': round(reintroduced / replayed, 3) if replayed else 0.0,
-                 'errors_per_10k_words': round(reintroduced / words * 10000, 3) if words else 0.0,
+                 'errors_per_10k_words': round(prose_hits / words * 10000, 3) if words else 0.0,
                  'unreplayable': unreplayable, 'halted': halted,
                  **{f'family.{k}.replayed': v[0] for k, v in by_family.items()},
                  **{f'family.{k}.reintroduced': v[1] for k, v in by_family.items()}},
