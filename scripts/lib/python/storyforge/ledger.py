@@ -201,15 +201,21 @@ def save_to(ref_dir: str, rows: list[dict[str, str]], *, command: str) -> None:
     with no `introduced_by` does too. The log entries are a diff of the file
     before and after the write, read back, so they record what is on disk.
     The ledger is written first: a log that can't be written is a WARNING
-    and the ledger write stands (`storyforge.audit` says why).
+    and the ledger write stands (`storyforge.audit` says why). A change made
+    on disk since the last logged write (by hand) is logged first, as
+    `command=hand-edit`, from the snapshot `audit` keeps.
     """
     from storyforge import audit
     path = os.path.join(ref_dir, LEDGER_FILE)
+    project_dir = audit.project_of(ref_dir)
     with _SAVE_LOCK:
         old = read_ledger(path) if os.path.isfile(path) else []
+        # What changed on disk since the last logged write was not this writer
+        audit.log_hand_edits(project_dir, old)
         write_ledger(path, rows)
-        audit.record(audit.project_of(ref_dir), old, read_ledger(path),
-                     command=command)
+        written = read_ledger(path)
+        audit.record(project_dir, old, written, command=command)
+        audit.write_snapshot(project_dir, written)
 
 
 def save(project_dir: str, rows: list[dict[str, str]], *, command: str) -> None:
@@ -975,4 +981,5 @@ def migrate_files(ref_dir: str, *, dry_run: bool = False) -> FileMigration:
     # One summary entry, not one per row (`storyforge.audit` says why)
     from storyforge import audit
     audit.record_migration(audit.project_of(ref_dir), migration.rows, old)
+    audit.write_snapshot(audit.project_of(ref_dir), read_ledger(path))
     return result

@@ -192,3 +192,31 @@ class TestCleanupKnowsTheLog:
         from storyforge.cmd_cleanup import EXPECTED_WORKING_FILES, EXPECTED_CSV_SCHEMAS
         assert audit.LOG_FILE in EXPECTED_WORKING_FILES
         assert EXPECTED_CSV_SCHEMAS[audit.LOG_PATH] == audit.COLUMNS
+
+
+class TestSnapshot:
+    def test_migration_starts_the_snapshot(self, project_dir):
+        ref = _ref(project_dir)
+        os.remove(os.path.join(ref, 'commitments.csv'))
+        for name in ledger.LEGACY_FILES:
+            shutil.copy(os.path.join(LEGACY_FIXTURE, name), ref)
+        ledger.migrate_files(ref)
+        assert audit.read_snapshot(str(project_dir)) == ledger.load_from(ref)
+
+    def test_each_save_updates_the_snapshot(self, project_dir):
+        rows = ledger.load(project_dir) + [_fact('snap')]
+        ledger.save(project_dir, rows, command='test')
+        assert audit.read_snapshot(str(project_dir)) == ledger.load(project_dir)
+
+    def test_hand_edit_entries(self, project_dir):
+        ledger.save(project_dir, ledger.load(project_dir) + [_fact('h')], command='test')
+        rows = ledger.load(project_dir)
+        rows[-1]['statement'] = 'edited'
+        ledger.write_ledger(ledger.ledger_path(str(project_dir)), rows)   # by hand
+        entries = audit.log_hand_edits(str(project_dir), ledger.load(project_dir))
+        assert [(e['fact_id'], e['command']) for e in entries] == [('h', 'hand-edit')]
+        assert audit.log_hand_edits(str(project_dir), ledger.load(project_dir)) == []
+
+    def test_cleanup_expects_the_snapshot(self):
+        from storyforge.cmd_cleanup import EXPECTED_WORKING_FILES
+        assert audit.SNAPSHOT_FILE in EXPECTED_WORKING_FILES

@@ -204,7 +204,7 @@ GN_OPTIONAL_CSV_FILES: set[str] = {
 # dashboard (#371); an author's copy is left alone, never flagged or removed.
 EXPECTED_WORKING_FILES = set(
     'pipeline.csv craft-weights.csv overrides.csv exemplars.csv dashboard.html '
-    'dashboard-data.json cleanup-report.csv audit-log.csv'.split()
+    'dashboard-data.json cleanup-report.csv audit-log.csv .audit-snapshot.csv'.split()
 )
 
 

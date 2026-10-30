@@ -1032,7 +1032,7 @@ def main(argv=None):
             # illustration-export/ tree (167 MB on the book #306 was filed
             # about, which this release deliberately declines to delete) into a
             # commit titled "upgrade to normalized registry model".
-            ['reference/', 'working/audit-log.csv',
+            ['reference/', 'working/audit-log.csv', 'working/.audit-snapshot.csv',
              os.path.join('manuscript', 'assets', 'illustrations')],
         )
         log('')

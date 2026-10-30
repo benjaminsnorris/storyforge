@@ -27,6 +27,15 @@ were lost. That is not a warn-and-continue past wrong output: the digest
 reads the ledger's `reviewed` column, never the log, so nothing downstream
 is wrong; only the history is incomplete, and the WARNING says where.
 
+**Edits made outside Storyforge** (by hand, or by a skill that edits
+commitments.csv directly) never pass through `save_to`, so its diff can't
+see them. `working/.audit-snapshot.csv` holds the ledger as the log last
+recorded it; before each logged write, and on every `storyforge audit` run,
+`log_hand_edits` logs the snapshot-to-disk difference as `command=hand-edit`.
+The snapshot is committed with the log (it is the log's baseline, and a
+clone without it would treat the next hand edit as the starting state). A
+project with no snapshot yet starts one, logging nothing.
+
 **The digest** (`digest`, used by `storyforge audit`) lists binding facts with
 a blank `reviewed`, in tiers (`TIERS`: `fixed` facts, then relationship and
 knowledge, then physical state, then other state facts), grouped by subject
@@ -187,6 +196,66 @@ def _append_or_warn(project_dir, entries):
             + (f': {listed}' if listed else ''))
 
 
+# ============================================================================
+# The snapshot: catching edits made outside Storyforge
+# ============================================================================
+
+SNAPSHOT_FILE = '.audit-snapshot.csv'
+#: Relative to the project root, for commit paths
+SNAPSHOT_PATH = f'working/{SNAPSHOT_FILE}'
+
+#: The writer named for a change found between the snapshot and the ledger
+HAND_EDIT = 'hand-edit'
+
+
+def snapshot_path(project_dir: str) -> str:
+    return os.path.join(project_dir, 'working', SNAPSHOT_FILE)
+
+
+def read_snapshot(project_dir: str) -> list[dict[str, str]] | None:
+    """The ledger as the log last recorded it; None when there is none yet."""
+    from storyforge.ledger import read_ledger
+    path = snapshot_path(project_dir)
+    return read_ledger(path) if os.path.isfile(path) else None
+
+
+def write_snapshot(project_dir: str, rows: list[dict[str, str]]) -> None:
+    """Record `rows` as what the log has seen. A failure is a WARNING: the
+    next write then can't tell a hand edit from its own change, and says so
+    by naming the file now."""
+    from storyforge.ledger import write_ledger
+    try:
+        with _LOCK:
+            write_ledger(snapshot_path(project_dir), rows)
+    except (OSError, ValueError) as e:
+        log(f'WARNING: {SNAPSHOT_PATH} was not written ({e}); an edit made to '
+            f'reference/commitments.csv by hand before the next ledger write '
+            f'will not be logged')
+
+
+def log_hand_edits(project_dir: str, disk: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Log, as `command=hand-edit`, how the ledger on disk (`disk`) differs
+    from the snapshot of the last logged write, then snapshot `disk`.
+
+    Catches what no Storyforge writer saw: an edit by hand, or by a skill
+    told to edit commitments.csv directly. With no snapshot yet (a project
+    whose ledger predates the log) there is nothing to compare: `disk`
+    becomes the snapshot and nothing is logged. Returns the entries.
+    """
+    snap = read_snapshot(project_dir)
+    if snap is None:
+        write_snapshot(project_dir, disk)
+        return []
+    entries = diff_entries(snap, disk, command=HAND_EDIT)
+    for e in entries:
+        # An added row's introduced_by is what the editor typed, not who wrote it
+        e['command'] = HAND_EDIT
+    if entries:
+        _append_or_warn(project_dir, entries)
+        write_snapshot(project_dir, disk)
+    return entries
+
+
 def read_log(project_dir: str) -> list[dict[str, str]]:
     """The log's entries; no log → []."""
     path = log_path(project_dir)
@@ -270,11 +339,43 @@ def _read(project_dir, name):
     return _read_rows(os.path.join(project_dir, 'reference', name))
 
 
-def scene_acts(project_dir: str) -> dict[str, str]:
-    """Scene id → `act` from scenes.csv ('' when blank or no column)."""
+def act_column(project_dir: str) -> str | None:
+    """The scenes.csv column that holds acts: `act`, or `part` in a project
+    without one (thornwall), or None when there is neither."""
+    header, _ = _read(project_dir, 'scenes.csv')
+    for column in ('act', 'part'):
+        if column in header:
+            return column
+    return None
+
+
+def scene_acts(project_dir: str, column: str | None = None) -> dict[str, str]:
+    """Scene id → act (from `column`, default `act_column`); '' when blank."""
+    column = column or act_column(project_dir)
     _, rows = _read(project_dir, 'scenes.csv')
-    return {r.get('id', '').strip(): (r.get('act') or '').strip()
+    return {r.get('id', '').strip(): ((r.get(column) or '').strip() if column else '')
             for r in rows if r.get('id', '').strip()}
+
+
+def thread_ids(project_dir: str) -> set[str]:
+    """Thread ids in mice-threads.csv."""
+    _, rows = _read(project_dir, 'mice-threads.csv')
+    return {r.get('id', '').strip() for r in rows if r.get('id', '').strip()}
+
+
+def resolve_character(project_dir: str, value: str) -> str:
+    """The characters.csv id `value` names (id, name or alias).
+
+    Raises:
+        ScopeError: no character is named that.
+    """
+    from storyforge.enrich import load_alias_map
+    path = os.path.join(project_dir, 'reference', 'characters.csv')
+    found = load_alias_map(path).get(value.strip().lower()) if os.path.isfile(path) else None
+    if not found:
+        raise ScopeError(f'{value!r} is not a character id, name or alias in '
+                         f'reference/characters.csv')
+    return found
 
 
 def thread_scenes(project_dir: str, thread: str) -> set[str]:
@@ -301,7 +402,9 @@ def select(rows: list[dict[str, str]], project_dir: str, scope: Scope,
     they hold from before scene 1.
 
     Raises:
-        ScopeError: a `--scenes` end that isn't a scene.
+        ScopeError: a scope naming something that isn't there: a `--scenes`
+            end that isn't a scene, an unknown character or thread, an act
+            no scene has, or `--act` with no act column.
     """
     digest = Digest()
     pool = [r for r in rows if scope.include_reviewed or is_unreviewed(r)]
@@ -319,9 +422,14 @@ def select(rows: list[dict[str, str]], project_dir: str, scope: Scope,
 
     titles = []
     if scope.character:
-        c = scope.character
-        pool = [r for r in pool if (r.get('subject') or '').strip() == c
-                or c in [k.strip() for k in (r.get('known_by') or '').split(';')]]
+        c = resolve_character(project_dir, scope.character)
+        from storyforge.enrich import load_alias_map
+        names = load_alias_map(os.path.join(project_dir, 'reference', 'characters.csv'))
+
+        def knows(r):
+            return c in [names.get(k.strip().lower(), k.strip())
+                         for k in (r.get('known_by') or '').split(';')]
+        pool = [r for r in pool if (r.get('subject') or '').strip() == c or knows(r)]
         titles.append(f'character {c}')
     if scope.scenes:
         a, b = scope.scenes
@@ -333,20 +441,38 @@ def select(rows: list[dict[str, str]], project_dir: str, scope: Scope,
         titles.append(f'scenes {a}..{b}' if a != b else f'scene {a}')
     if scope.thread:
         scenes = thread_scenes(project_dir, scope.thread)
+        if not scenes and scope.thread not in thread_ids(project_dir):
+            raise ScopeError(f'{scope.thread!r} is not a thread in '
+                             f'reference/mice-threads.csv or scene-intent.csv')
         if not scenes:
             digest.notes.append(f'no scene in scene-intent.csv carries the thread '
                                 f'{scope.thread!r}')
         pool = [r for r in pool if (r.get('scene_id') or '').strip() in scenes]
         titles.append(f'thread {scope.thread} (facts established in the '
                       f'{len(scenes)} scene(s) that carry it)')
-    acts = scene_acts(project_dir)
+    column = act_column(project_dir)
+    if column == 'part':
+        digest.notes.append('acts read from scenes.csv `part` (it has no `act` column)')
+    acts = scene_acts(project_dir, column)
 
     def act_of(r):
         return acts.get((r.get('scene_id') or '').strip(), '')
 
     if scope.act:
+        if column is None:
+            raise ScopeError('reference/scenes.csv has no `act` or `part` column, '
+                             'so there are no acts to scope to')
+        known = sorted({a for a in acts.values() if a})
+        if scope.act not in known:
+            raise ScopeError(f'no scene in reference/scenes.csv has {column} '
+                             f'{scope.act!r} ({column}s: {", ".join(known) or "none"})')
         pool = [r for r in pool if act_of(r) == scope.act]
         titles.append(f'act {scope.act}')
+    elif not scope.narrowed() and column is None:
+        digest.notes.append('reference/scenes.csv has no `act` or `part` column, so '
+                            'the digest is not split per act: every unreviewed '
+                            'fact is listed')
+        titles.append('all acts')
     elif not scope.narrowed():
         placed = [r for r in pool if pos(r) >= 0]
         unplaced = [r for r in pool if pos(r) < 0]
@@ -366,7 +492,7 @@ def select(rows: list[dict[str, str]], project_dir: str, scope: Scope,
             for r in placed:
                 if act_of(r) != digest.act:
                     digest.remaining[act_of(r)] = digest.remaining.get(act_of(r), 0) + 1
-        else:
+        elif unplaced:
             titles.append('facts with no scene')
     if scope.all_acts:
         titles.append('all acts')
@@ -406,10 +532,14 @@ def mark(rows: list[dict[str, str]], ids: list[str], verdict: str, *,
     """Set `reviewed` to `<verdict>:<date>` on `ids` (in place); `rejected`
     also sets `status=rejected`. Returns the ids changed.
 
+    A fact already marked with `verdict` is left as it is (not re-dated).
+
     Raises:
-        ValueError: an unknown verdict, an id not in the ledger, or `seen` on
+        ValueError: an unknown verdict, an id not in the ledger, `seen` on
             a rejected fact (marking it seen would not make it binding again,
-            and silently leaving it rejected would read as if it had).
+            and silently leaving it rejected would read as if it had), or
+            `rejected` on a superseded fact (its status would have to stop
+            saying it was replaced; reject its successor instead).
     """
     if verdict not in VERDICTS:
         raise ValueError(f'{verdict!r} is not one of {", ".join(VERDICTS)}')
@@ -423,10 +553,20 @@ def mark(rows: list[dict[str, str]], ids: list[str], verdict: str, *,
             raise ValueError(f'already rejected: {", ".join(rejected)} (to restore a '
                              f'fact, set its status back to binding in '
                              f'reference/commitments.csv)')
+    else:
+        superseded = [i for i in ids if by_id[i].get('status') == 'superseded']
+        if superseded:
+            raise ValueError(
+                f'superseded, so no longer binding: {", ".join(superseded)}. '
+                f'Rejecting it would lose that a later fact replaced it; reject '
+                f'the fact that superseded it, or mark this one seen')
     stamp = f'{verdict}:{date or datetime.now().strftime("%Y-%m-%d")}'
     changed = []
     for i in dict.fromkeys(ids):
         row = by_id[i]
+        if (row.get('reviewed') or '').startswith(f'{verdict}:') and (
+                verdict == 'seen' or row.get('status') == 'rejected'):
+            continue   # already marked so: a re-mark is a no-op, not a new date
         before = (row.get('reviewed'), row.get('status'))
         row['reviewed'] = stamp
         if verdict == 'rejected':
