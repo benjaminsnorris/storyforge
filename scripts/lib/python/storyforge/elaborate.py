@@ -60,6 +60,9 @@ _BRIEFS_COLS = [
 _SPINE_COLS = [
     'id', 'seq', 'title', 'summary', 'function', 'act',
 ]
+# Registries extract phase 5 writes (cmd_cleanup checks them against these)
+_THEMES_COLS = ['id', 'name', 'tier', 'description']
+_MOTIF_COLS = ['id', 'name', 'aliases', 'tier']
 _ARCHITECTURE_COLS = [
     'id', 'seq', 'title', 'summary', 'act', 'pov', 'spine_event',
     'action_sequel', 'emotional_arc', 'value_at_stake',

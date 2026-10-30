@@ -5,8 +5,9 @@ Phases 0-4 build the scene layer. Phase 5 is to write what sits above it
 voice guide, themes and motifs) from what those phases found, describing the
 book as written. Plan: docs/plans/2026-10-30-extract-upper-layers.md.
 
-This module so far holds the one gate every phase 5 writer goes through,
-`write_described`, and the provenance record it keeps.
+It holds the one gate every phase 5 writer goes through (`write_described`)
+and the provenance record it keeps, the scene evidence the steps share, and
+the steps themselves.
 
 **Never overwrite an author's file.** A file is written only when it holds
 nothing of the author's: missing, empty, a CSV with only a header, or still
@@ -33,9 +34,9 @@ import hashlib
 import os
 import posixpath
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, Literal, TypedDict
+from typing import Callable, Literal, TypedDict, get_args
 
 from .common import is_unfilled_template, log
 
@@ -344,13 +345,19 @@ STRUCTURE_SCHEMA = {
 }
 
 
-class StructureError(ValueError):
-    """A structure reply that can't be written; `problems` go back to the
-    model on the one retry."""
+class ReplyProblems(Exception):
+    """A reply that parsed but can't be written; `problems` go back to the
+    model on the one retry. Not a ValueError, so `_ask` can't confuse it
+    with an unreadable reply whatever order its handlers are in."""
 
     def __init__(self, problems: list[str]):
         super().__init__('; '.join(problems))
         self.problems = problems
+
+
+#: A model-chosen id: lowercase words joined by hyphens. It goes into `;`
+#: lists and is looked up exactly, so anything else would break a reader.
+_SLUG = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
 
 
 def _bounds(rng: tuple[int, int], available: int) -> tuple[int, int]:
@@ -406,21 +413,21 @@ def build_structure_prompt(profile: dict, scenes: list[dict[str, str]],
 4. **architecture**: the {arch_lo}-{arch_hi} anchor scenes that carry the spine,
    chosen from the scene ids above (use the ids exactly). Every spine event
    needs at least one anchor. For each: scene_id, and spine_event (the spine id
-   it carries). Choose the scenes where the story actually turns, wherever they
-   fall; don't space them evenly.
+   it carries). A scene is an anchor at most once. Choose the scenes where the
+   story actually turns, wherever they fall; don't space them evenly.
 """
 
 
 def parse_structure(response: str, scenes: list[dict[str, str]]) -> dict:
-    """Read and check step 5a's reply. Returns `{genre, subgenre, spine,
-    architecture}` with spine events in reading order (by their first
-    anchor) and anchors in reading order.
+    """Read and check step 5a's reply. Returns `{genre, subgenre,
+    scene_summaries, spine, architecture}`: spine events in reading order
+    (by their first anchor), anchors in reading order, and scene_summaries
+    mapping each scene that had no summary to the reply's.
 
-    `scene_summaries` maps each scene that had no summary to the one the
-    reply gives.
-
-    Raises StructureError listing every problem, so one retry can fix them
-    all: a scene with no summary left without one, an id that is no scene, a scene anchored twice, an anchor naming
+    Raises ReplyProblems listing every problem, so one retry can fix them
+    all: a scene with no summary left without one, a spine id empty,
+    repeated or not a slug, a spine event with no function, an id that is
+    no scene, a scene anchored twice, an anchor naming
     no spine event, a spine event with no anchor, counts outside the ranges,
     an empty or overlong summary. These are the mechanical floors; whether
     the book balances action and sequel is a fact about the book, and is
@@ -450,8 +457,9 @@ def parse_structure(response: str, scenes: list[dict[str, str]]) -> dict:
     seen_spine = set()
     for e in data['spine']:
         sid = e['id'].strip()
-        if not sid or sid in seen_spine:
-            problems.append(f'spine event id {sid!r} is empty or repeated')
+        if not _SLUG.match(sid) or sid in seen_spine:
+            problems.append(f'spine event id {sid!r} is empty, repeated, or not a '
+                            f'lowercase-hyphenated slug')
             continue
         seen_spine.add(sid)
         summary = ' '.join(e['summary'].split())
@@ -494,7 +502,7 @@ def parse_structure(response: str, scenes: list[dict[str, str]]) -> dict:
             problems.append(f'{label} has {len(items)} entries; expected {lo}-{hi}')
 
     if problems:
-        raise StructureError(problems)
+        raise ReplyProblems(problems)
 
     anchors.sort(key=lambda a: order[a['scene_id']])
     first = {}
@@ -544,7 +552,8 @@ def structure_rows(structure: dict, scenes: list[dict[str, str]],
 # Step 5b: themes and motifs (themes.csv, motif-taxonomy.csv, theme_threads)
 # ============================================================================
 
-TIERS = ('primary', 'secondary', 'tertiary')
+Tier = Literal['primary', 'secondary', 'tertiary']
+TIERS: tuple[Tier, ...] = get_args(Tier)
 THEME_RANGE = (3, 7)
 #: A motif must be named in at least this many scenes to be recurring.
 MOTIF_MIN_SCENES = 2
@@ -556,7 +565,7 @@ _MENTION_CHARS = 100
 def motif_mentions(scenes: list[dict[str, str]]) -> list[tuple[str, str]]:
     """Every motif mention in the briefs, as `(scene id, text)` in reading
     order. Briefs describe motifs in their own words ("fog pouring through
-    every chink"), so the same image is never spelled the same way twice:
+    every chink"), so the same image is rarely spelled the same way twice:
     the model groups these by number, and code checks each group recurs."""
     return [(s['id'], m.strip()) for s in scenes
             for m in s.get('motifs', '').split(';') if m.strip()]
@@ -624,7 +633,7 @@ def build_themes_prompt(profile: dict, scenes: list[dict[str, str]],
 
 1. **themes**: the {lo}-{hi} abstract concerns this book argues, each phrased as
    what the book is about rather than a moral. For each: id (a 1-4 word
-   lowercase-hyphenated slug), name, tier (primary for the book's central
+   lowercase-hyphenated slug, letters and digits only), name, tier (primary for the book's central
    concerns, then secondary and tertiary), and description (one or two
    sentences on how the book treats it). Themes are abstract; concrete
    recurring images are motifs, below.
@@ -635,24 +644,30 @@ def build_themes_prompt(profile: dict, scenes: list[dict[str, str]],
 3. **motifs**: the book's recurring images and objects, found by grouping
    the numbered mentions above that name the same image. Each: id (a 1-3
    word slug), name, aliases (1-4 short names a reader might use for it,
-   such as "fog"; each alias names one motif only), tier, and mentions (the numbers of every mention it
-   covers). A motif must recur: its mentions must come from at least
-   {MOTIF_MIN_SCENES} different scenes. Leave out mentions that belong to no
-   recurring image; a mention belongs to at most one motif.
+   such as "fog", with no semicolons; each alias names one motif only),
+   tier, and mentions (the numbers of every mention it covers). A motif must
+   recur: its mentions must come from at least {MOTIF_MIN_SCENES} different
+   scenes. Leave out mentions that belong to no recurring image; a mention
+   belongs to at most one motif. If any image recurs, return at least one
+   motif.
 """
 
 
 def parse_themes(response: str, scenes: list[dict[str, str]],
                  mentions: list[tuple[str, str]]) -> dict:
     """Read and check step 5b's reply. Returns `{themes, scene_themes,
-    motifs}`: `scene_themes` maps every scene id to a list of theme ids, and
-    each motif carries `scenes`, the scene ids its mentions come from.
+    motifs, mention_motif}`: `scene_themes` maps every scene id to a list of
+    theme ids, each motif carries `scenes` (the scene ids its mentions come
+    from), and `mention_motif` maps each claimed mention's number to its
+    motif id.
 
-    Raises StructureError listing every problem: a repeated or empty id, a
-    theme count outside THEME_RANGE, a scene tagged with an unknown theme, a
-    scene left out or invented, a mention number out of range or claimed
-    twice, an alias given to two motifs, a motif that doesn't recur, or no
-    motif when the briefs name some that recur.
+    Raises ReplyProblems listing every problem: an id empty, repeated or not
+    a slug, a tier outside TIERS, a theme count outside THEME_RANGE, a scene
+    tagged with an unknown theme, a scene left out or invented, a mention
+    number out of range or claimed twice, an alias with a `;` or given to
+    two motifs, a motif that doesn't recur, or no motif at all when the
+    mentions span two or more scenes (whether any recur is the model's
+    call; code can only see that they could).
     """
     from .extract import _json_answer
     data = _json_answer(response, THEMES_SCHEMA)
@@ -661,9 +676,12 @@ def parse_themes(response: str, scenes: list[dict[str, str]],
     themes, theme_ids = [], set()
     for t in data['themes']:
         tid = t['id'].strip()
-        if not tid or tid in theme_ids:
-            problems.append(f'theme id {tid!r} is empty or repeated')
+        if not _SLUG.match(tid) or tid in theme_ids:
+            problems.append(f'theme id {tid!r} is empty, repeated, or not a '
+                            f'lowercase-hyphenated slug')
             continue
+        if t['tier'] not in TIERS:
+            problems.append(f'theme {tid}\'s tier {t["tier"]!r} is not one of {", ".join(TIERS)}')
         theme_ids.add(tid)
         themes.append({'id': tid, 'name': ' '.join(t['name'].split()),
                        'tier': t['tier'],
@@ -695,13 +713,16 @@ def parse_themes(response: str, scenes: list[dict[str, str]],
     out_motifs, motif_ids = [], set()
     for m in data['motifs']:
         mid = m['id'].strip()
-        if not mid or mid in motif_ids:
-            problems.append(f'motif id {mid!r} is empty or repeated')
+        if not _SLUG.match(mid) or mid in motif_ids:
+            problems.append(f'motif id {mid!r} is empty, repeated, or not a '
+                            f'lowercase-hyphenated slug')
             continue
+        if m['tier'] not in TIERS:
+            problems.append(f'motif {mid}\'s tier {m["tier"]!r} is not one of {", ".join(TIERS)}')
         motif_ids.add(mid)
         used = []
         for n in m['mentions']:
-            if not 0 <= n < len(mentions):
+            if not isinstance(n, int) or not 0 <= n < len(mentions):
                 problems.append(f'motif {mid} names mention [{n}], which does not exist')
             elif n in claimed and claimed[n] != mid:
                 problems.append(f'mention [{n}] is claimed by both {claimed[n]} and {mid}')
@@ -712,6 +733,10 @@ def parse_themes(response: str, scenes: list[dict[str, str]],
         if len(in_scenes) < MOTIF_MIN_SCENES:
             problems.append(f'motif {mid} is named in {len(in_scenes)} scene(s); a motif '
                             f'must recur in at least {MOTIF_MIN_SCENES}')
+        bad = [a for a in m['aliases'] if ';' in a]
+        if bad:
+            problems.append(f'motif {mid}\'s alias(es) contain a semicolon: '
+                            + ', '.join(repr(a) for a in bad))
         aliases = list(dict.fromkeys(' '.join(a.split()).lower() for a in m['aliases']
                                      if a.strip() and ';' not in a))
         # An alias names one motif, or normalizing a brief against the
@@ -726,25 +751,39 @@ def parse_themes(response: str, scenes: list[dict[str, str]],
                         'into the motifs that recur')
 
     if problems:
-        raise StructureError(problems)
-    return {'themes': themes, 'scene_themes': tagged, 'motifs': out_motifs}
+        raise ReplyProblems(problems)
+    return {'themes': themes, 'scene_themes': tagged, 'motifs': out_motifs,
+            'mention_motif': dict(claimed)}
 
 
 # ============================================================================
 # Running the steps
 # ============================================================================
 
-THEMES_COLUMNS = ['id', 'name', 'tier', 'description']
-MOTIF_COLUMNS = ['id', 'name', 'aliases', 'tier']
 STRUCTURE_MAX_TOKENS = 12_000
 THEMES_MAX_TOKENS = 12_000
+#: What 5b's brief rewrite replaced: every mention as the brief had it, and
+#: the motif it was grouped into ('' when it named no recurring image).
+MENTIONS_FILE = os.path.join('working', 'extraction-motif-mentions.csv')
+
+#: What a step did: wrote all its files, wrote none (each reason reported),
+#: or wrote some and stopped (a file changed during the call).
+StepOutcome = Literal['written', 'skipped', 'partial']
+
+ProjectField = Literal['genre', 'subgenre']
+#: The values that count as unfilled, per field. The template's genre is the
+#: placeholder; its subgenre is empty.
+_PROJECT_PLACEHOLDERS: dict[ProjectField, frozenset[str]] = {
+    'genre': frozenset({'', 'PROJECT_GENRE'}),
+    'subgenre': frozenset({''}),
+}
 
 
 class DescribeFailed(RuntimeError):
     """A phase 5 step could not get a usable answer; nothing was written for it."""
 
 
-@dataclass
+@dataclass(kw_only=True)
 class Run:
     """What every step shares: where to write, how to call, what to record."""
     project_dir: str
@@ -752,161 +791,293 @@ class Run:
     log_dir: str
     force: bool
     version: str
-    provenance: Provenance
+    #: Read once by the caller, which stops when it is unusable (None)
+    provenance: dict[str, ProvenanceRow]
     #: (log file, operation, target, model): records the call's cost
     on_usage: Callable[[str, str, str, str], None]
-    reports: list[str]
+    reports: list[str] = field(default_factory=list)
 
     @property
     def ref_dir(self) -> str:
         return os.path.join(self.project_dir, 'reference')
 
 
+def _cell(value: str) -> str:
+    """A value as an unquoted pipe-CSV cell: one line, no `|`
+    (`common.csv_safe`), and no leading `"`, which `csv.DictReader` would
+    read as an opening quote."""
+    from .common import csv_safe
+    text = csv_safe(str(value))
+    return '\u201c' + text[1:] if text.startswith('"') else text
+
+
 def _csv_text(rows: list[dict[str, str]], columns: list[str]) -> str:
-    import io
-    out = io.StringIO()
-    writer = csv.DictWriter(out, fieldnames=columns, delimiter='|',
-                            lineterminator='\n', extrasaction='ignore')
-    writer.writeheader()
-    writer.writerows(rows)
-    return out.getvalue()
+    """Rows as this project writes CSV: `|`-joined, unquoted, LF. A quoting
+    writer would wrap a cell holding `"` or `|`, which the readers that
+    split on `|` (story-power, alias maps, export) can't undo."""
+    lines = ['|'.join(columns)]
+    lines += ['|'.join(_cell(row.get(c, '')) for c in columns) for row in rows]
+    return '\n'.join(lines) + '\n'
 
 
 def _ask(run: Run, label: str, prompt_for, parse, schema: dict, max_tokens: int):
     """One structured call, with one retry carrying the parser's problems.
 
-    Raises DescribeFailed on a cut-off or unreadable reply, or when the retry
-    still has problems: a step either gets an answer it can write whole or
-    writes nothing.
+    Raises DescribeFailed on an API error or refusal, a cut-off, unreadable
+    or malformed reply, or when the retry still has problems: a step either
+    gets an answer it can write whole or writes nothing.
     """
     from .api import extract_text, invoke_to_file, is_truncated
     problems = None
     for attempt in (1, 2):
         log_file = os.path.join(run.log_dir, f'extract-describe-{label}-{attempt}.json')
-        response = invoke_to_file(prompt_for(problems), run.model, log_file, max_tokens,
-                                  output_schema=schema)
+        try:
+            response = invoke_to_file(prompt_for(problems), run.model, log_file, max_tokens,
+                                      output_schema=schema)
+        except RuntimeError as e:   # HTTP errors, retries exhausted, a refusal
+            raise DescribeFailed(f'{label}: the API call failed ({e})') from e
         run.on_usage(log_file, f'extract-describe-{label}', 'book', run.model)
         if is_truncated(response):
             raise DescribeFailed(f'{label}: the reply hit its token limit')
         try:
             return parse(extract_text(response))
-        except StructureError as e:
+        except ReplyProblems as e:
             if attempt == 2:
                 raise DescribeFailed(f'{label}: still unusable after a retry: {e}') from e
             log(f'  {label}: {len(e.problems)} problem(s) in the reply; asking once more')
             problems = e.problems
         except ValueError as e:
             raise DescribeFailed(f'{label}: unreadable reply ({e})') from e
+        except (KeyError, TypeError, AttributeError) as e:
+            # Structured outputs shouldn't send a malformed item, but one
+            # that comes is the reply's fault, not a crash
+            raise DescribeFailed(f'{label}: malformed reply ({type(e).__name__}: {e})') from e
     raise AssertionError('unreachable')
 
 
-def _gate(run: Run, rels: list[str], step: str) -> bool:
-    """Whether every file a step writes may be written; reports the ones that
-    can't. A step writes all its files or none, so its outputs can't
-    disagree (an architecture naming a spine the author kept)."""
+def _gate(run: Run, rels: list[str], step: str, also: str) -> bool:
+    """Whether every file a step writes may be written; reports the ones
+    that can't, and what else the step then doesn't do (`also`). A step
+    writes all its files or none, so its outputs can't disagree (an
+    architecture naming a spine the author kept)."""
     verdicts = [decide(run.project_dir, rel, run.force, run.provenance) for rel in rels]
     kept = [v for v in verdicts if not v.write]
     if kept:
         run.reports.extend(v.report() for v in kept)
-        run.reports.append(f'{step} skipped: it writes {", ".join(rels)} together, '
-                           f'and {len(kept)} of them must be kept')
+        run.reports.append(f'{step} skipped: it writes {", ".join(rels)} together, and '
+                           f'{len(kept)} of them must be kept; {also} were not filled either')
         return False
     return True
 
 
-def _write(run: Run, rel: str, content: str, step: str) -> None:
-    verdict = write_described(run.project_dir, rel, content, step=step,
-                              version=run.version, force=run.force,
-                              provenance=run.provenance)
-    if verdict.write:
-        log(f'  wrote {rel}')
-    else:
-        run.reports.append(verdict.report())
+def _write_all(run: Run, files: list[tuple[str, str]], step: str, label: str) -> bool:
+    """Write a step's files through the gate. False, with a report, when one
+    was refused after all: the author changed it during the call. The step
+    then stops before anything that depends on its files."""
+    refused = []
+    for rel, content in files:
+        verdict = write_described(run.project_dir, rel, content, step=step,
+                                  version=run.version, force=run.force,
+                                  provenance=run.provenance)
+        if verdict.write:
+            log(f'  wrote {rel}')
+        else:
+            refused.append(verdict.report())
+    if refused:
+        run.reports.extend(refused)
+        run.reports.append(f'{label} stopped part-way: a file changed while it ran, so '
+                           f'its files may disagree; check them and run it again')
+        return False
+    return True
 
 
-def _fill_blank_cells(run: Run, column: str, values: dict[str, str]) -> int:
-    """Set `column` for each scene id in `values` whose cell is blank. Never
-    replaces a value: a filled cell may be the author's."""
-    from .elaborate import get_scene, update_scene
-    filled = 0
+def _registry_ids(path: str) -> set[str]:
+    from .elaborate import _read_csv
+    return {r.get('id', '').strip() for r in _read_csv(path) if r.get('id', '').strip()}
+
+
+def _set_cells(run: Run, filename: str, column: str, values: dict[str, str],
+               replaceable: Callable[[str], bool]) -> tuple[int, dict[str, str]]:
+    """Set `column` for each scene id in `values` whose current cell is
+    `replaceable`, in the scene CSV that owns it; a scene with no row there
+    gets none (a row written here would have nothing else in it). Returns
+    how many were set, and the cells kept because they were not replaceable
+    (scene id: current value)."""
+    from .elaborate import _read_csv_as_map, update_scene
+    rows = _read_csv_as_map(os.path.join(run.ref_dir, filename))
+    changed, kept = 0, {}
     for sid, value in values.items():
-        row = get_scene(sid, run.ref_dir)
-        if row is not None and value and not row.get(column, '').strip():
-            update_scene(sid, run.ref_dir, {column: value})
-            filled += 1
-    return filled
+        row = rows.get(sid)
+        if row is None:
+            continue
+        current = row.get(column, '').strip()
+        if current == value:
+            continue
+        if not replaceable(current):
+            kept[sid] = current
+            continue
+        update_scene(sid, run.ref_dir, {column: _cell(value)})
+        changed += 1
+    return changed, kept
 
 
-_PROJECT_PLACEHOLDERS = {'genre': {'', 'PROJECT_GENRE'}, 'subgenre': {''}}
-
-
-def _fill_project_field(run: Run, key: str, value: str) -> None:
+def _fill_project_field(run: Run, key: ProjectField, value: str) -> None:
     """Set `project.<key>` in storyforge.yaml when it is still empty or the
-    template's placeholder; an author's value is kept. Edits that one line,
-    keeping its inline comment and the file's line endings."""
+    template's placeholder; an author's value is kept. Edits that one line
+    inside the `project:` block, keeping its inline comment where it was and
+    the file's line endings."""
     from .common import _yaml_double_quote, read_yaml_field, rewrite_preserving_newlines
     if not value:
+        return
+    path = os.path.join(run.project_dir, 'storyforge.yaml')
+    if not os.path.isfile(path):
+        run.reports.append(f'storyforge.yaml: missing, so project.{key} was not set '
+                           f'(the book reads as {value!r})')
         return
     current = read_yaml_field(f'project.{key}', run.project_dir)
     if current not in _PROJECT_PLACEHOLDERS[key]:
         return
-    path = os.path.join(run.project_dir, 'storyforge.yaml')
-    pattern = re.compile(
-        rf'^(\s+{key}:)[ \t]*(?:"PROJECT_GENRE"|\'PROJECT_GENRE\'|PROJECT_GENRE|""|\'\')?'
-        r'([ \t]+#.*|[ \t]*)$', re.MULTILINE)
+    values = [r'""', r"''"]
+    for v in sorted(_PROJECT_PLACEHOLDERS[key]):
+        if v:
+            values += [f'"{re.escape(v)}"', f"'{re.escape(v)}'", re.escape(v)]
+    line_re = re.compile(rf'^([ \t]+{key}:)[ \t]*(?:{"|".join(values)})?[ \t]*(#.*)?$')
+    done = []
 
     def edit(text: str) -> str:
-        new, n = pattern.subn(lambda m: f'{m.group(1)} {_yaml_double_quote(value)}{m.group(2)}',
-                              text, count=1)
-        if not n:
-            run.reports.append(f'storyforge.yaml: project.{key} not set (no `{key}:` line '
-                               f'to fill); the book reads as {value!r}')
-        return new
-    if os.path.isfile(path) and rewrite_preserving_newlines(path, edit):
+        lines = text.split('\n')
+        in_project = False
+        for i, line in enumerate(lines):
+            if line and not line[0].isspace() and not line.startswith('#'):
+                in_project = line.rstrip() == 'project:'
+                continue
+            m = line_re.match(line) if in_project else None
+            if not m:
+                continue
+            head = f'{m.group(1)} {_yaml_double_quote(value)}'
+            comment = m.group(2) or ''
+            if comment:
+                # Keep the comment in its column when the value fits before it
+                col = len(line) - len(comment)
+                head += ' ' * max(1, col - len(head)) + comment
+            lines[i] = head
+            done.append(i)
+            break
+        return '\n'.join(lines)
+
+    if rewrite_preserving_newlines(path, edit):
         log(f'  set project.{key}: {value}')
+    elif not done:
+        run.reports.append(f'storyforge.yaml: project.{key} not set (no `{key}:` line '
+                           f'under project: to fill); the book reads as {value!r}')
 
 
-def run_structure(run: Run, profile: dict, scenes: list[dict[str, str]]) -> None:
+def run_structure(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutcome:
     """Step 5a: spine.csv, architecture.csv, blank scene summaries,
     anchors' architecture_scene, and project.genre / subgenre."""
     from .elaborate import _ARCHITECTURE_COLS, _SPINE_COLS
     rels = ['reference/spine.csv', 'reference/architecture.csv']
-    if not _gate(run, rels, '5a (structure)'):
-        return
+    if not _gate(run, rels, '5a (structure)',
+                 'blank scene summaries, architecture_scene and project.genre'):
+        return 'skipped'
+    old_anchors = _registry_ids(os.path.join(run.project_dir, rels[1]))
     structure = _ask(run, 'structure',
                      lambda problems: build_structure_prompt(profile, scenes, problems),
                      lambda text: parse_structure(text, scenes),
                      STRUCTURE_SCHEMA, STRUCTURE_MAX_TOKENS)
     spine, arch = structure_rows(structure, scenes)
-    _write(run, rels[0], _csv_text(spine, _SPINE_COLS), '5a')
-    _write(run, rels[1], _csv_text(arch, _ARCHITECTURE_COLS), '5a')
-    n = _fill_blank_cells(run, 'summary', structure['scene_summaries'])
+    if not _write_all(run, [(rels[0], _csv_text(spine, _SPINE_COLS)),
+                            (rels[1], _csv_text(arch, _ARCHITECTURE_COLS))], '5a', '5a'):
+        return 'partial'
+    n, _ = _set_cells(run, 'scenes.csv', 'summary', structure['scene_summaries'],
+                      replaceable=lambda cur: not cur)
     if n:
         log(f'  filled {n} blank scene summar{"y" if n == 1 else "ies"}')
-    _fill_blank_cells(run, 'architecture_scene', {r['id']: r['id'] for r in arch})
+    # An anchor marks itself. A cell naming an anchor this run dropped is
+    # the last run's mark (an author's would name a scene of their own
+    # choosing that still exists) and is cleared, or it would dangle
+    anchors = {r['id'] for r in arch}
+    marks = {s['id']: (s['id'] if s['id'] in anchors else '') for s in scenes}
+    _, kept = _set_cells(
+        run, 'scenes.csv', 'architecture_scene', marks,
+        replaceable=lambda cur: not cur or (cur in old_anchors and cur not in anchors))
+    dangling = [sid for sid, cur in kept.items() if cur not in anchors]
+    if dangling:
+        run.reports.append(f'{len(dangling)} scene(s) keep an architecture_scene that names no '
+                           f'anchor in architecture.csv: ' + ', '.join(dangling[:5])
+                           + ('…' if len(dangling) > 5 else ''))
     _fill_project_field(run, 'genre', structure['genre'])
     _fill_project_field(run, 'subgenre', structure['subgenre'])
+    return 'written'
 
 
-def run_themes(run: Run, profile: dict, scenes: list[dict[str, str]]) -> None:
-    """Step 5b: themes.csv, motif-taxonomy.csv, and blank theme_threads."""
+def _write_mentions(run: Run, scenes_mentions: list[tuple[str, str]],
+                    mention_motif: dict[int, str]) -> None:
+    path = os.path.join(run.project_dir, MENTIONS_FILE)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    rows = [{'scene_id': sid, 'mention': text, 'motif': mention_motif.get(i, '')}
+            for i, (sid, text) in enumerate(scenes_mentions)]
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        f.write(_csv_text(rows, ['scene_id', 'mention', 'motif']))
+
+
+def run_themes(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutcome:
+    """Step 5b: themes.csv, motif-taxonomy.csv, theme_threads, and each
+    brief's `motifs` cell as motif ids.
+
+    The brief rewrite is what keeps `validate` passing: once the taxonomy
+    has rows, a brief's `motifs` is checked against it, and a description
+    ("fog pouring through every chink") matches no alias. Each cell becomes
+    the ids its mentions were grouped into; a mention that named no
+    recurring image is dropped from the cell. Nothing is lost: every
+    mention as the brief had it, and its motif, is kept in MENTIONS_FILE.
+    """
+    from .elaborate import _MOTIF_COLS, _THEMES_COLS
     rels = ['reference/themes.csv', 'reference/motif-taxonomy.csv']
-    if not _gate(run, rels, '5b (themes and motifs)'):
-        return
+    if not _gate(run, rels, '5b (themes and motifs)', 'theme_threads and brief motifs'):
+        return 'skipped'
+    old_themes = _registry_ids(os.path.join(run.project_dir, rels[0]))
     mentions = motif_mentions(scenes)
     result = _ask(run, 'themes',
                   lambda problems: build_themes_prompt(profile, scenes, mentions, problems),
                   lambda text: parse_themes(text, scenes, mentions),
                   THEMES_SCHEMA, THEMES_MAX_TOKENS)
-    _write(run, rels[0], _csv_text(result['themes'], THEMES_COLUMNS), '5b')
     motif_rows = [{**m, 'aliases': ';'.join(m['aliases'])} for m in result['motifs']]
-    _write(run, rels[1], _csv_text(motif_rows, MOTIF_COLUMNS), '5b')
-    _fill_blank_cells(run, 'theme_threads',
-                      {sid: ';'.join(ids) for sid, ids in result['scene_themes'].items()})
+    if not _write_all(run, [(rels[0], _csv_text(result['themes'], _THEMES_COLS)),
+                            (rels[1], _csv_text(motif_rows, _MOTIF_COLS))], '5b', '5b'):
+        return 'partial'
+    # A cell made only of the last run's theme ids is the last run's tagging
+    # (themes.csv was extraction's, or the gate would have kept it), so it is
+    # retagged; one naming anything else is the author's, and kept
+    def stale_or_blank(cur: str) -> bool:
+        ids = [t.strip() for t in cur.split(';') if t.strip()]
+        return not ids or all(t in old_themes for t in ids)
+    _, kept = _set_cells(run, 'scene-intent.csv', 'theme_threads',
+                         {sid: ';'.join(ids) for sid, ids in result['scene_themes'].items()},
+                         replaceable=stale_or_blank)
+    if kept:
+        ids = list(kept)
+        run.reports.append(f'{len(ids)} scene(s) keep a theme_threads cell of the author\'s: '
+                           + ', '.join(ids[:5]) + ('…' if len(ids) > 5 else ''))
+    by_scene: dict[str, list[str]] = {}
+    for n, (sid, _) in enumerate(mentions):
+        by_scene.setdefault(sid, [])
+        motif = result['mention_motif'].get(n)
+        if motif and motif not in by_scene[sid]:
+            by_scene[sid].append(motif)
+    _write_mentions(run, mentions, result['mention_motif'])
+    n, _ = _set_cells(run, 'scene-briefs.csv', 'motifs',
+                      {sid: ';'.join(ids) for sid, ids in by_scene.items()},
+                      replaceable=lambda cur: True)
+    if n:
+        log(f'  briefs: {n} motifs cell(s) now name motif ids (the descriptions are in '
+            f'{MENTIONS_FILE})')
+    return 'written'
 
 
-#: Every file phase 5 may change, for the commit.
+#: Every path phase 5 may change, for the commit. `working/` covers the
+#: provenance record, the mentions file, the logs and the cost ledger.
 WRITTEN_PATHS = ['reference/spine.csv', 'reference/architecture.csv',
                  'reference/scenes.csv', 'reference/scene-intent.csv',
-                 'reference/themes.csv', 'reference/motif-taxonomy.csv',
-                 'storyforge.yaml', PROVENANCE_FILE.replace(os.sep, '/')]
+                 'reference/scene-briefs.csv', 'reference/themes.csv',
+                 'reference/motif-taxonomy.csv', 'storyforge.yaml', 'working/']

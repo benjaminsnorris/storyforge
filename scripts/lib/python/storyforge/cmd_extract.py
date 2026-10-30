@@ -55,7 +55,7 @@ def parse_args(argv):
                         help='Run cleanup only (skip extraction)')
     parser.add_argument('--force', action='store_true',
                         help='Overwrite existing field values (phase 5: regenerate the '
-                             'docs it wrote that nobody has edited since)')
+                             'files it wrote that nobody has edited since)')
     parser.add_argument('--expand', action='store_true',
                         help='Run expansion analysis after extraction')
     parser.add_argument('--dry-run', action='store_true',
@@ -202,10 +202,9 @@ def main(argv=None):
     if not args.dry_run and (args.cleanup or (args.phase is None and not args.cleanup_only)):
         _run_cleanup(ref_dir, project_dir)
 
-    # Phase 5: Describe (after cleanup, so it reads the cleaned scene data)
+    # Phase 5: Describe (after cleanup on a full run, so it reads cleaned data)
     if not args.cleanup_only and (args.phase is None or args.phase == 5):
-        _run_phase_5(project_dir, log_dir, profile_file, args.force, args.dry_run)
-        if not args.dry_run:
+        if _run_phase_5(project_dir, log_dir, profile_file, args.force, args.dry_run):
             update_pr_task('Phase 5: Describe the book (spine, architecture, themes, motifs)',
                            project_dir)
 
@@ -309,8 +308,10 @@ def _log_api_usage(log_file: str, operation: str, target: str, model: str,
             cache_read=usage.get('cache_read', 0),
             cache_create=usage.get('cache_create', 0),
         )
-    except Exception:
-        pass
+    except Exception as e:
+        # Unrecorded cost makes the ledger, the threshold check and the
+        # summary all read low: say so
+        log(f'  WARNING: cost of {operation} ({target}) not recorded: {e}')
 
 
 def _run_hone(plugin_dir: str, phase: int) -> None:
@@ -594,11 +595,10 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 def _mark_drafted(ref_dir, scenes_dir, scene_ids) -> int:
     """Mark `drafted` every scene that has prose and a blank status (#440).
 
-    Phase 1 set the status only on rows it created, and scenes-setup creates
-    them first, so an extracted book's scenes all had a blank status: the
-    scene-map floor, `storyforge status` and drafting then read a finished
-    book as unstarted. A status already set is never replaced. Returns how
-    many were marked.
+    scenes-setup creates the rows before extraction, so phase 1's new-row
+    default never reaches them, and a blank status reads as unstarted to the
+    scene-map floor, `storyforge status` and drafting. A status already set
+    is never replaced. Returns how many were marked.
     """
     from storyforge.elaborate import _read_csv_as_map, update_scene
     rows = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
@@ -1310,14 +1310,16 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 # Cleanup, validation, expansion
 # ============================================================================
 
-def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run):
+def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
     """Phase 5, describe (#440): the reference layers above the scenes, from
     what phases 0-4 found. Steps 5a (structure) and 5b (themes and motifs)
-    so far; `extract_describe` holds them and the write gate.
+    so far; `extract_describe` holds them and the write gate. Returns
+    whether any step wrote.
 
     A step whose files the author owns is skipped and says so. A step that
-    can't get a usable answer stops the run (exit 1) after committing what
-    the earlier steps wrote: nothing it would have written is guessed.
+    can't get a usable answer, or any error mid-step, stops the run (exit 1)
+    after committing what the earlier steps wrote: nothing it would have
+    written is guessed.
     """
     from storyforge import extract_describe as describe
     from storyforge.export import storyforge_version
@@ -1327,7 +1329,7 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run):
     scenes = describe.scene_table(ref_dir)
     if not scenes:
         log('  No scenes in reference/scenes.csv; run phases 1-3 first. Phase 5 skipped.')
-        return
+        return False
     profile = _load_profile(profile_file)
     if dry_run:
         print(f'===== DRY RUN: Phase 5 (describe) — {len(scenes)} scenes =====')
@@ -1337,19 +1339,18 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run):
                     profile, scenes, describe.motif_mentions(scenes)))):
             print(f'{label}: {len(prompt)} chars')
         print('===== END DRY RUN =====')
-        return
-
-    # Books extracted before phase 1 did this have every status blank
-    marked = _mark_drafted(ref_dir, os.path.join(project_dir, 'scenes'),
-                           [s['id'] for s in scenes])
-    if marked:
-        log(f'  status: {marked} scene(s) with prose and no status marked drafted')
+        return False
 
     provenance = describe.read_provenance(project_dir)
     if provenance is None:
         log(f'ERROR: {describe.PROVENANCE_FILE} could not be used (see the WARNING above). '
             f'Fix or delete it, then run extract --phase 5 again.')
         sys.exit(1)
+    # Books extracted before phase 1 did this have every status blank
+    marked = _mark_drafted(ref_dir, os.path.join(project_dir, 'scenes'),
+                           [s['id'] for s in scenes])
+    if marked:
+        log(f'  status: {marked} scene(s) with prose and no status marked drafted')
     warnings: list[str] = []
     version = storyforge_version(warnings)
     for w in warnings:
@@ -1357,13 +1358,14 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run):
     run = describe.Run(
         project_dir=project_dir, model=select_model('synthesis'), log_dir=log_dir,
         force=force, version=version, provenance=provenance,
-        on_usage=lambda f, op, target, model: _log_api_usage(f, op, target, model, project_dir),
-        reports=[])
+        on_usage=lambda f, op, target, model: _log_api_usage(f, op, target, model, project_dir))
+    outcomes = {}
     try:
         # Each step re-reads the scenes: 5a may have filled blank summaries
-        for step in (describe.run_structure, describe.run_themes):
-            step(run, profile, describe.scene_table(ref_dir))
-    except (describe.DescribeFailed, describe.ProvenanceError, OSError) as e:
+        for name, step in (('spine and architecture', describe.run_structure),
+                           ('themes and motifs', describe.run_themes)):
+            outcomes[name] = step(run, profile, describe.scene_table(ref_dir))
+    except Exception as e:   # anything mid-step: report and commit what is written
         for line in run.reports:
             log(f'  {line}')
         log(f'ERROR: Phase 5 stopped: {e}')
@@ -1372,9 +1374,16 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run):
         sys.exit(1)
     for line in run.reports:
         log(f'  {line}')
-    commit_and_push(project_dir,
-                    'Extract: Phase 5 — describe (spine, architecture, themes, motifs)',
-                    describe.WRITTEN_PATHS)
+    written = [name for name, outcome in outcomes.items() if outcome == 'written']
+    partial = [name for name, outcome in outcomes.items() if outcome == 'partial']
+    if written or partial or marked:
+        what = ', '.join(written) or 'nothing new'
+        commit_and_push(project_dir, f'Extract: Phase 5 — describe ({what}'
+                        + (f'; {", ".join(partial)} stopped part-way' if partial else '') + ')',
+                        describe.WRITTEN_PATHS)
+    if not written:
+        log('  Phase 5 wrote nothing (see the lines above for why).')
+    return bool(written)
 
 
 def _run_cleanup(ref_dir: str, project_dir: str) -> None:

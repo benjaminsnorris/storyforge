@@ -10,7 +10,7 @@ import json
 import pytest
 
 from storyforge.extract_describe import (
-    StructureError, build_structure_prompt, build_themes_prompt,
+    ReplyProblems, build_structure_prompt, build_themes_prompt,
     motif_mentions, parse_structure, parse_themes, structure_rows,
 )
 
@@ -54,7 +54,7 @@ class TestParseStructure:
                 {'scene_id': 's01', 'spine_event': 'event-9'},
                 {'scene_id': 's02', 'spine_event': 'event-1'},
                 {'scene_id': 's02', 'spine_event': 'event-1'}]
-        with pytest.raises(StructureError) as e:
+        with pytest.raises(ReplyProblems) as e:
             parse_structure(_reply(spine, arch), _scenes())
         text = ' '.join(e.value.problems)
         assert "'nowhere' is not one of the scene ids" in text
@@ -108,7 +108,7 @@ class TestSceneSummaries:
     def test_a_blank_scene_left_without_one_is_a_problem(self):
         scenes = _scenes()
         scenes[0]['summary'] = ''
-        with pytest.raises(StructureError) as e:
+        with pytest.raises(ReplyProblems) as e:
             parse_structure(_reply(), scenes)
         assert '1 scene(s) still have no summary: s01' in ' '.join(e.value.problems)
 
@@ -197,7 +197,7 @@ class TestParseThemes:
             motifs=[{'id': 'a', 'name': 'A', 'aliases': ['robe'], 'tier': 'primary', 'mentions': [0, 1]},
                     {'id': 'b', 'name': 'B', 'aliases': ['Robe'], 'tier': 'tertiary', 'mentions': [1, 9]},
                     {'id': 'c', 'name': 'C', 'aliases': [], 'tier': 'tertiary', 'mentions': [2]}])
-        with pytest.raises(StructureError) as e:
+        with pytest.raises(ReplyProblems) as e:
             parse_themes(reply, scenes, motif_mentions(scenes))
         text = ' '.join(e.value.problems)
         assert 'unknown theme(s): ghost' in text
@@ -210,7 +210,7 @@ class TestParseThemes:
 
     def test_no_motifs_when_some_recur_is_a_problem(self):
         scenes = _mentioned()
-        with pytest.raises(StructureError) as e:
+        with pytest.raises(ReplyProblems) as e:
             parse_themes(_themes_reply(scenes, motifs=[]), scenes, motif_mentions(scenes))
         assert 'motifs is empty' in ' '.join(e.value.problems)
 
@@ -220,3 +220,82 @@ class TestParseThemes:
             s['motifs'] = ''
         out = parse_themes(_themes_reply(scenes, motifs=[]), scenes, motif_mentions(scenes))
         assert out['motifs'] == []
+
+
+class TestReviewFixes:
+    """Regression tests for the #444 review."""
+
+    def test_row_keys_are_exactly_the_columns(self):
+        """TD: a key typo wrote a blank column with no error
+        (DictWriter's extrasaction='ignore')."""
+        from storyforge.elaborate import _ARCHITECTURE_COLS, _SPINE_COLS
+        scenes = _scenes()
+        spine, arch = structure_rows(parse_structure(_reply(), scenes), scenes)
+        assert set(spine[0]) == set(_SPINE_COLS)
+        assert set(arch[0]) == set(_ARCHITECTURE_COLS)
+
+    @pytest.mark.parametrize('words,ok', [(35, True), (36, False)])
+    def test_summary_length_boundary(self, words, ok):
+        scenes = _scenes()
+        scenes[0]['summary'] = ''
+        spine = _spine()
+        spine[0]['summary'] = ' '.join(['w'] * words)
+        reply = _reply(spine, summaries=[{'scene_id': 's01', 'summary': ' '.join(['w'] * words)}])
+        if ok:
+            parse_structure(reply, scenes)
+        else:
+            with pytest.raises(ReplyProblems) as e:
+                parse_structure(reply, scenes)
+            text = ' '.join(e.value.problems)
+            assert '36 words' in text and "s01's summary is empty or over 35 words" in text
+
+    def test_spine_ids_must_be_slugs_and_unique(self):
+        spine = _spine()
+        spine[1]['id'] = 'event-1'
+        spine[2]['id'] = 'Event Three'
+        with pytest.raises(ReplyProblems) as e:
+            parse_structure(_reply(spine), _scenes())
+        text = ' '.join(e.value.problems)
+        assert "'event-1' is empty, repeated, or not a lowercase-hyphenated slug" in text
+        assert "'Event Three' is empty, repeated" in text
+
+    def test_spine_act_is_its_first_anchors(self):
+        scenes = _scenes()
+        # event-2 anchors s05-s08, which start in act 1 and end in act 2
+        s = parse_structure(_reply(), scenes)
+        spine, _ = structure_rows(s, scenes)
+        assert scenes[4]['act'] == '1' and scenes[7]['act'] == '2'
+        assert spine[1]['act'] == '1'
+
+    def test_tiers_slugs_and_semicolon_aliases_in_themes(self):
+        from storyforge.extract_describe import TIERS, Tier
+        from typing import get_args
+        assert TIERS == get_args(Tier)
+        scenes = _mentioned()
+        reply = json.loads(_themes_reply(scenes))
+        reply['themes'][0]['tier'] = 'core'
+        reply['themes'][1]['id'] = 'two words'
+        reply['motifs'][0]['aliases'] = ['eyes; gaze']
+        with pytest.raises(ReplyProblems) as e:
+            parse_themes(json.dumps(reply), scenes, motif_mentions(scenes))
+        text = ' '.join(e.value.problems)
+        assert "theme t1's tier 'core' is not one of primary, secondary, tertiary" in text
+        assert "theme id 'two words' is empty, repeated" in text
+        assert "alias(es) contain a semicolon: 'eyes; gaze'" in text
+
+    def test_mention_numbers_that_are_not_integers_are_problems(self):
+        scenes = _mentioned()
+        reply = json.loads(_themes_reply(scenes))
+        reply['motifs'][0]['mentions'] = ['0', 1, 2]
+        with pytest.raises(ReplyProblems) as e:
+            parse_themes(json.dumps(reply), scenes, motif_mentions(scenes))
+        assert "names mention [0], which does not exist" in ' '.join(e.value.problems)
+
+    def test_the_mention_to_motif_map_is_returned(self):
+        scenes = _mentioned()
+        out = parse_themes(_themes_reply(scenes), scenes, motif_mentions(scenes))
+        assert out['mention_motif'] == {0: 'eyes', 1: 'eyes'}
+
+    def test_reply_problems_is_not_a_value_error(self):
+        """TD: _ask told the two apart only by handler order."""
+        assert not issubclass(ReplyProblems, ValueError)
