@@ -767,6 +767,39 @@ class TestManifestCoverIntegration:
             generate_publish_manifest(project, include_dashboard=False)
 
 
+class TestManifestChapterHeading:
+    """F-103: Bookshelf printed "Chapter 1: Chapter I" over a classic whose
+    text opens on its own "# Chapter I"; the map's heading never reached it."""
+
+    def _manifest(self, tmp_path, rows):
+        from storyforge.assembly import generate_publish_manifest
+        ref = tmp_path / 'reference'
+        ref.mkdir()
+        (tmp_path / 'scenes').mkdir()
+        (tmp_path / 'storyforge.yaml').write_text('project:\n  title: T\n  author: A\n')
+        ids = [f's{i}' for i in range(1, len(rows) + 1)]
+        (ref / 'scenes.csv').write_text('id|seq|title|status|word_count\n' + ''.join(
+            f'{sid}|{i}|One|drafted|10\n' for i, sid in enumerate(ids, 1)))
+        (ref / 'chapter-map.csv').write_text('chapter|title|heading|part|scenes\n' + ''.join(
+            f'{i}|Chapter {i}|{heading}||{sid}\n'
+            for i, (heading, sid) in enumerate(zip(rows, ids), 1)))
+        for sid in ids:
+            (tmp_path / 'scenes' / f'{sid}.md').write_text('Prose.\n')
+        with open(generate_publish_manifest(str(tmp_path), include_dashboard=False)) as f:
+            return json.load(f)['chapters']
+
+    def test_each_chapter_carries_its_heading(self, tmp_path):
+        chapters = self._manifest(tmp_path, ['none', 'numbered', 'titled', 'numbered-titled'])
+        assert [c['heading'] for c in chapters] == ['none', 'numbered', 'titled',
+                                                   'numbered-titled']
+
+    def test_blank_or_unknown_heading_is_left_out(self, tmp_path):
+        """Bookshelf keeps its own heading when none is sent, and refuses a
+        format it doesn't know, so only the four formats go."""
+        chapters = self._manifest(tmp_path, ['', 'roman'])
+        assert all('heading' not in c for c in chapters)
+
+
 class TestOnDiskManifestGuards:
     """cmd_publish re-checks the manifest it reads back before sending it.
 
