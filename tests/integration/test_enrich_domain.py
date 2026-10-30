@@ -323,6 +323,15 @@ class TestNormalizeMiceThreads:
     def test_empty_string(self):
         assert normalize_mice_threads('', {'a': 'b'}) == ''
 
+    def test_a_bracketed_note_is_kept_and_its_colon_is_not_a_type(self):
+        """understory: `zara-identity[advance: note]` became the note."""
+        alias_map = {'zara-identity': 'zara-identity', 'naji': 'naji-redemption'}
+        value = ('zara-identity[advance: Zara acts, shifting from outsider];'
+                 '+naji[open: Hana deflects]')
+        assert normalize_mice_threads(value, alias_map) == (
+            'zara-identity[advance: Zara acts, shifting from outsider];'
+            '+naji-redemption[open: Hana deflects]')
+
     def test_empty_alias_map(self):
         assert normalize_mice_threads('+inquiry:x', {}) == '+inquiry:x'
 

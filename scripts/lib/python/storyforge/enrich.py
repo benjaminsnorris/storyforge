@@ -406,6 +406,9 @@ _MICE_SEPARATOR_RE = re.compile(
     r';|,(?=\s*(?:[+-]|(?:milieu|inquiry|character|event)\s*:))', re.IGNORECASE)
 
 
+_MICE_NOTE_RE = re.compile(r'^(.*?)(\[[^\]]*\])$', re.DOTALL)
+
+
 def split_mice_entries(mice_string: str) -> list[str]:
     """Split a mice_threads value into its entries."""
     return _MICE_SEPARATOR_RE.split(mice_string or '')
@@ -439,6 +442,14 @@ def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
         if not entry:
             continue
 
+        # A bracketed note after the name (`zara-identity[advance: ...]`, as
+        # a revision pass wrote them) is kept as is: its colon is not a
+        # type:name separator
+        note = ''
+        m = _MICE_NOTE_RE.match(entry)
+        if m:
+            entry, note = m.group(1).strip(), m.group(2)
+
         # Determine prefix (+/-/none) and the rest
         prefix = ''
         rest = entry
@@ -460,7 +471,7 @@ def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
         canonical = alias_map.get(name_part.lower(), name_part)
 
         # Output bare canonical name — type lives in registry, not in references
-        result.append(f'{prefix}{canonical}')
+        result.append(f'{prefix}{canonical}{note}')
 
     return ';'.join(result)
 

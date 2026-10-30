@@ -44,7 +44,7 @@ import os
 import re
 import sys
 
-from storyforge.common import detect_project_root, log, read_yaml_field
+from storyforge.common import csv_safe, detect_project_root, log, read_yaml_field
 from storyforge.git import commit_and_push, ensure_on_branch
 
 
@@ -264,12 +264,19 @@ def _log_ledger_step(result) -> None:
 # ============================================================================
 
 def step5_normalize(ref_dir: str, project_dir: str) -> int:
-    """Normalize registry-backed fields. Returns count of updated cells."""
+    """Normalize registry-backed fields. Returns count of updated cells.
+
+    `normalize_fields` is built for model replies, where a trailing
+    "(referenced)" is noise. In the author's files a parenthetical is their
+    text (`food; erasure (Hunter residue)`), so a cell whose normalizing would
+    drop one is left as it is and named in the log.
+    """
     from storyforge.elaborate import _read_csv as elab_read_csv, _write_csv, _FILE_MAP
     from storyforge.enrich import load_registry_alias_maps, normalize_fields
 
     alias_maps = load_registry_alias_maps(project_dir)
     updated = 0
+    kept: list[str] = []
 
     for filename, columns in _FILE_MAP.items():
         path = os.path.join(ref_dir, filename)
@@ -282,16 +289,34 @@ def step5_normalize(ref_dir: str, project_dir: str) -> int:
         for row in rows:
             original = dict(row)
             normalize_fields(row, alias_maps)
-            if row != original:
+            for k in row:
+                if row[k] == original.get(k, ''):
+                    continue
+                if _drops_parenthetical(original.get(k, '')):
+                    row[k] = original[k]
+                    kept.append(f'{filename} {row.get("id", "?")} {k}: '
+                                f'{csv_safe(original[k])[:120]}')
+                    continue
                 changed = True
-                for k in row:
-                    if row[k] != original.get(k, ''):
-                        updated += 1
+                updated += 1
 
         if changed:
             _write_csv(path, rows, columns)
 
+    if kept:
+        log(f'         {len(kept)} cell(s) left as they are: normalizing would '
+            f'drop the parenthetical text in them. Edit them by hand:')
+        for item in kept:
+            log(f'           {item}')
     return updated
+
+
+def _drops_parenthetical(value: str) -> bool:
+    """Whether any `;` entry of `value` ends in a parenthetical, which
+    `enrich.strip_parentheticals` would remove."""
+    from storyforge.enrich import strip_parentheticals
+    return any(strip_parentheticals(part.strip()) != part.strip()
+               for part in (value or '').split(';'))
 
 
 # ============================================================================
