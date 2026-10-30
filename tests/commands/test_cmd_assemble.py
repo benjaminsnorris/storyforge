@@ -827,3 +827,43 @@ class TestMainUpdatesStoryforgeYaml:
         out = capsys.readouterr().out
         assert 'could not stamp `chapter_map`' in out
         assert 'UnicodeDecodeError' in out
+
+
+class TestIncompleteBook:
+    """A missing scene or a failed chapter used to be named with a WARNING;
+    the book was then assembled without it, `manuscript` stamped current,
+    the commit worded as a whole book, and the run exited 0."""
+
+    def _setup(self, project_dir, monkeypatch):
+        monkeypatch.setattr('storyforge.cmd_assemble.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_assemble.get_plugin_dir',
+                            lambda: os.path.dirname(os.path.dirname(
+                                os.path.dirname(os.path.dirname(
+                                    os.path.dirname(__file__))))))
+        from storyforge.cmd_assemble import _get_chapter_scenes
+        missing = _get_chapter_scenes(1, project_dir)[0]
+        os.remove(os.path.join(project_dir, 'scenes', f'{missing}.md'))
+        return missing
+
+    def test_a_missing_scene_makes_the_book_incomplete(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        missing = self._setup(project_dir, monkeypatch)
+        stamped = []
+        monkeypatch.setattr('storyforge.cmd_assemble.update_artifact_entry',
+                            lambda pd, artifact, **kw: stamped.append(artifact))
+
+        with pytest.raises(SystemExit) as exc:
+            main(['--format', 'markdown', '--no-pr'])
+
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert f'scene file(s) missing: {missing}' in out.split('is incomplete')[1]
+        assert 'manuscript' not in stamped
+        commits = [c[1] for c in mock_git.calls_for('commit_and_push')]
+        assert commits and commits[-1].endswith('(incomplete)')
+
+    def test_a_draft_may_be_missing_scenes(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        self._setup(project_dir, monkeypatch)
+        main(['--draft', '--no-pr'])  # a preview of an unfinished book: no exit
