@@ -47,13 +47,15 @@ def parse_args(argv):
     )
     parser.add_argument('--phase', type=int, default=None,
                         help='Run only phase N (0=characterize, 1=skeleton, 2=intent, '
-                             '3=briefs, 4=commitments)')
+                             '3=briefs, 4=commitments, 5=describe: spine, architecture, '
+                             'themes and motifs)')
     parser.add_argument('--cleanup', action='store_true',
                         help='Run cleanup after extraction')
     parser.add_argument('--cleanup-only', action='store_true',
                         help='Run cleanup only (skip extraction)')
     parser.add_argument('--force', action='store_true',
-                        help='Overwrite existing field values')
+                        help='Overwrite existing field values (phase 5: regenerate the '
+                             'docs it wrote that nobody has edited since)')
     parser.add_argument('--expand', action='store_true',
                         help='Run expansion analysis after extraction')
     parser.add_argument('--dry-run', action='store_true',
@@ -115,6 +117,7 @@ def main(argv=None):
 - [ ] Phase 1: Extract skeleton (scenes.csv)
 - [ ] Phase 2: Extract intent (scene-intent.csv)
 - [ ] Phase 3: Extract briefs (scene-briefs.csv)
+- [ ] Phase 5: Describe the book (spine, architecture, themes, motifs)
 - [ ] Validate
 - [ ] Review"""
         create_draft_pr(f'Extract: {title} ({scene_count} scenes)',
@@ -198,6 +201,13 @@ def main(argv=None):
     # Cleanup
     if not args.dry_run and (args.cleanup or (args.phase is None and not args.cleanup_only)):
         _run_cleanup(ref_dir, project_dir)
+
+    # Phase 5: Describe (after cleanup, so it reads the cleaned scene data)
+    if not args.cleanup_only and (args.phase is None or args.phase == 5):
+        _run_phase_5(project_dir, log_dir, profile_file, args.force, args.dry_run)
+        if not args.dry_run:
+            update_pr_task('Phase 5: Describe the book (spine, architecture, themes, motifs)',
+                           project_dir)
 
     # Validate
     if not args.dry_run:
@@ -1271,6 +1281,67 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 # ============================================================================
 # Cleanup, validation, expansion
 # ============================================================================
+
+def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run):
+    """Phase 5, describe (#440): the reference layers above the scenes, from
+    what phases 0-4 found. Steps 5a (structure) and 5b (themes and motifs)
+    so far; `extract_describe` holds them and the write gate.
+
+    A step whose files the author owns is skipped and says so. A step that
+    can't get a usable answer stops the run (exit 1) after committing what
+    the earlier steps wrote: nothing it would have written is guessed.
+    """
+    from storyforge import extract_describe as describe
+    from storyforge.export import storyforge_version
+    log('')
+    log('--- Phase 5: Describe the book ---')
+    ref_dir = os.path.join(project_dir, 'reference')
+    scenes = describe.scene_table(ref_dir)
+    if not scenes:
+        log('  No scenes in reference/scenes.csv; run phases 1-3 first. Phase 5 skipped.')
+        return
+    profile = _load_profile(profile_file)
+    if dry_run:
+        print(f'===== DRY RUN: Phase 5 (describe) — {len(scenes)} scenes =====')
+        for label, prompt in (
+                ('5a structure', describe.build_structure_prompt(profile, scenes)),
+                ('5b themes', describe.build_themes_prompt(
+                    profile, scenes, describe.motif_candidates(scenes)))):
+            print(f'{label}: {len(prompt)} chars')
+        print('===== END DRY RUN =====')
+        return
+
+    provenance = describe.read_provenance(project_dir)
+    if provenance is None:
+        log(f'ERROR: {describe.PROVENANCE_FILE} could not be used (see the WARNING above). '
+            f'Fix or delete it, then run extract --phase 5 again.')
+        sys.exit(1)
+    warnings: list[str] = []
+    version = storyforge_version(warnings)
+    for w in warnings:
+        log(f'  WARNING: {w}')
+    run = describe.Run(
+        project_dir=project_dir, model=select_model('synthesis'), log_dir=log_dir,
+        force=force, version=version, provenance=provenance,
+        on_usage=lambda f, op, target, model: _log_api_usage(f, op, target, model, project_dir),
+        reports=[])
+    try:
+        # Each step re-reads the scenes: 5a may have filled blank summaries
+        for step in (describe.run_structure, describe.run_themes):
+            step(run, profile, describe.scene_table(ref_dir))
+    except (describe.DescribeFailed, describe.ProvenanceError, OSError) as e:
+        for line in run.reports:
+            log(f'  {line}')
+        log(f'ERROR: Phase 5 stopped: {e}')
+        commit_and_push(project_dir, 'Extract: Phase 5 — describe (stopped)',
+                        describe.WRITTEN_PATHS)
+        sys.exit(1)
+    for line in run.reports:
+        log(f'  {line}')
+    commit_and_push(project_dir,
+                    'Extract: Phase 5 — describe (spine, architecture, themes, motifs)',
+                    describe.WRITTEN_PATHS)
+
 
 def _run_cleanup(ref_dir: str, project_dir: str) -> None:
     """Run post-extraction cleanup."""

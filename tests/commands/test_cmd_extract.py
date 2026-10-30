@@ -636,7 +636,14 @@ class TestPhaseExecution:
             'total_fixes': 0,
         })
 
+        # Phase 5 has its own tests (test_extract_phase5.py); here, only that
+        # a full run reaches it
+        phase5 = []
+        monkeypatch.setattr('storyforge.cmd_extract._run_phase_5',
+                            lambda *a, **k: phase5.append(a))
+
         main(['--force'])  # --force: the answers replace the fixture's values
+        assert len(phase5) == 1 and phase5[0][3] is True   # force reaches it
 
         # Should have submitted batches for phases 1, 2, and 3a at minimum
         batch_calls = mock_api.calls_for('submit_batch')

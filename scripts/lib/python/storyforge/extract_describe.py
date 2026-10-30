@@ -35,7 +35,7 @@ import posixpath
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Literal, TypedDict
+from typing import Callable, Literal, TypedDict
 
 from .common import is_unfilled_template, log
 
@@ -323,10 +323,14 @@ _SUMMARY_MAX_WORDS = 35   # scoring_levels._SUMMARY_MAX_WORDS
 
 STRUCTURE_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
-    'required': ['genre', 'subgenre', 'spine', 'architecture'],
+    'required': ['genre', 'subgenre', 'scene_summaries', 'spine', 'architecture'],
     'properties': {
         'genre': {'type': 'string'},
         'subgenre': {'type': 'string'},
+        'scene_summaries': {'type': 'array', 'items': {
+            'type': 'object', 'additionalProperties': False,
+            'required': ['scene_id', 'summary'],
+            'properties': {k: {'type': 'string'} for k in ('scene_id', 'summary')}}},
         'spine': {'type': 'array', 'items': {
             'type': 'object', 'additionalProperties': False,
             'required': ['id', 'title', 'summary', 'function'],
@@ -363,6 +367,12 @@ def build_structure_prompt(profile: dict, scenes: list[dict[str, str]],
     scenes, so nothing here can invent a scene.
     """
     spine_lo, spine_hi = _bounds(SPINE_RANGE, len(scenes))
+    blank = [s['id'] for s in scenes if not s.get('summary', '').strip()]
+    summaries_ask = (
+        f'2. **scene_summaries**: one sentence (at most {_SUMMARY_MAX_WORDS} words) saying '
+        f'what happens, for each of these scenes, which have none yet: '
+        + ', '.join(blank) + '.'
+        if blank else '2. **scene_summaries**: an empty list (every scene has one).')
     arch_lo, arch_hi = _bounds(ARCHITECTURE_RANGE, len(scenes))
     retry = ''
     if problems:
@@ -384,14 +394,16 @@ def build_structure_prompt(profile: dict, scenes: list[dict[str, str]],
 
 1. **genre** and **subgenre**: how a bookseller would shelve this book (subgenre may be empty).
 
-2. **spine**: the {spine_lo}-{spine_hi} irreducible events of this story, in reading
+{summaries_ask}
+
+3. **spine**: the {spine_lo}-{spine_hi} irreducible events of this story, in reading
    order. Remove any one and the story stops making sense. For each:
    - id: a 2-5 word lowercase-hyphenated slug of the event
    - title: a short title
    - summary: one sentence, at most {_SUMMARY_MAX_WORDS} words, saying what happens
    - function: one sentence on what the event does for the story
 
-3. **architecture**: the {arch_lo}-{arch_hi} anchor scenes that carry the spine,
+4. **architecture**: the {arch_lo}-{arch_hi} anchor scenes that carry the spine,
    chosen from the scene ids above (use the ids exactly). Every spine event
    needs at least one anchor. For each: scene_id, and spine_event (the spine id
    it carries). Choose the scenes where the story actually turns, wherever they
@@ -404,8 +416,11 @@ def parse_structure(response: str, scenes: list[dict[str, str]]) -> dict:
     architecture}` with spine events in reading order (by their first
     anchor) and anchors in reading order.
 
+    `scene_summaries` maps each scene that had no summary to the one the
+    reply gives.
+
     Raises StructureError listing every problem, so one retry can fix them
-    all: an id that is no scene, a scene anchored twice, an anchor naming
+    all: a scene with no summary left without one, an id that is no scene, a scene anchored twice, an anchor naming
     no spine event, a spine event with no anchor, counts outside the ranges,
     an empty or overlong summary. These are the mechanical floors; whether
     the book balances action and sequel is a fact about the book, and is
@@ -415,6 +430,21 @@ def parse_structure(response: str, scenes: list[dict[str, str]]) -> dict:
     data = _json_answer(response, STRUCTURE_SCHEMA)
     order = {s['id']: i for i, s in enumerate(scenes)}
     problems = []
+
+    blank = {s['id'] for s in scenes if not s.get('summary', '').strip()}
+    scene_summaries = {}
+    for item in data['scene_summaries']:
+        sid, text = item['scene_id'].strip(), ' '.join(item['summary'].split())
+        if sid not in blank:
+            continue   # a scene that has one keeps it
+        if not text or len(text.split()) > _SUMMARY_MAX_WORDS:
+            problems.append(f'scene {sid}\'s summary is empty or over {_SUMMARY_MAX_WORDS} words')
+            continue
+        scene_summaries[sid] = text
+    missing = sorted(blank - set(scene_summaries), key=order.get)
+    if missing:
+        problems.append(f'{len(missing)} scene(s) still have no summary: '
+                        + ', '.join(missing[:5]) + ('…' if len(missing) > 5 else ''))
 
     spine = []
     seen_spine = set()
@@ -473,6 +503,7 @@ def parse_structure(response: str, scenes: list[dict[str, str]]) -> dict:
     spine.sort(key=lambda e: first[e['id']])
     return {'genre': ' '.join(data['genre'].split()),
             'subgenre': ' '.join(data['subgenre'].split()),
+            'scene_summaries': scene_summaries,
             'spine': spine, 'architecture': anchors}
 
 
@@ -482,7 +513,7 @@ def structure_rows(structure: dict, scenes: list[dict[str, str]],
 
     An anchor's row is its scene: id, seq, title, act, pov and the intent
     columns are copied from the scene CSVs, and its summary is the scene's
-    own. A spine event's act is the act of its first anchor, so the two
+    own (or the one this reply gave a scene that had none). A spine event's act is the act of its first anchor, so the two
     files can't disagree about where an event falls.
     """
     by_id = {s['id']: s for s in scenes}
@@ -491,7 +522,9 @@ def structure_rows(structure: dict, scenes: list[dict[str, str]],
         s = by_id[a['scene_id']]
         arch.append({
             'id': s['id'], 'seq': s.get('seq', ''), 'title': s.get('title', ''),
-            'summary': s.get('summary', ''), 'act': s.get('act', ''),
+            'summary': s.get('summary', '').strip()
+            or structure['scene_summaries'].get(s['id'], ''),
+            'act': s.get('act', ''),
             'pov': s.get('pov', ''), 'spine_event': a['spine_event'],
             **{k: s.get(k, '') for k in ('action_sequel', 'emotional_arc',
                                           'value_at_stake', 'value_shift',
@@ -678,3 +711,185 @@ def parse_themes(response: str, scenes: list[dict[str, str]],
     if problems:
         raise StructureError(problems)
     return {'themes': themes, 'scene_themes': tagged, 'motifs': out_motifs}
+
+
+# ============================================================================
+# Running the steps
+# ============================================================================
+
+THEMES_COLUMNS = ['id', 'name', 'tier', 'description']
+MOTIF_COLUMNS = ['id', 'name', 'aliases', 'tier']
+STRUCTURE_MAX_TOKENS = 12_000
+THEMES_MAX_TOKENS = 12_000
+
+
+class DescribeFailed(RuntimeError):
+    """A phase 5 step could not get a usable answer; nothing was written for it."""
+
+
+@dataclass
+class Run:
+    """What every step shares: where to write, how to call, what to record."""
+    project_dir: str
+    model: str
+    log_dir: str
+    force: bool
+    version: str
+    provenance: Provenance
+    #: (log file, operation, target, model): records the call's cost
+    on_usage: Callable[[str, str, str, str], None]
+    reports: list[str]
+
+    @property
+    def ref_dir(self) -> str:
+        return os.path.join(self.project_dir, 'reference')
+
+
+def _csv_text(rows: list[dict[str, str]], columns: list[str]) -> str:
+    import io
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=columns, delimiter='|',
+                            lineterminator='\n', extrasaction='ignore')
+    writer.writeheader()
+    writer.writerows(rows)
+    return out.getvalue()
+
+
+def _ask(run: Run, label: str, prompt_for, parse, schema: dict, max_tokens: int):
+    """One structured call, with one retry carrying the parser's problems.
+
+    Raises DescribeFailed on a cut-off or unreadable reply, or when the retry
+    still has problems: a step either gets an answer it can write whole or
+    writes nothing.
+    """
+    from .api import extract_text, invoke_to_file, is_truncated
+    problems = None
+    for attempt in (1, 2):
+        log_file = os.path.join(run.log_dir, f'extract-describe-{label}-{attempt}.json')
+        response = invoke_to_file(prompt_for(problems), run.model, log_file, max_tokens,
+                                  output_schema=schema)
+        run.on_usage(log_file, f'extract-describe-{label}', 'book', run.model)
+        if is_truncated(response):
+            raise DescribeFailed(f'{label}: the reply hit its token limit')
+        try:
+            return parse(extract_text(response))
+        except StructureError as e:
+            if attempt == 2:
+                raise DescribeFailed(f'{label}: still unusable after a retry: {e}') from e
+            log(f'  {label}: {len(e.problems)} problem(s) in the reply; asking once more')
+            problems = e.problems
+        except ValueError as e:
+            raise DescribeFailed(f'{label}: unreadable reply ({e})') from e
+    raise AssertionError('unreachable')
+
+
+def _gate(run: Run, rels: list[str], step: str) -> bool:
+    """Whether every file a step writes may be written; reports the ones that
+    can't. A step writes all its files or none, so its outputs can't
+    disagree (an architecture naming a spine the author kept)."""
+    verdicts = [decide(run.project_dir, rel, run.force, run.provenance) for rel in rels]
+    kept = [v for v in verdicts if not v.write]
+    if kept:
+        run.reports.extend(v.report() for v in kept)
+        run.reports.append(f'{step} skipped: it writes {", ".join(rels)} together, '
+                           f'and {len(kept)} of them must be kept')
+        return False
+    return True
+
+
+def _write(run: Run, rel: str, content: str, step: str) -> None:
+    verdict = write_described(run.project_dir, rel, content, step=step,
+                              version=run.version, force=run.force,
+                              provenance=run.provenance)
+    if verdict.write:
+        log(f'  wrote {rel}')
+    else:
+        run.reports.append(verdict.report())
+
+
+def _fill_blank_cells(run: Run, column: str, values: dict[str, str]) -> int:
+    """Set `column` for each scene id in `values` whose cell is blank. Never
+    replaces a value: a filled cell may be the author's."""
+    from .elaborate import get_scene, update_scene
+    filled = 0
+    for sid, value in values.items():
+        row = get_scene(sid, run.ref_dir)
+        if row is not None and value and not row.get(column, '').strip():
+            update_scene(sid, run.ref_dir, {column: value})
+            filled += 1
+    return filled
+
+
+_PROJECT_PLACEHOLDERS = {'genre': {'', 'PROJECT_GENRE'}, 'subgenre': {''}}
+
+
+def _fill_project_field(run: Run, key: str, value: str) -> None:
+    """Set `project.<key>` in storyforge.yaml when it is still empty or the
+    template's placeholder; an author's value is kept. Edits that one line,
+    keeping its inline comment and the file's line endings."""
+    from .common import _yaml_double_quote, read_yaml_field, rewrite_preserving_newlines
+    if not value:
+        return
+    current = read_yaml_field(f'project.{key}', run.project_dir)
+    if current not in _PROJECT_PLACEHOLDERS[key]:
+        return
+    path = os.path.join(run.project_dir, 'storyforge.yaml')
+    pattern = re.compile(
+        rf'^(\s+{key}:)[ \t]*(?:"PROJECT_GENRE"|\'PROJECT_GENRE\'|PROJECT_GENRE|""|\'\')?'
+        r'([ \t]+#.*|[ \t]*)$', re.MULTILINE)
+
+    def edit(text: str) -> str:
+        new, n = pattern.subn(lambda m: f'{m.group(1)} {_yaml_double_quote(value)}{m.group(2)}',
+                              text, count=1)
+        if not n:
+            run.reports.append(f'storyforge.yaml: project.{key} not set (no `{key}:` line '
+                               f'to fill); the book reads as {value!r}')
+        return new
+    if os.path.isfile(path) and rewrite_preserving_newlines(path, edit):
+        log(f'  set project.{key}: {value}')
+
+
+def run_structure(run: Run, profile: dict, scenes: list[dict[str, str]]) -> None:
+    """Step 5a: spine.csv, architecture.csv, blank scene summaries,
+    anchors' architecture_scene, and project.genre / subgenre."""
+    from .elaborate import _ARCHITECTURE_COLS, _SPINE_COLS
+    rels = ['reference/spine.csv', 'reference/architecture.csv']
+    if not _gate(run, rels, '5a (structure)'):
+        return
+    structure = _ask(run, 'structure',
+                     lambda problems: build_structure_prompt(profile, scenes, problems),
+                     lambda text: parse_structure(text, scenes),
+                     STRUCTURE_SCHEMA, STRUCTURE_MAX_TOKENS)
+    spine, arch = structure_rows(structure, scenes)
+    _write(run, rels[0], _csv_text(spine, _SPINE_COLS), '5a')
+    _write(run, rels[1], _csv_text(arch, _ARCHITECTURE_COLS), '5a')
+    n = _fill_blank_cells(run, 'summary', structure['scene_summaries'])
+    if n:
+        log(f'  filled {n} blank scene summar{"y" if n == 1 else "ies"}')
+    _fill_blank_cells(run, 'architecture_scene', {r['id']: r['id'] for r in arch})
+    _fill_project_field(run, 'genre', structure['genre'])
+    _fill_project_field(run, 'subgenre', structure['subgenre'])
+
+
+def run_themes(run: Run, profile: dict, scenes: list[dict[str, str]]) -> None:
+    """Step 5b: themes.csv, motif-taxonomy.csv, and blank theme_threads."""
+    rels = ['reference/themes.csv', 'reference/motif-taxonomy.csv']
+    if not _gate(run, rels, '5b (themes and motifs)'):
+        return
+    motifs = motif_candidates(scenes)
+    result = _ask(run, 'themes',
+                  lambda problems: build_themes_prompt(profile, scenes, motifs, problems),
+                  lambda text: parse_themes(text, scenes, motifs),
+                  THEMES_SCHEMA, THEMES_MAX_TOKENS)
+    _write(run, rels[0], _csv_text(result['themes'], THEMES_COLUMNS), '5b')
+    motif_rows = [{**m, 'aliases': ';'.join(m['aliases'])} for m in result['motifs']]
+    _write(run, rels[1], _csv_text(motif_rows, MOTIF_COLUMNS), '5b')
+    _fill_blank_cells(run, 'theme_threads',
+                      {sid: ';'.join(ids) for sid, ids in result['scene_themes'].items()})
+
+
+#: Every file phase 5 may change, for the commit.
+WRITTEN_PATHS = ['reference/spine.csv', 'reference/architecture.csv',
+                 'reference/scenes.csv', 'reference/scene-intent.csv',
+                 'reference/themes.csv', 'reference/motif-taxonomy.csv',
+                 'storyforge.yaml', PROVENANCE_FILE.replace(os.sep, '/')]

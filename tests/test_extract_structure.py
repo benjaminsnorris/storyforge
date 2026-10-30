@@ -31,13 +31,13 @@ def _spine(n=5):
              'function': f'Turns {k}.'} for k in range(1, n + 1)]
 
 
-def _reply(spine=None, arch=None, genre='literary fiction'):
+def _reply(spine=None, arch=None, genre='literary fiction', summaries=None):
     spine = _spine() if spine is None else spine
     if arch is None:
         arch = [{'scene_id': f's{i:02d}', 'spine_event': f'event-{1 + (i - 1) // 4}'}
                 for i in range(1, 21)]
-    return json.dumps({'genre': genre, 'subgenre': '', 'spine': spine,
-                       'architecture': arch})
+    return json.dumps({'genre': genre, 'subgenre': '', 'scene_summaries': summaries or [],
+                       'spine': spine, 'architecture': arch})
 
 
 class TestParseStructure:
@@ -85,6 +85,35 @@ class TestParseStructure:
     def test_unreadable_reply_is_an_error_not_an_empty_structure(self):
         with pytest.raises(ValueError):
             parse_structure('not json', _scenes())
+
+
+class TestSceneSummaries:
+    """Books extracted before 3b kept its summaries have none; 5a asks for
+    exactly those, and never replaces one a scene has."""
+
+    def test_blank_scenes_are_asked_for_and_filled(self):
+        scenes = _scenes()
+        scenes[0]['summary'] = scenes[2]['summary'] = ''
+        prompt = build_structure_prompt({}, scenes)
+        assert 'which have none yet: s01, s03.' in prompt
+        reply = _reply(summaries=[{'scene_id': 's01', 'summary': 'Nick arrives.'},
+                                  {'scene_id': 's03', 'summary': 'Gatsby waves.'},
+                                  {'scene_id': 's02', 'summary': 'Not asked for.'}])
+        s = parse_structure(reply, scenes)
+        assert s['scene_summaries'] == {'s01': 'Nick arrives.', 's03': 'Gatsby waves.'}
+        _, arch = structure_rows(s, scenes)
+        assert arch[0]['summary'] == 'Nick arrives.'
+        assert arch[1]['summary'] == 'Thing 2 happens.'
+
+    def test_a_blank_scene_left_without_one_is_a_problem(self):
+        scenes = _scenes()
+        scenes[0]['summary'] = ''
+        with pytest.raises(StructureError) as e:
+            parse_structure(_reply(), scenes)
+        assert '1 scene(s) still have no summary: s01' in ' '.join(e.value.problems)
+
+    def test_no_blank_scenes_asks_for_none(self):
+        assert 'an empty list (every scene has one)' in build_structure_prompt({}, _scenes())
 
 
 class TestStructureRows:
