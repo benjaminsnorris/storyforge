@@ -739,6 +739,34 @@ def _facts_through(registry, shown, scene_id, order):
             or (row.get('origin') or '').strip() == scene_id}
 
 
+def _place_declared_facts(result, declared, shown_before):
+    """Keep a reply's lists consistent with the facts it declared (F-123).
+
+    A fact the scene declares is established there, so it belongs in its
+    knowledge_out, and in its knowledge_in only if an earlier scene already
+    showed it. A reply that declared a fact but left it out of
+    knowledge_out made the next scene's knowledge_in name a fact no
+    knowledge_out had established (P&P: `bennet-estate-entailed`); one
+    that listed it in its own knowledge_in had the scene know it before it
+    happened. Returns a note of what moved, or ''.
+    """
+    def ids(value):
+        return [i.strip() for i in (value or '').split(';') if i.strip()]
+    k_in, k_out = ids(result.get('knowledge_in')), ids(result.get('knowledge_out'))
+    early = [i for i in k_in if i in declared and i not in shown_before]
+    missing = sorted(declared - set(k_out))
+    if early:
+        result['knowledge_in'] = ';'.join(i for i in k_in if i not in early)
+    if missing:
+        result['knowledge_out'] = ';'.join(k_out + missing)
+    notes = []
+    if missing:
+        notes.append(f'declared but not in knowledge_out, added: {", ".join(missing)}')
+    if early:
+        notes.append(f'declared here but in knowledge_in, removed: {", ".join(early)}')
+    return '; '.join(notes)
+
+
 def _shown_ids(scene_ids, ref_dir):
     """Every knowledge id the briefs of `scene_ids` hold in `knowledge_out`."""
     from storyforge.elaborate import get_scene
@@ -932,8 +960,10 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                                           result.get('_new_facts', []), scene_id,
                                           reading_order)
         created_facts.update(added)
-        shown.update(f.get('id', '').strip() for f in result.get('_new_facts', [])
-                     if f.get('id', '').strip())
+        declared = {f.get('id', '').strip() for f in result.get('_new_facts', [])
+                    if f.get('id', '').strip()}
+        shown_before = set(shown)
+        shown |= declared
         # Writes only when a fact was added or moved earlier
         ledger.write_view(ref_dir, 'knowledge', list(knowledge_registry.values()),
                           origin='prose', introduced_by='extract')
@@ -941,6 +971,9 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         for k in ('knowledge_in', 'knowledge_out'):
             if result.get(k):
                 result[k] = resolve_knowledge_ids(visible, result[k])
+        moved = _place_declared_facts(result, declared, shown_before)
+        if moved:
+            log(f'  {scene_id}: {moved}')
         # Plastic Age: "henley-indicts-college-conformity" named no scene
         if result.get('continuity_deps'):
             result['continuity_deps'], dropped = resolve_scene_deps(
