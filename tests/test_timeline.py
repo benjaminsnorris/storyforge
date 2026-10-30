@@ -954,6 +954,19 @@ class TestChecks:
                           ('poker', '640', 'scene', 'XXXX-23~'))
         assert [f['check'] for f in check_timeline(rows, {})] == ['date_mismatch']
 
+    def test_a_season_reaches_past_its_quarter(self):
+        """F-112 (The Plastic Age): a visit in mid-September, told as
+        summer, was flagged against the July scene before it: the summer
+        window ended on 31 August."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('arrives', '0', 'scene', 'XXXX-07-01'),
+                          ('visit-ends', '80', 'scene', 'XXXX-22'))
+        assert check_timeline(rows, {}) == []
+        # Well into autumn is still not summer
+        rows = self._rows(('arrives', '0', 'scene', 'XXXX-07-01'),
+                          ('visit-ends', '120', 'scene', 'XXXX-22'))
+        assert [f['check'] for f in check_timeline(rows, {})] == ['date_mismatch']
+
     def test_month_and_season_dates_years_apart_still_agree(self):
         """With the year unstated a month recurs every year: October of the
         second year and May of the fourth fit the days between them."""

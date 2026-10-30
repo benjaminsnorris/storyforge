@@ -318,6 +318,10 @@ def _month_day(value: str) -> tuple[str, int, int] | None:
 _SEASON_SPANS = {21: (105, 46), 22: (197, 46), 23: (289, 45), 24: (15, 45)}
 # Slack on top of the two spans: "early in May" on the 2nd is still May
 _ROUGH_SLACK = 7
+# A season named in prose is looser than its calendar quarter: The Plastic
+# Age's mid-September visit is "summer", and so is Gatsby's hottest day in
+# early September (F-112). Each side of a season stretches this far
+_SEASON_MARGIN = 14
 
 
 def _rough_date(value: str) -> tuple[int, int, str] | None:
@@ -332,7 +336,7 @@ def _rough_date(value: str) -> tuple[int, int, str] | None:
     month = int(m.group('month'))
     if month in _SEASON_SPANS:
         middle, half = _SEASON_SPANS[month]
-        return middle, half, _SEASONS[month]
+        return middle, half + _SEASON_MARGIN, _SEASONS[month]
     if not 1 <= month <= 12:
         return None
     return _day_of_year(month, 15), 15, _MONTHS[month - 1]
