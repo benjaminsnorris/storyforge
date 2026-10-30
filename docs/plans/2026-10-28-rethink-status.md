@@ -1,6 +1,6 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-29 (night), at v1.86.2 (E8 gaps done). Handoff for the next session: **Decisions** and **Next steps** below. Start here when resuming the rethink in a new session. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`.
+Last updated 2026-10-29 (night), at v1.87.1 (E8 gaps done in #383; next is E6). Handoff for the next session: **Decisions** and **Next steps** below. Start here when resuming the rethink in a new session. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`.
 
 ## Where we are
 
@@ -34,10 +34,10 @@ Last updated 2026-10-29 (night), at v1.86.2 (E8 gaps done). Handoff for the next
 | 0 Corpus survey | done | (survey doc, #337) |
 | 1 Harness | done | #337 |
 | 2 E1 corpus | done: 144 cases (130 prose), 30 held out | #340 |
-| 3 E2 / E7 / E8 | done: E2 Carol (evals-56), E2 on E1, E7 Carol, E8 three pass families | #341, #342, #343, #344, #346 |
+| 3 E2 / E7 / E8 | done: E2 Carol (evals-56), E2 on E1, E7 Carol, E8 (seven pass families, 37 cases run) | #341, #342, #343, #344, #346, #383 |
 | 4 E3 / E5 | done | #346 |
 | — E4 | done (overnight): shared-dark Act 1 drafted with today's `write`, judged; see the E4 notes below | #361 (v1.81.0), re-recorded in #363 |
-| — E6 | not started: needs a budget decision (below) | |
+| — E6 | not started: approved, about $40 (Next steps 2) | |
 | 5 Phase 1 | mostly done (see above); the other `KEY: value` parsers and the remaining warn-and-continue sites to go | v1.80.0 PR, #359, #361, #363, #364, #368, #373, #374 |
 
 ## Baseline (`evals/baseline.json`)
@@ -159,12 +159,12 @@ Same 49 facts, extraction model forced with `STORYFORGE_MODEL`, Opus judge uncha
 ## Next steps, in order (handoff for a new session)
 
 Start by reading this doc, `CLAUDE.md` and `docs/agent-reference.md`.
-- **Checks:** run `python -m pytest tests/` and `python3 evals/run.py`. Main should replay every suite with no errors and no deltas. At v1.86.0 it did: 7,046+ tests, and only the gates that already failed still fail.
+- **Checks:** run `python -m pytest tests/` and `python3 evals/run.py`. Main should replay every suite with no errors and no deltas. At v1.87.1 (#383) it did: 7,096 tests, and only the gates that already failed still fail. Replay needs no API key. Expect about 5 minutes for the tests and 6 to 10 for the evals; most of the eval time is e2-corpus-drift and e2-corpus-validate. pytest-xdist doesn't help (the time is file I/O, not CPU), so run the tests serially.
 - **Coordination:**
-  - Message **evals-56** (SendMessage) before touching `timeline.py` or claiming a version.
-  - evals-56 is testing the TIME_GAP wording in `timeline.CUE_INSTRUCTIONS` on branch `exp/cue-gap-wording`.
+  - Two other sessions open Storyforge PRs and claim versions: **evals-56** (timeline, classics) and **evals-79** (extract, publish fixes). Message them (SendMessage) before claiming a version or touching `timeline.py`. Eval-only and test-only PRs bump nothing.
+  - evals-56's TIME_GAP/TIME_SPAN wording for `timeline.CUE_INSTRUCTIONS` merged in v1.86.1 (#380).
   - Never touch `~/Developer/evals` or evals-56's worktrees (`~/Developer/storyforge-*`).
-- **Process:** one PR per step, followed by the 5-agent review (CLAUDE.md). Then wait for Ben's "fix all of them in logical commits", and merge in order once the checks pass.
+- **Process:** one PR per step, followed by the 5-agent review (CLAUDE.md). The `pr-review-toolkit` agents it names aren't installed here; #383 used three available reviewers covering the same five angles (correctness, silent failures, tests, comments, types). Then wait for Ben's "fix all of them in logical commits", and merge in order once the checks pass.
 - **Spending:** estimate before any recording.
 
 1. ~~**E8 gaps.**~~ Done (#383; $3.88 recorded, $0.70 re-recorded after the review). 37 cases are run, up from 23. 35 are judged and 2 halt, as before (a refused redraft and a naturalness redraft with no reply). Of the 35, 6 are reintroduced (was 5 of 21). What changed:
