@@ -1160,7 +1160,7 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             taken.add(row['id'])
             rows.append(row)
             written += 1
-        ledger.save_to(ref_dir, rows)
+        ledger.save_to(ref_dir, rows, command=ledger.COMMITMENTS_PASS)
         log(f'  {scene_id}: {len(found)} commitment(s)')
 
     for kind, what in (('quote', 'quote(s) not found verbatim in their scene'),

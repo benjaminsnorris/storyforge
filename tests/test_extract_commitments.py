@@ -57,7 +57,7 @@ class TestViews:
                          subject='tessa-merrin', statement='Tessa holds the key.',
                          origin='prose', status='binding', mutable='state',
                          introduced_by=ledger.COMMITMENTS_PASS, scene_id='act1-sc01'))
-        ledger.save(project_dir, rows)
+        ledger.save(project_dir, rows, command='test')
         assert 'c-1' not in {r['id'] for r in ledger.read_view(ref, 'physical')}
         ledger.write_view(ref, 'physical', ledger.read_view(ref, 'physical'),
                           origin='prose', introduced_by='hone')
@@ -150,7 +150,7 @@ class TestPhase4:
         rows.append(dict({c: '' for c in ledger.COLUMNS}, id='done-1', type='trait',
                          statement='x', origin='prose', status='binding', mutable='fixed',
                          introduced_by=ledger.COMMITMENTS_PASS, scene_id=sorted(scenes)[0]))
-        ledger.save(project_dir, rows)
+        ledger.save(project_dir, rows, command='test')
         _, again = self._run(project_dir, monkeypatch, {})
         assert sorted(scenes)[0] not in {sid for sid, _ in again}
 
