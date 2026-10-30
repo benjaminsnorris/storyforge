@@ -639,11 +639,13 @@ def _validate_timeline(scenes_map, checks):
     plainly; assess_flashbacks in structural.py gauges whether they work.
 
     A run of consecutive scenes set before the same present is one finding
-    (F-122: a multi-plot novel's crosscuts gave one line per scene), the same
-    passage assess_flashbacks reports: frame and vision scenes are skipped
-    without ending it, and a scene with no day ends it. The finding names
-    the run's first and last scene and its count, and lists every scene in
-    ``scenes``, so grouping loses nothing.
+    (F-122: a multi-plot novel's crosscuts gave one line per scene), split as
+    assess_flashbacks splits passages: frame and vision scenes are skipped
+    without ending it, and a scene with no day ends it. (Unlike
+    assess_flashbacks, cut and merged scenes are not left out here.) A run
+    is a crosscut when any of its scenes leaves the present's POV. The
+    finding names the run's first and last scene and its count, and lists
+    every scene in ``scenes``, so grouping loses nothing.
     """
     sorted_ids = sorted(scenes_map.keys(),
                         key=lambda sid: int(scenes_map[sid].get('seq', 0)))
