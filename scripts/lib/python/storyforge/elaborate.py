@@ -296,7 +296,10 @@ def update_scene(scene_id: str, ref_dir: str, updates: dict[str, str]) -> None:
     for filename, cols_to_update in file_updates.items():
         path = os.path.join(ref_dir, filename)
         rows = _read_csv(path)
-        col_order = _FILE_MAP[filename]
+        # Columns the file has beyond the schema (an author's own, or a
+        # newer schema's) are kept after the schema's, not dropped
+        extra = [c for c in (rows[0] if rows else {}) if c not in _FILE_MAP[filename]]
+        col_order = _FILE_MAP[filename] + extra
 
         found = False
         for row in rows:

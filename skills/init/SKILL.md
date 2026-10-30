@@ -181,55 +181,13 @@ Use the **Glob tool** to find every `.md` file under `templates/reference/canon/
 
 The CSV files depend on which pipeline the author chose.
 
-**If elaboration pipeline:** Create the three scene-CSV files plus the structural-anchor tier (`spine.csv` and `architecture.csv`) and the themes registry. All start with headers only.
-
-**`{project-dir}/reference/scenes.csv`:**
-```
-id|seq|title|part|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words|target_pages|panel_count|page_count|architecture_scene
-```
-
-**`{project-dir}/reference/scene-intent.csv`:**
-```
-id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads|theme_threads
-```
-
-**`{project-dir}/reference/scene-briefs.csv`:**
-```
-id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
-```
-
-**`{project-dir}/reference/spine.csv`:**
-```
-id|seq|title|function|act
-```
-
-**`{project-dir}/reference/architecture.csv`:**
-```
-id|seq|title|act|pov|spine_event|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
-```
-
-**`{project-dir}/reference/themes.csv`:**
-```
-id|name|tier|description
-```
+**If elaboration pipeline:** Copy these six files from the plugin's `templates/reference/` into `{project-dir}/reference/`, unchanged: `scenes.csv`, `scene-intent.csv`, `scene-briefs.csv`, `spine.csv`, `architecture.csv`, `themes.csv`. Each holds only its header row. Copy them rather than typing the headers: the templates are kept equal to the columns every Storyforge writer uses (a test pins them), and a header typed here drifts.
 
 Also create the prose-tier summary file:
 
 **`{project-dir}/reference/story-summary.md`** — copy from the plugin's `templates/reference/story-summary.md`. Seed the `## Logline` section with the project's logline if the author provided one.
 
-Copy these from the plugin's `templates/reference/` directory if available.
-
-**If traditional pipeline:** Create two files with headers only:
-
-**`{project-dir}/reference/scenes.csv`:**
-```
-id|seq|title|part|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
-```
-
-**`{project-dir}/reference/scene-intent.csv`:**
-```
-id|function|emotional_arc|characters|motifs|notes
-```
+**If traditional pipeline:** Copy `scenes.csv` and `scene-intent.csv` from the plugin's `templates/reference/`, unchanged, for the same reason.
 
 ## Step 6: Generate the Project CLAUDE.md
 

@@ -32,16 +32,23 @@ BIBLES = (
 
 def _load_bibles(project_dir: str) -> dict[str, str]:
     """Read each bible from disk. Returns {label: content} for bibles that
-    exist; missing bibles, and bibles still identical to their template
-    (F-130), are silently skipped so a partial-bibles project
-    still gets a useful pass."""
+    exist; a missing bible is skipped, and one still identical to its
+    template (F-130) or unreadable is skipped with a log line, so a
+    partial-bibles project still gets a useful pass."""
     out: dict[str, str] = {}
     for rel, label in BIBLES:
         path = os.path.join(project_dir, rel)
-        if not os.path.isfile(path) or is_unfilled_template(path):
+        if not os.path.isfile(path):
             continue
-        with open(path, encoding='utf-8') as f:
-            content = f.read()
+        if is_unfilled_template(path):
+            log(f'  {rel} is still its template; checking without it')
+            continue
+        try:
+            with open(path, encoding='utf-8-sig') as f:
+                content = f.read()
+        except (OSError, UnicodeDecodeError) as e:
+            log(f'WARNING: {rel} could not be read ({e}); checking without it')
+            continue
         if content.strip():
             out[label] = content
     return out

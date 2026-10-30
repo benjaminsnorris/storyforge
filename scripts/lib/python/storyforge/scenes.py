@@ -389,8 +389,15 @@ def keep_epigraph_with_opening(chapter_text: str,
 # CSV generation
 # ============================================================================
 
-_SCENES_HEADER = 'id|seq|title|part|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words'
-_INTENT_HEADER = 'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads'
+def _schema_header(name: str) -> str:
+    # elaborate._FILE_MAP is the one column list every writer uses; imported
+    # here, not at module top, to keep this module's import light
+    from .elaborate import _FILE_MAP
+    return '|'.join(_FILE_MAP[name])
+
+
+_SCENES_HEADER = _schema_header('scenes.csv')
+_INTENT_HEADER = _schema_header('scene-intent.csv')
 
 
 def generate_scenes_rows(scenes: list[dict],
@@ -398,8 +405,7 @@ def generate_scenes_rows(scenes: list[dict],
                          seq_start: int = 1) -> list[str]:
     """Generate pipe-delimited CSV rows for ``scenes.csv``.
 
-    Each row uses the header order:
-    ``id|seq|title|part|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words``
+    Each row uses ``_SCENES_HEADER``'s order (elaborate._FILE_MAP's).
 
     The scene dicts must have at least ``title`` (str).  They may
     optionally include ``word_count`` (int) and ``slug`` (str).  If
@@ -440,8 +446,7 @@ def generate_scenes_rows(scenes: list[dict],
 def generate_intent_rows(scenes: list[dict]) -> list[str]:
     """Generate pipe-delimited CSV rows for ``scene-intent.csv``.
 
-    Each row uses the header order:
-    ``id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads``
+    Each row uses ``_INTENT_HEADER``'s order (elaborate._FILE_MAP's).
 
     Args:
         scenes: Scene dicts (must have at least ``title``; ``slug`` is

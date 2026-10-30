@@ -26,7 +26,7 @@ import argparse
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field, select_model,
     get_coaching_level, install_signal_handlers, get_plugin_dir,
-    build_shared_context,
+    build_shared_context, csv_safe,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr, commit_and_push,
@@ -982,7 +982,8 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             result = parse_knowledge_response(extract_text(response), scene_id)
         except Exception as e:
             _halt_chain(project_dir, '3b — knowledge chain', scene_id, e,
-                        ['reference/scene-briefs.csv', 'reference/commitments.csv', 'working/'])
+                        ['reference/scenes.csv', 'reference/scene-briefs.csv',
+                         'reference/commitments.csv', 'working/'])
 
         # Register the scene's new facts, then resolve both fields to ids:
         # against the facts established up to this scene, so a later fact
@@ -1026,13 +1027,27 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         summary = result.get('_summary', '')
         if summary:
             summaries.append(f'{scene_id}: {summary}')
+            # Fills a blank `summary` only, forced or not: a filled cell may
+            # be the author's outline, and nothing records which ones
+            # extraction wrote. A scene with no scenes.csv row gets none: a
+            # row written here would have no seq or status
+            if not scene_data:
+                log(f'  WARNING: {scene_id} has no scenes.csv row, so its summary '
+                    f'was not recorded (run extract --phase 1)')
+            elif not scene_data.get('summary', '').strip():
+                try:
+                    update_scene(scene_id, ref_dir, {'summary': csv_safe(summary)})
+                except OSError as e:
+                    _halt_chain(project_dir, '3b — knowledge chain', scene_id, e,
+                                ['reference/scenes.csv', 'reference/scene-briefs.csv',
+                                 'reference/commitments.csv', 'working/'])
 
         log(f'  {scene_id}: knowledge extracted')
 
     commit_and_push(project_dir,
                     'Extract: Phase 3b — knowledge chain',
-                    ['reference/scene-briefs.csv', 'reference/commitments.csv',
-                     'working/'])
+                    ['reference/scenes.csv', 'reference/scene-briefs.csv',
+                     'reference/commitments.csv', 'working/'])
 
     # --- Phase 3c: Physical state chain (sequential) ---
     log('')

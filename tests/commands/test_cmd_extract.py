@@ -1195,3 +1195,60 @@ class TestFactsWithNoKnownScene:
         ledger.save_to(ref, rows, command='test')
         _prune_registries(ref, set(), set())
         assert ledger.view_map(ref, 'knowledge')['map-anomaly-exists']['origin'] == 'burnside'
+
+
+class TestKnowledgeChainKeepsSceneSummaries:
+    """#440: phase 3b asks for a one-sentence summary of every scene, used it
+    only as rolling context and dropped it, so scenes.csv:summary stayed
+    blank on every extracted book. It is kept where the scene has none."""
+
+    _run = TestKnowledgeChainOffersOnlyEarlierFacts._run
+
+    def test_the_summary_fills_a_blank_cell(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        from storyforge.elaborate import get_scene
+        replies = {'act1-sc01': _structured(
+            'KNOWLEDGE_SCHEMA', scene_summary='Dorren finds the gap |\nin the map.')}
+        self._run(project_dir, mock_api, monkeypatch, replies, force=False)
+        ref_dir = os.path.join(project_dir, 'reference')
+        # csv_safe: a `|` would shift every later column, a newline start a row
+        assert get_scene('act1-sc01', ref_dir)['summary'] == \
+            'Dorren finds the gap / in the map.'
+        assert get_scene('act1-sc02', ref_dir)['summary'] == ''   # an empty reply writes nothing
+        commits = {c[1]: c[2] for c in mock_git.calls if c[0] == 'commit_and_push'}
+        assert 'reference/scenes.csv' in commits['Extract: Phase 3b — knowledge chain']
+
+    def test_a_scene_with_no_scenes_csv_row_gets_no_row(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch, capsys):
+        """Review H-1: update_scene appends a row for an unknown id, with no
+        seq or status, which then crashed extract's own cleanup."""
+        from storyforge.elaborate import _read_csv_as_map
+        ref_dir = os.path.join(project_dir, 'reference')
+        with open(os.path.join(project_dir, 'scenes', 'ghost-scene.md'), 'w') as f:
+            f.write('A scene phase 1 never recorded.\n')
+        replies = {'ghost-scene': _structured('KNOWLEDGE_SCHEMA', scene_summary='Ghosts.')}
+        self._run(project_dir, mock_api, monkeypatch, replies)
+        assert 'ghost-scene' not in _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+        assert 'ghost-scene has no scenes.csv row' in capsys.readouterr().out
+
+    def test_a_halt_commits_the_summaries_already_written(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        from storyforge.elaborate import get_scene
+        replies = {'act1-sc01': _structured('KNOWLEDGE_SCHEMA', scene_summary='First.'),
+                   'act1-sc02': 'not json'}
+        with pytest.raises(SystemExit):
+            self._run(project_dir, mock_api, monkeypatch, replies)
+        assert get_scene('act1-sc01', os.path.join(project_dir, 'reference'))['summary'] == 'First.'
+        commits = {c[1]: c[2] for c in mock_git.calls if c[0] == 'commit_and_push'}
+        assert 'reference/scenes.csv' in \
+            commits['Extract: Phase 3b — knowledge chain (stopped at act1-sc02)']
+
+    def test_an_existing_summary_is_kept_even_when_forced(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        from storyforge.elaborate import get_scene, update_scene
+        ref_dir = os.path.join(project_dir, 'reference')
+        update_scene('act1-sc01', ref_dir, {'summary': 'The author wrote this.'})
+        replies = {'act1-sc01': _structured(
+            'KNOWLEDGE_SCHEMA', scene_summary='The model wrote this.')}
+        self._run(project_dir, mock_api, monkeypatch, replies, force=True)
+        assert get_scene('act1-sc01', ref_dir)['summary'] == 'The author wrote this.'
