@@ -148,6 +148,19 @@ class TestLatestScores:
         assert result is not None
         assert result.endswith('cycle-3')
 
+    def test_skips_a_cycle_marked_incomplete(self, project_dir):
+        """With no latest link, an incomplete first cycle was read as latest."""
+        from storyforge.project import mark_cycle_incomplete
+        scores_dir = os.path.join(project_dir, 'working', 'scores')
+        os.makedirs(os.path.join(scores_dir, 'cycle-1'))
+        os.makedirs(os.path.join(scores_dir, 'cycle-2'))
+        mark_cycle_incomplete(os.path.join(scores_dir, 'cycle-2'), ['act 1'])
+
+        assert latest_scores(project_dir).endswith('cycle-1')
+
+        mark_cycle_incomplete(os.path.join(scores_dir, 'cycle-2'), [])
+        assert latest_scores(project_dir).endswith('cycle-2')
+
     def test_prefers_latest_symlink(self, project_dir):
         scores_dir = os.path.join(project_dir, 'working', 'scores')
         cycle_dir = os.path.join(scores_dir, 'cycle-5')
