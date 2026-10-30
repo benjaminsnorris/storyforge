@@ -525,9 +525,10 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
 _gn_brief_failures: list[str] = []
 
 
-#: The brief fields a GN brief reply fills; a brief with all of them is complete.
-_GN_BRIEF_FIELDS = ('goal', 'page_layout', 'panel_breakdown', 'visual_keywords',
-                    'page_turn_beats', 'caption_strategy')
+#: The brief fields every GN brief has; a brief with all of them was written.
+#: (The prompt lets the other GN fields be blank: a one-page scene has no
+#: page-turn beat.)
+_GN_BRIEF_FIELDS = ('goal', 'page_layout', 'panel_breakdown')
 
 
 def _gn_brief_complete(brief: dict) -> bool:
@@ -586,8 +587,9 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
     target_ids = [sid for sid in mapped_ids
                   if not _gn_brief_complete(briefs_map.get(sid, {}))]
     if len(target_ids) < len(mapped_ids):
-        log(f'{len(mapped_ids) - len(target_ids)} scene(s) already have a '
-            f'complete GN brief; not rewritten')
+        log(f'{len(mapped_ids) - len(target_ids)} scene(s) already have a GN '
+            f'brief (goal, page_layout, panel_breakdown); not rewritten. Blank '
+            f'one of those to have its brief written again')
     if not target_ids:
         log('No scenes need GN briefs.')
         return None

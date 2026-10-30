@@ -1067,6 +1067,36 @@ class TestOwedScenes:
 
         assert _read_csv_plan(plan_file)[0]['owed'] == 'act1-sc02'
 
+    def test_a_reply_with_no_scene_keeps_what_is_owed(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """Extraction that succeeds with nothing in it used to blank owed, so
+        the next run revised every original target again."""
+        plan_file = _run_pass_setup(project_dir, monkeypatch, 'craft')
+        rows = _read_csv_plan(plan_file)
+        rows[0]['owed'] = 'act1-sc02'
+        from storyforge.cmd_revise import _write_csv_plan
+        _write_csv_plan(plan_file, rows)
+        mock_api.set_response('These scenes read well.')
+
+        with pytest.raises(SystemExit):
+            self._run(project_dir, monkeypatch, [], [], [], [])
+
+        assert _read_csv_plan(plan_file)[0]['owed'] == 'act1-sc02'
+
+    def test_a_cut_off_reply_owes_the_targets_it_never_reached(self):
+        from storyforge.cmd_revise import _owed_scenes
+        assert _owed_scenes('a;b;NEW:c;d', ['a'], {'b': 'mid-sentence'},
+                            cut_off=True) == 'b;NEW:c;d'
+
+    def test_a_reply_that_ended_normally_owes_only_what_it_skipped(self):
+        """A finished reply may leave a target alone on purpose."""
+        from storyforge.cmd_revise import _owed_scenes
+        assert _owed_scenes('a;b;c', ['a'], {'b': 'collapsed'}, cut_off=False) == 'b'
+
+    def test_a_full_scope_pass_owes_what_it_skipped(self):
+        from storyforge.cmd_revise import _owed_scenes
+        assert _owed_scenes('', ['a'], {'z': 'cut off'}, cut_off=True) == 'z'
+
     def test_a_plan_without_the_column_reads_as_nothing_owed(self, tmp_path):
         plan = tmp_path / 'plan.csv'
         plan.write_text('pass|name|purpose|scope|targets|guidance|protection|'

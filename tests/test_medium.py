@@ -337,8 +337,10 @@ def test_briefs_handler_gn_skips_briefs_an_earlier_run_wrote(project_dir_gn, mon
     scenes_csv = os.path.join(ref_dir, 'scenes.csv')
     for sid in ('the-blank-page', 'shadows-arrive'):
         update_field(scenes_csv, sid, 'status', 'mapped')
-    update_field(os.path.join(ref_dir, 'scene-briefs.csv'), 'shadows-arrive',
-                 'caption_strategy', '')
+    briefs_csv = os.path.join(ref_dir, 'scene-briefs.csv')
+    update_field(briefs_csv, 'shadows-arrive', 'panel_breakdown', '')
+    # The prompt lets page_turn_beats be blank: still a written brief
+    update_field(briefs_csv, 'the-blank-page', 'page_turn_beats', '')
     asked = []
 
     def fake_invoke_to_file(prompt, model, log_file, **kwargs):
