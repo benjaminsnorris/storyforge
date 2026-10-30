@@ -1,10 +1,10 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-29 (night), at v1.87.1 (E8 gaps done in #383; next is E6). Handoff for the next session: **Decisions** and **Next steps** below. Start here when resuming the rethink in a new session. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`.
+Last updated 2026-10-30 (early morning), at v1.90.x: E6 done (this PR), skeleton parser done (#388, v1.89.0), hone name check (#393, v1.89.4), warn-and-continue sites (#394, v1.90.0), cassette record fix (#397). Overnight summary for Ben: **Overnight run (2026-10-29 → 30)** below. Handoff for the next session: **Decisions** and **Next steps** below. Start here when resuming the rethink in a new session. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`.
 
 ## Where we are
 
-**Phase 0 (evals and baseline) is done except E6.** Chunks 0–4 of plan §7 and E4 are merged. **Phase 1 is mostly done:**
+**Phase 0 (evals and baseline) is done, E6 included** (see **E6** below). Chunks 0–4 of plan §7 and E4 are merged. **Phase 1 is mostly done:**
 - **Models:** tiers resolve at runtime, with a thinking allowance.
 - **Bugs:** the whole bug checklist is fixed.
 - **E3 tier comparison:** no routing change.
@@ -22,8 +22,8 @@ Last updated 2026-10-29 (night), at v1.87.1 (E8 gaps done in #383; next is E6). 
 - `tests/test_hone.py::test_a_mapping_never_takes_an_alias_from_its_owner` (meridian-line `5433d3f`).
 
 **Left in Phase 1:**
-- the remaining `KEY: value` parsers. Characterize, intent and brief fields moved to structured outputs in v1.85.0 (#377), and the skeleton in v1.88.0 (#388): one reply fills `scenes.csv` and the timeline cues, whose texts `timeline.CUE_FIELDS` shares with the cue read. Left: extract's cleanup passes (`FIX:` lines in `parse_knowledge_cleanup_response` and `parse_mice_cleanup_response`) and the `prompts.py` consumers;
-- the remaining warn-and-continue sites.
+- the remaining `KEY: value` parsers. Characterize, intent and brief fields moved to structured outputs in v1.85.0 (#377), and the skeleton in v1.89.0 (#388; planned as 1.88.0): one reply fills `scenes.csv` and the timeline cues, whose texts `timeline.CUE_FIELDS` shares with the cue read. Left: extract's cleanup passes (`FIX:` lines in `parse_knowledge_cleanup_response` and `parse_mice_cleanup_response`) and the `prompts.py` consumers;
+- ~~the remaining warn-and-continue sites~~: the 9 that wrote wrong or incomplete output are fixed (#394, v1.90.0). The triage's undecided ones are listed in #394.
 
 **Dashboard (v1.86.0, #378, closes #371):** Storyforge sends versioned `dashboard_data` (schema version 1, contract in `docs/agent-reference.md`), and Bookshelf renders it (bookshelf#30). The renderer and `dashboard_html` are gone, and `storyforge visualize` writes `working/dashboard-data.json`. Folding the data into the Phase 2 `export` bundle is still to do.
 
@@ -37,7 +37,7 @@ Last updated 2026-10-29 (night), at v1.87.1 (E8 gaps done in #383; next is E6). 
 | 3 E2 / E7 / E8 | done: E2 Carol (evals-56), E2 on E1, E7 Carol, E8 (seven pass families, 37 cases run) | #341, #342, #343, #344, #346, #383 |
 | 4 E3 / E5 | done | #346 |
 | — E4 | done (overnight): shared-dark Act 1 drafted with today's `write`, judged; see the E4 notes below | #361 (v1.81.0), re-recorded in #363 |
-| — E6 | not started: approved, about $40 (Next steps 2) | |
+| — E6 | done: three runs of E2, E3, E4 and E8; $34.82 | this PR, #397 |
 | 5 Phase 1 | mostly done (see above); the other `KEY: value` parsers and the remaining warn-and-continue sites to go | v1.80.0 PR, #359, #361, #363, #364, #368, #373, #374 |
 
 ## Baseline (`evals/baseline.json`)
@@ -184,16 +184,73 @@ Start by reading this doc, `CLAUDE.md` and `docs/agent-reference.md`.
      - **lantern-folk-034:** no introducing commit, because the prompt files were untracked render output.
      - **lantern-folk-032:** the `--state` pass logged the prose of the time faithfully; the log went stale after a later prose fix, which a replay can't show (`EXCLUDED_CASES`).
      - **thornwall-028:** its introducing commit wrote both sides, so the pre-pass tree has no established fact to contradict (`EXCLUDED_CASES`).
-2. **E6** (approved, about $40): two more independent E4 runs plus the paid E2 suites, under separate recording keys, to measure run-to-run variance. Plan §4.2 has the design. E3's tier comparison and E3's recall moves are both "inside noise until E6"; report them against E6's spread.
+2. ~~**E6**~~ Done (see **E6** below).
 3. **Phase 1 leftovers:**
-   - ~~Extract's **skeleton** phase.~~ Done in v1.88.0 (#388). A skeleton reply that is unusable for any scene now stops the calendar from being placed (it used to re-place every scene from stale or missing cues, with force). The remaining line parsers are extract's cleanup passes (`FIX:` lines) and the `prompts.py` consumers.
-   - Then the remaining **warn-and-continue** sites. Grep for `WARNING` followed by `continue` in paths that write output.
+   - ~~Extract's **skeleton** phase.~~ Done in v1.89.0 (#388). A skeleton reply that is unusable for any scene now stops the calendar from being placed (it used to re-place every scene from stale or missing cues, with force).
+   - The remaining line parsers: extract's cleanup passes (`FIX:` lines) and the `prompts.py` consumers.
+   - ~~The remaining **warn-and-continue** sites.~~ Done in v1.90.0 (#394). Undecided ones (triage class C) are listed in #394: evaluator/persona pairing by position, a missing configured cover falling back to auto-detect, an unreadable overrides file read as empty, and commands that report only a count of skipped items.
 4. **Follow-ups noted in PRs:**
-   - `hone.hone_briefs` also rewrites briefs and should use the brief-fix name check (`cmd_revise._invented_names`; move it to a shared module).
+   - ~~`hone.hone_briefs` should use the brief-fix name check.~~ Done in v1.89.4 (#393), for hone's intent rewrites too; the check is `storyforge.brief_names`. Other writers of `scene-briefs.csv` / `scene-intent.csv` (elaborate, extract, enrich) are not checked yet.
+   - Re-running a revise pass that stopped over skipped scenes redrafts every target, not only the skipped ones (#394 review): needs per-scene pass state.
+   - Score's `latest` symlink moves to an incomplete cycle (#394 review): whether it should stay on the last complete one is a design call.
    - `skills/forge` routes to `scenes` and `recommend` skills that don't exist.
    - `dashboard_data` should fold into the Phase 2 `export` bundle.
 
 Then **Phase 2** (plan §5): ledger, `commitments.csv`, per-character state, `export`.
+
+## Overnight run (2026-10-29 → 30)
+
+Ben asked for work to continue overnight without waiting on him, and approved E6 at whatever it cost. Every PR got a review (one to three reviewer agents covering the five angles), and every finding I verified was fixed before merging. The review comments on each PR list what was found and what was left.
+
+| PR | Version | What |
+|---|---|---|
+| #388 | 1.89.0 | Extract's skeleton phase uses structured outputs; `timeline.CUE_FIELDS` shared with the cue read (its prompt is byte-identical). Review found that a failed skeleton reply let the calendar be re-placed from stale cues; fixed. |
+| #393 | 1.89.4 | `hone`'s brief and intent rewrites get revise's invented-name check (`storyforge.brief_names`). A delegated revise pass now redrafts only the scenes hone changed. |
+| #394 | 1.90.0 | Nine warn-and-continue sites that wrote wrong or incomplete output (table in the PR). **Behaviour change:** `score`, `assemble`, `elaborate`, `revise` and the GN commands now exit 1 on incomplete output. The worst was `illustrate --state` deleting author rows it couldn't read. |
+| #397 | — | Eval record mode no longer re-calls a request the run already recorded (found by E6). |
+| this PR | — | E6: runs 2 and 3, `evals/consistency.py`, the spread. |
+
+**Coordination:** evals-79 and evals-1e also merged Storyforge PRs overnight (1.89.1–1.89.3, 1.90.1+). Versions were agreed by message each time.
+
+**For Ben to decide:**
+- **E8 as a gate:** measure over three runs (see E6), since one run moves by 5 cases.
+- **#394's class C sites:** listed in the PR.
+- **Score's `latest` symlink** on an incomplete cycle.
+- **Re-running only a pass's skipped scenes:** needs per-scene pass state.
+
+## E6 (2026-10-30)
+
+Run-to-run variance of the paid suites: three independent live runs of the same code (v1.87.1, 3c01088d). Run 1 is the default recordings (`evals/fixtures/cassettes/`); runs 2 and 3 are `evals/fixtures/e6/run2` and `run3`. `python3 evals/consistency.py` replays all three (free) and writes `evals/e6/spread.json`; `evals/e6/e8-cases.json` is each E8 case's outcome per run. Not a default suite: the extra runs are a snapshot of one commit's prompts (see `evals/e6/__init__.py`), so they replay only while the requests match those of 3c01088d; a later prompt change is a miss. **Range** below is max − min over the three runs; three runs underestimate the true spread, so a move about the size of the range is not evidence either way.
+
+| Suite | Metric | run 1, 2, 3 | Range |
+|---|---|---|---|
+| E2-Carol | recall | 0.027, 0, 0.027 | one case of 37 |
+| E2-drift | recall | 0.078, 0.059, 0.020 (4, 3, 1 of 51 cases) | 0.059 |
+| E2-drift | precision | 0.40, 0.25, 0.33 | 0.15 |
+| E3 | recall (captured) | 0.286, 0.286, 0.265 (14, 14, 13) | 0.020 |
+| E3 | with partial | 0.755, 0.714, 0.694 | 0.061 |
+| E3 | missing | 12, 14, 15 | 3 |
+| E4 | CP10k (judge) | 16.1, 14.2, 16.7 | 2.5 |
+| E4 | CP10k (checker) | 0.46, 0.92, 0.47 | 0.46 |
+| E4 | broken promises | 6, 7, 6 | 1 |
+| E4 | voice | 4.80, 4.78, 4.71 | 0.10 |
+| E8 | reintroduced (of replayed) | 6/35, 10/37, 11/36 | 5 |
+| E8 | halted | 2, 0, 1 | 2 |
+
+**What the claims made from single runs come to:**
+- **E3, structured outputs** (recall 0.245 → 0.286, two more facts captured): twice the range, so probably real but small. "With partial" moved 0.816 → 0.755, the size of its range: noise.
+- **E3 tier comparison:** Opus missed 2 fewer facts than Sonnet; Sonnet's own misses vary by 3. No evidence Opus extracts better, so **no routing change** stands. Haiku missed 4 more than Sonnet, just over the range, so "Haiku drops facts" holds weakly. (The tier runs predate structured outputs; their misses aren't comparable to today's.)
+- **E2-drift, v1.80.0 model re-record** (recall 0.16 → 0.10, 8 → 5 of 51 cases; precision 0.30 → 0.40): both the size of the range (recall's 3 cases equals it exactly). Drift recall rests on 1–4 recalled cases of 51, from 1–2 true flags, so a one-case change is noise.
+- **E4, re-pin to 5e9bdf39:** CP10k 18.2 → 16.1 is within the range (2.5). BPS 2.86 → 0.26 is far outside it and stands: the corrupt briefs were real.
+- **E8 gaps** (reintroduced 5 → 6): noise. **The baseline's 6 is the low end:** runs 2 and 3 reintroduced 10 and 11.
+
+**E8, per case** (`e8-cases.json`): 6 cases reintroduce their error in every run (governor-016, governor-023, shared-dark-040, thornwall-020, thornwall-026, thornwall-030). 6 more do in one or two runs (governor-014, -022, -024; shared-dark-037, -041; thornwall-025), and 8 others flip between consistent, not present and halted. **For Phase 4's gate (reintroduced == 0), one run is not enough.** Measure E8 over at least three runs and report always / sometimes / never per case; a fix should move the "always" cases and shrink the "sometimes" ones.
+
+**Reliability, seen in passing:** one Haiku cue read, of about 5,500 drift-suite calls over the three runs, (run 3, governor's shimming-the-cot) came back as prose with no `TIME_RELATION` line. The drift suite's bootstrap stops at any failed cue read, so the suite errored. The reply is kept in `evals/fixtures/e6/run3-cue-failure/`; run 3's drift suite was recorded again without it.
+
+**A harness bug it found (#397):** `--mode record` called a request live twice when two cases sent it (two E3 facts from one scene), and the second reply overwrote the first, so the first case's judge prompt could never replay. Record mode now replays a key the run already recorded. Runs 2 and 3 were patched in `auto` mode ($0.26; 33 judge and extraction calls). The E3 and E8 numbers above are the replayable ones; the record-time values differed by one fact (E3 run 2: 0.265) and one case (E8 run 2: 11).
+
+**Spend:** $34.82 (run 2 $17.56, run 3 $16.30, run 3's drift retry $0.70, the patch $0.26). Ben's approval was "about $40", later "whatever it costs".
 
 ## Key paths
 
