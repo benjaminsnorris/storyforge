@@ -99,7 +99,7 @@ def extract(project_dir: str, scene_id: str) -> tuple[str, str, str]:
     from storyforge.api import extract_text, invoke
     from storyforge.common import select_model
     from storyforge import ledger
-    from storyforge.cmd_extract import _build_sorted_scene_ids, _facts_before
+    from storyforge.cmd_extract import _build_sorted_scene_ids, _facts_before, _shown_ids
     from storyforge.elaborate import get_scene
     from storyforge.extract import (COMMITMENTS_SCHEMA, KNOWLEDGE_SCHEMA,
                                     PHYSICAL_STATE_SCHEMA, build_commitments_prompt,
@@ -111,11 +111,12 @@ def extract(project_dir: str, scene_id: str) -> tuple[str, str, str]:
         text = f.read()
     scene = get_scene(scene_id, ref_dir) or {}
     model = select_model('evaluation')
-    # The facts `storyforge extract` would offer this scene: established
-    # before it in reading order, plus backstory (F-123)
-    order = {sid: i for i, sid in enumerate(
-        _build_sorted_scene_ids(os.path.join(project_dir, 'scenes'), ref_dir))}
-    known = _facts_before(ledger.view_map(ref_dir, 'knowledge'), scene_id, order)
+    # The facts `storyforge extract` would offer this scene: those the
+    # earlier scenes' briefs establish, plus backstory (F-123)
+    sorted_ids = _build_sorted_scene_ids(os.path.join(project_dir, 'scenes'), ref_dir)
+    order = {sid: i for i, sid in enumerate(sorted_ids)}
+    shown = _shown_ids(sorted_ids[:order[scene_id]], ref_dir)
+    known = _facts_before(ledger.view_map(ref_dir, 'knowledge'), shown, order)
     knowledge_prompt = build_knowledge_prompt(
         scene_id, text, {k: scene.get(k, '') for k in ('title', 'pov', 'location', 'act')},
         {k: scene.get(k, '') for k in ('function', 'action_sequel')}, {}, [],

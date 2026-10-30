@@ -261,7 +261,28 @@ def commit_and_push(project_dir: str, message: str, paths: list[str] | None = No
     if r.returncode != 0:
         return False
 
-    _git(project_dir, 'push', check=False)
+    _push(project_dir)
+    return True
+
+
+def _push(project_dir: str) -> bool:
+    """Push the current branch, setting its upstream if it has none.
+
+    A plain `git push` on a branch with no upstream fails, and it was run
+    with the result ignored, so a new branch's commits stayed local with
+    nothing said (`migrate`'s branch, 2026-10-30). A push that still fails
+    is named.
+    """
+    r = _git(project_dir, 'push', check=False)
+    if r.returncode != 0:
+        upstream = _git(project_dir, 'rev-parse', '--abbrev-ref', '@{u}', check=False)
+        if upstream.returncode != 0:
+            r = _git(project_dir, 'push', '-u', 'origin', 'HEAD', check=False)
+    if r.returncode != 0:
+        branch = current_branch(project_dir) or 'HEAD'
+        log(f'WARNING: could not push {branch}; the commit is only local: '
+            f'{(r.stderr or r.stdout).strip()[:200]}')
+        return False
     return True
 
 
