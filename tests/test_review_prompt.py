@@ -123,6 +123,15 @@ class TestReviewSeesContents:
         assert 'OLD_LOG_LINE' not in prompt
         assert 'Marley was dead: to begin with.' in prompt
 
+    def test_non_ascii_scene_names_are_read(self, nested_repo, monkeypatch):
+        repo = os.path.dirname(os.path.dirname(nested_repo))
+        _write(os.path.join(nested_repo, 'scenes', 'café-scène-opens.md'), 'UNICODE_SCENE_BODY\n')
+        _git(repo, 'add', '-A')
+        _git(repo, 'commit', '-m', 'more')
+        prompt = _capture_prompt(nested_repo, monkeypatch)
+        assert 'scenes/café-scène-opens.md' in prompt
+        assert 'UNICODE_SCENE_BODY' in prompt
+
     def test_no_base_branch_reviews_project_contents(self, no_base_repo, monkeypatch):
         prompt = _capture_prompt(no_base_repo, monkeypatch)
         assert '(no diff available)' not in prompt

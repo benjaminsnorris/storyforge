@@ -355,18 +355,21 @@ def _review_base(project_dir: str) -> tuple[str, str]:
     return '', ''
 
 
-def _lines(r: subprocess.CompletedProcess) -> list[str]:
+def _paths(project_dir: str, *args: str) -> list[str]:
+    """Paths from a git listing command, NUL-separated (-z) so non-ASCII and
+    oddly named files arrive verbatim rather than C-quoted."""
+    r = _git(project_dir, *args, '-z', check=False)
     if r.returncode != 0:
         return []
-    return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+    return [p for p in r.stdout.split('\0') if p]
 
 
 def _project_tree(project_dir: str) -> list[str]:
     """Every file in the project, relative to it (tracked and untracked)."""
-    tracked = _git(project_dir, 'ls-files', check=False)
-    if tracked.returncode == 0:
-        untracked = _git(project_dir, 'ls-files', '--others', '--exclude-standard', check=False)
-        return sorted(set(_lines(tracked)) | set(_lines(untracked)))
+    if _git(project_dir, 'rev-parse', '--is-inside-work-tree', check=False).returncode == 0:
+        tracked = _paths(project_dir, 'ls-files')
+        untracked = _paths(project_dir, 'ls-files', '--others', '--exclude-standard')
+        return sorted(set(tracked) | set(untracked))
     files = []
     for root, dirs, names in os.walk(project_dir):
         dirs[:] = [d for d in dirs if not d.startswith('.')]
@@ -388,8 +391,8 @@ def review_scope(project_dir: str) -> tuple[str, list[str], str]:
         # --relative limits the diff to project_dir and prints paths relative
         # to it; diffing against the merge base (not ...HEAD) also picks up
         # uncommitted edits to tracked files.
-        changed = _lines(_git(project_dir, 'diff', '--name-only', '--relative', mb, check=False))
-        untracked = _lines(_git(project_dir, 'ls-files', '--others', '--exclude-standard', check=False))
+        changed = _paths(project_dir, 'diff', '--name-only', '--relative', mb)
+        untracked = _paths(project_dir, 'ls-files', '--others', '--exclude-standard')
         files = _in_review(set(changed) | set(untracked))
         if files:
             stat = _git(project_dir, 'diff', '--stat=120', '--relative', mb, check=False).stdout.strip()
@@ -420,9 +423,10 @@ def _review_priority(rel: str) -> tuple[int, str]:
 def _read_text(path: str) -> str | None:
     """File text, or None for a binary file."""
     with open(path, 'rb') as f:
-        data = f.read()
-    if b'\0' in data[:8192]:
-        return None
+        head = f.read(8192)
+        if b'\0' in head:
+            return None
+        data = head + f.read()
     return data.decode('utf-8', errors='replace')
 
 
