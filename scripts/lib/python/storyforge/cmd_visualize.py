@@ -46,6 +46,8 @@ def main(argv=None):
     args = parse_args(argv or [])
 
     project_dir = detect_project_root()
+    from storyforge.ledger import exit_if_not_migrated
+    exit_if_not_migrated(project_dir)  # the registries live in the ledger
     metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
     data_file = os.path.join(project_dir, DATA_FILE)
 

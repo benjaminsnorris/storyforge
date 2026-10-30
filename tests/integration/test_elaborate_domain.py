@@ -10,6 +10,8 @@ Focuses on functions not already tested in tests/test_elaborate.py:
 """
 
 import os
+
+from ledger_helpers import write_facts
 import shutil
 
 from storyforge.elaborate import (
@@ -250,7 +252,7 @@ class TestValidatePhysicalStates:
             # s02 has broken-arm in but NOT in out, and no registry resolves
             f.write('s02|g|c|o|cr|d|||a|d|e|m|||false|broken-arm|\n')
 
-        # No physical-states.csv registry -> disappearance flagged
+        # No physical states in the ledger -> disappearance flagged
         report = validate_structure(ref)
         ps_checks = [c for c in report['checks'] if c['category'] == 'physical_state']
         disappearance = [c for c in ps_checks if 'disappearance' in c.get('check', '')]
@@ -278,9 +280,9 @@ class TestValidatePhysicalStates:
             f.write('s02|g|c|o|cr|d|||a|d|e|m|||false|broken-arm|\n')
 
         # Registry says broken-arm resolves in s02
-        with open(os.path.join(ref, 'physical-states.csv'), 'w') as f:
-            f.write('id|character|description|category|acquired|resolves|action_gating\n')
-            f.write('broken-arm|A|broken arm|injury|s01|s02|false\n')
+        write_facts(ref, 'physical-states.csv',
+                    'id|character|description|category|acquired|resolves|action_gating\n'
+                    'broken-arm|A|broken arm|injury|s01|s02|false\n')
 
         report = validate_structure(ref)
         ps_checks = [c for c in report['checks'] if c['category'] == 'physical_state']
@@ -309,9 +311,9 @@ class TestValidatePhysicalStates:
             # s02: Alice is on-stage but limp-alice NOT in physical_state_in
             f.write('s02|g|c|o|cr|d|||a|d|e|m|||false||\n')
 
-        with open(os.path.join(ref, 'physical-states.csv'), 'w') as f:
-            f.write('id|character|description|category|acquired|resolves|action_gating\n')
-            f.write('limp-alice|Alice|limping from injury|injury|s01|never|true\n')
+        write_facts(ref, 'physical-states.csv',
+                    'id|character|description|category|acquired|resolves|action_gating\n'
+                    'limp-alice|Alice|limping from injury|injury|s01|never|true\n')
 
         report = validate_structure(ref)
         ps_checks = [c for c in report['checks'] if c['category'] == 'physical_state']
@@ -344,9 +346,9 @@ class TestValidatePhysicalStates:
             f.write('s02|g|c|o|cr|d|||a|d|e|m|||false||\n')
             f.write('s03|g|c|o|cr|d|||a|d|e|m|||false||\n')
 
-        with open(os.path.join(ref, 'physical-states.csv'), 'w') as f:
-            f.write('id|character|description|category|acquired|resolves|action_gating\n')
-            f.write('headache-alice|Alice|a headache|fatigue|s01|s02|true\n')
+        write_facts(ref, 'physical-states.csv',
+                    'id|character|description|category|acquired|resolves|action_gating\n'
+                    'headache-alice|Alice|a headache|fatigue|s01|s02|true\n')
 
         report = validate_structure(ref)
         relevance = [c for c in report['checks'] if c.get('check') == 'on-stage-relevance'

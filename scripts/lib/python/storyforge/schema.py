@@ -284,13 +284,13 @@ COLUMN_SCHEMA = {
         'description': 'What the character actively chooses in response to the crisis.',
     },
     'knowledge_in': {
-        'type': 'registry', 'registry': 'knowledge.csv', 'array': True,
-        'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'Fact IDs the POV character knows entering. Normalized against reference/knowledge.csv. Only scene-gating facts (see knowledge-guidelines.md).',
+        'type': 'registry', 'registry': 'commitments.csv', 'ledger_type': 'knowledge',
+        'array': True, 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Fact IDs the POV character knows entering. Normalized against the knowledge facts in reference/commitments.csv. Only scene-gating facts (see knowledge-guidelines.md).',
     },
     'knowledge_out': {
-        'type': 'registry', 'registry': 'knowledge.csv', 'array': True,
-        'file': 'scene-briefs.csv', 'stage': 'brief',
+        'type': 'registry', 'registry': 'commitments.csv', 'ledger_type': 'knowledge',
+        'array': True, 'file': 'scene-briefs.csv', 'stage': 'brief',
         'description': 'Fact IDs the POV character knows leaving. Includes knowledge_in plus new facts learned. Target 0.5-1.5 new facts per scene (see knowledge-guidelines.md).',
     },
     'key_actions': {
@@ -344,36 +344,38 @@ COLUMN_SCHEMA = {
         'description': 'Narration style ("minimal", "journal voiceover", "none"). Graphic-novel only.',
     },
     'physical_state_in': {
-        'type': 'registry', 'registry': 'physical-states.csv', 'array': True,
-        'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'Physical state IDs active when scene begins. Normalized against reference/physical-states.csv.',
+        'type': 'registry', 'registry': 'commitments.csv', 'ledger_type': 'physical',
+        'array': True, 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Physical state IDs active when scene begins. Normalized against the physical states in reference/commitments.csv.',
     },
     'physical_state_out': {
-        'type': 'registry', 'registry': 'physical-states.csv', 'array': True,
-        'file': 'scene-briefs.csv', 'stage': 'brief',
+        'type': 'registry', 'registry': 'commitments.csv', 'ledger_type': 'physical',
+        'array': True, 'file': 'scene-briefs.csv', 'stage': 'brief',
         'description': 'Physical state IDs active when scene ends. Includes physical_state_in plus new, minus resolved.',
     },
-    # physical-states.csv registry columns
+    # The ledger's physical states (commitments.csv, type physical), in
+    # physical-states.csv's old columns: `character` is the subject id,
+    # `acquired` the scene_id
     'physical_states_character': {
         'type': 'registry', 'registry': 'characters.csv', 'array': False,
-        'file': 'physical-states.csv', 'stage': 'brief',
+        'file': 'commitments.csv', 'stage': 'brief',
         'description': 'Character this physical state belongs to.',
     },
     'physical_states_category': {
         'type': 'enum', 'values': VALID_PHYSICAL_STATE_CATEGORIES,
-        'file': 'physical-states.csv', 'stage': 'brief',
+        'file': 'commitments.csv', 'stage': 'brief',
         'description': 'State category: injury, equipment, ability, appearance, fatigue.',
     },
     'physical_states_acquired': {
-        'type': 'scene_ids', 'file': 'physical-states.csv', 'stage': 'brief',
+        'type': 'scene_ids', 'file': 'commitments.csv', 'stage': 'brief',
         'description': 'Scene where this state is acquired.',
     },
     'physical_states_resolves': {
-        'type': 'free_text', 'file': 'physical-states.csv', 'stage': 'brief',
+        'type': 'free_text', 'file': 'commitments.csv', 'stage': 'brief',
         'description': 'Scene ID where resolved, or "never" for permanent.',
     },
     'physical_states_action_gating': {
-        'type': 'boolean', 'file': 'physical-states.csv', 'stage': 'brief',
+        'type': 'boolean', 'file': 'commitments.csv', 'stage': 'brief',
         'description': 'Whether this state constrains character capability.',
     },
 }
@@ -484,22 +486,38 @@ def _check_registry(value: str, alias_map: dict, is_array: bool) -> list[str]:
     return failures
 
 
+def _registry_key(spec: dict) -> str:
+    """How a registry column's registry is named: its file, plus the ledger
+    type for a ledger-backed column (``commitments.csv (knowledge)``)."""
+    if spec.get('ledger_type'):
+        return f"{spec['registry']} ({spec['ledger_type']})"
+    return spec['registry']
+
+
 def _validated_files() -> list[tuple[str, list[str], str]]:
     """(filename, columns, schema-key prefix) for every CSV the schema covers.
 
     Scene CSVs key their columns directly. Registry files declare theirs with
-    a file-stem prefix (physical-states.csv's `character` column is
-    `physical_states_character`), and were previously never validated.
+    a file-stem prefix, and were previously never validated. The ledger's
+    physical states keep physical-states.csv's prefix (its `character` column
+    is `physical_states_character`): they are checked in that file's old
+    columns, read through `ledger.physical_view`.
     """
+    from storyforge.ledger import LEDGER_FILE
     files = [(name, cols, '') for name, cols in _FILE_MAP.items()]
     registry_files = sorted({spec['file'] for spec in COLUMN_SCHEMA.values()
                              if spec.get('file', '').endswith('.csv')
                              and spec['file'] not in _FILE_MAP})
     for name in registry_files:
-        prefix = name.removesuffix('.csv').replace('-', '_') + '_'
+        prefix = (_PHYSICAL_VIEW_PREFIX if name == LEDGER_FILE
+                  else name.removesuffix('.csv').replace('-', '_') + '_')
         cols = [key[len(prefix):] for key in COLUMN_SCHEMA if key.startswith(prefix)]
         files.append((name, ['id'] + cols, prefix))
     return files
+
+
+#: Schema-key prefix of the ledger's physical-state columns
+_PHYSICAL_VIEW_PREFIX = 'physical_states_'
 
 
 def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
@@ -520,18 +538,27 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
         from storyforge.common import get_medium
         medium = get_medium(project_dir)
 
-    # Load registry alias maps if project_dir provided
+    from storyforge import ledger
+
+    # Load registry alias maps if project_dir provided. A ledger-backed
+    # column resolves against that type's ids only, so a physical state's id
+    # never passes as a knowledge fact.
     registries: dict[str, dict] = {}
     mice_alias: dict[str, str] = {}
     mice_type_map: dict[str, str] = {}
     if project_dir:
         reg_dir = os.path.join(project_dir, 'reference')
+        ledger_rows = ledger.load_from(reg_dir)
         for col_schema in COLUMN_SCHEMA.values():
             if col_schema['type'] == 'registry':
-                csv_name = col_schema['registry']
+                csv_name = _registry_key(col_schema)
                 if csv_name not in registries:
-                    path = os.path.join(reg_dir, csv_name)
-                    registries[csv_name] = load_alias_map(path)
+                    if col_schema.get('ledger_type'):
+                        registries[csv_name] = ledger.alias_map(
+                            ledger.view(ledger_rows, col_schema['ledger_type']))
+                    else:
+                        path = os.path.join(reg_dir, col_schema['registry'])
+                        registries[csv_name] = load_alias_map(path)
             elif col_schema['type'] == 'mice':
                 csv_name = col_schema['registry']
                 if csv_name not in registries:
@@ -558,7 +585,10 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
         if not os.path.isfile(path):
             continue
 
-        rows = _read_csv(path)
+        if filename == ledger.LEDGER_FILE:
+            rows = ledger.read_view(ref_dir, 'physical')
+        else:
+            rows = _read_csv(path)
 
         for row in rows:
             scene_id = row.get('id', '?')
@@ -638,7 +668,7 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                         })
 
                 elif constraint == 'registry':
-                    csv_name = schema['registry']
+                    csv_name = _registry_key(schema)
                     alias_map = registries.get(csv_name, {})
                     if not alias_map:
                         skipped += 1
@@ -690,6 +720,16 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                             'constraint': 'scene_ids',
                             'unresolved': bad,
                         })
+
+    # The ledger's own rules (ids, enums, statements); its scene and
+    # character references are the column checks above
+    if os.path.isfile(os.path.join(ref_dir, ledger.LEDGER_FILE)):
+        for problem in ledger.validate_ledger(ledger.load_from(ref_dir)):
+            failed += 1
+            errors.append({
+                'file': ledger.LEDGER_FILE, 'row': '', 'column': '',
+                'value': '', 'constraint': 'ledger', 'reason': problem,
+            })
 
     # Medium-aware required-field checks
     if medium == 'graphic-novel':
@@ -761,22 +801,21 @@ def validate_knowledge_granularity(ref_dir: str, project_dir: str | None = None)
     warnings: list[dict] = []
 
     # --- Registry-level checks ---
-    knowledge_path = os.path.join(ref_dir, 'knowledge.csv')
+    from storyforge import ledger
     total_facts = 0
-    if os.path.isfile(knowledge_path):
-        for row in _read_csv(knowledge_path):
-            total_facts += 1
-            name = row.get('name', '').strip()
-            if not name:
-                continue
-            word_count = len(name.split())
-            if word_count > MAX_FACT_NAME_WORDS:
-                warnings.append({
-                    'type': 'long_name',
-                    'id': row.get('id', '?'),
-                    'name': name,
-                    'word_count': word_count,
-                })
+    for row in ledger.read_view(ref_dir, 'knowledge'):
+        total_facts += 1
+        name = row.get('name', '').strip()
+        if not name:
+            continue
+        word_count = len(name.split())
+        if word_count > MAX_FACT_NAME_WORDS:
+            warnings.append({
+                'type': 'long_name',
+                'id': row.get('id', '?'),
+                'name': name,
+                'word_count': word_count,
+            })
 
     # --- Scene-level checks ---
     briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
@@ -828,22 +867,21 @@ def validate_physical_state_granularity(ref_dir: str, project_dir: str | None = 
     warnings: list[dict] = []
 
     # --- Registry-level checks ---
-    states_path = os.path.join(ref_dir, 'physical-states.csv')
+    from storyforge import ledger
     total_states = 0
-    if os.path.isfile(states_path):
-        for row in _read_csv(states_path):
-            total_states += 1
-            desc = row.get('description', '').strip()
-            if not desc:
-                continue
-            word_count = len(desc.split())
-            if word_count > MAX_STATE_DESCRIPTION_WORDS:
-                warnings.append({
-                    'type': 'long_description',
-                    'id': row.get('id', '?'),
-                    'description': desc,
-                    'word_count': word_count,
-                })
+    for row in ledger.read_view(ref_dir, 'physical'):
+        total_states += 1
+        desc = row.get('description', '').strip()
+        if not desc:
+            continue
+        word_count = len(desc.split())
+        if word_count > MAX_STATE_DESCRIPTION_WORDS:
+            warnings.append({
+                'type': 'long_description',
+                'id': row.get('id', '?'),
+                'description': desc,
+                'word_count': word_count,
+            })
 
     # --- Scene-level checks ---
     briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')

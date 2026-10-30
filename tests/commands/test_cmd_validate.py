@@ -496,12 +496,12 @@ class TestMainStructuralScoring:
 
 
 class TestMainKnowledgeGranularity:
-    """Test main() behavior with knowledge.csv present."""
+    """Test main() behavior with the ledger present."""
 
     def test_knowledge_validated_when_present(self, project_dir, monkeypatch, capsys):
-        # knowledge.csv already exists in the fixture
-        knowledge_path = os.path.join(project_dir, 'reference', 'knowledge.csv')
-        assert os.path.isfile(knowledge_path), "fixture should have knowledge.csv"
+        # commitments.csv already exists in the fixture
+        ledger_path = os.path.join(project_dir, 'reference', 'commitments.csv')
+        assert os.path.isfile(ledger_path), "fixture should have commitments.csv"
 
         knowledge_called = []
         monkeypatch.setattr('storyforge.cmd_validate.detect_project_root',
@@ -519,7 +519,7 @@ class TestMainKnowledgeGranularity:
         assert len(knowledge_called) == 1
 
     def test_knowledge_skipped_when_missing(self, tmp_path, monkeypatch):
-        """When knowledge.csv does not exist, validation is skipped."""
+        """When commitments.csv does not exist, validation is skipped."""
         project_dir = str(tmp_path)
         ref_dir = os.path.join(project_dir, 'reference')
         os.makedirs(ref_dir, exist_ok=True)

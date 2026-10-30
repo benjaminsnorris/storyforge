@@ -34,6 +34,9 @@ def main(argv=None):
         print(f'Error: No scenes.csv found in {ref_dir}. Is this an elaboration pipeline project?')
         sys.exit(1)
 
+    from storyforge import ledger
+    ledger.exit_if_not_migrated(project_dir)
+
     from storyforge.elaborate import validate_structure
     from storyforge.schema import (
         validate_schema, validate_knowledge_granularity, validate_scene_ids,
@@ -55,8 +58,7 @@ def main(argv=None):
     )
 
     knowledge = None
-    knowledge_path = os.path.join(ref_dir, 'knowledge.csv')
-    if os.path.isfile(knowledge_path):
+    if os.path.isfile(ledger.ledger_path(project_dir)):
         knowledge = validate_knowledge_granularity(ref_dir, project_dir)
 
     from storyforge.schema import validate_voice_profile
@@ -195,6 +197,8 @@ def _print_human_readable(combined):
                     elif e['constraint'] == 'scene_ids':
                         unresolved = ', '.join(e.get('unresolved', []))
                         print(f'    {e["row"]} | {e["column"]}: "{unresolved}" — not in scenes.csv')
+                    elif e['constraint'] == 'ledger':
+                        print(f'    {e["reason"]}')
 
     if flashbacks:
         share = sum(f['share'] for f in flashbacks)

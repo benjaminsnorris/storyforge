@@ -1427,12 +1427,9 @@ def build_scene_prompt_from_briefs(
     state_in = scene.get('physical_state_in', '').strip()
     if state_in:
         state_ids = [s.strip() for s in state_in.split(';') if s.strip()]
-        # Try to load registry for descriptions
-        states_registry = {}
-        states_path = os.path.join(ref_dir, 'physical-states.csv')
-        if os.path.isfile(states_path):
-            from .elaborate import _read_csv_as_map
-            states_registry = _read_csv_as_map(states_path)
+        # The ledger's physical states, for descriptions
+        from . import ledger
+        states_registry = ledger.view_map(ref_dir, 'physical')
 
         state_lines = []
         for sid in state_ids:

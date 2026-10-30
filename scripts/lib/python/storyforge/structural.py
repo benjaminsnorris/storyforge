@@ -1258,7 +1258,7 @@ def score_physical_state_chain(scenes_map, briefs_map, ref_dir=''):
     Args:
         scenes_map: dict from _read_csv_as_map on scenes.csv
         briefs_map: dict from _read_csv_as_map on scene-briefs.csv
-        ref_dir: path to reference dir (for physical-states.csv registry)
+        ref_dir: path to reference dir (for the ledger's physical states)
 
     Returns:
         {'score': float 0-1, 'findings': [...]}
@@ -1320,9 +1320,9 @@ def score_physical_state_chain(scenes_map, briefs_map, ref_dir=''):
 
     # Build active state ranges per character from the registry
     active_ranges = {}  # state_id -> (start_idx, end_idx, character)
-    registry_path = os.path.join(ref_dir, 'physical-states.csv') if ref_dir else ''
-    if registry_path and os.path.isfile(registry_path):
-        reg = _read_csv(registry_path)
+    if ref_dir:
+        from storyforge import ledger
+        reg = ledger.read_view(ref_dir, 'physical')
         for entry in reg:
             sid = _s(entry.get('id')).strip()
             char = _s(entry.get('character')).strip().lower()

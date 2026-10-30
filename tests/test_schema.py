@@ -4,6 +4,8 @@ import json
 
 import pytest
 import os
+
+from ledger_helpers import write_facts
 import shutil
 import tempfile
 
@@ -208,10 +210,9 @@ class TestKnowledgeGranularity:
         ref = str(tmp_path / 'reference')
         os.makedirs(ref)
 
-        with open(os.path.join(ref, 'knowledge.csv'), 'w') as f:
-            f.write('id|name|aliases\n')
-            f.write('fact-one|The map is old|old map\n')
-            f.write('fact-two|A door opened|door\n')
+        write_facts(ref, 'knowledge.csv', 'id|name|aliases\n'
+                    'fact-one|The map is old|old map\n'
+                    'fact-two|A door opened|door\n')
         with open(os.path.join(ref, 'scene-briefs.csv'), 'w') as f:
             f.write('id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow\n')
             f.write('sc-1||||||fact-one|fact-one;fact-two|||||||\n')
@@ -226,9 +227,8 @@ class TestKnowledgeGranularity:
         ref = str(tmp_path / 'reference')
         os.makedirs(ref)
 
-        with open(os.path.join(ref, 'knowledge.csv'), 'w') as f:
-            f.write('id|name|aliases\n')
-            f.write('wordy-fact|This is a very long fact name that contains way too many words and should definitely be flagged by the validator as overly granular|too wordy\n')
+        write_facts(ref, 'knowledge.csv', 'id|name|aliases\n'
+                    'wordy-fact|This is a very long fact name that contains way too many words and should definitely be flagged by the validator as overly granular|too wordy\n')
         with open(os.path.join(ref, 'scene-briefs.csv'), 'w') as f:
             f.write('id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow\n')
             f.write('sc-1|||||||||||||||\n')
@@ -242,11 +242,12 @@ class TestKnowledgeGranularity:
 
 class TestRegistryFileValidation:
     """physical-states.csv columns are declared in COLUMN_SCHEMA but were never
-    validated, so display names in its character column went unreported."""
+    validated, so display names in its character column went unreported. The
+    ledger's physical states are checked in those columns."""
 
     def _write(self, ref_dir, character, category='injury'):
-        with open(os.path.join(ref_dir, 'physical-states.csv'), 'w') as f:
-            f.write('id|character|description|category|acquired|resolves|action_gating\n'
+        write_facts(ref_dir, 'physical-states.csv',
+                    'id|character|description|category|acquired|resolves|action_gating\n'
                     f'bruise|{character}|a bruise|{category}|act1-sc01|never|false\n')
 
     def test_unknown_character_reported(self, project_dir):
@@ -254,7 +255,7 @@ class TestRegistryFileValidation:
         ref_dir = os.path.join(project_dir, 'reference')
         self._write(ref_dir, 'Somebody Unknown')
         errors = validate_schema(ref_dir, project_dir)['errors']
-        assert any(e['file'] == 'physical-states.csv' and e['column'] == 'character'
+        assert any(e['file'] == 'commitments.csv' and e['column'] == 'character'
                    for e in errors)
 
     def test_bad_category_reported(self, project_dir):
@@ -262,7 +263,7 @@ class TestRegistryFileValidation:
         ref_dir = os.path.join(project_dir, 'reference')
         self._write(ref_dir, '', category='bruising')
         errors = validate_schema(ref_dir, project_dir)['errors']
-        assert any(e['file'] == 'physical-states.csv' and e['column'] == 'category'
+        assert any(e['file'] == 'commitments.csv' and e['column'] == 'category'
                    for e in errors)
 
 

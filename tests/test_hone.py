@@ -4,6 +4,8 @@ import json
 import os
 import shutil
 
+from ledger_helpers import read_facts, write_facts
+
 
 class TestHoneExports:
     def test_exports_reconcile_functions(self):
@@ -785,8 +787,8 @@ class TestPhysicalStateCharacters:
              'category': 'equipment', 'acquired': 'act1-sc01', 'resolves': 'never',
              'action_gating': 'false'},
         ])
-        with open(os.path.join(ref_dir, 'physical-states.csv')) as f:
-            chars = [r['character'] for r in _csv.DictReader(f, delimiter='|')]
+        from storyforge import ledger
+        chars = [r['character'] for r in ledger.read_view(ref_dir, 'physical')]
         assert chars == ['daisy-buchanan', 'daisy-buchanan']
 
     def test_prompt_includes_character_registry(self, project_dir):
@@ -811,7 +813,7 @@ class TestPhysicalStateCharacters:
 
         reconcile_domain('physical-states', ref_dir, 'test-model', str(tmp_path))
 
-        row = _read_csv_as_map(os.path.join(ref_dir, 'physical-states.csv'))['cut-hand-dorren']
+        row = read_facts(ref_dir, 'physical-states.csv')['cut-hand-dorren']
         assert row['character'] == 'dorren-hayle'
         assert row['acquired'] == 'act1-sc02'
         assert row['resolves'] == 'never'
@@ -864,7 +866,7 @@ class TestKnowledgeIdsAfterReconcile:
 
     def _ids(self, ref_dir):
         from storyforge.elaborate import _read_csv
-        return {r['id'] for r in _read_csv(os.path.join(ref_dir, 'knowledge.csv'))}
+        return set(read_facts(ref_dir, 'knowledge.csv'))
 
     def test_reconcile_maps_sentences_to_ids(self, project_dir, monkeypatch, tmp_path):
         from storyforge.hone import reconcile_domain
@@ -888,7 +890,7 @@ class TestKnowledgeIdsAfterReconcile:
         ids = self._ids(ref_dir)
         entries = self._entries(ref_dir)
         assert entries and all(e in ids for e in entries), entries
-        k = _read_csv_as_map(os.path.join(ref_dir, 'knowledge.csv'))
+        k = read_facts(ref_dir, 'knowledge.csv')
         assert k['kael-erased-archive']['origin'] == 'act1-sc02'
         assert k['kael-erased-archive']['category'] == 'identity'
         # Sentences are not kept as aliases
@@ -902,8 +904,9 @@ class TestKnowledgeIdsAfterReconcile:
         _mock_api(monkeypatch, ['1 | NEW | dorren-academy-trained | '
                                 'Dorren trained at the academy | identity\n'])
         reconcile_domain('knowledge', ref_dir, 'test-model', str(tmp_path))
-        k = _read_csv_as_map(os.path.join(ref_dir, 'knowledge.csv'))
-        assert k['dorren-academy-trained']['origin'] == 'backstory'
+        k = read_facts(ref_dir, 'knowledge.csv')
+        # Backstory: true before scene 1, so the ledger gives it no scene
+        assert k['dorren-academy-trained']['origin'] == ''
 
     def test_mapping_prompt_numbers_entries_and_lists_registry(self, project_dir):
         from storyforge.hone import build_mapping_prompt
@@ -1137,7 +1140,7 @@ class TestReviewFixes:
         _mock_api(monkeypatch, ['1 | NEW | pell-is-a-spy | Pell is a spy | identity\n',
                                 '1 | pell-is-a-spy\n'])
         hone.reconcile_domain('knowledge', ref_dir, 'test-model', str(tmp_path))
-        k = _read_csv_as_map(os.path.join(ref_dir, 'knowledge.csv'))
+        k = read_facts(ref_dir, 'knowledge.csv')
         assert k['pell-is-a-spy']['origin'] == 'act1-sc02'
 
     def test_skip_never_blanks_pov(self, project_dir, monkeypatch, tmp_path):

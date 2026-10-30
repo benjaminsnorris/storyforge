@@ -69,6 +69,8 @@ def main(argv=None):
         args.cleanup = True
 
     project_dir = detect_project_root()
+    from storyforge.ledger import exit_if_not_migrated
+    exit_if_not_migrated(project_dir)  # the registries live in the ledger
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)
 
@@ -633,28 +635,27 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 # Phase 3: Briefs (scene-briefs.csv)
 # ============================================================================
 
-def _record_physical_states(phys_csv, scene_id, new_states, resolved, character_aliases):
-    """Add a scene's new physical states to the registry and record where
+def _record_physical_states(ref_dir, scene_id, new_states, resolved, character_aliases):
+    """Add a scene's new physical states to the ledger and record where
     states resolve.
 
     A state the scene resolves gets ``resolves`` set to the scene, unless an
     earlier scene already resolved it. Without this every state stayed
     ``never``, and validate flagged each one as vanishing in the scene the
-    text ends it (F-057).
+    text ends it (F-057). Only physical rows change; every other fact in
+    the ledger is kept.
     """
-    from storyforge.elaborate import _read_csv_as_map, _write_csv
+    from storyforge import ledger
     from storyforge.enrich import normalize_aliases
 
     if not new_states and not resolved:
         return
-    columns = ['id', 'character', 'description', 'category',
-               'acquired', 'resolves', 'action_gating']
-    existing_phys = _read_csv_as_map(phys_csv)
+    existing_phys = ledger.view_map(ref_dir, 'physical')
     for ns in new_states:
         sid_key = ns.get('id', '').strip()
         if not sid_key or sid_key in existing_phys:
             continue
-        row = {c: '' for c in columns}
+        row = {c: '' for c in ledger.PHYSICAL_COLUMNS}
         row['id'] = sid_key
         row['character'] = normalize_aliases(character_aliases, ns.get('character', ''))
         row['description'] = ns.get('description', '')
@@ -667,40 +668,40 @@ def _record_physical_states(phys_csv, scene_id, new_states, resolved, character_
         row = existing_phys.get(state_id)
         if row is not None and row.get('resolves', '').strip() in ('', 'never'):
             row['resolves'] = scene_id
-    _write_csv(phys_csv, list(existing_phys.values()), columns)
+    ledger.write_view(ref_dir, 'physical', list(existing_phys.values()),
+                      origin='prose', introduced_by='extract')
 
 
 def _prune_registries(ref_dir, created_facts, created_states):
-    """After a forced phase 3, drop registry entries nothing uses (F-083).
+    """After a forced phase 3, drop ledger facts nothing uses (F-083).
 
-    A forced re-extraction seeds knowledge.csv and physical-states.csv from
-    the last run, so old entries piled up beside the new ones: under two
-    names, and still active by their old acquired/resolves scenes, which
-    validate then flagged. Keep an entry a brief references or this pass
-    declared; drop the rest and log their ids. Hand edits on an entry still
-    in use survive, and a scene this run didn't touch keeps what it uses.
+    A forced re-extraction seeds the knowledge facts and physical states
+    from the last run, so old entries piled up beside the new ones: under
+    two names, and still active by their old acquired/resolves scenes,
+    which validate then flagged. Keep an entry a brief references or this
+    pass declared; drop the rest and log their ids. Hand edits on an entry
+    still in use survive, a scene this run didn't touch keeps what it uses,
+    and facts of every other type are never touched.
     """
-    from storyforge.elaborate import _read_csv_as_map, _write_csv
+    from storyforge import ledger
+    from storyforge.elaborate import _read_csv_as_map
 
     briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
-    for name, fields, created in (
-            ('knowledge.csv', ('knowledge_in', 'knowledge_out'), created_facts),
-            ('physical-states.csv', ('physical_state_in', 'physical_state_out'),
+    for type_, label, fields, created in (
+            ('knowledge', 'knowledge facts', ('knowledge_in', 'knowledge_out'),
+             created_facts),
+            ('physical', 'physical states', ('physical_state_in', 'physical_state_out'),
              created_states)):
-        path = os.path.join(ref_dir, name)
-        if not os.path.isfile(path):
-            continue
         used = {i.strip() for row in briefs.values() for f in fields
                 for i in (row.get(f) or '').split(';') if i.strip()}
-        registry = _read_csv_as_map(path)
-        keep = {k: r for k, r in registry.items() if k in used or k in created}
-        dropped = sorted(set(registry) - set(keep))
+        registry = ledger.read_view(ref_dir, type_)
+        keep = [r for r in registry if r['id'] in used or r['id'] in created]
+        dropped = sorted({r['id'] for r in registry} - {r['id'] for r in keep})
         if not dropped:
             continue
-        with open(path) as f:
-            columns = f.readline().strip().split('|')
-        _write_csv(path, list(keep.values()), columns)
-        log(f'  {name}: dropped {len(dropped)} entries no brief uses '
+        ledger.write_view(ref_dir, type_, keep, origin='prose',
+                          introduced_by='extract')
+        log(f'  {ledger.LEDGER_FILE}: dropped {len(dropped)} {label} no brief uses '
             f'(left from the previous extraction): {", ".join(dropped)}')
 
 
@@ -735,7 +736,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     from storyforge.extract import (
         BRIEF_PARALLEL_SCHEMA, build_brief_parallel_prompt, parse_brief_parallel_response,
         build_knowledge_prompt, parse_knowledge_response, KNOWLEDGE_SCHEMA,
-        merge_new_knowledge_facts, resolve_knowledge_ids, resolve_scene_deps, KNOWLEDGE_COLUMNS,
+        merge_new_knowledge_facts, resolve_knowledge_ids, resolve_scene_deps,
         build_physical_state_prompt, parse_physical_state_response, PHYSICAL_STATE_SCHEMA,
     )
     from storyforge.elaborate import (
@@ -805,15 +806,15 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     knowledge_model = select_model('evaluation')
     knowledge_state = {}
     summaries = []
-    # knowledge_in/out are registry-backed: build knowledge.csv as the chain
-    # is extracted, so each scene's prompt can offer the ids established so
-    # far and the fields are written as ids, not sentences. Seeded from an
-    # existing registry so a re-extraction reuses its ids.
-    knowledge_csv = os.path.join(ref_dir, 'knowledge.csv')
-    knowledge_registry = {fid: row for fid, row in _read_csv_as_map(knowledge_csv).items()
-                          if fid}
+    # knowledge_in/out are registry-backed: build the ledger's knowledge
+    # facts as the chain is extracted, so each scene's prompt can offer the
+    # ids established so far and the fields are written as ids, not
+    # sentences. Seeded from the existing facts so a re-extraction reuses
+    # their ids.
+    from storyforge import ledger
+    knowledge_registry = ledger.view_map(ref_dir, 'knowledge')
     knowledge_registries = format_registries_for_prompt(
-        project_dir, exclude=('knowledge.csv',))
+        project_dir, exclude=('knowledge',))
     created_facts = set()   # knowledge ids this pass declared
 
     for scene_id in sorted_scene_ids:
@@ -850,15 +851,15 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             result = parse_knowledge_response(extract_text(response), scene_id)
         except Exception as e:
             _halt_chain(project_dir, '3b — knowledge chain', scene_id, e,
-                        ['reference/scene-briefs.csv', 'reference/knowledge.csv', 'working/'])
+                        ['reference/scene-briefs.csv', 'reference/commitments.csv', 'working/'])
 
         # Register the scene's new facts, then resolve both fields to ids
         added = merge_new_knowledge_facts(knowledge_registry,
                                           result.get('_new_facts', []), scene_id)
         created_facts.update(added)
         if added:
-            _write_csv(knowledge_csv, list(knowledge_registry.values()),
-                       KNOWLEDGE_COLUMNS)
+            ledger.write_view(ref_dir, 'knowledge', list(knowledge_registry.values()),
+                              origin='prose', introduced_by='extract')
         for k in ('knowledge_in', 'knowledge_out'):
             if result.get(k):
                 result[k] = resolve_knowledge_ids(knowledge_registry, result[k])
@@ -888,7 +889,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     commit_and_push(project_dir,
                     'Extract: Phase 3b — knowledge chain',
-                    ['reference/scene-briefs.csv', 'reference/knowledge.csv',
+                    ['reference/scene-briefs.csv', 'reference/commitments.csv',
                      'working/'])
 
     # --- Phase 3c: Physical state chain (sequential) ---
@@ -930,7 +931,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             result = parse_physical_state_response(extract_text(response), scene_id)
         except Exception as e:
             _halt_chain(project_dir, '3c — physical state chain', scene_id, e,
-                        ['reference/scene-briefs.csv', 'reference/physical-states.csv',
+                        ['reference/scene-briefs.csv', 'reference/commitments.csv',
                          'working/'])
 
         # Update briefs CSV
@@ -939,8 +940,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
         new_states = result.get('_new_states', [])
         resolved = result.get('_resolved', [])
-        _record_physical_states(os.path.join(ref_dir, 'physical-states.csv'),
-                                scene_id, new_states, resolved,
+        _record_physical_states(ref_dir, scene_id, new_states, resolved,
                                 alias_maps.get('characters', {}))
 
         # Accumulate state
@@ -973,8 +973,8 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     commit_and_push(project_dir,
                     'Extract: Phase 3c — physical state chain',
-                    ['reference/scene-briefs.csv', 'reference/physical-states.csv',
-                     'reference/knowledge.csv', 'working/'])
+                    ['reference/scene-briefs.csv', 'reference/commitments.csv',
+                     'working/'])
 
 
 # ============================================================================

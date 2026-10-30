@@ -103,9 +103,21 @@ _DOMAIN_TO_REGISTRY = {
     'locations': 'locations.csv',
     'values': 'values.csv',
     'mice-threads': 'mice-threads.csv',
-    'knowledge': 'knowledge.csv',
-    'physical-states': 'physical-states.csv',
+    'knowledge': 'commitments.csv',
+    'physical-states': 'commitments.csv',
 }
+
+#: Domains whose registry is one type of the ledger's facts, read and
+#: written in the old files' columns (`ledger.view`)
+_LEDGER_TYPES = {'knowledge': 'knowledge', 'physical-states': 'physical'}
+
+
+def read_registry(ref_dir: str, domain: str) -> list[dict[str, str]]:
+    """The domain's registry rows (a ledger domain: that type's view)."""
+    if domain in _LEDGER_TYPES:
+        from storyforge import ledger
+        return ledger.read_view(ref_dir, _LEDGER_TYPES[domain])
+    return _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
 
 # Which CSV columns to normalize per domain
 _DOMAIN_TARGETS = {
@@ -224,11 +236,14 @@ def _reference_key(domain: str, part: str) -> tuple[str, str, str] | None:
 def _registry_lookup(domain: str, ref_dir: str) -> dict[str, str]:
     """Lowercased id, name and alias → canonical id for the domain's registry."""
     path = os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain])
+    if domain in _LEDGER_TYPES:
+        # A physical state has no name: its lookup is its ids
+        from storyforge import ledger
+        return ledger.alias_map(read_registry(ref_dir, domain))
     if domain == 'mice-threads':
         lookup = load_mice_registry(path)[0]
     else:
         lookup = load_alias_map(path)
-    # physical-states.csv has no name column, so load_alias_map is empty
     for row in _read_csv(path):
         if row.get('id'):
             lookup.setdefault(row['id'].lower(), row['id'])
@@ -273,7 +288,7 @@ def find_alias_collisions(domain: str, ref_dir: str) -> dict[str, list[str]]:
     silently routes references to the wrong entry.
     """
     owners: dict[str, set[str]] = {}
-    for row in _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain])):
+    for row in read_registry(ref_dir, domain):
         entry_id = row.get('id', '')
         names = [row.get('name', ''), entry_id] + (row.get('aliases') or '').split(';')
         for name in names:
@@ -296,7 +311,7 @@ def resolve_alias_collisions(domain: str, ref_dir: str) -> int:
     collisions = find_alias_collisions(domain, ref_dir)
     if not collisions:
         return 0
-    rows = _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
+    rows = read_registry(ref_dir, domain)
     removed = 0
     for alias, _ids in collisions.items():
         named = [r for r in rows if alias in (r.get('id', '').lower(), r.get('name', '').strip().lower())]
@@ -325,7 +340,8 @@ def write_registry(ref_dir: str, domain: str, rows: list[dict[str, str]]) -> Non
     """Write registry rows to the domain's CSV file.
 
     Columns beyond the domain's own (a ``death_scene`` an author added to
-    characters.csv) are kept.
+    characters.csv) are kept. Knowledge facts and physical states go to the
+    ledger (`ledger.write_view`), which keeps every other fact.
 
     Args:
         ref_dir: Path to the reference/ directory.
@@ -352,6 +368,12 @@ def write_registry(ref_dir: str, domain: str, rows: list[dict[str, str]]) -> Non
             if row.get('action_gating'):
                 row['action_gating'] = reduce_boolean(row['action_gating'])
 
+    if domain in _LEDGER_TYPES:
+        # Only this type's facts change; a new one comes from the briefs
+        from storyforge import ledger
+        ledger.write_view(ref_dir, _LEDGER_TYPES[domain], rows, origin='plan',
+                          introduced_by='hone')
+        return
     columns = list(_REGISTRY_COLUMNS[domain])
     for row in rows:
         columns += [c for c in row if c not in columns]
@@ -492,7 +514,7 @@ def build_mapping_prompt(domain: str, ref_dir: str, batch: list[dict],
     aliases of a rebuilt registry.
     """
     noun = _DOMAIN_NOUN[domain]
-    registry = [r for r in _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
+    registry = [r for r in read_registry(ref_dir, domain)
                 if r.get('id')]
     registry_text = '\n'.join(_registry_line(domain, r) for r in registry) or '(empty)'
     present = {}
@@ -687,7 +709,7 @@ def rederive_columns(domain: str, ref_dir: str, ids: set[str]) -> None:
     from the knowledge_out wording that establishes it in a later one."""
     if not ids or domain not in ('knowledge', 'physical-states'):
         return
-    registry = _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
+    registry = read_registry(ref_dir, domain)
     for row in registry:
         if row.get('id') in ids:
             _derive_columns(domain, ref_dir, row)
@@ -705,7 +727,7 @@ def apply_mapping(domain: str, ref_dir: str, batch: list[dict],
     by_key.update({batch[n - 1]['key']: [] for n in skipped})
     changed = _rewrite_targets(domain, ref_dir, by_key)
 
-    registry = _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
+    registry = read_registry(ref_dir, domain)
     for row in new_rows:
         _derive_columns(domain, ref_dir, row)
         registry.append(row)
@@ -1004,7 +1026,7 @@ def reconcile_domain(
         calls += ops_calls
 
     remaining = _report_remaining(domain, ref_dir, skipped)
-    registry = _read_csv(os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain]))
+    registry = read_registry(ref_dir, domain)
     return {
         'registry_entries': len(registry),
         'references_mapped': mapped,
@@ -2770,15 +2792,15 @@ def propagate_physical_states(ref_dir: str, dry_run: bool = False) -> dict:
         Dict with states_propagated, scenes_updated, changes, refused.
     """
     from storyforge.elaborate import state_owner_absent
-    registry_path = os.path.join(ref_dir, 'physical-states.csv')
     scenes_path = os.path.join(ref_dir, 'scenes.csv')
     intent_path = os.path.join(ref_dir, 'scene-intent.csv')
     briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
 
-    if not os.path.isfile(registry_path):
-        return {'states_propagated': 0, 'scenes_updated': 0, 'changes': []}
+    registry = read_registry(ref_dir, 'physical-states')
+    if not registry:
+        return {'states_propagated': 0, 'scenes_updated': 0, 'changes': [],
+                'refused': []}
 
-    registry = _read_csv(registry_path)
     scenes_map = _read_csv_as_map(scenes_path)
     intent_map = _read_csv_as_map(intent_path) if os.path.isfile(intent_path) else {}
     briefs_map = _read_csv_as_map(briefs_path)

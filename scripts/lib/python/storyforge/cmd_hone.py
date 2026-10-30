@@ -72,6 +72,8 @@ def main(argv=None):
 
     install_signal_handlers()
     project_dir = detect_project_root()
+    from storyforge.ledger import exit_if_not_migrated
+    exit_if_not_migrated(project_dir)  # the registries live in the ledger
     ref_dir = os.path.join(project_dir, 'reference')
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)

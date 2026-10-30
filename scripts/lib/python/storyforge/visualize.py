@@ -12,6 +12,7 @@ import os
 import sys
 from datetime import datetime
 
+from . import ledger
 from .common import parse_yaml_scalar
 
 
@@ -198,7 +199,6 @@ def load_dashboard_data(project_dir: str) -> dict:
     locations_csv = os.path.join(project_dir, 'reference/locations.csv')
     values_csv = os.path.join(project_dir, 'reference/values.csv')
     mice_threads_csv = os.path.join(project_dir, 'reference/mice-threads.csv')
-    knowledge_csv = os.path.join(project_dir, 'reference/knowledge.csv')
     structural_csv = os.path.join(project_dir, 'working/scores/structural-latest.csv')
     repetition_csv = os.path.join(project_dir, 'working/scores/latest/repetition-latest.csv')
     fidelity_csv = os.path.join(project_dir, 'working/scores/latest/fidelity-scores.csv')
@@ -262,7 +262,8 @@ def load_dashboard_data(project_dir: str) -> dict:
         'locations': csv_to_records(locations_csv),
         'values': csv_to_records(values_csv),
         'mice_threads': csv_to_records(mice_threads_csv),
-        'knowledge': csv_to_records(knowledge_csv),
+        # knowledge.csv's shape, from the ledger: the dashboard contract
+        'knowledge': ledger.knowledge_view(ledger.load(project_dir)),
         'scores': csv_to_records(scores_csv),
         'weights': csv_to_records(weights_csv),
         'narrative_scores': csv_to_records(narrative_csv),

@@ -2,6 +2,8 @@
 
 import os
 
+from ledger_helpers import read_facts
+
 
 def _rewrite(path, edit):
     import csv
@@ -85,8 +87,7 @@ class TestBooleanAnswers:
         write_registry(ref_dir, 'physical-states', [
             {'id': 'x', 'character': 'Pell', 'description': 'd', 'category': 'injury',
              'acquired': 'act1-sc01', 'resolves': 'never', 'action_gating': 'Yes — limps'}])
-        assert _read_csv_as_map(os.path.join(ref_dir, 'physical-states.csv'))['x'][
-            'action_gating'] == 'true'
+        assert read_facts(ref_dir, 'physical-states.csv')['x']['action_gating'] == 'true'
 
 
 class TestCleanupAnswerFormats:
@@ -96,19 +97,20 @@ class TestCleanupAnswerFormats:
         ref_dir = os.path.join(project_dir, 'reference')
 
         def phys(rows):
-            rows[0]['action_gating'] = 'Yes — cannot run'
-            rows[1]['action_gating'] = 'Produces as evidence; drives dialogue'
+            states = [r for r in rows if r['type'] == 'physical']
+            states[0]['action_gating'] = 'Yes — cannot run'
+            states[1]['action_gating'] = 'Produces as evidence; drives dialogue'
 
         def briefs(rows):
             rows[0]['continuity_deps'] = '(none)'
             rows[1]['continuity_deps'] = 'act1-sc01;none'
-        _rewrite(os.path.join(ref_dir, 'physical-states.csv'), phys)
+        _rewrite(os.path.join(ref_dir, 'commitments.csv'), phys)
         _rewrite(os.path.join(ref_dir, 'scene-briefs.csv'), briefs)
 
         summary = run_cleanup(ref_dir)
 
         assert summary['answer_formats']['count'] == 3
-        p = list(_read_csv_as_map(os.path.join(ref_dir, 'physical-states.csv')).values())
+        p = list(read_facts(ref_dir, 'physical-states.csv').values())
         assert p[0]['action_gating'] == 'true'
         assert p[1]['action_gating'] == 'Produces as evidence; drives dialogue'
         b = list(_read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv')).values())
@@ -116,20 +118,22 @@ class TestCleanupAnswerFormats:
         # Idempotent
         assert run_cleanup(ref_dir)['answer_formats']['count'] == 0
 
-    def test_keeps_columns_an_author_added(self, project_dir):
+    def test_changes_only_the_gating_cell_of_the_ledger(self, project_dir):
+        """Only physical rows' action_gating changes: every other fact and
+        every other column (a quote, who knows it) is kept."""
+        from storyforge import ledger
         from storyforge.extract import cleanup_answer_formats
         ref_dir = os.path.join(project_dir, 'reference')
-        path = os.path.join(ref_dir, 'physical-states.csv')
-        with open(path) as f:
-            lines = f.read().splitlines()
-        lines[0] += '|notes'
-        lines[1] = lines[1].rsplit('|', 1)[0] + '|Yes — limps|keep me'
-        with open(path, 'w') as f:
-            f.write('\n'.join(lines) + '\n')
+        rows = ledger.load_from(ref_dir)
+        rows[0]['quote'] = 'keep me'
+        states = [r for r in rows if r['type'] == 'physical']
+        states[0]['action_gating'] = 'Yes — limps'
+        states[0]['known_by'] = 'tessa-merrin'
+        ledger.save_to(ref_dir, rows)
         cleanup_answer_formats(ref_dir)
-        with open(path) as f:
-            text = f.read()
-        assert text.splitlines()[0].endswith('|notes') and 'keep me' in text
+        after = ledger.load_from(ref_dir)
+        states[0]['action_gating'] = 'true'
+        assert after == rows
 
 
 def test_physical_state_prompt_asks_for_a_boolean():

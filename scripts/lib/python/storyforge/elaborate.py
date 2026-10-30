@@ -782,15 +782,15 @@ def _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_di
 
     available_states = set()
 
-    # Lazy-load the physical-states registry (needed for checks 2 and 3)
-    registry = None  # dict: state_id -> registry row
+    # Lazy-load the ledger's physical states (needed for checks 2 and 3)
+    registry = None  # dict: state_id -> physical view row
 
     def _get_registry():
         nonlocal registry
         if registry is None:
             if ref_dir:
-                registry_path = os.path.join(ref_dir, 'physical-states.csv')
-                registry = _read_csv_as_map(registry_path)
+                from storyforge import ledger
+                registry = ledger.view_map(ref_dir, 'physical')
             else:
                 registry = {}
         return registry

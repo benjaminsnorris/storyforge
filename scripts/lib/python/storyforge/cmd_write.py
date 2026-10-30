@@ -72,6 +72,8 @@ def main(argv=None):
     apply_coaching_override(args)
 
     project_dir = detect_project_root()
+    from storyforge.ledger import exit_if_not_migrated
+    exit_if_not_migrated(project_dir)  # the registries live in the ledger
     log(f'Project root: {project_dir}')
 
     scenes_dir = os.path.join(project_dir, 'scenes')
