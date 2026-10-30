@@ -396,7 +396,9 @@ class TestOutcomePhrasing:
         ('Yes.', 'yes'),
     ])
     def test_both_normalizers(self, answer, expected):
-        from storyforge.extract import parse_brief_parallel_response
+        # extract's outcome is now a schema enum; _reduce_enums still reduces
+        # a free-text answer (skeleton fields, hand-edited replies)
+        from storyforge.extract import _reduce_enums
         from storyforge.hone import normalize_outcomes
-        assert parse_brief_parallel_response(f'OUTCOME: {answer}\n', 's1')['outcome'] == expected
+        assert _reduce_enums({'outcome': answer})['outcome'] == expected
         assert normalize_outcomes(answer) == expected

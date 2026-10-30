@@ -145,8 +145,8 @@ def build_characterize_prompt(project_dir: str, model: str | None = None) -> str
     cut_note = ('' if fitted == manuscript else
                 '\n\nPart of the middle is cut from this request (marked in the text, with '
                 'the omitted scenes named). The cut is a limit of this request, not a gap '
-                'in the book: count the omitted scenes in ESTIMATED_SCENES and '
-                'ACT_STRUCTURE, and never report the cut as a compression point or '
+                'in the book: count the omitted scenes in estimated_scenes and '
+                'act_structure, and never report the cut as a compression point or '
                 'structural concern.')
     manuscript = fitted
 
@@ -579,11 +579,17 @@ def _ids(values) -> str:
 
 
 def _text(value, sep: str = '; ') -> str:
-    """A structured field as CSV text: a list joined with *sep*, ``;`` (the
-    CSV's array separator) stripped from inside each item."""
+    """A structured field as CSV text, on one line with no ``|``
+    (``common.csv_safe``): a JSON string may hold a newline, which our
+    line-based CSV readers would read as a new row. A list is joined with
+    *sep*, and a ``;`` (the CSV's array separator) inside an item is replaced
+    with a comma, so a ``key_dialogue`` quote may differ from the prose by
+    that comma."""
+    from .common import csv_safe
     if isinstance(value, list):
-        return sep.join(str(v).replace(';', ',').strip() for v in value if str(v).strip())
-    return str(value).strip()
+        items = (csv_safe(str(v)).replace(';', ',').strip() for v in value)
+        return sep.join(i for i in items if i)
+    return csv_safe(str(value)).strip()
 
 
 OFFERED_VALUE_SHIFTS = ('+/-', '-/+', '+/++', '-/--')

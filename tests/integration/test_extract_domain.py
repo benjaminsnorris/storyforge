@@ -323,6 +323,28 @@ class TestParseBriefParallelResponse:
         assert result['key_dialogue'] == '"Go, now," she says'
 
 
+class TestStructuredValuesAreCsvSafe:
+    """I1: a JSON string may hold a newline or a |, which the old line parser
+    never let through; written raw, our line-based CSV readers see a bogus
+    row or a shifted column."""
+
+    def test_newlines_and_pipes_are_flattened(self):
+        result = parse_brief_parallel_response(_reply(
+            'BRIEF_PARALLEL_SCHEMA', goal='Find\nthe | map',
+            key_dialogue=['"Go."\n"No."', 'a; b']), 'test')
+        assert result['goal'] == 'Find the / map'
+        assert result['key_dialogue'] == '"Go." "No.";a, b'
+
+    def test_profile_reaches_the_intent_prompt(self):
+        from storyforge.extract import build_intent_prompt, parse_characterize_response
+        profile = parse_characterize_response(_reply(
+            'CHARACTERIZE_SCHEMA', major_threads=['map-anomaly', 'archive-erasure'],
+            central_conflict='Truth against loyalty'))
+        prompt = build_intent_prompt('s1', 'Prose.', profile, {'title': 'T'})
+        assert 'Major threads in this manuscript: map-anomaly; archive-erasure' in prompt
+        assert 'Central conflict: Truth against loyalty' in prompt
+
+
 def _knowledge_reply(**fields):
     """A structured Phase 3b reply holding every required field."""
     reply = {'knowledge_in': [], 'knowledge_out': [], 'new_facts': [],
