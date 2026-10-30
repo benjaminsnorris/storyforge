@@ -27,7 +27,25 @@ dropped silently. Holdout cases are excluded. Families:
   is omitted: there is no Bookshelf in a replay; the pass is narrowed to the
   case's scene). Prose passes only.
 
-Hone passes are not replayed yet. A pre-pass project that predates
+Passes that write data rather than prose are replayed the same way, and the
+judge reads what the pass wrote (the rows or files it added or changed, see
+``written``) instead of a scene (``CSV_JUDGE_PROMPT``). A pass that writes
+nothing reintroduces nothing and is counted ``not_present`` without a judge
+call. These families:
+
+- ``brief-fix``: ``cmd_revise._fix_upstream_briefs`` on the case's scene, the
+  brief rewrite polish/naturalness runs before redrafting; the judge reads the
+  rewritten brief row. A rewrite the fix's own guard rejects halts.
+- ``hone-physical-states``: ``hone.reconcile_domain('physical-states')``, what
+  ``storyforge hone --domain physical-states`` runs, with hone's model; the
+  judge reads the rows it added to or changed in ``physical-states.csv``.
+- ``illustrate-state``: ``cmd_illustrate.run_state`` at ``full`` coaching (the
+  old pass proposed transitions; coach and strict write no content); the judge
+  reads the rows it added to the visual-state log.
+- ``illustrate-prompts``: ``cmd_illustrate.run_prompts`` for the prompt file
+  the case quotes; the judge reads the prompt files it wrote.
+
+A pre-pass project that predates
 ``reference/scenes.csv`` but has ``scene-metadata.csv`` is migrated in its
 materialized copy the way Storyforge migrated the books
 (``migrate_scene_metadata``); one that keeps its scenes in YAML is reported as
@@ -50,7 +68,9 @@ from dataclasses import dataclass, field
 
 import e1
 
-FAMILIES = ('redraft-from-brief', 'naturalness-upstream', 'revision-plan')
+# families whose pass writes data, judged on what it wrote (see written())
+CSV_FAMILIES = ('brief-fix', 'hone-physical-states', 'illustrate-state', 'illustrate-prompts')
+FAMILIES = ('redraft-from-brief', 'naturalness-upstream', 'revision-plan', *CSV_FAMILIES)
 
 ID_MAPS_DIR = os.path.join(e1.FIXTURES_DIR, 'id-maps')
 
@@ -81,6 +101,29 @@ Answer with one JSON object and nothing else:
 "consistent": the new draft states the fact and agrees with what was established.
 "not_present": the new draft does not touch the fact either way."""
 
+CSV_JUDGE_PROMPT = """You are checking what a novel-writing tool wrote into a book's project data (a scene brief, a registry row, an illustration log or prompt) for one specific continuity error.
+
+The book had already established this, earlier or elsewhere:
+{established}
+
+A past run of the same tool wrote data that contradicted it. The error looked like this:
+{error}
+(Summary: {summary})
+
+Here is what a NEW run of the tool wrote (the rows or files it added or changed):
+<written>
+{written}
+</written>
+
+Does the new output make the same error — does it assert something that contradicts what was established, in the way described? Output that simply leaves the fact out does not make the error.
+
+Answer with one JSON object and nothing else:
+{{"verdict": "reintroduced" | "consistent" | "not_present", "evidence": "<verbatim line from the new output that decides it, or empty for not_present>"}}
+
+"reintroduced": the new output contradicts the established fact.
+"consistent": the new output states the fact and agrees with what was established.
+"not_present": the new output does not touch the fact either way."""
+
 VERDICTS = ('reintroduced', 'consistent', 'not_present')
 
 
@@ -88,9 +131,16 @@ def family(case: dict) -> str:
     name = (case.get('introduced_by') or {}).get('pass', '').lower()
     if 'naturalness' in name and 'upstream' in name:
         return 'naturalness-upstream'
+    if 'upstream' in name and 'brief' in name:
+        return 'brief-fix'
+    if 'hone' in name:
+        return 'hone-physical-states' if 'physical' in name else ''
+    if 'illustrate' in name:
+        return {'--state': 'illustrate-state', '--prompts': 'illustrate-prompts'}.get(
+            name.split()[-1], '')
     if 'redraft' in name or name.startswith('write'):
         return 'redraft-from-brief'
-    if not name or 'hone' in name or 'illustrate' in name:
+    if not name:
         return ''
     return 'revision-plan'
 
@@ -112,7 +162,7 @@ def select(cases: list[dict], holdout: list[str]) -> Selection:
             continue
         if case['id'] in held:
             sel.exclude('holdout', case['id'])
-        elif case.get('level') != 'prose':
+        elif case.get('level') != 'prose' and family(case) not in CSV_FAMILIES:
             sel.exclude('csv-level (no prose to redraft)', case['id'])
         elif not family(case):
             sel.exclude(f"pass not replayable yet: {case['introduced_by'].get('pass', '?')}",
@@ -236,6 +286,9 @@ def _quotes(spans: list[dict]) -> str:
 
 def judge_prompt(case: dict, scene_text: str) -> str:
     established = _quotes(case['established']) or case.get('established_by_absence', '')
+    if family(case) in CSV_FAMILIES:
+        return CSV_JUDGE_PROMPT.format(established=established, error=_quotes(case['contradicted']),
+                                       summary=case['summary'], written=scene_text)
     return JUDGE_PROMPT.format(established=established, error=_quotes(case['contradicted']),
                                summary=case['summary'], scene=scene_text)
 
@@ -372,8 +425,89 @@ def _read(path: str) -> str:
         return f.read()
 
 
+def _snapshot(project_dir: str, rel: str) -> dict[str, str]:
+    """{relative path: text} for a file, or for every file under a directory."""
+    root = os.path.join(project_dir, rel)
+    if os.path.isfile(root):
+        return {rel: _read(root)}
+    found = {}
+    for dirpath, _dirs, files in os.walk(root):
+        for name in sorted(files):
+            path = os.path.join(dirpath, name)
+            found[os.path.relpath(path, project_dir)] = _read(path)
+    return found
+
+
+def written(before: dict[str, str], after: dict[str, str]) -> str:
+    """What a pass wrote, for the judge: per changed file, its first line (a
+    CSV's header) and every line that is new, in file order. A new file is
+    given whole. '' when nothing changed."""
+    parts = []
+    for path, text in sorted(after.items()):
+        old = before.get(path)
+        if old == text:
+            continue
+        lines = text.splitlines()
+        if old is None:
+            parts.append(f'{path} (new file):\n{text.rstrip()}')
+            continue
+        kept = set(old.splitlines())
+        new = [line for line in lines[1:] if line not in kept]
+        if new:
+            parts.append(f'{path}:\n' + '\n'.join(lines[:1] + new))
+    return '\n\n'.join(parts)
+
+
+def brief_fix(project_dir: str, scene_id: str) -> str:
+    """Rewrite one scene's brief as the polish/naturalness upstream fix does."""
+    from storyforge.cmd_revise import _fix_upstream_briefs
+    rel = os.path.join('reference', 'scene-briefs.csv')
+    before = _snapshot(project_dir, rel)
+    fixed, skipped = _fix_upstream_briefs(project_dir, [scene_id])
+    if not fixed:  # as naturalness_upstream: nothing written, reason in the note
+        raise PassHalted(f'upstream brief fix rewrote nothing for {scene_id}: '
+                         f'{skipped.get(scene_id, "unknown")}')
+    return written(before, _snapshot(project_dir, rel))
+
+
+def hone_physical_states(project_dir: str) -> str:
+    """Reconcile the physical-states registry as ``storyforge hone`` does."""
+    from storyforge.common import select_model
+    from storyforge.hone import reconcile_domain
+    ref_dir = os.path.join(project_dir, 'reference')
+    rel = os.path.join('reference', 'physical-states.csv')
+    before = _snapshot(project_dir, rel)
+    log_dir = os.path.join(project_dir, 'working', 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    reconcile_domain('physical-states', ref_dir, select_model('synthesis'), log_dir)
+    return written(before, _snapshot(project_dir, rel))
+
+
+def illustrate(project_dir: str, kind: str, ids: set[str] | None = None) -> str:
+    """Run ``illustrate --state`` or ``--prompts`` at full coaching."""
+    from storyforge import cmd_illustrate, illustrations, visual_state
+    if kind == 'illustrate-state':
+        rel = visual_state.STATE_FILE
+        run = lambda: cmd_illustrate.run_state(project_dir, 'full', dry_run=False)  # noqa: E731
+    else:
+        rel = illustrations.PROMPTS_SUBDIR
+        run = lambda: cmd_illustrate.run_prompts(project_dir, 'full', ids, dry_run=False)  # noqa: E731
+    before = _snapshot(project_dir, rel)
+    if run() != 0:  # it logged why; a cassette miss still errors the suite
+        raise PassHalted(f'{kind} exited non-zero and wrote nothing usable')
+    return written(before, _snapshot(project_dir, rel))
+
+
 def replay(case: dict, project_dir: str, scene_id: str) -> str:
     kind = family(case)
+    if kind == 'brief-fix':
+        return brief_fix(project_dir, scene_id)
+    if kind == 'hone-physical-states':
+        return hone_physical_states(project_dir)
+    if kind in ('illustrate-state', 'illustrate-prompts'):
+        return illustrate(project_dir, kind, {os.path.splitext(os.path.basename(s['path']))[0]
+                                              for s in case['contradicted']
+                                              if 'prompts/' in s['path']} or None)
     if kind == 'redraft-from-brief':
         return redraft(project_dir, scene_id)
     if kind == 'naturalness-upstream':
@@ -394,7 +528,15 @@ def prepare(case: dict, work_dir: str, root: str | None = None) -> tuple[str, st
         raise RuntimeError(f'{case["repo"]} is not cloned at {repo_dir}')
     parent = _git(repo_dir, 'rev-parse', f'{case["introduced_by"]["commit"]}~1').strip()
     project = materialize(repo_dir, parent, os.path.join(work_dir, case['id']))
-    scene_id = target_scene(case, repo_dir)
+    kind = family(case)
+    if kind in CSV_FAMILIES:
+        # a data pass reads the whole project: the scene is the one whose data
+        # carries the error (the brief a brief fix rewrites), for the notes
+        spans = case['contradicted']
+        scene_id = next((s['scene'] for s in spans if s['path'].endswith('scene-briefs.csv')),
+                        spans[0]['scene'])
+    else:
+        scene_id = target_scene(case, repo_dir)
     if not scene_id:
         raise LookupError(_untouched_reason(case, repo_dir))
     if (not os.path.isfile(os.path.join(project, 'reference', 'scenes.csv'))
@@ -407,10 +549,11 @@ def prepare(case: dict, work_dir: str, root: str | None = None) -> tuple[str, st
                               'and its plan in YAML; current revise refuses YAML plans and '
                               'Storyforge has no migration for them')
         raise LookupError('pre-pass project predates reference/scenes.csv')
-    if family(case) != 'revision-plan' and not os.path.isfile(
+    needs_briefs = ('redraft-from-brief', 'naturalness-upstream', 'brief-fix', 'hone-physical-states')
+    if kind in needs_briefs and not os.path.isfile(
             os.path.join(project, 'reference', 'scene-briefs.csv')):
         raise LookupError('pre-pass project has no scene-briefs.csv')
-    if family(case) == 'revision-plan':
+    if kind == 'revision-plan':
         row = plan_row(project, case['introduced_by']['pass'])
         if row.get('fix_location') in ('structural', 'registry', 'brief', 'intent'):
             raise LookupError(f'pass {row["name"]!r} is a {row["fix_location"]} pass, not prose')

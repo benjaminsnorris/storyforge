@@ -117,8 +117,13 @@ def test_the_e8_suite_loads():
 @pytest.mark.parametrize('name, expected', [
     ('naturalness (upstream brief fixes)', 'naturalness-upstream'),
     ('stakes-and-history', 'revision-plan'),
-    ('hone (registries/physical-states)', ''),
-    ('illustrate --state', ''),
+    ('hone (registries/physical-states)', 'hone-physical-states'),
+    ('hone-registries-physical-states', 'hone-physical-states'),
+    ('hone (briefs)', ''),
+    ('illustrate --state', 'illustrate-state'),
+    ('illustrate --prompts', 'illustrate-prompts'),
+    ('illustrate --embed', ''),
+    ('upstream-brief-fixes', 'brief-fix'),
 ])
 def test_more_families(name, expected):
     assert e8.family(_tool_case(introduced_by={'kind': 'tool', 'pass': name})) == expected
@@ -266,3 +271,54 @@ def test_a_yaml_project_is_unreplayable_with_the_reason(tmp_path, monkeypatch):
     monkeypatch.setattr(e8, 'ID_MAPS_DIR', str(maps))
     with pytest.raises(LookupError, match='refuses YAML plans'):
         e8.prepare(case, str(tmp_path / 'work'), str(root))
+
+
+def test_a_csv_level_case_is_selected_when_its_pass_writes_data():
+    hone = _tool_case(id='b-1', level='csv',
+                      introduced_by={'kind': 'tool', 'pass': 'hone-registries-physical-states',
+                                     'commit': 'abc'})
+    other = _tool_case(id='b-2', level='csv')
+    sel = e8.select([hone, other], [])
+    assert [c['id'] for c in sel.cases] == ['b-1']
+    assert sel.excluded == {'csv-level (no prose to redraft)': ['b-2']}
+
+
+def test_written_gives_the_header_and_the_new_lines_only():
+    before = {'reference/physical-states.csv': 'id|character\nscar-kael|Kael\n'}
+    after = {'reference/physical-states.csv': 'id|character\nscar-kael|Kael\nbraid-kael|Kael\n',
+             'reference/illustration-prompts/LF-13.md': 'every lantern out\n'}
+    assert e8.written(before, after) == (
+        'reference/illustration-prompts/LF-13.md (new file):\nevery lantern out\n\n'
+        'reference/physical-states.csv:\nid|character\nbraid-kael|Kael')
+    assert e8.written(before, before) == ''
+
+
+def test_a_data_case_is_judged_on_what_the_pass_wrote():
+    case = _tool_case(introduced_by={'kind': 'tool', 'pass': 'upstream-brief-fixes', 'commit': 'a'})
+    prompt = e8.judge_prompt(case, 'shell-breaks-open|Director Tessamine')
+    assert '<written>\nshell-breaks-open|Director Tessamine\n</written>' in prompt
+    assert '<scene>' not in prompt
+    # the prose judge prompt is unchanged, so recorded verdicts still replay
+    assert '<scene>' in e8.judge_prompt(_tool_case(), 'x')
+
+
+def test_a_brief_fix_that_rewrites_nothing_is_pass_halted_with_why(monkeypatch, tmp_path):
+    from storyforge import cmd_revise
+    monkeypatch.setattr(cmd_revise, '_fix_upstream_briefs',
+                        lambda p, ids: ([], {'s': 'names Tessamine, found nowhere'}))
+    with pytest.raises(e8.PassHalted, match='found nowhere'):
+        e8.brief_fix(str(tmp_path), 's')
+
+
+def test_a_data_pass_that_writes_nothing_is_not_present_without_a_judge(monkeypatch, tmp_path):
+    import importlib
+    suite = importlib.import_module('suites.e8_revision_safety')
+    case = _tool_case(id='b-1', introduced_by={'kind': 'tool', 'pass': 'hone (registries/physical-states)',
+                                               'commit': 'abc'})
+    monkeypatch.setattr(suite, 'select', lambda cases, holdout: e8.Selection(cases=[case]))
+    monkeypatch.setattr(suite, 'prepare', lambda c, w: (str(tmp_path), 's'))
+    monkeypatch.setattr(suite, 'replay', lambda c, p, s: '')
+    monkeypatch.setattr(suite, 'judge', lambda c, t: pytest.fail('judged empty output'))
+    out = suite.run(type('Ctx', (), {'work_dir': str(tmp_path)})())
+    assert out.metrics['replayed'] == 1 and out.metrics['reintroduced'] == 0
+    assert 'b-1 (s): not_present' in out.notes

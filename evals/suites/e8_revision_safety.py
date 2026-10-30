@@ -4,7 +4,7 @@ See evals/e8/__init__.py. Gate (plan §5, Phase 4): zero errors reintroduced.
 """
 
 from e1 import load_cases, load_holdout
-from e8 import PassHalted, family, judge, prepare, replay, select
+from e8 import CSV_FAMILIES, PassHalted, family, judge, prepare, replay, select
 from harness import Gate, Suite, SuiteOutput
 
 MIN_REPLAYED = 15  # below this the rate is too noisy to gate on
@@ -28,9 +28,13 @@ def run(ctx):
             halted += 1
             notes.append(f'{case["id"]} ({scene_id}): halted, nothing written — {str(e)[:160]}')
             continue
-        verdict = judge(case, prose)
+        if prose.strip():
+            verdict = judge(case, prose)
+        else:  # a data pass that wrote nothing cannot have reintroduced anything
+            verdict = {'verdict': 'not_present', 'evidence': ''}
         replayed += 1
-        words += len(prose.split())
+        if family(case) not in CSV_FAMILIES:  # errors per 10k words of prose
+            words += len(prose.split())
         hit = verdict['verdict'] == 'reintroduced'
         reintroduced += hit
         code = by_code.setdefault(case['code'], {'replayed': 0, 'reintroduced': 0})
