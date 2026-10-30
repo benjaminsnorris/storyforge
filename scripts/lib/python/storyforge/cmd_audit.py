@@ -30,6 +30,20 @@ ledger (so the marks are in `working/audit-log.csv`), and commits. A rejected
 fact's scenes are listed (the briefs that name it) for re-checking; the
 dependency graph that finds every scene leaning on it is Phase 4.
 
+Re-marking a fact with the verdict it already has changes nothing. A
+superseded fact can't be rejected (it would stop saying it was replaced):
+reject the fact that superseded it, or mark it seen. Explicit ids are marked
+whatever the scope flags say (a WARNING names the ignored flags); `all`
+marks what the same scope lists, which is why the listing's hint is
+`--mark seen all` plus the flags it was given. A scope naming something
+that isn't there (a scene, character, thread, or an act no scene has) is an
+error. Acts are scenes.csv's `act` column, or `part` when there is no `act`
+(said in a note).
+
+Every run first logs, as `hand-edit`, any change made to commitments.csv
+outside Storyforge since the last logged write (`audit.log_hand_edits`).
+With `--json`, stdout is the JSON alone; log lines go to stderr.
+
 The run-time cadence option (`--review-every N`) belongs to Phase 3's gate,
 which surfaces digests during a run; this command is the on-demand view.
 """
@@ -37,8 +51,10 @@ which surfaces digests during a run; this command is the on-demand view.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
+import shlex
 import sys
 
 from storyforge import audit, ledger
@@ -103,7 +119,30 @@ def _fact_json(r: dict) -> dict:
     return {k: r.get(k, '') for k in keys} | {'tier': audit.tier_of(r)}
 
 
-def render(digest: audit.Digest, *, include_reviewed: bool = False) -> str:
+def scope_flags(args) -> list[str]:
+    """The scope flags `args` was given, as command-line words."""
+    words = []
+    for flag, value in (('--act', args.act), ('--character', args.character),
+                        ('--scenes', args.scenes), ('--thread', args.thread)):
+        if value:
+            words += [flag, value]
+    for flag, on in (('--all', args.all_acts), ('--include-reviewed', args.include_reviewed),
+                     ('--include-migrated', args.include_migrated)):
+        if on:
+            words.append(flag)
+    return words
+
+
+def mark_hint(args) -> str:
+    """The command that marks exactly what this listing shows: `all` with
+    the same scope selects the same facts (for the per-act default too, which
+    also lists facts with no scene; `--act N` would leave those out)."""
+    return ' '.join(['storyforge audit', '--mark', 'seen', 'all']
+                    + [shlex.quote(w) for w in scope_flags(args)])
+
+
+def render(digest: audit.Digest, *, include_reviewed: bool = False,
+           hint: str = '') -> str:
     n = len(digest.facts)
     what = '' if include_reviewed else ' to review'
     lines = [f'Audit: {digest.title} — {n} fact{"" if n == 1 else "s"}{what}'
@@ -126,10 +165,8 @@ def render(digest: audit.Digest, *, include_reviewed: bool = False) -> str:
     if digest.remaining:
         later = ', '.join(f'act {a or "(none)"}: {c}' for a, c in digest.remaining.items())
         lines += ['', f'Still to review after this act — {later}']
-    if n:
-        lines += ['', 'Mark them: storyforge audit --mark seen all'
-                  + (f' --act {digest.act}' if digest.act else '')
-                  + '   (or --mark seen|rejected ID ...)']
+    if n and hint:
+        lines += ['', f'Mark them: {hint}   (or --mark seen|rejected ID ...)']
     return '\n'.join(lines)
 
 
@@ -141,36 +178,64 @@ def _fail(message: str) -> None:
 def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
     install_signal_handlers()
+    if not args.json_output:
+        _run(args, lambda text: print(text))
+        return
+    # --json: stdout carries the JSON only; every log line (a push WARNING
+    # from git, an ERROR) goes to stderr
+    out = sys.stdout
+
+    def emit(payload):
+        out.write(json.dumps(payload, indent=2) + '\n')
+        out.flush()
+    with contextlib.redirect_stdout(sys.stderr):
+        _run(args, emit)
+
+
+def _run(args, emit):
     project_dir = detect_project_root()
     ledger.exit_if_not_migrated(project_dir)
     rows = ledger.load(project_dir)
+    hand = audit.log_hand_edits(project_dir, rows)
     try:
         order = ledger.scene_order(project_dir)
     except ValueError as e:
         _fail(f'reading order: {e}')
     scope = _scope(args)
-    if args.mark and args.ids != ['all'] and not scope.narrowed():
-        # Explicit ids: no per-act narrowing hides one from the listing
-        scope.all_acts = True
+    explicit = bool(args.mark) and args.ids != ['all']
+    if explicit:
+        ignored = scope_flags(args)
+        if ignored:
+            log(f'WARNING: {" ".join(ignored)} ignored: explicit ids are marked '
+                f'whatever the scope (use `all` to mark what a scope lists)')
+        # No per-act narrowing hides an id from the listing
+        scope = audit.Scope(all_acts=True, include_reviewed=True, include_migrated=True)
     try:
         digest = audit.select(rows, project_dir, scope, order)
     except audit.ScopeError as e:
         _fail(str(e))
+    if hand:
+        digest.notes.insert(0, f'{len(hand)} change(s) made to reference/'
+                               f'{ledger.LEDGER_FILE} outside Storyforge logged to '
+                               f'{audit.LOG_PATH} as {audit.HAND_EDIT}'
+                               + ('' if args.mark and not args.dry_run else
+                                  ' (not committed yet)'))
 
     if not args.mark:
         if args.json_output:
-            print(json.dumps({
+            emit({
                 'title': digest.title, 'act': digest.act, 'notes': digest.notes,
-                'remaining': digest.remaining,
+                'remaining': digest.remaining, 'mark_hint': mark_hint(args),
                 'facts': [_fact_json(r) for r in digest.facts],
                 'groups': [{'tier': g['tier'], 'label': g['label'],
                             'subjects': [{'subject': s['subject'],
                                           'facts': [r['id'] for r in s['facts']]}
                                          for s in g['subjects']]}
                            for g in audit.group(digest.facts)],
-            }, indent=2))
+            })
         else:
-            print(render(digest, include_reviewed=args.include_reviewed))
+            emit(render(digest, include_reviewed=args.include_reviewed,
+                        hint=mark_hint(args)))
         return
 
     if 'all' in args.ids:
@@ -180,27 +245,39 @@ def main(argv=None):
     else:
         ids = args.ids
     if not ids:
-        print(f'Audit: {digest.title} — nothing to mark')
+        if args.json_output:
+            emit({'verdict': args.mark, 'marked': [], 'dry_run': args.dry_run,
+                  'recheck': {}, 'notes': digest.notes})
+        else:
+            emit(f'Audit: {digest.title} — nothing to mark')
         return
     try:
         changed = audit.mark(rows, ids, args.mark)
     except ValueError as e:
         _fail(str(e))
     recheck = audit.leaning_scenes(project_dir, changed) if args.mark == 'rejected' else {}
-    if not args.dry_run and changed:
+    committed = True
+    if not args.dry_run and (changed or hand):
         ensure_on_branch('audit', project_dir)
-        ledger.save(project_dir, rows, command='audit')
-        commit_and_push(project_dir,
-                        f'Audit: mark {len(changed)} fact{"" if len(changed) == 1 else "s"} '
-                        f'{args.mark}',
-                        [f'reference/{ledger.LEDGER_FILE}', audit.LOG_PATH])
+        if changed:
+            ledger.save(project_dir, rows, command='audit')
+        n = len(changed)
+        message = (f'Audit: mark {n} fact{"" if n == 1 else "s"} {args.mark}' if n
+                   else f'Audit: log {len(hand)} hand edit(s) to {ledger.LEDGER_FILE}')
+        committed = commit_and_push(project_dir, message,
+                                    [f'reference/{ledger.LEDGER_FILE}', audit.LOG_PATH,
+                                     audit.SNAPSHOT_PATH])
     if args.json_output:
-        print(json.dumps({'verdict': args.mark, 'marked': changed,
-                          'dry_run': args.dry_run, 'recheck': recheck}, indent=2))
-        return
-    verb = 'Would mark' if args.dry_run else 'Marked'
-    print(f'{verb} {len(changed)} fact{"" if len(changed) == 1 else "s"} {args.mark}'
-          + (f': {", ".join(changed)}' if changed else ' (already marked)'))
-    for fid, scenes in recheck.items():
-        print(f'  {fid}: ' + (f'named by the briefs of {", ".join(scenes)} — re-check them'
-                              if scenes else 'no brief names it'))
+        emit({'verdict': args.mark, 'marked': changed, 'dry_run': args.dry_run,
+              'committed': committed, 'recheck': recheck, 'notes': digest.notes})
+    else:
+        verb = 'Would mark' if args.dry_run else 'Marked'
+        lines = [f'{verb} {len(changed)} fact{"" if len(changed) == 1 else "s"} {args.mark}'
+                 + (f': {", ".join(changed)}' if changed else ' (already marked)')]
+        for fid, scenes in recheck.items():
+            lines.append(f'  {fid}: ' + (f'named by the briefs of {", ".join(scenes)} — '
+                                         f're-check them' if scenes else 'no brief names it'))
+        emit('\n'.join(lines))
+    if not committed:
+        _fail(f'the marks are written to reference/{ledger.LEDGER_FILE} and '
+              f'{audit.LOG_PATH}, but the commit failed: commit them by hand')
