@@ -1,15 +1,15 @@
 {
   "cost": {
-    "calls": 2265,
-    "input_tokens": 9390455,
-    "output_tokens": 2554958,
-    "replayed_calls": 2265,
+    "calls": 2495,
+    "input_tokens": 9391037,
+    "output_tokens": 2602131,
+    "replayed_calls": 2495,
     "unpriced_calls": 0,
-    "usd_if_live": 22.9728,
+    "usd_if_live": 26.8561,
     "usd_spent": 0.0
   },
   "git_dirty": false,
-  "git_sha": "4a86046730b88b2111aa795a7b71118f6eb7b1b7",
+  "git_sha": "dee5b7d0ff606c7f7769b21305d9b95dda52a271",
   "mode": "replay",
   "results": [
     {
@@ -46,7 +46,7 @@
         "usd_spent": 0.0
       },
       "description": "E1 gold-set health: format, 100+ prose cases, 20% holdout",
-      "duration_s": 0.02,
+      "duration_s": 0.01,
       "error": null,
       "gates": [
         {
@@ -82,7 +82,7 @@
       },
       "mode": "replay",
       "notes": [],
-      "started_at": "2026-10-30T19:45:50+00:00",
+      "started_at": "2026-10-30T20:58:52+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -140,7 +140,7 @@
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 8.35,
+      "duration_s": 7.3,
       "error": null,
       "gates": [
         {
@@ -204,9 +204,137 @@
         "missed 37 of 37: e2-carol-001, e2-carol-002, e2-carol-003, e2-carol-004, e2-carol-005, e2-carol-006, e2-carol-007, e2-carol-008, e2-carol-009, e2-carol-010, e2-carol-011, e2-carol-012, e2-carol-013, e2-carol-014, e2-carol-015, e2-carol-016, e2-carol-017, e2-carol-018, e2-carol-019, e2-carol-020, e2-carol-021, e2-carol-022, e2-carol-023, e2-carol-024, e2-carol-025, e2-carol-026, e2-carol-027, e2-carol-028, e2-carol-029, e2-carol-030, e2-carol-031, e2-carol-032, e2-carol-033, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
-      "started_at": "2026-10-30T19:45:50+00:00",
+      "started_at": "2026-10-30T20:58:52+00:00",
       "status": "fail",
       "suite": "e2-carol"
+    },
+    {
+      "by_code": {
+        "KNO": {
+          "cases": 5,
+          "precision": 1.0,
+          "recall": 0.8,
+          "recall_code_match": 0.8
+        },
+        "PHY": {
+          "cases": 6,
+          "precision": 0.6667,
+          "recall": 1.0,
+          "recall_code_match": 1.0
+        },
+        "PRM": {
+          "cases": 5,
+          "precision": 1.0,
+          "recall": 0.8,
+          "recall_code_match": 0.8
+        },
+        "REL": {
+          "cases": 5,
+          "precision": 1.0,
+          "recall": 1.0,
+          "recall_code_match": 1.0
+        },
+        "TIM": {
+          "cases": 5,
+          "precision": 1.0,
+          "recall": 0.8,
+          "recall_code_match": 0.8
+        },
+        "TRT": {
+          "cases": 6,
+          "precision": 1.0,
+          "recall": 1.0,
+          "recall_code_match": 0.5
+        },
+        "VOI": {
+          "cases": 2,
+          "recall": 0.0,
+          "recall_code_match": 0.0
+        },
+        "WLD": {
+          "cases": 3,
+          "precision": 0.3333,
+          "recall": 1.0,
+          "recall_code_match": 0.3333
+        }
+      },
+      "cost": {
+        "calls": 230,
+        "input_tokens": 582,
+        "output_tokens": 47173,
+        "replayed_calls": 230,
+        "unpriced_calls": 0,
+        "usd_if_live": 3.8833,
+        "usd_spent": 0.0
+      },
+      "description": "The gate checker on errors injected into A Christmas Carol",
+      "duration_s": 10.16,
+      "error": null,
+      "gates": [
+        {
+          "actual": 1.0,
+          "name": "recall_PHY",
+          "op": ">=",
+          "passed": true,
+          "threshold": 0.9
+        },
+        {
+          "actual": 0.8,
+          "name": "recall_TIM",
+          "op": ">=",
+          "passed": false,
+          "threshold": 0.9
+        },
+        {
+          "actual": 0.8,
+          "name": "recall_KNO",
+          "op": ">=",
+          "passed": false,
+          "threshold": 0.9
+        },
+        {
+          "actual": 1.0,
+          "name": "recall_REL",
+          "op": ">=",
+          "passed": true,
+          "threshold": 0.9
+        },
+        {
+          "actual": 0.5,
+          "name": "recall_TRT",
+          "op": ">=",
+          "passed": false,
+          "threshold": 0.9
+        },
+        {
+          "actual": 0.8438,
+          "name": "precision",
+          "op": ">=",
+          "passed": true,
+          "threshold": 0.8
+        }
+      ],
+      "metrics": {
+        "benign_cases": 8,
+        "benign_flagged": 0,
+        "cases": 37,
+        "control_flags": 0,
+        "flags_false": 5,
+        "flags_true": 27,
+        "precision": 0.8438,
+        "recall": 0.8649,
+        "recall_code_match": 0.7297
+      },
+      "mode": "replay",
+      "notes": [
+        "detector: the gate checker (contradictions; no brief promises)",
+        "missed 10 of 37: e2-carol-002, e2-carol-014, e2-carol-016, e2-carol-017, e2-carol-027, e2-carol-032, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
+        "0 finding(s) dropped as unverified (quotes not in the text they name)",
+        "0 flag(s) on unedited controls; 0 benign case(s) flagged"
+      ],
+      "started_at": "2026-10-30T20:59:00+00:00",
+      "status": "fail",
+      "suite": "e2-carol-checker"
     },
     {
       "by_code": {
@@ -252,7 +380,7 @@
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 183.06,
+      "duration_s": 190.57,
       "error": null,
       "gates": [
         {
@@ -316,7 +444,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-30T19:45:58+00:00",
+      "started_at": "2026-10-30T20:59:10+00:00",
       "status": "fail",
       "suite": "e2-corpus-drift"
     },
@@ -366,7 +494,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 126.34,
+      "duration_s": 218.74,
       "error": null,
       "gates": [
         {
@@ -430,7 +558,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-30T19:49:01+00:00",
+      "started_at": "2026-10-30T21:02:20+00:00",
       "status": "fail",
       "suite": "e2-corpus-validate"
     },
@@ -471,7 +599,7 @@
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 47.83,
+      "duration_s": 69.29,
       "error": null,
       "gates": [
         {
@@ -552,7 +680,7 @@
         "thornwall-029 (journals-of-the-east-wing): captured",
         "thornwall-030 (ivra-visits-sera): captured"
       ],
-      "started_at": "2026-10-30T19:51:07+00:00",
+      "started_at": "2026-10-30T21:05:59+00:00",
       "status": "pass",
       "suite": "e3-extraction"
     },
@@ -587,7 +715,7 @@
         "usd_spent": 0.0
       },
       "description": "Draft shared-dark Act 1 with write; CP10k, BPS, length, voice",
-      "duration_s": 7.64,
+      "duration_s": 8.29,
       "error": null,
       "gates": [
         {
@@ -641,7 +769,7 @@
         "checker plan: a Saturday 1 day(s) after voicemail's Thursday",
         "Judge stands in for the plan's human spot-check (still owed). Drafted in direct mode; batch mode is refused under a cassette."
       ],
-      "started_at": "2026-10-30T19:51:55+00:00",
+      "started_at": "2026-10-30T21:07:08+00:00",
       "status": "pass",
       "suite": "e4-generation"
     },
@@ -667,7 +795,7 @@
         "usd_spent": 0.0
       },
       "description": "Redraft from plan + ledger; facts the redraft changes",
-      "duration_s": 3.77,
+      "duration_s": 4.44,
       "error": null,
       "gates": [
         {
@@ -696,7 +824,7 @@
         "name-surfaces: 1 mismatch(es)\n    PHY: Hank writes the name in pen in the original, but in pencil in the redraft.",
         "voicemail: 2 mismatch(es)\n    KNO: The message in which Marie mentions the coworker Jennifer and the 11:15 departure is the fifth in the original but the fourth in the redraft\n    PHY: The unfiled case intake form is beside the laptop with the Post-it in the original, but lies on the counter in the redraft."
       ],
-      "started_at": "2026-10-30T19:52:03+00:00",
+      "started_at": "2026-10-30T21:07:17+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -724,7 +852,7 @@
         "usd_spent": 0.0
       },
       "description": "Continuity flags raised on classics with no known errors",
-      "duration_s": 0.21,
+      "duration_s": 0.34,
       "error": null,
       "gates": [
         {
@@ -758,7 +886,7 @@
         "christmas-carol/run2: 25 flag(s)",
         "christmas-carol/run1: 25 flag(s)"
       ],
-      "started_at": "2026-10-30T19:52:07+00:00",
+      "started_at": "2026-10-30T21:07:21+00:00",
       "status": "fail",
       "suite": "e7-classics"
     },
@@ -799,7 +927,7 @@
         "usd_spent": 0.0
       },
       "description": "Current revision passes vs the E1 errors past passes introduced",
-      "duration_s": 90.41,
+      "duration_s": 126.12,
       "error": null,
       "gates": [
         {
@@ -887,13 +1015,13 @@
         "thornwall-035 (riders-approach): consistent",
         "thornwall-037 (evening-visit): consistent"
       ],
-      "started_at": "2026-10-30T19:52:07+00:00",
+      "started_at": "2026-10-30T21:07:21+00:00",
       "status": "fail",
       "suite": "e8-revision-safety"
     }
   ],
   "schema_version": 1,
   "status": "fail",
-  "storyforge_version": "1.98.0",
-  "suite_count": 9
+  "storyforge_version": "1.99.0",
+  "suite_count": 10
 }
