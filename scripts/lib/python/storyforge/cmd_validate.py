@@ -138,6 +138,7 @@ def main(argv=None):
 
 
 def _print_human_readable(combined):
+    from storyforge.elaborate import finding_scene_list
     r = combined['structural']
     schema = combined['schema']
     knowledge = combined.get('knowledge')
@@ -159,6 +160,8 @@ def _print_human_readable(combined):
             if scene:
                 prefix += f' {scene}:'
             print(f"{prefix} {f['message']}")
+            if finding_scene_list(f):
+                print(f'      {finding_scene_list(f)}')
 
     if schema is not None:
         print()

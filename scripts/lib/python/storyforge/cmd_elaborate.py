@@ -253,7 +253,9 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
 
     log('Analyzing gaps...')
 
-    from storyforge.elaborate import analyze_gaps, validate_structure, update_scene, get_scenes
+    from storyforge.elaborate import (
+        analyze_gaps, validate_structure, update_scene, get_scenes, finding_scene_list,
+    )
     from storyforge.api import submit_batch, poll_batch, download_batch_results, invoke, extract_text, build_batch_request
     from storyforge.prompts_elaborate import build_gap_fill_prompt, build_knowledge_fix_prompt, csv_block_to_rows
     from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps, normalize_fields
@@ -472,6 +474,8 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
             if scene:
                 prefix += f' {scene}:'
             log(f'{prefix} {f["message"]}')
+            if finding_scene_list(f):
+                log(f'      {finding_scene_list(f)}')
         log('')
         log('Run gap-fill again to continue filling remaining gaps.')
 
@@ -498,6 +502,8 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
                     f.write(f'- **[{sev}]** {scene}: {msg}\n')
                 else:
                     f.write(f'- **[{sev}]** {msg}\n')
+                if finding_scene_list(fail):
+                    f.write(f'  - {finding_scene_list(fail)}\n')
 
     commit_and_push(project_dir, 'Elaborate: gap-fill validation report')
 
@@ -523,6 +529,16 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
 # still validated and committed for the briefs that were written, but the
 # phase doesn't advance and the run exits 1 naming them.
 _gn_brief_failures: list[str] = []
+
+
+#: The brief fields every GN brief has; a brief with all of them was written.
+#: (The prompt lets the other GN fields be blank: a one-page scene has no
+#: page-turn beat.)
+_GN_BRIEF_FIELDS = ('goal', 'page_layout', 'panel_breakdown')
+
+
+def _gn_brief_complete(brief: dict) -> bool:
+    return all(brief.get(field, '').strip() for field in _GN_BRIEF_FIELDS)
 
 
 def _briefs_handler_gn(project_dir: str, ref_dir: str,
@@ -567,11 +583,19 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
     briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
     alias_maps = load_registry_alias_maps(project_dir)
 
-    # Target: mapped scenes without a complete brief
-    target_ids = [
+    # Target: mapped scenes without a complete brief. A scene's status
+    # doesn't move when its brief is written, so a re-run after a partial
+    # failure skips the briefs an earlier run already wrote
+    mapped_ids = [
         sid for sid, row in scenes_map.items()
         if row.get('status', '') in ('mapped', 'architecture', 'spine', '')
     ]
+    target_ids = [sid for sid in mapped_ids
+                  if not _gn_brief_complete(briefs_map.get(sid, {}))]
+    if len(target_ids) < len(mapped_ids):
+        log(f'{len(mapped_ids) - len(target_ids)} scene(s) already have a GN '
+            f'brief (goal, page_layout, panel_breakdown); not rewritten. Blank '
+            f'one of those to have its brief written again')
     if not target_ids:
         log('No scenes need GN briefs.')
         return None
@@ -1578,6 +1602,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps, normalize_fields
     from storyforge.elaborate import (
         _read_csv, _write_csv, _read_csv_as_map, _FILE_MAP, validate_structure,
+        finding_scene_list,
     )
 
     registries = format_registries_for_prompt(project_dir)
@@ -1872,6 +1897,8 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
             if scene:
                 prefix += f' {scene}:'
             log(f'{prefix} {fail["message"]}')
+            if finding_scene_list(fail):
+                log(f'      {finding_scene_list(fail)}')
 
     # Save validation report
     from datetime import datetime
@@ -1894,6 +1921,8 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     f.write(f'- **[{sev}]** {scene}: {msg}\n')
                 else:
                     f.write(f'- **[{sev}]** {msg}\n')
+                if finding_scene_list(fail):
+                    f.write(f'  - {finding_scene_list(fail)}\n')
 
     # ========================================================================
     # Commit and update PR
