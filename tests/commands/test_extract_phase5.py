@@ -290,7 +290,12 @@ class TestReviewFixes:
         mock_api.set_response_fn(_answer(book))
         _run(book)
         assert get_scene(sid, ref)['theme_threads'] == 'my-own-theme'
-        assert "1 scene(s) keep a theme_threads cell of the author's" in capsys.readouterr().out
+        assert ('1 scene(s) have a theme_threads cell naming themes not in themes.csv'
+                in capsys.readouterr().out)
+        update_scene(sid, ref, {'theme_threads': 't2'})      # names a theme that exists
+        _run(book, force=True)
+        assert get_scene(sid, ref)['theme_threads'] == 't2'
+        assert '1 scene(s) have a theme_threads cell of their own, kept' in capsys.readouterr().out
 
     def test_validate_passes_on_motifs_after_5b(self, book, mock_api, mock_git, mock_costs):
         """CR H1: once the taxonomy had rows, every brief's descriptive
@@ -504,3 +509,44 @@ class TestProjectField:
         assert run.reports == ["storyforge.yaml: project.genre not set (no `genre:` line "
                                "under project: to fill); the book reads as 'mystery'"]
         assert (tmp_path / 'storyforge.yaml').read_text() == 'project:\n  title: "T"\n'
+
+
+class TestCellRecord:
+    """Phase 5 replaces a filled scene-CSV cell only while it still holds
+    what phase 5 wrote (working/extraction-cells.csv)."""
+
+    def test_an_author_edit_of_an_extracted_cell_survives_force(
+            self, book, mock_api, mock_git, mock_costs, capsys):
+        from storyforge.elaborate import get_scene, update_scene
+        ref = os.path.join(book, 'reference')
+        sid = _scene_ids(book)[0]
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        assert get_scene(sid, ref)['theme_threads'] == 't1;t2'
+        update_scene(sid, ref, {'theme_threads': 't2'})      # the author narrows it
+        _run(book, force=True)
+        assert get_scene(sid, ref)['theme_threads'] == 't2'
+        assert get_scene(_scene_ids(book)[1], ref)['theme_threads'] == 't1;t2'
+
+    def test_an_unreadable_record_fills_only_blank_cells_and_is_left_alone(
+            self, book, mock_api, mock_git, mock_costs, capsys):
+        from storyforge.elaborate import get_scene, update_scene
+        from storyforge.extract_describe import CELLS_FILE
+        ref = os.path.join(book, 'reference')
+        ids = _scene_ids(book)
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        record = os.path.join(book, CELLS_FILE)
+        with open(record, 'wb') as f:
+            f.write(b'\xff broken')
+        update_scene(ids[0], ref, {'theme_threads': ''})
+        themes2 = json.loads(_themes_reply(ids, 'the brass compass'))
+        for st in themes2['scene_themes']:
+            st['themes'] = ['t3']
+        mock_api.set_response_fn(_answer(book, themes=json.dumps(themes2)))
+        _run(book, force=True)
+        assert get_scene(ids[0], ref)['theme_threads'] == 't3'      # was blank
+        assert get_scene(ids[1], ref)['theme_threads'] == 't1;t2'   # can't be shown ours
+        assert 'extraction-cells.csv could not be read' in capsys.readouterr().out
+        with open(record, 'rb') as f:
+            assert f.read() == b'\xff broken'

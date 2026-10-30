@@ -767,6 +767,13 @@ THEMES_MAX_TOKENS = 12_000
 #: the motif it was grouped into ('' when it named no recurring image).
 MENTIONS_FILE = os.path.join('working', 'extraction-motif-mentions.csv')
 
+#: Every scene-CSV cell phase 5 wrote, with the value it wrote. A cell is
+#: phase 5's to replace only while it still holds exactly that value; any
+#: other filled cell is the author's (#444 review: an id-based guess could
+#: not tell an author's hand-tag from the last run's).
+CELLS_FILE = os.path.join('working', 'extraction-cells.csv')
+_CELLS_COLUMNS = ['file', 'scene_id', 'column', 'value']
+
 #: What a step did: wrote all its files, wrote none (each reason reported),
 #: or wrote some and stopped (a file changed during the call).
 StepOutcome = Literal['written', 'skipped', 'partial']
@@ -892,33 +899,70 @@ def _write_all(run: Run, files: list[tuple[str, str]], step: str, label: str) ->
     return True
 
 
-def _registry_ids(path: str) -> set[str]:
+def _read_cells(run: Run) -> dict[tuple[str, str, str], str] | None:
+    """CELLS_FILE as {(file, scene id, column): value}; {} when absent. None,
+    with a WARNING, when it exists but can't be read: then no filled cell
+    can be shown to be phase 5's, so only blank cells are written, and the
+    record is not rewritten (it would lose every other cell)."""
     from .elaborate import _read_csv
-    return {r.get('id', '').strip() for r in _read_csv(path) if r.get('id', '').strip()}
+    path = os.path.join(run.project_dir, CELLS_FILE)
+    if not os.path.lexists(path):
+        return {}
+    try:
+        with open(path, encoding='utf-8') as f:
+            header = f.readline().rstrip('\n').split('|')
+        if header != _CELLS_COLUMNS:
+            raise ValueError(f'its header is {"|".join(header)!r}')
+        rows = _read_csv(path)
+    except (OSError, ValueError) as e:
+        log(f'WARNING: {CELLS_FILE} could not be read ({e}); only blank cells are filled')
+        return None
+    return {(r['file'], r['scene_id'], r['column']): r['value'] for r in rows}
 
 
-def _set_cells(run: Run, filename: str, column: str, values: dict[str, str],
-               replaceable: Callable[[str], bool]) -> tuple[int, dict[str, str]]:
-    """Set `column` for each scene id in `values` whose current cell is
-    `replaceable`, in the scene CSV that owns it; a scene with no row there
-    gets none (a row written here would have nothing else in it). Returns
-    how many were set, and the cells kept because they were not replaceable
-    (scene id: current value)."""
+def _save_cells(run: Run, cells: dict[tuple[str, str, str], str]) -> None:
+    path = os.path.join(run.project_dir, CELLS_FILE)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    rows = [{'file': f, 'scene_id': sid, 'column': col, 'value': v}
+            for (f, sid, col), v in sorted(cells.items())]
+    with open(path, 'w', encoding='utf-8', newline='') as fh:
+        fh.write(_csv_text(rows, _CELLS_COLUMNS))
+
+
+def _set_cells(run: Run, filename: str, column: str, values: dict[str, str], *,
+               replace_any: bool = False) -> tuple[int, dict[str, str]]:
+    """Set `column` for each scene id in `values`, in the scene CSV that owns
+    it, where the cell is blank or still holds what phase 5 last wrote there
+    (CELLS_FILE); `replace_any` replaces whatever is there. A scene with no
+    row in that file gets none (a row written here would have nothing else
+    in it). Records what it wrote. Returns how many cells changed, and the
+    cells kept because they were the author's (scene id: current value).
+    """
     from .elaborate import _read_csv_as_map, update_scene
     rows = _read_csv_as_map(os.path.join(run.ref_dir, filename))
+    cells = _read_cells(run)
+    record = cells if cells is not None else {}
     changed, kept = 0, {}
     for sid, value in values.items():
         row = rows.get(sid)
         if row is None:
             continue
+        key = (filename, sid, column)
+        value = _cell(value)
         current = row.get(column, '').strip()
-        if current == value:
-            continue
-        if not replaceable(current):
+        ours = current and record.get(key) == current
+        if current != value and not (replace_any or not current or ours):
             kept[sid] = current
             continue
-        update_scene(sid, run.ref_dir, {column: _cell(value)})
-        changed += 1
+        if current != value:
+            update_scene(sid, run.ref_dir, {column: value})
+            changed += 1
+        if value:
+            record[key] = value
+        else:
+            record.pop(key, None)
+    if cells is not None:
+        _save_cells(run, record)
     return changed, kept
 
 
@@ -981,7 +1025,6 @@ def run_structure(run: Run, profile: dict, scenes: list[dict[str, str]]) -> Step
     if not _gate(run, rels, '5a (structure)',
                  'blank scene summaries, architecture_scene and project.genre'):
         return 'skipped'
-    old_anchors = _registry_ids(os.path.join(run.project_dir, rels[1]))
     structure = _ask(run, 'structure',
                      lambda problems: build_structure_prompt(profile, scenes, problems),
                      lambda text: parse_structure(text, scenes),
@@ -990,18 +1033,14 @@ def run_structure(run: Run, profile: dict, scenes: list[dict[str, str]]) -> Step
     if not _write_all(run, [(rels[0], _csv_text(spine, _SPINE_COLS)),
                             (rels[1], _csv_text(arch, _ARCHITECTURE_COLS))], '5a', '5a'):
         return 'partial'
-    n, _ = _set_cells(run, 'scenes.csv', 'summary', structure['scene_summaries'],
-                      replaceable=lambda cur: not cur)
+    n, _ = _set_cells(run, 'scenes.csv', 'summary', structure['scene_summaries'])
     if n:
-        log(f'  filled {n} blank scene summar{"y" if n == 1 else "ies"}')
-    # An anchor marks itself. A cell naming an anchor this run dropped is
-    # the last run's mark (an author's would name a scene of their own
-    # choosing that still exists) and is cleared, or it would dangle
+        log(f'  filled {n} scene summar{"y" if n == 1 else "ies"}')
+    # An anchor marks itself; a scene this run didn't anchor has its mark
+    # cleared if phase 5 put it there, or it would name a dropped anchor
     anchors = {r['id'] for r in arch}
     marks = {s['id']: (s['id'] if s['id'] in anchors else '') for s in scenes}
-    _, kept = _set_cells(
-        run, 'scenes.csv', 'architecture_scene', marks,
-        replaceable=lambda cur: not cur or (cur in old_anchors and cur not in anchors))
+    _, kept = _set_cells(run, 'scenes.csv', 'architecture_scene', marks)
     dangling = [sid for sid, cur in kept.items() if cur not in anchors]
     if dangling:
         run.reports.append(f'{len(dangling)} scene(s) keep an architecture_scene that names no '
@@ -1037,7 +1076,6 @@ def run_themes(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOut
     rels = ['reference/themes.csv', 'reference/motif-taxonomy.csv']
     if not _gate(run, rels, '5b (themes and motifs)', 'theme_threads and brief motifs'):
         return 'skipped'
-    old_themes = _registry_ids(os.path.join(run.project_dir, rels[0]))
     mentions = motif_mentions(scenes)
     result = _ask(run, 'themes',
                   lambda problems: build_themes_prompt(profile, scenes, mentions, problems),
@@ -1047,19 +1085,21 @@ def run_themes(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOut
     if not _write_all(run, [(rels[0], _csv_text(result['themes'], _THEMES_COLS)),
                             (rels[1], _csv_text(motif_rows, _MOTIF_COLS))], '5b', '5b'):
         return 'partial'
-    # A cell made only of the last run's theme ids is the last run's tagging
-    # (themes.csv was extraction's, or the gate would have kept it), so it is
-    # retagged; one naming anything else is the author's, and kept
-    def stale_or_blank(cur: str) -> bool:
-        ids = [t.strip() for t in cur.split(';') if t.strip()]
-        return not ids or all(t in old_themes for t in ids)
     _, kept = _set_cells(run, 'scene-intent.csv', 'theme_threads',
-                         {sid: ';'.join(ids) for sid, ids in result['scene_themes'].items()},
-                         replaceable=stale_or_blank)
-    if kept:
-        ids = list(kept)
-        run.reports.append(f'{len(ids)} scene(s) keep a theme_threads cell of the author\'s: '
-                           + ', '.join(ids[:5]) + ('…' if len(ids) > 5 else ''))
+                         {sid: ';'.join(ids) for sid, ids in result['scene_themes'].items()})
+    # A kept cell is the author's. Say whether it still resolves: one
+    # naming a theme themes.csv lacks fails validate
+    new_themes = {t['id'] for t in result['themes']}
+    dangling = [sid for sid, cur in kept.items()
+                if any(t.strip() not in new_themes for t in cur.split(';') if t.strip())]
+    valid = [sid for sid in kept if sid not in dangling]
+    for ids, what in ((valid, 'a theme_threads cell of their own, kept'),
+                      (dangling, 'a theme_threads cell naming themes not in themes.csv, kept '
+                                 'because phase 5 did not write it (retag or clear it by '
+                                 'hand)')):
+        if ids:
+            run.reports.append(f'{len(ids)} scene(s) have {what}: '
+                               + ', '.join(ids[:5]) + ('…' if len(ids) > 5 else ''))
     by_scene: dict[str, list[str]] = {}
     for n, (sid, _) in enumerate(mentions):
         by_scene.setdefault(sid, [])
@@ -1068,8 +1108,7 @@ def run_themes(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOut
             by_scene[sid].append(motif)
     _write_mentions(run, mentions, result['mention_motif'])
     n, _ = _set_cells(run, 'scene-briefs.csv', 'motifs',
-                      {sid: ';'.join(ids) for sid, ids in by_scene.items()},
-                      replaceable=lambda cur: True)
+                      {sid: ';'.join(ids) for sid, ids in by_scene.items()}, replace_any=True)
     if n:
         log(f'  briefs: {n} motifs cell(s) now name motif ids (the descriptions are in '
             f'{MENTIONS_FILE})')
@@ -1077,7 +1116,8 @@ def run_themes(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOut
 
 
 #: Every path phase 5 may change, for the commit. `working/` covers the
-#: provenance record, the mentions file, the logs and the cost ledger.
+#: provenance record, the cell record, the mentions file, the logs and the
+#: cost ledger.
 WRITTEN_PATHS = ['reference/spine.csv', 'reference/architecture.csv',
                  'reference/scenes.csv', 'reference/scene-intent.csv',
                  'reference/scene-briefs.csv', 'reference/themes.csv',
