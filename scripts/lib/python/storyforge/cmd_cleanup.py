@@ -170,6 +170,7 @@ OPTIONAL_CSV_COLUMNS: dict[str, set[str]] = {
     # them on their next write of the file
     'reference/scenes.csv': {'summary', 'time_mode', 'timeline_date', 'architecture_scene'},
     'reference/scene-intent.csv': {'theme_threads'},
+    'reference/scene-briefs.csv': {'motif_details'},
 }
 EXPECTED_WORKING_DIRS = set(
     'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup'.split()

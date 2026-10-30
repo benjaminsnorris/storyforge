@@ -272,7 +272,7 @@ def write_described(project_dir: str, rel_path: str, content: str, *,
 def scene_table(ref_dir: str) -> list[dict[str, str]]:
     """Every scene phases 1-3 recorded, in reading order, with the columns
     phase 5 reads: scenes.csv joined with scene-intent.csv and the briefs'
-    `motifs`. Cut and merged scenes are left out (`build_scene_list`)."""
+    `motifs` and `motif_details`. Cut and merged scenes are left out (`build_scene_list`)."""
     from .elaborate import _read_csv_as_map
     from .scene_filter import build_scene_list
 
@@ -285,6 +285,7 @@ def scene_table(ref_dir: str) -> list[dict[str, str]]:
         for k, v in intent.get(sid, {}).items():
             row.setdefault(k, v)
         row['motifs'] = briefs.get(sid, {}).get('motifs', '')
+        row['motif_details'] = briefs.get(sid, {}).get('motif_details', '')
         rows.append(row)
     return rows
 
@@ -567,9 +568,13 @@ def motif_mentions(scenes: list[dict[str, str]]) -> list[tuple[str, str]]:
     """Every motif mention in the briefs, as `(scene id, text)` in reading
     order. Briefs describe motifs in their own words ("fog pouring through
     every chink"), so the same image is rarely spelled the same way twice:
-    the model groups these by number, and code checks each group recurs."""
+    the model groups these by number, and code checks each group recurs.
+
+    Read from `motif_details` when the brief has it: once 5b has run,
+    `motifs` holds ids and the descriptions live there."""
     return [(s['id'], m.strip()) for s in scenes
-            for m in s.get('motifs', '').split(';') if m.strip()]
+            for m in (s.get('motif_details', '').strip() or s.get('motifs', '')).split(';')
+            if m.strip()]
 
 
 THEMES_SCHEMA = {
@@ -763,9 +768,6 @@ def parse_themes(response: str, scenes: list[dict[str, str]],
 
 STRUCTURE_MAX_TOKENS = 12_000
 THEMES_MAX_TOKENS = 12_000
-#: What 5b's brief rewrite replaced: every mention as the brief had it, and
-#: the motif it was grouped into ('' when it named no recurring image).
-MENTIONS_FILE = os.path.join('working', 'extraction-motif-mentions.csv')
 
 #: Every scene-CSV cell phase 5 wrote, with the value it wrote. A cell is
 #: phase 5's to replace only while it still holds exactly that value; any
@@ -1051,26 +1053,16 @@ def run_structure(run: Run, profile: dict, scenes: list[dict[str, str]]) -> Step
     return 'written'
 
 
-def _write_mentions(run: Run, scenes_mentions: list[tuple[str, str]],
-                    mention_motif: dict[int, str]) -> None:
-    path = os.path.join(run.project_dir, MENTIONS_FILE)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    rows = [{'scene_id': sid, 'mention': text, 'motif': mention_motif.get(i, '')}
-            for i, (sid, text) in enumerate(scenes_mentions)]
-    with open(path, 'w', encoding='utf-8', newline='') as f:
-        f.write(_csv_text(rows, ['scene_id', 'mention', 'motif']))
-
-
 def run_themes(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutcome:
     """Step 5b: themes.csv, motif-taxonomy.csv, theme_threads, and each
-    brief's `motifs` cell as motif ids.
+    brief's motifs split into ids and descriptions.
 
-    The brief rewrite is what keeps `validate` passing: once the taxonomy
-    has rows, a brief's `motifs` is checked against it, and a description
-    ("fog pouring through every chink") matches no alias. Each cell becomes
-    the ids its mentions were grouped into; a mention that named no
-    recurring image is dropped from the cell. Nothing is lost: every
-    mention as the brief had it, and its motif, is kept in MENTIONS_FILE.
+    Once the taxonomy has rows, `validate` checks a brief's `motifs` against
+    it, and a description ("fog pouring through every chink") matches no
+    alias. So `motifs` becomes the ids the scene's mentions were grouped
+    into, and every description, including those that named no recurring
+    image, moves to `motif_details`, which the drafting prompt reads
+    beside it. Nothing the brief said is dropped.
     """
     from .elaborate import _MOTIF_COLS, _THEMES_COLS
     rels = ['reference/themes.csv', 'reference/motif-taxonomy.csv']
@@ -1106,18 +1098,25 @@ def run_themes(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOut
         motif = result['mention_motif'].get(n)
         if motif and motif not in by_scene[sid]:
             by_scene[sid].append(motif)
-    _write_mentions(run, mentions, result['mention_motif'])
+    details: dict[str, list[str]] = {}
+    for sid, text in mentions:
+        details.setdefault(sid, []).append(text)
+    # Descriptions first, since the ids replace the only copy of them. A
+    # brief that already has motif_details was read from it (motif_mentions),
+    # so this writes the same text back and its cell is unchanged
+    _set_cells(run, 'scene-briefs.csv', 'motif_details',
+               {sid: '; '.join(texts) for sid, texts in details.items()})
     n, _ = _set_cells(run, 'scene-briefs.csv', 'motifs',
-                      {sid: ';'.join(ids) for sid, ids in by_scene.items()}, replace_any=True)
+                      {sid: ';'.join(ids) for sid, ids in by_scene.items()},
+                      replace_any=True)
     if n:
-        log(f'  briefs: {n} motifs cell(s) now name motif ids (the descriptions are in '
-            f'{MENTIONS_FILE})')
+        log(f'  briefs: {n} motifs cell(s) now name motif ids; the descriptions are in '
+            f'motif_details')
     return 'written'
 
 
 #: Every path phase 5 may change, for the commit. `working/` covers the
-#: provenance record, the cell record, the mentions file, the logs and the
-#: cost ledger.
+#: provenance record, the cell record, the logs and the cost ledger.
 WRITTEN_PATHS = ['reference/spine.csv', 'reference/architecture.csv',
                  'reference/scenes.csv', 'reference/scene-intent.csv',
                  'reference/scene-briefs.csv', 'reference/themes.csv',

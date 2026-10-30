@@ -310,6 +310,10 @@ COLUMN_SCHEMA = {
         'file': 'scene-briefs.csv', 'stage': 'brief',
         'description': 'Recurring images/symbols deployed. Normalized against reference/motif-taxonomy.csv.',
     },
+    'motif_details': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'How the scene\'s motifs appear in it, in the brief\'s own words (semicolon-separated). `motifs` names them by id; this keeps what each looks like here, including images that recur nowhere else.',
+    },
     'subtext': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
         'description': 'What is happening beneath the surface — phrased as a drafting instruction. "Character says X but means Y; do not state Y directly."',

@@ -299,20 +299,43 @@ class TestReviewFixes:
 
     def test_validate_passes_on_motifs_after_5b(self, book, mock_api, mock_git, mock_costs):
         """CR H1: once the taxonomy had rows, every brief's descriptive
-        motifs failed the registry check. Briefs now name motif ids, and the
-        descriptions are kept in working/."""
-        from storyforge.elaborate import get_scene
-        from storyforge.extract_describe import MENTIONS_FILE
+        motifs failed the registry check. Briefs now name motif ids, and
+        every description moves to motif_details (Ben: ids, nothing lost)."""
+        from storyforge.elaborate import get_scene, update_scene
         from storyforge.schema import validate_schema
+        ref = os.path.join(book, 'reference')
         ids = _scene_ids(book)
+        update_scene(ids[2], ref, {'motifs': 'a lone kite over the moor'})   # recurs nowhere
         mock_api.set_response_fn(_answer(book))
         _run(book)
-        ref = os.path.join(book, 'reference')
         assert get_scene(ids[0], ref)['motifs'] == 'm'
+        assert get_scene(ids[0], ref)['motif_details'] == 'the brass compass'
+        assert get_scene(ids[2], ref)['motifs'] == ''
+        assert get_scene(ids[2], ref)['motif_details'] == 'a lone kite over the moor'
         report = validate_schema(ref, book)
-        assert [f for f in report['errors'] if f.get('column') == 'motifs'] == []
-        rows = _read_csv(os.path.join(book, MENTIONS_FILE))
-        assert {'scene_id': ids[0], 'mention': 'the brass compass', 'motif': 'm'} in rows
+        assert [e for e in report['errors'] if e['column'] in ('motifs', 'motif_details')] == []
+
+    def test_a_forced_rerun_regroups_from_the_details(self, book, mock_api, mock_git,
+                                                       mock_costs):
+        """After 5b, motifs holds ids; a rerun must group the descriptions,
+        not the ids, or the second taxonomy is built from its own output."""
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        _run(book, force=True)
+        themes_prompts = [c['prompt'] for c in mock_api.calls if '**themes**' in c['prompt']]
+        assert ': the brass compass' in themes_prompts[-1]
+
+    def test_an_authors_motif_details_is_the_source_and_is_kept(
+            self, book, mock_api, mock_git, mock_costs):
+        from storyforge.elaborate import get_scene, update_scene
+        ref = os.path.join(book, 'reference')
+        sid = _scene_ids(book)[0]
+        update_scene(sid, ref, {'motif_details': 'my own notes'})
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        prompt = next(c['prompt'] for c in mock_api.calls if '**themes**' in c['prompt'])
+        assert f'[0] {sid}: my own notes' in prompt
+        assert get_scene(sid, ref)['motif_details'] == 'my own notes'
 
     def test_an_api_failure_in_5b_commits_5a_and_stops(self, book, mock_api, mock_git,
                                                         mock_costs, monkeypatch, capsys):
