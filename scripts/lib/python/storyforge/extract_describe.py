@@ -521,8 +521,9 @@ def structure_rows(structure: dict, scenes: list[dict[str, str]],
 
     An anchor's row is its scene: id, seq, title, act, pov and the intent
     columns are copied from the scene CSVs, and its summary is the scene's
-    own (or the one this reply gave a scene that had none). A spine event's act is the act of its first anchor, so the two
-    files can't disagree about where an event falls.
+    own (or the one this reply gave a scene that had none). A spine event's
+    act is the act of its first anchor, so the two files can't disagree
+    about where an event falls.
     """
     by_id = {s['id']: s for s in scenes}
     arch = []
