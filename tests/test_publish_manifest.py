@@ -128,6 +128,24 @@ class TestGeneratePublishManifest:
             generate_publish_manifest(proj)
         assert 'stale' not in str(exc.value)
 
+    def test_author_from_production(self, tmp_path):
+        # The schema puts the author under production (lantern-folk); publish
+        # read only project.author, so every such book published as "Unknown".
+        import json
+        from storyforge.assembly import generate_publish_manifest
+        proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
+        (tmp_path / 'storyforge.yaml').write_text(
+            'project:\n  title: Test Book\nproduction:\n  author: "Edith Wharton"\n')
+        with open(generate_publish_manifest(proj)) as f:
+            assert json.load(f)['author'] == 'Edith Wharton'
+
+    def test_author_from_project_still_read(self, tmp_path):
+        import json
+        from storyforge.assembly import generate_publish_manifest
+        proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
+        with open(generate_publish_manifest(proj)) as f:
+            assert json.load(f)['author'] == 'Test Author'
+
     def test_strips_yaml_frontmatter(self, tmp_path):
         from storyforge.assembly import generate_publish_manifest
         proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
