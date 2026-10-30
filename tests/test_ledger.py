@@ -609,6 +609,22 @@ class TestUntouchedRowsAreByteIdentical:
             [l for l in after if not l.startswith('new-bruise|')]
 
 
+    def test_a_padded_alias_on_a_blank_subject_stays_a_blank_subject(self, project_dir):
+        """A writer that strips the view's `character` (shown from the kept
+        alias) used to set subject to the name."""
+        ref = os.path.join(project_dir, 'reference')
+        rows = ledger.load(project_dir)
+        rows.append(dict(rows[-1], id='padded-cut', subject='', aliases=' Garren ',
+                         type='physical'))
+        ledger.save(project_dir, rows)
+        view = ledger.read_view(ref, 'physical')
+        for row in view:
+            row['character'] = row['character'].strip()
+        ledger.write_view(ref, 'physical', view, origin='prose', introduced_by='hone')
+        row = next(r for r in ledger.load(project_dir) if r['id'] == 'padded-cut')
+        assert row['subject'] == '' and row['aliases'] == ' Garren '
+
+
 class TestFileProblems:
     def _write(self, project_dir, text):
         path = os.path.join(project_dir, 'reference', 'commitments.csv')
@@ -625,10 +641,12 @@ class TestFileProblems:
         ('{h}\n{a}\n{a}\n', "line 3: id 'a' is also on line 2"),
         ('{h}\n{blank}\n', 'line 2: no id'),
         ('{h}\n{a}|extra\n', 'line 2: 19 cells, the header has 18'),
+        ('{h}\n{padded}\n', "line 2: id 'a ' has surrounding whitespace"),
     ])
     def test_load_refuses_rather_than_fixing(self, project_dir, body, needle):
         path = self._write(project_dir, body.format(h='|'.join(COLUMNS), a=self._row('a'),
-                                                    blank=self._row('')))
+                                                    blank=self._row(''),
+                                                    padded=self._row('a ')))
         before = open(path).read()
         assert any(needle in p for p in ledger.file_problems(path))
         with pytest.raises(ledger.LedgerError, match=needle.replace('(', r'\(')):

@@ -112,6 +112,11 @@ def file_problems(path: str) -> list[str]:
         rid = cells[0]
         if not rid.strip():
             problems.append(f'{LEDGER_FILE} line {n}: no id: {line[:80]!r}')
+        elif rid != rid.strip():
+            # Writers key facts by the stripped id, so a padded one would be
+            # dropped and written again as a new fact
+            problems.append(f'{LEDGER_FILE} line {n}: id {rid!r} has surrounding '
+                            f'whitespace')
         elif rid in seen:
             problems.append(f'{LEDGER_FILE} line {n}: id {rid!r} is also on line '
                             f'{seen[rid]}')
@@ -350,7 +355,10 @@ def replace_view(rows: list[dict[str, str]], type_: str,
         mapped = _from_view(type_, vr)
         updated = dict(row)
         for vcol, lcol in _VIEW_TO_LEDGER[type_].items():
-            if (vr.get(vcol) or '') != current[vcol]:
+            # Compared stripped, as `_from_view` writes them: a writer that
+            # strips a cell hasn't changed it (and a blank subject shown as
+            # its kept alias must not become that name)
+            if (vr.get(vcol) or '').strip() != current[vcol].strip():
                 updated[lcol] = mapped[lcol]
         out.append(updated)
         placed.add(row['id'])
