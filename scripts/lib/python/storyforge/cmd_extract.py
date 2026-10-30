@@ -705,27 +705,39 @@ def _prune_registries(ref_dir, created_facts, created_states):
             f'(left from the previous extraction): {", ".join(dropped)}')
 
 
-def _facts_before(registry, scene_id, order):
-    """id → name of the knowledge facts established before `scene_id` in
-    reading order (`ledger.established_before`), plus the facts with no known
+def _facts_before(registry, shown, order):
+    """id → name of the knowledge facts the book has established before a
+    scene: those an earlier scene's `knowledge_out` holds or an earlier
+    scene declared (`shown`, see `_shown_ids`), plus the facts with no known
     position: backstory (no scene, true before scene 1) and a scene id that
     isn't in `order` (a renamed or removed scene; `_unplaced_facts` names
-    them for a WARNING, and validate reports them)."""
-    from storyforge import ledger
-    rows = ledger.replace_view([], 'knowledge', list(registry.values()),
-                               origin='prose', introduced_by='extract')
-    before = {r['id'] for r in ledger.established_before(rows, scene_id, order,
-                                                         type_='knowledge')}
+    them for a WARNING, and validate reports them).
+
+    Not the ledger's stored scene (F-123): on a forced re-run that is where
+    the last run put the fact, so a scene that no longer establishes it was
+    skipped while later scenes were offered an id nothing in this run had
+    shown."""
     return {fid: row.get('name', '') for fid, row in registry.items()
-            if fid in before or _unplaced(row, order)}
+            if fid in shown or _unplaced(row, order)}
 
 
-def _facts_through(registry, scene_id, order):
-    """The registry rows established before or in `scene_id`, plus the facts
-    with no known position (see `_facts_before`)."""
-    at = order[scene_id]
+def _facts_through(registry, shown, scene_id, order):
+    """The registry rows a reply for `scene_id` may name: those offered it
+    (`_facts_before`), plus the facts the scene declared or that the ledger
+    places at this scene, so its own facts' wording lands on their ids."""
     return {fid: row for fid, row in registry.items()
-            if _unplaced(row, order) or order[row['origin'].strip()] <= at}
+            if fid in shown or _unplaced(row, order)
+            or (row.get('origin') or '').strip() == scene_id}
+
+
+def _shown_ids(scene_ids, ref_dir):
+    """Every knowledge id the briefs of `scene_ids` hold in `knowledge_out`."""
+    from storyforge.elaborate import get_scene
+    shown = set()
+    for sid in scene_ids:
+        out = (get_scene(sid, ref_dir) or {}).get('knowledge_out', '')
+        shown.update(i.strip() for i in out.split(';') if i.strip())
+    return shown
 
 
 def _unplaced(row, order):
@@ -857,7 +869,16 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             f'scene is offered them, like backstory (fix their scene_id in '
             f'{ledger.LEDGER_FILE}): {", ".join(unplaced)}')
 
+    # Facts the scenes so far established in this pass (F-123): each earlier
+    # scene's knowledge_out as it now stands (this run's reply; on an
+    # unforced run, what the brief already held where the reply was empty)
+    # and the facts it declared
+    shown = set()
+    previous = None
     for scene_id in sorted_scene_ids:
+        if previous is not None:
+            shown |= _shown_ids([previous], ref_dir)
+        previous = scene_id
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
         if not os.path.isfile(scene_path):
             continue
@@ -872,11 +893,11 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
         # Only what the book has shown before this scene (F-123): a forced
         # re-run seeded from the last run must not offer a fact a later
-        # scene reveals
+        # scene reveals, nor one only the last run established
         prompt = build_knowledge_prompt(
             scene_id, scene_text, skeleton, intent, knowledge_state, summaries,
             registries_text=knowledge_registries,
-            known_facts=_facts_before(knowledge_registry, scene_id, reading_order))
+            known_facts=_facts_before(knowledge_registry, shown, reading_order))
 
         knowledge_log = os.path.join(log_dir, f'extract-knowledge-{scene_id}.json')
 
@@ -902,10 +923,12 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                                           result.get('_new_facts', []), scene_id,
                                           reading_order)
         created_facts.update(added)
+        shown.update(f.get('id', '').strip() for f in result.get('_new_facts', [])
+                     if f.get('id', '').strip())
         # Writes only when a fact was added or moved earlier
         ledger.write_view(ref_dir, 'knowledge', list(knowledge_registry.values()),
                           origin='prose', introduced_by='extract')
-        visible = _facts_through(knowledge_registry, scene_id, reading_order)
+        visible = _facts_through(knowledge_registry, shown, scene_id, reading_order)
         for k in ('knowledge_in', 'knowledge_out'):
             if result.get(k):
                 result[k] = resolve_knowledge_ids(visible, result[k])
