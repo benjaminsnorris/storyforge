@@ -627,6 +627,37 @@ class TestPrintHumanReadableStructural:
         output = capsys.readouterr().out
         assert '[blocking]' in output
 
+    def test_advisory_findings_shown_when_nothing_blocks(self, capsys):
+        """F-124: a pass with advisory findings lists them, so 'Passed'
+        with nothing under it still means checked and clean."""
+        structural = {
+            'passed': True,
+            'checks': [{'category': 'timeline'}] * 3,
+            'failures': [
+                {'scene_id': 'brooke-visits-lowick', 'severity': 'advisory',
+                 'message': 'Crosscut: 3 scenes set before the present',
+                 'scenes': ['brooke-visits-lowick', 'vincys-at-dinner', 'fred-rides-out']},
+                {'scene_id': 'rome-honeymoon', 'severity': 'advisory',
+                 'message': 'Flashback: set before the present'},
+            ],
+        }
+        combined = {'structural': structural, 'schema': None, 'knowledge': None,
+                    'scores': None, 'scores_previous': None}
+        _print_human_readable(combined)
+        output = capsys.readouterr().out
+        assert 'Passed (3 checks, 0 blocking, 2 advisory)' in output
+        assert '[advisory] brooke-visits-lowick: Crosscut' in output
+        assert 'vincys-at-dinner' in output
+        assert '[advisory] rome-honeymoon: Flashback' in output
+
+    def test_clean_pass_says_no_findings(self, capsys):
+        combined = {'structural': _passing_structural(), 'schema': None,
+                    'knowledge': None, 'scores': None, 'scores_previous': None}
+        _print_human_readable(combined)
+        output = capsys.readouterr().out
+        assert '0 failures' in output
+        assert '[advisory]' not in output
+
 
 # ============================================================================
 # _print_human_readable — schema
