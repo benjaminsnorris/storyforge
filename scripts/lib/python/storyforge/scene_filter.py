@@ -36,11 +36,11 @@ def _read_csv_rows(csv_path: str) -> list[dict[str, str]]:
     return rows
 
 
-def build_scene_list(metadata_csv: str) -> list[str]:
+def build_scene_list(metadata_csv: str, min_words: int = MIN_SCENE_WORDS) -> list[str]:
     """Build ordered scene list from metadata CSV.
 
     Returns scene IDs sorted by seq, excluding cut/merged scenes
-    and scenes below MIN_SCENE_WORDS.
+    and scenes below *min_words* (MIN_SCENE_WORDS unless given).
     """
     if not os.path.isfile(metadata_csv):
         log(f'ERROR: Metadata CSV not found: {metadata_csv}')
@@ -65,7 +65,7 @@ def build_scene_list(metadata_csv: str) -> list[str]:
         if wc_str:
             try:
                 wc = int(wc_str)
-                if 0 < wc < MIN_SCENE_WORDS:
+                if 0 < wc < min_words:
                     skipped += 1
                     continue
             except ValueError:

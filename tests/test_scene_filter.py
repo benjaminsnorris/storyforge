@@ -74,3 +74,27 @@ class TestApplySceneFilter:
         filtered = [s for s in scenes if s['id'] == 'new-x1']
         assert len(filtered) == 1
         assert filtered[0]['id'] == 'new-x1'
+
+
+class TestShortScenes:
+    """F-107: the timeline never re-read a scene under 50 words, so Plastic
+    Age's 41-word arrival-night scene kept a stale "a few days" cue."""
+
+    def _csv(self, tmp_path):
+        path = tmp_path / 'scenes.csv'
+        path.write_text('id|seq|status|word_count\n'
+                        'long|1|drafted|900\nshort|2|drafted|41\nempty|3|drafted|0\n')
+        return str(path)
+
+    def test_scoring_still_skips_short_scenes(self, tmp_path):
+        from storyforge.scene_filter import build_scene_list
+        assert build_scene_list(self._csv(tmp_path)) == ['long', 'empty']
+
+    def test_a_lower_floor_keeps_them(self, tmp_path):
+        from storyforge.scene_filter import build_scene_list
+        assert build_scene_list(self._csv(tmp_path), min_words=1) == ['long', 'short', 'empty']
+
+    def test_timeline_places_every_scene(self):
+        import inspect
+        from storyforge import cmd_timeline
+        assert 'build_scene_list(metadata_csv, min_words=1)' in inspect.getsource(cmd_timeline)
