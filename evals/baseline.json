@@ -1,15 +1,15 @@
 {
   "cost": {
     "calls": 2206,
-    "input_tokens": 8689285,
-    "output_tokens": 2394699,
+    "input_tokens": 8685290,
+    "output_tokens": 2402759,
     "replayed_calls": 2206,
     "unpriced_calls": 0,
-    "usd_if_live": 19.6735,
+    "usd_if_live": 20.1821,
     "usd_spent": 0.0
   },
   "git_dirty": true,
-  "git_sha": "91bf1517575557e6595dd1542574bc86b185c2bb",
+  "git_sha": "38f5d7befd05ce6ce2bac630a28f50d4cb41f2f0",
   "mode": "replay",
   "results": [
     {
@@ -46,7 +46,7 @@
         "usd_spent": 0.0
       },
       "description": "E1 gold-set health: format, 100+ prose cases, 20% holdout",
-      "duration_s": 0.03,
+      "duration_s": 0.04,
       "error": null,
       "gates": [
         {
@@ -82,7 +82,7 @@
       },
       "mode": "replay",
       "notes": [],
-      "started_at": "2026-10-30T04:00:52+00:00",
+      "started_at": "2026-10-30T13:48:17+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -140,7 +140,7 @@
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 10.15,
+      "duration_s": 5.13,
       "error": null,
       "gates": [
         {
@@ -204,7 +204,7 @@
         "missed 37 of 37: e2-carol-001, e2-carol-002, e2-carol-003, e2-carol-004, e2-carol-005, e2-carol-006, e2-carol-007, e2-carol-008, e2-carol-009, e2-carol-010, e2-carol-011, e2-carol-012, e2-carol-013, e2-carol-014, e2-carol-015, e2-carol-016, e2-carol-017, e2-carol-018, e2-carol-019, e2-carol-020, e2-carol-021, e2-carol-022, e2-carol-023, e2-carol-024, e2-carol-025, e2-carol-026, e2-carol-027, e2-carol-028, e2-carol-029, e2-carol-030, e2-carol-031, e2-carol-032, e2-carol-033, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
-      "started_at": "2026-10-30T04:00:52+00:00",
+      "started_at": "2026-10-30T13:48:17+00:00",
       "status": "fail",
       "suite": "e2-carol"
     },
@@ -252,7 +252,7 @@
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 347.83,
+      "duration_s": 130.85,
       "error": null,
       "gates": [
         {
@@ -316,7 +316,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-30T04:01:02+00:00",
+      "started_at": "2026-10-30T13:48:22+00:00",
       "status": "fail",
       "suite": "e2-corpus-drift"
     },
@@ -330,7 +330,7 @@
         },
         "PHY": {
           "cases": 14,
-          "precision": 0.0387,
+          "precision": 0.0377,
           "recall": 0.4286,
           "recall_code_match": 0.4286
         },
@@ -366,7 +366,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 255.03,
+      "duration_s": 134.6,
       "error": null,
       "gates": [
         {
@@ -405,7 +405,7 @@
           "threshold": 0.9
         },
         {
-          "actual": 0.0312,
+          "actual": 0.0305,
           "name": "precision",
           "op": ">=",
           "passed": false,
@@ -416,10 +416,10 @@
         "benign_cases": 0,
         "benign_flagged": 0,
         "cases": 51,
-        "control_flags": 1069,
-        "flags_false": 715,
+        "control_flags": 1096,
+        "flags_false": 730,
         "flags_true": 23,
-        "precision": 0.0312,
+        "precision": 0.0305,
         "recall": 0.4118,
         "recall_code_match": 0.1176
       },
@@ -430,7 +430,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-30T04:06:50+00:00",
+      "started_at": "2026-10-30T13:50:33+00:00",
       "status": "fail",
       "suite": "e2-corpus-validate"
     },
@@ -450,7 +450,7 @@
         },
         "TIM": {
           "facts": 12,
-          "recall": 0.1667
+          "recall": 0.25
         },
         "TRT": {
           "facts": 14,
@@ -458,20 +458,20 @@
         },
         "WLD": {
           "facts": 5,
-          "recall": 0.4
+          "recall": 0.2
         }
       },
       "cost": {
         "calls": 147,
-        "input_tokens": 898772,
-        "output_tokens": 48173,
+        "input_tokens": 893450,
+        "output_tokens": 52956,
         "replayed_calls": 147,
         "unpriced_calls": 0,
-        "usd_if_live": 2.4727,
+        "usd_if_live": 2.5029,
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 66.11,
+      "duration_s": 36.28,
       "error": null,
       "gates": [
         {
@@ -492,23 +492,23 @@
       "metrics": {
         "captured": 14,
         "facts": 49,
-        "missing": 12,
-        "partial": 23,
+        "missing": 14,
+        "partial": 21,
         "recall": 0.2857,
-        "recall_with_partial": 0.7551
+        "recall_with_partial": 0.7143
       },
       "mode": "replay",
       "notes": [
         "excluded 25: holdout",
         "excluded 3: no prose established span",
         "excluded 53: tree predates reference/scenes.csv",
-        "governor-015 (routine-maintenance): captured",
+        "governor-015 (routine-maintenance): partial",
         "governor-016 (routine-maintenance): missing",
         "governor-018 (haddons-reckoning): captured",
         "governor-019 (finest-cartographer): partial",
         "governor-020 (ashward-breach): captured",
         "governor-022 (terrace-row): partial",
-        "governor-023 (haddons-reckoning): captured",
+        "governor-023 (haddons-reckoning): missing",
         "governor-024 (haddons-reckoning): partial",
         "governor-025 (the-governors-vigil): missing",
         "governor-026 (haddons-reckoning): partial",
@@ -517,13 +517,13 @@
         "lantern-folk-001 (a07-the-cold-sleep): captured",
         "lantern-folk-002 (a03-the-little-voices): captured",
         "lantern-folk-003 (a12-the-remembering): partial",
-        "lantern-folk-004 (a14-the-keepers-flame): missing",
+        "lantern-folk-004 (a14-the-keepers-flame): partial",
         "lantern-folk-005 (a11-in-the-dark): partial",
         "lantern-folk-006 (a08-what-the-folk-fear): partial",
         "lantern-folk-008 (a03-the-little-voices): captured",
         "lantern-folk-011 (a07-the-cold-sleep): captured",
         "lantern-folk-012 (a04-the-great-lamp): partial",
-        "lantern-folk-013 (a12-the-remembering): partial",
+        "lantern-folk-013 (a12-the-remembering): missing",
         "lantern-folk-014 (a03-the-little-voices): captured",
         "lantern-folk-015 (a03-the-little-voices): captured",
         "lantern-folk-016 (a05-the-pledge): missing",
@@ -536,8 +536,8 @@
         "shared-dark-034 (watching-ostrowski): missing",
         "shared-dark-035 (no-response): partial",
         "shared-dark-039 (building): partial",
-        "shared-dark-040 (building): partial",
-        "shared-dark-041 (pewter-town): partial",
+        "shared-dark-040 (building): missing",
+        "shared-dark-041 (pewter-town): captured",
         "shared-dark-043 (keisha-argument): missing",
         "shared-dark-044 (keisha-argument): missing",
         "thornwall-002 (garrens-ledger): partial",
@@ -549,10 +549,10 @@
         "thornwall-026 (crowded-chamber): partial",
         "thornwall-027 (thessan-vigil): partial",
         "thornwall-028 (thessan-resistance): captured",
-        "thornwall-029 (journals-of-the-east-wing): partial",
+        "thornwall-029 (journals-of-the-east-wing): captured",
         "thornwall-030 (ivra-visits-sera): partial"
       ],
-      "started_at": "2026-10-30T04:11:05+00:00",
+      "started_at": "2026-10-30T13:52:48+00:00",
       "status": "fail",
       "suite": "e3-extraction"
     },
@@ -584,7 +584,7 @@
         "usd_spent": 0.0
       },
       "description": "Draft shared-dark Act 1 with write; CP10k, BPS, length, voice",
-      "duration_s": 7.48,
+      "duration_s": 6.94,
       "error": null,
       "gates": [
         {
@@ -638,7 +638,7 @@
         "checker engineer: the text says \"three days\" (about 3 day(s)), but the calendar puts it 0 day(s) on",
         "Judge stands in for the plan's human spot-check (still owed). Drafted in direct mode; batch mode is refused under a cassette."
       ],
-      "started_at": "2026-10-30T04:12:11+00:00",
+      "started_at": "2026-10-30T13:53:24+00:00",
       "status": "pass",
       "suite": "e4-generation"
     },
@@ -670,7 +670,7 @@
         "usd_spent": 0.0
       },
       "description": "Redraft from plan + ledger; facts the redraft changes",
-      "duration_s": 2.73,
+      "duration_s": 3.42,
       "error": null,
       "gates": [
         {
@@ -699,7 +699,7 @@
         "name-surfaces: 7 mismatch(es)\n    PHY: The number of pages of notes on the legal pad differs.\n    TIM: When the notes were written differs: the original has him writing them at 11:40 p.m. and 12:15, with 2:47 the moment the name surfaces; the \n    PHY: The building's door and lock differ: a steel personnel door with a padlock hasp welded to the frame and a Master 6271 tubular-key padlock, v\n    PHY: The water ration differs: eight ounces every six hours versus water by the capful.\n    PHY: The space heater is placed two meters from the chair to keep the subject alive in the original, but sits against the east wall unplugged in \n    KNO: How Hank learns the name Claire differs: a coworker calling it out in a parking lot versus the captor's thumb reading it off a laminated lan\n    KNO: In the original Hank has location clues (driving directions, Oregon plates, a Coos Bay receipt), while in the redraft he says the site could",
         "voicemail: 7 mismatch(es)\n    TIM: When Marie first called the office: two days ago in the original, eleven days ago in the redraft.\n    PHY: Where Claire's car was found: her apartment lot in the original, the hospital lot in the redraft.\n    PHY: The sixth message is an angry spoken complaint in the original but only twelve seconds of breathing in the redraft.\n    PHY: The fifth message lists different details: license plate, shift schedule and coworker Jennifer in the original; height, hair and a gap in he\n    PHY: Where Marie was during the seventh message: indoors in Claire's apartment on the landline in the original, outside in the wind in the redraf\n    PHY: The seventh message is cut off by the time limit right after the hinge in the original, but runs nine more seconds after the hinge in the re\n    TIM: When Maren heard the hinge in her vision: two nights ago in the original, at four that morning in the redraft."
       ],
-      "started_at": "2026-10-30T04:12:18+00:00",
+      "started_at": "2026-10-30T13:53:31+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -713,8 +713,8 @@
           "false-positive": 96
         },
         "TIM": {
-          "deliberate": 7,
-          "extraction-error": 6
+          "deliberate": 2,
+          "extraction-error": 1
         }
       },
       "cost": {
@@ -727,7 +727,7 @@
         "usd_spent": 0.0
       },
       "description": "Continuity flags raised on classics with no known errors",
-      "duration_s": 0.06,
+      "duration_s": 0.28,
       "error": null,
       "gates": [
         {
@@ -738,7 +738,7 @@
           "threshold": 0
         },
         {
-          "actual": 115,
+          "actual": 105,
           "name": "noise",
           "op": "==",
           "passed": false,
@@ -746,11 +746,11 @@
         }
       ],
       "metrics": {
-        "deliberate": 7,
-        "extraction_error": 12,
+        "deliberate": 2,
+        "extraction_error": 7,
         "false_positive": 96,
-        "flags": 115,
-        "noise": 115,
+        "flags": 105,
+        "noise": 105,
         "real": 0,
         "snapshots": 3,
         "unreviewed": 0
@@ -758,10 +758,10 @@
       "mode": "replay",
       "notes": [
         "plastic-age/run1: 55 flag(s)",
-        "christmas-carol/run2: 35 flag(s)",
+        "christmas-carol/run2: 25 flag(s)",
         "christmas-carol/run1: 25 flag(s)"
       ],
-      "started_at": "2026-10-30T04:12:21+00:00",
+      "started_at": "2026-10-30T13:53:34+00:00",
       "status": "fail",
       "suite": "e7-classics"
     },
@@ -794,15 +794,15 @@
       },
       "cost": {
         "calls": 80,
-        "input_tokens": 551224,
-        "output_tokens": 192680,
+        "input_tokens": 552551,
+        "output_tokens": 195957,
         "replayed_calls": 80,
         "unpriced_calls": 0,
-        "usd_if_live": 8.6291,
+        "usd_if_live": 9.1075,
         "usd_spent": 0.0
       },
       "description": "Current revision passes vs the E1 errors past passes introduced",
-      "duration_s": 83.52,
+      "duration_s": 85.96,
       "error": null,
       "gates": [
         {
@@ -821,7 +821,7 @@
         }
       ],
       "metrics": {
-        "errors_per_10k_words": 1.72,
+        "errors_per_10k_words": 1.74,
         "family.brief-fix.reintroduced": 0,
         "family.brief-fix.replayed": 2,
         "family.hone-physical-states.reintroduced": 0,
@@ -862,7 +862,7 @@
         "governor-024 (acceptable-losses): not_present",
         "governor-025 (haddons-reckoning): halted, nothing written \u2014 redraft of haddons-reckoning refused: model refused the request (cyber)",
         "governor-026 (the-governors-vigil): not_present",
-        "governor-027 (elias-agrees-to-the-terms): not_present",
+        "governor-027 (elias-agrees-to-the-terms): consistent",
         "governor-028 (order): halted, nothing written \u2014 1 scene(s) not re-drafted: order (no response)",
         "lantern-folk-015 (a09-the-worst-night): consistent",
         "lantern-folk-020 (a06-standing-guard): consistent",
@@ -890,13 +890,13 @@
         "thornwall-035 (riders-approach): consistent",
         "thornwall-037 (evening-visit): consistent"
       ],
-      "started_at": "2026-10-30T04:12:21+00:00",
+      "started_at": "2026-10-30T13:53:35+00:00",
       "status": "fail",
       "suite": "e8-revision-safety"
     }
   ],
   "schema_version": 1,
   "status": "fail",
-  "storyforge_version": "1.86.3",
+  "storyforge_version": "1.93.0",
   "suite_count": 9
 }
