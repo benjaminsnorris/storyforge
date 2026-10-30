@@ -91,3 +91,33 @@ def test_a_refused_scene_is_recorded_and_drafting_goes_on(monkeypatch, tmp_path)
     monkeypatch.setattr('storyforge.api.invoke', fake_invoke)
     drafts, refused = e4.draft(str(tmp_path), ['a', 'b'])
     assert list(drafts) == ['b'] and 'cyber' in refused['a']
+
+
+def test_each_draft_is_gated_before_the_next_and_a_failure_drafts_on(monkeypatch, tmp_path):
+    from storyforge import gate
+    from storyforge.checker import CheckResult, Finding
+    (tmp_path / 'scenes').mkdir()
+    (tmp_path / 'reference').mkdir()
+    (tmp_path / 'reference' / 'scenes.csv').write_text('id|seq|word_count|status\na|1||\nb|2||\n')
+    monkeypatch.setattr('storyforge.common.build_shared_context', lambda p, model='': [])
+    monkeypatch.setattr('storyforge.common.select_model', lambda t: 'm')
+    order = []
+
+    def prompt(sid, *a, **k):
+        order.append(('prompt', sid))
+        return sid
+    monkeypatch.setattr('storyforge.cmd_write._build_prompt', prompt)
+    monkeypatch.setattr('storyforge.api.invoke',
+                        lambda p, m, **k: {'content': [{'type': 'text', 'text': 'Prose. ' * 120}]})
+    bad = Finding('contradiction', 'TIM', 'x', 'y', 'z', '', 'why')
+
+    def fake_gate(project_dir, sid, *, command, prose, log_dir, **k):
+        order.append(('gate', sid))
+        result = gate.GateResult(sid, check=CheckResult(sid, findings=[bad] if sid == 'a' else []))
+        return gate.GatedScene(prose + ' Fixed.', result, result, fixed=True)
+    monkeypatch.setattr(gate, 'gate_and_fix', fake_gate)
+    gated = {}
+    drafts, _ = e4.draft(str(tmp_path), ['a', 'b'], gated=gated, log_dir=str(tmp_path / 'g'))
+    assert order == [('prompt', 'a'), ('gate', 'a'), ('prompt', 'b'), ('gate', 'b')]
+    assert drafts['a'].endswith('Fixed.') and not gated['a'].result.passed
+    assert (tmp_path / 'scenes' / 'a.md').read_text().endswith('Fixed.')

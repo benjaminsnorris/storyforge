@@ -301,6 +301,7 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
             failed.append(f'{sid} ({reason})')
         else:
             written += 1
+            _mark_ungated(project_dir, sid)
 
     commit_and_push(
         project_dir,
@@ -310,6 +311,21 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
 
     if failed:
         raise RedraftError(f'{len(failed)} scene(s) not re-drafted: {"; ".join(failed)}')
+
+
+def _mark_ungated(project_dir: str, scene_id: str) -> None:
+    """A redraft isn't gated yet (Phase 4 routes revision through the gate):
+    say so, and list the scene in `gate.pending` so `write` won't draft past
+    it until `storyforge check` passes it. Its earlier facts stay in the
+    ledger and may no longer match the prose."""
+    from storyforge import gate
+    log(f'    WARNING: the redraft of {scene_id} is not gated; run '
+        f'`storyforge check {scene_id}` (listed in {gate.PENDING_PATH})')
+    try:
+        gate.mark_pending(project_dir, scene_id, 'redraft',
+                          'redrafted by revise, not gated: run storyforge check')
+    except (gate.GateError, OSError) as e:
+        log(f'    ERROR: could not list {scene_id} in {gate.PENDING_PATH}: {e}')
 
 
 def _report_redraft_error(e: 'RedraftError') -> None:
@@ -1463,6 +1479,7 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
 
         with open(scene_file, 'w', encoding='utf-8') as f:
             f.write(preserved['text'])
+        _mark_ungated(project_dir, scene_id)
 
         count += 1
         log(f'  Re-drafted {scene_id}')

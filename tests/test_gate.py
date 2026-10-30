@@ -3,6 +3,7 @@ The API is mocked at `api._api_request`: a request with tools is the
 checker, one without is extraction."""
 
 import json
+import os
 from unittest.mock import patch
 
 import pytest
@@ -13,6 +14,23 @@ from storyforge.gate import GateError, gate_scene
 SCENE = 'act1-sc02'
 HERE = 'population four hundred and twelve at last census'
 
+
+
+@pytest.fixture(autouse=True)
+def _pure_prose_scenes(request):
+    """Scene files are pure prose (the gate refuses frontmatter); the shared
+    fixture's older scenes still carry it."""
+    if 'project_dir' not in request.fixturenames:
+        return
+    import glob
+    import re as _re
+    for path in glob.glob(os.path.join(request.getfixturevalue('project_dir'), 'scenes', '*.md')):
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+        stripped = _re.sub(r'\A---\n.*?\n---\n\s*', '', text, flags=_re.S)
+        if stripped != text:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(stripped)
 
 def _text(payload, stop='end_turn'):
     return {'stop_reason': stop, 'model': 'claude-opus-5-5',
