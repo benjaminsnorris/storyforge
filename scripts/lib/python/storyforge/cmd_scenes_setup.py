@@ -365,6 +365,21 @@ def main(argv=None):
                  if breaks else None)
         return build_boundary_prompt(chapter_text, fixed)
 
+    # Chapters whose scene detection failed (errored, refused or cut off):
+    # left unsplit, since a guess would write wrong scene files with
+    # permanent ids. The run names them and exits 1 after committing the rest.
+    detect_failed: dict[str, str] = {}
+
+    def report_failed_detection():
+        if not detect_failed:
+            return
+        log(f'ERROR: scene detection failed for {len(detect_failed)} chapter(s); '
+            f'they were not split:')
+        for ch_name, why in detect_failed.items():
+            log(f'  {ch_name}: {why}')
+        log('Re-run scenes-setup for those chapters.')
+        sys.exit(1)
+
     def claude_detect_scenes(chapter_text, chapter_id):
         """Use direct API to detect scene boundaries and name the scenes."""
         prompt = chapter_prompt(chapter_text)
@@ -606,6 +621,9 @@ def main(argv=None):
                                 detect_file = os.path.join(work_dir, f'.detect-{ch_name}.txt')
                                 with open(txt_file) as src, open(detect_file, 'w') as dst:
                                     dst.write(src.read())
+                            else:
+                                detect_failed[ch_name] = ('the batch reply errored, was '
+                                                          'refused or was cut off')
                             if os.path.isfile(json_file):
                                 with open(json_file) as jf:
                                     resp_data = json.load(jf)
@@ -618,6 +636,7 @@ def main(argv=None):
                                               cache_create=usage.get('cache_create', 0))
                         else:
                             log(f'  WARNING: Batch item failed for {ch_name}')
+                            detect_failed[ch_name] = 'no batch result'
 
                         # Cleanup temp files
                         for path in [status_file, txt_file, json_file]:
@@ -647,8 +666,11 @@ def main(argv=None):
                         df.write(response)
                     return ch_name
 
-                run_parallel(claude_chapters, _detect_worker,
-                             max_workers=parallel, label='chapter')
+                results = run_parallel(claude_chapters, _detect_worker,
+                                       max_workers=parallel, label='chapter')
+                for cf, r in results.items():
+                    if isinstance(r, Exception):
+                        detect_failed[os.path.splitext(os.path.basename(cf))[0]] = str(r)
 
         # Now process all chapters sequentially
         chapter_num = 0
@@ -665,6 +687,12 @@ def main(argv=None):
 
             detect_file = os.path.join(work_dir, f'.detect-{ch_name}.txt')
             breaks = detect_explicit_breaks(chapter_text)
+
+            if ch_name in detect_failed:
+                log(f'\nProcessing chapter {chapter_num}: {ch_name}')
+                log(f'  WARNING: scene detection failed ({detect_failed[ch_name]}); '
+                    f'the chapter is not split')
+                continue
 
             boundaries = []
             if os.path.isfile(detect_file):
@@ -980,6 +1008,7 @@ def main(argv=None):
                             pr_body, project_dir, 'drafting')
             print_summary(project_dir, 'scene-detect', session_start=session_start)
             log('Committed and pushed split results')
+        report_failed_detection()
 
     elif args.split_manuscript:
         if not args.dry_run:
@@ -1011,6 +1040,7 @@ def main(argv=None):
                             pr_body, project_dir, 'drafting')
             print_summary(project_dir, 'scene-detect', session_start=session_start)
             log('Committed and pushed split results')
+        report_failed_detection()
 
     log('============================================')
     mode_name = 'rename' if args.rename else ('split-chapters' if args.split_chapters else 'split-manuscript')

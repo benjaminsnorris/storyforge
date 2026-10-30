@@ -410,6 +410,50 @@ class TestSplitChaptersMode:
         assert len(new_scenes) >= 2
 
 
+    def test_failed_detection_leaves_the_chapter_unsplit_and_exits_1(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """SF-1: a chapter whose detection failed (here refused in the
+        batch) was split as a single scene with a permanent id."""
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+        def refused(results_url, output_dir, log_dir, keep_incomplete=False):
+            with open(os.path.join(output_dir, '.status-ch01'), 'w') as f:
+                f.write('fail')  # what the download writes for a refusal
+            return []
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.download_batch_results', refused)
+        self._make_chapter(project_dir, 'chapters', 'ch01.md', 'One. Two. Three.\n')
+        before = sorted(os.listdir(os.path.join(project_dir, 'scenes')))
+
+        with pytest.raises(SystemExit) as exit_info:
+            main(['--split-chapters', '--source', 'chapters', '--yes'])
+
+        assert exit_info.value.code == 1
+        assert sorted(os.listdir(os.path.join(project_dir, 'scenes'))) == before
+        out = capsys.readouterr().out
+        assert 'the chapter is not split' in out
+        assert 'ch01: the batch reply errored, was refused or was cut off' in out
+        assert mock_git.calls_for('commit_and_push')
+
+    def test_failed_direct_detection_leaves_the_chapter_unsplit(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+        def refuse(*a, **kw):
+            raise RuntimeError('model refused the request (cyber)')
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.invoke_to_file', refuse)
+        self._make_chapter(project_dir, 'chapters', 'ch01.md', 'One. Two. Three.\n')
+        before = sorted(os.listdir(os.path.join(project_dir, 'scenes')))
+
+        with pytest.raises(SystemExit):
+            main(['--split-chapters', '--source', 'chapters', '--yes', '--direct'])
+
+        assert sorted(os.listdir(os.path.join(project_dir, 'scenes'))) == before
+        assert 'ch01: model refused the request' in capsys.readouterr().out
+
     def test_split_creates_metadata_entries(self, mock_api, mock_git,
                                             mock_costs, project_dir,
                                             monkeypatch):
