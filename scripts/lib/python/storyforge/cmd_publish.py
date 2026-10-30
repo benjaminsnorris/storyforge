@@ -303,6 +303,12 @@ def _explain_publish_failure(message: str) -> None:
             'more than 200 assets: the publish route validates the manifest\'s '
             'array against the same 200 cap as the upload endpoint. Split the '
             'book or retire illustrations with status=superseded.')
+    elif 'dashboard data' in message or 'dashboard_data' in message:
+        log('Bookshelf refused the dashboard data. "Unsupported dashboard data '
+            'version" means this plugin and Bookshelf are out of step: update '
+            'Bookshelf (or the plugin) so they read the same schema_version. '
+            'Otherwise the data broke the contract in docs/agent-reference.md '
+            '("Dashboard data"). To publish the book meanwhile, pass --no-dashboard.')
     elif 'assets_legacy_cover' in message:
         log('The manifest sent both a cover asset and the deprecated '
             'cover_base64 field. Regenerate the manifest with the current '

@@ -36,6 +36,35 @@ def test_row_and_project_values_are_strings(project_dir):
         for row in data[key]:
             assert all(isinstance(v, str) for v in row.values()), key
     assert data['scenes'], 'the fixture has scenes'
+    # Bookshelf: scene_id, field and issue are strings; the counts strings or
+    # numbers, never None
+    assert data['brief_quality'], 'the fixture has brief issues'
+    for row in data['brief_quality']:
+        assert all(isinstance(row[k], str) for k in ('scene_id', 'field', 'issue'))
+        assert all(isinstance(v, (str, int, float)) and not isinstance(v, bool)
+                   for v in row.values())
+
+
+def test_score_rows_are_strings(project_dir):
+    """The fixture has no scores, so the check above never saw a score row."""
+    latest = os.path.join(project_dir, 'working', 'scores', 'latest')
+    os.makedirs(latest, exist_ok=True)
+    with open(os.path.join(latest, 'scene-scores.csv'), 'w') as f:
+        f.write('id|prose_naturalness|economy_clarity\nact1-sc01|4|n/a\n')
+    data = load_dashboard_data(project_dir)
+    assert data['scores'] == [{'id': 'act1-sc01', 'prose_naturalness': '4',
+                               'economy_clarity': 'n/a'}]
+
+
+def test_brief_quality_that_cannot_be_checked_says_so(project_dir, monkeypatch, capsys):
+    """SF2: a crash returned [], which the dashboard shows as no brief issues."""
+    import storyforge.hone as hone
+
+    def boom(*a, **kw):
+        raise KeyError('goal')
+    monkeypatch.setattr(hone, 'detect_brief_issues', boom)
+    assert load_dashboard_data(project_dir)['brief_quality'] == []
+    assert 'WARNING: brief quality not checked' in capsys.readouterr().out
 
 
 def test_values_are_not_escaped(tmp_path):

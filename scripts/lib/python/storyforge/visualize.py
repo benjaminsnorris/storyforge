@@ -1,10 +1,9 @@
-"""Dashboard data loading for storyforge-visualize.
+"""Dashboard data: ``load_dashboard_data`` builds ``dashboard_data``, which
+``publish`` sends and ``storyforge visualize`` writes to
+working/dashboard-data.json. Bookshelf renders it (#371); the contract is in
+docs/agent-reference.md ("Dashboard data").
 
-Replaces fragile awk-based CSV-to-JSON conversion with reliable Python
-parsing. The bash script continues to handle HTML template assembly but
-calls this module for data loading.
-
-Usage from bash:
+Usage:
     python3 -m storyforge.visualize data "$PROJECT_DIR"
 """
 
@@ -118,11 +117,8 @@ def _compute_brief_quality(project_dir: str) -> list[dict]:
     plus type-specific metrics (beat_count, char_count, etc.).
     Returns [] if detection fails or data is missing.
     """
-    try:
-        from storyforge.elaborate import _read_csv_as_map
-        from storyforge.hone import detect_brief_issues, detect_gaps
-    except ImportError:
-        return []
+    from storyforge.elaborate import _read_csv_as_map
+    from storyforge.hone import detect_brief_issues, detect_gaps
 
     ref_dir = os.path.join(project_dir, 'reference')
     scenes_path = os.path.join(ref_dir, 'scenes.csv')
@@ -166,7 +162,10 @@ def _compute_brief_quality(project_dir: str) -> list[dict]:
             })
 
         return results
-    except Exception:
+    except Exception as exc:
+        # An empty list would read as "no brief issues"; say it wasn't checked
+        from storyforge.common import log
+        log(f'WARNING: brief quality not checked for the dashboard: {exc}')
         return []
 
 
@@ -216,7 +215,7 @@ def load_dashboard_data(project_dir: str) -> dict:
 
     scenes = csv_to_records(metadata_csv)
 
-    # Normalize 'setting' column to 'location' for dashboard JS compatibility
+    # Normalize 'setting' column to 'location' for the renderer (Bookshelf)
     for scene in scenes:
         if 'setting' in scene and 'location' not in scene:
             scene['location'] = scene['setting']
