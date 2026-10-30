@@ -79,6 +79,40 @@ class TestIsEpigraphBlock:
             'Dear Hugh [he read]. You\'ve been awfully good to me but I can\'t '
             'stand it.\n\nBERT MORSE.\n')
 
+    def test_note_signed_with_an_initial_is_not_an_epigraph(self):
+        assert not is_epigraph_block(
+            'Gone to the village. Back by six. Do not wait dinner. —J.\n')
+
+    def test_telegram_signed_in_capitals_is_not_an_epigraph(self):
+        assert not is_epigraph_block(
+            '“Am coming at once. Do nothing till I arrive. Watch her '
+            'closely.”\n\nVAN HELSING.\n')
+
+    def test_telegram_with_document_header_is_not_an_epigraph(self):
+        assert not is_epigraph_block(
+            '_Telegram, Van Helsing, Antwerp, to Seward, Carfax._\n\n'
+            '“Am coming at once. Do nothing till I arrive.”\n\n—VAN HELSING.\n')
+
+    def test_dated_diary_head_is_not_an_epigraph(self):
+        assert not is_epigraph_block(
+            '_3 May. Bistritz._—Left Munich at 8:35 P.M.\n')
+        assert not is_epigraph_block(
+            '_Journal, 4 May._—Slept badly.\n')
+
+    def test_dateline_or_name_list_is_not_verse(self):
+        assert not is_epigraph_block('Netherfield Park\nHertfordshire\nThursday\n')
+        assert not is_epigraph_block('Mr. Bennet\nMrs. Bennet\nJane\nElizabeth\n')
+
+    def test_recited_verse_without_attribution_is_accepted(self):
+        # A known trade-off: verse a character recites at a chapter's start,
+        # with no attribution, reads exactly like an unattributed epigraph,
+        # so a boundary after it is refused. Unattributed epigraphs are the
+        # commoner case in the classics (Middlemarch has dozens).
+        assert is_epigraph_block(
+            'On either side the river lie\nLong fields of barley and of rye,\n'
+            'That clothe the wold and meet the sky;\nAnd thro\' the field the '
+            'road runs by\nTo many-tower\'d Camelot;\n')
+
     def test_empty_or_heading_only_is_not_an_epigraph(self):
         assert not is_epigraph_block('')
         assert not is_epigraph_block('# Chapter LVII\n\n')

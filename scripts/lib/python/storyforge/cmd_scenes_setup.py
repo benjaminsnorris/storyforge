@@ -780,10 +780,11 @@ def main(argv=None):
                 for r in refused:
                     opening = next((l.strip() for l in chapter_text.splitlines()[r['line'] - 1:]
                                     if l.strip() and not l.strip().startswith('#')), '')
-                    log(f'  WARNING: refused the scene boundary that would make the '
-                        f'chapter epigraph ("{opening[:50]}...") its own scene '
-                        f'"{r["slug"] or "unnamed"}"; it stays with the opening '
-                        f'scene "{splits[0]["slug"] or "unnamed"}"')
+                    log(f'  WARNING: refused a scene boundary: '
+                        f'scene "{r["slug"] or "unnamed"}" would hold only an '
+                        f'epigraph-like block ("{opening[:50]}..."); kept it in '
+                        f'"{splits[0]["slug"] or "unnamed"}". Check that split by hand '
+                        f'if the block is a scene of its own')
             elif args.dry_run:
                 log(f'\nProcessing chapter {chapter_num}: {ch_name}')
                 tw = count_words(chapter_text)

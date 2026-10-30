@@ -254,6 +254,14 @@ _ITALIC_TITLE_RE = re.compile(r'^([_*])[A-Z][^_*\n]*\1[\s.,;:]*(?:[ivxlcdm]+|\d+
 # A letter, not an epigraph: "Dear Hugh", "My dear Sir,", "Madam,".
 _SALUTATION_RE = re.compile(r'^[“"]?(?:my\s+)?(?:dear(?:est)?\b|sir\b|madam\b|gentlemen\b)',
                             re.IGNORECASE)
+# A document's italic head, not an epigraph: "_Telegram, Van Helsing, to
+# Seward._", "_Letter from Mina to Lucy._", "_3 May. Bistritz._", "_Journal._"
+_DOCUMENT_HEAD_RE = re.compile(
+    r'^[“"]?[_*](?:[^_*\n]*\d|(?:letter|telegram|note|memorandum|memo|diary|journal'
+    r'|postscript|enclosure|card|cablegram|wire|dispatch|despatch|report)\b)',
+    re.IGNORECASE)
+# A signature of initials only: "J.", "J. M.", "J.M.W."
+_INITIALS_RE = re.compile(r'^(?:[A-Z]\.\s*)+$')
 
 
 def _is_attribution(tail: str) -> bool:
@@ -266,6 +274,9 @@ def _is_attribution(tail: str) -> bool:
     # Speech cut off at a name ends in a quote mark or "!"/"?"; a source
     # cited after the quotation doesn't.
     if re.search(r'[”"’!?]$', tail):
+        return False
+    # A note signed with an initial: "—J."
+    if _INITIALS_RE.match(tail):
         return False
     words = re.findall(r"[^\W\d_][\w’'.-]*", tail)
     if not words or len(words) > 12 or words[0].lower().startswith('your'):
@@ -288,11 +299,6 @@ def _caps_line(paragraph: str) -> bool:
             and len(text.split()) <= 8)
 
 
-def _is_quoted(paragraph: str) -> bool:
-    text = paragraph.strip()
-    return bool(re.match(r'^[“"‘]', text)) and bool(re.search(r'[”"’]$', text))
-
-
 def _is_verse(paragraph: str) -> bool:
     """Verse lines kept as lines, or verse whose line breaks were joined
     into one paragraph (Project Gutenberg texts often are)."""
@@ -300,9 +306,12 @@ def _is_verse(paragraph: str) -> bool:
     # Verse lines: short, each opening on a capital, and at least one running
     # on past its line end (hard-wrapped prose opens lines in lower case;
     # one sentence per line ends each in a full stop).
+    # A dateline or a list of names ("Netherfield Park / Hertfordshire /
+    # Thursday") has short capitalized lines too, but no punctuation in them.
     if (len(lines) >= 2 and all(len(ln) <= 60 for ln in lines)
             and all(re.match(r'[^\w]*[A-Z]', ln) for ln in lines)
-            and any(re.search(r'[\w,;:]$', ln) for ln in lines[:-1])):
+            and any(re.search(r'[\w,;:]$', ln) for ln in lines[:-1])
+            and re.search(r'[,;:!?]', paragraph)):
         return True
     openers = [w for w in _VERSE_LINE_OPENER_RE.findall(paragraph)
                if w.lower() in _VERSE_LINE_OPENERS]
@@ -313,10 +322,17 @@ def is_epigraph_block(text: str) -> bool:
     """Whether ``text`` holds nothing but an epigraph (plus any heading).
 
     An epigraph is a short block before a chapter's first prose paragraph:
-    a quotation closed by an attribution ("—Scott", or a line "SIR WALTER
-    SCOTT" under verse or a quotation), a speech quoted from a play
-    ("1_st Gent_. ..."), or verse with no attribution at all. Short prose,
-    dialogue, a letter, or an epigraph followed by prose is not one.
+    a quotation closed by a dash attribution ("—Scott"), verse over a line
+    of capitals ("SIR WALTER SCOTT"), a speech quoted from a play
+    ("1_st Gent_. ..."), or verse with no attribution at all.
+
+    Not one: short prose or dialogue; an epigraph followed by prose; a
+    letter that opens with a salutation ("Dear Hugh"); a document under an
+    italic head ("_Telegram, ... to Seward._", "_3 May. Bistritz._"); a
+    note signed with initials ("—J."); prose over a line of capitals (a
+    signed telegram); a dateline or list of names. Verse a character recites
+    with no attribution still reads as an epigraph: a known trade-off.
+    Letters with no salutation and no head are not recognized.
     """
     body = [ln for ln in text.splitlines()
             if not ln.strip().startswith('#') and not is_break_marker(ln.strip())]
@@ -325,13 +341,17 @@ def is_epigraph_block(text: str) -> bool:
         return False
     if sum(len(p.split()) for p in paragraphs) > _EPIGRAPH_MAX_WORDS:
         return False
-    if _SALUTATION_RE.match(paragraphs[0]):
+    if _SALUTATION_RE.match(paragraphs[0]) or _DOCUMENT_HEAD_RE.match(paragraphs[0]):
         return False
     *quote, last = paragraphs
     if _dash_attribution(last):
+        # A signature on a paragraph of its own under prose is a signed
+        # message; an epigraph's source there sits under verse.
+        if quote and _DASH_ATTRIBUTION_RE.fullmatch(last):
+            return len(quote) <= 2 and all(_is_verse(p) for p in quote)
         return len(quote) <= 2
     if _caps_line(last) and quote:
-        return all(_is_verse(p) or _is_quoted(p) for p in quote)
+        return all(_is_verse(p) for p in quote)
     if _SPEAKER_TAG_RE.match(paragraphs[0]) and len(paragraphs) <= 2:
         return True
     return all(_is_verse(p) for p in paragraphs)
