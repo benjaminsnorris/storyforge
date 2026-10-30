@@ -96,6 +96,34 @@ class TestValidation:
                    for c in phys_fails)
 
 
+    def test_a_recurring_state_ending_again_is_not_a_disappearance(self, fixture_dir, tmp_path):
+        """F-110 (A Christmas Carol): Scrooge falls asleep again after the
+        registry's resolving scene, and waking a second time was flagged:
+        the registry can name only one resolving scene."""
+        from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP, validate_structure
+        ref = str(tmp_path / 'reference')
+        shutil.copytree(os.path.join(fixture_dir, 'reference'), ref)
+
+        briefs_path = os.path.join(ref, 'scene-briefs.csv')
+        rows = _read_csv(briefs_path)
+        for r in rows:
+            if r['id'] == 'act2-sc03':
+                r['physical_state_in'] = 'archive-key-dorren;exhaustion-tessa'
+                r['physical_state_out'] = 'archive-key-dorren'
+        _write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
+
+        states_path = os.path.join(ref, 'physical-states.csv')
+        states_rows = _read_csv(states_path)
+        for r in states_rows:
+            if r['id'] == 'exhaustion-tessa':
+                r['resolves'] = 'act1-sc02'   # ended once, earlier
+        _write_csv(states_path, states_rows,
+                   ['id', 'character', 'description', 'category', 'acquired', 'resolves', 'action_gating'])
+
+        result = validate_structure(ref)
+        assert not any(c.get('check') == 'state-disappearance' and 'exhaustion-tessa' in c.get('message', '')
+                       for c in result['checks'] if not c['passed'])
+
 class TestGranularity:
     def test_clean_fixture_passes(self, fixture_dir):
         from storyforge.schema import validate_physical_state_granularity
