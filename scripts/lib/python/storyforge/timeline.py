@@ -915,6 +915,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     present = None
     last_day = None
     last_mode = ''
+    last_duration = ''
     after_frame = False
     dated: list[tuple[str, int, tuple, bool]] = []
     rough: list[tuple[str, int, tuple]] = []
@@ -950,13 +951,22 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         # cue goes back a day or more ("ten years")
         stated = _keeps_stated_date(row, cue)
         reached = last_day if at_present else present
+        # A summary's day is where its stretch starts: a scene may step back
+        # into the stretch and still land after that day (Plastic Age's
+        # wrong classroom, inside "several weeks" of other instructors).
+        # Measure from the stretch's end when its length is counted; when
+        # it isn't, there is nothing to measure from
+        if at_present and last_mode == 'summary':
+            span = gap_to_days(last_duration)
+            reached = None if span is None else last_day + span
         # A stated date the calendar keeps outranks "earlier" on a later
         # day; on the same day, a month and day that agree say nothing
         # about the year (Fezziwig's Christmas Eve, years back, on day 1)
         if relation == 'earlier' and last_day is not None and reached is not None and (
                 (day > reached and not stated)
                 or (day == reached and _goes_back_days(cue.get('gap', '')))):
-            before = (f'the previous scene\'s ({last_day})' if at_present
+            before = (f'the previous scene\'s ({last_day})' if at_present and reached == last_day
+                      else f'the end of the previous summary (day {reached})' if at_present
                       else f'the story\'s present (day {present})')
             findings.append({'scene_id': sid, 'check': 'flashback_not_earlier',
                              'message': f'reads as set earlier, but its day ({day}) is not before '
@@ -997,6 +1007,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
             weekdays.append((sid, day, weekday))
         last_day = day
         last_mode = mode
+        last_duration = row.get('duration', '')
         if relation != 'earlier' and (present is None or day > present):
             present = day
 
