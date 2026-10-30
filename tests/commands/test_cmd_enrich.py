@@ -362,7 +362,7 @@ class TestErrorHandling:
 
     def test_interactive_mode_does_not_need_api_key(self, mock_api, mock_git,
                                                       mock_costs, project_dir,
-                                                      monkeypatch):
+                                                      monkeypatch, capsys):
         """Interactive mode uses claude -p and should not check ANTHROPIC_API_KEY."""
         monkeypatch.setattr('storyforge.cmd_enrich.detect_project_root',
                             lambda: project_dir)
@@ -390,8 +390,9 @@ class TestErrorHandling:
                   '--skip-timeline', '--skip-dashboard'])
         except SystemExit as e:
             # If it exits, it must NOT be the API key error (code 1 with 'api' reason)
-            # Other exits (e.g., no enrichment needed) are acceptable
-            assert e.code != 1 or mock_api.call_count > 0, \
+            # Other exits are acceptable: the mocked session writes no
+            # results, so enrich names the scene and exits 1
+            assert 'ANTHROPIC_API_KEY' not in capsys.readouterr().out, \
                 "Interactive mode should not exit due to missing ANTHROPIC_API_KEY"
 
         # No batch API calls should have been made (wrong mode)
@@ -404,6 +405,17 @@ class TestErrorHandling:
 # ============================================================================
 
 
+_real_run = subprocess.run
+
+
+def _fake_run(cmd, *a, **kw):
+    """Run enrich's own reply parser for real (so a reply is applied, or
+    the scene is named as failed); answer every other subprocess with '{}'."""
+    if 'apply-response' in [str(c) for c in cmd]:
+        return _real_run(cmd, *a, **kw)
+    return subprocess.CompletedProcess(cmd, 0, stdout='{}', stderr='')
+
+
 class TestMainBatchMode:
     """Test main() in default batch mode."""
 
@@ -413,11 +425,9 @@ class TestMainBatchMode:
         monkeypatch.setattr('storyforge.cmd_enrich.detect_project_root',
                             lambda: project_dir)
         # Mock subprocess for build-prompt, apply-response, and alias loading
-        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run',
-                            lambda *a, **kw: subprocess.CompletedProcess(
-                                a[0] if a else [], 0, stdout='{}', stderr=''))
+        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run', _fake_run)
 
-        mock_api.set_response('TYPE|scene\nLOCATION|Library\nPOV|Dorren')
+        mock_api.set_response('TYPE: plot\nLOCATION: Library\nPOV: Dorren')
 
         # Force to ensure enrichment happens
         main(['--force', '--scenes', 'act1-sc01', '--fields', 'type',
@@ -431,11 +441,9 @@ class TestMainBatchMode:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_enrich.detect_project_root',
                             lambda: project_dir)
-        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run',
-                            lambda *a, **kw: subprocess.CompletedProcess(
-                                a[0] if a else [], 0, stdout='{}', stderr=''))
+        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run', _fake_run)
 
-        mock_api.set_response('TYPE|scene')
+        mock_api.set_response('TYPE: plot')
 
         main(['--force', '--scenes', 'act1-sc01', '--fields', 'type',
               '--skip-timeline', '--skip-dashboard'])
@@ -448,11 +456,9 @@ class TestMainBatchMode:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_enrich.detect_project_root',
                             lambda: project_dir)
-        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run',
-                            lambda *a, **kw: subprocess.CompletedProcess(
-                                a[0] if a else [], 0, stdout='{}', stderr=''))
+        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run', _fake_run)
 
-        mock_api.set_response('TYPE|scene')
+        mock_api.set_response('TYPE: plot')
 
         main(['--force', '--scenes', 'act1-sc01', '--fields', 'type',
               '--skip-timeline', '--skip-dashboard'])
@@ -469,9 +475,7 @@ class TestMainBatchMode:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_enrich.detect_project_root',
                             lambda: project_dir)
-        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run',
-                            lambda *a, **kw: subprocess.CompletedProcess(
-                                a[0] if a else [], 0, stdout='{}', stderr=''))
+        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run', _fake_run)
 
         def cut_off(results_url, output_dir, log_dir, keep_incomplete=False):
             with open(os.path.join(output_dir, '.status-act1-sc01'), 'w') as f:
@@ -485,9 +489,11 @@ class TestMainBatchMode:
         monkeypatch.setattr('storyforge.cmd_enrich.log_operation',
                             lambda pd, op, model, *a, target='', **kw: costed.append((op, target)))
 
-        main(['--force', '--scenes', 'act1-sc01', '--fields', 'type',
-              '--skip-timeline', '--skip-dashboard'])
+        with pytest.raises(SystemExit) as exc:
+            main(['--force', '--scenes', 'act1-sc01', '--fields', 'type',
+                  '--skip-timeline', '--skip-dashboard'])
 
+        assert exc.value.code == 1  # the cut-off scene is named, not counted
         assert ('enrich', 'act1-sc01') in costed
 
     def test_enrich_runs_no_dashboard_step(self, mock_api, mock_git, mock_costs,
@@ -500,9 +506,8 @@ class TestMainBatchMode:
         commands = []
         monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run',
                             lambda *a, **kw: commands.append(a[0] if a else []) or
-                            subprocess.CompletedProcess(a[0] if a else [], 0, stdout='{}',
-                                                        stderr=''))
-        mock_api.set_response('TYPE|scene')
+                            _fake_run(*a, **kw))
+        mock_api.set_response('TYPE: plot')
 
         main(['--force', '--scenes', 'act1-sc01', '--fields', 'type', '--skip-timeline'])
         main(['--force', '--scenes', 'act1-sc01', '--fields', 'type', '--skip-timeline',
@@ -518,11 +523,9 @@ class TestMainBatchMode:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_enrich.detect_project_root',
                             lambda: project_dir)
-        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run',
-                            lambda *a, **kw: subprocess.CompletedProcess(
-                                a[0] if a else [], 0, stdout='{}', stderr=''))
+        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run', _fake_run)
 
-        mock_api.set_response('TYPE|scene')
+        mock_api.set_response('TYPE: plot')
 
         main(['--force', '--scenes', 'act1-sc01', '--fields', 'type',
               '--skip-timeline', '--skip-dashboard'])
@@ -545,9 +548,7 @@ class TestCostThreshold:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_enrich.detect_project_root',
                             lambda: project_dir)
-        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run',
-                            lambda *a, **kw: subprocess.CompletedProcess(
-                                a[0] if a else [], 0, stdout='{}', stderr=''))
+        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run', _fake_run)
 
         mock_costs.threshold_ok = False
 
@@ -602,10 +603,8 @@ class TestFreeEnrichment:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_enrich.detect_project_root',
                             lambda: project_dir)
-        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run',
-                            lambda *a, **kw: subprocess.CompletedProcess(
-                                a[0] if a else [], 0, stdout='{}', stderr=''))
-        mock_api.set_response('TYPE|scene')
+        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run', _fake_run)
+        mock_api.set_response('TYPE: plot')
 
         # Force enrichment on a scene that has word_count=0
         main(['--force', '--scenes', 'act1-sc01', '--fields', 'type',
@@ -617,3 +616,41 @@ class TestFreeEnrichment:
         wc = get_field(meta, 'act1-sc01', 'word_count')
         # Should now have a non-zero word count (from the scene file)
         assert wc != '' and wc != '0'
+
+
+class TestIncompleteEnrichment:
+    """A scene with no usable reply, or a failed timeline step, used to be a
+    count in the summary (or 'non-fatal, continuing') with exit 0."""
+
+    def _env(self, project_dir, monkeypatch):
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_enrich.detect_project_root',
+                            lambda: project_dir)
+
+    def test_a_scene_with_no_usable_reply_is_named_and_exits_1(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        self._env(project_dir, monkeypatch)
+        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run', _fake_run)
+        mock_api.set_response('I could not determine these fields.')
+
+        with pytest.raises(SystemExit) as exc:
+            main(['--force', '--scenes', 'act1-sc01', '--fields', 'type', '--skip-timeline'])
+
+        assert exc.value.code == 1
+        assert '(no usable reply): act1-sc01' in capsys.readouterr().out
+        assert mock_git.calls_for('commit_and_push')  # the rest is still committed
+
+    def test_enrich_says_it_does_not_run_the_timeline(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """Step 8 called scripts/storyforge-timeline, removed in v1.0.0, so
+        it only ever logged 'not found, skipping'. It now says the timeline
+        isn't run here and names the command that runs it."""
+        self._env(project_dir, monkeypatch)
+        monkeypatch.setattr('storyforge.cmd_enrich.subprocess.run', _fake_run)
+        mock_api.set_response('TYPE: plot')
+
+        main(['--force', '--scenes', 'act1-sc01', '--fields', 'type'])
+
+        out = capsys.readouterr().out
+        assert 'Run `storyforge timeline`' in out
+        assert 'storyforge-timeline not found' not in out
