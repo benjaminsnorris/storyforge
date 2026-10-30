@@ -2182,8 +2182,9 @@ def main(argv=None):
     session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     project_dir = detect_project_root()
-    from storyforge.ledger import exit_if_not_migrated
+    from storyforge.ledger import exit_if_not_migrated, exit_if_unordered
     exit_if_not_migrated(project_dir)  # the registries live in the ledger
+    exit_if_unordered(project_dir)  # drafting reads the ledger as of each scene
 
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)

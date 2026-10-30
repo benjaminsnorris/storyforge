@@ -1334,6 +1334,132 @@ def _load_prose_exemplars(project_dir: str, pov: str = '') -> str:
 # Brief-aware prompt builder (elaboration pipeline)
 # ============================================================================
 
+#: States shown per subject in a drafting prompt, the most recent. Phase 4
+#: doesn't set `resolves`, so a state ends only when a later fact supersedes
+#: it, and the older ones would pile up over a book (Phase 3's gate is where
+#: states get ended).
+MAX_STATES_PER_SUBJECT = 25
+
+
+def _established_facts_block(scene_id: str, scene: dict[str, str],
+                             project_dir: str, shown: set[str]) -> str:
+    """The ledger's binding facts the scene must agree with: for its POV and
+    on-stage characters (pronouns from characters.csv, `fixed` facts, states
+    entering the scene) and its location, and those the scene itself has
+    already established (``ledger.drafting_slice``). Facts in ``shown`` (the
+    brief's ``physical_state_in``, listed above it) are left out. Empty when
+    the ledger holds nothing for the scene.
+
+    Logs a WARNING for a POV, on-stage or location name that isn't in the
+    registries (its facts can't be found), for facts tied to a scene id
+    that isn't a scene, and for states left out past
+    ``MAX_STATES_PER_SUBJECT`` (the prompt says so too).
+
+    Raises:
+        ValueError: if scenes.csv has a scene without a numeric ``seq``
+            (``ledger.exit_if_unordered`` stops commands on that first).
+    """
+    from . import ledger
+    from .common import log
+    from .elaborate import _read_csv
+    from .enrich import load_alias_map
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    rows = ledger.load_from(ref_dir)
+    if not rows:
+        return ''
+    order = ledger.scene_order(project_dir)
+    if scene_id not in order:
+        log(f'WARNING: {scene_id} is not in scenes.csv; its drafting prompt '
+            'has no established facts from the ledger')
+        return ''
+
+    char_ids = load_alias_map(os.path.join(ref_dir, 'characters.csv'))
+    place_ids = load_alias_map(os.path.join(ref_dir, 'locations.csv'))
+    characters = {r['id'].strip(): r for r in _read_csv(os.path.join(ref_dir, 'characters.csv'))
+                  if (r.get('id') or '').strip()}
+    places = {r['id'].strip(): r for r in _read_csv(os.path.join(ref_dir, 'locations.csv'))
+              if (r.get('id') or '').strip()}
+
+    subjects: list[str] = []
+    unknown: list[str] = []
+    for name in [scene.get('pov', '')] + scene.get('on_stage', '').split(';'):
+        name = name.strip()
+        cid = char_ids.get(name.lower())
+        if cid and cid not in subjects:
+            subjects.append(cid)
+        elif name and not cid and name not in unknown:
+            unknown.append(name)
+    location = scene.get('location', '').strip()
+    place = place_ids.get(location.lower())
+    if location and not place:
+        unknown.append(location)
+    if unknown:
+        log(f'WARNING: {scene_id}: not in characters.csv or locations.csv, so '
+            f'the ledger has no facts for them in the prompt: {", ".join(unknown)}')
+    found = ledger.drafting_slice(rows, scene_id, order,
+                                  subjects + ([place] if place else []))
+    if found.unplaced:
+        ids = [r['id'] for r in found.unplaced]
+        log(f'WARNING: {scene_id}: {len(ids)} ledger fact(s) name a scene that '
+            'is not in scenes.csv, so when they hold is unknown and they are '
+            'left out of the prompt: ' + ', '.join(ids[:10])
+            + (' ...' if len(ids) > 10 else ''))
+
+    def line(r: dict) -> str:
+        text = f"- {r.get('statement', '').strip()}"
+        knowers = [characters.get(k, {}).get('name') or k
+                   for k in ledger._split(r.get('known_by', ''))]
+        if knowers:
+            text += f" (known to {', '.join(knowers)})"
+        if r.get('action_gating', '').lower() == 'true':
+            text += ' *(action-gating)*'
+        return text
+
+    sections = []
+    trimmed = []
+    for sid in subjects + ([place] if place else []):
+        is_place = sid == place
+        row = places.get(sid, {}) if is_place else characters.get(sid, {})
+        heading = (row.get('name') or sid).strip()
+        pronouns = '' if is_place else (row.get('pronouns') or '').strip()
+        fixed = found.fixed.get(sid, [])
+        states = [r for r in found.states.get(sid, []) if r['id'] not in shown]
+        if not (fixed or states or pronouns):
+            continue
+        parts = [f"### {heading}" + (' (location)' if is_place else '')]
+        if pronouns:
+            parts.append(f'Pronouns: {pronouns}')
+        if fixed:
+            parts.append('Always true:\n' + '\n'.join(line(r) for r in fixed))
+        if states:
+            left_out = len(states) - MAX_STATES_PER_SUBJECT
+            if left_out > 0:
+                states = states[left_out:]
+                trimmed.append(f'{heading} ({left_out})')
+            parts.append('True entering this scene'
+                         + (f' (the {MAX_STATES_PER_SUBJECT} most recent; '
+                            f'{left_out} older not shown)' if left_out > 0 else '')
+                         + ':\n' + '\n'.join(line(r) for r in states))
+        sections.append('\n'.join(parts))
+    if trimmed:
+        log(f'WARNING: {scene_id}: older states left out of the prompt '
+            f'(more than {MAX_STATES_PER_SUBJECT} in force): {", ".join(trimmed)}')
+    own = [r for r in found.scene if r['id'] not in shown]
+    if own:
+        sections.append('### Established in this scene so far\n'
+                        "From the scene's plan or its current draft. Keep each "
+                        'of these unless the brief says otherwise: where they '
+                        'differ, the brief wins.\n'
+                        + '\n'.join(line(r) for r in own))
+    if not sections:
+        return ''
+    return ('## Established Facts\n\n'
+            'What the book has already committed to about the people and place '
+            'in this scene. The scene must not contradict it.\n\n'
+            + '\n\n'.join(sections))
+
+
 def build_scene_prompt_from_briefs(
     scene_id: str,
     project_dir: str,
@@ -1455,6 +1581,10 @@ def build_scene_prompt_from_briefs(
             + '\n'.join(state_lines)
         )
 
+    ledger_block = _established_facts_block(
+        scene_id, scene, project_dir,
+        shown={s.strip() for s in state_in.split(';') if s.strip()})
+
     # Craft principles
     craft = build_weighted_directive(project_dir)
     craft_block = f"## Craft Principles\n\n{craft}" if craft else ''
@@ -1565,7 +1695,7 @@ The brief is your contract. Deliver:
 Do NOT follow it with a reflection, a thematic echo, or a landscape-as-metaphor sentence.
 
 **Guardrails:**
-- Do NOT invent character relationships, history, or backstory not present in the brief, knowledge chain, or character bible
+- Do NOT invent character relationships, history, or backstory not present in the brief, knowledge chain, established facts, or character bible
 - Interpretive brief fields (function, motifs, subtext, emotions, and how key_actions are phrased) are notes to you, written with hindsight. The narration may reveal only what knowledge_in and knowledge_out allow: never state a fact, motive or meaning that appears only in those notes
 - Do NOT add characters not listed in on_stage
 - Do NOT resolve threads not listed in mice_threads for this scene
@@ -1621,6 +1751,8 @@ Do NOT add creative interpretation or suggestions."""
 {dep_block}
 
 {state_block}
+
+{ledger_block}
 
 {voice_guide}
 
