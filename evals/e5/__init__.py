@@ -20,7 +20,10 @@ last sampled one (``commit_prose``), as an author would after drafting. Each
 redraft is then given what the ledger holds for it (``prompts``'s established
 facts): the states and fixed facts in force entering the scene, and the
 commitments its own prose made. That is the point of the suite: a fact the
-ledger pins should survive a redraft.
+ledger pins should survive a redraft. It also means the number is not
+like-for-like with runs before v1.97.0, when the redraft had only the brief
+and the bibles: part of a fall comes from the redraft being shown facts read
+off the very prose it is judged against.
 """
 
 from __future__ import annotations
@@ -122,12 +125,14 @@ def commit_prose(project_dir: str, scenes: list[str]) -> None:
     """
     from unittest import mock
 
-    from storyforge import cmd_extract
+    from storyforge import cmd_extract, ledger
     ref_dir = os.path.join(project_dir, 'reference')
     scenes_dir = os.path.join(project_dir, 'scenes')
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)
-    ordered = cmd_extract._build_sorted_scene_ids(scenes_dir, ref_dir)
+    order = ledger.scene_order(project_dir)   # drafting's order, seq as a number
+    ordered = [s for s in sorted(order, key=order.get)
+               if os.path.isfile(os.path.join(scenes_dir, f'{s}.md'))]
     last = max(ordered.index(s) for s in scenes)
     with mock.patch.object(cmd_extract, 'commit_and_push', lambda *a, **k: False):
         try:

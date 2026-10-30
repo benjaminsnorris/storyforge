@@ -198,6 +198,33 @@ class TestDraftingSlice:
         # not yet superseded before it
         assert self._ids(drafting_slice(rows, 's1', ORDER, ['tessa']).fixed) == {}
 
+    def test_a_state_the_scene_supersedes_still_holds_entering_it(self):
+        rows = [_row('in-study', scene_id='s1', subject='tessa'),
+                _row('in-hall', scene_id='s2', subject='tessa', supersedes='in-study')]
+        found = drafting_slice(rows, 's2', ORDER, ['tessa'])
+        assert self._ids(found.states) == {'tessa': ['in-study']}
+        assert [r['id'] for r in found.scene] == ['in-hall']
+        assert self._ids(drafting_slice(rows, 's3', ORDER, ['tessa']).states) == \
+            {'tessa': ['in-hall']}
+
+    def test_a_fact_from_a_scene_that_is_not_in_the_book_is_unplaced(self):
+        """A renamed later scene must not read as backstory (F-123: no
+        reading ahead); only a blank scene_id is backstory."""
+        rows = [_row('renamed', scene_id='old-s9', subject='tessa', mutable='fixed'),
+                _row('renamed-state', scene_id='old-s9', subject='tessa'),
+                _row('backstory', scene_id='', subject='tessa', mutable='fixed')]
+        found = drafting_slice(rows, 's1', ORDER, ['tessa'])
+        assert self._ids(found.fixed) == {'tessa': ['backstory']}
+        assert found.states == {}
+        assert [r['id'] for r in found.unplaced] == ['renamed', 'renamed-state']
+
+    def test_a_fact_about_an_on_stage_subject_is_filed_under_it_not_its_knowers(self):
+        rows = [_row('loc', type='world', scene_id='s1', subject='study'),
+                _row('k', type='knowledge', scene_id='s1', subject='dorren',
+                     known_by='tessa')]
+        found = drafting_slice(rows, 's2', ORDER, ['tessa', 'dorren', 'study'])
+        assert self._ids(found.states) == {'study': ['loc'], 'dorren': ['k']}
+
     def test_an_unknown_scene_raises(self):
         with pytest.raises(KeyError):
             drafting_slice([], 'nope', ORDER, ['tessa'])

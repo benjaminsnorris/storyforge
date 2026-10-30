@@ -181,8 +181,8 @@ class TestEstablishedFacts:
         assert prompt.count('holds the restricted archive key') == 1
 
     def test_pronouns_from_characters_csv(self, project_dir, plugin_dir):
-        """slipform: Pell's pronoun was fixed by hand, then undone by a
-        redraft, because no file the drafter read recorded it."""
+        """The survey's case was slipform's Pell: a pronoun fixed by hand,
+        then undone by a redraft, because no file the drafter read held it."""
         path = os.path.join(project_dir, 'reference', 'characters.csv')
         with open(path) as f:
             lines = f.read().splitlines()
@@ -193,6 +193,56 @@ class TestEstablishedFacts:
             f.write('\n'.join(lines) + '\n')
         prompt = self._prompt(project_dir, plugin_dir, 'act1-sc01')
         assert '### Dorren Hayle\nPronouns: she/her' in prompt
+
+    def test_knowers_action_gating_and_the_brief_wins(self, project_dir, plugin_dir):
+        self._add(project_dir,
+                  dict(id='secret', scene_id='act1-sc01', type='knowledge',
+                       subject='kael-maren', statement='Kael forged the map',
+                       known_by='dorren-hayle;tessa-merrin'))
+        prompt = self._prompt(project_dir, plugin_dir, 'act1-sc02')
+        assert '- Kael forged the map (known to Dorren Hayle, Tessa Merrin)' in prompt
+        assert '- holds the restricted archive key *(action-gating)*' in prompt
+        # a redraft from a corrected brief: the brief, not the old draft, wins
+        assert 'where they differ, the brief wins' in prompt
+
+    def test_unresolved_names_and_unplaced_facts_are_named(
+            self, project_dir, plugin_dir, capsys):
+        from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP
+        scenes = os.path.join(project_dir, 'reference', 'scenes.csv')
+        rows = _read_csv(scenes)
+        row = next(r for r in rows if r['id'] == 'act1-sc02')
+        row['location'] = 'Nowhere Hall'
+        _write_csv(scenes, rows, list(rows[0]))
+        self._add(project_dir, dict(id='ghost', scene_id='renamed-scene', type='trait',
+                                    subject='dorren-hayle', statement='Ghost fact',
+                                    mutable='fixed'))
+        prompt = self._prompt(project_dir, plugin_dir, 'act1-sc02')
+        err = capsys.readouterr()
+        out = err.out + err.err
+        assert 'Ghost fact' not in prompt
+        assert 'Nowhere Hall' in out and 'ghost' in out
+
+    def test_states_past_the_limit_are_trimmed_and_said(
+            self, project_dir, plugin_dir, monkeypatch, capsys):
+        from storyforge import prompts
+        monkeypatch.setattr(prompts, 'MAX_STATES_PER_SUBJECT', 2)
+        self._add(project_dir, *[dict(id=f's{n}', scene_id='act1-sc01', type='physical',
+                                      subject='dorren-hayle', statement=f'State {n}')
+                                 for n in range(4)])
+        prompt = self._prompt(project_dir, plugin_dir, 'act1-sc02')
+        assert 'State 0' not in prompt and 'State 3' in prompt
+        assert '(the 2 most recent; 2 older not shown)' in prompt
+        assert 'older states left out' in ''.join(capsys.readouterr())
+
+    def test_a_scene_without_a_number_stops_write_and_revise(self, project_dir):
+        from storyforge.elaborate import _read_csv, _write_csv
+        scenes = os.path.join(project_dir, 'reference', 'scenes.csv')
+        rows = _read_csv(scenes)
+        rows[0]['seq'] = 'first'
+        _write_csv(scenes, rows, list(rows[0]))
+        with pytest.raises(SystemExit) as exc:
+            ledger.exit_if_unordered(project_dir)
+        assert exc.value.code == 1
 
     def test_nothing_for_the_scene_means_no_section(self, project_dir, plugin_dir):
         ref = os.path.join(project_dir, 'reference')

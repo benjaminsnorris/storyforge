@@ -168,6 +168,20 @@ def exit_if_not_migrated(project_dir: str) -> None:
         raise SystemExit(1)
 
 
+def exit_if_unordered(project_dir: str) -> None:
+    """Stop the command (exit 1) when scenes.csv has a scene without a
+    numeric `seq`: drafting reads the ledger as of each scene
+    (`drafting_slice`), and without an order what came before is a guess."""
+    if not os.path.isfile(os.path.join(project_dir, 'reference', 'scenes.csv')):
+        return
+    try:
+        scene_order(project_dir)
+    except ValueError as e:
+        from storyforge.common import log
+        log(f'ERROR: {e}. Give every scene a number in seq.')
+        raise SystemExit(1)
+
+
 def load_from(ref_dir: str) -> list[dict[str, str]]:
     """The ledger in `ref_dir`; no ledger and no old files → [].
 
@@ -602,14 +616,20 @@ def established_before(rows: list[dict[str, str]], scene_id: str,
 @dataclass
 class DraftingSlice:
     """What drafting `scene_id` must agree with (rethink plan §3.1, §3.3)."""
-    #: subject id → its `fixed` facts established before the scene (or with
-    #: no scene: backstory), in reading order
+    #: subject id → its `fixed` facts established before the scene, or with a
+    #: blank scene (backstory), and not superseded by then; in reading order
     fixed: dict[str, list[dict[str, str]]] = field(default_factory=dict)
     #: subject id → its `state` facts in force entering the scene
+    #: (`active_states(entering=True)`: a state the scene itself supersedes
+    #: is still in force entering it), in reading order
     states: dict[str, list[dict[str, str]]] = field(default_factory=dict)
     #: binding facts established in the scene itself, by its plan or by
-    #: prose it already has: a redraft must keep them
+    #: prose it already has
     scene: list[dict[str, str]] = field(default_factory=list)
+    #: binding facts whose `scene_id` is neither blank nor a scene (a renamed
+    #: or deleted scene): when they hold can't be told, so they are left out
+    #: and the caller names them
+    unplaced: list[dict[str, str]] = field(default_factory=list)
 
 
 def drafting_slice(rows: list[dict[str, str]], scene_id: str,
@@ -620,15 +640,25 @@ def drafting_slice(rows: list[dict[str, str]], scene_id: str,
 
     A fact is filed under its subject when that is one of `subjects`, else
     under the first of `subjects` in its `known_by` (a character's knowledge
-    about someone off stage), else not at all. Each fact appears once: a fact
-    established in the scene goes to `scene` only. A fact superseded by one
-    established no later than the scene is left out.
+    about someone off stage), else not at all (an object, someone off stage
+    whom no one here knows about). Each fact appears once: a fact
+    established in the scene goes to `scene` only. Unlike `active_states`,
+    a fact whose `scene_id` is not blank and not a scene is not treated as
+    backstory (it may be a later scene, renamed): it goes to `unplaced`.
 
     Raises:
         KeyError: if `scene_id` is not in `order`.
     """
     at = order[scene_id]
-    binding = [r for r in rows if r.get('status') == 'binding']
+    binding, out = [], DraftingSlice()
+    for r in rows:
+        if r.get('status') != 'binding':
+            continue
+        sid = r.get('scene_id', '').strip()
+        if sid and sid not in order:
+            out.unplaced.append(r)
+        else:
+            binding.append(r)
 
     def pos(r: dict) -> int:
         return order.get(r.get('scene_id', '').strip(), -1)
@@ -642,7 +672,6 @@ def drafting_slice(rows: list[dict[str, str]], scene_id: str,
         knowers = _split(r.get('known_by', ''))
         return next((s for s in subjects if s in knowers), None)
 
-    out = DraftingSlice()
     for r in binding:
         if r.get('scene_id', '').strip() == scene_id:
             out.scene.append(r)
