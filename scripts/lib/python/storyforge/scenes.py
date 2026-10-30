@@ -219,6 +219,173 @@ def parse_scene_boundaries(response: str) -> list[dict]:
 
 
 # ============================================================================
+# Epigraphs
+# ============================================================================
+
+# An epigraph is short: Middlemarch's longest runs to about 120 words.
+_EPIGRAPH_MAX_WORDS = 200
+_EPIGRAPH_MAX_PARAGRAPHS = 4
+
+# Words that open a verse line but, capitalized after a lowercase word or a
+# comma, almost never occur mid-sentence in prose. Joined verse ("a name Rose
+# on their souls ... there As thrill the buds ... frame At penetration") is
+# full of them; "I" and names are left out because prose has those too.
+_VERSE_LINE_OPENERS = frozenset('''
+    a an and as at but by for from had has have he her his how if in into is it
+    its like my nor not now o of oh on or our she so than that the thee their
+    them then there these they thine this those thou thy till to toward towards
+    upon was we were what when where which while who whose why with ye yet you
+    your
+'''.split())
+_VERSE_LINE_OPENER_RE = re.compile(r"[a-z,;]\s+([A-Z][a-z]*)\b")
+_MIN_VERSE_OPENERS = 3
+
+# An attribution after a dash at the end of the epigraph: "—Scott",
+# "—_The Maid’s Tragedy:_ BEAUMONT AND FLETCHER.", "—_Purgatorio_, vii."
+_DASH_ATTRIBUTION_RE = re.compile(r'(?:^|[\s.,;:!?"”’\'_*)\]])[—―–]+\s*([^—―–]{1,80})$')
+_NAME_PARTICLES = frozenset('of the and for de da di du la le van von in a an on to'.split())
+# A numbered speaker tag opening a quotation from a play: "1_st Gent_.",
+# "2_d Gent_." (a bare "_Monday_." could open a diary entry, so it doesn't count).
+_SPEAKER_TAG_RE = re.compile(r'^[“"]?\d_[a-z]{1,2} [A-Z][^_\n]{0,20}_\.\s')
+# An italic title cited after a dash, with at most a book or canto number:
+# "—_Measure for Measure_.", "—_Purgatorio_, vii."
+_ITALIC_TITLE_RE = re.compile(r'^([_*])[A-Z][^_*\n]*\1[\s.,;:]*(?:[ivxlcdm]+|\d+)?[.,;:]?$',
+                              re.IGNORECASE)
+# A letter, not an epigraph: "Dear Hugh", "My dear Sir,", "Madam,".
+_SALUTATION_RE = re.compile(r'^[“"]?(?:my\s+)?(?:dear(?:est)?\b|sir\b|madam\b|gentlemen\b)',
+                            re.IGNORECASE)
+# A document's italic head, not an epigraph: "_Telegram, Van Helsing, to
+# Seward._", "_Letter from Mina to Lucy._", "_3 May. Bistritz._", "_Journal._"
+_DOCUMENT_HEAD_RE = re.compile(
+    r'^[“"]?[_*](?:[^_*\n]*\d|(?:letter|telegram|note|memorandum|memo|diary|journal'
+    r'|postscript|enclosure|card|cablegram|wire|dispatch|despatch|report)\b)',
+    re.IGNORECASE)
+# A signature of initials only: "J.", "J. M.", "J.M.W."
+_INITIALS_RE = re.compile(r'^(?:[A-Z]\.\s*)+$')
+
+
+def _is_attribution(tail: str) -> bool:
+    """Whether ``tail`` reads as a source's name rather than prose: an
+    italic title, every word capitalized (bar particles such as "of" and
+    "the"), or an all-caps name somewhere in it."""
+    tail = tail.strip()
+    if _ITALIC_TITLE_RE.match(tail) and tail[1].isupper():
+        return True
+    # Speech cut off at a name ends in a quote mark or "!"/"?"; a source
+    # cited after the quotation doesn't.
+    if re.search(r'[”"’!?]$', tail):
+        return False
+    # A note signed with an initial: "—J."
+    if _INITIALS_RE.match(tail):
+        return False
+    words = re.findall(r"[^\W\d_][\w’'.-]*", tail)
+    if not words or len(words) > 12 or words[0].lower().startswith('your'):
+        return False
+    if any(len(w) >= 3 and w.isupper() for w in words):
+        return True
+    return all(w[0].isupper() or w.lower() in _NAME_PARTICLES for w in words)
+
+
+def _dash_attribution(paragraph: str) -> bool:
+    m = _DASH_ATTRIBUTION_RE.search(paragraph.strip())
+    return bool(m) and _is_attribution(m.group(1))
+
+
+def _caps_line(paragraph: str) -> bool:
+    """A paragraph that is one line of capitals: "SIR WALTER SCOTT"."""
+    text = paragraph.strip()
+    letters = re.sub(r'[^A-Za-z]', '', text)
+    return ('\n' not in text and len(letters) >= 3 and letters.isupper()
+            and len(text.split()) <= 8)
+
+
+def _is_verse(paragraph: str) -> bool:
+    """Verse lines kept as lines, or verse whose line breaks were joined
+    into one paragraph (Project Gutenberg texts often are)."""
+    lines = [ln.strip() for ln in paragraph.strip().splitlines() if ln.strip()]
+    # Verse lines: short, each opening on a capital, and at least one running
+    # on past its line end (hard-wrapped prose opens lines in lower case;
+    # one sentence per line ends each in a full stop).
+    # A dateline or a list of names ("Netherfield Park / Hertfordshire /
+    # Thursday") has short capitalized lines too, but no punctuation in them.
+    if (len(lines) >= 2 and all(len(ln) <= 60 for ln in lines)
+            and all(re.match(r'[^\w]*[A-Z]', ln) for ln in lines)
+            and any(re.search(r'[\w,;:]$', ln) for ln in lines[:-1])
+            and re.search(r'[,;:!?]', paragraph)):
+        return True
+    openers = [w for w in _VERSE_LINE_OPENER_RE.findall(paragraph)
+               if w.lower() in _VERSE_LINE_OPENERS]
+    return len(openers) >= _MIN_VERSE_OPENERS
+
+
+def is_epigraph_block(text: str) -> bool:
+    """Whether ``text`` holds nothing but an epigraph (plus any heading).
+
+    An epigraph is a short block before a chapter's first prose paragraph:
+    a quotation closed by a dash attribution ("—Scott"), verse over a line
+    of capitals ("SIR WALTER SCOTT"), a speech quoted from a play
+    ("1_st Gent_. ..."), or verse with no attribution at all.
+
+    Not one: short prose or dialogue; an epigraph followed by prose; a
+    letter that opens with a salutation ("Dear Hugh"); a document under an
+    italic head ("_Telegram, ... to Seward._", "_3 May. Bistritz._"); a
+    note signed with initials ("—J."); prose over a line of capitals (a
+    signed telegram); a dateline or list of names. Verse a character recites
+    with no attribution still reads as an epigraph: a known trade-off.
+    Letters with no salutation and no head are not recognized.
+    """
+    body = [ln for ln in text.splitlines()
+            if not ln.strip().startswith('#') and not is_break_marker(ln.strip())]
+    paragraphs = [p.strip() for p in re.split(r'\n\s*\n', '\n'.join(body)) if p.strip()]
+    if not paragraphs or len(paragraphs) > _EPIGRAPH_MAX_PARAGRAPHS:
+        return False
+    if sum(len(p.split()) for p in paragraphs) > _EPIGRAPH_MAX_WORDS:
+        return False
+    if _SALUTATION_RE.match(paragraphs[0]) or _DOCUMENT_HEAD_RE.match(paragraphs[0]):
+        return False
+    *quote, last = paragraphs
+    if _dash_attribution(last):
+        # A signature on a paragraph of its own under prose is a signed
+        # message; an epigraph's source there sits under verse.
+        if quote and _DASH_ATTRIBUTION_RE.fullmatch(last):
+            return len(quote) <= 2 and all(_is_verse(p) for p in quote)
+        return len(quote) <= 2
+    if _caps_line(last) and quote:
+        return all(_is_verse(p) for p in quote)
+    if _SPEAKER_TAG_RE.match(paragraphs[0]) and len(paragraphs) <= 2:
+        return True
+    return all(_is_verse(p) for p in paragraphs)
+
+
+def keep_epigraph_with_opening(chapter_text: str,
+                               splits: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Refuse a boundary that leaves a chapter's first scene as nothing but
+    its epigraph: the epigraph joins the scene that opens the chapter, which
+    keeps its own name.
+
+    Args:
+        chapter_text: The chapter's full text.
+        splits: Scene starts, sorted, as dicts with a 1-based ``line``.
+
+    Returns:
+        ``(splits, refused)``: the splits to write, and the epigraph-only
+        splits that were folded into the next scene (for the caller to name
+        in a WARNING).
+    """
+    lines = chapter_text.splitlines()
+    kept = list(splits)
+    refused = []
+    while len(kept) > 1:
+        first = '\n'.join(lines[kept[0]['line'] - 1:kept[1]['line'] - 1])
+        if not is_epigraph_block(first):
+            break
+        refused.append(kept[0])
+        kept[1] = dict(kept[1], line=kept[0]['line'])
+        kept.pop(0)
+    return kept, refused
+
+
+# ============================================================================
 # CSV generation
 # ============================================================================
 

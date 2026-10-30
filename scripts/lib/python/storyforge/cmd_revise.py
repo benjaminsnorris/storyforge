@@ -87,8 +87,12 @@ def parse_args(argv):
 # CSV plan helpers
 # ============================================================================
 
+# `owed`: the scenes a prose pass's reply held but didn't write (`;`-joined).
+# Written in the same commit as the scenes it did write; a re-run of the pass
+# revises only these, and the pass is completed when none remain.
 CSV_PLAN_FIELDS = ['pass', 'name', 'purpose', 'scope', 'targets', 'guidance',
-                   'protection', 'findings', 'status', 'model_tier', 'fix_location']
+                   'protection', 'findings', 'status', 'model_tier', 'fix_location',
+                   'owed']
 
 
 def _sanitize_csv_field(value: str) -> str:
@@ -1864,15 +1868,44 @@ def _extract_scenes(step_log: str, project_dir: str,
     return written, skipped
 
 
-def _fail_skipped_scenes(pass_name: str, skipped: dict[str, str], step_log: str) -> None:
+def _split_targets(targets: str) -> list[str]:
+    return [t.strip() for t in (targets or '').split(';') if t.strip()]
+
+
+def _owed_scenes(targets: str, written: list[str], skipped: dict[str, str],
+                 cut_off: bool) -> str:
+    """The `owed` value after a reply: the scenes it held but didn't write,
+    and, when it was cut off, every target it didn't write (it never reached
+    the scenes after the cut). A reply that ended normally may leave a target
+    alone on purpose. A target keeps its `NEW:` prefix, so a re-run still
+    registers the scene. With no targets (a full-scope pass), only the skipped
+    scenes are known to be owed."""
+    written_ids = set(written)
+    entries = {t.removeprefix('NEW:'): t for t in _split_targets(targets)}
+    owed = [entries.get(sid, sid) for sid in skipped]
+    if cut_off:
+        owed += [t for sid, t in entries.items()
+                 if sid not in written_ids and sid not in skipped]
+    return ';'.join(sorted(set(owed), key=lambda t: t.removeprefix('NEW:')))
+
+
+def _fail_skipped_scenes(pass_name: str, skipped: dict[str, str], step_log: str,
+                         owed_saved: bool = False) -> None:
     """Stop a pass whose reply held scenes that were not written: what it
-    did write is committed, but the pass did not do its job for these."""
+    did write is committed, but the pass did not do its job for these.
+    ``owed_saved``: the plan's `owed` column names them, so a re-run of the
+    pass revises only these."""
     log(f'ERROR: Pass \'{pass_name}\' did not write {len(skipped)} scene(s); '
         f'their prose is unchanged:')
     for sid, reason in skipped.items():
         log(f'  {sid}: {reason}')
-    log(f'The scenes it did write are committed. The pass is not marked completed; '
-        f're-run it for these scenes. See the reply: {step_log}')
+    if owed_saved:
+        log(f'The scenes it did write are committed. The pass is not marked completed; '
+            f're-run `storyforge revise` and it revises only these scenes. '
+            f'See the reply: {step_log}')
+    else:
+        log(f'The scenes it did write are committed. The pass is not marked completed; '
+            f're-run it for these scenes. See the reply: {step_log}')
     sys.exit(1)
 
 
@@ -2443,6 +2476,14 @@ def main(argv=None):
         elif pass_scope in ('scene-level', 'targeted'):
             effective_scope = 'full'
 
+        # A prose pass that stopped over unwritten scenes re-runs only those
+        owed = _read_pass_field(plan_rows, pass_num, 'owed')
+        if owed and fix_location not in ('brief', 'intent', 'structural', 'registry'):
+            log(f'  Re-running for the scenes this pass still owes: '
+                f'{owed.replace(";", ", ")}')
+            targets = owed
+            effective_scope = owed.replace(';', ',')
+
         # Build config block for prompt builder
         pass_block = f'- name: {pass_name}\n    purpose: {pass_purpose}\n    scope: {pass_scope}'
         if targets:
@@ -2722,6 +2763,20 @@ Rules:
                     try:
                         written_scenes, skipped_scenes = _extract_scenes(
                             step_log, project_dir, python_lib)
+                        # Saved before the commit below, so the plan names
+                        # what's still owed in the same commit as the scenes.
+                        # A reply with no scene in it leaves owed as it was
+                        # (the unchanged-content check stops the pass)
+                        if written_scenes or skipped_scenes:
+                            owed_now = _owed_scenes(
+                                targets, written_scenes, skipped_scenes,
+                                cut_off=response.get('stop_reason') == 'max_tokens')
+                            _update_pass_field(plan_rows, pass_num, 'owed',
+                                               owed_now, csv_plan_file)
+                            for entry in _split_targets(owed_now):
+                                sid = entry.removeprefix('NEW:')
+                                if sid not in skipped_scenes:
+                                    skipped_scenes[sid] = 'the reply was cut off before it'
                     except ExtractError as e:
                         # No scene was written: the unchanged-content check below stops the pass
                         log(f'  API response received, but no scene could be read from it: {e}')
@@ -2819,9 +2874,11 @@ Rules:
         _git(project_dir, 'push', check=False)
 
         if skipped_scenes:
-            _fail_skipped_scenes(pass_name, skipped_scenes, step_log)
+            _fail_skipped_scenes(pass_name, skipped_scenes, step_log, owed_saved=True)
 
-        # Mark completed
+        # Mark completed (an interactive session writes the scenes itself,
+        # so nothing it was owed is tracked past it)
+        _update_pass_field(plan_rows, pass_num, 'owed', '', csv_plan_file)
         _update_pass_field(plan_rows, pass_num, 'status', 'completed', csv_plan_file)
 
         commit_short = _git(project_dir, 'rev-parse', '--short', 'HEAD', check=False).stdout.strip()
