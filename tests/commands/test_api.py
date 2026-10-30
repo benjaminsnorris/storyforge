@@ -774,3 +774,16 @@ class TestCalculateCostFromUsage:
         assert isinstance(cost, float)
         assert cost > 0
 
+
+
+def test_only_write_and_evaluate_keep_incomplete_batch_replies():
+    """T-1: every other batch caller parses the .txt as a complete answer,
+    so it must let download_batch_results drop refused and cut-off replies."""
+    import glob
+    import re
+    from storyforge import api
+    pkg = os.path.dirname(api.__file__)
+    keeping = sorted(os.path.basename(p) for p in glob.glob(os.path.join(pkg, '*.py'))
+                     if os.path.basename(p) != 'api.py'
+                     and re.search(r'keep_incomplete\s*=\s*True', open(p).read()))
+    assert keeping == ['cmd_evaluate.py', 'cmd_write.py']
