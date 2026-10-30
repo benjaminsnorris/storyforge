@@ -28,8 +28,11 @@ dropped silently. Holdout cases are excluded. Families:
   case's scene). Prose passes only.
 
 Hone passes are not replayed yet. A pre-pass project that predates
-``reference/scenes.csv`` cannot be run by current Storyforge at all, and is
-reported as unreplayable rather than migrated.
+``reference/scenes.csv`` but has ``scene-metadata.csv`` is migrated in its
+materialized copy the way Storyforge migrated the books
+(``migrate_scene_metadata``); one that keeps its scenes in YAML is reported as
+unreplayable. Scenes renamed after the introducing commit are found through
+E1's id-maps.
 
 Needs the book repos cloned under ``STORYFORGE_CORPUS_DIR`` (see ``evals/e1``).
 """
@@ -48,6 +51,12 @@ from dataclasses import dataclass, field
 import e1
 
 FAMILIES = ('redraft-from-brief', 'naturalness-upstream', 'revision-plan')
+
+ID_MAPS_DIR = os.path.join(e1.FIXTURES_DIR, 'id-maps')
+
+# storyforge-migrate-elaborate's scenes.csv columns
+MIGRATED_SCENE_COLUMNS = ['id', 'seq', 'title', 'part', 'pov', 'location', 'timeline_day',
+                          'time_of_day', 'duration', 'status', 'word_count', 'target_words']
 
 JUDGE_PROMPT = """You are checking one scene of a novel for one specific continuity error.
 
@@ -139,20 +148,86 @@ def materialize(repo_dir: str, commit: str, dest: str) -> str:
     return dest
 
 
+def old_ids(repo: str, slug: str) -> list[str]:
+    """The pre-rename scene ids E1's id-map records for ``slug``
+    (``scenes/s09-garrens-watch.md|garrens-ledger|...`` -> ``s09-garrens-watch``)."""
+    path = os.path.join(ID_MAPS_DIR, f'{repo}.csv')
+    if not os.path.isfile(path):
+        return []
+    with open(path, encoding='utf-8') as f:
+        rows = [line.rstrip('\n').split('|') for line in f.readlines()[1:] if line.strip()]
+    return [os.path.splitext(os.path.basename(r[0]))[0] for r in rows if len(r) > 1 and r[1] == slug]
+
+
+def _changed_scenes(repo_dir: str, commit: str) -> set[str]:
+    return {os.path.splitext(os.path.basename(p))[0]
+            for p in _git(repo_dir, 'show', '--name-only', '--format=', commit).split()
+            if p.startswith('scenes/') and p.endswith('.md')}
+
+
+def _span_ids(case: dict, span: dict) -> list[str]:
+    """Every id the span's scene may have had: its slug, its path's stem, and
+    the old ids E1's id-map gives the slug (scenes renamed after the commit)."""
+    return [span['scene'], os.path.splitext(os.path.basename(span['path']))[0],
+            *old_ids(case['repo'], span['scene'])]
+
+
 def target_scene(case: dict, repo_dir: str) -> str:
     """The scene the introducing pass rewrote that carries the error, as an id
     in the pre-pass project; '' when it cannot be determined."""
-    commit = case['introduced_by']['commit']
-    changed = {os.path.splitext(os.path.basename(p))[0]
-               for p in _git(repo_dir, 'show', '--name-only', '--format=', commit).split()
-               if p.startswith('scenes/') and p.endswith('.md')}
+    changed = _changed_scenes(repo_dir, case['introduced_by']['commit'])
     for span in case['contradicted']:
         if span.get('source', 'prose') != 'prose':
             continue
-        for candidate in (span['scene'], os.path.splitext(os.path.basename(span['path']))[0]):
+        for candidate in _span_ids(case, span):
             if candidate in changed:
                 return candidate
     return ''
+
+
+def _untouched_reason(case: dict, repo_dir: str) -> str:
+    """Why the introducing commit changed none of the contradicted scenes."""
+    changed = _changed_scenes(repo_dir, case['introduced_by']['commit'])
+    wrote = sorted({s['scene'] for s in case['established']
+                    if any(i in changed for i in _span_ids(case, s))})
+    if wrote:
+        # e.g. a pass that planted a promise (established) whose payoff
+        # (contradicted) it never wrote: replaying it cannot show the error
+        return (f'introducing commit wrote only the established side ({", ".join(wrote)}), '
+                'not a contradicted scene')
+    return 'introducing commit changed none of the contradicted scenes'
+
+
+def migrate_scene_metadata(project_dir: str) -> bool:
+    """Convert a pre-April-2026 ``reference/scene-metadata.csv`` into
+    ``reference/scenes.csv`` in the materialized copy (never the book repo).
+
+    A port of the scenes.csv step of Storyforge's own ``storyforge-migrate-
+    elaborate`` (removed in e22a58c4), which is how these books were moved to
+    the three-file model: the same columns are copied, and a missing status is
+    backfilled the same way. ``scene-intent.csv`` is left as it is, and no
+    ``scene-briefs.csv`` is created: those projects had no briefs, so a pass
+    that needs them is reported as unreplayable rather than run on empty ones.
+    Returns False when there is no ``scene-metadata.csv`` to convert."""
+    import csv
+    ref_dir = os.path.join(project_dir, 'reference')
+    old_path = os.path.join(ref_dir, 'scene-metadata.csv')
+    if not os.path.isfile(old_path):
+        return False
+    with open(old_path, newline='', encoding='utf-8') as f:
+        old_rows = list(csv.DictReader(f, delimiter='|'))
+    new_rows = []
+    for row in old_rows:
+        new_row = {c: row.get(c) or '' for c in MIGRATED_SCENE_COLUMNS}
+        if new_row['status'] not in ('drafted', 'revised', 'consolidated', 'polished'):
+            new_row['status'] = 'drafted' if new_row['word_count'] not in ('0', '') else 'mapped'
+        new_rows.append(new_row)
+    with open(os.path.join(ref_dir, 'scenes.csv'), 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=MIGRATED_SCENE_COLUMNS, delimiter='|',
+                                lineterminator='\n')
+        writer.writeheader()
+        writer.writerows(new_rows)
+    return True
 
 
 def _quotes(spans: list[dict]) -> str:
@@ -321,8 +396,16 @@ def prepare(case: dict, work_dir: str, root: str | None = None) -> tuple[str, st
     project = materialize(repo_dir, parent, os.path.join(work_dir, case['id']))
     scene_id = target_scene(case, repo_dir)
     if not scene_id:
-        raise LookupError('introducing commit changed none of the contradicted scenes')
-    if not os.path.isfile(os.path.join(project, 'reference', 'scenes.csv')):
+        raise LookupError(_untouched_reason(case, repo_dir))
+    if (not os.path.isfile(os.path.join(project, 'reference', 'scenes.csv'))
+            and not migrate_scene_metadata(project)):
+        if os.path.isfile(os.path.join(project, 'scenes', 'scene-index.yaml')):
+            # Storyforge's YAML-to-CSV migration went with the squash of #13,
+            # and revise refuses a YAML plan, so running these would mean
+            # inventing both conversions.
+            raise LookupError('pre-pass project keeps its scenes in scenes/scene-index.yaml '
+                              'and its plan in YAML; current revise refuses YAML plans and '
+                              'Storyforge has no migration for them')
         raise LookupError('pre-pass project predates reference/scenes.csv')
     if family(case) != 'revision-plan' and not os.path.isfile(
             os.path.join(project, 'reference', 'scene-briefs.csv')):

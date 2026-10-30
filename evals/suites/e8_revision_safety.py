@@ -12,7 +12,7 @@ MIN_REPLAYED = 15  # below this the rate is too noisy to gate on
 
 def run(ctx):
     sel = select(load_cases(), load_holdout())
-    notes = [f'excluded {len(ids)}: {reason}' for reason, ids in sorted(sel.excluded.items())]
+    notes = []
     by_code: dict[str, dict[str, float]] = {}
     by_family: dict[str, list[int]] = {}
     reintroduced = replayed = words = halted = 0
@@ -41,6 +41,9 @@ def run(ctx):
         fam[1] += hit
         notes.append(f'{case["id"]} ({scene_id}): {verdict["verdict"]}'
                      + (f' — "{verdict.get("evidence", "")[:120]}"' if hit else ''))
+    # after the loop, which adds the cases prepare() could not replay
+    notes[:0] = [f'excluded {len(ids)}: {reason} ({", ".join(ids)})'
+                 for reason, ids in sorted(sel.excluded.items())]
     unreplayable = sum(len(v) for k, v in sel.excluded.items() if k.startswith('unreplayable'))
     return SuiteOutput(
         metrics={'replayed': replayed, 'reintroduced': reintroduced,

@@ -169,3 +169,100 @@ def test_a_naturalness_fix_that_rewrites_nothing_is_pass_halted_with_why(monkeyp
                         lambda p, ids: pytest.fail('nothing to redraft'))
     with pytest.raises(e8.PassHalted, match='rewrote nothing for s: named Mallen'):
         e8.naturalness_upstream('/nowhere', 's')
+
+
+def test_the_suite_notes_name_the_cases_prepare_could_not_replay(monkeypatch, tmp_path):
+    import importlib
+    suite = importlib.import_module('suites.e8_revision_safety')
+    sel = e8.Selection(cases=[_tool_case(id='book-001')])
+    sel.exclude('holdout', 'book-002')
+    monkeypatch.setattr(suite, 'select', lambda cases, holdout: sel)
+
+    def unreplayable(case, work_dir):
+        raise LookupError('pre-pass project predates reference/scenes.csv')
+    monkeypatch.setattr(suite, 'prepare', unreplayable)
+    out = suite.run(type('Ctx', (), {'work_dir': str(tmp_path)})())
+    assert ('excluded 1: unreplayable: pre-pass project predates reference/scenes.csv (book-001)'
+            in out.notes)
+    assert 'excluded 1: holdout (book-002)' in out.notes
+    assert out.metrics['unreplayable'] == 1
+
+
+def _rename_book(tmp_path, *, established_only=False):
+    """A book whose pass rewrote s09-ledger.md, later renamed garrens-ledger.md."""
+    repo = tmp_path / 'corpus' / 'book'
+    (repo / 'scenes').mkdir(parents=True)
+    (repo / 'reference').mkdir()
+    git = ['git', '-C', str(repo), '-c', 'user.email=t@t', '-c', 'user.name=t']
+    subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+    (repo / 'scenes' / 's09-ledger.md').write_text('Still five.\n')
+    (repo / 'scenes' / 's02-letter.md').write_text('Five.\n')
+    (repo / 'reference' / 'scene-metadata.csv').write_text(
+        'id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words\n'
+        's09-ledger|1|Ledger|kael|hall|1|scene|3|night|revised|1188|\n'
+        's02-letter|2|Letter|kael|hall|1|scene|3|night||0|900\n')
+    subprocess.run(git + ['add', '-A'], check=True)
+    subprocess.run(git + ['commit', '-qm', 'before'], check=True)
+    changed = 's02-letter.md' if established_only else 's09-ledger.md'
+    (repo / 'scenes' / changed).write_text('Six.\n')
+    subprocess.run(git + ['commit', '-qam', 'quick-fixes'], check=True)
+    sha = subprocess.run(git + ['rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+    maps = tmp_path / 'id-maps'
+    maps.mkdir()
+    (maps / 'book.csv').write_text('old_path|slug|commit|method|notes\n'
+                                   'scenes/s09-ledger.md|garrens-ledger|abc|rename|\n'
+                                   'scenes/s02-letter.md|four-at-table|abc|rename|\n')
+    case = _tool_case(
+        repo='book', introduced_by={'kind': 'tool', 'pass': 'quick-fixes', 'commit': sha},
+        established=[{'scene': 'four-at-table', 'path': 'scenes/four-at-table.md',
+                      'commit': 'abc', 'quote': 'Five.'}],
+        contradicted=[{'scene': 'garrens-ledger', 'path': 'scenes/garrens-ledger.md',
+                       'commit': 'abc', 'quote': 'Six.'}])
+    return tmp_path / 'corpus', maps, case
+
+
+def test_a_scene_renamed_after_the_pass_is_found_through_the_id_map(tmp_path, monkeypatch):
+    root, maps, case = _rename_book(tmp_path)
+    monkeypatch.setattr(e8, 'ID_MAPS_DIR', str(maps))
+    monkeypatch.setattr(e8, 'plan_row', lambda p, name: {'name': name})
+    project, scene = e8.prepare(case, str(tmp_path / 'work'), str(root))
+    assert scene == 's09-ledger'  # the pre-pass id, which the replay runs on
+
+
+def test_a_pass_that_wrote_only_the_established_side_says_so(tmp_path, monkeypatch):
+    root, maps, case = _rename_book(tmp_path, established_only=True)
+    monkeypatch.setattr(e8, 'ID_MAPS_DIR', str(maps))
+    with pytest.raises(LookupError, match=r'wrote only the established side \(four-at-table\)'):
+        e8.prepare(case, str(tmp_path / 'work'), str(root))
+
+
+def test_scene_metadata_is_migrated_in_the_copy_as_storyforge_migrated_it(tmp_path, monkeypatch):
+    root, maps, case = _rename_book(tmp_path)
+    monkeypatch.setattr(e8, 'ID_MAPS_DIR', str(maps))
+    monkeypatch.setattr(e8, 'plan_row', lambda p, name: {'name': name})
+    project, _ = e8.prepare(case, str(tmp_path / 'work'), str(root))
+    with open(f'{project}/reference/scenes.csv') as f:
+        lines = f.read().splitlines()
+    assert lines == ['id|seq|title|part|pov|location|timeline_day|time_of_day|duration|status|'
+                     'word_count|target_words',
+                     's09-ledger|1|Ledger|1|kael||3|night||revised|1188|',
+                     's02-letter|2|Letter|1|kael||3|night||mapped|0|900']
+    assert not (root / 'book' / 'reference' / 'scenes.csv').exists()  # never the book repo
+    assert not (tmp_path / 'work' / case['id'] / 'reference' / 'scene-briefs.csv').exists()
+
+
+def test_a_yaml_project_is_unreplayable_with_the_reason(tmp_path, monkeypatch):
+    root, maps, case = _rename_book(tmp_path)
+    repo = root / 'book'
+    git = ['git', '-C', str(repo), '-c', 'user.email=t@t', '-c', 'user.name=t']
+    subprocess.run(git + ['rm', '-q', 'reference/scene-metadata.csv'], check=True)
+    (repo / 'scenes' / 'scene-index.yaml').write_text('- id: s09-ledger\n')
+    subprocess.run(git + ['add', '-A'], check=True)
+    subprocess.run(git + ['commit', '-qm', 'yaml'], check=True)
+    (repo / 'scenes' / 's09-ledger.md').write_text('Seven.\n')
+    subprocess.run(git + ['commit', '-qam', 'pass'], check=True)
+    sha = subprocess.run(git + ['rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+    case['introduced_by']['commit'] = sha
+    monkeypatch.setattr(e8, 'ID_MAPS_DIR', str(maps))
+    with pytest.raises(LookupError, match='refuses YAML plans'):
+        e8.prepare(case, str(tmp_path / 'work'), str(root))
