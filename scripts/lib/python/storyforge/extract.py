@@ -706,6 +706,26 @@ def resolve_knowledge_ids(registry: dict[str, dict[str, str]], value: str) -> st
     return normalize_aliases(alias_map, strip_placeholders(value))
 
 
+def resolve_scene_deps(value: str, scene_ids) -> tuple[str, list[str]]:
+    """Map each ``continuity_deps`` entry to a scene id in *scene_ids*.
+
+    A near miss (an extended, cut or one-word-changed id) lands on the scene
+    it means; an entry that matches no scene is dropped, since no later pass
+    can resolve it. Returns the ``;`` field and the dropped entries.
+    """
+    from .scenes import match_scene_id
+    kept, dropped = [], []
+    for dep in (d.strip() for d in strip_placeholders(value).split(';')):
+        if not dep:
+            continue
+        sid = match_scene_id(dep, scene_ids)
+        if sid is None:
+            dropped.append(dep)
+        elif sid not in kept:
+            kept.append(sid)
+    return ';'.join(kept), dropped
+
+
 # ============================================================================
 # Phase 3c: Physical state chain (sequential)
 # ============================================================================

@@ -654,3 +654,43 @@ class TestForcedPhase3PrunesRegistries:
         from storyforge import cmd_extract
         src = inspect.getsource(cmd_extract._run_phase_3)
         assert 'if force:\n        _prune_registries(' in src
+
+
+class TestContinuityDepsResolved:
+    """F-106: 3b's continuity_deps named scenes that don't exist (Plastic Age
+    "henley-indicts-college-conformity", Gatsby "tom-drives-accident"), and
+    nothing checked them until validate reported schema errors."""
+
+    IDS = ['tom-drives-toward-accident', 'henley-lectures-class-on-conformity',
+           'nick-meets-gatsby', 'nick-meets-gatsby-again']
+
+    def test_near_misses_land_on_their_scene(self):
+        from storyforge.scenes import match_scene_id
+        assert match_scene_id('tom-drives-accident', self.IDS) == 'tom-drives-toward-accident'
+        assert match_scene_id('tom-drives-toward-the-accident', self.IDS) == 'tom-drives-toward-accident'
+        assert match_scene_id('tom-rides-toward-accident', self.IDS) == 'tom-drives-toward-accident'
+        # A changed word in a three-word id is too much of it
+        assert match_scene_id('nick-greets-gatsby', self.IDS) is None
+        assert match_scene_id('henley-lectures-class-on-conformity-sharply', self.IDS) \
+            == 'henley-lectures-class-on-conformity'
+
+    def test_exact_wins_and_ambiguous_or_distant_match_nothing(self):
+        from storyforge.scenes import match_scene_id
+        assert match_scene_id('nick-meets-gatsby', self.IDS) == 'nick-meets-gatsby'
+        # Cut short at a hyphen from two scenes
+        assert match_scene_id('nick-meets', self.IDS) is None
+        assert match_scene_id('henley-indicts-college-conformity', self.IDS) is None
+
+    def test_resolve_keeps_order_and_reports_drops(self):
+        from storyforge.extract import resolve_scene_deps
+        value, dropped = resolve_scene_deps(
+            'tom-drives-accident;invented-scene-here;(none);tom-drives-toward-accident;'
+            'nick-meets-gatsby', self.IDS)
+        assert value == 'tom-drives-toward-accident;nick-meets-gatsby'
+        assert dropped == ['invented-scene-here']
+
+    def test_phase_3b_resolves_deps_before_writing(self):
+        import inspect
+        from storyforge import cmd_extract
+        src = inspect.getsource(cmd_extract._run_phase_3)
+        assert src.index('resolve_scene_deps(') < src.index('_update_chain_fields(scene_id, ref_dir, result, force,\n                             (\'knowledge_in\'')

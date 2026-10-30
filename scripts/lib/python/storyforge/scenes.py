@@ -117,6 +117,36 @@ def scene_id_slug(text: str, max_words: int = 5) -> str:
     return '-'.join(words)
 
 
+def _one_word_apart(a: list[str], b: list[str]) -> bool:
+    """True if word lists *a* and *b* differ by one word changed, added or
+    dropped. A changed word counts only in ids of four words or more: in three
+    it is a third of the id ("laura-visits-ladyship" is not "laura-visits-lady")."""
+    if len(a) == len(b):
+        return len(a) >= 4 and sum(x != y for x, y in zip(a, b)) == 1
+    short, long_ = sorted((a, b), key=len)
+    if len(long_) - len(short) != 1:
+        return False
+    return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
+
+
+def match_scene_id(reply_id: str, ids) -> str | None:
+    """The scene id in *ids* a model's *reply_id* means, or None.
+
+    An exact id wins. Otherwise the one id the reply extends or cuts short
+    at a hyphen, else the one id a word apart (changed, added or dropped):
+    Gatsby's "tom-drives-accident" for "tom-drives-toward-accident". A reply
+    that could mean two scenes matches neither.
+    """
+    if reply_id in ids:
+        return reply_id
+    prefix = [i for i in ids if reply_id.startswith(i + '-') or i.startswith(reply_id + '-')]
+    if prefix:
+        return prefix[0] if len(prefix) == 1 else None
+    words = reply_id.split('-')
+    near = [i for i in ids if _one_word_apart(words, i.split('-'))]
+    return near[0] if len(near) == 1 else None
+
+
 def unique_slug(base_slug: str, used: set[str]) -> str:
     """Return a unique slug, appending ``-2``, ``-3``, etc. if needed.
 
