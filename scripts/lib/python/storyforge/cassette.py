@@ -7,7 +7,11 @@ and body, and ``STORYFORGE_CASSETTE_MODE`` decides what happens:
 - ``replay`` (default): return the recorded response. A request with no
   recording raises ``CassetteMiss`` — a replay that quietly went live would
   spend money and stop being deterministic, which is the whole point lost.
-- ``record``: call the API and overwrite the recording.
+- ``record``: call the API and overwrite the recording — once per run. A
+  request this run already recorded (two cases sharing one scene send the
+  same extraction request) replays that recording: a second live call would
+  overwrite the first reply, and whatever was built from the first (a
+  judge prompt quoting it) could then never replay.
 - ``auto``: replay what exists, record what does not.
 
 Environment variables rather than a function argument because evals drive
@@ -76,6 +80,29 @@ def _existing_recording(cassette_dir: str, key: str) -> str:
     return gz if os.path.isfile(gz) else plain if os.path.isfile(plain) else ''
 
 
+# Keys this process recorded live; the log (below) covers subprocesses too
+_recorded_here: set[tuple[str, str]] = set()
+
+
+def _recorded_this_run(cassette_dir: str, key: str) -> bool:
+    """Whether this run already recorded ``key`` live: in this process, or
+    in any process sharing the run's ``STORYFORGE_CASSETTE_LOG``."""
+    if (cassette_dir, key) in _recorded_here:
+        return True
+    log_file = os.environ.get('STORYFORGE_CASSETTE_LOG', '')
+    if not log_file or not os.path.isfile(log_file):
+        return False
+    with open(log_file) as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if entry.get('key') == key and entry.get('replayed') is False:
+                return True
+    return False
+
+
 def _append_log(entry: dict) -> None:
     log_file = os.environ.get('STORYFORGE_CASSETTE_LOG', '')
     if log_file:
@@ -128,7 +155,7 @@ def request(method: str, path: str, body: dict | None, live) -> dict:
     target = recording_path(cassette_dir, key)
 
     existing = _existing_recording(cassette_dir, key)
-    if current != 'record' and existing:
+    if existing and (current != 'record' or _recorded_this_run(cassette_dir, key)):
         try:
             opener = gzip.open if existing.endswith('.gz') else open
             with opener(existing, 'rt', encoding='utf-8') as f:
@@ -155,7 +182,6 @@ def request(method: str, path: str, body: dict | None, live) -> dict:
         except OSError:
             pass
         raise
-    _log_call(key, body, response, replayed=False)
     os.makedirs(os.path.dirname(target), exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), suffix='.tmp')
     with os.fdopen(fd, 'wb') as raw, gzip.GzipFile(fileobj=raw, mode='wb', mtime=0) as f:
@@ -165,4 +191,8 @@ def request(method: str, path: str, body: dict | None, live) -> dict:
     plain = target[:-len('.gz')]
     if os.path.isfile(plain):
         os.remove(plain)  # a re-record supersedes the uncompressed original
+    # Logged once the recording is in place: a later identical request in
+    # this run replays it (see _recorded_this_run), never an older one
+    _log_call(key, body, response, replayed=False)
+    _recorded_here.add((cassette_dir, key))
     return response
