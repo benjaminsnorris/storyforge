@@ -726,6 +726,8 @@ class TestMainBatch:
         out = capsys.readouterr().out
         assert '[act1-sc01] FAILED: the reply was cut off at max_tokens' in out
         assert 'no scene scores for act1-sc01' in out
+        scores = os.path.join(project_dir, 'working', 'scores', 'latest', 'scene-scores.csv')
+        assert not os.path.isfile(scores) or 'act1-sc01|' not in open(scores).read()
 
     def test_failed_item_is_costed_and_named_in_the_summary(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):

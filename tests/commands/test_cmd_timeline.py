@@ -461,3 +461,17 @@ class TestCuesNotRead:
         main(['--check', '--scenes', 'act1-sc01'])
         assert 'no fresh cues for 1 scene(s), so they were checked against their stored cues' \
             in capsys.readouterr().out
+
+
+    def test_phase1_only_names_scenes_without_fresh_cues(self, mock_api, mock_git, mock_costs,
+                                                         project_dir, monkeypatch, capsys):
+        """--phase1-only exited before the summary that names them."""
+        monkeypatch.setattr('storyforge.cmd_timeline.detect_project_root', lambda: project_dir)
+        _patch_interactive(monkeypatch)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        _ensure_scene_files(project_dir)
+        _patch_pass(monkeypatch)  # reads no cues
+        with pytest.raises(SystemExit):
+            main(['--phase1-only', '--direct', '--scenes', 'act1-sc01'])
+        assert 'no fresh cues for 1 scene(s); they keep their earlier cues, if any: act1-sc01' \
+            in capsys.readouterr().out
