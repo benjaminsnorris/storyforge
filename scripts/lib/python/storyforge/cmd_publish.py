@@ -16,8 +16,7 @@ so a manifest declaring assets without one would clear the live cover.
 Usage:
     storyforge publish                    # Publish content, cover, and art
     storyforge publish --no-cover         # Omit the cover asset (no assets only)
-    storyforge publish --dashboard        # Include dashboard (default: on)
-    storyforge publish --no-dashboard     # Skip dashboard
+    storyforge publish --no-dashboard     # Omit the dashboard data
     storyforge publish --annotations      # Fetch and display reader annotations
     storyforge publish --dry-run          # Report what would publish and upload
 """
@@ -25,7 +24,6 @@ Usage:
 import argparse
 import json
 import os
-import subprocess
 import sys
 
 from storyforge.common import (
@@ -51,52 +49,17 @@ def parse_args(argv):
                              'a cover is refused because it would clear the '
                              "live book's cover image")
     parser.add_argument('--dashboard', action='store_true', default=True,
-                        help='Include the dashboard HTML (default: on)')
+                        help='Include the dashboard data, which Bookshelf renders '
+                             '(default: on)')
     parser.add_argument('--no-dashboard', action='store_true',
-                        help='Skip dashboard generation and inclusion')
+                        help='Omit the dashboard data')
     parser.add_argument('--annotations', action='store_true',
                         help='Fetch and display reader annotations after publishing')
     parser.add_argument('--dry-run', action='store_true',
                         help='Generate manifest and show what would be published')
-    parser.add_argument('--skip-visualize', action='store_true',
-                        help='Skip dashboard regeneration (use existing working/dashboard.html)')
+    # Deprecated no-op: publish no longer renders a dashboard to skip (#371)
+    parser.add_argument('--skip-visualize', action='store_true', help=argparse.SUPPRESS)
     return parser.parse_args(argv)
-
-
-# ============================================================================
-# Dashboard regeneration
-# ============================================================================
-
-def _regenerate_dashboard(project_dir: str) -> bool:
-    """Run storyforge visualize to regenerate dashboard.html.
-
-    Returns True if the dashboard was successfully generated.
-    """
-    log('Regenerating dashboard...')
-    try:
-        # Find the storyforge runner
-        runner = os.path.join(project_dir, 'storyforge')
-        if not os.path.isfile(runner):
-            # Fall back to module invocation
-            from storyforge.common import get_plugin_dir
-            runner = os.path.join(get_plugin_dir(), 'storyforge')
-
-        subprocess.run(
-            [runner, 'visualize'],
-            cwd=project_dir,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        dashboard_path = os.path.join(project_dir, 'working', 'dashboard.html')
-        if os.path.isfile(dashboard_path):
-            log('Dashboard regenerated successfully.')
-            return True
-        log('Warning: visualize ran but dashboard.html not found.')
-        return False
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        log(f'Warning: dashboard regeneration failed: {e}')
-        return False
 
 
 # ============================================================================
@@ -114,11 +77,11 @@ def main(argv=None):
         log('Note: --cover is a no-op — the cover is always published as an '
             'asset now. Pass --no-cover to omit it.')
 
-    # Step 1: Regenerate dashboard if needed
-    if include_dashboard and not args.skip_visualize and not args.dry_run:
-        _regenerate_dashboard(project_dir)
+    if args.skip_visualize:
+        log('Note: --skip-visualize is a no-op — publish sends the dashboard as '
+            'data and no longer renders it.')
 
-    # Step 2: Generate manifest
+    # Generate manifest
     log('Generating publish manifest...')
     from storyforge.assembly import generate_publish_manifest
     try:
@@ -141,8 +104,10 @@ def main(argv=None):
     )
     log(f'Manifest: {len(manifest["chapters"])} chapters, '
         f'{total_scenes} scenes, {total_words:,} words')
-    if manifest.get('dashboard_html'):
-        log(f'Dashboard: included ({len(manifest["dashboard_html"]):,} bytes)')
+    if manifest.get('dashboard_data'):
+        size = len(json.dumps(manifest['dashboard_data'], ensure_ascii=False).encode())
+        log(f'Dashboard data: included (schema version '
+            f'{manifest["dashboard_data"].get("schema_version")}, {size:,} bytes)')
 
     # Second line of defence behind generate_publish_manifest's own check.
     #
