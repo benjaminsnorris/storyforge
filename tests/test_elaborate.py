@@ -449,6 +449,45 @@ class TestTimelineOrderGroupsSteppingBack:
         assert listed == ['b', 'c', 'd', 'f']
 
 
+    def test_reaching_back_is_left_out_when_the_earliest_day_ends_the_run(self):
+        first = self._scenes([('p', '30', 'x', ''), ('a', '5', 'y', ''),
+                              ('b', '9', 'y', ''), ('c', '12', 'y', '')])
+        last = self._scenes([('p', '30', 'x', ''), ('a', '12', 'y', ''),
+                             ('b', '9', 'y', ''), ('c', '5', 'y', '')])
+        middle = self._scenes([('p', '30', 'x', ''), ('a', '12', 'y', ''),
+                               ('b', '5', 'y', ''), ('c', '9', 'y', '')])
+        assert 'reaching back' not in self._failures(first)[0]['message']
+        assert 'reaching back' not in self._failures(last)[0]['message']
+        assert self._failures(middle)[0]['message'].endswith('; reaching back to day 5')
+
+    def test_cut_and_merged_scenes_still_count_in_the_order(self):
+        """As the docstring says, unlike assess_flashbacks: a cut scene with a
+        later day still moves the present, and so ends a run."""
+        scenes = self._scenes([('p', '30', 'x', ''), ('a', '10', 'y', ''),
+                               ('gone', '40', 'x', ''), ('b', '11', 'y', '')])
+        scenes['gone']['status'] = 'cut'
+        failures = self._failures(scenes)
+        assert [f['scenes'] for f in failures] == [['a'], ['b']]
+        assert 'reached in gone' in failures[1]['message']
+
+    def test_finding_scene_list_names_every_scene_of_a_longer_run(self):
+        from storyforge.elaborate import finding_scene_list
+        assert finding_scene_list({'scenes': ['a', 'b', 'c']}) == 'scenes: a, b, c'
+        assert finding_scene_list({'scenes': ['a', 'b']}) == ''   # the message names both
+        assert finding_scene_list({'scene_id': 'a'}) == ''
+
+    def test_validate_text_report_lists_the_scenes_between(self, capsys):
+        from storyforge.cmd_validate import _print_human_readable
+        scenes = self._scenes([('p', '30', 'x', ''), ('a', '10', 'y', ''),
+                               ('mid', '11', 'y', ''), ('b', '12', 'y', '')])
+        failures = self._failures(scenes)
+        _print_human_readable({'structural': {'passed': False, 'checks': failures,
+                                              'failures': failures},
+                               'schema': None})
+        out = capsys.readouterr().out
+        assert 'scenes: a, mid, b' in out
+
+
 class TestComputeDraftingWaves:
     def test_waves(self, fixture_dir):
         from storyforge.elaborate import compute_drafting_waves

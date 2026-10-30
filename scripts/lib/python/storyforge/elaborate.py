@@ -506,6 +506,16 @@ _REQUIRED_BY_STATUS = {
 }
 
 
+def finding_scene_list(finding: dict) -> str:
+    """``scenes: a, b, c`` for a finding over more than two scenes, else ''.
+
+    A grouped finding (a timeline-order run) names only its first and last
+    scene in its message; plain-text reports print this line under it so
+    the scenes between are not lost."""
+    scenes = finding.get('scenes') or []
+    return f"scenes: {', '.join(scenes)}" if len(scenes) > 2 else ''
+
+
 def _check(category: str, check: str, passed: bool, message: str,
            severity: str = 'blocking', scene_id: str = '',
            fields=None) -> dict:
@@ -643,7 +653,10 @@ def _validate_timeline(scenes_map, checks):
     assess_flashbacks splits passages: frame and vision scenes are skipped
     without ending it, and a scene with no day ends it. (Unlike
     assess_flashbacks, cut and merged scenes are not left out here.) A run
-    is a crosscut when any of its scenes leaves the present's POV. The
+    is a crosscut when any of its scenes leaves the present's POV, so a run
+    can be labelled differently here and in assess_flashbacks, which labels
+    a passage by its first scene alone: a run that opens in the present's
+    POV and then crosscuts is a flashback there and a crosscut here. The
     finding names the run's first and last scene and its count, and lists
     every scene in ``scenes``, so grouping loses nothing.
     """
