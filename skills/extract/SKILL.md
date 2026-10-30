@@ -41,7 +41,7 @@ When extracting data interactively, use canonical IDs from these registries for 
 Based on project state:
 
 - **No scene files** → Author needs to split their manuscript first. Route to `/storyforge:scenes` (setup mode) or help them split interactively.
-- **Scene files exist, no CSV data or old metadata CSV** → Full extraction needed (all 4 phases). The extraction will read the prose and build all three CSVs from scratch.
+- **Scene files exist, no CSV data or old metadata CSV** → Full extraction needed (all phases). The extraction will read the prose and build all three CSVs from scratch.
 - **Scene files + partial elaboration data** → Targeted extraction — only run phases for missing data.
 
 ## Step 3: Execute Extraction
@@ -83,6 +83,8 @@ Work through each phase in this conversation:
 - 3b (sequential): knowledge_in, knowledge_out, continuity_deps — must process in scene order
 
 Write to `reference/scene-briefs.csv`.
+
+**Phase 5: Describe** (`./storyforge extract --phase 5`; also the last step of a full run). Describes the book as written, from what phases 0-4 found: `spine.csv` and `architecture.csv` (the irreducible events and the anchor scenes that carry them, chosen from existing scenes), `themes.csv` and `motif-taxonomy.csv`, plus blank scene summaries, `architecture_scene`, `theme_threads` and a placeholder `project.genre`. More of the upper layers (story summary, bibles, voice guide) follow in later steps (#440). It never replaces a file the author wrote: a step whose files are the author's is skipped and says so, and `--force` regenerates only files phase 5 wrote that nobody has edited since (`working/extraction-provenance.csv`). About $0.20 on a 40-scene book. Present what it wrote as a description to check, not a plan to follow: if the book's structure fails a floor check, that is a finding about the book or the rubric.
 
 After each phase, commit: `git add -A && git commit -m "Extract: Phase N — [description]" && git push`
 
