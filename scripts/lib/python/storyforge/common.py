@@ -857,6 +857,8 @@ _TASK_TIER = {
     'extraction': 'haiku',
     'synthesis': 'opus',
     'review': 'sonnet',
+    # the gate's checker (storyforge.checker): plan §3.2 asks for the strongest
+    'checking': 'opus',
     # creative: synthesis-style work that needs strong judgment but isn't
     # full-scene drafting (style guides, summary proposals, prose adaptation).
     'creative': 'opus',
