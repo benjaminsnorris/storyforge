@@ -256,6 +256,12 @@ def _check_refusal(response) -> None:
         raise RefusalError(response)
 
 
+def _output_config(schema: dict) -> dict:
+    """The request's ``output_config`` for a structured (JSON schema) reply,
+    shared by direct and batch requests so they can't drift apart."""
+    return {'format': {'type': 'json_schema', 'schema': schema}}
+
+
 def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
           system: list[dict] | None, output_schema: dict | None = None,
           fallback: bool = False) -> dict:
@@ -286,7 +292,7 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
     if system:
         body['system'] = system
     if output_schema:
-        body['output_config'] = {'format': {'type': 'json_schema', 'schema': output_schema}}
+        body['output_config'] = _output_config(output_schema)
     if fallback:
         body['fallbacks'] = 'default'
     heartbeat = _Heartbeat(label or model)
@@ -497,7 +503,7 @@ def build_batch_request(custom_id: str, prompt: str, model: str,
     if system:
         params['system'] = system
     if output_schema:
-        params['output_config'] = {'format': {'type': 'json_schema', 'schema': output_schema}}
+        params['output_config'] = _output_config(output_schema)
     return {'custom_id': custom_id, 'params': params}
 
 
