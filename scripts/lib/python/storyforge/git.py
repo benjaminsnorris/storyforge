@@ -725,7 +725,7 @@ Long files are excerpted: the start and end are shown and the middle is marked a
 
 ## Fixable Items
 
-List specific items that can be fixed automatically without author input.
+List specific mechanical fixes (typos, wrong ids, broken references) that need no author judgment. They are reported to the author, not applied.
 Format each as a checkbox:
 - [ ] {{specific file}}: {{what needs to change}}
 
@@ -740,7 +740,7 @@ If nothing is auto-fixable, write: "None — all concerns require author judgmen
 def run_review_phase(review_type: str, project_dir: str, pr_number: str = '') -> None:
     """Run the review phase at the end of an autonomous process.
 
-    Sequence: label swap -> Claude review -> cleanup -> recommend -> label swap
+    Sequence: label swap -> Claude review -> report fixable items -> recommend -> label swap
     """
     from storyforge.common import (
         get_current_cycle, update_cycle_field, get_cycle_plan_file,
