@@ -80,7 +80,7 @@ Read the `phase` field from `storyforge.yaml`. If it is one of: `spine`, `archit
   above: once the section's floor check passes, recommend running
   `storyforge score --story-power` to validate narrative design before the spine.
 - Route to the `elaborate` skill for most requests (scene work, drafting prep, "what's next", structural planning)
-- The `develop`, `voice`, `scenes`, and `plan-revision` skills are not used during elaboration — their work is integrated into the elaborate pipeline
+- Character, world, voice and scene design and revision planning have no separate skills: that work is in the elaborate pipeline (and revision planning in the `revise` skill)
 - Skills that still apply normally: `title`, `cover`, `press-kit`, `produce`, `score`, `publish`
 - If the author asks to start drafting and the phase is `briefs` (briefs are complete), check that `reference/scene-briefs.csv` has data and validation passes, then provide the write command (which will automatically detect briefs and use the brief-aware prompt builder)
 - If the author asks to evaluate or polish after drafting, those scripts work normally
@@ -197,22 +197,22 @@ Invoke the corresponding skill (`title`, `cover`, `press-kit`).
 
 If the project's coaching level is `coach` or `strict`, remind the author that revision will produce editorial notes or checklists instead of editing scene files. They can override with `--coaching full` for a specific run.
 
-If the revision plan doesn't exist, explain that a revision plan is needed first and offer to invoke `plan-revision`.
+If the revision plan doesn't exist, explain that a revision plan is needed first and offer to invoke the `revise` skill, which plans revision from evaluation findings or scores.
 
 **"Score" / "Score my scenes" / "Run scoring":**
 Invoke the `score` skill.
 
 **"Set up scenes" / "Split my manuscript" / "Rename scene files" / "Enrich metadata":**
-Invoke the `scenes` skill — it handles setup (splitting manuscripts/chapters into scenes, renaming files to slugs) and enrichment (populating missing metadata).
+Provide the commands: `storyforge scenes-setup` splits manuscripts or chapters into scenes and renames files to slugs; `storyforge enrich` fills missing scene metadata. For an existing manuscript that needs its full structural data (scenes, intent, briefs), invoke the `extract` skill.
 
 **"Show me my book" / "Visualize" / "Dashboard":**
-Bookshelf renders the manuscript dashboard from the data `publish` sends: invoke the `publish` skill, then open the book's dashboard in Bookshelf. If metadata is sparse, suggest running enrichment through the `scenes` skill first.
+Bookshelf renders the manuscript dashboard from the data `publish` sends: invoke the `publish` skill, then open the book's dashboard in Bookshelf. If metadata is sparse, suggest `storyforge enrich` first.
 
 **"What should I do next?":**
-Invoke the `recommend` skill. Note: recommend should be aware that if scoring was recently run, publishing (`./storyforge publish`) refreshes the dashboard in Bookshelf. Similarly, if scene metadata is sparse, enrichment via the `scenes` skill is high value.
+Use the `storyforge status --json` verdict from Step 1 and recommend its `next.command`. Also: if scoring was recently run, publishing (`./storyforge publish`) refreshes the dashboard in Bookshelf; if scene metadata is sparse, `storyforge enrich` is high value.
 
 **"Review revision" / "How did the revision go?" / "What changed?":**
-Invoke the `review` skill. This is the natural next step after a revision cycle completes.
+Invoke the `revise` skill, which reviews a finished revision cycle's results. This is the natural next step after a revision cycle completes.
 
 **"Develop the title" / "Refine my title" / "What should I call this book?":**
 Invoke the `title` skill.
@@ -324,7 +324,7 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 |---|---|
 | `storyforge write` | Scene data (`reference/scenes.csv`) with at least one scene, `reference/voice-guide.md` |
 | `storyforge evaluate` | At least some scene files (`.md`) in `scenes/` |
-| `plan-revision` | Evaluation results in `working/evaluations/` |
+| Revision planning (`revise` skill) | Evaluation results in `working/evaluations/`, or scores |
 | `storyforge revise` | Revision plan for the current pipeline cycle (from `working/pipeline.csv`) |
 | `storyforge assemble` | `reference/chapter-map.csv` with at least one chapter, scene files for referenced scenes |
 | `storyforge review` | Must be on a feature branch (ideally with a PR) |

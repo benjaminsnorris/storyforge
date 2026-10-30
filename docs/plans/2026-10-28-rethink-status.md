@@ -193,7 +193,7 @@ Start by reading this doc, `CLAUDE.md` and `docs/agent-reference.md`.
    - ~~`hone.hone_briefs` should use the brief-fix name check.~~ Done in v1.89.4 (#393), for hone's intent rewrites too; the check is `storyforge.brief_names`. Other writers of `scene-briefs.csv` / `scene-intent.csv` (elaborate, extract, enrich) are not checked yet.
    - Re-running a revise pass that stopped over skipped scenes redrafts every target, not only the skipped ones (#394 review): needs per-scene pass state.
    - Score's `latest` symlink moves to an incomplete cycle (#394 review): whether it should stay on the last complete one is a design call.
-   - `skills/forge` routes to `scenes` and `recommend` skills that don't exist.
+   - ~~`skills/forge` routes to `scenes` and `recommend` skills that don't exist.~~ Fixed in v1.90.5, with `review` and `plan-revision`; `tests/test_skill_routes.py` checks every skill a SKILL.md names.
    - `dashboard_data` should fold into the Phase 2 `export` bundle.
 
 Then **Phase 2** (plan §5): ledger, `commitments.csv`, per-character state, `export`. **Start with `docs/plans/2026-10-30-ledger-migration-proposal.md`.** The plan's `commitments.csv` columns can't hold everything `knowledge.csv` and `physical-states.csv` carry, so the migration needs seven decisions from Ben before any code changes author data. That doc surveys the seven book repos and proposes a mapping.
