@@ -80,20 +80,27 @@ def _existing_recording(cassette_dir: str, key: str) -> str:
     return gz if os.path.isfile(gz) else plain if os.path.isfile(plain) else ''
 
 
-# Keys this process recorded live; the log (below) covers subprocesses too
-_recorded_here: set[tuple[str, str]] = set()
+# Keys this process recorded live, per run (a run is its log file); the log
+# itself (below) covers subprocesses too
+_recorded_here: set[tuple[str, str, str]] = set()
+
+
+def _run_id(cassette_dir: str, key: str) -> tuple[str, str, str]:
+    return (os.environ.get('STORYFORGE_CASSETTE_LOG', ''), cassette_dir, key)
 
 
 def _recorded_this_run(cassette_dir: str, key: str) -> bool:
     """Whether this run already recorded ``key`` live: in this process, or
     in any process sharing the run's ``STORYFORGE_CASSETTE_LOG``."""
-    if (cassette_dir, key) in _recorded_here:
+    if _run_id(cassette_dir, key) in _recorded_here:
         return True
     log_file = os.environ.get('STORYFORGE_CASSETTE_LOG', '')
     if not log_file or not os.path.isfile(log_file):
         return False
     with open(log_file) as f:
         for line in f:
+            if key not in line:
+                continue
             try:
                 entry = json.loads(line)
             except ValueError:
@@ -182,17 +189,23 @@ def request(method: str, path: str, body: dict | None, live) -> dict:
         except OSError:
             pass
         raise
-    os.makedirs(os.path.dirname(target), exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), suffix='.tmp')
-    with os.fdopen(fd, 'wb') as raw, gzip.GzipFile(fileobj=raw, mode='wb', mtime=0) as f:
-        f.write(json.dumps({'request': {'method': method, 'path': path, 'body': body},
-                            'response': response}, indent=1).encode('utf-8'))
-    os.replace(tmp, target)
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), suffix='.tmp')
+        with os.fdopen(fd, 'wb') as raw, gzip.GzipFile(fileobj=raw, mode='wb', mtime=0) as f:
+            f.write(json.dumps({'request': {'method': method, 'path': path, 'body': body},
+                                'response': response}, indent=1).encode('utf-8'))
+        os.replace(tmp, target)
+    except OSError as e:
+        # The call was paid for: log it, and the failure, where the harness
+        # sees both (command code may swallow the raise)
+        _log_call(key, body, response, replayed=False)
+        raise _fail(CassetteError(f'Could not save the recording {target}: {e}')) from e
     plain = target[:-len('.gz')]
     if os.path.isfile(plain):
         os.remove(plain)  # a re-record supersedes the uncompressed original
     # Logged once the recording is in place: a later identical request in
     # this run replays it (see _recorded_this_run), never an older one
     _log_call(key, body, response, replayed=False)
-    _recorded_here.add((cassette_dir, key))
+    _recorded_here.add(_run_id(cassette_dir, key))
     return response

@@ -83,6 +83,37 @@ def test_record_replays_a_request_this_run_already_recorded(tape, monkeypatch, l
     assert [e['replayed'] for e in _log(tape)] == [False, True]
 
 
+def test_a_second_run_in_the_same_process_records_again(tape, monkeypatch, live_calls):
+    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'record')
+    api._api_request('messages', BODY, method='POST')
+    monkeypatch.setenv('STORYFORGE_CASSETTE_LOG', str(tape / 'log2.jsonl'))  # the next run
+    api._api_request('messages', BODY, method='POST')
+    assert len(live_calls) == 2
+
+
+def test_a_replayed_log_entry_is_not_a_recording(tape, monkeypatch, live_calls):
+    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'auto')
+    api._api_request('messages', BODY, method='POST')     # recorded
+    monkeypatch.setattr(cassette, '_recorded_here', set())
+    monkeypatch.setenv('STORYFORGE_CASSETTE_LOG', str(tape / 'log2.jsonl'))
+    api._api_request('messages', BODY, method='POST')     # replayed in the new run
+    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'record')
+    api._api_request('messages', BODY, method='POST')     # still goes live
+    assert len(live_calls) == 2
+
+
+def test_a_recording_that_cant_be_saved_is_logged_and_raised(tape, monkeypatch, live_calls):
+    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'record')
+    def fail(*a, **k):
+        raise OSError('disk full')
+    monkeypatch.setattr(cassette.tempfile, 'mkstemp', fail)
+    with pytest.raises(cassette.CassetteError, match='disk full'):
+        api._api_request('messages', BODY, method='POST')
+    log = _log(tape)
+    assert log[0]['replayed'] is False and log[0]['usage'] == RESPONSE['usage']
+    assert 'disk full' in log[1]['error']
+
+
 def test_a_subprocess_sharing_the_runs_log_replays_it_too(tape, monkeypatch, live_calls):
     monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'record')
     api._api_request('messages', BODY, method='POST')
