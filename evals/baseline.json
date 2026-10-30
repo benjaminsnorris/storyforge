@@ -1,15 +1,15 @@
 {
   "cost": {
-    "calls": 2255,
-    "input_tokens": 9173511,
-    "output_tokens": 2533904,
-    "replayed_calls": 2255,
+    "calls": 2265,
+    "input_tokens": 9369662,
+    "output_tokens": 2559633,
+    "replayed_calls": 2265,
     "unpriced_calls": 0,
-    "usd_if_live": 22.7228,
+    "usd_if_live": 23.31,
     "usd_spent": 0.0
   },
-  "git_dirty": true,
-  "git_sha": "215e86700691f50a0c2652883c9a59586ffbb0f8",
+  "git_dirty": false,
+  "git_sha": "43d6f5e44d7de3a70286190adce61cdb29042626",
   "mode": "replay",
   "results": [
     {
@@ -46,7 +46,7 @@
         "usd_spent": 0.0
       },
       "description": "E1 gold-set health: format, 100+ prose cases, 20% holdout",
-      "duration_s": 0.01,
+      "duration_s": 0.02,
       "error": null,
       "gates": [
         {
@@ -82,7 +82,7 @@
       },
       "mode": "replay",
       "notes": [],
-      "started_at": "2026-10-30T17:02:17+00:00",
+      "started_at": "2026-10-30T19:01:23+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -140,7 +140,7 @@
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 5.7,
+      "duration_s": 9.22,
       "error": null,
       "gates": [
         {
@@ -204,7 +204,7 @@
         "missed 37 of 37: e2-carol-001, e2-carol-002, e2-carol-003, e2-carol-004, e2-carol-005, e2-carol-006, e2-carol-007, e2-carol-008, e2-carol-009, e2-carol-010, e2-carol-011, e2-carol-012, e2-carol-013, e2-carol-014, e2-carol-015, e2-carol-016, e2-carol-017, e2-carol-018, e2-carol-019, e2-carol-020, e2-carol-021, e2-carol-022, e2-carol-023, e2-carol-024, e2-carol-025, e2-carol-026, e2-carol-027, e2-carol-028, e2-carol-029, e2-carol-030, e2-carol-031, e2-carol-032, e2-carol-033, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
-      "started_at": "2026-10-30T17:02:17+00:00",
+      "started_at": "2026-10-30T19:01:23+00:00",
       "status": "fail",
       "suite": "e2-carol"
     },
@@ -252,7 +252,7 @@
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 142.94,
+      "duration_s": 245.91,
       "error": null,
       "gates": [
         {
@@ -316,7 +316,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-30T17:02:23+00:00",
+      "started_at": "2026-10-30T19:01:32+00:00",
       "status": "fail",
       "suite": "e2-corpus-drift"
     },
@@ -366,7 +366,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 141.85,
+      "duration_s": 143.22,
       "error": null,
       "gates": [
         {
@@ -430,7 +430,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-30T17:04:46+00:00",
+      "started_at": "2026-10-30T19:05:38+00:00",
       "status": "fail",
       "suite": "e2-corpus-validate"
     },
@@ -471,7 +471,7 @@
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 69.51,
+      "duration_s": 54.4,
       "error": null,
       "gates": [
         {
@@ -552,17 +552,17 @@
         "thornwall-029 (journals-of-the-east-wing): captured",
         "thornwall-030 (ivra-visits-sera): captured"
       ],
-      "started_at": "2026-10-30T17:07:08+00:00",
+      "started_at": "2026-10-30T19:08:01+00:00",
       "status": "pass",
       "suite": "e3-extraction"
     },
     {
       "by_code": {
         "KNO": {
-          "contradictions": 7
+          "contradictions": 2
         },
         "PHY": {
-          "contradictions": 18
+          "contradictions": 15
         },
         "PRM": {
           "broken_promises": 6
@@ -571,20 +571,23 @@
           "contradictions": 4
         },
         "TIM": {
-          "contradictions": 6
+          "contradictions": 8
+        },
+        "WLD": {
+          "contradictions": 2
         }
       },
       "cost": {
         "calls": 69,
-        "input_tokens": 695135,
-        "output_tokens": 124053,
+        "input_tokens": 705334,
+        "output_tokens": 122955,
         "replayed_calls": 69,
         "unpriced_calls": 0,
-        "usd_if_live": 5.2453,
+        "usd_if_live": 5.286,
         "usd_spent": 0.0
       },
       "description": "Draft shared-dark Act 1 with write; CP10k, BPS, length, voice",
-      "duration_s": 6.49,
+      "duration_s": 6.8,
       "error": null,
       "gates": [
         {
@@ -599,78 +602,75 @@
         "bps": 0.261,
         "broken_promises": 6,
         "checker_flags": 1,
-        "contradictions": 35,
-        "cp10k": 16.072,
+        "contradictions": 31,
+        "cp10k": 14.236,
         "cp10k_checker": 0.459,
-        "length_drift": 0.046,
+        "length_drift": 0.056,
         "refused": 0,
         "scenes": 23,
         "target_words": 21370,
-        "voi": 4.804,
+        "voi": 4.728,
         "voi_author": 4.652,
-        "words": 21777
+        "words": 21776
       },
       "mode": "replay",
       "notes": [
-        "claires-cold: 886 words, 0 contradiction(s), 1 broken promise(s)\n    PRM physical_state_out: The scene mentions only sand-gritted concrete under her bare feet; it never establishes any abrasions, let alone worsening ones.",
-        "harmons-hands: 727 words, 1 contradiction(s), 0 broken promise(s)\n    PHY: This scene has Harmon take the radial pulse with two fingers, but the earlier scene establishes, as a pointed detail, that he takes it with his thumb, an amateu",
-        "waking-maren: 993 words, 1 contradiction(s), 0 broken promise(s)\n    PHY: Maren feels the captive's left wrist as worse than the right, but the earlier scene establishes the right wrist as the more damaged one, split and bloodied at t",
-        "waking-hank: 975 words, 0 contradiction(s), 0 broken promise(s)",
-        "the-school: 979 words, 0 contradiction(s), 0 broken promise(s)",
-        "advocate: 1051 words, 0 contradiction(s), 0 broken promise(s)",
-        "maren-runs: 891 words, 1 contradiction(s), 0 broken promise(s)\n    PHY: This scene says Maren pressed her knuckles into the bathroom tile until the tremor stopped, but the earlier scene says the tremor kept going while she pressed.",
-        "engineer: 896 words, 1 contradiction(s), 0 broken promise(s)\n    KNO: Hank places the remembered tremor of Harmon's hands at a door, but in the dream the hand jumped while Harmon was checking the woman's pulse at her wrist beside ",
-        "name-surfaces: 803 words, 2 contradiction(s), 1 broken promise(s)\n    KNO: Hank's close-third narration names the captor 'Harmon' even though no earlier scene has Hank learn the man's name; he has only ever known him as 'the man', and \n    PHY: The page Hank rereads on the pad says the hasp and padlock are one exterior fitting, and he recalls the weight of a keyed brass lock. His earlier notes put a co\n    PRM physical_state_out: The scene never establishes that Hank has gone without sleep or is exhausted; it notes only the hour and that the pad was left before dawn, without conveying a ",
-        "voicemail: 933 words, 3 contradiction(s), 1 broken promise(s)\n    REL: Marie Renaud is presented as Claire's mother, but the reference material establishes her as Claire's sister.\n    PHY: Maren recalls waking against a motel mattress at 2:47 that morning, but she is living at and waking in her Portland apartment above the bookstore, not a motel.\n    TIM: The latest voicemail, already reporting Claire missing, is eleven days old, which means Claire has been missing longer than the nine days of captivity establish\n    PRM outcome: The scene resolves the goal affirmatively, with Maren concluding \"So it was real\" after matching the hinge sound, rather than leaving the corroboration unachiev",
-        "missing-persons: 1268 words, 4 contradiction(s), 0 broken promise(s)\n    PHY: The scene has Claire's wrists bound in front of her, resting in her lap, but earlier her hands are tied behind her.\n    REL: Marie Renaud is called Claire's sister here, but in the voicemail scene Marie calls Claire her daughter.\n    TIM: Claire's last contact is nine days ago, yet Marie's voicemails about her disappearance were already eleven days old in the previous scene.\n    KNO: Maren searches NamUs as if she doesn't know the captive's identity, but in the previous scene she had already identified Claire Renaud, opened a case under that",
-        "driving-west: 795 words, 2 contradiction(s), 0 broken promise(s)\n    REL: Danny Vasquez is treated as Hank's supervisor, granting him leave and offering to cover his walkthrough, but earlier he is the crew lead who takes Hank's orders\n    KNO: The scene says Hank's notes and knowledge come to only a building type and a first name, but earlier he had written much more, including the padlock, zip-tie ro",
-        "pewter-town: 1228 words, 3 contradiction(s), 0 broken promise(s)\n    TIM: The scene says three weeks have passed since Claire went missing, but she has been missing nine days (about ten here), and the 11/2 date clashes with the Januar\n    KNO: Marie says nobody from Portland has called her, but Maren already phoned her from Portland, and the reference says Maren called her and listened for forty minut\n    REL: Carolyn is made a night-desk nurse at Claire's hospital, but Carolyn is established as Maren's supervisor at the DA's office, and the character list has only on",
-        "diner: 1075 words, 1 contradiction(s), 0 broken promise(s)\n    TIM: Maren recalls nine nights of the captor's hands in her dreams, but the dreams began only four nights earlier, a figure this same scene repeats.",
-        "two-hours: 1082 words, 1 contradiction(s), 1 broken promise(s)\n    PHY: Maren describes Claire's wrists as tied behind her, but in Maren's own earlier dream and research notes the wrists were bound in front and resting in her lap.\n    PRM physical_state_out: The scene never establishes Maren's or Hank's sleep deprivation; it mentions neither sleep nor exhaustion beyond Maren's face looking older in the screen light.",
-        "plan: 1012 words, 3 contradiction(s), 0 broken promise(s)\n    PHY: The scene seats Hank with his back to the wall and has Maren noticing it as she came in, but Maren was already seated when Hank arrived, and she was the one wit\n    PHY: A radio is playing a game in the diner kitchen, but the waitress had already switched the diner's radio off.\n    PHY: Maren pays with a ten, but Hank had already paid the check with a twenty and both of them had got up to leave.",
-        "dark-road: 833 words, 2 contradiction(s), 0 broken promise(s)\n    PHY: The scene says Maren got wet at a payphone, but in the previous scene she made the impersonation call on her own cell phone under the diner overhang.\n    PHY: Rook is placed on a bench seat between Hank and Maren, but she had moved over the console into the back when Maren got in, and the truck has a center console ra",
-        "building: 1084 words, 0 contradiction(s), 0 broken promise(s)",
-        "twelve-minutes: 860 words, 1 contradiction(s), 0 broken promise(s)\n    KNO: The scene says Maren spoke only the two words \"She's alive\" when she came off the wall, but in the previous scene she said two sentences.",
-        "claire: 1019 words, 3 contradiction(s), 1 broken promise(s)\n    TIM: The scene places Maren's impersonation of Marie to the dispatcher two nights earlier, but she made that call the same night, minutes before they drove to the pr\n    PHY: The space heater sits three feet from the chair at the center of the slab, but earlier it stood by the door.\n    PHY: In the previous scene Hank held the door open on its padlocked hasp while Maren walked past him into the building; here the door comes free, he sets it against \n    PRM goal: The scene ends with Claire collapsed in Maren's arms inside the building, so the extraction and walking out never happen.",
-        "drive: 925 words, 5 contradiction(s), 1 broken promise(s)\n    TIM: Claire is said to have been held eleven days, but the earlier scenes consistently put her captivity at nine days.\n    PHY: Hank cuts Claire's wrist and ankle zip ties here, but the previous scene already showed him cutting all of them.\n    PHY: Hank catches Claire when her legs fold, but in the previous scene Maren caught her and was holding her full weight.\n    PHY: The hinge pins are said to be in Hank's jacket pocket, but he had laid them on the gravel beside the door.\n    KNO: The scene says Hank and Maren planned the rescue and the 911 call in a motel room, but they planned only in the diner and drove straight to the property, and no\n    PRM physical_state_out: The scene establishes the hand tremor and the contamination residue, but it never conveys sleeplessness or fatigue.",
-        "bench: 985 words, 1 contradiction(s), 0 broken promise(s)\n    PHY: The scene says Hank angled the heater vents toward the back seat for Claire, but in the drive Claire rode up front on the bench seat between Maren and Hank, and",
-        "eleven-days: 477 words, 0 contradiction(s), 0 broken promise(s)",
-        "checker engineer: the text says \"three days\" (about 3 day(s)), but the calendar puts it 0 day(s) on",
+        "claires-cold: 829 words, 0 contradiction(s), 1 broken promise(s)\n    PRM physical_state_out: The scene never mentions gravel or abrasions; the floor is concrete and no scraped skin on knees or elsewhere appears.",
+        "harmons-hands: 764 words, 1 contradiction(s), 0 broken promise(s)\n    PHY: This scene has Claire's wrists zip-tied to the chair arms, but the earlier scene has her hands bound behind the chair.",
+        "waking-maren: 989 words, 0 contradiction(s), 0 broken promise(s)",
+        "waking-hank: 1000 words, 1 contradiction(s), 0 broken promise(s)\n    PHY: The scene places the dream's single tremor at the moment the hands set down a plastic jug, but in the earlier dream the one tremor happens in the gloved hand af",
+        "the-school: 861 words, 0 contradiction(s), 0 broken promise(s)",
+        "advocate: 981 words, 0 contradiction(s), 0 broken promise(s)",
+        "maren-runs: 997 words, 0 contradiction(s), 0 broken promise(s)",
+        "engineer: 999 words, 1 contradiction(s), 0 broken promise(s)\n    WLD: The school is dated 1957 and built of brick in common bond, but the earlier visit to what appears to be the same school (same east-wall crack, Rook, scalded knu",
+        "name-surfaces: 859 words, 4 contradiction(s), 1 broken promise(s)\n    TIM: The scene says Hank wrote the 2:47 AM page standing up before going to the sink, but in the earlier scene he came to at the sink first and only sat down to writ\n    PHY: The heater is given residual warmth from some earlier day, implying it had been on, but the earlier scenes establish it is touched each night and never turned o\n    TIM: Hank's workday is placed at a parking structure in Redmond, while the same day (knuckles still pink from that morning's scalding, no sleep) was spent assessing \n    PHY: Claire's water is said to come a capful at a time, but she is given water from a cup.\n    PRM physical_state_out: The scene never establishes Hank's prolonged sleeplessness or exhaustion; only the tremor and pink knuckles (somatic activation) appear.",
+        "voicemail: 940 words, 3 contradiction(s), 0 broken promise(s)\n    REL: Marie Renaud is presented as Claire's mother, but the character bible establishes her as Claire's sister.\n    PHY: The door in the dream is recalled as giving a hinge squeal, but the earlier scene from Claire's perspective establishes it as a sliding door that scrapes along \n    TIM: Marie's first voicemail about Claire missing her call is dated eleven days ago, which is earlier than Claire's captivity allows. Claire had been held nine days ",
+        "missing-persons: 1279 words, 4 contradiction(s), 0 broken promise(s)\n    KNO: Maren searches NamUs and is struck by Claire Renaud's name and record as a new discovery, but in the previous scene she had already heard seven voicemails about\n    REL: The record lists Marie Renaud as Claire's sister, but the earlier scene had Marie identify herself as Claire's mother.\n    TIM: Claire's last contact is nine days ago, yet Marie's first voicemail reporting that Claire hadn't called was left eleven days ago.\n    REL: Delgado is treated as a client writing a victim impact statement, but earlier he was the attorney filing Sofia's declaration.",
+        "driving-west: 839 words, 1 contradiction(s), 1 broken promise(s)\n    PHY: Hank tears out four pages of dream notes, but the legal pad by then held five pages, with the name CLAIRE written on the fifth.\n    PRM physical_state_out: The scene never says Hank has gone without sleep or shows him as sleep-deprived; only the tremor and Rook's weight on his wrist are rendered.",
+        "pewter-town: 1186 words, 2 contradiction(s), 0 broken promise(s)\n    REL: Marie Renaud is presented as a woman close to Claire's age, but in the earlier voicemail scene Marie calls Claire her daughter.\n    TIM: The scene says Claire has been missing ten days on the same day Maren woke at 2:47, but the missing-persons scene that morning gave her last contact as nine day",
+        "diner: 1089 words, 1 contradiction(s), 0 broken promise(s)\n    TIM: Maren says Claire disappeared nine days ago, but the day before in Coos Bay she had already reckoned it at ten days, so by the diner it should be at least ten.",
+        "two-hours: 1098 words, 1 contradiction(s), 1 broken promise(s)\n    PHY: Maren describes the captive's chair as cold through jeans, but Claire was taken in her work scrubs and is wearing them in captivity.\n    PRM physical_state_out: The scene never establishes either character's sleep deprivation or exhaustion; it mentions cold coffee and raw hands but nothing about lost sleep.",
+        "plan: 979 words, 1 contradiction(s), 1 broken promise(s)\n    TIM: The previous scene ended with Hank paying and Maren already in her coat, ready to leave, but this scene has them still seated at the table planning, and Maren p\n    PRM physical_state_out: The scene never establishes Maren's sleeplessness or how long she has been awake; the only time reference is to the 2:47 dream four nights ago.",
+        "dark-road: 839 words, 0 contradiction(s), 1 broken promise(s)\n    PRM physical_state_out: The scene shows jaw ache, swimming vision and locked hands, but it never mentions sleeplessness or how long Hank has gone without sleep.",
+        "building: 1001 words, 1 contradiction(s), 0 broken promise(s)\n    KNO: Maren recalls watching Hank scald his hands at a gas station in Reedsport, but the two first met at the Coos Bay diner and drove straight from there to the prop",
+        "twelve-minutes: 875 words, 3 contradiction(s), 0 broken promise(s)\n    PHY: Harmon's house is placed a quarter mile away through shore pine with a lit TV window, but the previous scene put it about two hundred yards up the rise and dark\n    PHY: Rook is lying in the gravel ten feet behind them, but she was ordered to stay in the truck, which was parked well back up the track.\n    PHY: With the hinges off, the side door is said to hang on a deadbolt, but Hank's own dream notes record a steel hasp on the side door.",
+        "claire: 1080 words, 1 contradiction(s), 0 broken promise(s)\n    PHY: The previous scene ends with Maren already through the door gap and inside the room, saying Claire's name, but this scene opens with her still at the threshold,",
+        "drive: 825 words, 5 contradiction(s), 0 broken promise(s)\n    PHY: The scene says there were two hinges, but in the earlier scene Hank pulled pins from three hinges.\n    PHY: The scene says four zip ties were cut, but the earlier scene cut three.\n    PHY: Rook is on the truck's back seat when Hank reaches it, but she had been at the building's threshold with Hank holding her collar.\n    PHY: The door is described as standing open on the side wall, but Hank had lifted it off its frame and leaned it against the outside wall.\n    TIM: Claire is said to have been held eleven days, but the reference and earlier scenes put it at nine.",
+        "bench: 997 words, 0 contradiction(s), 0 broken promise(s)",
+        "eleven-days: 470 words, 1 contradiction(s), 0 broken promise(s)\n    WLD: The scene calls the Redmond job Hank returns to a 1948 grange hall, but the earlier scene established that his Redmond job was a parking structure.",
+        "checker plan: a Saturday 1 day(s) after voicemail's Thursday",
         "Judge stands in for the plan's human spot-check (still owed). Drafted in direct mode; batch mode is refused under a cassette."
       ],
-      "started_at": "2026-10-30T17:08:17+00:00",
+      "started_at": "2026-10-30T19:08:56+00:00",
       "status": "pass",
       "suite": "e4-generation"
     },
     {
       "by_code": {
         "KNO": {
-          "mismatches": 5
-        },
-        "PHY": {
-          "mismatches": 43
-        },
-        "TIM": {
-          "mismatches": 12
-        },
-        "TRT": {
           "mismatches": 3
         },
-        "WLD": {
+        "PHY": {
+          "mismatches": 15
+        },
+        "TIM": {
+          "mismatches": 4
+        },
+        "TRT": {
           "mismatches": 1
         }
       },
       "cost": {
-        "calls": 20,
-        "input_tokens": 79494,
-        "output_tokens": 46002,
-        "replayed_calls": 20,
+        "calls": 30,
+        "input_tokens": 260774,
+        "output_tokens": 72002,
+        "replayed_calls": 30,
         "unpriced_calls": 0,
-        "usd_if_live": 1.6881,
+        "usd_if_live": 2.6069,
         "usd_spent": 0.0
       },
       "description": "Redraft from plan + ledger; facts the redraft changes",
-      "duration_s": 2.31,
+      "duration_s": 3.65,
       "error": null,
       "gates": [
         {
@@ -682,24 +682,24 @@
         }
       ],
       "metrics": {
-        "mismatches": 64,
-        "mismatches_per_scene": 6.4,
+        "mismatches": 23,
+        "mismatches_per_scene": 2.3,
         "scenes": 10
       },
       "mode": "replay",
       "notes": [
-        "claires-cold: 4 mismatch(es)\n    PHY: In the original she kneels on the concrete floor with her hands tied behind her back; in the redraft she is bound to a chair.\n    PHY: In the original the captor turns on the space heater and moves it closer to her; in the redraft he never turns it on.\n    PHY: In the original the door is a hinged door that creaks; in the redraft it is a sliding door that rolls on a track.\n    PHY: In the original he gives her water from a plastic bottle through the hood; in the redraft he uses a plastic cup after lifting the hood's hem",
-        "harmons-hands: 2 mismatch(es)\n    PHY: In the original he cuts off the too-tight left-wrist zip tie with a folding knife and puts on a new one; in the redraft he does not cut it b\n    PHY: The original says the hands he's wearing stay steady all night, but in the redraft his right hand twitches and makes the lantern rock.",
-        "waking-maren: 5 mismatch(es)\n    PHY: When the clock reads 2:47, the original has Maren sitting up in bed; the redraft has her already standing at the kitchen counter.\n    PHY: The 2:47 reading comes from the bedroom alarm clock in the original but from the stove clock in the redraft.\n    PHY: The surface she presses her palms onto is linoleum in the original but butcher block in the redraft.\n    PHY: The hood in the dream is made of tight synthetic fabric in the original but is a cotton pillowcase in the redraft.\n    TRT: The work stress behind the first-night excuse is the Hoffman deposition in the original but three trials and the Petrakis sentencing in the ",
-        "waking-hank: 8 mismatch(es)\n    PHY: The legal pad sits in a different place: on the counter in the original, on the kitchen table in the redraft.\n    TIM: He set out the legal pad after the second night in the original, but on the first night in the redraft.\n    PHY: He writes with a pencil in the original but with a pen in the redraft.\n    PHY: The 2:47 time is shown on the stove clock in the original but on the microwave clock in the redraft.\n    PHY: Rook does not whine in the original, but in the redraft she makes a high, thin sound.\n    PHY: Rook stays in the doorway in the original, but in the redraft she comes over and lies against his feet.\n    TIM: On the second night he sat at the kitchen table cataloging what he'd carried back in the original, but the redraft says both previous nights\n    PHY: The pad was lying facedown in the original, whereas in the redraft a pen lay across it, implying it was open on the table.",
-        "the-school: 9 mismatch(es)\n    PHY: The gymnasium lights are off in the original but were left on in the redraft.\n    PHY: In the original Rook is told to stay in the truck and only later appears at the gym entrance; in the redraft she enters the gym with Hank fr\n    TIM: The original has the assessment take forty minutes after a 7:15 arrival; the redraft has him finishing at quarter to ten.\n    PHY: The original places the worst cracking at the southeast corner; the redraft has the cracks at the southeast end as hairline and widening tow\n    PHY: The hand-spreading episode happens halfway along the wall in the original but near the corner in the redraft.\n    PHY: In the original Hank installs crack monitor cards along the wall himself; in the redraft his report recommends that crack monitors be instal\n    PHY: The troubling sentence is handwritten on the clipboard elevation drawing and crossed out in the original, but typed on a laptop in the truck\n    TIM: In the original he plans to write up the report that afternoon; in the redraft he types the report in the truck right away.\n    PHY: In the truck afterward, the heater is running in the original, while the engine is off in the redraft.",
-        "advocate: 9 mismatch(es)\n    TRT: Sofia's age differs: twenty-six on the intake form versus about nineteen.\n    PHY: The palm Sofia presses her thumb into differs: her left palm versus her right palm.\n    PHY: Maren's hands rest on the table palms up in the original but palms down in the redraft.\n    TIM: What Sofia was doing when the abuser arrived differs: washing dishes as he came in through the kitchen door versus already in bed when he ca\n    PHY: The assault happened on the kitchen floor in the original but on the hallway floor in the redraft.\n    PHY: How he grabbed Sofia differs: he pulled her hair versus he pulled her by the ankle.\n    PHY: The location of Sofia's bruise differs: high on her left cheekbone versus on her jaw.\n    PHY: The finger that twitches with Maren's tremor differs: her left ring finger versus her left index finger.\n    TIM: The filing deadline differs: motions are still due by close of business Wednesday versus the deadline having already passed at noon yesterda",
-        "maren-runs: 7 mismatch(es)\n    PHY: The run's direction differs: the original starts at the west approach and finishes at the east, while the redraft starts at the east end and\n    TIM: In the original she had already crossed the bridge ninety times before this run; in the redraft this run is the ninetieth crossing.\n    TRT: Her breathing pattern differs: three strides in and three out in the original, in for three and out for two in the redraft.\n    TIM: The left-hand tremor began this morning in the original but has been going since yesterday in the redraft.\n    PHY: Her posture during the flinch differs: in the original her arms come up and her hands splay wide open, while in the redraft her arms are pul\n    KNO: The number of times she has watched this response across an interview table differs: about a hundred in the original, about two hundred in t\n    PHY: In the original her hands have stopped shaking by the time she reaches the end of the bridge; in the redraft both hands are shaking at the e",
-        "engineer: 6 mismatch(es)\n    PHY: In the original the east-wall stucco Hank inspects and has removed is on the interior of the gymnasium; in the redraft it is exterior stucco\n    KNO: In the original Danny removes the stucco himself from a ladder with a masonry hammer; in the redraft two crew members do it from a lift, so \n    PHY: In the original the diaphragm anchor bolts are entirely absent, cut or sheared during a previous renovation; in the redraft most anchors are\n    KNO: In the original Danny says \"Hell\" on seeing the exposed connections; in the redraft Hank says it and Danny asks if it's bad.\n    WLD: In the original the school has been closed and empty since 2019; the redraft treats it as an operating school with a custodian and a seasona\n    TIM: In the original the 1957 building's components have been in place about sixty-five years; the redraft says fifty years.",
-        "name-surfaces: 7 mismatch(es)\n    PHY: The number of pages of notes on the legal pad differs.\n    TIM: When the notes were written differs: the original has him writing them at 11:40 p.m. and 12:15, with 2:47 the moment the name surfaces; the \n    PHY: The building's door and lock differ: a steel personnel door with a padlock hasp welded to the frame and a Master 6271 tubular-key padlock, v\n    PHY: The water ration differs: eight ounces every six hours versus water by the capful.\n    PHY: The space heater is placed two meters from the chair to keep the subject alive in the original, but sits against the east wall unplugged in \n    KNO: How Hank learns the name Claire differs: a coworker calling it out in a parking lot versus the captor's thumb reading it off a laminated lan\n    KNO: In the original Hank has location clues (driving directions, Oregon plates, a Coos Bay receipt), while in the redraft he says the site could",
-        "voicemail: 7 mismatch(es)\n    TIM: When Marie first called the office: two days ago in the original, eleven days ago in the redraft.\n    PHY: Where Claire's car was found: her apartment lot in the original, the hospital lot in the redraft.\n    PHY: The sixth message is an angry spoken complaint in the original but only twelve seconds of breathing in the redraft.\n    PHY: The fifth message lists different details: license plate, shift schedule and coworker Jennifer in the original; height, hair and a gap in he\n    PHY: Where Marie was during the seventh message: indoors in Claire's apartment on the landline in the original, outside in the wind in the redraf\n    PHY: The seventh message is cut off by the time limit right after the hinge in the original, but runs nine more seconds after the hinge in the re\n    TIM: When Maren heard the hinge in her vision: two nights ago in the original, at four that morning in the redraft."
+        "claires-cold: 2 mismatch(es)\n    PHY: In the original the door hinges creak audibly when he enters; in the redraft the hinges make no sound at all.\n    TIM: He holds his palm between her shoulder blades for three seconds in the original, but for about fifteen seconds in the redraft.",
+        "harmons-hands: 1 mismatch(es)\n    PHY: In the original the space heater is sitting unplugged in the corner when he arrives and he plugs it in and moves it to four feet from her; i",
+        "waking-maren: 2 mismatch(es)\n    PHY: When she wakes at 2:47, the original has Maren already sitting up, while the redraft has her lying on her back and only sitting up later.\n    PHY: Her spoken voice saying \"Third night\" is clinical in the original but scraped raw in the redraft.",
+        "waking-hank: 1 mismatch(es)\n    PHY: In the original the pencil sits beside the facedown legal pad; in the redraft the pencil lies across the top sheet of the pad.",
+        "the-school: 1 mismatch(es)\n    PHY: In the original the crossed-out sentence is struck through with a single line and stays legible; in the redraft he strikes it twice, hard en",
+        "advocate: 3 mismatch(es)\n    KNO: In the original Maren can already see the grip mark on Sofia's right wrist and has noted it; in the redraft the wrist is hidden under a slee\n    KNO: In the original Delgado himself comes on the line and confirms receipt; in the redraft Delgado never speaks to Maren and the clerk relays hi\n    TIM: In the original Maren's finger tremor begins when Sofia's account reaches 12:15; in the redraft it begins earlier, while Sofia is describing",
+        "maren-runs: 4 mismatch(es)\n    PHY: The foot that caught at stride 231 differs: left in the original, right in the redraft.\n    PHY: During the flinch her hands were splayed at her sides in the original, but came up in front of her face in the redraft.\n    PHY: After the stop, her stride count reset to zero in the original, but in the redraft it continued from 232.\n    PHY: The Willamette is gray in the original but brown in the redraft.",
+        "engineer: 5 mismatch(es)\n    PHY: The mortar joint depths Danny calls out differ: shallow in the original, three-quarter inch to a full inch in the redraft.\n    PHY: Hank records his notes in a field book in the original but on a clipboard in the redraft.\n    PHY: Danny removes the stucco with a masonry hammer in the original but with a flat bar in the redraft.\n    PHY: The east entrance door frame is wood in the original but steel or metal in the redraft.\n    KNO: Danny says \"Hell\" on seeing the missing anchors in the original, whereas Hank says it in the redraft and Danny stays silent.",
+        "name-surfaces: 0 mismatch(es)",
+        "voicemail: 4 mismatch(es)\n    TIM: In the original, Marie reports finding Claire's car in the apartment lot in the fourth message; the redraft puts it in the third message.\n    PHY: In the original, the hinge sound is heard in a gap when Marie's voice cracks and she pulls away from the phone; in the redraft, Marie keeps \n    TIM: In the original, the seventh message cuts off right after \"Nobody will\u2014\"; in the redraft, it runs another twenty seconds after the sound bef\n    TRT: In the original, Marie's steadiness is gone by message five and she is angry in message six; in the redraft, her calm is still there in mess"
       ],
-      "started_at": "2026-10-30T17:08:24+00:00",
+      "started_at": "2026-10-30T19:09:03+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -727,7 +727,7 @@
         "usd_spent": 0.0
       },
       "description": "Continuity flags raised on classics with no known errors",
-      "duration_s": 0.22,
+      "duration_s": 0.29,
       "error": null,
       "gates": [
         {
@@ -761,7 +761,7 @@
         "christmas-carol/run2: 25 flag(s)",
         "christmas-carol/run1: 25 flag(s)"
       ],
-      "started_at": "2026-10-30T17:08:26+00:00",
+      "started_at": "2026-10-30T19:09:06+00:00",
       "status": "fail",
       "suite": "e7-classics"
     },
@@ -794,15 +794,15 @@
       },
       "cost": {
         "calls": 80,
-        "input_tokens": 552551,
-        "output_tokens": 195957,
+        "input_tokens": 557223,
+        "output_tokens": 196784,
         "replayed_calls": 80,
         "unpriced_calls": 0,
-        "usd_if_live": 9.1075,
+        "usd_if_live": 8.7352,
         "usd_spent": 0.0
       },
       "description": "Current revision passes vs the E1 errors past passes introduced",
-      "duration_s": 126.93,
+      "duration_s": 76.84,
       "error": null,
       "gates": [
         {
@@ -821,7 +821,7 @@
         }
       ],
       "metrics": {
-        "errors_per_10k_words": 1.74,
+        "errors_per_10k_words": 1.692,
         "family.brief-fix.reintroduced": 0,
         "family.brief-fix.replayed": 2,
         "family.hone-physical-states.reintroduced": 0,
@@ -854,11 +854,11 @@
         "excluded 1: unreplayable: the introducing commit wrote both sides (the six years and the nine), so the pre-pass project has no established fact for the replay to contradict (thornwall-028)",
         "governor-013 (walking-the-eastern-development): consistent",
         "governor-014 (elias-disarms): consistent",
-        "governor-016 (routine-maintenance): reintroduced \u2014 \"Through the sealed glass, on Block Fourteen, the stone-cutters had settled into their afternoon rhythm: two strikes and \"",
+        "governor-016 (routine-maintenance): reintroduced \u2014 \"Through the sealed glass came the stone-cutters on Block Fourteen, the long rasp of the saw and then the chisels, then t\"",
         "governor-018 (acceptable-losses): not_present",
         "governor-020 (junction-fourteen): consistent",
         "governor-022 (article-twelve): not_present",
-        "governor-023 (acceptable-losses): reintroduced \u2014 \"Sera Holdt waited by the door with the dispatch satchel.\"",
+        "governor-023 (acceptable-losses): reintroduced \u2014 \"She came in from the outer room with her ledger.\"",
         "governor-024 (acceptable-losses): not_present",
         "governor-025 (haddons-reckoning): halted, nothing written \u2014 redraft of haddons-reckoning refused: model refused the request (cyber)",
         "governor-026 (the-governors-vigil): not_present",
@@ -882,7 +882,7 @@
         "thornwall-023 (journals-of-the-east-wing): consistent",
         "thornwall-024 (evening-visit): not_present",
         "thornwall-025 (thessan-vigil): consistent",
-        "thornwall-026 (thessan-rides): reintroduced \u2014 \"He'd thanked her for her service, as if she'd done him a kindness, and signed where she showed him to sign.\"",
+        "thornwall-026 (thessan-rides): reintroduced \u2014 \"He'd thanked her for her service.\"",
         "thornwall-027 (thessan-at-verath): not_present",
         "thornwall-029 (evidence-room): not_present",
         "thornwall-030 (ivra-seals-archive): reintroduced \u2014 \"At Garren's Watch the figures had told the same story over nine years, each reduction justified by a different administr\"",
@@ -890,13 +890,13 @@
         "thornwall-035 (riders-approach): consistent",
         "thornwall-037 (evening-visit): consistent"
       ],
-      "started_at": "2026-10-30T17:08:26+00:00",
+      "started_at": "2026-10-30T19:09:06+00:00",
       "status": "fail",
       "suite": "e8-revision-safety"
     }
   ],
   "schema_version": 1,
   "status": "fail",
-  "storyforge_version": "1.96.0",
+  "storyforge_version": "1.97.0",
   "suite_count": 9
 }
