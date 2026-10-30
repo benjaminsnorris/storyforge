@@ -15,7 +15,7 @@ from typing import Any
 from .enrich import load_registry_alias_maps, normalize_fields  # noqa: F401
 from .enrich import is_placeholder, normalize_aliases, reduce_boolean, strip_placeholders
 from .common import log
-from .ledger import COMMITMENTS_PASS
+from .ledger import is_commitment
 from .prompts import read_yaml_field
 
 
@@ -778,7 +778,7 @@ def build_commitments_prompt(scene_id: str, scene_text: str,
             return '(none yet)'
         return '\n'.join(
             f'- {k["id"]} [{k["type"]}, {k.get("mutable") or "state"}'
-            + ('' if k.get('introduced_by') == COMMITMENTS_PASS else ', registry')
+            + ('' if is_commitment(k) else ', registry')
             + f'] {k.get("subject") or "-"}: {k["statement"]}' for k in rows)
     known_text = listing(known)
     recorded_section = (

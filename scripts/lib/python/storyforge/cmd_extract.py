@@ -1139,8 +1139,9 @@ def _phase4_known(rows, scene_id, order, scene_subjects):
     `known_by`) are kept first, `fixed` before `state`, then the most recent;
     the result is in reading order, and `left_out` counts the rest.
 
-    `recorded`: registry facts (not this pass's) already recorded for the
-    scene itself, which the scene must not restate.
+    `recorded`: facts another writer already recorded for the scene itself
+    (registry facts, and the gate's commitments), which the scene must not
+    restate.
     """
     from storyforge import ledger
     at = order[scene_id]
@@ -1191,10 +1192,11 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     registry facts already recorded for it (`_phase4_known`, F-128), so one
     that changes a fact says which it supersedes or ends instead of restating
     it. `ends` sets `resolves` on this pass's own earlier states. Reported in
-    WARNINGs for the author, never applied: a `supersedes` naming a registry
-    fact recorded for the same scene (the prose and the registry disagree),
-    an `ends` naming a registry state, or this pass's state already ended
-    elsewhere. Rows are binding,
+    WARNINGs for the author, never applied: a `supersedes` naming a fact
+    another writer recorded for the same scene (the prose and the registry,
+    or the gate, disagree), an `ends` naming another writer's state (a
+    registry fact or the gate's; this pass edits only its own rows), or this
+    pass's state already ended elsewhere. Rows are binding,
     `origin=prose`, `introduced_by=commitments` (`ledger.COMMITMENTS_PASS`),
     with the establishing quote. A scene that already has rows from this pass
     is skipped unless `force`, which replaces them. A quote not found in the
@@ -1343,8 +1345,9 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                                      'registry fact recorded for the same scene; kept '
                                      'both, unlinked: check which is right'),
                        ('ends', '"ends" naming no offered state, dropped'),
-                       ('ends registry', 'registry state(s) the prose ends in a scene '
-                                         'its resolves doesn\'t say; check resolves'),
+                       ('ends registry', 'state(s) recorded by another writer (the '
+                                         'registry or the gate) that the prose ends in '
+                                         'a scene its resolves doesn\'t say; check resolves'),
                        ('ends again', 'state(s) the prose ends that already end '
                                       'elsewhere; kept the first'),
                        ('cap', f'scene(s) offered only {MAX_KNOWN_COMMITMENTS} of the '

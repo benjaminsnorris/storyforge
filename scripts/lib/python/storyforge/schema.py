@@ -498,13 +498,12 @@ def _ledger_reference_problems(rows: list[dict], ref_dir: str,
         problems.append('no characters.csv, so the physical states\' characters '
                         'were not checked')
         char_ids = None
-    from storyforge.ledger import COMMITMENTS_PASS
+    from storyforge.ledger import is_commitment
     for row in rows:
         rid = row.get('id', '')
         # A commitment (extract phase 4) may be about a location, an object
         # or no one: only a physical state in the registry needs a character
-        if (row.get('type') == 'physical'
-                and row.get('introduced_by') != COMMITMENTS_PASS):
+        if row.get('type') == 'physical' and not is_commitment(row):
             subject = (row.get('subject') or '').strip()
             if not subject:
                 kept = (row.get('aliases') or '').strip()

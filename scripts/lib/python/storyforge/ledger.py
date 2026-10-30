@@ -309,15 +309,26 @@ def _cell(row: dict, column: str) -> str:
 #: View columns per type. A physical view's `character` is the subject id.
 VIEW_COLUMNS = {'knowledge': KNOWLEDGE_COLUMNS, 'physical': PHYSICAL_COLUMNS}
 
-#: `introduced_by` of the rubric pass (extract phase 4). Its knowledge and
-#: physical facts are not registry entries: briefs don't reference them by
-#: id, so the views leave them out and view writes leave them as they are
-#: (Phase 3's gate is where the two meet).
+#: `introduced_by` of the rubric pass (extract phase 4).
 COMMITMENTS_PASS = 'commitments'
+
+#: Every `introduced_by` that writes commitments rather than registry facts:
+#: the rubric pass and the gate, which tags a row with the command that wrote
+#: the prose (`docs/plans/2026-10-30-gate-ledger-design.md`). Their knowledge
+#: and physical facts are not registry entries: briefs don't reference them
+#: by id, so the views leave them out and view writes leave them as they are.
+#: Any other value, blank included (a hand-added row), is a registry fact.
+COMMITMENT_WRITERS = (COMMITMENTS_PASS, 'draft', 'redraft', 'revise', 'advisor')
+
+
+def is_commitment(row: dict) -> bool:
+    """Whether `row` is a commitment (what the prose said), not a registry
+    fact (what a brief can name)."""
+    return (row.get('introduced_by') or '').strip() in COMMITMENT_WRITERS
 
 
 def _in_view(row: dict, type_: str) -> bool:
-    return row.get('type') == type_ and row.get('introduced_by') != COMMITMENTS_PASS
+    return row.get('type') == type_ and not is_commitment(row)
 
 
 def view(rows: list[dict[str, str]], type_: str) -> list[dict[str, str]]:
@@ -378,7 +389,7 @@ def replace_view(rows: list[dict[str, str]], type_: str,
                  introduced_by: str) -> list[dict[str, str]]:
     """The ledger with `type_`'s rows replaced by `view_rows`.
 
-    Rows of every other type, and the rubric pass's rows (`COMMITMENTS_PASS`),
+    Rows of every other type, and commitments (`is_commitment`),
     stay as they are, where they are. A `type_` row whose id is still in
     `view_rows` keeps its place and every column the view doesn't carry
     (quote, known_by, status, ...), and only the cells whose view value
@@ -388,8 +399,12 @@ def replace_view(rows: list[dict[str, str]], type_: str,
 
     Raises:
         ValueError: if a new id is already a fact of another type (the ledger
-            would hold one id twice).
+            would hold one id twice), or `introduced_by` is a commitment
+            writer (its rows would drop out of the view it just wrote).
     """
+    if introduced_by.strip() in COMMITMENT_WRITERS:
+        raise ValueError(f'{introduced_by!r} writes commitments, not registry facts: '
+                         f'a view write needs a registry writer\'s name')
     wanted: dict[str, dict] = {}
     for vr in view_rows:
         rid = (vr.get('id') or '').strip()
@@ -448,6 +463,38 @@ def write_view(ref_dir: str, type_: str, view_rows: list[dict[str, str]], *,
                        introduced_by=introduced_by)
     if new != rows:
         save_to(ref_dir, new, command=command or introduced_by)
+
+
+def fill_quote(rows: list[dict[str, str]], fact_id: str, quote: str) -> bool:
+    """Set registry fact `fact_id`'s `quote` to `quote` if the cell is blank,
+    in place; True if it was set. A quote already there is never replaced
+    (False). This is the only change the gate makes to a registry row: a
+    brief's promised fact, confirmed in the prose, gains its evidence
+    (`docs/plans/2026-10-30-gate-ledger-design.md`).
+
+    The quote is not checked against the prose here: the gate passes only
+    quotes the checker found verbatim in the scene.
+
+    Raises:
+        ValueError: `fact_id` is not in `rows`; is a commitment, not a binding
+            knowledge or physical registry fact (what a brief can name); or
+            `quote` is blank.
+    """
+    if not quote.strip():
+        raise ValueError(f'{fact_id}: no quote to fill')
+    row = next((r for r in rows if r.get('id') == fact_id), None)
+    if row is None:
+        raise ValueError(f'{fact_id}: not in {LEDGER_FILE}')
+    if is_commitment(row):
+        raise ValueError(f'{fact_id}: a commitment, not a registry fact; its quote '
+                         f'is the one extraction recorded')
+    if row.get('status') != 'binding' or row.get('type') not in VIEW_COLUMNS:
+        raise ValueError(f'{fact_id}: not a binding knowledge or physical registry fact '
+                         f'(status {row.get("status")!r}, type {row.get("type")!r})')
+    if (row.get('quote') or '').strip():
+        return False
+    row['quote'] = ' '.join(quote.split())
+    return True
 
 
 def alias_map(view_rows: list[dict[str, str]]) -> dict[str, str]:
