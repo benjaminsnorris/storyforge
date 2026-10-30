@@ -1,6 +1,6 @@
 # Extract the upper reference layers (#440, F-130 part 2)
 
-Status: plan, not started. Written 2026-10-30 at v1.99.x, on branch `storyforge/extract-upper-layers-20261030-1525`.
+Status: plan approved 2026-10-30; PR 0 in progress. Written 2026-10-30 at v1.99.x, on branch `storyforge/extract-upper-layers-20261030-1525`.
 
 ## Goal
 
@@ -89,9 +89,9 @@ Files a book doesn't use (`systems-bible.md` for *Gatsby*) get a one-paragraph e
 
 - **Describe, never prescribe.** No "Do / Do not" lists. Template sections that only make sense as prescriptions ("Things to Avoid", "Expansion Opportunities", "Influence Blend" weights) are renamed to their descriptive counterparts ("What the book never does", "What the text leaves open", "Lineage"). The headings consumers depend on stay put. A test asserts the voice guide has no imperative bullet lines.
 - Flashbacks, uneven scene lengths and MICE nesting are described, never flagged.
-- **Coaching levels:** phase 5 runs at every level, because it describes a book that exists rather than inventing one. That's the same reason phases 0–4 aren't gated. *Confirm (decision 3).*
+- **Coaching levels:** phase 5 runs at every level, because it describes a book that exists rather than inventing one. That's the same reason phases 0–4 aren't gated. (Decision 3.)
 - **Graphic-novel projects:** skipped with a log line; a separate issue covers them.
-- **`key-decisions.md`:** never extracted. Inventing an author's decisions is the one thing this phase must not do. *See decision 1.*
+- **`key-decisions.md`:** never extracted. Inventing an author's decisions is the one thing this phase must not do. (Decision 1.)
 
 ## PRs, in order
 
@@ -136,13 +136,13 @@ Opus 5.5 at $4 per million input tokens and $20 per million output tokens (`cost
 - Re-scoring (story-power and the character and narrative passes) is extra, at storyforge-evals' existing per-book figures.
 - Worth weighing: on Sonnet 5.5 ($2/$10) the whole phase is about half the cost. 5a and 5b are mostly selection and could go to Sonnet; the descriptive docs should stay on Opus.
 
-## Decisions for Ben
+## Decisions (Ben, 2026-10-30)
 
-1. **Files that should stay empty.** I recommend narrowing the acceptance criterion "no file in `reference/` is template-identical" to exclude `key-decisions.md` (author decisions, which can't be extracted), `visual-style.md` and `canon/` (GN and illustration art direction), and listing those exemptions in E9. Alternative: write an extracted stub that says why they're empty.
-2. **Write prescriptive guidance at all?** A drafter continuing an extracted book (a sequel, or revising in the original's voice) would benefit from rules. I recommend **no** for this issue: describe only, as the issue says. A later `elaborate --stage voice --from-extracted` could turn the description into rules if wanted.
-3. **Coaching level.** Should phase 5 run at `strict`? I recommend yes, because it's description and not creative work.
-4. **Model for 5a/5b:** Opus or Sonnet (see cost).
-5. **`project.logline` in `storyforge.yaml`:** it's deprecated as an input, with `story-summary.md` canonical. I recommend leaving it alone rather than filling a deprecated field.
+1. **Files that stay empty:** the "no template-identical file" acceptance excludes `key-decisions.md` (author decisions can't be extracted), `visual-style.md` and `canon/` (art direction). E9 lists these exemptions.
+2. **Describe only.** No prescriptive rules in this issue. A later elaborate step can turn a description into drafting rules if wanted.
+3. **Coaching:** phase 5 runs at every level, `strict` included, because it describes a book that exists rather than inventing one.
+4. **Model:** Opus for every phase 5 call, 5a and 5b included.
+5. **`project.logline`** is left alone. It's deprecated as an input and `story-summary.md` is canonical.
 
 ## Risks
 
