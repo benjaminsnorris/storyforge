@@ -144,8 +144,9 @@ class TestCues:
         reply = {k: [] if SKELETON_SCHEMA['properties'][k]['type'] == 'array' else ''
                  for k in SKELETON_SCHEMA['required']}
         reply.update(title='T', timeline_day='73', time_relation='later',
-                     time_date='XXXX-07-04')
+                     time_gap='a week', time_span='all summer', time_date='XXXX-07-04')
         result = parse_skeleton_response(json.dumps(reply), 's1')
+        assert not {k for k in result if k.startswith('time_')}
         assert 'timeline_day' not in result
         assert result['timeline_date'] == 'XXXX-07-04'
 

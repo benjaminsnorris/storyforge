@@ -93,6 +93,17 @@ class TestParseSkeletonResponse:
             with pytest.raises(ValueError):
                 skeleton_cues(reply)
 
+    def test_list_items_and_text_are_csv_safe(self):
+        """A ';' inside a place would split it into two; a '|' would break
+        the row; a newline would start a new one. An "unknown" or blank item
+        is no place."""
+        from storyforge.extract import parse_skeleton_response
+        result = parse_skeleton_response(_reply(
+            'SKELETON_SCHEMA', title='a\nb',
+            location=['Hall; east wing', 'Yard|gate', ' ', 'unknown']), 's1')
+        assert result['location'] == 'Hall, east wing;Yard/gate'
+        assert result['title'] == 'a b'
+
     def test_cues_come_from_the_same_reply(self):
         from storyforge.extract import skeleton_cues
         cues = skeleton_cues(_reply('SKELETON_SCHEMA', time_relation='later',
