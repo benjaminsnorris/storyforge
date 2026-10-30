@@ -10,11 +10,21 @@ from those files is `docs/plans/2026-10-30-ledger-migration-proposal.md`.
 - `validate_ledger`: problems as strings; an empty list means checked and clean.
 - `scene_order`, `active_states`, `established_before`: derived state. Per-
   character state "as of scene N" is derived, never stored.
+- `load` / `save` (and `load_from` / `save_to` for a `reference/` dir): the
+  project's ledger. `load` raises `NotMigratedError` while knowledge.csv or
+  physical-states.csv is still on disk, so nothing reads half the facts.
+- `knowledge_view` / `physical_view` (`read_view`, `view_map`): one type's
+  rows in the old files' shapes, for consumers that matched on them.
+  `replace_view` / `write_view` write those shapes back, changing only that
+  type's rows: every other row, and every column the view doesn't carry, is
+  kept.
 - `migrate_registries`: `knowledge.csv` + `physical-states.csv` to ledger rows,
   with every quirk reported rather than guessed. `regenerate_knowledge` /
   `regenerate_physical` write the old files back out of the ledger, and
   `round_trip_differences` names any line that doesn't come back unchanged
-  that no quirk explains.
+  that no quirk explains. `migrate_files` is the whole step (`storyforge
+  migrate`): migrate, write, verify from the written file, remove the old
+  files.
 """
 
 from __future__ import annotations
@@ -50,8 +60,76 @@ PHYSICAL_COLUMNS = ['id', 'character', 'description', 'category', 'acquired',
                     'resolves', 'action_gating']
 
 
+#: The files the ledger replaced. Never written again.
+LEGACY_FILES = ('knowledge.csv', 'physical-states.csv')
+
+
 def ledger_path(project_dir: str) -> str:
     return os.path.join(project_dir, 'reference', LEDGER_FILE)
+
+
+class NotMigratedError(RuntimeError):
+    """knowledge.csv or physical-states.csv is still in `reference/`."""
+
+
+def legacy_files(ref_dir: str) -> list[str]:
+    """The replaced files still present in `ref_dir`."""
+    return [f for f in LEGACY_FILES if os.path.isfile(os.path.join(ref_dir, f))]
+
+
+def not_migrated_message(ref_dir: str) -> str | None:
+    """Why the registries can't be read yet, or None when they can.
+
+    The old files alone need `storyforge migrate`. The old files beside a
+    ledger are a half-finished migration or a restored file; which holds the
+    truth is the author's call, so nothing reads either.
+    """
+    old = legacy_files(ref_dir)
+    if not old:
+        return None
+    names = ' and '.join(f'reference/{f}' for f in old)
+    if os.path.isfile(os.path.join(ref_dir, LEDGER_FILE)):
+        return (f'{names} {"is" if len(old) == 1 else "are"} still present beside '
+                f'reference/{LEDGER_FILE}, which replaced {"it" if len(old) == 1 else "them"}. '
+                f'Check that the ledger holds every fact, then delete '
+                f'{"it" if len(old) == 1 else "them"} (storyforge migrate never '
+                f'overwrites an existing ledger).')
+    return (f'{names} must move into reference/{LEDGER_FILE} before Storyforge '
+            f'can read the knowledge facts and physical states: run '
+            f'`storyforge migrate`.')
+
+
+def exit_if_not_migrated(project_dir: str) -> None:
+    """Stop the command (exit 1) when the registries can't be read."""
+    message = not_migrated_message(os.path.join(project_dir, 'reference'))
+    if message:
+        from storyforge.common import log
+        log(f'ERROR: {message}')
+        raise SystemExit(1)
+
+
+def load_from(ref_dir: str) -> list[dict[str, str]]:
+    """The ledger in `ref_dir`; no ledger and no old files → [].
+
+    Raises:
+        NotMigratedError: while knowledge.csv or physical-states.csv is there.
+    """
+    message = not_migrated_message(ref_dir)
+    if message:
+        raise NotMigratedError(message)
+    return read_ledger(os.path.join(ref_dir, LEDGER_FILE))
+
+
+def load(project_dir: str) -> list[dict[str, str]]:
+    return load_from(os.path.join(project_dir, 'reference'))
+
+
+def save_to(ref_dir: str, rows: list[dict[str, str]]) -> None:
+    write_ledger(os.path.join(ref_dir, LEDGER_FILE), rows)
+
+
+def save(project_dir: str, rows: list[dict[str, str]]) -> None:
+    save_to(os.path.join(project_dir, 'reference'), rows)
 
 
 # ============================================================================
@@ -114,6 +192,133 @@ def _cell(row: dict, column: str) -> str:
         raise ValueError(f'{row.get("id", "?")}: {column} holds a "|" or a '
                          f'line break: {value!r}')
     return value
+
+
+# ============================================================================
+# Typed views: one type's rows in the old files' shapes
+# ============================================================================
+
+#: View columns per type. A physical view's `character` is the subject id.
+VIEW_COLUMNS = {'knowledge': KNOWLEDGE_COLUMNS, 'physical': PHYSICAL_COLUMNS}
+
+
+def view(rows: list[dict[str, str]], type_: str) -> list[dict[str, str]]:
+    """`type_`'s rows in its view's columns, in ledger order."""
+    file = _FILE_OF[type_]
+    return [{c: _old_cells(r, file, 'standard')[c] for c in VIEW_COLUMNS[type_]}
+            for r in rows if r.get('type') == type_]
+
+
+def knowledge_view(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Knowledge facts as id / name / aliases / category / origin (the scene)."""
+    return view(rows, 'knowledge')
+
+
+def physical_view(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Physical states as id / character (subject id) / description /
+    category / acquired / resolves / action_gating."""
+    return view(rows, 'physical')
+
+
+def read_view(ref_dir: str, type_: str) -> list[dict[str, str]]:
+    return view(load_from(ref_dir), type_)
+
+
+def view_map(ref_dir: str, type_: str) -> dict[str, dict[str, str]]:
+    """id → view row of `type_`."""
+    return {r['id']: r for r in read_view(ref_dir, type_) if r['id']}
+
+
+def _from_view(type_: str, cells: dict) -> dict[str, str]:
+    """The ledger columns a view row sets (the view's inverse)."""
+    def get(column):
+        return (cells.get(column) or '').strip()
+    if type_ == 'knowledge':
+        origin = get('origin')
+        return {'statement': get('name'), 'aliases': get('aliases'),
+                'category': get('category'),
+                'scene_id': '' if origin in _NO_SCENE_ORIGINS else origin}
+    return {'subject': get('character'), 'statement': get('description'),
+            'category': get('category'), 'scene_id': get('acquired'),
+            'resolves': get('resolves'), 'action_gating': get('action_gating')}
+
+
+def replace_view(rows: list[dict[str, str]], type_: str,
+                 view_rows: list[dict[str, str]], *, origin: str,
+                 introduced_by: str) -> list[dict[str, str]]:
+    """The ledger with `type_`'s rows replaced by `view_rows`.
+
+    Rows of every other type stay as they are, where they are. A `type_` row
+    whose id is still in `view_rows` keeps its place and every column the
+    view doesn't carry (quote, known_by, status, ...); one whose id is gone is
+    dropped. A new id becomes a binding `state` fact with `origin` and
+    `introduced_by`, placed after the type's last row.
+
+    Raises:
+        ValueError: if a new id is already a fact of another type (the ledger
+            would hold one id twice).
+    """
+    wanted: dict[str, dict] = {}
+    for vr in view_rows:
+        rid = (vr.get('id') or '').strip()
+        if rid:
+            wanted[rid] = vr
+    out: list[dict[str, str]] = []
+    placed: set[str] = set()
+    insert_at = None
+    for row in rows:
+        if row.get('type') != type_:
+            out.append(row)
+            continue
+        vr = wanted.get(row.get('id', ''))
+        if vr is None or row['id'] in placed:
+            continue
+        out.append({**row, **_from_view(type_, vr)})
+        placed.add(row['id'])
+        insert_at = len(out)
+    other_ids = {r.get('id', '') for r in rows if r.get('type') != type_}
+    new = []
+    for rid, vr in wanted.items():
+        if rid in placed:
+            continue
+        if rid in other_ids:
+            raise ValueError(f'{rid}: already in {LEDGER_FILE} as another type '
+                             f'of fact; a {type_} fact needs its own id')
+        row = _base_row(rid, type_)
+        row.update(origin=origin, introduced_by=introduced_by)
+        row.update(_from_view(type_, vr))
+        new.append(row)
+    if insert_at is None:
+        insert_at = len(out)
+    return out[:insert_at] + new + out[insert_at:]
+
+
+def write_view(ref_dir: str, type_: str, view_rows: list[dict[str, str]], *,
+               origin: str, introduced_by: str) -> None:
+    """Replace `type_`'s rows in `ref_dir`'s ledger (see `replace_view`)."""
+    rows = load_from(ref_dir)
+    new = replace_view(rows, type_, view_rows, origin=origin,
+                       introduced_by=introduced_by)
+    if new != rows:
+        save_to(ref_dir, new)
+
+
+def alias_map(view_rows: list[dict[str, str]]) -> dict[str, str]:
+    """Lowercased id, name and alias → id, like `enrich.load_alias_map` on a
+    view (a physical view has no name: its map is its ids)."""
+    out: dict[str, str] = {}
+    for row in view_rows:
+        rid = (row.get('id') or '').strip()
+        if not rid:
+            continue
+        name = (row.get('name') or '').strip()
+        if name:
+            out[name.lower()] = rid
+        out[rid.lower()] = rid
+        for alias in (row.get('aliases') or '').split(';'):
+            if alias.strip():
+                out[alias.strip().lower()] = rid
+    return out
 
 
 # ============================================================================
@@ -583,3 +788,71 @@ def round_trip_differences(ref_dir: str, migration: Migration) -> list[str]:
         if [i for i in new_ids if i in old_ids] != [i for i in old_ids if i in new_ids]:
             out.append(f'{file}: rows came back in a different order')
     return out
+
+
+# ============================================================================
+# The migration step (storyforge migrate)
+# ============================================================================
+
+@dataclass
+class FileMigration:
+    """What `migrate_files` did. `status`: 'skip' (no old files), 'stopped'
+    (nothing changed; `problems` says why), 'dry-run' or 'done'."""
+    status: str
+    rows: list[dict[str, str]] = field(default_factory=list)
+    quirks: list[Quirk] = field(default_factory=list)
+    problems: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+
+
+def migration_blockers(ref_dir: str) -> tuple[Migration | None, list[str]]:
+    """Run the migration without writing: (migration, problems that stop it).
+
+    None when there is nothing to migrate. A ledger already beside the old
+    files stops it: merging into an existing ledger would be a guess.
+    """
+    old = legacy_files(ref_dir)
+    if not old:
+        return None, []
+    if os.path.isfile(os.path.join(ref_dir, LEDGER_FILE)):
+        return None, [not_migrated_message(ref_dir)]
+    migration = migrate_registries(ref_dir)
+    problems = list(migration.errors)
+    if not problems:
+        problems = round_trip_differences(ref_dir, migration)
+    return migration, problems
+
+
+def migrate_files(ref_dir: str, *, dry_run: bool = False) -> FileMigration:
+    """Move knowledge.csv and physical-states.csv into commitments.csv.
+
+    Stops, changing nothing, on a migration error, on a ledger that already
+    exists, or when the round trip doesn't hold. Otherwise writes the ledger,
+    checks the round trip again from the written file (a cell the writer
+    changed shows there), and only then deletes the old files. Idempotent:
+    with no old files it is a skip.
+    """
+    old = legacy_files(ref_dir)
+    if not old:
+        return FileMigration('skip')
+    migration, problems = migration_blockers(ref_dir)
+    if problems:
+        return FileMigration('stopped', problems=problems,
+                             quirks=migration.quirks if migration else [])
+    result = FileMigration('dry-run' if dry_run else 'done', rows=migration.rows,
+                           quirks=migration.quirks)
+    if dry_run:
+        result.removed = old
+        return result
+    path = os.path.join(ref_dir, LEDGER_FILE)
+    write_ledger(path, migration.rows)
+    written = Migration(read_ledger(path), migration.quirks, migration.errors)
+    problems = round_trip_differences(ref_dir, written)
+    if problems:
+        os.remove(path)
+        result.status, result.problems = 'stopped', problems
+        return result
+    for file in old:
+        os.remove(os.path.join(ref_dir, file))
+    result.removed = old
+    return result

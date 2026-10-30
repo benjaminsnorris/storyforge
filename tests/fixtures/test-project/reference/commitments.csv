@@ -1,0 +1,10 @@
+id|scene_id|type|subject|statement|quote|origin|status|mutable|known_by|supersedes|depends_on|reviewed|introduced_by|category|aliases|resolves|action_gating
+map-anomaly-exists||knowledge||A map anomaly exists in the pressure records||migrated|binding|state|||||migration||anomaly in records;maps show anomaly||
+village-vanished||knowledge||A village has vanished from the pressure maps||migrated|binding|state|||||migration||missing village;village disappeared||
+archive-erasure||knowledge||The archive shows signs of systematic erasure||migrated|binding|state|||||migration||systematic erasure;records altered||
+subsidence-not-natural||knowledge||The eastern subsidence is not natural||migrated|binding|state|||||migration||unnatural subsidence;subsidence is artificial||
+council-dismisses-evidence||knowledge||The council dismissed the evidence as procedural noise||migrated|binding|state|||||migration||evidence dismissed;council rejected findings||
+sprained-ankle-tessa|act2-sc02|physical|tessa-merrin|right ankle sprained during ridge collapse||migrated|binding|state|||||migration|injury||never|true
+archive-key-dorren|act1-sc02|physical|dorren-hayle|holds the restricted archive key||migrated|binding|state|||||migration|equipment||never|true
+exhaustion-tessa|act1-sc02|physical|tessa-merrin|physically exhausted from 4-hour eastern trek||migrated|binding|state|||||migration|fatigue||act2-sc03|false
+scar-left-hand-kael|act1-sc01|physical|kael-maren|old scar across left palm from archive incident||migrated|binding|state|||||migration|appearance||never|false
