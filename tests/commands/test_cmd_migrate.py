@@ -569,3 +569,24 @@ class TestStep4Ledger:
         assert result.status == 'stopped' and result.problems
         assert not os.path.isfile(os.path.join(ref, 'commitments.csv'))
         assert ledger.legacy_files(ref) == ['knowledge.csv', 'physical-states.csv']
+
+
+class TestStep5Normalize:
+    def test_leaves_cells_whose_parenthetical_text_would_be_dropped(
+            self, project_dir, capsys):
+        """understory: normalizing stripped "(Hunter residue)" from motifs
+        and "(for both — ...)" from value_at_stake."""
+        from storyforge.cmd_migrate import step5_normalize
+        from storyforge.csv_cli import get_field, update_field
+        ref = os.path.join(project_dir, 'reference')
+        briefs = os.path.join(ref, 'scene-briefs.csv')
+        intent = os.path.join(ref, 'scene-intent.csv')
+        update_field(briefs, 'act1-sc01', 'motifs', 'maps; erasure (Hunter residue)')
+        update_field(intent, 'act1-sc01', 'characters', 'Dorren Hayle;Tessa Merrin')
+
+        step5_normalize(ref, project_dir)
+
+        assert get_field(briefs, 'act1-sc01', 'motifs') == 'maps; erasure (Hunter residue)'
+        assert get_field(intent, 'act1-sc01', 'characters') == 'dorren-hayle;tessa-merrin'
+        out = capsys.readouterr().out
+        assert 'left as they are' in out and 'act1-sc01 motifs' in out
