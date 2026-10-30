@@ -396,3 +396,97 @@ class TestFallbackRecord:
         api.report_fallback_replies()
         out = capsys.readouterr()
         assert out.out + out.err == ''
+
+
+class TestConverse:
+    """api.converse: the tool-use loop the gate's checker runs on."""
+    TOOLS = [{'name': 'lookup', 'description': 'Look a word up.',
+              'input_schema': {'type': 'object', 'properties': {'word': {'type': 'string'}},
+                               'required': ['word'], 'additionalProperties': False}}]
+
+    @staticmethod
+    def _tool_reply(*calls):
+        return {'stop_reason': 'tool_use',
+                'content': [{'type': 'thinking', 'thinking': '', 'signature': 'sig'}]
+                + [{'type': 'tool_use', 'id': f'tu{n}', 'name': name, 'input': args}
+                   for n, (name, args) in enumerate(calls)],
+                'usage': {'input_tokens': 10, 'output_tokens': 2}}
+
+    ANSWER = {'stop_reason': 'end_turn', 'content': [{'type': 'text', 'text': '{"a": 1}'}],
+              'usage': {'input_tokens': 5, 'output_tokens': 3, 'cache_read_input_tokens': 7}}
+
+    @patch('storyforge.api._api_request')
+    def test_runs_tools_until_the_model_answers(self, mock_req, tmp_path):
+        from storyforge.api import converse
+        replies = [self._tool_reply(('lookup', {'word': 'fog'}), ('lookup', {'word': 'bell'})),
+                   self.ANSWER]
+        bodies = []
+        mock_req.side_effect = lambda path, body, **k: (bodies.append(body), replies.pop(0))[1]
+        log = str(tmp_path / 'log.json')
+        run = converse('q', 'claude-opus-5-5', self.TOOLS,
+                       {'lookup': lambda args: f'{args["word"]}!'}, log_file=log)
+        assert run.response == self.ANSWER
+        assert [c[:2] for c in run.calls] == [('lookup', {'word': 'fog'}),
+                                              ('lookup', {'word': 'bell'})]
+        # The second request replays the first reply unchanged (thinking
+        # block included) and both results in one user message
+        second = bodies[1]['messages']
+        assert second[1]['content'][0]['type'] == 'thinking'
+        assert [r['content'] for r in second[2]['content']] == ['fog!', 'bell!']
+        assert all(t['strict'] for t in bodies[0]['tools'])
+        assert run.usage['input_tokens'] == 15 and run.usage['cache_read_input_tokens'] == 7
+        with open(log) as f:
+            assert len(json.load(f)) == 2
+
+    @patch('storyforge.api._api_request')
+    def test_a_tool_input_error_goes_back_to_the_model(self, mock_req):
+        from storyforge.api import ToolInputError, converse
+        replies = [self._tool_reply(('lookup', {'word': 'x'})), self.ANSWER]
+        bodies = []
+        mock_req.side_effect = lambda path, body, **k: (bodies.append(body), replies.pop(0))[1]
+
+        def lookup(args):
+            raise ToolInputError('no such word')
+        run = converse('q', 'claude-opus-5-5', self.TOOLS, {'lookup': lookup})
+        result = bodies[1]['messages'][2]['content'][0]
+        assert result['is_error'] is True and result['content'] == 'no such word'
+        assert run.calls == [('lookup', {'word': 'x'}, True)]
+
+    @patch('storyforge.api._api_request')
+    def test_any_other_handler_exception_propagates(self, mock_req):
+        from storyforge.api import converse
+        mock_req.return_value = self._tool_reply(('lookup', {'word': 'x'}))
+
+        def lookup(args):
+            raise KeyError('bug')
+        with pytest.raises(KeyError):
+            converse('q', 'claude-opus-5-5', self.TOOLS, {'lookup': lookup})
+
+    @patch('storyforge.api._api_request')
+    def test_too_many_turns_raises(self, mock_req):
+        from storyforge.api import ToolLoopError, converse
+        mock_req.return_value = self._tool_reply(('lookup', {'word': 'x'}))
+        with pytest.raises(ToolLoopError, match='after 3 requests'):
+            converse('q', 'claude-opus-5-5', self.TOOLS, {'lookup': lambda a: ''}, max_turns=3)
+        assert mock_req.call_count == 3
+
+    @patch('storyforge.api._api_request')
+    def test_a_refusal_raises(self, mock_req):
+        from storyforge.api import RefusalError, converse
+        mock_req.return_value = {'stop_reason': 'refusal', 'content': [], 'usage': {}}
+        with pytest.raises(RefusalError):
+            converse('q', 'claude-opus-5-5', self.TOOLS, {'lookup': lambda a: ''})
+
+    def test_every_tool_needs_a_handler(self):
+        from storyforge.api import converse
+        with pytest.raises(ValueError, match='no handler for tool'):
+            converse('q', 'claude-opus-5-5', self.TOOLS, {})
+
+    @patch('storyforge.api._api_request')
+    def test_schema_becomes_output_config(self, mock_req):
+        from storyforge.api import converse
+        mock_req.return_value = self.ANSWER
+        schema = TestInvokeOutputSchema.SCHEMA
+        converse('q', 'claude-opus-5-5', self.TOOLS, {'lookup': lambda a: ''},
+                 output_schema=schema)
+        assert mock_req.call_args[0][1]['output_config']['format']['schema'] == schema

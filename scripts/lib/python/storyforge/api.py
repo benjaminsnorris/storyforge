@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import threading
+from dataclasses import dataclass, field
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
@@ -378,6 +379,116 @@ def _write_log(log_file: str, response: dict) -> None:
     os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
     with open(log_file, 'w') as f:
         json.dump(response, f)
+
+
+class ToolInputError(ValueError):
+    """A tool handler's answer to input it can't serve (an unknown scene id,
+    a malformed query). ``converse`` sends the message back to the model as
+    an error result, so it can correct the call; any other exception from a
+    handler is a bug and propagates."""
+
+
+class ToolLoopError(RuntimeError):
+    """The model was still calling tools after ``max_turns`` requests."""
+
+
+@dataclass
+class ToolRun:
+    """What ``converse`` returns.
+
+    ``response``: the last reply (its text is the answer). ``responses``:
+    every reply in order. ``calls``: ``(tool name, input, is_error)`` for
+    each tool call made. ``usage``: the replies' token counts summed, in the
+    API's usage shape, so ``extract_usage`` and the cost helpers take it.
+    """
+    response: dict
+    responses: list[dict] = field(default_factory=list)
+    calls: list[tuple[str, dict, bool]] = field(default_factory=list)
+
+    @property
+    def usage(self) -> dict:
+        keys = ('input_tokens', 'output_tokens', 'cache_read_input_tokens',
+                'cache_creation_input_tokens')
+        return {k: sum((r.get('usage') or {}).get(k, 0) or 0 for r in self.responses)
+                for k in keys}
+
+
+def converse(prompt: str, model: str, tools: list[dict], handlers: dict,
+             max_tokens: int = 4096, max_turns: int = 20, label: str = '',
+             timeout: int = API_TIMEOUT, system: list[dict] | None = None,
+             output_schema: dict | None = None, log_file: str = '') -> ToolRun:
+    """A tool-using exchange: send ``prompt`` with ``tools``, run each tool
+    call through ``handlers`` (name → function of the call's input returning
+    a string), send the results back, and repeat until the model answers.
+
+    History is append-only: every reply's content goes back unchanged
+    (thinking blocks included), and all of one turn's results go in one user
+    message. Tools are sent ``strict``, so each input matches its schema.
+    The request is auto-cached, so each turn reads the conversation so far
+    from cache. With ``output_schema`` the final answer's text is one JSON
+    object matching it.
+
+    ``max_tokens`` is per reply (``THINKING_ALLOWANCE`` is added). A reply cut
+    off at ``max_tokens`` ends the exchange and is returned: check
+    ``is_truncated(run.response)``. ``log_file``, if given, gets every reply
+    as a JSON list, written after each turn so a failure leaves the trail.
+
+    Raises:
+        RefusalError: the model refused (the log is written first).
+        ToolLoopError: no answer after ``max_turns`` requests.
+        Whatever a handler raises other than ``ToolInputError``.
+    """
+    tools = [{**t, 'strict': True} for t in tools]
+    missing = [t['name'] for t in tools if t['name'] not in handlers]
+    if missing:
+        raise ValueError(f'no handler for tool(s): {", ".join(missing)}')
+    messages: list[dict] = [{'role': 'user', 'content': prompt}]
+    run = ToolRun(response={})
+    for _ in range(max_turns):
+        body = {
+            'model': model,
+            'max_tokens': request_max_tokens(model, max_tokens),
+            'messages': messages,
+            'tools': tools,
+            'cache_control': {'type': 'ephemeral'},
+        }
+        if system:
+            body['system'] = system
+        if output_schema:
+            body['output_config'] = _output_config(output_schema)
+        heartbeat = _Heartbeat(label or model)
+        heartbeat.start()
+        try:
+            response = _api_request('messages', body, method='POST', timeout=timeout)
+        finally:
+            heartbeat.stop()
+        run.responses.append(response)
+        run.response = response
+        if log_file:
+            _write_log(log_file, run.responses)
+        _check_refusal(response)
+        uses = [b for b in response.get('content', []) if b.get('type') == 'tool_use']
+        if response.get('stop_reason') != 'tool_use' or not uses:
+            return run
+        messages = messages + [{'role': 'assistant', 'content': response['content']}]
+        results = []
+        for use in uses:
+            name, args = use.get('name', ''), use.get('input') or {}
+            handler = handlers.get(name)
+            try:
+                if handler is None:
+                    raise ToolInputError(f'there is no tool named {name!r}')
+                content, is_error = str(handler(args)), False
+            except ToolInputError as e:
+                content, is_error = str(e), True
+            run.calls.append((name, args, is_error))
+            result = {'type': 'tool_result', 'tool_use_id': use['id'], 'content': content}
+            if is_error:
+                result['is_error'] = True
+            results.append(result)
+        messages = messages + [{'role': 'user', 'content': results}]
+    raise ToolLoopError(f'{label or "tool exchange"}: still calling tools after '
+                        f'{max_turns} requests')
 
 
 def is_truncated(response) -> bool:

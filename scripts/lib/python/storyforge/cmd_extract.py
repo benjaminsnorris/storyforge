@@ -1169,8 +1169,7 @@ def _phase4_known(rows, scene_id, order, scene_subjects):
                                        known[i].get('mutable') != 'fixed', -i))
         keep = set(ranked[:MAX_KNOWN_COMMITMENTS])
         known = [r for i, r in enumerate(known) if i in keep]
-    recorded = [r for r in binding if pos(r) == at
-                and r.get('introduced_by') != ledger.COMMITMENTS_PASS]
+    recorded = [r for r in binding if pos(r) == at and not ledger.is_commitment(r)]
     return known, recorded, left_out
 
 
@@ -1317,7 +1316,7 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                     problems['ends'].append(f'{scene_id}: {gone}')
                 elif ends == scene_id:
                     pass   # already ends here
-                elif old.get('introduced_by') != ledger.COMMITMENTS_PASS:
+                elif not ledger.is_commitment(old):
                     problems['ends registry'].append(
                         f'{scene_id}: {gone} (resolves: {ends or "blank"})')
                 elif ends:
