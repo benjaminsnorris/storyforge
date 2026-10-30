@@ -86,3 +86,41 @@ def test_suites_load():
     import harness as h
     names = {s.name for s in h.discover(str(PLUGIN_DIR / 'evals' / 'suites'))}
     assert {'e2-corpus-validate', 'e2-corpus-drift'} <= names
+
+
+def _timeline_book(root, days):
+    """A reference dir whose scenes run in the given order with the given days."""
+    ref = root / 'reference'
+    ref.mkdir(parents=True)
+    head = 'id|seq|title|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n'
+    (ref / 'scenes.csv').write_text(head + ''.join(
+        f'{sid}|{i}|T|1|{pov}|Town|{day}|morning|1 hour|action|briefed|1000|2000\n'
+        for i, (sid, day, pov) in enumerate(days, 1)))
+    (ref / 'scene-intent.csv').write_text(
+        'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads\n'
+        + ''.join(f'{sid}|f|action|flat|truth|+/-|revelation|a|{pov}|{pov}|\n' for sid, _, pov in days))
+    (ref / 'scene-briefs.csv').write_text(
+        'id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow\n'
+        + ''.join(f'{sid}|g|c|o|cr|d|k|k|a|d|e|m||false\n' for sid, _, _ in days))
+    return str(root)
+
+
+def test_a_scene_an_edit_moves_into_a_timeline_run_is_still_found(tmp_path):
+    """F-122 review: validate groups a run of scenes set before the present
+    into one finding keyed by its first scene. The control book has the run
+    a-b; the edit sets x before the present too, extending it to a-b-x. Keyed
+    only by its first scene, the case's finding matched the control's and was
+    dropped as a baseline flag, so recall fell with no error."""
+    from e2 import score
+    control = _timeline_book(tmp_path / 'control', [('p', 30, 'dee'), ('a', 10, 'fred'),
+                                                   ('b', 11, 'fred'), ('x', 31, 'dee')])
+    edited = _timeline_book(tmp_path / 'edited', [('p', 30, 'dee'), ('a', 10, 'fred'),
+                                                  ('b', 11, 'fred'), ('x', 12, 'fred')])
+    control_flags = corpus.validate_detector(control, [], '')
+    case_flags = corpus.validate_detector(edited, [], '')
+    tim = [f for f in case_flags if f['check'] == 'timeline-order']
+    assert sorted(f['scene_id'] for f in tim) == ['a', 'b', 'x']   # one flag per scene in the run
+    case = {'id': 'c1', 'code': 'TIM', 'injection': {'scene': 'x'},
+            'contradicted': [{'scene': 'x'}], 'established': []}
+    result = score([case], {'c1': case_flags}, {'x': control_flags}, ['p', 'a', 'b', 'x'])
+    assert result['metrics']['recall_code_match'] == 1.0
