@@ -368,14 +368,25 @@ def main(argv=None):
     # ========================================================================
     # Phase 2.5: Generate cover if missing
     # ========================================================================
+    # A configured cover that's missing fails the formats that carry a cover
+    # (epub, web), rather than shipping another cover, a placeholder or none
+    from storyforge.assembly import configured_cover_path
+    cover_error = ''
+    try:
+        configured_cover_path(project_dir)
+    except ValueError as exc:
+        cover_error = str(exc)
+        log(f'ERROR: {cover_error}')
+
     env = os.environ.copy()
     env['PYTHONPATH'] = python_lib
-    subprocess.run(
-        [sys.executable, '-c',
-         f'from storyforge.assembly import generate_cover_if_missing; '
-         f'generate_cover_if_missing("{project_dir}", "{plugin_dir}")'],
-        env=env, capture_output=True,
-    )
+    if not cover_error:
+        subprocess.run(
+            [sys.executable, '-c',
+             f'from storyforge.assembly import generate_cover_if_missing; '
+             f'generate_cover_if_missing("{project_dir}", "{plugin_dir}")'],
+            env=env, capture_output=True,
+        )
 
     # ========================================================================
     # Phase 3: Generate output formats
@@ -396,6 +407,10 @@ def main(argv=None):
                 format_failures.append(f'{fmt} generation failed')
 
     def _generate_format(fmt):
+        if cover_error and fmt in ('epub', 'web'):
+            log(f'Skipping {fmt}: its configured cover is missing')
+            format_failures.append(f'{fmt} not generated: {cover_error}')
+            return
         if fmt == 'epub':
             epub_file = os.path.join(output_dir, f'{title_slug}.epub')
             _run_format(fmt, [sys.executable, '-c',
