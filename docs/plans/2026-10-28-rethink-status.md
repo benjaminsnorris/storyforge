@@ -25,7 +25,7 @@ Last updated 2026-10-29, at v1.84.5. Start here when resuming the rethink in a n
 - the remaining `KEY: value` parsers;
 - the remaining warn-and-continue sites.
 
-**E2 recall:** the Phase 1 criterion "E2 recall improves over baseline" is not met. E2-Carol finds 0 of 37, and drift on E1 about 0.10. Most of Carol's injected errors (physical state, knowledge, numbers) are outside what the timeline check reads, so real recall depends on the Phase 2 ledger and the Phase 3 checker.
+**E2 recall:** the Phase 1 criterion "E2 recall improves over baseline" is not met. E2-Carol finds 0 of 37, and e2-corpus-drift recall is about 0.10. Most of Carol's injected errors (physical state, knowledge, numbers) are outside what the timeline check reads, so real recall depends on the Phase 2 ledger and the Phase 3 checker.
 
 | Plan chunk | State | PRs |
 |---|---|---|
