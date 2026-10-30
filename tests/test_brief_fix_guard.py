@@ -203,3 +203,45 @@ def test_nothing_rewritten_redrafts_nothing(project_dir):
          patch('storyforge.cmd_revise._redraft_or_halt') as redraft:
         assert _fix_and_redraft(project_dir, ['a'])[0] == []
     redraft.assert_not_called()
+
+
+class TestHoneBriefsGuard:
+    """hone's brief rewrites (concretize, trim, evaluation fixes) go through
+    the same check as revise's upstream brief fix."""
+
+    def _hone(self, project_dir, monkeypatch, reply):
+        from storyforge import api
+        from storyforge.hone import hone_briefs
+        findings = os.path.join(project_dir, 'working', 'findings.csv')
+        os.makedirs(os.path.dirname(findings), exist_ok=True)
+        with open(findings, 'w') as f:
+            f.write('scene_id|target_file|fields|guidance\n')
+            f.write('act1-sc01|scene-briefs.csv|goal|Make the goal concrete\n')
+        monkeypatch.setattr(api, 'invoke_to_file', lambda *a, **kw: None)
+        monkeypatch.setattr(api, 'extract_text_from_file', lambda path: reply)
+        return hone_briefs(os.path.join(project_dir, 'reference'), project_dir,
+                           scene_ids=['act1-sc01'], model='m',
+                           log_dir=os.path.join(project_dir, 'working', 'logs'),
+                           coaching_level='full', findings_file=findings)
+
+    def _goal(self, project_dir):
+        from storyforge.elaborate import _read_csv_as_map
+        return _read_csv_as_map(os.path.join(
+            project_dir, 'reference', 'scene-briefs.csv'))['act1-sc01']['goal']
+
+    def test_a_rewrite_naming_someone_the_book_never_does_is_refused(
+            self, project_dir, monkeypatch, capsys):
+        before = self._goal(project_dir)
+        result = self._hone(project_dir, monkeypatch,
+                            'goal: get Detective Ruzek to sign off on the audit')
+        assert result['fields_rewritten'] == 0 and result['scenes_rewritten'] == 0
+        assert result['rejected'] == {
+            'act1-sc01': ['evaluation rewrite of goal named Detective, Ruzek']}
+        assert self._goal(project_dir) == before
+        assert 'WARNING: not rewriting act1-sc01' in capsys.readouterr().out
+
+    def test_a_rewrite_in_the_books_own_names_is_kept(self, project_dir, monkeypatch):
+        result = self._hone(project_dir, monkeypatch,
+                            'goal: Dorren files the Deep Archive audit by nightfall')
+        assert result['fields_rewritten'] == 1 and result['rejected'] == {}
+        assert self._goal(project_dir) == 'Dorren files the Deep Archive audit by nightfall'

@@ -1767,7 +1767,9 @@ def hone_briefs(
             scene-briefs.csv are merged into all_issues before processing.
 
     Returns:
-        Dict with scenes_flagged, scenes_rewritten, fields_rewritten.
+        Dict with scenes_flagged, scenes_rewritten, fields_rewritten and
+        rejected: scene id -> why a rewrite was refused (it named a word the
+        book never uses; see ``brief_names``).
     """
     briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
     scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
@@ -1836,9 +1838,35 @@ def hone_briefs(
     for issue in all_issues:
         by_scene.setdefault(issue['scene_id'], []).append(issue)
 
+    from storyforge.brief_names import invented_names, read_text, reference_text
+    known_reference = reference_text(project_dir)
+    rejected: dict[str, list[str]] = {}
+
     scenes_rewritten = 0
     fields_rewritten = 0
     total_scenes = len(by_scene)
+
+    def apply_rewrites(sid: str, rewrites: dict, current_values: dict, kind: str) -> int:
+        """Write one reply's changed fields into the brief, unless the reply
+        names a capitalized word the reference files, the scene's prose and
+        the brief's other fields never use; then the brief is left as it was
+        and the scene listed in ``rejected``. Returns the fields changed."""
+        changed = {f: v for f, v in rewrites.items() if v and v != current_values.get(f)}
+        if not changed:
+            return 0
+        prose_path = os.path.join(project_dir, 'scenes', f'{sid}.md')
+        prose = read_text(prose_path) if os.path.isfile(prose_path) else ''
+        kept = ' '.join(str(v) for k, v in briefs_map[sid].items() if k not in changed)
+        names = invented_names(list(changed.values()), '\n'.join((known_reference, prose, kept)))
+        if names:
+            reason = (f'{kind} rewrite of {", ".join(sorted(changed))} named '
+                      f'{", ".join(names)}')
+            log(f'    WARNING: not rewriting {sid}: the {reason}, which appear nowhere in '
+                f'the reference files, its prose or its other brief fields')
+            rejected.setdefault(sid, []).append(reason)
+            return 0
+        briefs_map[sid].update(changed)
+        return len(changed)
 
     for idx, (sid, issues) in enumerate(by_scene.items(), 1):
         if sid not in briefs_map:
@@ -1848,6 +1876,7 @@ def hone_briefs(
         trim_issues = [i for i in issues if i['issue'] in ('overspecified', 'verbose')]
         issue_types = sorted(set(i['issue'] for i in issues))
         log(f'  [{idx}/{total_scenes}] {sid} ({", ".join(issue_types)})')
+        changed = 0
 
         # Handle abstract issues with concretization prompt
         if abstract_issues and coaching_level == 'full':
@@ -1869,10 +1898,7 @@ def hone_briefs(
             response = extract_text_from_file(log_file)
 
             rewrites = parse_concretize_response(response, sid, abstract_fields)
-            for field, new_value in rewrites.items():
-                if new_value and new_value != current_values.get(field):
-                    briefs_map[sid][field] = new_value
-                    fields_rewritten += 1
+            changed += apply_rewrites(sid, rewrites, current_values, 'concretize')
 
         # Handle overspecified/verbose issues with trim prompt
         if trim_issues and coaching_level == 'full':
@@ -1895,10 +1921,7 @@ def hone_briefs(
                 response = extract_text_from_file(log_file)
 
                 rewrites = parse_concretize_response(response, sid, trim_fields)
-                for field, new_value in rewrites.items():
-                    if new_value and new_value != current_values.get(field):
-                        briefs_map[sid][field] = new_value
-                        fields_rewritten += 1
+                changed += apply_rewrites(sid, rewrites, current_values, 'trim')
 
         # Handle evaluation issues (from external findings)
         eval_issues = [i for i in issues if i['issue'] == 'evaluation']
@@ -1925,10 +1948,7 @@ def hone_briefs(
             response = extract_text_from_file(log_file)
 
             rewrites = parse_concretize_response(response, sid, eval_fields)
-            for field, new_value in rewrites.items():
-                if new_value and new_value != current_values.get(field):
-                    briefs_map[sid][field] = new_value
-                    fields_rewritten += 1
+            changed += apply_rewrites(sid, rewrites, current_values, 'evaluation')
 
         # Coach mode: save proposals for all issue types
         if coaching_level == 'coach':
@@ -1943,8 +1963,9 @@ def hone_briefs(
                         fh.write(f"**Current:** {issue['value'][:300]}\n\n")
             continue
 
-        if abstract_issues or trim_issues or eval_issues:
+        if changed:
             scenes_rewritten += 1
+            fields_rewritten += changed
 
     # Write back if any changes were made
     if fields_rewritten > 0:
@@ -1960,6 +1981,7 @@ def hone_briefs(
         'scenes_flagged': len(by_scene),
         'scenes_rewritten': scenes_rewritten,
         'fields_rewritten': fields_rewritten,
+        'rejected': rejected,
     }
 
 

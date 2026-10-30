@@ -236,6 +236,16 @@ def _run_registry_domain(domain: str, ref_dir: str, project_dir: str,
                     ['reference/', 'working/logs/'])
 
 
+def _log_rejected(result: dict) -> None:
+    """Name the scenes whose brief rewrite was refused for naming someone or
+    something the book never mentions; their briefs are unchanged."""
+    rejected = result.get('rejected') or {}
+    if rejected:
+        log(f'  Left unchanged ({len(rejected)} scene(s)): the rewrite named words the book never uses')
+        for sid, reasons in rejected.items():
+            log(f'    {sid}: {"; ".join(reasons)}')
+
+
 def _run_briefs_domain(ref_dir: str, project_dir: str, log_dir: str,
                        model: str, coaching: str, scene_filter: list[str] | None,
                        threshold: float, dry_run: bool,
@@ -291,6 +301,7 @@ def _run_briefs_domain(ref_dir: str, project_dir: str, log_dir: str,
     rewritten = result.get('scenes_rewritten', 0)
     fields = result.get('fields_rewritten', 0)
     log(f'  Rewritten: {rewritten} scenes, {fields} fields')
+    _log_rejected(result)
 
     if rewritten > 0:
         commit_and_push(project_dir,
@@ -473,6 +484,7 @@ def _run_loop(ref_dir: str, project_dir: str, log_dir: str, model: str,
         rewritten = result.get('scenes_rewritten', 0)
         fields = result.get('fields_rewritten', 0)
         log(f'  Rewritten: {rewritten} scenes, {fields} fields')
+        _log_rejected(result)
 
         if rewritten > 0:
             commit_and_push(project_dir,
