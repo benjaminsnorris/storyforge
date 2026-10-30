@@ -1,6 +1,8 @@
 # Ledger migration: proposed mapping and the decisions it needs
 
-Written overnight on 2026-10-30, at the start of plan chunk 6 (Phase 2). Phase 1 is done. This doc is for Ben: it proposes how `knowledge.csv` and `physical-states.csv` map into `commitments.csv` and lists the decisions the mapping needs before any code changes author data. No code has been written for it yet.
+**Decided (Ben, 2026-10-30 morning): the mapping below is accepted, recommendations included.** That is: the four added columns; `origin = migrated`; unresolved `character` names reported with `subject` left blank; understory's statement from the first alias; facts with no scene left with a blank `scene_id` and reported; and two PRs (`ledger.py` plus the migration, then the consumer switch). The re-record budget for the consumer switch (decision 6, about $20) still needs an estimate and Ben's go-ahead. The work is Next steps 5 and 6 in `docs/plans/2026-10-28-rethink-status.md`.
+
+Written overnight on 2026-10-30, at the start of plan chunk 6 (Phase 2), once Phase 1 was done. It proposes how `knowledge.csv` and `physical-states.csv` map into `commitments.csv`, and lists the decisions the mapping needed before any code changes author data.
 
 ## Why stop here
 
