@@ -635,3 +635,34 @@ def test_dispatcher_routes_score_to_novel_in_novel_mode(project_dir, monkeypatch
         pass
     assert called['novel'], 'novel-mode score should route to cmd_score'
     assert not called['gn'], 'novel-mode score should NOT call cmd_score_gn'
+
+
+@pytest.mark.parametrize('reply, why', [(None, 'API call failed'), ('', 'empty reply')])
+def test_briefs_handler_gn_names_a_scene_that_got_no_brief(project_dir_gn, monkeypatch,
+                                                           reply, why):
+    """A failed or empty brief call was logged and skipped; nothing named the
+    scene at the end and the phase could advance without its brief. It is
+    now recorded, and the stage exits 1 after committing the rest."""
+    import json
+    from storyforge import api, cmd_elaborate
+    from storyforge.csv_cli import update_field
+    ref_dir = os.path.join(project_dir_gn, 'reference')
+    update_field(os.path.join(ref_dir, 'scenes.csv'), 'the-blank-page', 'status', 'mapped')
+    update_field(os.path.join(ref_dir, 'scene-briefs.csv'), 'the-blank-page',
+                 'panel_breakdown', '')
+
+    def fake_invoke_to_file(prompt, model, log_file, **kwargs):
+        if reply is None:
+            raise RuntimeError('overloaded')
+        response = {'content': [{'type': 'text', 'text': reply}],
+                    'usage': {'input_tokens': 1, 'output_tokens': 1}}
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    monkeypatch.setattr(api, 'invoke_to_file', fake_invoke_to_file)
+    monkeypatch.setattr(cmd_elaborate, '_gn_brief_failures', [])
+
+    cmd_elaborate._briefs_handler_gn(project_dir_gn, ref_dir, dry_run=False,
+                                     stage_model='m', system=None)
+
+    assert cmd_elaborate._gn_brief_failures == [f'the-blank-page: {why}']

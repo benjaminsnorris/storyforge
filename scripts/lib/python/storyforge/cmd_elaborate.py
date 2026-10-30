@@ -519,6 +519,12 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
 # GN briefs helper
 # ============================================================================
 
+# GN scenes whose brief call failed this run (scene id: why). The stage is
+# still validated and committed for the briefs that were written, but the
+# phase doesn't advance and the run exits 1 naming them.
+_gn_brief_failures: list[str] = []
+
+
 def _briefs_handler_gn(project_dir: str, ref_dir: str,
                        dry_run: bool, stage_model: str, system,
                        interactive: bool = False):
@@ -626,6 +632,7 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
                                       max_tokens=2048, system=system)
         except Exception as e:
             log(f'  ERROR: API failed for {sid}: {e}')
+            _gn_brief_failures.append(f'{sid}: API call failed')
             continue
 
         # Log cost per scene under elaborate-briefs-gn so the ledger
@@ -642,6 +649,7 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
         response_text = extract_text_from_file(log_file)
         if not response_text:
             log(f'  WARNING: Empty response for {sid}')
+            _gn_brief_failures.append(f'{sid}: empty reply')
             continue
 
         rows = csv_block_to_rows(response_text)
@@ -666,6 +674,7 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
             log(f'  {sid}: brief written')
         else:
             log(f'  WARNING: Could not parse brief for {sid}')
+            _gn_brief_failures.append(f'{sid}: unreadable reply')
 
     if written_ids:
         ordered = sorted(briefs_map.values(), key=lambda r: r.get('id', ''))
@@ -1898,6 +1907,13 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     }
     next_phase = next_phase_map.get(stage)
 
+    if _gn_brief_failures:
+        log(f'ERROR: {len(_gn_brief_failures)} scene(s) got no brief; the phase is not '
+            f'advanced. Re-run the briefs stage for them:')
+        for failure in _gn_brief_failures:
+            log(f'  {failure}')
+        sys.exit(1)
+
     if validate_passed and next_phase:
         current_phase = read_yaml_field('phase', project_dir)
         if current_phase in (stage, 'spine', 'development'):
@@ -1942,6 +1958,7 @@ def main(argv=None):
     args = parse_args(argv or [])
 
     install_signal_handlers()
+    _gn_brief_failures.clear()
 
     from datetime import datetime
     session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
