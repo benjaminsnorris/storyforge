@@ -83,6 +83,16 @@ class TestParseSkeletonResponse:
             with pytest.raises(ValueError):
                 skeleton_cues(reply)
 
+    def test_a_value_of_the_wrong_type_is_unreadable_not_mangled(self):
+        """A null would be stored as "None" and a list as its repr."""
+        from storyforge.extract import parse_skeleton_response, skeleton_cues
+        for fields in ({'title': None}, {'time_refers': ['a', 'b']}, {'location': 'Office'}):
+            reply = _reply('SKELETON_SCHEMA', **fields)
+            with pytest.raises(ValueError):
+                parse_skeleton_response(reply, 's1')
+            with pytest.raises(ValueError):
+                skeleton_cues(reply)
+
     def test_cues_come_from_the_same_reply(self):
         from storyforge.extract import skeleton_cues
         cues = skeleton_cues(_reply('SKELETON_SCHEMA', time_relation='later',

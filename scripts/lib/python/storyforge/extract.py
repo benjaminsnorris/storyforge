@@ -245,7 +245,7 @@ Key locations: {profile.get('key_locations', 'unknown')}"""
 {registries_section}
 ## Instructions
 
-Answer with a JSON object with these fields (a list field is a JSON array of strings; "unknown" where a value cannot be determined, and an empty string for a time cue the text doesn't give):
+Answer with a JSON object with these fields (a list field is a JSON array of strings; "unknown" where a value cannot be determined, and an empty string for a time cue the text doesn't give, except time_relation, which is "unclear" then):
 
 - title: a short evocative title for this scene, 3-7 words
 - pov: the POV character's full name
@@ -576,6 +576,16 @@ def _json_answer(response: str, schema: dict) -> dict:
     missing = [k for k in schema['required'] if k not in data]
     if missing:
         raise ValueError(f'reply has no {", ".join(missing)}')
+    # A value of the wrong type would be stored as its repr ("None",
+    # "['a', 'b']"): structured outputs shouldn't send one, but if one
+    # comes the reply is unreadable, not quietly mangled
+    for key in schema['required']:
+        kind = schema['properties'][key].get('type')
+        value = data[key]
+        if kind == 'string' and not isinstance(value, str):
+            raise ValueError(f'reply\'s {key} is not a string: {value!r:.80}')
+        if kind == 'array' and not isinstance(value, list):
+            raise ValueError(f'reply\'s {key} is not a list: {value!r:.80}')
     return data
 
 
