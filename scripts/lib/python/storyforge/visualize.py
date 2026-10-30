@@ -20,9 +20,8 @@ def csv_to_records(csv_file: str) -> list[dict]:
     """Read a pipe-delimited CSV file into a list of dicts.
 
     Header row becomes dict keys. Missing files or empty files return [].
-    Values are always strings (matching the awk behavior).
-    HTML-unsafe characters (<, >) are escaped for safe injection into
-    script tags.
+    Values are always strings, as the dashboard contract requires. They are
+    not escaped: escaping belongs to the renderer (Bookshelf).
     """
     if not csv_file or not os.path.isfile(csv_file):
         return []
@@ -46,10 +45,7 @@ def csv_to_records(csv_file: str) -> list[dict]:
         fields = line.split('|')
         row = {}
         for i, header in enumerate(headers):
-            val = fields[i] if i < len(fields) else ''
-            # Escape HTML-unsafe characters for safe script-tag injection
-            val = val.replace('<', '\\u003c').replace('>', '\\u003e')
-            row[header] = val
+            row[header] = fields[i] if i < len(fields) else ''
         records.append(row)
 
     return records
@@ -174,16 +170,23 @@ def _compute_brief_quality(project_dir: str) -> list[dict]:
         return []
 
 
+# The dashboard_data contract with Bookshelf, which renders it
+# (benjaminsnorris/bookshelf#30; documented in docs/agent-reference.md). A
+# major version: adding a list or a CSV column doesn't change it; renaming
+# or removing a key, or changing a value's type, does.
+DASHBOARD_SCHEMA_VERSION = 1
+
+
 def load_dashboard_data(project_dir: str) -> dict:
-    """Load all CSV data needed for the manuscript dashboard.
+    """Load the manuscript dashboard's data (``dashboard_data``).
 
     Args:
         project_dir: Path to the novel project root.
 
     Returns:
-        Dict with keys: scenes, intents, characters, motif_taxonomy,
-        locations, scores, weights, narrative_scores, project.
-        All values are JSON-serializable.
+        Dict with ``schema_version``, ``project`` and one list of row dicts
+        per dashboard section (see docs/agent-reference.md). Every row value
+        is a string, except ``brief_quality``'s counts.
     """
     # Three-file model: scenes.csv + scene-intent.csv + scene-briefs.csv
     metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
@@ -251,6 +254,7 @@ def load_dashboard_data(project_dir: str) -> dict:
     brief_quality = _compute_brief_quality(project_dir)
 
     return {
+        'schema_version': DASHBOARD_SCHEMA_VERSION,
         'scenes': scenes,
         'intents': intents,
         'briefs': briefs,
