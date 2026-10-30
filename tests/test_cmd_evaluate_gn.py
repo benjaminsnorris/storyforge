@@ -295,8 +295,11 @@ class TestEvaluateJsonParsing:
         assert data['findings'][0]['severity'] == 'high'
         assert data['findings'][0]['message'] == 'Missing shot type'
 
-    def test_unparseable_response_skipped_gracefully(self, project_dir_gn, monkeypatch):
-        """If a persona returns non-JSON, it is skipped and the run continues."""
+    def test_unparseable_response_is_named_not_counted_as_clean(
+            self, project_dir_gn, monkeypatch, capsys):
+        """A persona whose reply can't be read is skipped and the run goes on,
+        but it used to be listed as run with 0 findings: the scene read as
+        clean. It is now listed as failed, and the run exits 1."""
         monkeypatch.chdir(project_dir_gn)
         _write_scenes(project_dir_gn, {'the-blank-page': _SCRIPT_THE_BLANK_PAGE})
 
@@ -312,8 +315,10 @@ class TestEvaluateJsonParsing:
         monkeypatch.setattr(storyforge_api, 'invoke_to_file', fake)
         monkeypatch.setattr(cmd_evaluate_gn, 'invoke_to_file', fake)
 
-        # Should not raise — bad JSON is gracefully skipped
-        cmd_evaluate_gn.main(['--personas', 'pacing'])
+        with pytest.raises(SystemExit) as exc:
+            cmd_evaluate_gn.main(['--personas', 'pacing'])
+        assert exc.value.code == 1
+        assert 'the-blank-page: pacing' in capsys.readouterr().out
 
         output_dir = os.path.join(project_dir_gn, 'working', 'evaluations', 'latest')
         json_path = os.path.join(output_dir, 'the-blank-page.json')
@@ -322,8 +327,8 @@ class TestEvaluateJsonParsing:
         with open(json_path) as f:
             data = json.load(f)
 
-        # The persona ran but produced no parseable findings
-        assert data['personas_run'] == ['pacing']
+        assert data['personas_run'] == []
+        assert data['personas_failed'] == ['pacing']
         assert data['findings'] == []
 
 
@@ -364,12 +369,10 @@ class TestParseFindings:
         result = self._call('{"findings": []}')
         assert result == []
 
-    def test_empty_response_returns_empty(self):
-        """Empty string returns []."""
-        result = self._call('')
-        assert result == []
+    def test_empty_response_is_unreadable(self):
+        """An empty reply is no review: None, not 'no findings'."""
+        assert self._call('') is None
 
-    def test_non_list_findings_returns_empty_list(self):
-        """{"findings": "some string"} returns [] without crashing."""
-        result = self._call('{"findings": "some string"}')
-        assert result == []
+    def test_non_list_findings_is_unreadable(self):
+        """{"findings": "some string"} returns None without crashing."""
+        assert self._call('{"findings": "some string"}') is None
