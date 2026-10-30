@@ -237,8 +237,13 @@ class TestMigrate:
         ref = _ref(tmp_path, physical=P_HEADER + 'cut|Garren|a cut|injury|s1|never|false\n')
         result = migrate_registries(ref)
         assert result.rows[0]['subject'] == ''
+        # The name is kept, in aliases, and comes back out of the round trip
+        assert result.rows[0]['aliases'] == 'Garren'
         assert [q.kind for q in result.quirks] == ['unresolved-character']
         assert "'Garren'" in str(result.quirks[0])
+        assert 'the name kept in aliases' in str(result.quirks[0])
+        assert round_trip_differences(ref, result) == []
+        assert ledger.physical_view(result.rows)[0]['character'] == 'Garren'
 
     def test_backstory_and_blank_origins_leave_scene_id_blank(self, tmp_path):
         ref = _ref(tmp_path, knowledge=K_HEADER + 'k1|Old|||backstory\nk2|New|||\n')
@@ -534,3 +539,103 @@ class TestMigrateFiles:
         assert result.status == 'dry-run' and len(result.rows) == 9
         assert not os.path.isfile(os.path.join(ref, 'commitments.csv'))
         assert ledger.legacy_files(ref) == list(ledger.LEGACY_FILES)
+
+
+# ============================================================================
+# A write changes only what the writer changed
+# ============================================================================
+
+def _ledger_text(project_dir):
+    with open(os.path.join(project_dir, 'reference', 'commitments.csv'), newline='') as f:
+        return f.read()
+
+
+def _odd_ledger(project_dir):
+    """The fixture ledger with the things a careless write-back would change:
+    doubled spaces in a statement and a quote, a `backstory` scene_id, a
+    timeline fact, and an unresolved character kept in aliases."""
+    path = os.path.join(project_dir, 'reference', 'commitments.csv')
+    rows = read_ledger(path)
+    rows[0]['statement'] = 'A map  anomaly exists '
+    rows[0]['quote'] = '"It was  there," she said.'
+    rows[1]['scene_id'] = 'backstory'
+    rows.append({**rows[5], 'id': 'garren-cut', 'subject': '', 'aliases': 'Garren'})
+    rows.append({**rows[0], 'id': 'day-three', 'type': 'timeline', 'statement': 'Day  3'})
+    write_ledger(path, rows)
+    return _ledger_text(project_dir)
+
+
+class TestUntouchedRowsAreByteIdentical:
+    def test_read_and_write_back(self, project_dir):
+        before = _odd_ledger(project_dir)
+        ledger.save(project_dir, ledger.load(project_dir))
+        assert _ledger_text(project_dir) == before
+
+    @pytest.mark.parametrize('type_', ['knowledge', 'physical'])
+    def test_an_unchanged_view_written_back(self, project_dir, type_):
+        before = _odd_ledger(project_dir)
+        ref = os.path.join(project_dir, 'reference')
+        ledger.write_view(ref, type_, ledger.read_view(ref, type_), origin='prose',
+                          introduced_by='extract')
+        assert _ledger_text(project_dir) == before
+
+    def test_a_changed_cell_changes_only_its_line(self, project_dir):
+        before = _odd_ledger(project_dir).splitlines()
+        ref = os.path.join(project_dir, 'reference')
+        view = ledger.read_view(ref, 'physical')
+        view[0]['resolves'] = 'act2-sc01'
+        ledger.write_view(ref, 'physical', view, origin='prose', introduced_by='extract')
+        after = _ledger_text(project_dir).splitlines()
+        changed = [i for i, (a, b) in enumerate(zip(before, after)) if a != b]
+        assert len(after) == len(before) and changed == [6]
+        assert after[6] == before[6].replace('|never|true', '|act2-sc01|true')
+
+    def test_extract_hone_and_prune_writes_keep_other_rows(self, project_dir):
+        from storyforge.cmd_extract import _prune_registries, _record_physical_states
+        from storyforge.hone import read_registry, write_registry
+        before = _odd_ledger(project_dir).splitlines()
+        ref = os.path.join(project_dir, 'reference')
+        _record_physical_states(ref, 'act2-sc01', [{'id': 'new-bruise',
+                                'character': 'tessa-merrin', 'description': 'a bruise'}],
+                                [], {})
+        write_registry(ref, 'knowledge', read_registry(ref, 'knowledge'))
+        write_registry(ref, 'physical-states', read_registry(ref, 'physical-states'))
+        _prune_registries(ref, created_facts=set(), created_states={'new-bruise'})
+        after = _ledger_text(project_dir).splitlines()
+        # Every line nothing changed is still there as it was
+        pruned = {'subsidence-not-natural', 'sprained-ankle-tessa',
+                  'scar-left-hand-kael', 'garren-cut'}
+        assert [l for l in before if l.split('|')[0] not in pruned] == \
+            [l for l in after if not l.startswith('new-bruise|')]
+
+
+class TestFileProblems:
+    def _write(self, project_dir, text):
+        path = os.path.join(project_dir, 'reference', 'commitments.csv')
+        with open(path, 'w') as f:
+            f.write(text)
+        return path
+
+    def _row(self, rid):
+        return '|'.join([rid, '', 'knowledge', '', 'A fact', '', 'author', 'binding',
+                         'state'] + [''] * 9)
+
+    @pytest.mark.parametrize('body, needle', [
+        ('{h}|notes\n', 'columns the ledger has no place for: notes'),
+        ('{h}\n{a}\n{a}\n', "line 3: id 'a' is also on line 2"),
+        ('{h}\n{blank}\n', 'line 2: no id'),
+        ('{h}\n{a}|extra\n', 'line 2: 19 cells, the header has 18'),
+    ])
+    def test_load_refuses_rather_than_fixing(self, project_dir, body, needle):
+        path = self._write(project_dir, body.format(h='|'.join(COLUMNS), a=self._row('a'),
+                                                    blank=self._row('')))
+        before = open(path).read()
+        assert any(needle in p for p in ledger.file_problems(path))
+        with pytest.raises(ledger.LedgerError, match=needle.replace('(', r'\(')):
+            ledger.load(project_dir)
+        with pytest.raises(SystemExit):
+            ledger.exit_if_not_migrated(project_dir)
+        assert open(path).read() == before
+
+    def test_the_fixture_has_none(self, project_dir):
+        assert ledger.file_problems(ledger.ledger_path(project_dir)) == []

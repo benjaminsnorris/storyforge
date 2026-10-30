@@ -179,13 +179,14 @@ def _dispatch(module) -> None:
     Only a non-zero code exits: returning normally on success keeps this
     callable in-process, which the dispatcher tests rely on.
 
-    A ``ledger.NotMigratedError`` (knowledge.csv or physical-states.csv
-    still on disk) exits 1 with its message rather than a traceback.
+    A ``ledger.LedgerError`` (knowledge.csv or physical-states.csv still on
+    disk, or a ledger with a duplicate or blank id, a bad header or a short
+    row) exits 1 with its message rather than a traceback.
     """
-    from storyforge.ledger import NotMigratedError
+    from storyforge.ledger import LedgerError
     try:
         code = module.main(sys.argv[1:])
-    except NotMigratedError as e:
+    except LedgerError as e:
         # A command with no up-front check reached the registries: stop as
         # plainly as the ones that check
         print(f'ERROR: {e}', file=sys.stderr)

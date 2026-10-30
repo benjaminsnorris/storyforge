@@ -68,8 +68,56 @@ def ledger_path(project_dir: str) -> str:
     return os.path.join(project_dir, 'reference', LEDGER_FILE)
 
 
-class NotMigratedError(RuntimeError):
+class LedgerError(RuntimeError):
+    """The ledger can't be read as it is; the message says why and where."""
+
+
+class NotMigratedError(LedgerError):
     """knowledge.csv or physical-states.csv is still in `reference/`."""
+
+
+def file_problems(path: str) -> list[str]:
+    """What stops `path` being read as the ledger, one string each: a header
+    that isn't exactly COLUMNS, a row whose cell count differs from it, a
+    blank id, an id on two rows. Missing file → []. Each would be silently
+    "fixed" by reading and writing the file back (a column dropped, rows
+    merged), so the ledger is not read until the author fixes them.
+    """
+    if not os.path.isfile(path):
+        return []
+    lines, _ = _raw_lines(path)
+    if not lines:
+        return []
+    problems = []
+    header = lines[0].split('|')
+    if header != COLUMNS:
+        unknown = [h for h in header if h not in COLUMNS]
+        missing = [c for c in COLUMNS if c not in header]
+        detail = '; '.join(filter(None, [
+            unknown and f'columns the ledger has no place for: {", ".join(unknown)}',
+            missing and f'missing columns: {", ".join(missing)}',
+            not unknown and not missing and 'columns out of order or repeated']))
+        problems.append(f'{LEDGER_FILE} line 1: the header must be exactly '
+                        f'{"|".join(COLUMNS)} ({detail})')
+        return problems
+    seen: dict[str, int] = {}
+    for n, line in enumerate(lines[1:], start=2):
+        if not line.strip():
+            continue
+        cells = line.split('|')
+        if len(cells) != len(COLUMNS):
+            problems.append(f'{LEDGER_FILE} line {n}: {len(cells)} cells, the '
+                            f'header has {len(COLUMNS)}: {line[:80]!r}')
+            continue
+        rid = cells[0]
+        if not rid.strip():
+            problems.append(f'{LEDGER_FILE} line {n}: no id: {line[:80]!r}')
+        elif rid in seen:
+            problems.append(f'{LEDGER_FILE} line {n}: id {rid!r} is also on line '
+                            f'{seen[rid]}')
+        else:
+            seen[rid] = n
+    return problems
 
 
 def legacy_files(ref_dir: str) -> list[str]:
@@ -100,11 +148,13 @@ def not_migrated_message(ref_dir: str) -> str | None:
 
 
 def exit_if_not_migrated(project_dir: str) -> None:
-    """Stop the command (exit 1) when the registries can't be read."""
-    message = not_migrated_message(os.path.join(project_dir, 'reference'))
-    if message:
+    """Stop the command (exit 1) when the registries can't be read: the old
+    files are still there, or the ledger has a problem `file_problems` names."""
+    try:
+        load(project_dir)
+    except LedgerError as e:
         from storyforge.common import log
-        log(f'ERROR: {message}')
+        log(f'ERROR: {e}')
         raise SystemExit(1)
 
 
@@ -113,11 +163,17 @@ def load_from(ref_dir: str) -> list[dict[str, str]]:
 
     Raises:
         NotMigratedError: while knowledge.csv or physical-states.csv is there.
+        LedgerError: when the ledger has a problem `file_problems` names.
     """
     message = not_migrated_message(ref_dir)
     if message:
         raise NotMigratedError(message)
-    return read_ledger(os.path.join(ref_dir, LEDGER_FILE))
+    path = os.path.join(ref_dir, LEDGER_FILE)
+    problems = file_problems(path)
+    if problems:
+        raise LedgerError(f'reference/{LEDGER_FILE} can\'t be read until these are '
+                          f'fixed: ' + '; '.join(problems))
+    return read_ledger(path)
 
 
 def load(project_dir: str) -> list[dict[str, str]]:
@@ -185,7 +241,10 @@ def write_ledger(path: str, rows: list[dict[str, str]]) -> None:
 def _cell(row: dict, column: str) -> str:
     value = row.get(column, '') or ''
     if column in _PROSE_COLUMNS:
-        return csv_safe(value)
+        # Only a value that would break the row is collapsed: one read from
+        # the file goes back as it was
+        return csv_safe(value) if ('|' in value or '\n' in value
+                                   or '\r' in value) else value
     # Ids, enums and `;` lists: a `|` or newline here is corrupt data, and
     # collapsing it would hide that
     if '|' in value or '\n' in value or '\r' in value:
@@ -215,8 +274,10 @@ def knowledge_view(rows: list[dict[str, str]]) -> list[dict[str, str]]:
 
 
 def physical_view(rows: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Physical states as id / character (subject id) / description /
-    category / acquired / resolves / action_gating."""
+    """Physical states as id / character / description / category /
+    acquired / resolves / action_gating. `character` is the subject id, or,
+    for a subject the migration couldn't resolve (blank), the name it kept
+    in aliases."""
     return view(rows, 'physical')
 
 
@@ -227,6 +288,16 @@ def read_view(ref_dir: str, type_: str) -> list[dict[str, str]]:
 def view_map(ref_dir: str, type_: str) -> dict[str, dict[str, str]]:
     """id → view row of `type_`."""
     return {r['id']: r for r in read_view(ref_dir, type_) if r['id']}
+
+
+#: Which ledger column each view column is
+_VIEW_TO_LEDGER = {
+    'knowledge': {'name': 'statement', 'aliases': 'aliases', 'category': 'category',
+                  'origin': 'scene_id'},
+    'physical': {'character': 'subject', 'description': 'statement',
+                 'category': 'category', 'acquired': 'scene_id',
+                 'resolves': 'resolves', 'action_gating': 'action_gating'},
+}
 
 
 def _from_view(type_: str, cells: dict) -> dict[str, str]:
@@ -250,8 +321,8 @@ def replace_view(rows: list[dict[str, str]], type_: str,
 
     Rows of every other type stay as they are, where they are. A `type_` row
     whose id is still in `view_rows` keeps its place and every column the
-    view doesn't carry (quote, known_by, status, ...); one whose id is gone is
-    dropped. A new id becomes a binding `state` fact with `origin` and
+    view doesn't carry (quote, known_by, status, ...), and only the cells
+    whose view value changed are rewritten; one whose id is gone is dropped. A new id becomes a binding `state` fact with `origin` and
     `introduced_by`, placed after the type's last row.
 
     Raises:
@@ -273,7 +344,15 @@ def replace_view(rows: list[dict[str, str]], type_: str,
         vr = wanted.get(row.get('id', ''))
         if vr is None or row['id'] in placed:
             continue
-        out.append({**row, **_from_view(type_, vr)})
+        # Only the cells the writer changed: an untouched row goes back as it
+        # was (whitespace, a `backstory` scene_id, a name kept in aliases)
+        current = view([row], type_)[0]
+        mapped = _from_view(type_, vr)
+        updated = dict(row)
+        for vcol, lcol in _VIEW_TO_LEDGER[type_].items():
+            if (vr.get(vcol) or '') != current[vcol]:
+                updated[lcol] = mapped[lcol]
+        out.append(updated)
         placed.add(row['id'])
         insert_at = len(out)
     other_ids = {r.get('id', '') for r in rows if r.get('type') != type_}
@@ -672,15 +751,18 @@ def _physical_row(rid, cells, characters, scene_ids, file, result):
     name = cells.get('character', '')
     subject = characters.get(name.lower(), '')
     if not subject:
+        # Kept in aliases so the name isn't lost; validate reports the row
         result.quirks.append(Quirk(
             file, 'unresolved-character', rid,
             f'character {name!r} is not in characters.csv (name, id or '
-            f'alias): subject left blank', column='character', old=name, new=''))
+            f'alias): subject left blank, the name kept in aliases'))
     elif subject != name:
         result.quirks.append(Quirk(
             file, 'character-id', rid, f'character {name!r} is written as its '
             f'id {subject!r}', column='character', old=name, new=subject))
     row['subject'] = subject
+    if not subject and name:
+        row['aliases'] = name
     row['statement'] = cells.get('description', '')
     row['category'] = cells.get('category', '')
     row['scene_id'] = cells.get('acquired', '')
@@ -726,7 +808,8 @@ def regenerate_physical(rows: list[dict[str, str]]) -> str:
 def _old_cells(row: dict, file: str, layout: str) -> dict[str, str]:
     """A ledger row in the old file's columns (the migration, inverted)."""
     if file == 'physical-states.csv':
-        return {'id': row['id'], 'character': row['subject'],
+        # A subject that couldn't be resolved keeps its name in aliases
+        return {'id': row['id'], 'character': row['subject'] or row['aliases'],
                 'description': row['statement'], 'category': row['category'],
                 'acquired': row['scene_id'], 'resolves': row['resolves'],
                 'action_gating': row['action_gating']}
