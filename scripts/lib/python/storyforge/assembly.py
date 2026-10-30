@@ -533,7 +533,7 @@ def generate_epub_metadata(project_dir: str) -> str:
     isbn = read_production_nested(project_dir, 'copyright', 'isbn')
     copyright_year = (read_production_nested(project_dir, 'copyright', 'year')
                       or str(datetime.now().year))
-    cover_image = read_production_field(project_dir, 'cover_image')
+    cover_file = configured_cover_path(project_dir)
 
     def _quoted(value: str) -> str:
         return yaml_single_quote(_unquote(value))
@@ -550,21 +550,8 @@ def generate_epub_metadata(project_dir: str) -> str:
         lines.append(f'subject: {_quoted(genre)}')
     if isbn:
         lines.append(f'identifier: {_quoted(isbn)}')
-    if cover_image:
-        full_path = os.path.join(project_dir, cover_image)
-        if os.path.isfile(full_path):
-            lines.append(f'cover-image: {_quoted(full_path)}')
-        else:
-            # A declared-but-missing cover was dropped in silence, and this was
-            # the one cover consumer in the repo that stayed quiet about it —
-            # `_resolve_cover_path` warns, and `require_cover_asset` refuses
-            # outright, because Bookshelf nulls a live book's cover from a
-            # manifest that omits one. An epub built without the cover the author
-            # declared is a wrong artifact that looks like a right one.
-            from storyforge.common import log as _log
-            _log(f'WARNING: production.cover_image names {cover_image!r}, '
-                 f'which does not exist at {full_path} — the epub will be '
-                 f'built with no cover image. Fix the path or remove the key.')
+    if cover_file:
+        lines.append(f'cover-image: {_quoted(cover_file)}')
 
     # Series metadata
     series_name = _yaml_field(project_dir, 'project.series_name')
@@ -756,12 +743,11 @@ def generate_epub(project_dir: str, manuscript_file: str,
         '--resource-path', project_dir,
     ]
 
-    # Add cover image if available
-    cover_image = read_production_field(project_dir, 'cover_image')
-    if cover_image:
-        full_path = os.path.join(project_dir, cover_image)
-        if os.path.isfile(full_path):
-            cmd.extend(['--epub-cover-image', full_path])
+    # Add cover image if configured (a configured one that's missing raised
+    # in generate_epub_metadata above)
+    cover_file = configured_cover_path(project_dir)
+    if cover_file:
+        cmd.extend(['--epub-cover-image', cover_file])
 
     subprocess.run(cmd, check=True)
 
@@ -1593,6 +1579,10 @@ def cover_manifest_asset(project_dir: str, cover_path: str | None = None):
 
     Returns:
         (asset, project_relative_path), or None with a WARNING logged.
+
+    Raises:
+        ValueError: If an explicit path or `production.cover_image` names a
+            file that does not exist.
     """
     from storyforge import illustrations as _ill
     from storyforge.common import log
@@ -1603,10 +1593,6 @@ def cover_manifest_asset(project_dir: str, cover_path: str | None = None):
         log('WARNING: no cover image found — the published book will have no '
             'cover asset. Add production/cover.png (or .jpg/.webp), or set '
             'production.cover_image in storyforge.yaml.')
-        return None
-    if not os.path.isfile(resolved):
-        log(f'WARNING: cover image {resolved} does not exist — no cover asset '
-            f'will be published.')
         return None
 
     extension = _ill.normalize_asset_extension(os.path.splitext(resolved)[1])
@@ -1728,6 +1714,28 @@ def _optimize_cover_image(cover_path: str, project_dir: str) -> str:
 _COVER_AUTODETECT_EXTENSIONS = ('jpg', 'jpeg', 'png', 'webp', 'svg')
 
 
+def configured_cover_path(project_dir: str) -> str:
+    """The file `production.cover_image` names, or '' when the key is unset.
+
+    A configured cover that is missing is an error, never a fallback to
+    auto-detect or to no cover: the build would ship another cover, or none,
+    in place of the one the author chose.
+
+    Raises:
+        ValueError: If the key names a file that does not exist.
+    """
+    cover_image = read_production_field(project_dir, 'cover_image')
+    if not cover_image:
+        return ''
+    full = os.path.join(project_dir, cover_image)
+    if not os.path.isfile(full):
+        raise ValueError(
+            f'production.cover_image names {cover_image!r}, which does not '
+            f'exist at {full}. Fix the path in storyforge.yaml or remove the '
+            f'key.')
+    return full
+
+
 def _resolve_cover_path(project_dir: str, cover_path: str | None,
                         extensions: tuple[str, ...] = _COVER_AUTODETECT_EXTENSIONS,
                         ) -> str | None:
@@ -1745,21 +1753,15 @@ def _resolve_cover_path(project_dir: str, cover_path: str | None,
             missing a publishable cover sitting next to it.
     """
     if cover_path:
-        if os.path.isabs(cover_path):
-            return cover_path
-        return os.path.join(project_dir, cover_path)
+        full = (cover_path if os.path.isabs(cover_path)
+                else os.path.join(project_dir, cover_path))
+        if not os.path.isfile(full):
+            raise ValueError(f'The cover {cover_path!r} does not exist at {full}')
+        return full
 
-    # Check production.cover_image YAML field
-    try:
-        cover_image = read_production_field(project_dir, 'cover_image')
-    except Exception:
-        cover_image = ''
-    if cover_image:
-        full = os.path.join(project_dir, cover_image)
-        if os.path.isfile(full):
-            return full
-        from storyforge.common import log
-        log(f'WARNING: production.cover_image set to {cover_image!r} but file not found, falling back to auto-detect')
+    configured = configured_cover_path(project_dir)
+    if configured:
+        return configured
 
     # Auto-detect from standard locations (jpg preferred for publishing)
     for directory in ('production', 'manuscript/assets'):
