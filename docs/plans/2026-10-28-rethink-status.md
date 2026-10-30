@@ -1,6 +1,6 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-30 (morning), at v1.90.8 (evals-1e's F-118, #407, is the latest merge). **A fresh session starts here:** read **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-10-30 (afternoon), at v1.93.0 (#417, the ledger consumer switch, is the latest merge). **A fresh session starts here:** read **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
 
 ## Start here
 
@@ -13,7 +13,7 @@ Last updated 2026-10-30 (morning), at v1.90.8 (evals-1e's F-118, #407, is the la
   - **Warn-and-continue sites that wrote wrong output are fixed** (#394, follow-ups #403 and #405).
   - **The three silent-failure regression tests exist** (listed below).
   - **E2 recall did not improve.** That criterion waits on the Phase 2 ledger and the Phase 3 checker (see the note below).
-- **Phase 2 (ledger and export): next.** Ben accepted the ledger migration mapping on 2026-10-30. Before Phase 2 there are four small decided fixes (Next steps 1–4).
+- **Phase 2 (ledger and export): in progress.** The ledger is built and every consumer uses it (#416, #417); the seven books are migrated on branches awaiting Ben's merge. Next: the rest of Phase 2 (Next steps 1).
 
 **Ben's decisions, 2026-10-30 morning** (on the overnight run's open questions):
 1. **Ledger migration mapping:** accepted as proposed in `docs/plans/2026-10-30-ledger-migration-proposal.md`. That includes:
@@ -50,42 +50,46 @@ Last updated 2026-10-30 (morning), at v1.90.8 (evals-1e's F-118, #407, is the la
 | — E4 | done: shared-dark Act 1 drafted with today's `write`, judged | #361, re-recorded in #363 |
 | — E6 | done: three runs of E2, E3, E4 and E8; $34.82 | #397, #399 |
 | 5 Phase 1 | done | v1.80.0 PR, #359–#405 (see the two overnight sections) |
-| 6 Phase 2 | next: decided mapping; nothing built yet | #401 (proposal) |
+| 6 Phase 2 | ledger and consumer switch done; books migrated on branches; extraction rubric, audit log and `export` next | #401 (proposal), #416, #417 |
 
 ## Next steps, in order (handoff for a new session)
 
 **Before starting:**
-- **Environment:** use `~/.venvs/storyforge` (Python 3.12, has pytest); the system `python3` is 3.9. The book repos are under `~/Developer` and are read-only: never commit, check out or migrate anything in them; work on copies.
-- **Checks:** run `python -m pytest tests/` (about 5 to 8 minutes, serially; 7,176+ tests at v1.90.7) and `python3 evals/run.py` (6 to 10 minutes; no API key needed). Main should replay every suite with no errors and the baseline metrics; only the gates that already fail (E2, E3 recall, E7 noise, E8 reintroduced) fail.
+- **Environment:** use `~/.venvs/storyforge` (Python 3.12, has pytest); the system `python3` is 3.9. The book repos are under `~/Developer` and are read-only unless Ben says otherwise: work on copies. (Ben allowed the 2026-10-30 ledger migration; its branches are listed above.)
+- **Checks:** run `python -m pytest tests/` (about 5 to 9 minutes, serially; 7,373+ tests at v1.93.0) and `python3 evals/run.py` (6 to 10 minutes; no API key needed). Main should replay every suite with no errors and the baseline metrics; only the gates that already fail (E2, E3 recall, E7 noise, E8 reintroduced) fail.
 - **Coordination:** other sessions open Storyforge PRs and claim versions. Overnight that was **evals-1e** (timeline, scenes-setup, classics fixes) and **evals-79** (extract, publish); find live ones with ListAgents. Agree a version by SendMessage before merging, and say when you touch `timeline.py` or `cmd_extract.py`. Eval-only and test-only PRs bump nothing. Never touch `~/Developer/evals` or other sessions' worktrees (`~/Developer/storyforge-*`).
 - **Process:** one PR per step, branch `storyforge/{name}-{timestamp}`, then the review (CLAUDE.md's 5-agent review; the `pr-review-toolkit` agents aren't installed here, so use one to three general reviewers covering correctness, silent failures, tests, comments and types). Unless Ben says otherwise, wait for his "fix all of them in logical commits" before fixing and merging. Overnight he waived that and asked for findings to be fixed directly.
 - **Spending:** estimate before any recording and confirm with Ben unless it's already approved.
 
-**1. Score: keep `latest` on the last complete cycle** (decision 4). `cmd_score.main` repoints `working/scores/latest` (`cmd_score.py`, "Update latest symlink") before it knows the cycle is incomplete (`_incomplete`, added in #394). Move the symlink update after the check, and skip it when `_incomplete` is non-empty, with a log line naming the cycle `latest` stays on. Test: an incomplete cycle leaves `latest` where it was; a complete one moves it. Patch version.
+**Done on 2026-10-30 (afternoon session, storyforge-59)** — Ben's five decisions and both ledger PRs. Each PR had one to three general reviewers; every verified finding was fixed before merging (the PR comments list them).
 
-**2. Assemble and publish: a configured cover that's missing fails** (decision 2). `assembly._resolve_cover_path` logs a WARNING and falls back to auto-detect when `production.cover_image` names a missing file. Make it an error that names the path. `cover_manifest_asset` (publish) and the epub/PDF builds (assemble) must exit 1, not quietly ship another cover or none. Check every caller (`assembly.py:1600`, the epub/PDF paths, `cmd_illustrate.py:2505` has its own resolution in the same shape). Tests for each path. Patch version.
+| PR | Version | What |
+|---|---|---|
+| #409 | 1.90.9 | score leaves `latest` on the last complete cycle; an incomplete cycle gets `cycle-N/incomplete.txt`, which `project.latest_scores`' fallback skips; revise's lightweight re-score doesn't repoint `latest` past failed scenes |
+| #412 | 1.90.10 | a configured cover that's missing fails: `assembly.configured_cover_path` raises; publish exits 1; assemble names epub and web as not generated (exit 1), makes no placeholder, and the web book uses the configured cover |
+| #414 | 1.90.12 | enrich's timeline step message and `--skip-timeline` removed |
+| #415 | 1.91.0 | `owed` column in `revision-plan.csv`: a prose pass's unwritten scenes (all unwritten targets when the reply was cut off), saved in the commit with the written ones; a re-run revises only those. GN briefs skip scenes whose brief has goal, page_layout and panel_breakdown |
+| #416 | 1.92.0 | `storyforge/ledger.py` and the migration; `evals/ledger_check.py`. The round trip is cell by cell (4,243 single-cell mutations over the seven books, all caught) |
+| #417 | 1.93.0 | every registry reader and writer on `reference/commitments.csv`; `storyforge migrate` step 4; F-123 (extract 3b offers only earlier facts). E3 and E8 re-recorded ($3.80) |
 
-**3. enrich: remove the timeline references** (decision 3). Remove step 8's "not run by enrich" message (added in #405) and the hidden `--skip-timeline` flag; 13 tests in `tests/commands/test_cmd_enrich.py` pass the flag. Check the docs and skills for mentions. Patch version.
+evals-b5 merged #410, #411, #413 and #418 (1.90.11, 1.92.1–1.92.3) in the same window; versions were agreed by message.
 
-**4. Per-scene pass state for revise** (decision 5). Since #394, a direct prose pass or polish-loop pass whose reply skipped scenes commits what it wrote and exits 1 without marking the pass completed (`cmd_revise._fail_skipped_scenes`). Re-running it re-revises every target. Record the scenes a pass has written. The likely shape is a column in `working/plans/revision-plan.csv`, written in the same commit as the scenes. A re-run then targets only the scenes still owed, and the pass is completed when none remain. Design the column with the plan CSV's readers in mind (`revision.py`, `cmd_revise._read_pass_field`). The GN briefs stage (`cmd_elaborate._briefs_handler_gn`) picks scenes by `status` (mapped, architecture, spine or blank), not by whether a brief was written. Check whether a re-run after a partial failure redoes the briefs it already wrote, and give it the same treatment if so. Minor version.
+**What #417 changed for authors:**
+- Writes keep untouched rows byte-identical; a malformed ledger (bad header, wrong cell count, blank, padded or duplicate id) raises `ledger.LedgerError` and commands exit 1. Old files present make commands exit 1 with "run `storyforge migrate`".
+- An unresolved physical `character` (thornwall's Garren ×16, governor's `governor` ×9) keeps its name in `aliases` with `subject` blank; validate reports each. Facts whose `scene_id` isn't a scene (shared-dark's `burnside`, `playground`, `site-review`) are offered like backstory with a WARNING and reported by validate.
+- validate now checks briefs' `physical_state_in/out` against the ledger, which it never did: on migrated copies that's 521 findings for shared-dark, 402 governor, 352 meridian-line, 150 thornwall, 19 understory (understory's 1,212 knowledge findings go away). These are real author data, not migration bugs.
+- `characters.csv` has an optional `pronouns` column (cleanup knows it; no finding when absent). Nothing fills it yet.
 
-**5. Phase 2, PR 1: `ledger.py` and the migration** (decision 1; plan chunk 6). Mapping and data quirks: `docs/plans/2026-10-30-ledger-migration-proposal.md`. Build:
-- **`storyforge/ledger.py`:** `commitments.csv` columns (plan §3.1 plus `category`, `aliases`, `resolves`, `action_gating`), read and write (pipe-delimited, LF, `common.csv_safe` for prose), validation, and derived per-character state as of a scene (plan §3.1).
-- **A migration function:** `knowledge.csv` + `physical-states.csv` → `commitments.csv`, reporting every quirk the proposal lists rather than guessing.
-- **A round-trip test** that regenerates both old files from `commitments.csv` byte for byte, except the reported quirks.
-- **A check script** that runs the migration on a temporary copy of each of the seven book repos and reports. No consumer, prompt or author-data change in this PR.
+**Eval deltas** (baseline re-written after #417): E3 recall 0.286 unchanged, with partial 0.755 → 0.714 (inside E6's range); E8 reintroduced 6 of 35 unchanged; E2-corpus-validate precision 0.0312 → 0.0305 (the new owner and scene reports on controls); E7 115 → 105 flags (from evals-b5's #411).
 
-Also add `pronouns` to the `characters.csv` schema (plan §3.1) if it fits here without touching prompts; otherwise do it in PR 2.
+**The books (Ben approved running the migration, 2026-10-30):** only `migrate`'s step 4 was run (not the whole command: step 5's normalize mangles understory's MICE entries, a bug on main before this work). Each book has branch `storyforge/migrate-ledger-20261030-0747` and an open PR, **not merged**: shared-dark#88, thornwall#71, lantern-folk#15, governor#82, meridian-line#86, understory#36, slipform#24. Merging them is Ben's call. Until then the books' `main` still has the old files, and current Storyforge stops on them. Eval trees are pinned commits and are migrated in each suite's copy, so the evals don't depend on this.
 
-**6. Phase 2, PR 2: switch the consumers.**
-- **The switch:** the 15 modules that read `knowledge.csv` / `physical-states.csv` (listed in the proposal) read `commitments.csv`. The briefs' `knowledge_in/out` and `physical_state_in/out` still hold the same ids. The old files are deleted.
-- **Migration command:** a `storyforge` command (or `cleanup` step) runs the migration on a book. Running it on Ben's books is his call: test on copies.
-- **Re-records:** prompts that embed the registries change, so E2, E3, E5 and E8 need re-recording (about $20; estimate first and confirm with Ben).
-- **Verify:** E3 and E5 against the baseline, and the migration on all seven books (on copies).
-
-**7. Then the rest of Phase 2** (plan §5, chunk 6): the rubric-driven extraction prompt (plan decision 5; Ben may refine its wording), the audit log and digest (decision 2), and `export` with `schema_version` (§3.5), into which `dashboard_data` folds. Success: E3 recall ≥ 0.85, E5 mismatches below baseline, export round-trips across the seven books.
+**1. Then the rest of Phase 2** (plan §5, chunk 6): the rubric-driven extraction prompt (plan decision 5; Ben may refine its wording), the audit log and digest (decision 2), and `export` with `schema_version` (§3.5), into which `dashboard_data` folds. Success: E3 recall ≥ 0.85, E5 mismatches below baseline, export round-trips across the seven books.
 
 **Open follow-ups, not scheduled:**
+- **The book PRs above** wait on Ben. After merging, thornwall and governor need their unresolved owners added to `characters.csv` (or the states reassigned), and the validate findings are the author's to work through.
+- **`migrate` step 5 (normalize) mangles understory's MICE entries** (found by #417's verification, on main before it). Fix before anyone runs the full `storyforge migrate` on understory.
+- **`pronouns`:** the column exists; no command writes or reads it yet (plan §3.1: the slipform Pell regression).
 - **Other writers of briefs and intent** (elaborate, extract) don't go through `storyforge.brief_names`' invented-name check yet (#393).
 - **`scoring_story_power`** wasn't reviewed for warn-and-continue sites (6,700+ lines; it already tracks dropped rows).
 - **E8 as a gate:** measure over three runs, since one run moves by 5 cases (E6). Do this before Phase 4 relies on it.
