@@ -984,3 +984,75 @@ class TestRecordPhysicalStates:
         assert rows['cough']['resolves'] == 'b'
         assert 'not-a-state' not in rows
 
+
+class TestKnowledgeChainOffersOnlyEarlierFacts:
+    """F-123: a forced re-run seeds phase 3b from the ledger, and each scene's
+    prompt offered every fact in it, so a scene's knowledge_in could name a
+    fact the book reveals later. Only facts established before the scene in
+    reading order (plus backstory) are offered, or resolved."""
+
+    def _run(self, project_dir, mock_api, monkeypatch, replies):
+        from storyforge import cmd_extract, extract, ledger
+        ref_dir = os.path.join(project_dir, 'reference')
+        rows = ledger.load_from(ref_dir)
+        view = ledger.knowledge_view(rows)
+        view[0]['origin'] = 'act1-sc02'     # map-anomaly-exists
+        view[1]['origin'] = 'act2-sc01'     # village-vanished: revealed later
+        ledger.save_to(ref_dir, ledger.replace_view(rows, 'knowledge', view,
+                                                    origin='author', introduced_by='author'))
+        offered = {}
+
+        def knowledge_prompt(scene_id, *args, known_facts=None, **kw):
+            offered[scene_id] = dict(known_facts or {})
+            return f'KNOWLEDGE {scene_id}'
+        monkeypatch.setattr(extract, 'build_knowledge_prompt', knowledge_prompt)
+        monkeypatch.setattr(extract, 'build_physical_state_prompt',
+                            lambda scene_id, *a, **kw: f'PHYSICAL {scene_id}')
+
+        def reply(prompt):
+            if prompt.startswith('KNOWLEDGE '):
+                return replies.get(prompt.split()[1], _structured('KNOWLEDGE_SCHEMA'))
+            if prompt.startswith('PHYSICAL '):
+                return _structured('PHYSICAL_STATE_SCHEMA')
+            return _structured('BRIEF_PARALLEL_SCHEMA')
+        mock_api.set_response_fn(reply)
+        order = cmd_extract._build_sorted_scene_ids(os.path.join(project_dir, 'scenes'), ref_dir)
+        cmd_extract._run_phase_3(order, project_dir, os.path.join(project_dir, 'scenes'),
+                                 ref_dir, os.path.join(project_dir, 'working', 'logs'),
+                                 os.path.join(project_dir, 'working', 'profile.json'),
+                                 force=True, dry_run=False)
+        return offered, ledger.view_map(ref_dir, 'knowledge')
+
+    def test_a_scene_is_offered_only_facts_from_earlier_scenes(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        offered, _ = self._run(project_dir, mock_api, monkeypatch, {})
+        backstory = {'archive-erasure', 'subsidence-not-natural', 'council-dismisses-evidence'}
+        assert set(offered['act1-sc01']) == backstory
+        assert set(offered['act1-sc02']) == backstory          # not its own fact
+        assert set(offered['new-x1']) == backstory | {'map-anomaly-exists'}
+        assert 'village-vanished' not in offered['act2-sc01']   # established there
+        assert offered['new-x1']['map-anomaly-exists'] == \
+            'A map anomaly exists in the pressure records'
+
+    def test_a_later_facts_wording_is_not_resolved_to_its_id(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        from storyforge.elaborate import get_scene
+        replies = {'act1-sc01': _structured(
+            'KNOWLEDGE_SCHEMA', knowledge_out=['missing village', 'archive-erasure'])}
+        self._run(project_dir, mock_api, monkeypatch, replies)
+        ref_dir = os.path.join(project_dir, 'reference')
+        assert get_scene('act1-sc01', ref_dir)['knowledge_out'] == \
+            'missing village;archive-erasure'
+
+    def test_an_earlier_declaration_moves_the_facts_origin(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        replies = {'act1-sc01': _structured(
+            'KNOWLEDGE_SCHEMA', knowledge_out=['village-vanished'],
+            new_facts=[{'id': 'village-vanished', 'name': 'A village vanished',
+                        'category': 'state-change'}])}
+        offered, facts = self._run(project_dir, mock_api, monkeypatch, replies)
+        assert facts['village-vanished']['origin'] == 'act1-sc01'
+        # The first declaration's row is kept: only its scene moved
+        assert facts['village-vanished']['name'] == \
+            'A village has vanished from the pressure maps'
+        assert 'village-vanished' in offered['act1-sc02']

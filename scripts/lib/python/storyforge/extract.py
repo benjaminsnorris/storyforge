@@ -706,18 +706,28 @@ KNOWLEDGE_COLUMNS = ['id', 'name', 'aliases', 'category', 'origin']
 
 def merge_new_knowledge_facts(registry: dict[str, dict[str, str]],
                               new_facts: list[dict[str, str]],
-                              scene_id: str) -> list[str]:
+                              scene_id: str,
+                              order: dict[str, int] | None = None) -> list[str]:
     """Add facts declared in a reply's ``new_facts`` to the running knowledge registry.
 
-    ``registry`` maps id -> knowledge view row (`ledger.knowledge_view`) and is
-    updated in place; a new
-    fact's origin is the scene that declared it. An id already registered
-    keeps its existing row (first declaration wins). Returns the ids added.
+    ``registry`` maps id -> knowledge view row (`ledger.knowledge_view`) and
+    is updated in place; a new fact's origin is the scene that declared it.
+    An id already registered keeps its existing row (first declaration
+    wins), except that with ``order`` (scene id -> reading position) a fact
+    a forced re-run declares earlier than its recorded origin (or whose
+    origin is no scene in ``order``) moves its origin to this scene, so the
+    scenes in between are offered it. Returns the ids added.
     """
     added = []
     for fact in new_facts:
         fid = fact.get('id', '').strip()
-        if not fid or fid in registry:
+        if not fid:
+            continue
+        if fid in registry:
+            origin = (registry[fid].get('origin') or '').strip()
+            if (order is not None and origin and scene_id in order
+                    and order.get(origin, len(order)) > order[scene_id]):
+                registry[fid]['origin'] = scene_id
             continue
         registry[fid] = {
             'id': fid,

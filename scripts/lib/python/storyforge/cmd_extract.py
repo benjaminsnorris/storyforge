@@ -705,6 +705,28 @@ def _prune_registries(ref_dir, created_facts, created_states):
             f'(left from the previous extraction): {", ".join(dropped)}')
 
 
+def _facts_before(registry, scene_id, order):
+    """id → name of the knowledge facts established before `scene_id` in
+    reading order (`ledger.established_before`), plus backstory: a fact with
+    no scene was true before scene 1. A fact whose scene isn't in `order` (a
+    renamed or removed scene) is left out, since where it falls is unknown."""
+    from storyforge import ledger
+    rows = ledger.replace_view([], 'knowledge', list(registry.values()),
+                               origin='prose', introduced_by='extract')
+    before = {r['id'] for r in ledger.established_before(rows, scene_id, order,
+                                                         type_='knowledge')}
+    return {fid: row.get('name', '') for fid, row in registry.items()
+            if fid in before or not (row.get('origin') or '').strip()}
+
+
+def _facts_through(registry, scene_id, order):
+    """The registry rows established before or in `scene_id` (and backstory)."""
+    at = order[scene_id]
+    return {fid: row for fid, row in registry.items()
+            if not (row.get('origin') or '').strip()
+            or order.get(row['origin'].strip(), at + 1) <= at}
+
+
 def _update_chain_fields(scene_id, ref_dir, result, force, keys):
     """Write a 3b/3c chain reply's fields to the scene's brief.
 
@@ -816,6 +838,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     knowledge_registries = format_registries_for_prompt(
         project_dir, exclude=('knowledge',))
     created_facts = set()   # knowledge ids this pass declared
+    reading_order = {sid: i for i, sid in enumerate(sorted_scene_ids)}
 
     for scene_id in sorted_scene_ids:
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
@@ -830,11 +853,13 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'act']}
         intent = {k: scene_data.get(k, '') for k in ['function', 'action_sequel']}
 
+        # Only what the book has shown before this scene (F-123): a forced
+        # re-run seeded from the last run must not offer a fact a later
+        # scene reveals
         prompt = build_knowledge_prompt(
             scene_id, scene_text, skeleton, intent, knowledge_state, summaries,
             registries_text=knowledge_registries,
-            known_facts={fid: row.get('name', '')
-                         for fid, row in knowledge_registry.items()})
+            known_facts=_facts_before(knowledge_registry, scene_id, reading_order))
 
         knowledge_log = os.path.join(log_dir, f'extract-knowledge-{scene_id}.json')
 
@@ -853,16 +878,20 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             _halt_chain(project_dir, '3b — knowledge chain', scene_id, e,
                         ['reference/scene-briefs.csv', 'reference/commitments.csv', 'working/'])
 
-        # Register the scene's new facts, then resolve both fields to ids
+        # Register the scene's new facts, then resolve both fields to ids:
+        # against the facts established up to this scene, so a later fact
+        # from the last run can't be matched by its wording either
         added = merge_new_knowledge_facts(knowledge_registry,
-                                          result.get('_new_facts', []), scene_id)
+                                          result.get('_new_facts', []), scene_id,
+                                          reading_order)
         created_facts.update(added)
-        if added:
-            ledger.write_view(ref_dir, 'knowledge', list(knowledge_registry.values()),
-                              origin='prose', introduced_by='extract')
+        # Writes only when a fact was added or moved earlier
+        ledger.write_view(ref_dir, 'knowledge', list(knowledge_registry.values()),
+                          origin='prose', introduced_by='extract')
+        visible = _facts_through(knowledge_registry, scene_id, reading_order)
         for k in ('knowledge_in', 'knowledge_out'):
             if result.get(k):
-                result[k] = resolve_knowledge_ids(knowledge_registry, result[k])
+                result[k] = resolve_knowledge_ids(visible, result[k])
         # Plastic Age: "henley-indicts-college-conformity" named no scene
         if result.get('continuity_deps'):
             result['continuity_deps'], dropped = resolve_scene_deps(
