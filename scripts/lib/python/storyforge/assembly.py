@@ -692,6 +692,8 @@ def get_genre_css(plugin_dir: str, genre: str) -> str:
 
 def generate_cover_if_missing(project_dir: str, plugin_dir: str) -> None:
     """Generate a placeholder SVG cover if no cover image exists."""
+    if configured_cover_path(project_dir):
+        return
     production_dir = os.path.join(project_dir, 'production')
     for ext in ('jpg', 'jpeg', 'png', 'webp', 'svg'):
         if os.path.isfile(os.path.join(production_dir, f'cover.{ext}')):
@@ -947,11 +949,15 @@ def generate_web_book(project_dir: str, plugin_dir: str,
             shutil.rmtree(fonts_dst)
         shutil.copytree(fonts_src, fonts_dst)
 
-    # Cover image
+    # Cover image: the configured one, else production/cover.*
     cover_img = ''
-    for ext in ('jpg', 'jpeg', 'png', 'webp', 'svg'):
-        candidate = os.path.join(project_dir, 'production', f'cover.{ext}')
+    configured = configured_cover_path(project_dir)
+    candidates = ([configured] if configured else
+                  [os.path.join(project_dir, 'production', f'cover.{ext}')
+                   for ext in ('jpg', 'jpeg', 'png', 'webp', 'svg')])
+    for candidate in candidates:
         if os.path.isfile(candidate):
+            ext = os.path.splitext(candidate)[1].lstrip('.').lower()
             dst = os.path.join(web_dir, f'cover.{ext}')
             shutil.copy2(candidate, dst)
             cover_img = (f'<img src="cover.{ext}" alt="{title}" '
