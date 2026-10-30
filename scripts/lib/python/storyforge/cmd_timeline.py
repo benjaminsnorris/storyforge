@@ -128,7 +128,10 @@ def main(argv=None):
         if args.interactive:
             open(interactive_file, 'w').close()
 
-    all_ids = build_scene_list(metadata_csv)
+    # Every scene happens on some day, however short: a 41-word scene left
+    # out kept a stale cue and set the present for the scenes after it
+    # (Plastic Age's helen-memory-fades-college, F-107)
+    all_ids = build_scene_list(metadata_csv, min_words=1)
     filter_mode, filter_val, filter_val2 = resolve_filter_args(args)
     scene_ids = apply_scene_filter(metadata_csv, all_ids, filter_mode, filter_val, filter_val2)
     scene_count = len(scene_ids)
