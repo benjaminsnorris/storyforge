@@ -16,9 +16,10 @@ Gatsby has no labeled flag set yet.
 
 import csv
 import os
+import shutil
 from collections import Counter
 
-from harness import EVALS_DIR, Gate, Suite, SuiteOutput
+from harness import EVALS_DIR, Gate, Suite, SuiteOutput, migrate_tree
 
 FIXTURES = os.path.join(EVALS_DIR, 'fixtures', 'e7')
 CONTINUITY_CATEGORIES = ('physical_state', 'timeline', 'knowledge')
@@ -47,6 +48,15 @@ def load_labels(book: str) -> dict[tuple[str, str, str], dict]:
             if r['source'].startswith('validate')}
 
 
+def migrated(ref: str, work_dir: str, label: str) -> str:
+    """A copy of a snapshot's reference dir with its registries in the
+    ledger: the frozen snapshots predate it (``harness.migrate_tree``)."""
+    copy = os.path.join(work_dir, 'e7-migrated', label)
+    shutil.copytree(ref, os.path.join(copy, 'reference'))
+    migrate_tree(copy, label)
+    return os.path.join(copy, 'reference')
+
+
 def continuity_flags(ref_dir: str) -> list[dict]:
     from storyforge.elaborate import validate_structure
     return [c for c in validate_structure(ref_dir)['checks']
@@ -62,7 +72,7 @@ def run(ctx):
         raise RuntimeError(f'no snapshots under {FIXTURES}')
     for book, run_name, ref in snapshots:
         labels = load_labels(book)
-        flags = continuity_flags(ref)
+        flags = continuity_flags(migrated(ref, ctx.work_dir, f'{book}/{run_name}'))
         for flag in flags:
             label = labels.get((run_name, flag.get('scene_id', ''), flag['message']))
             verdict = label['ben_verdict'] if label else 'unreviewed'

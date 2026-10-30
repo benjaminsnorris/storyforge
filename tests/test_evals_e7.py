@@ -74,11 +74,12 @@ def test_no_snapshots_is_an_error(fixtures, tmp_path):
 
 
 @pytest.mark.parametrize('book', ['christmas-carol', 'plastic-age'])
-def test_each_book_reproduces_every_labeled_validate_flag(book):
+def test_each_book_reproduces_every_labeled_validate_flag(book, tmp_path):
     labels = e7.load_labels(book)
     raised = set()
     for snap_book, run, ref in e7.book_snapshots():
         if snap_book == book:
             raised |= {(run, f.get('scene_id', ''), f['message'])
-                       for f in e7.continuity_flags(ref)}
+                       for f in e7.continuity_flags(
+                           e7.migrated(ref, str(tmp_path), f'{book}/{run}'))}
     assert raised == set(labels)

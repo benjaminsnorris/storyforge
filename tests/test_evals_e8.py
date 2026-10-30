@@ -395,19 +395,19 @@ def test_hone_reconciles_physical_states_and_reports_registry_and_brief_changes(
     from storyforge import common, hone
     ref = tmp_path / 'reference'
     ref.mkdir()
-    (ref / 'physical-states.csv').write_text('id|character\nscar-kael|Kael\n')
+    (ref / 'commitments.csv').write_text('id|character\nscar-kael|Kael\n')
     (ref / 'scene-briefs.csv').write_text('id|physical_state_in\ns1|\n')
     calls = []
 
     def reconcile(domain, ref_dir, model, log_dir):
         calls.append((domain, ref_dir, model))
-        (ref / 'physical-states.csv').write_text('id|character\nscar-kael|Kael\nburns-tessa|Tessa\n')
+        (ref / 'commitments.csv').write_text('id|character\nscar-kael|Kael\nburns-tessa|Tessa\n')
         (ref / 'scene-briefs.csv').write_text('id|physical_state_in\ns1|burns-tessa\n')
     monkeypatch.setattr(hone, 'reconcile_domain', reconcile)
     monkeypatch.setattr(common, 'select_model', lambda task: f'model-for-{task}')
     out = e8.hone_physical_states(str(tmp_path))
     assert calls == [('physical-states', str(ref), 'model-for-synthesis')]
-    assert out == ('reference/physical-states.csv:\nid|character\nburns-tessa|Tessa\n\n'
+    assert out == ('reference/commitments.csv:\nid|character\nburns-tessa|Tessa\n\n'
                    'reference/scene-briefs.csv:\nid|physical_state_in\ns1|burns-tessa')
 
 

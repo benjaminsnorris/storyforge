@@ -125,8 +125,11 @@ def validate_cases(cases: list[dict], book_dir: str) -> list[str]:
 
 
 def copy_book(book_dir: str, dest: str, case: dict | None = None) -> str:
-    """Copy the book to *dest*, applying *case*'s injection if given."""
+    """Copy the book to *dest*, applying *case*'s injection if given, with
+    its registries moved into the ledger (``harness.migrate_tree``)."""
+    from harness import migrate_tree
     shutil.copytree(book_dir, dest)
+    migrate_tree(dest, os.path.basename(os.path.dirname(book_dir)))
     if case:
         inj = case['injection']
         path = os.path.join(dest, 'scenes', f'{inj["scene"]}.md')

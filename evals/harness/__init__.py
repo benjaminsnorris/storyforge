@@ -40,6 +40,32 @@ if PYTHON_LIB not in sys.path:
     sys.path.insert(0, PYTHON_LIB)
 
 SCHEMA_VERSION = 1
+
+#: Trees whose registries couldn't move into the ledger during the running
+#: suite, for its notes (`migrate_tree`)
+_MIGRATION_NOTES: list[str] = []
+
+
+def migrate_tree(project_dir: str, label: str) -> None:
+    """Move a book tree's knowledge.csv and physical-states.csv into
+    reference/commitments.csv, as `storyforge migrate` does, before
+    Storyforge reads it: the suites run on trees from pinned commits that
+    predate the ledger.
+
+    A tree that can't migrate keeps its old files (so a command that reads
+    the registries stops on it) and is named in the suite's notes, with
+    why.
+    """
+    from storyforge import ledger
+    ref = os.path.join(project_dir, 'reference')
+    if not os.path.isdir(ref):
+        return
+    result = ledger.migrate_files(ref)
+    if result.status == 'stopped':
+        _MIGRATION_NOTES.append(
+            f'ledger migration stopped for {label} (its old registries are kept): '
+            + '; '.join(result.problems[:5])
+            + (f' (and {len(result.problems) - 5} more)' if len(result.problems) > 5 else ''))
 ERROR_CODES = ('PHY', 'TIM', 'KNO', 'REL', 'TRT', 'WLD', 'PRM', 'VOI')
 
 Mode = Literal['replay', 'record', 'auto']
@@ -214,6 +240,7 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str) -> dict:
               'started_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
               'status': 'error', 'metrics': {}, 'by_code': {}, 'gates': [],
               'notes': [], 'error': None}
+    _MIGRATION_NOTES.clear()
     with tempfile.TemporaryDirectory(prefix=f'eval-{suite.name}-') as work_dir:
         log_file = os.path.join(work_dir, '.cassette-log.jsonl')
         os.environ['STORYFORGE_CASSETTE'] = cassette_dir
@@ -235,6 +262,7 @@ def run_suite(suite: Suite, mode: Mode, cassettes_root: str) -> dict:
             result['error'] = f'{type(e).__name__}: {e}'
             result['traceback'] = traceback.format_exc()
         finally:
+            result['notes'] = list(result['notes']) + _MIGRATION_NOTES
             for key, value in saved.items():
                 if value is None:
                     os.environ.pop(key, None)
