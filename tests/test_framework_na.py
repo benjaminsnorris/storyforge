@@ -7,13 +7,7 @@ functions as observer rather than hero". Not using a framework is a creative
 choice; n/a is left out of averages, diagnosis and proposals.
 """
 
-import json
 import os
-import re
-import shutil
-import subprocess
-
-import pytest
 
 from storyforge.scoring import _sc_class, generate_diagnosis
 
@@ -58,59 +52,6 @@ def test_na_has_no_score_colour():
     assert _sc_class('n/a') == ''
 
 
-def _dashboard(plugin_dir):
-    with open(os.path.join(plugin_dir, 'templates', 'dashboard.html')) as f:
-        return f.read()
-
-
-def test_dashboard_draws_na_as_na_not_zero(plugin_dir):
-    html = _dashboard(plugin_dir)
-    assert 'var na = isNaN(parseInt(act[p]));' in html
-    assert "var na = isNaN(parseInt(p.score));" in html
-    assert 'parseInt(act[p]) || 0' not in html
-    # The act drawer and the narrative radar print framework scores through
-    # the helper; a raw number with "/5" appended read "NaN/5" or "0/5" for n/a
-    act_drawer = html[html.index('function showAllActRationales'):]
-    act_drawer = act_drawer[:act_drawer.index('\n}\n')]
-    radar = html[html.index('var na = isNaN(parseInt(p.score));'):]
-    radar = radar[:radar.index('\n})();')]
-    for block in (act_drawer, radar):
-        assert "+ '/5" not in block
-        assert 'frameworkScoreText(' in block
-    # n/a points stay out of the radar's polygon
-    assert 'points.filter(function(p) { return !p.na; })' in radar
-
-
-@pytest.mark.skipif(shutil.which('node') is None, reason='node not installed')
-def test_framework_score_text_runs(plugin_dir):
-    """Run the dashboard's helper itself: n/a must never read NaN/5 or 0/5."""
-    html = _dashboard(plugin_dir)
-    match = re.search(r'function frameworkScoreText\(value\) \{.*?\n\}', html, re.S)
-    assert match
-    script = match.group(0) + (
-        "\nconsole.log(JSON.stringify(['4', 'n/a', '', undefined, 3]"
-        ".map(frameworkScoreText)));")
-    out = subprocess.run(['node', '-e', script], capture_output=True, text=True, check=True)
-    assert json.loads(out.stdout) == ['4/5', 'n/a', 'n/a', 'n/a', '3/5']
-
-
-def test_merge_appends_on_a_new_line_when_the_target_has_no_final_newline(tmp_path):
-    """Evals F-050: act scores are merged one act at a time, and the first
-    act's file has no final newline, so act 3's row was glued onto act 1's
-    ("act-1|...|5act-3|4|...") and the diagnosis lost act 3."""
-    from storyforge.scoring import merge_score_files, _read_csv
-    target, source = tmp_path / 'act-scores.csv', tmp_path / 'act-3.csv'
-    target.write_text('id|three_act\nact-1|4')
-    source.write_text('id|three_act\nact-3|5\n')
-    merge_score_files(str(target), str(source))
-    _header, rows = _read_csv(str(target))
-    assert rows == [['act-1', '4'], ['act-3', '5']]
-
-
-def test_merge_adds_no_blank_line_when_the_target_ends_with_a_newline(tmp_path):
-    from storyforge.scoring import merge_score_files
-    target, source = tmp_path / 'act-scores.csv', tmp_path / 'act-2.csv'
-    target.write_text('id|three_act\nact-1|4\n')
-    source.write_text('id|three_act\nact-2|5\n')
-    merge_score_files(str(target), str(source))
-    assert target.read_text() == 'id|three_act\nact-1|4\nact-2|5\n'
+# The dashboard's n/a drawing (radar, drawers, frameworkScoreText) is tested
+# in Bookshelf, which renders the dashboard (#371; bookshelf
+# tests/unit/dashboard/render.test.ts).
