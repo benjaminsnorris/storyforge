@@ -1118,3 +1118,34 @@ class TestLogUsage:
         log.write_text('{not json')
         _log_usage(project_dir, str(log), 'revise', 'pass-a', 'm')
         assert 'WARNING: could not log the cost of revise pass-a' in capsys.readouterr().out
+
+
+class TestHoneDelegationRedraftsOnlyChangedScenes:
+    """A brief pass delegated to hone redrafted every target, including a
+    scene whose rewrite hone refused: its prose was redrafted from the brief
+    it already had."""
+
+    def test_a_refused_scene_is_not_redrafted(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        from storyforge import cmd_revise
+        plan_file = _run_pass_setup(project_dir, monkeypatch, 'brief')
+        rows = _read_csv_plan(plan_file)
+        rows[0]['targets'] = 'act1-sc01;act1-sc02'
+        rows[0]['scope'] = 'targeted'
+        _write_plan(project_dir, rows)
+        briefs_csv = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+
+        def hone(**kw):
+            from storyforge.csv_cli import update_field
+            update_field(briefs_csv, 'act1-sc01', 'goal', 'A sharper goal')
+            return {'scenes_rewritten': 1, 'fields_rewritten': 1, 'changed': ['act1-sc01'],
+                    'rejected': {'act1-sc02': ['evaluation rewrite of goal named Ruzek']}}
+        monkeypatch.setattr('storyforge.hone.hone_briefs', hone)
+        redrafted = []
+        monkeypatch.setattr(cmd_revise, '_redraft_from_briefs',
+                            lambda pd, ids, *a, **kw: redrafted.append(list(ids)))
+
+        main([])
+
+        assert redrafted == [['act1-sc01']]
+        assert 'Rewrite refused for act1-sc02' in capsys.readouterr().out

@@ -14,7 +14,8 @@ from unittest.mock import patch
 import pytest
 
 from storyforge import cmd_revise
-from storyforge.cmd_revise import _fix_and_redraft, _fix_upstream_briefs, _invented_names
+from storyforge.brief_names import invented_names
+from storyforge.cmd_revise import _fix_and_redraft, _fix_upstream_briefs
 
 # From shared-dark 0940bd4d (claires-cold), the rewrite that brought in Mallen.
 MALLEN = ('The captor, Mallen, kneels without speaking and works with genuine, '
@@ -23,14 +24,14 @@ MALLEN = ('The captor, Mallen, kneels without speaking and works with genuine, '
 
 class TestInventedNames:
     def test_flags_a_name_the_book_never_uses(self):
-        assert _invented_names([MALLEN], 'Claire is held in a basement room.') == ['Mallen']
+        assert invented_names([MALLEN], 'Claire is held in a basement room.') == ['Mallen']
 
     def test_book_names_and_possessives_pass(self):
-        assert _invented_names(["Claire's hands shake when Hank speaks."],
+        assert invented_names(["Claire's hands shake when Hank speaks."],
                                'Claire and Hank') == []
 
     def test_a_possessive_in_the_book_vouches_for_the_name(self):
-        assert _invented_names(['she waits for Mallen'], "Mallen's door") == []
+        assert invented_names(['she waits for Mallen'], "Mallen's door") == []
 
     @pytest.mark.parametrize('field', [
         'Mallen blocks the door.',
@@ -41,23 +42,23 @@ class TestInventedNames:
         'GOAL: Mallen',
     ])
     def test_names_opening_a_field_or_sentence_are_checked(self, field):
-        assert _invented_names([field], 'the warden waits at the door said go') != []
+        assert invented_names([field], 'the warden waits at the door said go') != []
 
     def test_ordinary_openers_pass_when_the_book_uses_the_word(self):
-        assert _invented_names(['Refuses to answer. Stays silent: Holds still.'],
+        assert invented_names(['Refuses to answer. Stays silent: Holds still.'],
                                'she refused, stayed, holding') == []
 
     def test_capitalized_ordinary_word_the_book_uses_passes(self):
-        assert _invented_names(['she reaches the Basement door'], 'the basement') == []
+        assert invented_names(['she reaches the Basement door'], 'the basement') == []
 
     def test_camel_case_and_hyphenated_names(self):
-        assert _invented_names(['she calls McKenzie and Jean-Luc'],
+        assert invented_names(['she calls McKenzie and Jean-Luc'],
                                'McKenzie spoke to Jean and Luc') == []
-        assert _invented_names(['she calls Luc'], 'Jean-Luc') == []
-        assert _invented_names(['she calls McMallen'], 'McKenzie') == ['McMallen']
+        assert invented_names(['she calls Luc'], 'Jean-Luc') == []
+        assert invented_names(['she calls McMallen'], 'McKenzie') == ['McMallen']
 
     def test_calendar_words_and_titles_pass(self):
-        assert _invented_names(['by Tuesday in March she asks Dr. Hank'], 'Hank') == []
+        assert invented_names(['by Tuesday in March she asks Dr. Hank'], 'Hank') == []
 
 
 REPLY = 'GOAL: {g}\nCONFLICT: {c}\nCRISIS: the door locks\nDECISION: she stays'
@@ -202,3 +203,81 @@ def test_nothing_rewritten_redrafts_nothing(project_dir):
          patch('storyforge.cmd_revise._redraft_or_halt') as redraft:
         assert _fix_and_redraft(project_dir, ['a'])[0] == []
     redraft.assert_not_called()
+
+
+class TestHoneBriefsGuard:
+    """hone's brief rewrites (concretize, trim, evaluation fixes) go through
+    the same check as revise's upstream brief fix."""
+
+    def _hone(self, project_dir, monkeypatch, reply):
+        from storyforge import api
+        from storyforge.hone import hone_briefs
+        findings = os.path.join(project_dir, 'working', 'findings.csv')
+        os.makedirs(os.path.dirname(findings), exist_ok=True)
+        with open(findings, 'w') as f:
+            f.write('scene_id|target_file|fields|guidance\n')
+            f.write('act1-sc01|scene-briefs.csv|goal|Make the goal concrete\n')
+        monkeypatch.setattr(api, 'invoke_to_file', lambda *a, **kw: None)
+        monkeypatch.setattr(api, 'extract_text_from_file', lambda path: reply)
+        return hone_briefs(os.path.join(project_dir, 'reference'), project_dir,
+                           scene_ids=['act1-sc01'], model='m',
+                           log_dir=os.path.join(project_dir, 'working', 'logs'),
+                           coaching_level='full', findings_file=findings)
+
+    def _goal(self, project_dir):
+        from storyforge.elaborate import _read_csv_as_map
+        return _read_csv_as_map(os.path.join(
+            project_dir, 'reference', 'scene-briefs.csv'))['act1-sc01']['goal']
+
+    def test_a_rewrite_naming_someone_the_book_never_does_is_refused(
+            self, project_dir, monkeypatch, capsys):
+        before = self._goal(project_dir)
+        result = self._hone(project_dir, monkeypatch,
+                            'goal: get Detective Ruzek to sign off on the audit')
+        assert result['fields_rewritten'] == 0 and result['scenes_rewritten'] == 0
+        assert result['rejected'] == {
+            'act1-sc01': ['evaluation rewrite of goal named Detective, Ruzek']}
+        assert self._goal(project_dir) == before
+        assert 'WARNING: not rewriting act1-sc01' in capsys.readouterr().out
+
+    def test_a_rewrite_in_the_books_own_names_is_kept(self, project_dir, monkeypatch):
+        result = self._hone(project_dir, monkeypatch,
+                            'goal: Dorren files the Deep Archive audit by nightfall')
+        assert result['fields_rewritten'] == 1 and result['rejected'] == {}
+        assert self._goal(project_dir) == 'Dorren files the Deep Archive audit by nightfall'
+
+    def test_an_intent_rewrite_naming_someone_new_is_refused(self, project_dir, monkeypatch):
+        from storyforge import api
+        from storyforge.elaborate import _read_csv_as_map
+        from storyforge.hone import hone_intent
+        findings = os.path.join(project_dir, 'working', 'findings.csv')
+        os.makedirs(os.path.dirname(findings), exist_ok=True)
+        with open(findings, 'w') as f:
+            f.write('scene_id|target_file|fields|guidance\n')
+            f.write('act1-sc01|scene-intent.csv|function|Sharpen the function\n')
+        monkeypatch.setattr(api, 'invoke_to_file', lambda *a, **kw: None)
+        monkeypatch.setattr(api, 'extract_text_from_file',
+                            lambda path: 'function: shows Mallen taking over the office')
+        intent_csv = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+        before = _read_csv_as_map(intent_csv)['act1-sc01']['function']
+
+        result = hone_intent(os.path.join(project_dir, 'reference'), project_dir,
+                             scene_ids=['act1-sc01'], model='m',
+                             log_dir=os.path.join(project_dir, 'working', 'logs'),
+                             coaching_level='full', findings_file=findings)
+
+        assert result['rejected'] == {
+            'act1-sc01': ['evaluation rewrite of function named Mallen']}
+        assert _read_csv_as_map(intent_csv)['act1-sc01']['function'] == before
+
+    def test_a_name_only_in_the_briefs_or_intent_files_does_not_vouch(
+            self, project_dir, monkeypatch):
+        """An earlier rewrite may have put the name there: hone trusts only
+        the other reference files and the scene's prose."""
+        from storyforge.csv_cli import update_field
+        update_field(os.path.join(project_dir, 'reference', 'scene-briefs.csv'),
+                     'act1-sc01', 'conflict', 'Voss blocks the audit')
+        update_field(os.path.join(project_dir, 'reference', 'scene-intent.csv'),
+                     'act1-sc01', 'function', 'Voss takes the office')
+        result = self._hone(project_dir, monkeypatch, 'goal: get past Voss before the audit')
+        assert result['rejected'] == {'act1-sc01': ['evaluation rewrite of goal named Voss']}

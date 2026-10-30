@@ -24,6 +24,7 @@ import subprocess
 import sys
 import time
 
+from storyforge.brief_names import invented_names, read_text, reference_text
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field,
     select_model, select_revision_model, get_coaching_level,
@@ -1184,73 +1185,7 @@ def _detect_upstream_scenes(project_dir: str, diag_rows: list[dict]) -> list[str
     return sorted(upstream)
 
 
-# A capitalized word: a candidate proper name. Title case only ("Mallen",
-# "McKenzie", "Jean-Luc"); all-caps acronyms, accented names and O'Brien-style
-# names are not checked.
-_NAME_RE = re.compile(r"(?<![\w'’-])([A-Z][a-z][A-Za-z]*(?:[-'’][A-Za-z]+)*)")
-_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'’-]*")
-# After these, or at a field's start, a capitalized word may only open a sentence.
-_SENTENCE_START = '.!?:;"\u201c\u2014(|'
-# Capitalized words no book invents: calendar words, titles, and sentence
-# openers a short reference set might not contain.
-_COMMON_CAPITALIZED = frozenset('''
-monday tuesday wednesday thursday friday saturday sunday january february
-march april may june july august september october november december
-mr mrs ms dr st he she it we they you his her its their our your this that
-these those there then when while if as at in on of to for from with by
-after before but and or so not no yes the an
-'''.split())
 _PROSE_CONTEXT_WORDS = 6000  # of the scene's prose shown to the brief fix
-
-
-def _strip_possessive(word: str) -> str:
-    return re.sub(r"['’]s$", '', word)
-
-
-def _name_parts(word: str) -> list[str]:
-    """``Jean-Luc`` -> jean, luc; ``McKenzie`` -> mc, kenzie."""
-    return [p.lower() for p in re.findall(r'[A-Z]?[a-z]+', word)]
-
-
-def _stem(word: str) -> str:
-    for suffix in ('ing', 'ed', 'es', 'e', 's', 'ly'):
-        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
-            return word[:-len(suffix)]
-    return word
-
-
-def _invented_names(fields: list[str], known_text: str) -> list[str]:
-    """Capitalized words in ``fields`` that ``known_text`` never uses, in any
-    case. A word that opens a field or a sentence is checked too, but also
-    passes when the known text uses another form of it ("Refuses" against
-    "refused"), since it may be an ordinary word. Used to reject brief
-    rewrites that bring in people, places or institutions (shared-dark, April
-    2026: upstream brief fixes brought in Mallen, Danny Olinsky, Detective
-    Ruzek and a prison facility, none of them in the book). It cannot catch
-    a known name given a new role (the book's Hank Voigt recast as a police
-    sergeant)."""
-    known: set[str] = set()
-    for token in _WORD_RE.findall(known_text):
-        token = _strip_possessive(token)
-        known.add(token.lower())
-        known.update(_name_parts(token))
-    stems = {_stem(w) for w in known}
-    found = set()
-    for text in fields:
-        for m in _NAME_RE.finditer(text or ''):
-            name = _strip_possessive(m.group(1))
-            lower = name.lower()
-            if lower in known or lower in _COMMON_CAPITALIZED:
-                continue
-            parts = _name_parts(name)
-            if len(parts) > 1 and all(p in known for p in parts):
-                continue
-            before = text[:m.start()].rstrip()
-            opener = not before or before[-1] in _SENTENCE_START
-            if opener and _stem(lower) in stems:
-                continue
-            found.add(name)
-    return sorted(found)
 
 
 # The fields the brief fix rewrites; their current text does not vouch for a
@@ -1258,27 +1193,11 @@ def _invented_names(fields: list[str], known_text: str) -> list[str]:
 _BRIEF_FIX_FIELDS = ('goal', 'conflict', 'crisis', 'decision')
 
 
-def _read_text(path: str) -> str:
-    with open(path, encoding='utf-8', errors='replace') as f:
-        return f.read()
-
-
-def _reference_text(project_dir: str) -> str:
-    """The reference docs and registries, which make a name the book's own.
-    ``scene-briefs.csv`` is left out on purpose: names an earlier fix invented
-    live there."""
-    ref_dir = os.path.join(project_dir, 'reference')
-    return '\n'.join(
-        _read_text(os.path.join(ref_dir, name))
-        for name in (sorted(os.listdir(ref_dir)) if os.path.isdir(ref_dir) else [])
-        if name != 'scene-briefs.csv' and name.endswith(('.md', '.csv')))
-
-
-def _book_text(reference_text: str, prose: str, brief: dict) -> str:
+def _book_text(known_text: str, prose: str, brief: dict) -> str:
     """What a rewrite of one scene's brief may name: the reference text, the
     scene's prose, and the brief fields the fix leaves alone."""
     kept = ' '.join(str(v) for k, v in brief.items() if k not in _BRIEF_FIX_FIELDS)
-    return '\n'.join((reference_text, prose, kept))
+    return '\n'.join((known_text, prose, kept))
 
 
 def _scene_prose_excerpt(scene_id: str, prose: str | None) -> str:
@@ -1329,14 +1248,14 @@ def _fix_upstream_briefs(project_dir: str,
     scenes_map = _read_csv_as_map(scenes_path)
     intent_map = _read_csv_as_map(intent_path)
 
-    reference_text = _reference_text(project_dir)
+    known_text = reference_text(project_dir)
     rewritten: list[str] = []
     skipped: dict[str, str] = {}
 
     for scene_id in scene_ids:
         brief = briefs_map.get(scene_id, {})
         prose_path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
-        prose = _read_text(prose_path) if os.path.isfile(prose_path) else None
+        prose = read_text(prose_path) if os.path.isfile(prose_path) else None
         scene = scenes_map.get(scene_id, {})
         intent = intent_map.get(scene_id, {})
 
@@ -1408,8 +1327,8 @@ DECISION: [rewritten decision]"""
                 f'{", ".join(missing)}. Its brief is unchanged.')
             continue
 
-        invented = _invented_names(list(fields.values()),
-                                   _book_text(reference_text, prose or '', brief))
+        invented = invented_names(list(fields.values()),
+                                   _book_text(known_text, prose or '', brief))
         if invented:
             skipped[scene_id] = f'named {", ".join(invented)}'
             log(f'  WARNING: Not rewriting the brief of {scene_id}: the rewrite names '
@@ -2561,14 +2480,18 @@ def main(argv=None):
             fields_changed = hone_result.get('fields_rewritten', 0)
             scenes_changed = hone_result.get('scenes_rewritten', 0)
             log(f'  Upstream: {scenes_changed} scenes, {fields_changed} fields rewritten')
+            for sid, reasons in (hone_result.get('rejected') or {}).items():
+                log(f'  Rewrite refused for {sid}: {"; ".join(reasons)}')
 
-            # Track or execute redraft
+            # Track or execute redraft: only scenes whose brief or intent
+            # changed (a refused rewrite leaves its prose alone)
             if effective_coaching == 'full' and targets:
-                affected = [t.strip() for t in targets.split(';') if t.strip()]
+                changed_ids = set(hone_result.get('changed') or [])
+                affected = [s for s in (target_scenes or []) if s in changed_ids]
                 if defer_redraft:
                     redraft_needed.update(affected)
                     log(f'  Deferred redraft for {len(affected)} scenes (will batch after all upstream passes)')
-                else:
+                elif affected:
                     try:
                         _redraft_from_briefs(project_dir, affected, pass_model,
                                              log_dir, system=system)

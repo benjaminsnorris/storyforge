@@ -1740,6 +1740,37 @@ No explanation. No markdown. Just the labeled lines."""
 # Briefs domain: hone_briefs
 # ============================================================================
 
+# The files hone's model rewrites write: neither vouches for a name, since
+# an earlier rewrite (hone's, or revise's brief fix) may have invented it
+_REWRITTEN_FILES = ('scene-briefs.csv', 'scene-intent.csv')
+
+
+def _apply_checked_rewrites(row: dict, sid: str, rewrites: dict, current_values: dict,
+                            kind: str, project_dir: str, known_reference: str,
+                            rejected: dict[str, list[str]]) -> int:
+    """Write one reply's changed fields into *row* (a scene's brief or intent),
+    unless the reply names a capitalized word that *known_reference* (the
+    reference files but ``_REWRITTEN_FILES``) and the scene's prose never use;
+    then the row is left as it was and the scene listed in *rejected* with
+    why. The row's own fields don't vouch for a name either. Returns the
+    number of fields changed."""
+    from storyforge.brief_names import invented_names, read_text
+    changed = {f: v for f, v in rewrites.items() if v and v != current_values.get(f)}
+    if not changed:
+        return 0
+    prose_path = os.path.join(project_dir, 'scenes', f'{sid}.md')
+    prose = read_text(prose_path) if os.path.isfile(prose_path) else ''
+    names = invented_names(list(changed.values()), '\n'.join((known_reference, prose)))
+    if names:
+        reason = f'{kind} rewrite of {", ".join(sorted(changed))} named {", ".join(names)}'
+        log(f'    WARNING: not rewriting {sid}: the {reason}, which appear nowhere in the '
+            f'reference files or its prose')
+        rejected.setdefault(sid, []).append(reason)
+        return 0
+    row.update(changed)
+    return len(changed)
+
+
 def hone_briefs(
     ref_dir: str,
     project_dir: str,
@@ -1767,7 +1798,11 @@ def hone_briefs(
             scene-briefs.csv are merged into all_issues before processing.
 
     Returns:
-        Dict with scenes_flagged, scenes_rewritten, fields_rewritten.
+        Dict with scenes_flagged, scenes_rewritten, fields_rewritten,
+        changed (the ids of the scenes whose brief changed) and rejected:
+        scene id -> why a rewrite was refused (it named a word the book never
+        uses; see ``brief_names``). The early returns (dry run, strict, no
+        issues) carry only the counts.
     """
     briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
     scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
@@ -1836,6 +1871,11 @@ def hone_briefs(
     for issue in all_issues:
         by_scene.setdefault(issue['scene_id'], []).append(issue)
 
+    from storyforge.brief_names import reference_text
+    known_reference = reference_text(project_dir, exclude=_REWRITTEN_FILES)
+    rejected: dict[str, list[str]] = {}
+    changed_ids: list[str] = []
+
     scenes_rewritten = 0
     fields_rewritten = 0
     total_scenes = len(by_scene)
@@ -1848,6 +1888,7 @@ def hone_briefs(
         trim_issues = [i for i in issues if i['issue'] in ('overspecified', 'verbose')]
         issue_types = sorted(set(i['issue'] for i in issues))
         log(f'  [{idx}/{total_scenes}] {sid} ({", ".join(issue_types)})')
+        changed = 0
 
         # Handle abstract issues with concretization prompt
         if abstract_issues and coaching_level == 'full':
@@ -1869,10 +1910,8 @@ def hone_briefs(
             response = extract_text_from_file(log_file)
 
             rewrites = parse_concretize_response(response, sid, abstract_fields)
-            for field, new_value in rewrites.items():
-                if new_value and new_value != current_values.get(field):
-                    briefs_map[sid][field] = new_value
-                    fields_rewritten += 1
+            changed += _apply_checked_rewrites(briefs_map[sid], sid, rewrites, current_values,
+                                              'concretize', project_dir, known_reference, rejected)
 
         # Handle overspecified/verbose issues with trim prompt
         if trim_issues and coaching_level == 'full':
@@ -1895,10 +1934,8 @@ def hone_briefs(
                 response = extract_text_from_file(log_file)
 
                 rewrites = parse_concretize_response(response, sid, trim_fields)
-                for field, new_value in rewrites.items():
-                    if new_value and new_value != current_values.get(field):
-                        briefs_map[sid][field] = new_value
-                        fields_rewritten += 1
+                changed += _apply_checked_rewrites(briefs_map[sid], sid, rewrites, current_values,
+                                                  'trim', project_dir, known_reference, rejected)
 
         # Handle evaluation issues (from external findings)
         eval_issues = [i for i in issues if i['issue'] == 'evaluation']
@@ -1925,10 +1962,8 @@ def hone_briefs(
             response = extract_text_from_file(log_file)
 
             rewrites = parse_concretize_response(response, sid, eval_fields)
-            for field, new_value in rewrites.items():
-                if new_value and new_value != current_values.get(field):
-                    briefs_map[sid][field] = new_value
-                    fields_rewritten += 1
+            changed += _apply_checked_rewrites(briefs_map[sid], sid, rewrites, current_values,
+                                              'evaluation', project_dir, known_reference, rejected)
 
         # Coach mode: save proposals for all issue types
         if coaching_level == 'coach':
@@ -1943,8 +1978,10 @@ def hone_briefs(
                         fh.write(f"**Current:** {issue['value'][:300]}\n\n")
             continue
 
-        if abstract_issues or trim_issues or eval_issues:
+        if changed:
             scenes_rewritten += 1
+            fields_rewritten += changed
+            changed_ids.append(sid)
 
     # Write back if any changes were made
     if fields_rewritten > 0:
@@ -1960,6 +1997,8 @@ def hone_briefs(
         'scenes_flagged': len(by_scene),
         'scenes_rewritten': scenes_rewritten,
         'fields_rewritten': fields_rewritten,
+        'changed': changed_ids,
+        'rejected': rejected,
     }
 
 
@@ -2497,7 +2536,8 @@ def hone_intent(
             scene-intent.csv are merged into all_issues before processing.
 
     Returns:
-        Dict with scenes_flagged, scenes_rewritten, fields_rewritten.
+        Dict with scenes_flagged, scenes_rewritten, fields_rewritten and
+        rejected (as ``hone_briefs``).
     """
     intent_path = os.path.join(ref_dir, 'scene-intent.csv')
     if not os.path.isfile(intent_path):
@@ -2539,6 +2579,7 @@ def hone_intent(
     # character_presence scoring rewards characters being in on_stage, so we
     # expand the characters list rather than shrinking on_stage.
     det_fields_rewritten = 0
+    det_changed: set[str] = set()
     not_subset_issues = [i for i in all_issues if i['issue'] == 'not_subset']
     for issue in not_subset_issues:
         sid = issue['scene_id']
@@ -2554,6 +2595,7 @@ def hone_intent(
             new_chars = existing_chars + missing
             intent_map[sid]['characters'] = ';'.join(new_chars)
             det_fields_rewritten += 1
+            det_changed.add(sid)
 
     # Write deterministic fixes immediately if any
     if det_fields_rewritten > 0:
@@ -2598,6 +2640,10 @@ def hone_intent(
     scenes_rewritten = (len(set(i['scene_id'] for i in not_subset_issues))
                         if det_fields_rewritten > 0 else 0)
     api_fields_rewritten = 0
+    from storyforge.brief_names import reference_text
+    known_reference = reference_text(project_dir, exclude=_REWRITTEN_FILES)
+    rejected: dict[str, list[str]] = {}
+    changed_ids: list[str] = []
     total_scenes = len(by_scene)
 
     for idx, (sid, issues) in enumerate(by_scene.items(), 1):
@@ -2633,11 +2679,10 @@ def hone_intent(
             response = extract_text_from_file(log_file)
 
             rewrites = parse_concretize_response(response, sid, detected_fields)
-            for field, new_value in rewrites.items():
-                if new_value and new_value != current_values.get(field):
-                    intent_map[sid][field] = new_value
-                    api_fields_rewritten += 1
-                    scene_fields_rewritten += 1
+            n = _apply_checked_rewrites(intent_map[sid], sid, rewrites, current_values,
+                                        'intent', project_dir, known_reference, rejected)
+            api_fields_rewritten += n
+            scene_fields_rewritten += n
 
         # Handle evaluation issues (from external findings)
         if eval_issues and coaching_level == 'full':
@@ -2664,11 +2709,10 @@ def hone_intent(
             response = extract_text_from_file(log_file)
 
             rewrites = parse_concretize_response(response, sid, eval_fields)
-            for field, new_value in rewrites.items():
-                if new_value and new_value != current_values.get(field):
-                    intent_map[sid][field] = new_value
-                    api_fields_rewritten += 1
-                    scene_fields_rewritten += 1
+            n = _apply_checked_rewrites(intent_map[sid], sid, rewrites, current_values,
+                                        'evaluation', project_dir, known_reference, rejected)
+            api_fields_rewritten += n
+            scene_fields_rewritten += n
 
         # Coach mode: save proposals instead of applying
         if coaching_level == 'coach':
@@ -2685,6 +2729,7 @@ def hone_intent(
 
         if scene_fields_rewritten > 0:
             scenes_rewritten += 1
+            changed_ids.append(sid)
 
     # Write back if any API-driven changes were made (deterministic writes already happened above)
     if api_fields_rewritten > 0:
@@ -2696,6 +2741,8 @@ def hone_intent(
         'scenes_flagged': len(set(f['scene_id'] for f in all_issues)),
         'scenes_rewritten': scenes_rewritten,
         'fields_rewritten': det_fields_rewritten + api_fields_rewritten,
+        'changed': sorted(set(changed_ids) | det_changed),
+        'rejected': rejected,
     }
 
 
