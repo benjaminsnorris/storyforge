@@ -39,7 +39,7 @@ from storyforge.costs import (
 from storyforge.scenes import (
     generate_slug, unique_slug, scene_id_slug, is_break_marker, parse_scene_boundaries,
     build_boundary_prompt, scenes_header, intent_header,
-    _title_from_file,
+    keep_epigraph_with_opening, _title_from_file,
 )
 from storyforge.csv_cli import get_field, get_column, append_row
 
@@ -775,6 +775,16 @@ def main(argv=None):
                      'reason': b['description'] or 'Claude detection'}
                     for b in boundaries
                 ]
+                # A chapter's epigraph belongs to its opening scene (F-120).
+                splits, refused = keep_epigraph_with_opening(chapter_text, splits)
+                for r in refused:
+                    opening = next((l.strip() for l in chapter_text.splitlines()[r['line'] - 1:]
+                                    if l.strip() and not l.strip().startswith('#')), '')
+                    log(f'  WARNING: refused a scene boundary: '
+                        f'scene "{r["slug"] or "unnamed"}" would hold only an '
+                        f'epigraph-like block ("{opening[:50]}..."); kept it in '
+                        f'"{splits[0]["slug"] or "unnamed"}". Check that split by hand '
+                        f'if the block is a scene of its own')
             elif args.dry_run:
                 log(f'\nProcessing chapter {chapter_num}: {ch_name}')
                 tw = count_words(chapter_text)

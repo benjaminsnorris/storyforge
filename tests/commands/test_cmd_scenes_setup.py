@@ -1096,3 +1096,66 @@ class TestChapterMap:
         row = lines[1].split('|')
         assert row[:4] == ['1', 'the-arrival', 'numbered', '']
         assert len(row[4].split(';')) == 2
+
+
+# ============================================================================
+# main — a chapter epigraph stays with the chapter's opening scene (F-120)
+# ============================================================================
+
+
+_FIXTURES = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'fixtures')
+
+
+class TestEpigraphStaysWithOpeningScene:
+    """Middlemarch heads every chapter with an epigraph. For Chapter LVII the
+    boundary model split the epigraph (114 words of verse, its line breaks
+    flattened) off as its own scene, chapter-epigraph-scott-childhood-verse."""
+
+    def _run(self, project_dir, monkeypatch, mock_api, content, response):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        mock_api.set_response(response)
+        ch_dir = os.path.join(project_dir, 'chapters')
+        os.makedirs(ch_dir, exist_ok=True)
+        with open(os.path.join(ch_dir, 'ch01.md'), 'w') as f:
+            f.write(content)
+        main(['--split-chapters', '--source', 'chapters', '--yes', '--direct'])
+        _, rows = _new_rows(project_dir, 'scenes.csv')
+        return sorted(rows, key=lambda r: int(r['seq']))
+
+    def test_middlemarch_ch57_epigraph_not_its_own_scene(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch,
+            capsys):
+        with open(os.path.join(_FIXTURES, 'scenes-setup',
+                               'middlemarch-ch57-opening.md')) as f:
+            content = f.read()
+        rows = self._run(
+            project_dir, monkeypatch, mock_api, content,
+            'SCENE: 1 | chapter-epigraph-scott-childhood-verse | epigraph\n'
+            'SCENE: 5 | fred-confronted-by-mrs-garth | Fred calls on Mrs. Garth\n')
+        assert [r['id'] for r in rows] == ['fred-confronted-by-mrs-garth']
+        assert _opening(project_dir, 'fred-confronted-by-mrs-garth') == '# Chapter LVII'
+        with open(os.path.join(project_dir, 'scenes',
+                               'fred-confronted-by-mrs-garth.md')) as f:
+            text = f.read()
+        assert 'They numbered scarce eight summers' in text
+        assert 'The evening that Fred Vincy walked' in text
+        out = capsys.readouterr().out
+        assert 'WARNING' in out and 'epigraph' in out
+        assert 'chapter-epigraph-scott-childhood-verse' in out
+
+    def test_short_opening_scene_is_still_split(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch,
+            capsys):
+        # A short prose scene opening a chapter is not an epigraph.
+        rows = self._run(
+            project_dir, monkeypatch, mock_api,
+            '# Chapter 3\n\nThe carriage came for them at nine, and Elizabeth '
+            'went down to it alone.\n\nAt Rosings the next morning, Lady '
+            'Catherine received them in the great hall.\n',
+            'SCENE: 1 | carriage-comes-for-elizabeth | a\n'
+            'SCENE: 5 | lady-catherine-receives-them | b\n')
+        assert [r['id'] for r in rows] == ['carriage-comes-for-elizabeth',
+                                          'lady-catherine-receives-them']
+        assert 'epigraph' not in capsys.readouterr().out
