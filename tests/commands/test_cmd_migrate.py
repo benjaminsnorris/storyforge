@@ -231,21 +231,19 @@ class TestStep3SeedRegistries:
         assert 'done:2' in values_result
         assert os.path.isfile(os.path.join(ref_dir, 'values.csv'))
 
-    def test_seeds_knowledge_csv(self, tmp_path):
+    def test_does_not_seed_knowledge(self, tmp_path):
+        """Knowledge lives in the ledger (step 4); a slugged fact from a
+        brief's wording would carry no scene, so it is not seeded."""
         ref_dir = str(tmp_path)
-        # Intent file for values/mice
-        intent_path = tmp_path / 'scene-intent.csv'
-        intent_path.write_text('id|value_at_stake|mice_threads\nsc1||\n')
-        # Briefs with knowledge
-        briefs_path = tmp_path / 'scene-briefs.csv'
-        briefs_path.write_text(
+        (tmp_path / 'scene-intent.csv').write_text('id|value_at_stake|mice_threads\nsc1||\n')
+        (tmp_path / 'scene-briefs.csv').write_text(
             'id|knowledge_in|knowledge_out\n'
             'sc1|fact-a|fact-b\n'
         )
         results = step3_seed_registries(ref_dir, dry_run=False)
-        knowledge_result = [r for r in results if r.startswith('knowledge.csv')][0]
-        assert 'done:2' in knowledge_result
-        assert os.path.isfile(os.path.join(ref_dir, 'knowledge.csv'))
+        assert [r.split(':')[0] for r in results] == ['values.csv', 'mice-threads.csv']
+        assert not os.path.isfile(os.path.join(ref_dir, 'knowledge.csv'))
+        assert not os.path.isfile(os.path.join(ref_dir, 'commitments.csv'))
 
     def test_seeds_mice_threads_csv(self, tmp_path):
         ref_dir = str(tmp_path)
@@ -301,8 +299,8 @@ class TestMainDryRun:
                                            project_dir, monkeypatch):
         monkeypatch.setattr('storyforge.cmd_migrate.detect_project_root',
                             lambda: project_dir)
-        # Patch step5_validate since it imports elaborate/enrich/schema
-        monkeypatch.setattr('storyforge.cmd_migrate.step5_validate',
+        # Patch step6_validate since it imports elaborate/enrich/schema
+        monkeypatch.setattr('storyforge.cmd_migrate.step6_validate',
                             lambda ref_dir, proj_dir: '0 passed, 0 failed, 0 skipped')
         main(['--dry-run'])
         # No git commits in dry-run mode
@@ -313,7 +311,7 @@ class TestMainDryRun:
                                         project_dir, monkeypatch):
         monkeypatch.setattr('storyforge.cmd_migrate.detect_project_root',
                             lambda: project_dir)
-        monkeypatch.setattr('storyforge.cmd_migrate.step5_validate',
+        monkeypatch.setattr('storyforge.cmd_migrate.step6_validate',
                             lambda ref_dir, proj_dir: '0 passed, 0 failed, 0 skipped')
         main(['--dry-run'])
         branch_calls = mock_git.calls_for('ensure_on_branch')
@@ -333,9 +331,9 @@ class TestMainNoCommit:
         monkeypatch.setattr('storyforge.cmd_migrate.detect_project_root',
                             lambda: project_dir)
         # Patch normalize (step4) and validate (step5) which have heavy imports
-        monkeypatch.setattr('storyforge.cmd_migrate.step4_normalize',
+        monkeypatch.setattr('storyforge.cmd_migrate.step5_normalize',
                             lambda ref_dir, proj_dir: 0)
-        monkeypatch.setattr('storyforge.cmd_migrate.step5_validate',
+        monkeypatch.setattr('storyforge.cmd_migrate.step6_validate',
                             lambda ref_dir, proj_dir: '0 passed, 0 failed, 0 skipped')
         main(['--no-commit'])
         commit_calls = mock_git.calls_for('commit_and_push')
@@ -345,9 +343,9 @@ class TestMainNoCommit:
                                           project_dir, monkeypatch):
         monkeypatch.setattr('storyforge.cmd_migrate.detect_project_root',
                             lambda: project_dir)
-        monkeypatch.setattr('storyforge.cmd_migrate.step4_normalize',
+        monkeypatch.setattr('storyforge.cmd_migrate.step5_normalize',
                             lambda ref_dir, proj_dir: 0)
-        monkeypatch.setattr('storyforge.cmd_migrate.step5_validate',
+        monkeypatch.setattr('storyforge.cmd_migrate.step6_validate',
                             lambda ref_dir, proj_dir: '0 passed, 0 failed, 0 skipped')
         main(['--no-commit'])
         branch_calls = mock_git.calls_for('ensure_on_branch')
@@ -366,9 +364,9 @@ class TestMainFullRun:
                                  project_dir, monkeypatch):
         monkeypatch.setattr('storyforge.cmd_migrate.detect_project_root',
                             lambda: project_dir)
-        monkeypatch.setattr('storyforge.cmd_migrate.step4_normalize',
+        monkeypatch.setattr('storyforge.cmd_migrate.step5_normalize',
                             lambda ref_dir, proj_dir: 0)
-        monkeypatch.setattr('storyforge.cmd_migrate.step5_validate',
+        monkeypatch.setattr('storyforge.cmd_migrate.step6_validate',
                             lambda ref_dir, proj_dir: '0 passed, 0 failed, 0 skipped')
         main([])
         commit_calls = mock_git.calls_for('commit_and_push')
@@ -379,9 +377,9 @@ class TestMainFullRun:
                                project_dir, monkeypatch):
         monkeypatch.setattr('storyforge.cmd_migrate.detect_project_root',
                             lambda: project_dir)
-        monkeypatch.setattr('storyforge.cmd_migrate.step4_normalize',
+        monkeypatch.setattr('storyforge.cmd_migrate.step5_normalize',
                             lambda ref_dir, proj_dir: 0)
-        monkeypatch.setattr('storyforge.cmd_migrate.step5_validate',
+        monkeypatch.setattr('storyforge.cmd_migrate.step6_validate',
                             lambda ref_dir, proj_dir: '0 passed, 0 failed, 0 skipped')
         main([])
         branch_calls = mock_git.calls_for('ensure_on_branch')
@@ -413,9 +411,9 @@ class TestMainErrors:
         """Running migration twice should not cause errors."""
         monkeypatch.setattr('storyforge.cmd_migrate.detect_project_root',
                             lambda: project_dir)
-        monkeypatch.setattr('storyforge.cmd_migrate.step4_normalize',
+        monkeypatch.setattr('storyforge.cmd_migrate.step5_normalize',
                             lambda ref_dir, proj_dir: 0)
-        monkeypatch.setattr('storyforge.cmd_migrate.step5_validate',
+        monkeypatch.setattr('storyforge.cmd_migrate.step6_validate',
                             lambda ref_dir, proj_dir: '0 passed, 0 failed, 0 skipped')
         # First run
         main(['--no-commit'])
@@ -446,3 +444,128 @@ class TestWriteRegistry:
         with open(path) as f:
             content = f.read()
         assert content == 'id|name\n'
+
+
+# ============================================================================
+# Step 4: knowledge.csv and physical-states.csv move into the ledger
+# ============================================================================
+
+LEGACY = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'fixtures',
+                      'legacy-registries')
+
+
+class TestStep4Ledger:
+    def _legacy(self, project_dir):
+        """The fixture project before the ledger."""
+        import shutil
+        ref = os.path.join(project_dir, 'reference')
+        os.remove(os.path.join(ref, 'commitments.csv'))
+        for name in ('knowledge.csv', 'physical-states.csv'):
+            shutil.copy(os.path.join(LEGACY, name), ref)
+        return ref
+
+    def _run(self, project_dir, monkeypatch, *argv):
+        monkeypatch.setattr('storyforge.cmd_migrate.detect_project_root',
+                            lambda: project_dir)
+        main(['--no-commit', *argv])
+
+    def test_moves_the_files_into_the_ledger(self, mock_api, mock_git, mock_costs,
+                                              project_dir, monkeypatch, capsys):
+        from storyforge import ledger
+        expected = open(os.path.join(project_dir, 'reference', 'commitments.csv')).read()
+        ref = self._legacy(project_dir)
+        self._run(project_dir, monkeypatch)
+        assert open(os.path.join(ref, 'commitments.csv')).read() == expected
+        assert ledger.legacy_files(ref) == []
+        out = capsys.readouterr().out
+        assert '[4/10] Move registries into commitments.csv: done (5 knowledge, 4 physical' in out
+        # Every quirk on its own line, with counts by kind
+        assert '9 change(s) to review: character-id 4, no-scene 5' in out
+        assert "physical-states.csv sprained-ankle-tessa: character 'Tessa Merrin' is " \
+               "written as its id 'tessa-merrin'" in out
+        assert out.count('knowledge.csv ') >= 5
+        # Steps 5 and 6 read the ledger after it
+        assert '[6/10] Schema validation:' in out
+
+    def test_commit_includes_the_removed_files(self, mock_api, mock_git, mock_costs,
+                                               project_dir, monkeypatch):
+        self._legacy(project_dir)
+        monkeypatch.setattr('storyforge.cmd_migrate.detect_project_root',
+                            lambda: project_dir)
+        main([])
+        assert 'reference/' in mock_git.calls_for('commit_and_push')[0][2]
+
+    def test_idempotent(self, mock_api, mock_git, mock_costs, project_dir,
+                        monkeypatch, capsys):
+        ref = self._legacy(project_dir)
+        self._run(project_dir, monkeypatch)
+        first = open(os.path.join(ref, 'commitments.csv')).read()
+        capsys.readouterr()
+        self._run(project_dir, monkeypatch)
+        assert open(os.path.join(ref, 'commitments.csv')).read() == first
+        assert '[4/10] Move registries into commitments.csv: skipped' in capsys.readouterr().out
+
+    def test_dry_run_changes_nothing(self, mock_api, mock_git, mock_costs,
+                                     project_dir, monkeypatch, capsys):
+        ref = self._legacy(project_dir)
+        before = {n: open(os.path.join(ref, n)).read() for n in os.listdir(ref)
+                  if n.endswith('.csv')}
+        self._run(project_dir, monkeypatch, '--dry-run')
+        after = {n: open(os.path.join(ref, n)).read() for n in os.listdir(ref)
+                 if n.endswith('.csv')}
+        assert after == before
+        out = capsys.readouterr().out
+        assert 'dry run (5 knowledge, 4 physical; would remove knowledge.csv, ' \
+               'physical-states.csv)' in out
+        assert '[6/10] Schema validation: skipped (dry run' in out
+
+    def _assert_stopped(self, project_dir, monkeypatch, capsys, ref, needle):
+        # Step 1 would rename this column: a stop must come before it
+        intent = os.path.join(ref, 'scene-intent.csv')
+        with open(intent) as f:
+            text = f.read()
+        with open(intent, 'w') as f:
+            f.write(text.replace('action_sequel', 'scene_type', 1))
+        before = {n: open(os.path.join(ref, n)).read() for n in os.listdir(ref)
+                  if n.endswith('.csv')}
+        with pytest.raises(SystemExit) as exc:
+            self._run(project_dir, monkeypatch)
+        assert exc.value.code == 1
+        after = {n: open(os.path.join(ref, n)).read() for n in os.listdir(ref)
+                 if n.endswith('.csv')}
+        assert after == before
+        out = capsys.readouterr().out
+        assert 'so nothing was changed' in out and needle in out
+
+    def test_a_migration_error_stops_before_any_step(self, mock_api, mock_git, mock_costs,
+                                                     project_dir, monkeypatch, capsys):
+        ref = self._legacy(project_dir)
+        with open(os.path.join(ref, 'knowledge.csv'), 'a') as f:
+            f.write('village-vanished|A different statement|||\n')
+        self._assert_stopped(project_dir, monkeypatch, capsys, ref,
+                             "id 'village-vanished' is on two rows that differ")
+
+    def test_an_existing_ledger_beside_the_old_files_stops(self, mock_api, mock_git,
+                                                           mock_costs, project_dir,
+                                                           monkeypatch, capsys):
+        import shutil
+        ref = os.path.join(project_dir, 'reference')
+        shutil.copy(os.path.join(LEGACY, 'knowledge.csv'), ref)
+        self._assert_stopped(project_dir, monkeypatch, capsys, ref,
+                             'still present beside reference/commitments.csv')
+
+    def test_a_round_trip_lost_in_writing_restores_the_old_files(self, project_dir,
+                                                                 monkeypatch):
+        """A difference that only the written file shows (the writer changed
+        a cell) stops it: the ledger is removed and the old files kept."""
+        from storyforge import ledger
+        ref = self._legacy(project_dir)
+        real = ledger.write_ledger
+
+        def lossy(path, rows):
+            real(path, [{**r, 'statement': r['statement'] + '!'} for r in rows])
+        monkeypatch.setattr(ledger, 'write_ledger', lossy)
+        result = ledger.migrate_files(ref)
+        assert result.status == 'stopped' and result.problems
+        assert not os.path.isfile(os.path.join(ref, 'commitments.csv'))
+        assert ledger.legacy_files(ref) == ['knowledge.csv', 'physical-states.csv']

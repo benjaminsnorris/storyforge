@@ -1,9 +1,9 @@
 """Tests for the elaboration-v1 migration steps in cmd_migrate.
 
 Covers:
-  - step6_create_story_summary: bootstrap reference/story-summary.md
-  - step7_extract_spine: move status=spine rows to spine.csv
-  - step8_extract_architecture: move status=architecture rows to architecture.csv
+  - step7_create_story_summary: bootstrap reference/story-summary.md
+  - step8_extract_spine: move status=spine rows to spine.csv
+  - step9_extract_architecture: move status=architecture rows to architecture.csv
 
 Idempotency is the key invariant — running migrate twice should not
 double-extract or overwrite author edits.
@@ -13,9 +13,9 @@ import os
 import shutil
 
 from storyforge.cmd_migrate import (
-    step6_create_story_summary,
-    step7_extract_spine,
-    step8_extract_architecture,
+    step7_create_story_summary,
+    step8_extract_spine,
+    step9_extract_architecture,
 )
 
 
@@ -33,7 +33,7 @@ def test_step6_creates_story_summary_when_absent(project_dir):
     path = os.path.join(project_dir, 'reference', 'story-summary.md')
     assert not os.path.isfile(path)
 
-    result = step6_create_story_summary(project_dir, dry_run=False)
+    result = step7_create_story_summary(project_dir, dry_run=False)
     assert result.startswith('create:')
     assert os.path.isfile(path)
     content = _read_file(path)
@@ -53,14 +53,14 @@ def test_step6_skips_when_file_exists(project_dir):
     with open(path, 'w') as f:
         f.write('# Custom content I wrote\n')
 
-    result = step6_create_story_summary(project_dir, dry_run=False)
+    result = step7_create_story_summary(project_dir, dry_run=False)
     assert result.startswith('skip:')
     assert 'Custom content I wrote' in _read_file(path)
 
 
 def test_step6_dry_run_does_not_write(project_dir):
     path = os.path.join(project_dir, 'reference', 'story-summary.md')
-    result = step6_create_story_summary(project_dir, dry_run=True)
+    result = step7_create_story_summary(project_dir, dry_run=True)
     assert result.startswith('create:')
     assert not os.path.isfile(path)
 
@@ -72,7 +72,7 @@ def test_step6_leaves_logline_blank_when_yaml_has_none(tmp_path):
     instead of being fooled by a placeholder that the user clearly
     didn't author."""
     (tmp_path / 'storyforge.yaml').write_text('project:\n  title: test\n')
-    step6_create_story_summary(str(tmp_path), dry_run=False)
+    step7_create_story_summary(str(tmp_path), dry_run=False)
     md = _read_file(os.path.join(str(tmp_path), 'reference', 'story-summary.md'))
     # The template has `## Logline\n\n{logline}\n\n## Synopsis` — the
     # logline-section body should be empty between those headers.
@@ -93,7 +93,7 @@ def test_step6_seeds_logline_from_yaml(project_dir):
     """The project's storyforge.yaml:project.logline gets written into the
     Logline section of the bootstrapped file. Uses the fixture's pre-existing
     logline rather than injecting a new value."""
-    step6_create_story_summary(project_dir, dry_run=False)
+    step7_create_story_summary(project_dir, dry_run=False)
     md_content = _read_file(os.path.join(project_dir, 'reference', 'story-summary.md'))
     # The fixture's storyforge.yaml has this logline pre-set.
     assert 'A cartographer discovers her maps are erasing people from existence.' in md_content
@@ -116,7 +116,7 @@ def test_step7_extracts_spine_rows(project_dir):
     assert 'act2-sc02' in before
     # act2-sc02 has status=spine per the fixture
 
-    result = step7_extract_spine(ref_dir, dry_run=False)
+    result = step8_extract_spine(ref_dir, dry_run=False)
     assert result.startswith('extract:')
     assert os.path.isfile(spine_csv)
     spine_content = _read_file(spine_csv)
@@ -134,10 +134,10 @@ def test_step7_extracts_spine_rows(project_dir):
 def test_step7_is_idempotent(project_dir):
     """Running twice doesn't double-extract or clobber."""
     ref_dir = os.path.join(project_dir, 'reference')
-    step7_extract_spine(ref_dir, dry_run=False)
+    step8_extract_spine(ref_dir, dry_run=False)
     first = _read_file(os.path.join(ref_dir, 'spine.csv'))
 
-    result = step7_extract_spine(ref_dir, dry_run=False)
+    result = step8_extract_spine(ref_dir, dry_run=False)
     assert result.startswith('skip:')
     second = _read_file(os.path.join(ref_dir, 'spine.csv'))
     assert first == second
@@ -146,7 +146,7 @@ def test_step7_is_idempotent(project_dir):
 def test_step7_skips_when_no_spine_rows(project_dir_gn):
     """A project with no status=spine rows → step7 is a no-op."""
     ref_dir = os.path.join(project_dir_gn, 'reference')
-    result = step7_extract_spine(ref_dir, dry_run=False)
+    result = step8_extract_spine(ref_dir, dry_run=False)
     assert result.startswith('skip:')
 
 
@@ -154,7 +154,7 @@ def test_step7_removes_extracted_id_from_scene_intent(project_dir):
     """The intent row for the moved scene must NOT remain in scene-intent.csv —
     its function column is now carried by spine.csv."""
     ref_dir = os.path.join(project_dir, 'reference')
-    step7_extract_spine(ref_dir, dry_run=False)
+    step8_extract_spine(ref_dir, dry_run=False)
     with open(os.path.join(ref_dir, 'scene-intent.csv')) as f:
         intent = f.read()
     assert 'act2-sc02|' not in intent
@@ -176,7 +176,7 @@ def test_step8_extracts_architecture_rows(project_dir):
     with open(scenes_csv) as f:
         assert 'act2-sc01' in f.read()
 
-    result = step8_extract_architecture(ref_dir, dry_run=False)
+    result = step9_extract_architecture(ref_dir, dry_run=False)
     assert result.startswith('extract:')
     assert os.path.isfile(arch_csv)
     arch_content = _read_file(arch_csv)
@@ -192,7 +192,7 @@ def test_step8_leaves_spine_event_empty(project_dir):
     """Migration can't determine spine_event references automatically —
     author wires them up after migration."""
     ref_dir = os.path.join(project_dir, 'reference')
-    step8_extract_architecture(ref_dir, dry_run=False)
+    step9_extract_architecture(ref_dir, dry_run=False)
     arch_content = _read_file(os.path.join(ref_dir, 'architecture.csv'))
     rows = arch_content.splitlines()[1:]
     for row in rows:
@@ -205,9 +205,9 @@ def test_step8_leaves_spine_event_empty(project_dir):
 
 def test_step8_is_idempotent(project_dir):
     ref_dir = os.path.join(project_dir, 'reference')
-    step8_extract_architecture(ref_dir, dry_run=False)
+    step9_extract_architecture(ref_dir, dry_run=False)
     first = _read_file(os.path.join(ref_dir, 'architecture.csv'))
-    result = step8_extract_architecture(ref_dir, dry_run=False)
+    result = step9_extract_architecture(ref_dir, dry_run=False)
     assert result.startswith('skip:')
     assert _read_file(os.path.join(ref_dir, 'architecture.csv')) == first
 
@@ -215,7 +215,7 @@ def test_step8_is_idempotent(project_dir):
 def test_step8_preserves_briefed_and_mapped_rows(project_dir):
     """Rows with status >= mapped stay in scenes.csv after extraction."""
     ref_dir = os.path.join(project_dir, 'reference')
-    step8_extract_architecture(ref_dir, dry_run=False)
+    step9_extract_architecture(ref_dir, dry_run=False)
     with open(os.path.join(ref_dir, 'scenes.csv')) as f:
         scenes = f.read()
     # Fixture has at least one briefed row and one mapped row
@@ -244,7 +244,7 @@ def test_step7_drops_orphan_brief_for_moved_id(project_dir):
         f.write(existing.rstrip('\n') + '\n' if existing.strip() else '')
         f.write(orphan_row + '\n')
 
-    result = step7_extract_spine(ref_dir, dry_run=False)
+    result = step8_extract_spine(ref_dir, dry_run=False)
     assert 'orphan brief' in result
 
     with open(briefs_path) as f:
@@ -268,7 +268,7 @@ def test_step8_drops_orphan_brief_for_moved_id(project_dir):
         f.write(existing.rstrip('\n') + '\n' if existing.strip() else '')
         f.write(orphan_row + '\n')
 
-    result = step8_extract_architecture(ref_dir, dry_run=False)
+    result = step9_extract_architecture(ref_dir, dry_run=False)
     assert 'orphan brief' in result
 
     with open(briefs_path) as f:
@@ -282,7 +282,7 @@ def test_step7_picks_up_stranded_spine_rows_added_between_runs(project_dir):
     silently skipping because spine.csv already has data."""
     ref_dir = os.path.join(project_dir, 'reference')
     # First run extracts act2-sc02 → spine.csv
-    step7_extract_spine(ref_dir, dry_run=False)
+    step8_extract_spine(ref_dir, dry_run=False)
     first_spine = _read_file(os.path.join(ref_dir, 'spine.csv'))
     assert 'act2-sc02' in first_spine
 
@@ -299,7 +299,7 @@ def test_step7_picks_up_stranded_spine_rows_added_between_runs(project_dir):
         f.write('|'.join(new_row[c] for c in scenes_header) + '\n')
 
     # Second run: should pick up the stranded row
-    result = step7_extract_spine(ref_dir, dry_run=False)
+    result = step8_extract_spine(ref_dir, dry_run=False)
     assert result.startswith('extract:'), (
         f'expected stranded row to be picked up; got {result!r}'
     )
@@ -317,15 +317,15 @@ def test_step7_skip_when_truly_idempotent(project_dir):
     """When spine.csv has data AND scenes.csv has no stranded spine rows,
     step 7 reports `skip:already migrated`."""
     ref_dir = os.path.join(project_dir, 'reference')
-    step7_extract_spine(ref_dir, dry_run=False)
-    result = step7_extract_spine(ref_dir, dry_run=False)
+    step8_extract_spine(ref_dir, dry_run=False)
+    result = step8_extract_spine(ref_dir, dry_run=False)
     assert result == 'skip:already migrated'
 
 
 def test_step8_picks_up_stranded_architecture_rows(project_dir):
     """Symmetric to test_step7_picks_up_stranded_spine_rows."""
     ref_dir = os.path.join(project_dir, 'reference')
-    step8_extract_architecture(ref_dir, dry_run=False)
+    step9_extract_architecture(ref_dir, dry_run=False)
 
     scenes_path = os.path.join(ref_dir, 'scenes.csv')
     with open(scenes_path) as f:
@@ -338,7 +338,7 @@ def test_step8_picks_up_stranded_architecture_rows(project_dir):
     with open(scenes_path, 'a', encoding='utf-8') as f:
         f.write('|'.join(new_row[c] for c in scenes_header) + '\n')
 
-    result = step8_extract_architecture(ref_dir, dry_run=False)
+    result = step9_extract_architecture(ref_dir, dry_run=False)
     assert result.startswith('extract:')
     arch_content = _read_file(os.path.join(ref_dir, 'architecture.csv'))
     assert 'late-arch-1' in arch_content
@@ -350,18 +350,18 @@ def test_full_v1_sequence_on_fixture(project_dir):
     architecture.csv, story-summary.md, and a reduced scenes.csv."""
     ref_dir = os.path.join(project_dir, 'reference')
 
-    step6_create_story_summary(project_dir, dry_run=False)
-    step7_extract_spine(ref_dir, dry_run=False)
-    step8_extract_architecture(ref_dir, dry_run=False)
+    step7_create_story_summary(project_dir, dry_run=False)
+    step8_extract_spine(ref_dir, dry_run=False)
+    step9_extract_architecture(ref_dir, dry_run=False)
 
     assert os.path.isfile(os.path.join(ref_dir, 'story-summary.md'))
     assert os.path.isfile(os.path.join(ref_dir, 'spine.csv'))
     assert os.path.isfile(os.path.join(ref_dir, 'architecture.csv'))
 
     # Re-running the sequence is a no-op
-    assert step6_create_story_summary(project_dir, dry_run=False).startswith('skip:')
-    assert step7_extract_spine(ref_dir, dry_run=False).startswith('skip:')
-    assert step8_extract_architecture(ref_dir, dry_run=False).startswith('skip:')
+    assert step7_create_story_summary(project_dir, dry_run=False).startswith('skip:')
+    assert step8_extract_spine(ref_dir, dry_run=False).startswith('skip:')
+    assert step9_extract_architecture(ref_dir, dry_run=False).startswith('skip:')
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +380,7 @@ def test_step7_upgrades_old_header_with_stranded_row(project_dir):
         f.write('id|seq|title|function|part\n')
         f.write('ev-prior|1|Prior event|inciting|1\n')
     # Fixture already has a stranded status=spine row (act2-sc02).
-    result = step7_extract_spine(ref_dir, dry_run=False)
+    result = step8_extract_spine(ref_dir, dry_run=False)
     assert result.startswith('extract:')
     content = _read_file(spine_csv)
     lines = content.strip().split('\n')
@@ -415,7 +415,7 @@ def test_step7_upgrades_old_header_without_stranded_rows(project_dir):
         for line in lines:
             if not line.startswith('act2-sc02'):
                 f.write(line)
-    result = step7_extract_spine(ref_dir, dry_run=False)
+    result = step8_extract_spine(ref_dir, dry_run=False)
     assert result.startswith('skip:')  # nothing to extract
     # Header was upgraded even though no rows were appended.
     content = _read_file(spine_csv)
@@ -433,7 +433,7 @@ def test_step8_upgrades_old_header_with_stranded_row(project_dir):
     with open(arch_csv, 'w') as f:
         f.write(old_header + '\n')
         f.write('arch-prior|1|Prior|1|POV|ev-x|action|arc|truth|+/-|reveal\n')
-    result = step8_extract_architecture(ref_dir, dry_run=False)
+    result = step9_extract_architecture(ref_dir, dry_run=False)
     assert result.startswith('extract:') or result.startswith('skip:')
     content = _read_file(arch_csv)
     lines = content.strip().split('\n')
@@ -470,7 +470,7 @@ def test_upgrade_helper_refuses_when_existing_has_extra_columns(tmp_path):
 
 
 # ============================================================================
-# Step 9: illustration prompt bodies leave manuscript/assets/ (#306)
+# Step 10: illustration prompt bodies leave manuscript/assets/ (#306)
 # ============================================================================
 
 def _seed_legacy_prompts(project_dir, ids, *, declare=True):
@@ -497,7 +497,7 @@ def test_step9_moves_bodies_and_rewrites_the_plan(project_dir):
     from storyforge import cmd_migrate, illustrations as ill
     _seed_legacy_prompts(project_dir, ['LF-01', 'LF-02'])
 
-    result = cmd_migrate.step9_move_illustration_prompts(project_dir, False)
+    result = cmd_migrate.step10_move_illustration_prompts(project_dir, False)
 
     assert result.startswith('done:')
     for illus_id in ('LF-01', 'LF-02'):
@@ -515,17 +515,17 @@ def test_step9_moves_bodies_and_rewrites_the_plan(project_dir):
 def test_step9_is_idempotent(project_dir):
     from storyforge import cmd_migrate, illustrations as ill
     _seed_legacy_prompts(project_dir, ['LF-01'])
-    cmd_migrate.step9_move_illustration_prompts(project_dir, False)
+    cmd_migrate.step10_move_illustration_prompts(project_dir, False)
     before = ill.read_plan(project_dir)
 
-    assert cmd_migrate.step9_move_illustration_prompts(
+    assert cmd_migrate.step10_move_illustration_prompts(
         project_dir, False).startswith('skip:')
     assert ill.read_plan(project_dir) == before
 
 
 def test_step9_is_a_noop_without_a_legacy_directory(project_dir):
     from storyforge import cmd_migrate
-    assert cmd_migrate.step9_move_illustration_prompts(
+    assert cmd_migrate.step10_move_illustration_prompts(
         project_dir, False) == 'skip:no legacy prompts directory'
 
 
@@ -533,7 +533,7 @@ def test_step9_dry_run_moves_nothing(project_dir):
     from storyforge import cmd_migrate, illustrations as ill
     _seed_legacy_prompts(project_dir, ['LF-01'])
 
-    result = cmd_migrate.step9_move_illustration_prompts(project_dir, True)
+    result = cmd_migrate.step10_move_illustration_prompts(project_dir, True)
 
     assert result.startswith('dry-run:')
     assert os.path.isfile(os.path.join(project_dir, ill.LEGACY_PROMPTS_SUBDIR,
@@ -552,7 +552,7 @@ def test_step9_leaves_a_collision_in_place_rather_than_overwriting(project_dir):
     with open(os.path.join(target_dir, 'LF-01.md'), 'w', encoding='utf-8') as f:
         f.write('the newer body')
 
-    result = cmd_migrate.step9_move_illustration_prompts(project_dir, False)
+    result = cmd_migrate.step10_move_illustration_prompts(project_dir, False)
 
     assert 'left in place' in result
     with open(os.path.join(target_dir, 'LF-01.md'), encoding='utf-8') as f:
@@ -568,7 +568,7 @@ def test_step9_leaves_an_unrelated_prompt_file_cell_alone(project_dir):
     rows[0]['prompt_file'] = 'reference/hand-written/LF-01.md'
     ill.write_plan(project_dir, rows)
 
-    cmd_migrate.step9_move_illustration_prompts(project_dir, False)
+    cmd_migrate.step10_move_illustration_prompts(project_dir, False)
 
     assert ill.read_plan(project_dir)[0]['prompt_file'] == \
         'reference/hand-written/LF-01.md'

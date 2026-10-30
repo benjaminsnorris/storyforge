@@ -1,27 +1,34 @@
 """storyforge migrate — Upgrade existing projects to the current schema.
 
-One-time migration that runs nine steps. Steps 1-5 normalize the
-registry model; steps 6-8 carry projects forward to the elaboration-v1
-three-tier structure (#229); step 9 moves the illustration prompt bodies
+One-time migration that runs ten steps. Steps 1-6 normalize the
+registry model; steps 7-9 carry projects forward to the elaboration-v1
+three-tier structure (#229); step 10 moves the illustration prompt bodies
 out of manuscript/assets/ (#306):
 
   1. Renames scene_type -> action_sequel in scene-intent.csv
   2. Removes the threads column from scene-intent.csv
-  3. Seeds new registry files (values.csv, knowledge.csv, mice-threads.csv)
-  4. Normalizes all registry-backed fields to canonical IDs
-  5. Runs schema validation to show remaining issues
-  6. Creates reference/story-summary.md (Logline / Synopsis / Act-shape /
+  3. Seeds new registry files (values.csv, mice-threads.csv)
+  4. Moves knowledge.csv and physical-states.csv into the commitments
+     ledger, reference/commitments.csv (`ledger.migrate_files`): writes the
+     ledger, checks the old files come back out of it unchanged except for
+     the reported quirks, then deletes them. Before step 1 a dry run of it
+     stops the whole migration, changing nothing, on a migration error, a
+     round trip that doesn't hold, or a ledger that already exists beside
+     the old files.
+  5. Normalizes all registry-backed fields to canonical IDs
+  6. Runs schema validation to show remaining issues
+  7. Creates reference/story-summary.md (Logline / Synopsis / Act-shape /
      Theme), seeding the Logline from storyforge.yaml:project.logline
-  7. Extracts status=spine rows from scenes.csv into reference/spine.csv
+  8. Extracts status=spine rows from scenes.csv into reference/spine.csv
      (also drops matching scene-intent.csv rows and orphan scene-briefs.csv
      rows). Idempotent — picks up stranded rows added between runs.
-  8. Extracts status=architecture rows from scenes.csv into
-     reference/architecture.csv (same shape as step 7).
-  9. Moves manuscript/assets/illustrations/prompts/*.md to
+  9. Extracts status=architecture rows from scenes.csv into
+     reference/architecture.csv (same shape as step 8).
+  10. Moves manuscript/assets/illustrations/prompts/*.md to
      reference/illustration-prompts/ and rewrites the plan's prompt_file
      column, so the illustrations directory holds only illustrations.
 
-Steps 7 and 8 use multi-file atomic writes so a mid-write failure
+Steps 8 and 9 use multi-file atomic writes so a mid-write failure
 doesn't leave the project in a half-migrated state.
 
 Every step is idempotent — safe to run multiple times.
@@ -146,20 +153,15 @@ def step2_remove_threads(ref_dir: str, dry_run: bool) -> str:
 # ============================================================================
 
 def step3_seed_registries(ref_dir: str, dry_run: bool) -> list[str]:
-    """Seed values.csv, mice-threads.csv, knowledge.csv from scene data.
-    Returns list of 'registry:action:detail' strings."""
-    results = []
+    """Seed values.csv and mice-threads.csv from scene data.
+    Returns list of 'registry:action:detail' strings.
 
-    # --- values.csv ---
-    results.append(_seed_values(ref_dir, dry_run))
-
-    # --- mice-threads.csv ---
-    results.append(_seed_mice_threads(ref_dir, dry_run))
-
-    # --- knowledge.csv ---
-    results.append(_seed_knowledge(ref_dir, dry_run))
-
-    return results
+    Knowledge is not seeded: it lives in the ledger now (step 4), and a fact
+    slugged from a brief's wording would carry no scene, which is what lets
+    extraction offer a scene a fact the book reveals later (F-123). `hone
+    --domain registries` builds facts from unresolved references instead.
+    """
+    return [_seed_values(ref_dir, dry_run), _seed_mice_threads(ref_dir, dry_run)]
 
 
 def _seed_values(ref_dir: str, dry_run: bool) -> str:
@@ -221,42 +223,47 @@ def _seed_mice_threads(ref_dir: str, dry_run: bool) -> str:
     return f'mice-threads.csv:done:{len(threads)}'
 
 
-def _seed_knowledge(ref_dir: str, dry_run: bool) -> str:
-    knowledge_path = os.path.join(ref_dir, 'knowledge.csv')
-    if os.path.isfile(knowledge_path):
-        with open(knowledge_path) as f:
-            existing = [l.strip() for l in f if l.strip()]
-        if len(existing) > 1:
-            return f'knowledge.csv:skip:already exists ({len(existing)-1} entries)'
+# ============================================================================
+# Step 4: Move knowledge.csv and physical-states.csv into the ledger
+# ============================================================================
 
-    _, briefs_rows = _read_csv(os.path.join(ref_dir, 'scene-briefs.csv'))
-    facts = set()
-    for r in briefs_rows:
-        for field in ('knowledge_in', 'knowledge_out'):
-            v = r.get(field, '').strip()
-            if v:
-                for fact in v.split(';'):
-                    fact = fact.strip()
-                    if fact:
-                        facts.add(fact)
+def step4_move_to_ledger(ref_dir: str, dry_run: bool):
+    """`ledger.migrate_files`; the caller has already stopped on its
+    blockers (`ledger.migration_blockers`)."""
+    from storyforge import ledger
+    return ledger.migrate_files(ref_dir, dry_run=dry_run)
 
-    if facts and not dry_run:
-        rows = []
-        for fact in sorted(facts):
-            sid = _slugify(fact)
-            if not sid:
-                continue
-            rows.append(f'{sid}|{fact}|')
-        _write_registry(knowledge_path, 'id|name|aliases', rows)
 
-    return f'knowledge.csv:done:{len(facts)}'
+def _log_ledger_step(result) -> None:
+    from collections import Counter
+    from storyforge import ledger
+    label = f'  [4/10] Move registries into {ledger.LEDGER_FILE}'
+    if result.status == 'skip':
+        log(f'{label}: skipped (no knowledge.csv or physical-states.csv)')
+        return
+    if result.status == 'stopped':
+        log(f'{label}: STOPPED, nothing changed:')
+        for problem in result.problems:
+            log(f'         {problem}')
+        return
+    types = Counter(r['type'] for r in result.rows)
+    counts = ', '.join(f'{n} {t}' for t, n in sorted(types.items())) or 'no rows'
+    verb = 'would remove' if result.status == 'dry-run' else 'removed'
+    log(f'{label}: {"dry run" if result.status == "dry-run" else "done"} '
+        f'({counts}; {verb} {", ".join(result.removed)})')
+    if result.quirks:
+        kinds = Counter(q.kind for q in result.quirks)
+        log(f'         {len(result.quirks)} change(s) to review: '
+            + ', '.join(f'{k} {n}' for k, n in sorted(kinds.items())))
+        for quirk in result.quirks:
+            log(f'           {quirk}')
 
 
 # ============================================================================
-# Step 4: Normalize all fields
+# Step 5: Normalize all fields
 # ============================================================================
 
-def step4_normalize(ref_dir: str, project_dir: str) -> int:
+def step5_normalize(ref_dir: str, project_dir: str) -> int:
     """Normalize registry-backed fields. Returns count of updated cells."""
     from storyforge.elaborate import _read_csv as elab_read_csv, _write_csv, _FILE_MAP
     from storyforge.enrich import load_registry_alias_maps, normalize_fields
@@ -288,10 +295,10 @@ def step4_normalize(ref_dir: str, project_dir: str) -> int:
 
 
 # ============================================================================
-# Step 5: Validate
+# Step 6: Validate
 # ============================================================================
 
-def step5_validate(ref_dir: str, project_dir: str) -> str:
+def step6_validate(ref_dir: str, project_dir: str) -> str:
     """Run schema validation. Returns formatted result string."""
     from storyforge.schema import validate_schema
 
@@ -325,12 +332,14 @@ def step5_validate(ref_dir: str, project_dir: str) -> str:
                 elif e['constraint'] == 'scene_ids':
                     unresolved = ', '.join(e.get('unresolved', []))
                     lines.append(f'    {e["row"]} | {e["column"]}: "{unresolved}" — not in scenes.csv')
+                elif e['constraint'] == 'ledger':
+                    lines.append(f'    {e["reason"]}')
 
     return '\n'.join(lines)
 
 
 # ============================================================================
-# Step 6: bootstrap reference/story-summary.md from project.logline
+# Step 7: bootstrap reference/story-summary.md from project.logline
 # ============================================================================
 
 # Re-rendering the template via Python rather than file-copying keeps the
@@ -384,7 +393,7 @@ theme_updated:
 """
 
 
-def step6_create_story_summary(project_dir: str, dry_run: bool) -> str:
+def step7_create_story_summary(project_dir: str, dry_run: bool) -> str:
     """Create reference/story-summary.md if absent.
 
     Seeds the Logline section from `storyforge.yaml:project.logline` when
@@ -417,7 +426,7 @@ def step6_create_story_summary(project_dir: str, dry_run: bool) -> str:
 
 
 # ============================================================================
-# Step 7: extract status=spine rows from scenes.csv into spine.csv
+# Step 8: extract status=spine rows from scenes.csv into spine.csv
 # ============================================================================
 
 # Column lists are the single source of truth in elaborate._FILE_MAP.
@@ -430,7 +439,7 @@ from storyforge.elaborate import _SPINE_COLS, _ARCHITECTURE_COLS
 _LEGACY_ACT_RENAME = {'part': 'act'}
 
 
-def step7_extract_spine(ref_dir: str, dry_run: bool) -> str:
+def step8_extract_spine(ref_dir: str, dry_run: bool) -> str:
     """Move status=spine rows from scenes.csv into reference/spine.csv.
 
     For each moved row, the matching scene-intent.csv row is also removed
@@ -538,15 +547,15 @@ def step7_extract_spine(ref_dir: str, dry_run: bool) -> str:
 
 
 # ============================================================================
-# Step 8: extract status=architecture rows from scenes.csv into architecture.csv
+# Step 9: extract status=architecture rows from scenes.csv into architecture.csv
 # ============================================================================
 
-def step8_extract_architecture(ref_dir: str, dry_run: bool) -> str:
+def step9_extract_architecture(ref_dir: str, dry_run: bool) -> str:
     """Move status=architecture rows from scenes.csv (+ matching scene-intent
     columns) into reference/architecture.csv. `spine_event` is left empty —
     the author wires it up after migration.
 
-    Side effects + idempotency + atomicity: same shape as step 7. Reads
+    Side effects + idempotency + atomicity: same shape as step 8. Reads
     scenes.csv, scene-intent.csv, scene-briefs.csv; writes architecture.csv
     and rewrites the manuscript-tier files atomically.
     """
@@ -762,7 +771,7 @@ def _rewrite_csv(path: str, header: list[str], rows: list[dict]) -> None:
     Cells default to '' when a row is missing a header column. Preserves
     header order even when rows have a different shape.
 
-    Kept for backward compatibility with earlier callers; new step 7/8
+    Kept for backward compatibility with earlier callers; new step 8/9
     code paths go through _format_csv_lines + _atomic_multi_write for
     multi-file atomicity.
     """
@@ -792,7 +801,7 @@ def parse_args(argv):
 # Main
 # ============================================================================
 
-def step9_move_illustration_prompts(project_dir: str, dry_run: bool) -> str:
+def step10_move_illustration_prompts(project_dir: str, dry_run: bool) -> str:
     """Move illustration prompt bodies to `reference/illustration-prompts/`.
 
     `manuscript/assets/illustrations/` holds illustrations; the prompt bodies
@@ -878,6 +887,18 @@ def main(argv=None):
         print(f'Error: No scenes.csv found in {ref_dir}.')
         sys.exit(1)
 
+    # Step 4 stops the whole migration, before anything changes, when the
+    # registries can't move into the ledger as they are
+    from storyforge import ledger
+    _, blockers = ledger.migration_blockers(ref_dir)
+    if blockers:
+        log(f'Error: knowledge.csv and physical-states.csv can\'t move into '
+            f'{ledger.LEDGER_FILE} as they are, so nothing was changed:')
+        for problem in blockers:
+            log(f'  {problem}')
+        log('Fix these in the old files and run storyforge migrate again.')
+        sys.exit(1)
+
     if not args.dry_run and not args.no_commit:
         ensure_on_branch('migrate', project_dir)
 
@@ -887,21 +908,21 @@ def main(argv=None):
     # Step 1: Rename scene_type -> action_sequel
     result = step1_rename_scene_type(ref_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [1/9] Rename scene_type -> action_sequel: skipped ({result[5:]})')
+        log(f'  [1/10] Rename scene_type -> action_sequel: skipped ({result[5:]})')
     else:
         count = result.split(':')[1]
-        log(f'  [1/9] Rename scene_type -> action_sequel: done ({count} rows)')
+        log(f'  [1/10] Rename scene_type -> action_sequel: done ({count} rows)')
 
     # Step 2: Remove threads column
     result = step2_remove_threads(ref_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [2/9] Remove threads column: skipped ({result[5:]})')
+        log(f'  [2/10] Remove threads column: skipped ({result[5:]})')
     else:
         count = result.split(':')[1]
-        log(f'  [2/9] Remove threads column: done ({count} rows)')
+        log(f'  [2/10] Remove threads column: done ({count} rows)')
 
     # Step 3: Seed registries
-    log('  [3/9] Seed registries:')
+    log('  [3/10] Seed registries:')
     registry_results = step3_seed_registries(ref_dir, args.dry_run)
     for line in registry_results:
         registry = line.split(':')[0]
@@ -912,48 +933,61 @@ def main(argv=None):
         else:
             log(f'    {registry}: created ({detail} entries)')
 
-    # Step 4: Normalize fields
+    # Step 4: Move knowledge.csv and physical-states.csv into the ledger.
+    # Before steps 5 and 6, which read the registries from it.
+    ledger_result = step4_move_to_ledger(ref_dir, args.dry_run)
+    _log_ledger_step(ledger_result)
+    if ledger_result.status == 'stopped':
+        # The preflight passed, so only the written file's round trip can
+        # stop it here; the ledger was removed and the old files kept
+        sys.exit(1)
+
+    # Step 5: Normalize fields
     if args.dry_run:
-        log('  [4/9] Normalize fields: skipped (dry run)')
+        log('  [5/10] Normalize fields: skipped (dry run)')
     else:
-        updated = step4_normalize(ref_dir, project_dir)
-        log(f'  [4/9] Normalize fields: {updated} cells updated')
+        updated = step5_normalize(ref_dir, project_dir)
+        log(f'  [5/10] Normalize fields: {updated} cells updated')
 
-    # Step 5: Validate
-    validate_output = step5_validate(ref_dir, project_dir)
-    first_line = validate_output.split('\n')[0]
-    log(f'  [5/9] Schema validation: {first_line}')
-    rest_lines = validate_output.split('\n')[1:]
-    for line in rest_lines:
-        log(f'         {line}')
+    # Step 6: Validate
+    if ledger_result.status == 'dry-run':
+        log('  [6/10] Schema validation: skipped (dry run: the knowledge facts '
+            'and physical states are still in the old files)')
+    else:
+        validate_output = step6_validate(ref_dir, project_dir)
+        first_line = validate_output.split('\n')[0]
+        log(f'  [6/10] Schema validation: {first_line}')
+        rest_lines = validate_output.split('\n')[1:]
+        for line in rest_lines:
+            log(f'         {line}')
 
-    # Step 6: Bootstrap story-summary.md (elaboration v1)
-    result = step6_create_story_summary(project_dir, args.dry_run)
+    # Step 7: Bootstrap story-summary.md (elaboration v1)
+    result = step7_create_story_summary(project_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [6/9] Create story-summary.md: skipped ({result[5:]})')
+        log(f'  [7/10] Create story-summary.md: skipped ({result[5:]})')
     else:
-        log(f'  [6/9] Create story-summary.md: {result.split(":")[1]}')
+        log(f'  [7/10] Create story-summary.md: {result.split(":")[1]}')
 
-    # Step 7: Extract spine.csv from status=spine rows
-    result = step7_extract_spine(ref_dir, args.dry_run)
+    # Step 8: Extract spine.csv from status=spine rows
+    result = step8_extract_spine(ref_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [7/9] Extract spine.csv: skipped ({result[5:]})')
+        log(f'  [8/10] Extract spine.csv: skipped ({result[5:]})')
     else:
-        log(f'  [7/9] Extract spine.csv: {result.split(":")[1]}')
+        log(f'  [8/10] Extract spine.csv: {result.split(":")[1]}')
 
-    # Step 8: Extract architecture.csv from status=architecture rows
-    result = step8_extract_architecture(ref_dir, args.dry_run)
+    # Step 9: Extract architecture.csv from status=architecture rows
+    result = step9_extract_architecture(ref_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [8/9] Extract architecture.csv: skipped ({result[5:]})')
+        log(f'  [9/10] Extract architecture.csv: skipped ({result[5:]})')
     else:
-        log(f'  [8/9] Extract architecture.csv: {result.split(":")[1]}')
+        log(f'  [9/10] Extract architecture.csv: {result.split(":")[1]}')
 
-    # Step 9: Move illustration prompt bodies out of manuscript/assets/
-    result = step9_move_illustration_prompts(project_dir, args.dry_run)
+    # Step 10: Move illustration prompt bodies out of manuscript/assets/
+    result = step10_move_illustration_prompts(project_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [9/9] Move illustration prompts: skipped ({result[5:]})')
+        log(f'  [10/10] Move illustration prompts: skipped ({result[5:]})')
     else:
-        log(f'  [9/9] Move illustration prompts: {result.split(":")[1]}')
+        log(f'  [10/10] Move illustration prompts: {result.split(":")[1]}')
 
     # Commit
     if args.dry_run:
@@ -966,7 +1000,7 @@ def main(argv=None):
         committed = commit_and_push(
             project_dir,
             'Migrate: upgrade to normalized registry model',
-            # Narrowed to the one directory step 9 touches. `commit_and_push`
+            # Narrowed to the one directory step 10 touches. `commit_and_push`
             # does `git add <path>` per path, and this block is unconditional —
             # so a bare `manuscript/` swept the rendered PNGs, the assembled
             # epub and PDF, the regenerated packet, and the superseded
