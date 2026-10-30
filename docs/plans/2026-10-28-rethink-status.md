@@ -29,7 +29,7 @@ Last updated 2026-10-30 (late), at v1.98.0. **Phase 3 is next and nothing is in 
 | — E4, E6 | done | #361, #363, #397, #399 |
 | 5 Phase 1 | done | #359–#405 |
 | 6 Phase 2 | done | #401, #416, #417, #420–#424, #430, #432 |
-| 7 Phase 3 | next | — |
+| 7 Phase 3 | in progress: step 1 (design) done | #436 |
 
 ## Next steps, in order (handoff for a new session)
 
@@ -63,7 +63,7 @@ Last updated 2026-10-30 (late), at v1.98.0. **Phase 3 is next and nothing is in 
 **1. Phase 3: the gate and sequential loop** (plan §3.2–3.3, §5 Phase 3, decisions 2 and 4; chunk 7). Success: **E4 CP10k and BPS halve** against the last pre-gate numbers at the 5e9bdf39 pin (v1.98.0 baseline: CP10k 14.2, BPS 0.26 = 6 broken promises in 23 scenes; so ≤ 7.1 and ≤ 3 promises), and **E2 precision ≥ 0.8** (today 0 / 0.40 / 0.03 for Carol / drift / validate). Then parallel waves vs sequential on E4; keep parallel only if equal.
 
 Suggested order, one PR each (each with a reviewer, evals re-recorded without asking):
-1. **Settle the merge of registry facts and commitments** (a short design note first; it decides what the gate checks against). Today briefs name registry ids (`knowledge_in/out`, `physical_state_in/out`) and phase 4 writes commitments beside them; F-128 only stops restating. Options: commitments become the source and registry rows a view over them; or the gate writes both. Decide with Ben if it changes author data.
+1. **Done: the merge of registry facts and commitments** (`docs/plans/2026-10-30-gate-ledger-design.md`; Ben decided 2026-10-30). Two roles in one ledger: registry rows are the plan's vocabulary (what briefs name), commitments are what the prose said. The gate checks prose against every binding fact in force (both kinds) and the brief's promises (an unestablished `knowledge_out` / `physical_state_out` is a broken promise), halts on a contradiction with a registry fact, writes only commitments (`introduced_by` = the drafting command, so `ledger.is_commitment` replaces the `== COMMITMENTS_PASS` tests), and fills a confirmed registry fact's blank `quote`.
 2. **The gate as a library** (`storyforge/gate.py`): for one scene, extract (phase 4's prompt per scene, with `_phase4_known`), `audit.halting_conditions` on the proposal, check, then commit the facts through `ledger.save(…, command=)`. **Check** is the new part: a tool-using model call (tools: search the manuscript, query the ledger by subject/scene/type) that returns contradictions with binding facts and broken brief promises, by code. Fail loud: any step that fails halts (no warn-and-continue). Add the plan-contradiction halt that `halting_conditions` can't see. Measure the checker on **E2** (Carol's 37 injected errors, the drift and validate cases) before wiring it in: that is where E2 precision ≥ 0.8 is earned.
 3. **Fix**: targeted edits for each flagged contradiction or broken promise, re-check once; advisor mode reports instead of editing (`--advisor` or coaching level; decide).
 4. **Wire it into `write`** (`_run_direct_mode`, `_verify_and_commit_scene`): sequential drafting is the default; each scene drafted from its brief, the ledger slice (already in the prompt since v1.97.0) and prior prose per decision 4 (the preceding scene in full and the latest scene of each active thread), then gated, then committed. Batch mode can't gate between scenes; decide whether it stays (plan: delete the open-loop wave scheduler if evals say so). Then revise's redraft-from-brief.
