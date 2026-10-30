@@ -598,3 +598,59 @@ class TestForcedChainClearsStaleFields:
                              True, ('physical_state_in', 'physical_state_out'))
         assert self._brief(project_dir, 'physical_state_out') == 'cut-hand'
         assert self._brief(project_dir, 'physical_state_in') == ''
+
+
+class TestForcedPhase3PrunesRegistries:
+    """F-083 (Ben's decision, option 3): a forced phase 3 seeds the registries
+    from the last run, so old entries piled up and stayed active. Afterwards
+    keep what a brief uses or the pass declared; drop the rest."""
+
+    def _ids(self, project_dir, name):
+        from storyforge.elaborate import _read_csv_as_map
+        return set(_read_csv_as_map(os.path.join(project_dir, 'reference', name)))
+
+    def _add_rows(self, project_dir, name, rows):
+        with open(os.path.join(project_dir, 'reference', name), 'a') as f:
+            f.writelines(r + '\n' for r in rows)
+
+    def test_drops_only_entries_nothing_uses(self, project_dir):
+        from storyforge.cmd_extract import _prune_registries
+        self._add_rows(project_dir, 'knowledge.csv',
+                       ['stale-fact|An old fact|||act1-sc01', 'fresh-fact|New this pass|||act2-sc01'])
+        self._add_rows(project_dir, 'physical-states.csv',
+                       ['broken-nose-old|Tessa Merrin|old|injury|act1-sc01|never|true'])
+        before_k = self._ids(project_dir, 'knowledge.csv')
+        before_p = self._ids(project_dir, 'physical-states.csv')
+
+        _prune_registries(os.path.join(project_dir, 'reference'),
+                          created_facts={'fresh-fact'}, created_states=set())
+
+        knowledge = self._ids(project_dir, 'knowledge.csv')
+        states = self._ids(project_dir, 'physical-states.csv')
+        assert 'stale-fact' not in knowledge
+        assert 'fresh-fact' in knowledge            # declared this pass
+        assert {'map-anomaly-exists', 'village-vanished'} <= knowledge   # in briefs
+        assert 'broken-nose-old' not in states
+        assert 'archive-key-dorren' in states       # in briefs
+        # The fixture's own unused state goes too; every dropped id is unused
+        assert 'sprained-ankle-tessa' not in states
+        assert before_k - knowledge == {'stale-fact', 'subsidence-not-natural'}
+        assert before_p - states == {'broken-nose-old', 'sprained-ankle-tessa',
+                                     'scar-left-hand-kael'}
+
+    def test_keeps_columns_and_rows_of_kept_entries(self, project_dir):
+        from storyforge.cmd_extract import _prune_registries
+        path = os.path.join(project_dir, 'reference', 'physical-states.csv')
+        with open(path) as f:
+            header = f.readline()
+        _prune_registries(os.path.join(project_dir, 'reference'), set(), set())
+        with open(path) as f:
+            assert f.readline() == header
+            assert any(l.startswith('archive-key-dorren|Dorren Hayle|holds the restricted')
+                       for l in f)
+
+    def test_unforced_run_does_not_prune(self):
+        import inspect
+        from storyforge import cmd_extract
+        src = inspect.getsource(cmd_extract._run_phase_3)
+        assert 'if force:\n        _prune_registries(' in src

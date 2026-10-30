@@ -652,6 +652,40 @@ def _record_physical_states(phys_csv, scene_id, new_states, resolved, character_
     _write_csv(phys_csv, list(existing_phys.values()), columns)
 
 
+def _prune_registries(ref_dir, created_facts, created_states):
+    """After a forced phase 3, drop registry entries nothing uses (F-083).
+
+    A forced re-extraction seeds knowledge.csv and physical-states.csv from
+    the last run, so old entries piled up beside the new ones: under two
+    names, and still active by their old acquired/resolves scenes, which
+    validate then flagged. Keep an entry a brief references or this pass
+    declared; drop the rest and log their ids. Hand edits on an entry still
+    in use survive, and a scene this run didn't touch keeps what it uses.
+    """
+    from storyforge.elaborate import _read_csv_as_map, _write_csv
+
+    briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    for name, fields, created in (
+            ('knowledge.csv', ('knowledge_in', 'knowledge_out'), created_facts),
+            ('physical-states.csv', ('physical_state_in', 'physical_state_out'),
+             created_states)):
+        path = os.path.join(ref_dir, name)
+        if not os.path.isfile(path):
+            continue
+        used = {i.strip() for row in briefs.values() for f in fields
+                for i in (row.get(f) or '').split(';') if i.strip()}
+        registry = _read_csv_as_map(path)
+        keep = {k: r for k, r in registry.items() if k in used or k in created}
+        dropped = sorted(set(registry) - set(keep))
+        if not dropped:
+            continue
+        with open(path) as f:
+            columns = f.readline().strip().split('|')
+        _write_csv(path, list(keep.values()), columns)
+        log(f'  {name}: dropped {len(dropped)} entries no brief uses '
+            f'(left from the previous extraction): {", ".join(dropped)}')
+
+
 def _update_chain_fields(scene_id, ref_dir, result, force, keys):
     """Write a 3b/3c chain reply's fields to the scene's brief.
 
@@ -762,6 +796,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                           if fid}
     knowledge_registries = format_registries_for_prompt(
         project_dir, exclude=('knowledge.csv',))
+    created_facts = set()   # knowledge ids this pass declared
 
     for scene_id in sorted_scene_ids:
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
@@ -800,8 +835,10 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                         ['reference/scene-briefs.csv', 'reference/knowledge.csv', 'working/'])
 
         # Register the scene's new facts, then resolve both fields to ids
-        if merge_new_knowledge_facts(knowledge_registry,
-                                     result.get('_new_facts', []), scene_id):
+        added = merge_new_knowledge_facts(knowledge_registry,
+                                          result.get('_new_facts', []), scene_id)
+        created_facts.update(added)
+        if added:
             _write_csv(knowledge_csv, list(knowledge_registry.values()),
                        KNOWLEDGE_COLUMNS)
         for k in ('knowledge_in', 'knowledge_out'):
@@ -835,6 +872,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     phys_model = select_model('evaluation')
     phys_states = {}  # dict[str, set[str]]: character -> active state IDs
+    created_states = set()   # state ids this pass declared
     phys_summaries = []
 
     for scene_id in sorted_scene_ids:
@@ -883,6 +921,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         # Accumulate state
         for ns in new_states:
             sid_key = ns.get('id', '').strip()
+            created_states.add(sid_key)
             char = ns.get('character', '').strip()
             if sid_key and char:
                 phys_states.setdefault(char, set())
@@ -904,10 +943,13 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
         log(f'  {scene_id}: physical states extracted')
 
+    if force:
+        _prune_registries(ref_dir, created_facts, created_states)
+
     commit_and_push(project_dir,
                     'Extract: Phase 3c — physical state chain',
                     ['reference/scene-briefs.csv', 'reference/physical-states.csv',
-                     'working/'])
+                     'reference/knowledge.csv', 'working/'])
 
 
 # ============================================================================
