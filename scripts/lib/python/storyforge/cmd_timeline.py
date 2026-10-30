@@ -46,7 +46,7 @@ from storyforge.api import (
     submit_batch, poll_batch, download_batch_results, build_batch_request,
 )
 from storyforge.timeline import (
-    CUES_FILE, CHECK_CUES_FILE, cue_prompts, extract_cues, parse_cues, write_cues, read_cues,
+    CUES_FILE, CHECK_CUES_FILE, cue_prompts, extract_cues, has_cues, parse_cues, write_cues, read_cues,
     run_assignment, check_timeline, report_findings, reading_order,
 )
 
@@ -228,6 +228,9 @@ def main(argv=None):
         stale_cues = [sid for sid in scene_ids if sid not in fresh]
 
     if args.phase1_only:
+        if stale_cues:
+            log(f'WARNING: no fresh cues for {len(stale_cues)} scene(s); they keep their '
+                f'earlier cues, if any: {", ".join(stale_cues)}')
         log(f'Cues stored in {CUES_FILE}. Review or edit them, then run:')
         log('  storyforge timeline --skip-phase1')
         sys.exit(0)
@@ -298,9 +301,12 @@ def _extract_cues_batch(project_dir, scene_ids, model, log_dir):
     cues = {}
     for sid in prompts:
         txt = os.path.join(log_dir, f'{sid}.txt')
+        text = ''
         if sid in succeeded and os.path.isfile(txt):
             with open(txt) as f:
-                cues[sid] = parse_cues(f.read())
+                text = f.read()
+        if has_cues(text):
+            cues[sid] = parse_cues(text)
         else:
             log(f'  WARNING: no cue result for {sid}')
     write_cues(project_dir, cues)

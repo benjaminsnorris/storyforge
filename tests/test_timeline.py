@@ -1124,3 +1124,42 @@ class TestVisions:
         _scenes(project_dir, [('a', '1', 'scene'), ('future', '400', 'vision'), ('b', '2', 'scene')])
         opps = analyze_expansion_opportunities(os.path.join(project_dir, 'reference'))
         assert [o for o in opps if o['type'] == 'timeline_gap'] == []
+
+
+
+def test_a_cut_off_cue_reply_is_a_failure_not_cues(project_dir, tmp_path, monkeypatch, capsys):
+    """A direct cue reply cut off at max_tokens may lack the relation or
+    anchor; it was parsed and stored as the scene's cues."""
+    import storyforge.api as api
+    from storyforge import timeline
+
+    def cut_off(prompt, model, log_file, max_tokens=4096, label='', **kw):
+        return {'content': [{'type': 'text', 'text': 'TIME_RELATION: continues'}],
+                'usage': {'input_tokens': 1, 'output_tokens': 1}, 'stop_reason': 'max_tokens'}
+    monkeypatch.setattr(api, 'invoke_to_file', cut_off)
+
+    cues = timeline.extract_cues(project_dir, ['act1-sc01'], 'm', str(tmp_path), store=False)
+
+    assert cues == {}
+    assert 'time cues failed for act1-sc01: the reply was cut off at max_tokens' \
+        in capsys.readouterr().out
+
+
+
+def test_a_failed_cue_read_keeps_the_stored_cues(project_dir, tmp_path, monkeypatch, capsys):
+    """store=True: a cut-off or label-less reply is a failed read, so the
+    scene's stored cues stay as they were (named, not overwritten)."""
+    import storyforge.api as api
+    from storyforge import timeline
+    timeline.write_cues(project_dir, {'act1-sc01': {**timeline.parse_cues(
+        'TIME_RELATION: later\nTIME_GAP: next morning'), 'id': 'act1-sc01'}})
+
+    def reply(prompt, model, log_file, max_tokens=4096, label='', **kw):
+        return {'content': [{'type': 'text', 'text': 'The scene happens later.'}],
+                'usage': {'input_tokens': 1, 'output_tokens': 1}, 'stop_reason': 'end_turn'}
+    monkeypatch.setattr(api, 'invoke_to_file', reply)
+
+    assert timeline.extract_cues(project_dir, ['act1-sc01'], 'm', str(tmp_path)) == {}
+    assert timeline.read_cues(project_dir)['act1-sc01']['gap'] == 'next morning'
+    assert 'time cues failed for act1-sc01: the reply has no TIME_RELATION line' \
+        in capsys.readouterr().out

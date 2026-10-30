@@ -454,6 +454,25 @@ class TestSplitChaptersMode:
         assert sorted(os.listdir(os.path.join(project_dir, 'scenes'))) == before
         assert 'ch01: model refused the request' in capsys.readouterr().out
 
+    def test_cut_off_direct_detection_leaves_the_chapter_unsplit(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """A cut-off reply names only some boundaries; splitting on it wrote
+        wrong scene files."""
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        mock_api.set_response_dict({'content': [{'type': 'text', 'text': 'BOUNDARY: 1'}],
+                                    'usage': {'input_tokens': 1, 'output_tokens': 1},
+                                    'stop_reason': 'max_tokens'})
+        self._make_chapter(project_dir, 'chapters', 'ch01.md', 'One. Two. Three.\n')
+        before = sorted(os.listdir(os.path.join(project_dir, 'scenes')))
+
+        with pytest.raises(SystemExit):
+            main(['--split-chapters', '--source', 'chapters', '--yes', '--direct'])
+
+        assert sorted(os.listdir(os.path.join(project_dir, 'scenes'))) == before
+        assert 'ch01: the reply was cut off at max_tokens' in capsys.readouterr().out
+
     def test_split_creates_metadata_entries(self, mock_api, mock_git,
                                             mock_costs, project_dir,
                                             monkeypatch):
