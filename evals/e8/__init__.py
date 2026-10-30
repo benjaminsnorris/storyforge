@@ -45,10 +45,16 @@ call. These families:
 - ``illustrate-prompts``: ``cmd_illustrate.run_prompts`` for the prompt file
   the case quotes; the judge reads the prompt files it wrote.
 
+A data pass that exits non-zero errors the suite (it did not do its job); a
+hone batch cut off at the token limit halts the case, as a cut-off does in
+the prose families. ``EXCLUDED_CASES`` lists cases whose error a replay
+cannot show, with why.
+
 A pre-pass project that predates
 ``reference/scenes.csv`` but has ``scene-metadata.csv`` is migrated in its
-materialized copy the way Storyforge migrated the books
-(``migrate_scene_metadata``); one that keeps its scenes in YAML is reported as
+materialized copy by a port of Storyforge's removed migrate script
+(``migrate_scene_metadata``, an approximation: the books themselves got
+``scenes.csv`` from ``extract``); one that keeps its scenes in YAML is reported as
 unreplayable. Scenes renamed after the introducing commit are found through
 E1's id-maps.
 
@@ -69,10 +75,20 @@ from dataclasses import dataclass, field
 import e1
 
 # families whose pass writes data, judged on what it wrote (see written())
-CSV_FAMILIES = ('brief-fix', 'hone-physical-states', 'illustrate-state', 'illustrate-prompts')
-FAMILIES = ('redraft-from-brief', 'naturalness-upstream', 'revision-plan', *CSV_FAMILIES)
+DATA_FAMILIES = ('brief-fix', 'hone-physical-states', 'illustrate-state', 'illustrate-prompts')
+FAMILIES = ('redraft-from-brief', 'naturalness-upstream', 'revision-plan', *DATA_FAMILIES)
 
 ID_MAPS_DIR = os.path.join(e1.FIXTURES_DIR, 'id-maps')
+
+# Cases whose error a replay of the introducing pass cannot show, with why.
+# Reported as unreplayable like every other exclusion.
+EXCLUDED_CASES = {
+    'lantern-folk-032': ('the --state pass logged the pre-pass prose faithfully ("Two relit. Two '
+                         'still dark."); the error is the log going stale after a later prose '
+                         'fix (37bc78e), which a replay of the pass cannot show'),
+    'thornwall-028': ('the introducing commit wrote both sides (the six years and the nine), so '
+                      'the pre-pass project has no established fact for the replay to contradict'),
+}
 
 # storyforge-migrate-elaborate's scenes.csv columns
 MIGRATED_SCENE_COLUMNS = ['id', 'seq', 'title', 'part', 'pov', 'location', 'timeline_day',
@@ -106,7 +122,7 @@ CSV_JUDGE_PROMPT = """You are checking what a novel-writing tool wrote into a bo
 The book had already established this, earlier or elsewhere:
 {established}
 
-A past run of the same tool wrote data that contradicted it. The error looked like this:
+A past run of the same tool wrote data that contradicted it. The error looked like this (quoted from that data, or from prose later drafted from it):
 {error}
 (Summary: {summary})
 
@@ -162,7 +178,7 @@ def select(cases: list[dict], holdout: list[str]) -> Selection:
             continue
         if case['id'] in held:
             sel.exclude('holdout', case['id'])
-        elif case.get('level') != 'prose' and family(case) not in CSV_FAMILIES:
+        elif case.get('level') != 'prose' and family(case) not in DATA_FAMILIES:
             sel.exclude('csv-level (no prose to redraft)', case['id'])
         elif not family(case):
             sel.exclude(f"pass not replayable yet: {case['introduced_by'].get('pass', '?')}",
@@ -253,9 +269,11 @@ def migrate_scene_metadata(project_dir: str) -> bool:
     ``reference/scenes.csv`` in the materialized copy (never the book repo).
 
     A port of the scenes.csv step of Storyforge's own ``storyforge-migrate-
-    elaborate`` (removed in e22a58c4), which is how these books were moved to
-    the three-file model: the same columns are copied, and a missing status is
-    backfilled the same way. ``scene-intent.csv`` is left as it is, and no
+    elaborate`` (removed in e22a58c4): the same columns are copied, and a
+    status other than drafted, revised, consolidated or polished is
+    recomputed the same way. It is an approximation of the books' history:
+    governor, shared-dark and thornwall got ``scenes.csv`` from ``extract``'s
+    skeleton phase after the script was removed. ``scene-intent.csv`` is left as it is, and no
     ``scene-briefs.csv`` is created: those projects had no briefs, so a pass
     that needs them is reported as unreplayable rather than run on empty ones.
     Returns False when there is no ``scene-metadata.csv`` to convert."""
@@ -286,7 +304,7 @@ def _quotes(spans: list[dict]) -> str:
 
 def judge_prompt(case: dict, scene_text: str) -> str:
     established = _quotes(case['established']) or case.get('established_by_absence', '')
-    if family(case) in CSV_FAMILIES:
+    if family(case) in DATA_FAMILIES:
         return CSV_JUDGE_PROMPT.format(established=established, error=_quotes(case['contradicted']),
                                        summary=case['summary'], written=scene_text)
     return JUDGE_PROMPT.format(established=established, error=_quotes(case['contradicted']),
@@ -425,41 +443,97 @@ def _read(path: str) -> str:
         return f.read()
 
 
-def _snapshot(project_dir: str, rel: str) -> dict[str, str]:
-    """{relative path: text} for a file, or for every file under a directory."""
-    root = os.path.join(project_dir, rel)
-    if os.path.isfile(root):
-        return {rel: _read(root)}
+def _snapshot(project_dir: str, *rels: str) -> dict[str, str]:
+    """{relative path: text} for each file, or every file under each directory."""
     found = {}
-    for dirpath, _dirs, files in os.walk(root):
-        for name in sorted(files):
-            path = os.path.join(dirpath, name)
-            found[os.path.relpath(path, project_dir)] = _read(path)
+    for rel in rels:
+        root = os.path.join(project_dir, rel)
+        if os.path.isfile(root):
+            found[rel] = _read(root)
+        for dirpath, _dirs, files in os.walk(root):
+            for name in sorted(files):
+                path = os.path.join(dirpath, name)
+                found[os.path.relpath(path, project_dir)] = _read(path)
     return found
 
 
+def _csv_rows(text: str) -> tuple[str, dict[str, dict[str, str]]] | None:
+    """(header line, {id: row}) for a pipe-delimited CSV keyed by a unique
+    first column; None when the text is not one (e.g. the visual-state log,
+    whose rows repeat an entity)."""
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines or '|' not in lines[0]:
+        return None
+    header = lines[0].split('|')
+    rows = {}
+    for line in lines[1:]:
+        row = dict(zip(header, line.split('|')))
+        if row[header[0]] in rows:
+            return None
+        rows[row[header[0]]] = row
+    return lines[0], rows
+
+
+def _same_row(a: dict[str, str], b: dict[str, str]) -> bool:
+    # a rewrite that only adds empty columns (cmd_revise writes briefs with
+    # every column of today's schema) leaves the row as it was
+    return all((a.get(k) or '') == (b.get(k) or '') for k in {*a, *b})
+
+
 def written(before: dict[str, str], after: dict[str, str]) -> str:
-    """What a pass wrote, for the judge: per changed file, its first line (a
-    CSV's header) and every line that is new, in file order. A new file is
-    given whole. '' when nothing changed."""
+    """What a pass wrote, for the judge. Per changed file: for a CSV keyed by
+    a unique id, its header and every row that is new or changed, by id, with
+    removed rows marked; for any other file, its first line (a CSV's header),
+    every new line, and every removed line marked ``(removed)``. A new file is
+    given whole, a deleted one named. '' when nothing changed."""
     parts = []
-    for path, text in sorted(after.items()):
-        old = before.get(path)
+    for path in sorted({*before, *after}):
+        old, text = before.get(path), after.get(path)
         if old == text:
             continue
-        lines = text.splitlines()
+        if text is None:
+            parts.append(f'{path} (deleted)')
+            continue
         if old is None:
             parts.append(f'{path} (new file):\n{text.rstrip()}')
             continue
-        kept = set(old.splitlines())
-        new = [line for line in lines[1:] if line not in kept]
-        if new:
-            parts.append(f'{path}:\n' + '\n'.join(lines[:1] + new))
+        old_csv, new_csv = _csv_rows(old), _csv_rows(text)
+        if old_csv and new_csv:
+            new_lines = text.splitlines()
+            changed = [line for line in new_lines[1:] if line.strip()
+                       and not _same_row(old_csv[1].get(line.split('|')[0], {}),
+                                         dict(zip(new_csv[0].split('|'), line.split('|'))))]
+            removed = [f'(removed) {line}' for line in old.splitlines()[1:]
+                       if line.strip() and line.split('|')[0] not in new_csv[1]]
+        else:
+            new_lines, kept, now = text.splitlines(), set(old.splitlines()), set(text.splitlines())
+            changed = [line for line in new_lines[1:] if line not in kept]
+            removed = [f'(removed) {line}' for line in old.splitlines()[1:] if line not in now]
+            if new_lines[:1] != old.splitlines()[:1]:
+                changed.insert(0, f'(first line was) {old.splitlines()[0] if old.strip() else ""}')
+        if changed or removed:
+            parts.append(f'{path}:\n' + '\n'.join(new_lines[:1] + changed + removed))
     return '\n\n'.join(parts)
 
 
+class _cassette_key:
+    """Under a cassette, give commands that check ``ANTHROPIC_API_KEY``
+    themselves (``illustrate``) a placeholder, as ``api`` needs none to
+    replay; without it a keyless replay would exit 1 and look like a halt."""
+
+    def __enter__(self):
+        self.added = bool(os.environ.get('STORYFORGE_CASSETTE')) and not os.environ.get('ANTHROPIC_API_KEY')
+        if self.added:
+            os.environ['ANTHROPIC_API_KEY'] = 'cassette-replay'
+
+    def __exit__(self, *exc):
+        if self.added:
+            del os.environ['ANTHROPIC_API_KEY']
+
+
 def brief_fix(project_dir: str, scene_id: str) -> str:
-    """Rewrite one scene's brief as the polish/naturalness upstream fix does."""
+    """Rewrite one scene's brief as the polish/naturalness upstream fix does;
+    return the brief rows that changed."""
     from storyforge.cmd_revise import _fix_upstream_briefs
     rel = os.path.join('reference', 'scene-briefs.csv')
     before = _snapshot(project_dir, rel)
@@ -471,34 +545,64 @@ def brief_fix(project_dir: str, scene_id: str) -> str:
 
 
 def hone_physical_states(project_dir: str) -> str:
-    """Reconcile the physical-states registry as ``storyforge hone`` does."""
+    """Reconcile the physical-states registry as ``storyforge hone`` does;
+    return what it wrote to the registry and to the briefs' state columns."""
+    from storyforge import hone
     from storyforge.common import select_model
-    from storyforge.hone import reconcile_domain
     ref_dir = os.path.join(project_dir, 'reference')
-    rel = os.path.join('reference', 'physical-states.csv')
-    before = _snapshot(project_dir, rel)
+    rels = (os.path.join('reference', 'physical-states.csv'),
+            os.path.join('reference', 'scene-briefs.csv'))
+    before = _snapshot(project_dir, *rels)
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)
-    reconcile_domain('physical-states', ref_dir, select_model('synthesis'), log_dir)
-    return written(before, _snapshot(project_dir, rel))
+    cut_off = []
+    invoke_batch = hone._invoke_batch
+
+    def counting(prompt, model, log_file, label):
+        text = invoke_batch(prompt, model, log_file, label)
+        if text is None:
+            cut_off.append(label)
+        return text
+    hone._invoke_batch = counting
+    try:
+        hone.reconcile_domain('physical-states', ref_dir, select_model('synthesis'), log_dir)
+    finally:
+        hone._invoke_batch = invoke_batch
+    if cut_off:
+        # hone applies the batches that finished and leaves the rest
+        # unresolved; judging that partial output would score a pass that
+        # never ran on part of the book, so it halts like the other cut-offs
+        raise PassHalted(f'{len(cut_off)} hone batch(es) cut off at the token limit: '
+                         + '; '.join(cut_off))
+    return written(before, _snapshot(project_dir, *rels))
 
 
-def illustrate(project_dir: str, kind: str, ids: set[str] | None = None) -> str:
-    """Run ``illustrate --state`` or ``--prompts`` at full coaching."""
+def illustrate(project_dir: str, family_name: str, ids: set[str] | None = None) -> str:
+    """Run ``illustrate --state`` or ``--prompts`` at full coaching; return
+    the log rows or prompt files it wrote."""
     from storyforge import cmd_illustrate, illustrations, visual_state
-    if kind == 'illustrate-state':
+    if family_name == 'illustrate-state':
         rel = visual_state.STATE_FILE
         run = lambda: cmd_illustrate.run_state(project_dir, 'full', dry_run=False)  # noqa: E731
     else:
         rel = illustrations.PROMPTS_SUBDIR
         run = lambda: cmd_illustrate.run_prompts(project_dir, 'full', ids, dry_run=False)  # noqa: E731
     before = _snapshot(project_dir, rel)
-    if run() != 0:  # it logged why; a cassette miss still errors the suite
-        raise PassHalted(f'{kind} exited non-zero and wrote nothing usable')
+    with _cassette_key():
+        status = run()
+    if status != 0:
+        # an unparseable or failed reply, an unknown id, a partial --prompts
+        # run: the pass did not do its job, so the suite errors rather than
+        # count the case as halted (safe)
+        raise RuntimeError(f'{family_name} exited {status} (its log above says why); wrote: '
+                           f'{written(before, _snapshot(project_dir, rel))[:300] or "nothing"}')
     return written(before, _snapshot(project_dir, rel))
 
 
 def replay(case: dict, project_dir: str, scene_id: str) -> str:
+    """Run today's version of the case's pass. Returns the new prose of the
+    scene for a prose family, and ``written()``'s account of what the pass
+    wrote for a family in ``DATA_FAMILIES`` ('' when it wrote nothing)."""
     kind = family(case)
     if kind == 'brief-fix':
         return brief_fix(project_dir, scene_id)
@@ -517,22 +621,35 @@ def replay(case: dict, project_dir: str, scene_id: str) -> str:
     raise ValueError(f'{case["id"]}: no replayable pass family')
 
 
+def _brief_ids(project_dir: str) -> set[str]:
+    path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    with open(path, encoding='utf-8') as f:
+        return {line.split('|')[0] for line in f.read().splitlines()[1:] if line.strip()}
+
+
 def prepare(case: dict, work_dir: str, root: str | None = None) -> tuple[str, str]:
     """Materialize the pre-pass project for ``case``; return (project_dir, scene_id).
     Raises LookupError when the case cannot be replayed, with the reason.
 
+    ``scene_id`` is the pre-pass id of the scene the pass rewrites (prose
+    families) or whose brief it rewrites (``brief-fix``). For a whole-project
+    data pass (hone, illustrate) it only labels the case in the notes: the
+    scene whose data or prose carries the error.
+
     Each case gets its own copy, because passes write into the project and a
     second case at the same commit must start from the same state."""
+    if case['id'] in EXCLUDED_CASES:
+        raise LookupError(EXCLUDED_CASES[case['id']])
     repo_dir = os.path.join(root or e1.corpus_dir(), case['repo'])
     if not os.path.isdir(os.path.join(repo_dir, '.git')):
         raise RuntimeError(f'{case["repo"]} is not cloned at {repo_dir}')
     parent = _git(repo_dir, 'rev-parse', f'{case["introduced_by"]["commit"]}~1').strip()
     project = materialize(repo_dir, parent, os.path.join(work_dir, case['id']))
     kind = family(case)
-    if kind in CSV_FAMILIES:
-        # a data pass reads the whole project: the scene is the one whose data
-        # carries the error (the brief a brief fix rewrites), for the notes
-        spans = case['contradicted']
+    spans = case['contradicted']
+    if kind in DATA_FAMILIES:
+        if not spans:
+            raise ValueError(f'{case["id"]}: no contradicted span')
         scene_id = next((s['scene'] for s in spans if s['path'].endswith('scene-briefs.csv')),
                         spans[0]['scene'])
     else:
@@ -543,16 +660,26 @@ def prepare(case: dict, work_dir: str, root: str | None = None) -> tuple[str, st
             and not migrate_scene_metadata(project)):
         if os.path.isfile(os.path.join(project, 'scenes', 'scene-index.yaml')):
             # Storyforge's YAML-to-CSV migration went with the squash of #13,
-            # and revise refuses a YAML plan, so running these would mean
-            # inventing both conversions.
-            raise LookupError('pre-pass project keeps its scenes in scenes/scene-index.yaml '
-                              'and its plan in YAML; current revise refuses YAML plans and '
-                              'Storyforge has no migration for them')
+            # so running these would mean inventing that conversion (and, for
+            # a plan pass, converting a YAML plan, which revise refuses).
+            yaml_plan = any(n.endswith('.yaml') for n in os.listdir(
+                os.path.join(project, 'working', 'plans'))) if os.path.isdir(
+                os.path.join(project, 'working', 'plans')) else False
+            raise LookupError('pre-pass project keeps its scenes in scenes/scene-index.yaml'
+                              + (' and its plan in YAML (current revise refuses YAML plans)'
+                                 if yaml_plan else '')
+                              + '; Storyforge has no migration for it')
         raise LookupError('pre-pass project predates reference/scenes.csv')
     needs_briefs = ('redraft-from-brief', 'naturalness-upstream', 'brief-fix', 'hone-physical-states')
     if kind in needs_briefs and not os.path.isfile(
             os.path.join(project, 'reference', 'scene-briefs.csv')):
         raise LookupError('pre-pass project has no scene-briefs.csv')
+    if kind == 'brief-fix':
+        span = next((s for s in spans if s['path'].endswith('scene-briefs.csv')), spans[0])
+        ids = _brief_ids(project)
+        scene_id = next((i for i in _span_ids(case, span) if i in ids), '')
+        if not scene_id:
+            raise LookupError(f'pre-pass scene-briefs.csv has no row for {span["scene"]}')
     if kind == 'revision-plan':
         row = plan_row(project, case['introduced_by']['pass'])
         if row.get('fix_location') in ('structural', 'registry', 'brief', 'intent'):
