@@ -157,25 +157,32 @@ class TestIdSimilarity:
 # ============================================================================
 
 
+def _reply(schema_name, **fields):
+    """A structured reply for ``extract.<schema_name>``: every required field,
+    empty unless given."""
+    from storyforge import extract
+    schema = getattr(extract, schema_name)
+    reply = {k: [] if schema['properties'][k]['type'] == 'array' else ''
+             for k in schema['required']}
+    reply.update(fields)
+    return json.dumps(reply)
+
+
 class TestParseCharacterizeResponse:
     """Tests for parse_characterize_response."""
 
-    def test_parses_labeled_fields(self):
-        response = """NARRATIVE_MODE: first-person
-POV_CHARACTERS: Dorren Hayle; Tessa Merrin
-TIMELINE: linear
-TIMELINE_SPAN: 3 days
-SCENE_BREAK_STYLE: explicit-markers
-ESTIMATED_SCENES: 42
-ACT_STRUCTURE: 3 acts: scenes 1-12, 13-28, 29-42
-MAJOR_THREADS: map-anomaly; archive-erasure
-CENTRAL_CONFLICT: A cartographer discovers her maps are erasing people
-PROTAGONIST_ARC: Perfectionist denial to confronting institutional power
-TONE: ominous literary
-CAST_SIZE: 12
-KEY_LOCATIONS: Pressure Cartography Office; The Deep Archive
-COMPRESSION_POINTS: council confrontation
-STRUCTURAL_CONCERNS: pacing in act 2"""
+    def test_parses_fields(self):
+        response = _reply(
+            'CHARACTERIZE_SCHEMA', narrative_mode='first-person',
+            pov_characters=['Dorren Hayle', 'Tessa Merrin'], timeline='linear',
+            timeline_span='3 days', scene_break_style='explicit-markers', estimated_scenes='42',
+            act_structure='3 acts: scenes 1-12, 13-28, 29-42',
+            major_threads=['map-anomaly', 'archive-erasure'],
+            central_conflict='A cartographer discovers her maps are erasing people',
+            protagonist_arc='Perfectionist denial to confronting institutional power',
+            tone='ominous literary', cast_size='12',
+            key_locations=['Pressure Cartography Office', 'The Deep Archive'],
+            compression_points=['council confrontation'], structural_concerns=['pacing in act 2'])
 
         result = parse_characterize_response(response)
         assert result['narrative_mode'] == 'first-person'
@@ -185,32 +192,18 @@ STRUCTURAL_CONCERNS: pacing in act 2"""
         assert result['central_conflict'] == 'A cartographer discovers her maps are erasing people'
         assert result['tone'] == 'ominous literary'
 
-    def test_skips_unknown_and_na_values(self):
-        response = """NARRATIVE_MODE: first-person
-TIMELINE: N/A
-CAST_SIZE: none
-KEY_LOCATIONS: []"""
+    def test_skips_empty_unknown_and_na_values(self):
+        response = _reply('CHARACTERIZE_SCHEMA', narrative_mode='first-person',
+                          timeline='N/A', cast_size='none', key_locations=[])
 
         result = parse_characterize_response(response)
-        assert 'narrative_mode' in result
-        assert 'timeline' not in result
-        assert 'cast_size' not in result
-        assert 'key_locations' not in result
+        assert result == {'narrative_mode': 'first-person'}
 
-    def test_skips_non_labeled_lines(self):
-        response = """Some introductory text.
-NARRATIVE_MODE: third-limited
-Another line of commentary.
-TONE: dark"""
-
-        result = parse_characterize_response(response)
-        assert len(result) == 2
-        assert result['narrative_mode'] == 'third-limited'
-        assert result['tone'] == 'dark'
-
-    def test_empty_response(self):
-        result = parse_characterize_response('')
-        assert result == {}
+    def test_unreadable_reply_raises(self):
+        with pytest.raises(ValueError):
+            parse_characterize_response('NARRATIVE_MODE: third-limited\nTONE: dark')
+        with pytest.raises(ValueError):
+            parse_characterize_response('')
 
 
 class TestParseSkeletonResponse:
@@ -266,70 +259,90 @@ class TestParseIntentResponse:
     """Tests for parse_intent_response."""
 
     def test_parses_intent_fields(self):
-        response = """FUNCTION: Establishes Dorren as institutional gatekeeper
-ACTION_SEQUEL: action
-EMOTIONAL_ARC: Controlled competence to buried unease
-VALUE_AT_STAKE: truth
-VALUE_SHIFT: +/-
-TURNING_POINT: revelation
-CHARACTERS: Dorren Hayle; Tessa Merrin; Pell
-ON_STAGE: Dorren Hayle; Tessa Merrin
-MICE_THREADS: +inquiry:map-anomaly
-CONFIDENCE: high"""
+        response = _reply(
+            'INTENT_SCHEMA', function='Establishes Dorren as institutional gatekeeper',
+            action_sequel='action', emotional_arc='Controlled competence to buried unease',
+            value_at_stake='truth', value_shift='+/-', turning_point='revelation',
+            characters=['Dorren Hayle', 'Tessa Merrin', 'Pell'],
+            on_stage=['Dorren Hayle', 'Tessa Merrin'], mice_threads=['+inquiry:map-anomaly'],
+            confidence='high')
 
         result = parse_intent_response(response, 'act1-sc01')
         assert result['id'] == 'act1-sc01'
         assert result['function'] == 'Establishes Dorren as institutional gatekeeper'
         assert result['action_sequel'] == 'action'
         assert result['value_at_stake'] == 'truth'
-        assert result['characters'] == 'Dorren Hayle; Tessa Merrin; Pell'
+        assert result['characters'] == 'Dorren Hayle;Tessa Merrin;Pell'
         assert result['_confidence'] == 'high'
 
     def test_skips_unknown_values(self):
-        response = """FUNCTION: Does something important
-VALUE_AT_STAKE: UNKNOWN"""
+        response = _reply('INTENT_SCHEMA', function='Does something important',
+                          value_at_stake='unknown', value_shift='unknown')
 
         result = parse_intent_response(response, 'test')
         assert 'function' in result
-        assert 'value_at_stake' not in result
+        assert 'value_at_stake' not in result and 'value_shift' not in result
 
 
 class TestParseBriefParallelResponse:
     """Tests for parse_brief_parallel_response."""
 
     def test_parses_brief_fields(self):
-        response = """GOAL: Complete the quarterly pressure audit on schedule
-CONFLICT: Anomalous readings don't match known patterns
-OUTCOME: no-and
-CRISIS: Report the anomaly or file it as error
-DECISION: Files as instrument error but keeps a private note
-KEY_ACTIONS: Reviews maps; Finds anomaly; Consults Tessa
-KEY_DIALOGUE: "The eastern readings are within acceptable variance"
-EMOTIONS: competence; unease; self-doubt; resolve
-MOTIFS: maps/cartography; acceptable-variance
-SUBTEXT: Dorren says acceptable but means unexplained"""
+        response = _reply(
+            'BRIEF_PARALLEL_SCHEMA', goal='Complete the quarterly pressure audit on schedule',
+            conflict="Anomalous readings don't match known patterns", outcome='no-and',
+            crisis='Report the anomaly or file it as error',
+            decision='Files as instrument error but keeps a private note',
+            key_actions=['Reviews maps', 'Finds anomaly', 'Consults Tessa'],
+            key_dialogue=['"The eastern readings are within acceptable variance"'],
+            emotions=['competence', 'unease', 'self-doubt', 'resolve'],
+            motifs=['maps/cartography', 'acceptable-variance'],
+            subtext='Dorren says acceptable but means unexplained')
 
         result = parse_brief_parallel_response(response, 'act1-sc01')
         assert result['id'] == 'act1-sc01'
         assert result['goal'] == 'Complete the quarterly pressure audit on schedule'
         assert result['outcome'] == 'no-and'
-        assert 'Reviews maps' in result['key_actions']
-        assert result['motifs'] == 'maps/cartography; acceptable-variance'
+        assert result['key_actions'] == 'Reviews maps;Finds anomaly;Consults Tessa'
+        assert result['motifs'] == 'maps/cartography;acceptable-variance'
 
     def test_skips_none_for_subtext(self):
-        response = """GOAL: Do something
-SUBTEXT: NONE"""
-
-        result = parse_brief_parallel_response(response, 'test')
+        result = parse_brief_parallel_response(
+            _reply('BRIEF_PARALLEL_SCHEMA', goal='Do something', subtext='NONE'), 'test')
         assert 'subtext' not in result
 
     def test_skips_unknown_for_all_fields(self):
-        response = """GOAL: UNKNOWN
-CONFLICT: Something real"""
-
-        result = parse_brief_parallel_response(response, 'test')
+        result = parse_brief_parallel_response(
+            _reply('BRIEF_PARALLEL_SCHEMA', goal='UNKNOWN', conflict='Something real'), 'test')
         assert 'goal' not in result
         assert result['conflict'] == 'Something real'
+
+    def test_a_semicolon_inside_an_item_does_not_split_it(self):
+        result = parse_brief_parallel_response(
+            _reply('BRIEF_PARALLEL_SCHEMA', key_dialogue=['"Go; now," she says']), 'test')
+        assert result['key_dialogue'] == '"Go, now," she says'
+
+
+class TestStructuredValuesAreCsvSafe:
+    """I1: a JSON string may hold a newline or a |, which the old line parser
+    never let through; written raw, our line-based CSV readers see a bogus
+    row or a shifted column."""
+
+    def test_newlines_and_pipes_are_flattened(self):
+        result = parse_brief_parallel_response(_reply(
+            'BRIEF_PARALLEL_SCHEMA', goal='Find\nthe | map',
+            key_dialogue=['"Go."\n"No."', 'a; b']), 'test')
+        assert result['goal'] == 'Find the / map'
+        assert result['key_dialogue'] == '"Go." "No.";a, b'
+
+    def test_profile_reaches_the_intent_prompt(self):
+        from storyforge.extract import build_intent_prompt, parse_characterize_response
+        profile = parse_characterize_response(_reply(
+            'CHARACTERIZE_SCHEMA', major_threads=['map-anomaly', 'archive-erasure'],
+            central_conflict='Truth against loyalty'))
+        prompt = build_intent_prompt('s1', 'Prose.', profile, {'title': 'T'})
+        assert 'Major threads in this manuscript: map-anomaly; archive-erasure' in prompt
+        assert 'Central conflict: Truth against loyalty' in prompt
 
 
 def _knowledge_reply(**fields):

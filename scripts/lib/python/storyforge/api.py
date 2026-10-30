@@ -256,6 +256,12 @@ def _check_refusal(response) -> None:
         raise RefusalError(response)
 
 
+def _output_config(schema: dict) -> dict:
+    """The request's ``output_config`` for a structured (JSON schema) reply,
+    shared by direct and batch requests so they can't drift apart."""
+    return {'format': {'type': 'json_schema', 'schema': schema}}
+
+
 def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
           system: list[dict] | None, output_schema: dict | None = None,
           fallback: bool = False) -> dict:
@@ -286,7 +292,7 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
     if system:
         body['system'] = system
     if output_schema:
-        body['output_config'] = {'format': {'type': 'json_schema', 'schema': output_schema}}
+        body['output_config'] = _output_config(output_schema)
     if fallback:
         body['fallbacks'] = 'default'
     heartbeat = _Heartbeat(label or model)
@@ -474,7 +480,8 @@ def calculate_cost_from_usage(usage: dict, model: str, batch: bool = False) -> f
 
 def build_batch_request(custom_id: str, prompt: str, model: str,
                         max_tokens: int = 4096,
-                        system: list[dict] | None = None) -> dict:
+                        system: list[dict] | None = None,
+                        output_schema: dict | None = None) -> dict:
     """Build a single batch request item (one JSONL line).
 
     Args:
@@ -483,6 +490,7 @@ def build_batch_request(custom_id: str, prompt: str, model: str,
         model: Model ID.
         max_tokens: Maximum output tokens.
         system: Optional list of system content blocks with cache_control.
+        output_schema: Optional JSON schema for a structured reply (see _send).
 
     Returns:
         Dict suitable for JSON serialization as one JSONL line.
@@ -494,6 +502,8 @@ def build_batch_request(custom_id: str, prompt: str, model: str,
     }
     if system:
         params['system'] = system
+    if output_schema:
+        params['output_config'] = _output_config(output_schema)
     return {'custom_id': custom_id, 'params': params}
 
 

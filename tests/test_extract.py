@@ -24,21 +24,30 @@ def _physical_reply(**fields):
     return json.dumps(reply)
 
 
+def _reply(schema_name, **fields):
+    """A structured reply for ``extract.<schema_name>``: every required field,
+    empty unless given."""
+    from storyforge import extract
+    schema = getattr(extract, schema_name)
+    reply = {k: [] if schema['properties'][k]['type'] == 'array' else ''
+             for k in schema['required']}
+    reply.update(fields)
+    return json.dumps(reply)
+
+
 class TestParseCharacterizeResponse:
     def test_extracts_fields(self):
         from storyforge.extract import parse_characterize_response
-        response = (
-            'NARRATIVE_MODE: third-limited\n'
-            'POV_CHARACTERS: Dorren Hayle;Tessa Merrin\n'
-            'TIMELINE: linear\nTIMELINE_SPAN: 3 weeks\n'
-            'SCENE_BREAK_STYLE: explicit-markers\nESTIMATED_SCENES: 42\n'
-            'MAJOR_THREADS: institutional-failure;chosen-blindness;the-anomaly\n'
-            'CENTRAL_CONFLICT: A cartographer must choose between institutional loyalty and truth\n'
-            'CAST_SIZE: 12'
-        )
+        response = _reply('CHARACTERIZE_SCHEMA',
+            narrative_mode='third-limited', pov_characters=['Dorren Hayle', 'Tessa Merrin'],
+            timeline='linear', timeline_span='3 weeks', scene_break_style='explicit-markers',
+            estimated_scenes='42',
+            major_threads=['institutional-failure', 'chosen-blindness', 'the-anomaly'],
+            central_conflict='A cartographer must choose between institutional loyalty and truth',
+            cast_size='12')
         result = parse_characterize_response(response)
         assert result['narrative_mode'] == 'third-limited'
-        assert 'Dorren Hayle;Tessa Merrin' in result['pov_characters']
+        assert result['pov_characters'] == 'Dorren Hayle; Tessa Merrin'
         assert result['estimated_scenes'] == '42'
         assert 'institutional-failure' in result['major_threads']
 
@@ -61,39 +70,47 @@ class TestParseSkeletonResponse:
 class TestParseIntentResponse:
     def test_extracts_fields(self):
         from storyforge.extract import parse_intent_response
-        response = (
-            'FUNCTION: Emmett reads the staged crime scene and connects the murder to a disappearance\n'
-            'ACTION_SEQUEL: action\nEMOTIONAL_ARC: Professional detachment to resolved determination\n'
-            'VALUE_AT_STAKE: truth\nVALUE_SHIFT: +/-\nTURNING_POINT: revelation\n'
-            'CHARACTERS: Emmett Slade;Samuel Orcutt;Colson\n'
-            'ON_STAGE: Emmett Slade;Colson\nMICE_THREADS: +inquiry:who-killed-orcutt\n'
-            'CONFIDENCE: high'
-        )
+        response = _reply('INTENT_SCHEMA',
+            function='Emmett reads the staged crime scene and connects the murder to a disappearance',
+            action_sequel='action', emotional_arc='Professional detachment to resolved determination',
+            value_at_stake='truth', value_shift='+/-', turning_point='revelation',
+            characters=['Emmett Slade', 'Samuel Orcutt', 'Colson'],
+            on_stage=['Emmett Slade', 'Colson'], mice_threads=['+inquiry:who-killed-orcutt'],
+            confidence='high')
         result = parse_intent_response(response, 'arranged-dead')
         assert 'staged crime scene' in result['function']
         assert result['action_sequel'] == 'action'
         assert result['value_shift'] == '+/-'
         assert result['_confidence'] == 'high'
+        assert result['on_stage'] == 'Emmett Slade;Colson'
 
 
 class TestParseBriefResponse:
     def test_extracts_fields(self):
         from storyforge.extract import parse_brief_parallel_response
-        response = (
-            'GOAL: Determine cause of death and establish whether it is murder\n'
-            'CONFLICT: The crime scene has been deliberately staged to look accidental\n'
-            'OUTCOME: no-and\n'
-            'CRISIS: Report the staging and alert the territorial marshal, or investigate quietly\n'
-            'DECISION: Investigates quietly\n'
-            'KEY_ACTIONS: Examines body;Notes staged positioning\n'
-            'KEY_DIALOGUE: The body was found like this?\n'
-            'EMOTIONS: professional-calm;suspicion\n'
-            'MOTIFS: arranged-bodies;survey-equipment'
-        )
+        response = _reply('BRIEF_PARALLEL_SCHEMA',
+            goal='Determine cause of death and establish whether it is murder',
+            conflict='The crime scene has been deliberately staged to look accidental',
+            outcome='no-and',
+            crisis='Report the staging and alert the territorial marshal, or investigate quietly',
+            decision='Investigates quietly',
+            key_actions=['Examines body', 'Notes staged positioning'],
+            key_dialogue=['The body was found like this?'],
+            emotions=['professional-calm', 'suspicion'],
+            motifs=['arranged-bodies', 'survey-equipment'], subtext='none')
         result = parse_brief_parallel_response(response, 'arranged-dead')
         assert 'cause of death' in result['goal']
         assert result['outcome'] == 'no-and'
         assert 'Report the staging' in result['crisis']
+        assert result['key_actions'] == 'Examines body;Notes staged positioning'
+        assert 'subtext' not in result
+
+    def test_unreadable_or_partial_reply_raises(self):
+        from storyforge.extract import parse_brief_parallel_response
+        with pytest.raises(ValueError, match='not a JSON object'):
+            parse_brief_parallel_response('GOAL: x\n', 's1')
+        with pytest.raises(ValueError, match='reply has no'):
+            parse_brief_parallel_response('{"goal": "x"}', 's1')
 
 
 class TestParseKnowledgeResponse:
@@ -158,7 +175,8 @@ class TestBuildPrompts:
         prompt = build_intent_prompt('act1-sc01', 'Scene prose.',
                                      {'major_threads': 'thread-a'},
                                      {'title': 'Test', 'pov': 'Alice'})
-        assert 'FUNCTION' in prompt and 'VALUE_SHIFT' in prompt and 'MICE_THREADS' in prompt
+        assert '- function:' in prompt and '- value_shift:' in prompt and '- mice_threads' in prompt
+        assert 'FUNCTION:' not in prompt
 
     def test_intent_prompt_offers_only_valid_value_shifts(self):
         """The prompt asks for exactly one shift, and every shift it names
@@ -172,10 +190,12 @@ class TestBuildPrompts:
         from storyforge.extract import build_intent_prompt
         from storyforge.schema import VALID_VALUE_SHIFTS
         prompt = build_intent_prompt('s1', 'Prose.', {}, {'title': 'T'})
-        line = next(l for l in prompt.splitlines() if l.startswith('VALUE_SHIFT:'))
+        line = next(l for l in prompt.splitlines() if l.startswith('- value_shift:'))
         named = set(re.findall(r'[+-]{1,2}/[+-]{1,2}', line))
         assert named == {'+/-', '-/+', '+/++', '-/--'} and named <= VALID_VALUE_SHIFTS
         assert 'exactly one' in line
+        from storyforge.extract import INTENT_SCHEMA
+        assert set(INTENT_SCHEMA['properties']['value_shift']['enum']) == named | {'unknown'}
 
 
 class TestCleanupTimeline:
@@ -308,7 +328,8 @@ class TestValueAtStakeIsBare:
 
     def _parse(self, value):
         from storyforge.extract import parse_intent_response
-        return parse_intent_response(f'VALUE_AT_STAKE: {value}\n', 's1')['value_at_stake']
+        return parse_intent_response(_reply('INTENT_SCHEMA', value_at_stake=value),
+                                     's1')['value_at_stake']
 
     def test_em_dash_elaboration_dropped(self):
         assert self._parse('truth — specifically, the hidden past') == 'truth'
@@ -336,8 +357,7 @@ class TestEnumAnswersReduced:
 
     def _intent(self, **fields):
         from storyforge.extract import parse_intent_response
-        text = ''.join(f'{k.upper()}: {v}\n' for k, v in fields.items())
-        return parse_intent_response(text, 's1')
+        return parse_intent_response(_reply('INTENT_SCHEMA', **fields), 's1')
 
     def test_explanations_dropped(self):
         r = self._intent(action_sequel='sequel — reaction: Nick broods',
@@ -508,26 +528,25 @@ class TestCharacterizeBudget:
         assert 'omitted here' not in extract.build_characterize_prompt(str(tmp_path), model='big')
 
 
-class TestCharacterizeMultilineFields:
+class TestCharacterizeLists:
     """Opus 5.5 answered ACT_STRUCTURE and STRUCTURAL_CONCERNS as bullet
-    lists on Pride and Prejudice; the line parser kept only the lead-in
-    ("3 acts, following the original volumes:") and dropped the concerns."""
+    lists on Pride and Prejudice, and the line parser dropped the concerns.
+    The reply is now structured; list fields join with "; "."""
 
-    def test_bullets_join_their_field(self):
+    def test_list_fields_join(self):
         from storyforge.extract import parse_characterize_response
-        result = parse_characterize_response(
-            'TONE: ironic\n\nACT_STRUCTURE: 3 acts, following the volumes:\n'
-            '- Act I (scenes 1-62)\n- Act II (scenes 63-120)\n\n'
-            'STRUCTURAL_CONCERNS:\n- Darcy fades\n- Kitty: thin\nCAST_SIZE: 55\n')
+        result = parse_characterize_response(_reply(
+            'CHARACTERIZE_SCHEMA', tone='ironic',
+            act_structure='3 acts, following the volumes: Act I (scenes 1-62); Act II',
+            structural_concerns=['Darcy fades', 'Kitty: thin'], cast_size='55'))
         assert result['tone'] == 'ironic'
-        assert result['act_structure'] == ('3 acts, following the volumes: Act I (scenes 1-62); '
-                                           'Act II (scenes 63-120)')
         assert result['structural_concerns'] == 'Darcy fades; Kitty: thin'
         assert result['cast_size'] == '55'
 
-    def test_single_line_fields_unchanged(self):
+    def test_empty_and_none_fields_dropped(self):
         from storyforge.extract import parse_characterize_response
-        assert parse_characterize_response('TIMELINE: linear\nCOMPRESSION_POINTS: none\n') == {
+        assert parse_characterize_response(_reply(
+            'CHARACTERIZE_SCHEMA', timeline='linear', compression_points=['none'])) == {
             'timeline': 'linear'}
 
 
