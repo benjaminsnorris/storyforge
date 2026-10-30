@@ -174,15 +174,13 @@ class TestExtractHelpers:
 
     def test_parse_skeleton_response_extracts_fields(self):
         from storyforge.extract import parse_skeleton_response
-        response = """TITLE: Test Scene
-POV: Alice
-LOCATION: Library
-TIMELINE_DAY: 1
-TIME_OF_DAY: morning
-DURATION: 1 hour
-TYPE: character
-TARGET_WORDS: 2500
-PART: 1"""
+        from storyforge.extract import SKELETON_SCHEMA
+        response = json.dumps({
+            **{k: [] if SKELETON_SCHEMA['properties'][k]['type'] == 'array' else ''
+               for k in SKELETON_SCHEMA['required']},
+            'title': 'Test Scene', 'pov': 'Alice', 'location': ['Library'],
+            'time_of_day': 'morning', 'duration': '1 hour', 'type': 'character',
+            'target_words': '2500', 'act': '1'})
         result = parse_skeleton_response(response, 'test-sc01')
         assert result.get('id') == 'test-sc01'
         assert result.get('title') == 'Test Scene'

@@ -219,8 +219,8 @@ def main(argv=None):
 
     print_summary(project_dir, 'extract', session_start=session_start)
     if _unanswered:
-        log('ERROR: some scenes got no usable extraction reply (refused, cut off or '
-            'failed); re-run extract for them:')
+        log('ERROR: some scenes got no usable extraction reply (refused, cut off, '
+            'failed, unreadable or empty); re-run extract for them:')
         for csv_name, ids in _unanswered.items():
             log(f'  {csv_name}: {", ".join(ids)}')
         sys.exit(1)
@@ -362,8 +362,7 @@ def _merge_batch_results(csv_path, csv_name, sorted_scene_ids, log_dir, parse,
                 unanswered.append(sid)
                 continue
         if not any(v for k, v in result.items() if k != 'id' and not k.startswith('_')):
-            # Every field unknown or empty, or (skeleton) no labeled line at
-            # all: nothing was extracted, which is not "nothing changed"
+            # Every field unknown or empty: nothing was extracted, which is not "nothing changed"
             log(f'  WARNING: {csv_name}: the reply for {sid} holds no values')
             unanswered.append(sid)
             continue
@@ -457,7 +456,9 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     log('')
     log('--- Phase 1: Extract skeleton (scenes.csv) ---')
 
-    from storyforge.extract import build_skeleton_prompt, parse_skeleton_response
+    from storyforge.extract import (
+        SKELETON_SCHEMA, build_skeleton_prompt, parse_skeleton_response, skeleton_cues,
+    )
     from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps, normalize_fields
     from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
 
@@ -486,6 +487,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     log(f'  Building batch for {len(sorted_scene_ids)} scenes...')
     from storyforge.timeline import tail_words
     previous_text = ''
+    batched = []
     for scene_id in sorted_scene_ids:
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
         if not os.path.isfile(scene_path):
@@ -494,13 +496,14 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             scene_text = f.read()
         if not scene_text:
             continue
+        batched.append(scene_id)
 
         prompt = build_skeleton_prompt(scene_id, scene_text, profile,
                                         registries_text=registries,
                                         previous_tail=tail_words(previous_text))
         previous_text = scene_text
         request = build_batch_request(scene_id, prompt, model, 1024,
-                                      system=system)
+                                      system=system, output_schema=SKELETON_SCHEMA)
         with open(batch_file, 'a') as f:
             f.write(json.dumps(request) + '\n')
 
@@ -532,18 +535,33 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     # The timeline pass: store each scene's time cues, then place every scene
     # on one calendar. Nobody authored these days, so they are replaced.
-    from storyforge.timeline import parse_cues, write_cues, run_assignment
+    from storyforge.timeline import write_cues, run_assignment
     cues = {}
+    rejected = set(_unanswered.get('scenes.csv', []))
     for sid in sorted_scene_ids:
         txt_file = os.path.join(log_dir, f'{sid}.txt')
-        # Only this batch's answers: never a stale file from an earlier run
-        if sid in succeeded and os.path.isfile(txt_file):
+        # Only this batch's answers (never a stale file from an earlier run),
+        # and only those the scenes.csv merge accepted: a reply with cues but
+        # no scene values was named as unusable there
+        if sid in succeeded and sid not in rejected and os.path.isfile(txt_file):
             with open(txt_file) as f:
-                cues[sid] = parse_cues(f.read())
+                try:
+                    cues[sid] = skeleton_cues(f.read())
+                except ValueError:
+                    pass  # the scenes.csv merge above named it; no cues for it below
     write_cues(project_dir, cues)
-    log('  Placing scenes on the calendar...')
-    result = run_assignment(project_dir, select_model('evaluation'), log_dir, force=True)
-    log(f'  Timeline: {result["assigned"]} value(s) set, {result["unplaced"]} scene(s) unplaced')
+    # A calendar is one piece: placing it without one scene's fresh cues
+    # (an earlier run's, or none) would move its neighbours too, and with
+    # force the wrong days would replace every scene's.
+    no_cues = [sid for sid in batched if sid not in cues]
+    if no_cues:
+        log(f'  ERROR: timeline not placed: no fresh time cues for {len(no_cues)} scene(s) '
+            f'({", ".join(no_cues)}); every day is left as it was')
+        _unanswered.setdefault('timeline (not placed)', []).extend(no_cues)
+    else:
+        log('  Placing scenes on the calendar...')
+        result = run_assignment(project_dir, select_model('evaluation'), log_dir, force=True)
+        log(f'  Timeline: {result["assigned"]} value(s) set, {result["unplaced"]} scene(s) unplaced')
 
     _safe_remove(batch_file)
     _safe_rmdir(skel_output)

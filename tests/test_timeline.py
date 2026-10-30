@@ -1,5 +1,6 @@
 """Tests for timeline functions (migrated from test-timeline.sh)."""
 
+import json
 import os
 import shutil
 
@@ -114,13 +115,38 @@ class TestCues:
         from storyforge.extract import build_skeleton_prompt
         prompt = build_skeleton_prompt('s1', 'Text.', {}, previous_tail='...the end of it.')
         assert 'TIMELINE_DAY' not in prompt
-        assert 'TIME_RELATION' in prompt and 'TIME_DATE' in prompt
+        assert '- time_relation:' in prompt and '- time_date:' in prompt
         assert '...the end of it.' in prompt
+        # The cue texts' cross-references name the JSON fields, not the labels
+        assert 'that is time_span' in prompt and 'TIME_SPAN' not in prompt
+
+    def test_cue_instructions_are_the_fields_as_labeled_lines(self):
+        """The cue read's wording and extract's skeleton share CUE_FIELDS,
+        so a wording change reaches both."""
+        from storyforge.timeline import CUE_FIELDS, CUE_INSTRUCTIONS
+        lines = CUE_INSTRUCTIONS.split('\n')
+        assert [l.split(':', 1)[0] for l in lines] == list(CUE_FIELDS)
+        assert lines[0] == f"TIME_RELATION: [{CUE_FIELDS['TIME_RELATION']}]"
+
+    def test_structured_and_labeled_cues_normalize_alike(self):
+        from storyforge.timeline import cues_from_fields, parse_cues
+        labeled = parse_cues('TIME_RELATION: Later, weeks on\nTIME_GAP: "three weeks"\n'
+                             'TIME_ANCHOR: (none)\nTIME_DATE: not a date\n')
+        structured = cues_from_fields({'time_relation': 'Later, weeks on',
+                                       'time_gap': '"three weeks"', 'time_anchor': '(none)',
+                                       'time_date': 'not a date'})
+        assert labeled == structured == {'relation': 'later', 'gap': 'three weeks',
+                                         'anchor': '', 'refers': '', 'span': '', 'date': ''}
 
     def test_skeleton_parser_keeps_only_the_date(self):
         from storyforge.extract import parse_skeleton_response
-        result = parse_skeleton_response('TITLE: T\nTIMELINE_DAY: 73\nTIME_RELATION: later\n'
-                                         'TIME_DATE: XXXX-07-04\n', 's1')
+        from storyforge.extract import SKELETON_SCHEMA
+        reply = {k: [] if SKELETON_SCHEMA['properties'][k]['type'] == 'array' else ''
+                 for k in SKELETON_SCHEMA['required']}
+        reply.update(title='T', timeline_day='73', time_relation='later',
+                     time_gap='a week', time_span='all summer', time_date='XXXX-07-04')
+        result = parse_skeleton_response(json.dumps(reply), 's1')
+        assert not {k for k in result if k.startswith('time_')}
         assert 'timeline_day' not in result
         assert result['timeline_date'] == 'XXXX-07-04'
 

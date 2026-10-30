@@ -22,7 +22,7 @@ Last updated 2026-10-29 (night), at v1.87.1 (E8 gaps done in #383; next is E6). 
 - `tests/test_hone.py::test_a_mapping_never_takes_an_alias_from_its_owner` (meridian-line `5433d3f`).
 
 **Left in Phase 1:**
-- the remaining `KEY: value` parsers. Characterize, intent and brief fields moved to structured outputs in v1.85.0 (#377). Extract's skeleton phase is next: it shares the time-cue lines with `timeline.parse_cues`, whose wording settled in v1.86.1 (#380);
+- the remaining `KEY: value` parsers. Characterize, intent and brief fields moved to structured outputs in v1.85.0 (#377), and the skeleton in v1.88.0 (#388): one reply fills `scenes.csv` and the timeline cues, whose texts `timeline.CUE_FIELDS` shares with the cue read. Left: extract's cleanup passes (`FIX:` lines in `parse_knowledge_cleanup_response` and `parse_mice_cleanup_response`) and the `prompts.py` consumers;
 - the remaining warn-and-continue sites.
 
 **Dashboard (v1.86.0, #378, closes #371):** Storyforge sends versioned `dashboard_data` (schema version 1, contract in `docs/agent-reference.md`), and Bookshelf renders it (bookshelf#30). The renderer and `dashboard_html` are gone, and `storyforge visualize` writes `working/dashboard-data.json`. Folding the data into the Phase 2 `export` bundle is still to do.
@@ -186,7 +186,7 @@ Start by reading this doc, `CLAUDE.md` and `docs/agent-reference.md`.
      - **thornwall-028:** its introducing commit wrote both sides, so the pre-pass tree has no established fact to contradict (`EXCLUDED_CASES`).
 2. **E6** (approved, about $40): two more independent E4 runs plus the paid E2 suites, under separate recording keys, to measure run-to-run variance. Plan §4.2 has the design. E3's tier comparison and E3's recall moves are both "inside noise until E6"; report them against E6's spread.
 3. **Phase 1 leftovers:**
-   - Extract's **skeleton** phase still parses `KEY: value` lines. It shares the cue lines with `timeline.parse_cues`. The CUE_INSTRUCTIONS experiment settled in v1.86.1 (#380, TIME_GAP/TIME_SPAN wording), so the skeleton can move now, with that wording.
+   - ~~Extract's **skeleton** phase.~~ Done in v1.88.0 (#388). A skeleton reply that is unusable for any scene now stops the calendar from being placed (it used to re-place every scene from stale or missing cues, with force). The remaining line parsers are extract's cleanup passes (`FIX:` lines) and the `prompts.py` consumers.
    - Then the remaining **warn-and-continue** sites. Grep for `WARNING` followed by `continue` in paths that write output.
 4. **Follow-ups noted in PRs:**
    - `hone.hone_briefs` also rewrites briefs and should use the brief-fix name check (`cmd_revise._invented_names`; move it to a shared module).
