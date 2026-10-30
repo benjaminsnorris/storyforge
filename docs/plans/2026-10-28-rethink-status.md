@@ -196,7 +196,7 @@ Start by reading this doc, `CLAUDE.md` and `docs/agent-reference.md`.
    - `skills/forge` routes to `scenes` and `recommend` skills that don't exist.
    - `dashboard_data` should fold into the Phase 2 `export` bundle.
 
-Then **Phase 2** (plan §5): ledger, `commitments.csv`, per-character state, `export`.
+Then **Phase 2** (plan §5): ledger, `commitments.csv`, per-character state, `export`. **Start with `docs/plans/2026-10-30-ledger-migration-proposal.md`.** The plan's `commitments.csv` columns can't hold everything `knowledge.csv` and `physical-states.csv` carry, so the migration needs seven decisions from Ben before any code changes author data. That doc surveys the seven book repos and proposes a mapping.
 
 ## Overnight run (2026-10-29 → 30)
 
