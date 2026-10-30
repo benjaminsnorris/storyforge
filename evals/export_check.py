@@ -61,7 +61,7 @@ def check(repo_dir: str) -> bool:
         warned = ' '.join(bundle['warnings'])
         unaccounted = [
             rel for rel in (os.path.relpath(p, book) for p in
-                            sorted(glob.glob(os.path.join(book, 'reference', '*.csv'))))
+                            sorted(glob.glob(os.path.join(glob.escape(book), 'reference', '*.csv'))))
             if rel not in bundle['tables'] and rel not in warned]
 
     kinds = Counter(t['kind'] for t in bundle['tables'].values())

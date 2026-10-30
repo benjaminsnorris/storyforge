@@ -3,7 +3,6 @@ keys are pinned, and nothing it can't read is dropped silently. Changing a key
 or a value's type must bump export.SCHEMA_VERSION in the same commit (and in
 docs/agent-reference.md)."""
 
-import glob
 import json
 import os
 import shutil
@@ -31,8 +30,8 @@ def _assert_round_trip(project_dir, bundle):
     texts = export.tables_from_bundle(bundle)
     for rel, text in texts.items():
         assert text.encode('utf-8') == _read_bytes(os.path.join(project_dir, rel)), rel
-    refs = {os.path.relpath(p, project_dir)
-            for p in glob.glob(os.path.join(project_dir, 'reference', '*.csv'))}
+    ref_dir = os.path.join(project_dir, 'reference')
+    refs = {f'reference/{n}' for n in os.listdir(ref_dir) if n.endswith('.csv')}
     assert refs and refs <= set(texts)
 
 
@@ -118,6 +117,15 @@ class TestRoundTrip:
         table = export.parse_table('﻿id|name\n')
         assert table['bom'] and table['header'] == ['id', 'name']
 
+    def test_stray_cr_in_a_crlf_file_is_named(self, project_dir):
+        path = os.path.join(project_dir, 'reference', 'values.csv')
+        _write(path, b'id|name\r\nx|a\rb\r\n')
+        bundle = export.build_bundle(project_dir)
+        assert bundle['tables']['reference/values.csv']['line_ending'] == '\r\n'
+        assert any('reference/values.csv' in w and 'stray CR' in w
+                   for w in bundle['warnings'])
+        _assert_round_trip(project_dir, bundle)
+
     def test_mixed_line_endings_are_kept_and_named(self, project_dir):
         path = os.path.join(project_dir, 'reference', 'values.csv')
         _write(path, b'id|name\r\nx|y\nz|w\n')
@@ -125,6 +133,24 @@ class TestRoundTrip:
         assert any('reference/values.csv' in w and 'mixed line endings' in w
                    for w in bundle['warnings'])
         _assert_round_trip(project_dir, bundle)
+
+
+class TestGlobCharactersInPath:
+    def test_project_path_with_glob_characters(self, fixture_dir, tmp_path):
+        """Regression: paths went to glob.glob unescaped, so a book under
+        `x [draft]` exported no tables with no warning."""
+        project = tmp_path / 'x [draft] *?' / 'book'
+        shutil.copytree(fixture_dir, project)
+        project = str(project)
+        scores = os.path.join(project, 'working', 'scores')
+        _write(os.path.join(scores, 'cycle-1', 'scene-scores.csv'), b'id|p\na|1\n')
+        _write(os.path.join(project, 'working', 'timeline-cues.csv'), b'id|gap\n')
+        _write(os.path.join(project, 'working', 'audit-log.csv'), b'id|note\n')
+        bundle = export.build_bundle(project)
+        kinds = {t['kind'] for t in bundle['tables'].values()}
+        assert kinds == {'reference', 'scores', 'timeline', 'audit'}
+        assert bundle['warnings'] == []
+        _assert_round_trip(project, bundle)
 
 
 class TestScoresTimelineAudit:
@@ -201,6 +227,27 @@ class TestProblems:
             f.write('short|row\n')
         with pytest.raises(ledger.LedgerError):
             export.build_bundle(project_dir)
+
+
+class TestWrite:
+    def test_atomic_leaves_no_temp_file(self, project_dir, tmp_path):
+        path = tmp_path / 'out' / 'bundle.json'
+        export.write_bundle(export.build_bundle(project_dir), str(path))
+        export.write_bundle(export.build_bundle(project_dir), str(path))
+        assert os.listdir(path.parent) == ['bundle.json']
+        assert os.stat(path).st_mode & 0o044  # not mkstemp's 0600
+
+    def test_failed_write_keeps_the_old_bundle(self, project_dir, tmp_path, monkeypatch):
+        (tmp_path / 'out').mkdir()
+        path = tmp_path / 'out' / 'bundle.json'
+        path.write_text('old', encoding='utf-8')
+        def boom(_):
+            raise OSError(28, 'No space left on device')
+        monkeypatch.setattr(export, 'dumps', boom)
+        with pytest.raises(OSError):
+            export.write_bundle({}, str(path))
+        assert path.read_text(encoding='utf-8') == 'old'
+        assert os.listdir(path.parent) == ['bundle.json']
 
 
 class TestStableJson:

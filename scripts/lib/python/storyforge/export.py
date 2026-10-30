@@ -46,10 +46,10 @@ bumps it, and the bundle changes in the same commit as any such change.
 from __future__ import annotations
 
 import contextlib
-import glob
 import json
 import os
 import sys
+import tempfile
 
 from storyforge import ledger
 from storyforge.common import get_medium, get_plugin_dir, read_yaml_field
@@ -132,6 +132,9 @@ def _read_table(project_dir: str, rel: str, kind: str,
     if table['line_ending'] == '\n' and '\r' in text:
         warnings.append(f'{rel}: mixed line endings; rows are split on LF and '
                         f'each CR stays at the end of its line\'s last cell')
+    elif '\r' in text.replace('\r\n', ''):
+        warnings.append(f'{rel}: a CR that doesn\'t end a line; rows are split on '
+                        f'CRLF and the stray CR stays inside its cell')
     table['kind'] = kind
     return table
 
@@ -140,8 +143,16 @@ def _rel(project_dir: str, path: str) -> str:
     return os.path.relpath(path, project_dir).replace(os.sep, '/')
 
 
-def _csvs(pattern: str) -> list[str]:
-    return sorted(p for p in glob.glob(pattern) if os.path.isfile(p))
+def _csvs(directory: str, prefix: str = '') -> list[str]:
+    """The `prefix*.csv` files in `directory`, sorted. Listed, not globbed: a
+    project path may hold glob characters (`[draft]`)."""
+    try:
+        names = os.listdir(directory)
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+    return sorted(os.path.join(directory, n) for n in names
+                  if n.startswith(prefix) and n.endswith('.csv')
+                  and os.path.isfile(os.path.join(directory, n)))
 
 
 def _score_tables(project_dir: str, warnings: list[str]) -> tuple[str | None, list[str]]:
@@ -159,7 +170,7 @@ def _score_tables(project_dir: str, warnings: list[str]) -> tuple[str | None, li
         else:
             cycle_rel = _rel(real_project, real_cycle)
             paths += [os.path.join(project_dir, cycle_rel, os.path.basename(p))
-                      for p in _csvs(os.path.join(real_cycle, '*.csv'))]
+                      for p in _csvs(real_cycle)]
     structural = os.path.join(project_dir, 'working', 'scores', 'structural-latest.csv')
     if os.path.isfile(structural):
         paths.append(structural)
@@ -169,7 +180,7 @@ def _score_tables(project_dir: str, warnings: list[str]) -> tuple[str | None, li
 def _audit_paths(project_dir: str, warnings: list[str]) -> list[str]:
     """PROVISIONAL: working/audit*.csv and every CSV under working/audit/."""
     working = os.path.join(project_dir, 'working')
-    paths = _csvs(os.path.join(working, 'audit*.csv'))
+    paths = _csvs(working, 'audit')
     audit_dir = os.path.join(working, 'audit')
     for root, dirs, files in os.walk(audit_dir):
         dirs.sort()
@@ -186,11 +197,11 @@ def _audit_paths(project_dir: str, warnings: list[str]) -> list[str]:
 def _collect_tables(project_dir: str, warnings: list[str]) -> tuple[str | None, dict]:
     sources: list[tuple[str, str]] = []
     sources += [(p, 'reference') for p in
-                _csvs(os.path.join(project_dir, 'reference', '*.csv'))]
+                _csvs(os.path.join(project_dir, 'reference'))]
     score_cycle, score_paths = _score_tables(project_dir, warnings)
     sources += [(p, 'scores') for p in score_paths]
     sources += [(p, 'timeline') for p in
-                _csvs(os.path.join(project_dir, 'working', 'timeline*.csv'))]
+                _csvs(os.path.join(project_dir, 'working'), 'timeline')]
     sources += [(p, 'audit') for p in _audit_paths(project_dir, warnings)]
 
     tables = {}
@@ -273,10 +284,25 @@ def dumps(bundle: dict) -> str:
 
 
 def write_bundle(bundle: dict, path: str) -> None:
-    """Write the bundle to `path` (UTF-8, LF), creating its directory."""
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, 'w', encoding='utf-8', newline='\n') as f:
-        f.write(dumps(bundle))
+    """Write the bundle to `path` (UTF-8, LF), creating its directory.
+
+    Atomic: written to a temporary file beside `path`, then moved over it, so
+    a reader never sees half a bundle. Raises OSError when it can't write.
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix='.bundle-', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(dumps(bundle))
+        umask = os.umask(0)
+        os.umask(umask)
+        os.chmod(tmp, 0o666 & ~umask)  # mkstemp's 0600 would outlive the move
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
 
 
 def build_bundle_quietly(project_dir: str) -> dict:

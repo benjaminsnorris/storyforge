@@ -52,6 +52,33 @@ class TestMain:
         assert 'Schema version 1' in captured.err
         assert not os.path.exists(os.path.join(project_dir, export.DEFAULT_OUTPUT))
 
+    def test_stdout_survives_readers_that_print(self, project_dir, monkeypatch, capsys):
+        """Anything printed while the bundle is built goes to stderr, so
+        stdout parses as exactly one JSON document."""
+        import storyforge.visualize as visualize
+        real = visualize.load_dashboard_data
+
+        def noisy(project):
+            print('a reader that prints')
+            return real(project)
+        monkeypatch.setattr(visualize, 'load_dashboard_data', noisy)
+        _run(project_dir, monkeypatch, ['--stdout'])
+        captured = capsys.readouterr()
+        assert json.loads(captured.out)['schema_version'] == 1
+        assert 'a reader that prints' in captured.err
+
+    def test_unwritable_output_exits_1_naming_it(self, project_dir, monkeypatch,
+                                                 capsys, tmp_path):
+        blocker = tmp_path / 'a-file'
+        blocker.write_text('x')
+        out = blocker / 'bundle.json'  # its "directory" is a file
+        with pytest.raises(SystemExit) as exc:
+            _run(project_dir, monkeypatch, ['--output', str(out)])
+        assert exc.value.code == 1
+        text = capsys.readouterr().out
+        assert f'ERROR: could not write the bundle to {out}' in text
+        assert 'Traceback' not in text
+
     def test_warnings_are_logged(self, project_dir, monkeypatch, capsys):
         with open(os.path.join(project_dir, 'reference', 'themes.csv'), 'wb') as f:
             f.write(b'id|name\nx|\xff\n')

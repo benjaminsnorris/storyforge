@@ -61,7 +61,11 @@ def main(argv=None):
         sys.stdout.flush()
     else:
         path = args.output or os.path.join(project_dir, export.DEFAULT_OUTPUT)
-        export.write_bundle(bundle, path)
+        try:
+            export.write_bundle(bundle, path)
+        except OSError as e:
+            say(f'ERROR: could not write the bundle to {path}: {e.strerror or e}')
+            sys.exit(1)
         say(f'Export bundle written: {path}')
 
     kinds: dict[str, int] = {}
