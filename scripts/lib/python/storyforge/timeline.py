@@ -343,19 +343,26 @@ def _rough_date(value: str) -> tuple[int, int, str] | None:
 
 
 
-def _place_in_year(value: str) -> tuple[int, int] | None:
-    """``(day of year, half-width)`` for where a single date falls in its
-    year, without the slack prose gets: a season is its quarter, a month
-    its own days, a day itself (``~``/``?`` loosen it by a few days)."""
+def _days_in_year(value: str) -> set[int] | None:
+    """The days of the year (2001's calendar) a single date can fall on,
+    without the slack prose gets: a season is its quarter (winter is
+    December to February), a month its own days, a day itself (``~``/``?``
+    loosen it by a few days). None without a known month or season."""
     md = _month_day(value)
     if md:
-        loose = bool(re.search(r'[~?%]', value))
-        return _day_of_year(md[1], md[2]), _APPROXIMATE_SLACK if loose else 0
-    rough = _rough_date(value)
-    if not rough:
+        doy = _day_of_year(md[1], md[2])
+        slack = _APPROXIMATE_SLACK if re.search(r'[~?%]', value) else 0
+        return {(doy - 1 + k) % 365 + 1 for k in range(-slack, slack + 1)}
+    m = _EDTF_DATE.match((value or '').strip())
+    if not m or not m.group('month') or 'X' in m.group('month'):
         return None
-    middle, half, words = rough
-    return middle, half - _SEASON_MARGIN if words in _SEASONS.values() else half
+    if m.group('day') and 'X' not in m.group('day'):
+        return None
+    month = int(m.group('month'))
+    months = {21: (3, 4, 5), 22: (6, 7, 8), 23: (9, 10, 11), 24: (12, 1, 2)}.get(
+        month, (month,) if 1 <= month <= 12 else ())
+    return {_day_of_year(mo, d) for mo in months for d in range(1, 32)
+            if d <= (28 if mo == 2 else 30 if mo in (4, 6, 9, 11) else 31)} or None
 
 
 def date_contradicts(stored: str, cue: str) -> bool:
@@ -370,11 +377,8 @@ def date_contradicts(stored: str, cue: str) -> bool:
     ys, yc = _EDTF_DATE.match(stored).group('year'), _EDTF_DATE.match(cue).group('year')
     if any(a != b for a, b in zip(ys, yc) if 'X' not in (a, b)):
         return True
-    ps, pc = _place_in_year(stored), _place_in_year(cue)
-    if not (ps and pc):
-        return False
-    apart = abs(ps[0] - pc[0])
-    return min(apart, 365 - apart) > ps[1] + pc[1]
+    ds, dc = _days_in_year(stored), _days_in_year(cue)
+    return bool(ds and dc) and not ds & dc
 
 # ============================================================================
 # Assignment: the running-present walk, then batches

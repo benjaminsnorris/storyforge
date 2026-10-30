@@ -1267,10 +1267,17 @@ class TestCueDates:
         assert date_contradicts('1831-10~', '1832-05')       # years differ
         assert date_contradicts('XXXX-01', 'XXXX-02')
         assert date_contradicts('XXXX-07-04', 'XXXX-06-30')  # exact days apart
+        assert date_contradicts('XXXX-21', 'XXXX-22')        # every pair of seasons
+        assert date_contradicts('XXXX-24', 'XXXX-21')
+        assert date_contradicts('XXXX-12-31', 'XXXX-01')
         # A coarser or matching cue is no contradiction
         assert not date_contradicts('1829-12~', '1829')
         assert not date_contradicts('1906-09-12', 'XXXX-09')
         assert not date_contradicts('XXXX-21', 'XXXX-04')    # April is spring
+        assert not date_contradicts('XXXX-24', 'XXXX-01-15')
+        assert not date_contradicts('1829-01-31', '1829-01')  # a month's last day
+        assert not date_contradicts('XXXX-02-29', 'XXXX-02')
+        assert not date_contradicts('XXXX-01-03~', 'XXXX-12-28~')  # across the new year
         assert not date_contradicts('187X-04', '1874-04')
         # Approximate days may sit a few days apart
         assert not date_contradicts('XXXX-07-04~', 'XXXX-06-30~')
