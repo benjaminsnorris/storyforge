@@ -9,7 +9,7 @@ verdict is ``unreviewed`` — a new kind of noise, or a real find — and needs 
 author before it can be counted either way, so it fails the suite too.
 
 Covers A Christmas Carol's two extraction runs and The Plastic Age's one, and
-the deterministic validator only. ``timeline --check`` flags (8 of Carol's 68
+the deterministic validator only. ``timeline --check`` flags (8 of Carol's 58
 labeled, 5 of The Plastic Age's 60) need API calls and are not replayed yet;
 Gatsby has no labeled flag set yet.
 """
