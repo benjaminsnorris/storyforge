@@ -316,6 +316,23 @@ class TestStageDispatch:
         with open(yaml_path) as f:
             assert f.read() == before
 
+    def test_an_interactive_session_with_no_blocks_is_not_a_failure(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """The interactive claude session writes the reference files itself;
+        its stream log has no blocks to apply, and that is not an error."""
+        monkeypatch.setattr('storyforge.cmd_elaborate.detect_project_root',
+                            lambda: project_dir)
+
+        def session(cmd, stdout=None, **kw):
+            stdout.write('{"type": "result", "result": "Updated the spine."}\n')
+            stdout.close()
+            return type('P', (), {'wait': lambda s: None, 'returncode': 0})()
+        monkeypatch.setattr('storyforge.cmd_elaborate.subprocess.Popen', session)
+
+        main(['--stage', 'spine', '--interactive'])  # no exit 1
+
+        assert mock_git.calls_for('commit_and_push')
+
     def test_spine_creates_branch_and_pr(self, mock_api, mock_git, mock_costs,
                                           project_dir, monkeypatch):
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')

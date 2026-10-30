@@ -620,9 +620,11 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
                 answer = ''
             if answer in ('q', 'quit'):
                 log('Author quit; stopping briefs loop')
+                _gn_brief_failures.append(f'{sid} and the scenes after it: author quit')
                 break
             if answer in ('s', 'skip'):
                 log(f'  {sid}: skipped by author')
+                _gn_brief_failures.append(f'{sid}: skipped by author')
                 continue
 
         log_file = os.path.join(log_dir, f'{sid}.json')
@@ -1836,14 +1838,20 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     f.write(content + '\n')
                 written.append(filename)
 
-        if not written:
+        if written:
+            log(f'  Updated: {", ".join(written)}')
+        elif interactive:
+            # The interactive session edits the reference files itself; its
+            # stream log holds no blocks to apply
+            log('  No output blocks in the session log (the interactive session '
+                'writes its files directly)')
+        else:
             # Validating, committing and advancing the phase over a stage
             # that wrote nothing would read as the stage having run
             log(f'ERROR: the {stage} reply held no output blocks Storyforge could '
                 f'apply; nothing was written and the phase is not advanced. '
                 f'See the reply: {stage_log}')
             sys.exit(1)
-        log(f'  Updated: {", ".join(written)}')
 
     # ========================================================================
     # Validate
