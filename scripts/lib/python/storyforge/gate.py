@@ -488,7 +488,7 @@ def report_lines(result: GateResult) -> list[str]:
         for rid, quote, why in result.check.kept_unverified:
             lines.append(f'NOTE (kept, not filled): {rid}: {why}')
         if result.check.unknown_brief_items:
-            lines.append('NOTE (brief items no binding fact matches, not checked): '
+            lines.append('NOTE (brief items in words, no ledger fact; checked as words): '
                          + _one_line('; '.join(result.check.unknown_brief_items)))
     if result.committed:
         lines.append(f'COMMITTED: {len(result.proposed)} fact(s)'

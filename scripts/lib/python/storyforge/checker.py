@@ -113,8 +113,8 @@ class CheckResult:
     #: (id, quote, why) for a `kept` item that didn't hold up: an id the brief
     #: doesn't promise, or a quote not in the scene
     kept_unverified: list[tuple[str, str, str]] = field(default_factory=list)
-    #: brief items (`column: item`) that name no binding ledger fact: the
-    #: checker was told so, but can't check them
+    #: brief items (`column: item`) written in words rather than naming a
+    #: binding ledger fact: checked against their words (no quote to fill)
     unknown_brief_items: list[str] = field(default_factory=list)
     run: ToolRun | None = None
 
@@ -314,7 +314,7 @@ class Brief:
     text: str = ''                                          # the prompt section
     promised: dict[str, str] = field(default_factory=dict)  # registry id → statement
     fields: dict[str, str] = field(default_factory=dict)    # PROMISE_FIELDS → text
-    unknown: list[str] = field(default_factory=list)        # brief items no ledger fact matches
+    unknown: list[str] = field(default_factory=list)        # brief items in words, no ledger fact
 
 
 def _brief(book: Book, project_dir: str, at: str) -> Brief:
@@ -338,8 +338,12 @@ def _brief(book: Book, project_dir: str, at: str) -> Brief:
             for item in _split_cell(scene.get(col, '')):
                 rid = aliases.get(item.lower())
                 if rid is None:
+                    # Written in words rather than naming a ledger fact: still
+                    # part of the brief, checked against its words
                     brief.unknown.append(f'{col}: {item}')
-                    lines.append(f'- **{col}**: "{item}" (not a binding fact in the ledger)')
+                    lines.append(f'- **{col}**: "{item}" (in words; no ledger fact names it)')
+                    if col in REGISTRY_PROMISE_FIELDS:
+                        brief.fields[col] = '; '.join(filter(None, [brief.fields.get(col), item]))
                     continue
                 lines.append(f'- **{col}**: {rid}: {by_id[rid]["statement"]}')
                 if col in REGISTRY_PROMISE_FIELDS:
@@ -360,7 +364,8 @@ def build_prompt(book: Book, at: str, brief_text: str) -> str:
     promise_rules = '' if "## The brief's promises" not in brief_text else (
         "\n**Broken promises.** Each item under \"The brief's promises\" is a promise. "
         'Report one the scene does not deliver (kind `broken-promise`; `fact_id` the registry id, or the '
-        'brief field for outcome / key_actions / key_dialogue; `established_quote` the '
+        'brief field for outcome / key_actions / key_dialogue or for an item written in '
+        'words; `established_quote` the '
         'promised item; `established_scene` empty; `scene_quote` the scene\'s nearest '
         'words, or empty if nothing in the scene comes near). A close paraphrase keeps a '
         'key_dialogue promise. For each registry fact the scene must establish and does, '

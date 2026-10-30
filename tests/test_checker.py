@@ -214,3 +214,31 @@ class TestReview439:
         with patch('storyforge.api._api_request', side_effect=boom), \
                 pytest.raises(CheckError, match='HTTP 500'):
             check_scene(project_dir, SCENE, model='m')
+
+
+class TestBriefItemsInWords:
+    """E4 at v1.101.0: 8 of 11 broken promises were physical_state_out items
+    the brief writes in words ("no sleep 36h"), which no ledger fact names
+    and the checker never checked. They are promises in words now."""
+
+    def _words(self, project_dir):
+        from storyforge.csv_cli import update_field
+        update_field(f'{project_dir}/reference/scene-briefs.csv', SCENE,
+                     'physical_state_out', 'archive-key-dorren;no sleep 36h')
+
+    def test_a_promise_in_words_is_listed_and_checkable(self, project_dir):
+        self._words(project_dir)
+        book = checker.Book.load(project_dir, SCENE)
+        brief = checker._brief(book, project_dir, SCENE)
+        promises = brief.text.split("## The brief's promises")[1]
+        assert '"no sleep 36h" (in words; no ledger fact names it)' in promises
+        assert brief.fields['physical_state_out'] == 'no sleep 36h'
+        assert 'archive-key-dorren' in brief.promised
+
+    def test_a_broken_promise_in_words_verifies(self, project_dir):
+        self._words(project_dir)
+        f = _finding(**{'kind': 'broken-promise', 'established_scene': '', 'scene_quote': '',
+                        'fact_id': 'physical_state_out',
+                        'established_quote': 'no sleep 36h'})
+        result, _ = _run(project_dir, [_answer([f])])
+        assert len(result.findings) == 1 and result.unverified == []
