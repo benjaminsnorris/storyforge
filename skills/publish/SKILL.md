@@ -1,6 +1,6 @@
 ---
 name: publish
-description: Publish a book to the Bookshelf app — generate manifest, authenticate, push content via API. Use when the author wants to publish, deploy, push their book to bookshelf, generate a dashboard, or update the web book.
+description: Publish a book to the Bookshelf app — generate manifest, authenticate, push content via API. Use when the author wants to publish, deploy, push their book to bookshelf, update or view the dashboard, or update the web book.
 ---
 
 # Storyforge Publish Skill

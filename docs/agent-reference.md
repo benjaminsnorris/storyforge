@@ -55,13 +55,13 @@ Scene files (`scenes/{id}.md`) are pure prose — **no frontmatter**. Filename i
 
 Storyforge defines and sends the dashboard's data; Bookshelf renders it (benjaminsnorris/bookshelf#30; Bookshelf's copy of the contract is `src/lib/dashboard/schema.ts`). `visualize.load_dashboard_data` builds it, `publish` sends it, and `storyforge visualize` writes it to `working/dashboard-data.json`.
 
-- `schema_version`: `1` (`visualize.DASHBOARD_SCHEMA_VERSION`). It is a major version. Adding a list or a CSV column doesn't change it. Renaming or removing a key, or changing a value's type, bumps it, and Bookshelf must support the new version first, since it refuses one it can't draw. `tests/test_dashboard_data.py` pins the keys.
+- `schema_version`: `1` (`visualize.DASHBOARD_SCHEMA_VERSION`). Bookshelf reads a missing one as 1. It is a major version. Adding a list or a CSV column doesn't change it. Renaming or removing a key, or changing a value's type, bumps it, and Bookshelf must support the new version first, since it refuses one it can't draw. `tests/test_dashboard_data.py` pins the keys.
 - `project`: `title`, `genre`, `phase`, `scene_count`, `total_words`, `target_words`, `generated`. All strings.
 - One list of rows per section. Each row is a CSV record, every value a string, with header names as keys. Values are not escaped; the renderer escapes them.
 
 | Key | Rows from |
 |---|---|
-| `scenes` | `reference/scenes.csv`. `location` may hold several places joined with `;`, and the renderer splits it. `act` is structural, `part` the book's physical division. A `setting` column is copied to `location` |
+| `scenes` | `reference/scenes.csv`. `location` may hold several places joined with `;`, and the renderer splits it. `act` is structural, `part` the book's physical division. A `setting` column is copied to `location` when there is no `location` column |
 | `intents`, `briefs` | `reference/scene-intent.csv`, `reference/scene-briefs.csv`, in `scenes.csv` `seq` order |
 | `characters`, `motif_taxonomy`, `locations`, `values`, `mice_threads`, `knowledge` | the matching `reference/*.csv` registry |
 | `scores`, `scene_rationales`, `narrative_scores`, `narrative_rationales`, `act_scores`, `act_rationales`, `character_scores`, `character_rationales`, `genre_scores`, `genre_rationales`, `fidelity_scores`, `fidelity_rationales` | `working/scores/latest/*.csv` |
