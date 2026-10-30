@@ -84,15 +84,17 @@ def is_unfilled_template(path: str, plugin_dir: str | None = None) -> bool:
     story architecture, ...), so on an extracted book they stay the
     template, whose headings and guidance would read as the book's own
     (F-130). Compared with templates/reference/<name>, ignoring outer
-    whitespace; a file with no template counterpart, or one that can't be
-    read, is never unfilled.
+    whitespace, a BOM and line endings; a file with no template counterpart,
+    or one that can't be read, is never unfilled.
     """
     template = os.path.join(plugin_dir or get_plugin_dir(), 'templates',
                             'reference', os.path.basename(path))
     if not os.path.isfile(path) or not os.path.isfile(template):
         return False
     try:
-        with open(path, encoding='utf-8') as f, open(template, encoding='utf-8') as t:
+        # utf-8-sig and newline=None: a BOM or CRLF endings (an editor's
+        # save) don't make a template copy read as the author's own text
+        with open(path, encoding='utf-8-sig') as f, open(template, encoding='utf-8-sig') as t:
             return f.read().strip() == t.read().strip()
     except (OSError, UnicodeDecodeError):
         return False  # unreadable: the caller's own read reports it
