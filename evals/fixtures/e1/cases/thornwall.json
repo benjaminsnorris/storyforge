@@ -833,8 +833,8 @@
       ],
       "introduced_by": {
         "kind": "tool",
-        "pass": "pattern-thinning",
-        "commit": "ea71b4e"
+        "pass": "write (first draft)",
+        "commit": "6456a04"
       },
       "regressed_by": [],
       "subsets": [
@@ -842,7 +842,7 @@
       ],
       "label_source": "",
       "confidence": "medium",
-      "notes": "9c24f36 named \"Compression technique incorrectly attributed to others\" as a target and fixed s30, but missed this line in s20 (present in its own parent tree ccb2a04). Removed silently in the scene-architecture rewrite 9b1f507. Introducing commit is for the first span; survey #34."
+      "notes": "9c24f36 named \"Compression technique incorrectly attributed to others\" as a target and fixed s30, but missed this line in s20 (present in its own parent tree ccb2a04). Removed silently in the scene-architecture rewrite 9b1f507. Survey #34. Both spans date from the first draft of s20-brens-fire (6456a04); pattern-thinning (ea71b4e, the case's earlier introducing commit) only reworded a line that already gave Bren \"three years of compression\"."
     },
     {
       "id": "thornwall-016",
@@ -1574,7 +1574,7 @@
       "introduced_by": {
         "kind": "tool",
         "pass": "redraft-from-corrected-briefs",
-        "commit": "7919d1a"
+        "commit": "749a82b"
       },
       "regressed_by": [],
       "subsets": [
@@ -1583,7 +1583,7 @@
       ],
       "label_source": "",
       "confidence": "medium",
-      "notes": "Medium because \"carried in my kit\" is loose; six vs nine is the hard pair. \"six years\" from 7919d1a, \"nine years\" from 749a82b, \"fifteen years\" from 1561e9b. Before the April redrafts Greenhollow was \"forty years past\" (s24)."
+      "notes": "Medium because \"carried in my kit\" is loose; six vs nine is the hard pair. 749a82b wrote both \"six years\" (thessan-resistance) and \"nine years\" (corvins-dispatch) in one redraft, so it is the introducing commit; 7919d1a only reworded the \"six years\" line. \"fifteen years\" from 1561e9b. Before the April redrafts Greenhollow was \"forty years past\" (s24)."
     },
     {
       "id": "thornwall-029",
