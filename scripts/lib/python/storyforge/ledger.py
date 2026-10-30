@@ -11,7 +11,10 @@ from those files is `docs/plans/2026-10-30-ledger-migration-proposal.md`.
 - `scene_order`, `active_states`, `established_before`: derived state. Per-
   character state "as of scene N" is derived, never stored.
 - `load` / `save` (and `load_from` / `save_to` for a `reference/` dir): the
-  project's ledger. `load` raises `NotMigratedError` while knowledge.csv or
+  project's ledger. Every write through `save`, `save_to`, `write_view` and
+  `migrate_files` is appended to the audit log (`storyforge.audit`,
+  `working/audit-log.csv`); `write_ledger` is the bare file writer and logs
+  nothing. `load` raises `NotMigratedError` while knowledge.csv or
   physical-states.csv is still on disk, so nothing reads half the facts.
 - `knowledge_view` / `physical_view` (`read_view`, `view_map`): one type's
   rows in the old files' shapes, for consumers that matched on them.
@@ -31,6 +34,7 @@ from __future__ import annotations
 
 import csv
 import os
+import threading
 from dataclasses import dataclass, field
 
 from storyforge.common import csv_safe
@@ -185,12 +189,37 @@ def load(project_dir: str) -> list[dict[str, str]]:
     return load_from(os.path.join(project_dir, 'reference'))
 
 
-def save_to(ref_dir: str, rows: list[dict[str, str]]) -> None:
-    write_ledger(os.path.join(ref_dir, LEDGER_FILE), rows)
+#: Serializes save_to's read-old / write / read-back / log sequence
+_SAVE_LOCK = threading.Lock()
 
 
-def save(project_dir: str, rows: list[dict[str, str]]) -> None:
-    save_to(os.path.join(project_dir, 'reference'), rows)
+def save_to(ref_dir: str, rows: list[dict[str, str]], *, command: str) -> None:
+    """Write `ref_dir`'s ledger and append the change to the audit log.
+
+    `command` names the writer (`hone`, `extract`, `audit`, ...): the audit
+    entry of every changed or removed fact carries it, and an added fact
+    with no `introduced_by` does too. The log entries are a diff of the file
+    before and after the write, read back, so they record what is on disk.
+    The ledger is written first: a log that can't be written is a WARNING
+    and the ledger write stands (`storyforge.audit` says why). A change made
+    on disk since the last logged write (by hand) is logged first, as
+    `command=hand-edit`, from the snapshot `audit` keeps.
+    """
+    from storyforge import audit
+    path = os.path.join(ref_dir, LEDGER_FILE)
+    project_dir = audit.project_of(ref_dir)
+    with _SAVE_LOCK:
+        old = read_ledger(path) if os.path.isfile(path) else []
+        # What changed on disk since the last logged write was not this writer
+        audit.log_hand_edits(project_dir, old)
+        write_ledger(path, rows)
+        written = read_ledger(path)
+        audit.record(project_dir, old, written, command=command)
+        audit.write_snapshot(project_dir, written)
+
+
+def save(project_dir: str, rows: list[dict[str, str]], *, command: str) -> None:
+    save_to(os.path.join(project_dir, 'reference'), rows, command=command)
 
 
 # ============================================================================
@@ -381,13 +410,16 @@ def replace_view(rows: list[dict[str, str]], type_: str,
 
 
 def write_view(ref_dir: str, type_: str, view_rows: list[dict[str, str]], *,
-               origin: str, introduced_by: str) -> None:
-    """Replace `type_`'s rows in `ref_dir`'s ledger (see `replace_view`)."""
+               origin: str, introduced_by: str, command: str | None = None) -> None:
+    """Replace `type_`'s rows in `ref_dir`'s ledger (see `replace_view`).
+
+    The change is audit-logged under `command`, which defaults to
+    `introduced_by` (the writer's name either way)."""
     rows = load_from(ref_dir)
     new = replace_view(rows, type_, view_rows, origin=origin,
                        introduced_by=introduced_by)
     if new != rows:
-        save_to(ref_dir, new)
+        save_to(ref_dir, new, command=command or introduced_by)
 
 
 def alias_map(view_rows: list[dict[str, str]]) -> dict[str, str]:
@@ -946,4 +978,8 @@ def migrate_files(ref_dir: str, *, dry_run: bool = False) -> FileMigration:
     for file in old:
         os.remove(os.path.join(ref_dir, file))
     result.removed = old
+    # One summary entry, not one per row (`storyforge.audit` says why)
+    from storyforge import audit
+    audit.record_migration(audit.project_of(ref_dir), migration.rows, old)
+    audit.write_snapshot(audit.project_of(ref_dir), read_ledger(path))
     return result

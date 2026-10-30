@@ -268,7 +268,7 @@ class TestRegistryFileValidation:
         rows = ledger.load_from(ref_dir)
         state = next(r for r in rows if r['id'] == 'archive-key-dorren')
         state.update(subject='', aliases='Garren')
-        ledger.save_to(ref_dir, rows)
+        ledger.save_to(ref_dir, rows, command='test')
         report = validate_schema(ref_dir, project_dir)
         assert [e['reason'] for e in report['errors'] if e['constraint'] == 'ledger'] == [
             "archive-key-dorren: physical state has no character (subject is blank; "
@@ -281,7 +281,7 @@ class TestRegistryFileValidation:
         ref_dir = os.path.join(project_dir, 'reference')
         rows = ledger.load_from(ref_dir)
         rows[0]['scene_id'] = 'burnside'
-        ledger.save_to(ref_dir, rows)
+        ledger.save_to(ref_dir, rows, command='test')
         reasons = [e.get('reason') for e in validate_schema(ref_dir, project_dir)['errors']]
         assert "map-anomaly-exists: scene_id 'burnside' is not a scene in scenes.csv " \
                "(renamed or removed?)" in reasons

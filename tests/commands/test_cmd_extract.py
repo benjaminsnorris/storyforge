@@ -1000,7 +1000,8 @@ class TestKnowledgeChainOffersOnlyEarlierFacts:
         view[1]['origin'] = 'act2-sc01'     # village-vanished: revealed later
         view[2]['origin'] = 'burnside'      # archive-erasure: a renamed scene
         ledger.save_to(ref_dir, ledger.replace_view(rows, 'knowledge', view,
-                                                    origin='author', introduced_by='author'))
+                                                    origin='author', introduced_by='author'),
+                       command='test')
         offered = {}
 
         def knowledge_prompt(scene_id, *args, known_facts=None, **kw):
@@ -1080,6 +1081,6 @@ class TestFactsWithNoKnownScene:
         rows = ledger.load_from(ref)
         used = next(r for r in rows if r['id'] == 'map-anomaly-exists')
         used['scene_id'] = 'burnside'
-        ledger.save_to(ref, rows)
+        ledger.save_to(ref, rows, command='test')
         _prune_registries(ref, set(), set())
         assert ledger.view_map(ref, 'knowledge')['map-anomaly-exists']['origin'] == 'burnside'

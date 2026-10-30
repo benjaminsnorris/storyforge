@@ -129,7 +129,7 @@ class TestCleanupAnswerFormats:
         states = [r for r in rows if r['type'] == 'physical']
         states[0]['action_gating'] = 'Yes — limps'
         states[0]['known_by'] = 'tessa-merrin'
-        ledger.save_to(ref_dir, rows)
+        ledger.save_to(ref_dir, rows, command='test')
         cleanup_answer_formats(ref_dir)
         after = ledger.load_from(ref_dir)
         states[0]['action_gating'] = 'true'

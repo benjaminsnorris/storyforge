@@ -235,7 +235,8 @@ def _run_registry_domain(domain: str, ref_dir: str, project_dir: str,
 
     commit_and_push(project_dir,
                     f'Hone: registries/{domain} — {entries} entries, {normalized} normalizations',
-                    ['reference/', 'working/logs/'])
+                    ['reference/', 'working/logs/', 'working/audit-log.csv',
+                     'working/.audit-snapshot.csv'])
 
 
 def _log_rejected(result: dict) -> None:
