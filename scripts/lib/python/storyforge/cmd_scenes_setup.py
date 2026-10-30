@@ -56,6 +56,17 @@ _PART_HEADING_RE = re.compile(
 )
 
 
+# A section of the story that isn't numbered as a chapter: "PRELUDE.",
+# "# Finale", "Epilogue: Ten Years Later". Middlemarch opens on a Prelude and
+# ends on a Finale; among chapter headings, the Prelude was dropped as front
+# matter and the Finale ran on inside the last chapter (F-117)
+_OTHER_CHAPTER_RE = re.compile(
+    r'^(?:#{1,2}\s+)?(?:prologue|prelude|interlude|epilogue|finale|afterword|coda)'
+    r'\.?\s*(?:[:.\-—–]\s*[^.!?]{0,60})?$',
+    re.IGNORECASE,
+)
+
+
 def _is_part_heading(line):
     stripped = line.strip()
     return len(stripped) <= 80 and bool(_PART_HEADING_RE.match(stripped))
@@ -841,6 +852,15 @@ def main(argv=None):
                 after = line_num == total_lines or not ms_lines[line_num].strip()
                 if before and after:
                     part_starts.append((line_num, stripped))
+                    continue
+
+            # A prologue, prelude, interlude, epilogue or finale on its own line
+            if _OTHER_CHAPTER_RE.match(stripped) and len(stripped) <= 80:
+                before = line_num == 1 or not ms_lines[line_num - 2].strip()
+                after = line_num == total_lines or not ms_lines[line_num].strip()
+                if before and after:
+                    chapter_starts.append(line_num)
+                    chapter_names.append(re.sub(r'^#+\s*', '', stripped))
                     continue
 
             # Markdown chapter headings
