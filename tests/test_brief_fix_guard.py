@@ -14,7 +14,8 @@ from unittest.mock import patch
 import pytest
 
 from storyforge import cmd_revise
-from storyforge.cmd_revise import _fix_and_redraft, _fix_upstream_briefs, _invented_names
+from storyforge.brief_names import invented_names
+from storyforge.cmd_revise import _fix_and_redraft, _fix_upstream_briefs
 
 # From shared-dark 0940bd4d (claires-cold), the rewrite that brought in Mallen.
 MALLEN = ('The captor, Mallen, kneels without speaking and works with genuine, '
@@ -23,14 +24,14 @@ MALLEN = ('The captor, Mallen, kneels without speaking and works with genuine, '
 
 class TestInventedNames:
     def test_flags_a_name_the_book_never_uses(self):
-        assert _invented_names([MALLEN], 'Claire is held in a basement room.') == ['Mallen']
+        assert invented_names([MALLEN], 'Claire is held in a basement room.') == ['Mallen']
 
     def test_book_names_and_possessives_pass(self):
-        assert _invented_names(["Claire's hands shake when Hank speaks."],
+        assert invented_names(["Claire's hands shake when Hank speaks."],
                                'Claire and Hank') == []
 
     def test_a_possessive_in_the_book_vouches_for_the_name(self):
-        assert _invented_names(['she waits for Mallen'], "Mallen's door") == []
+        assert invented_names(['she waits for Mallen'], "Mallen's door") == []
 
     @pytest.mark.parametrize('field', [
         'Mallen blocks the door.',
@@ -41,23 +42,23 @@ class TestInventedNames:
         'GOAL: Mallen',
     ])
     def test_names_opening_a_field_or_sentence_are_checked(self, field):
-        assert _invented_names([field], 'the warden waits at the door said go') != []
+        assert invented_names([field], 'the warden waits at the door said go') != []
 
     def test_ordinary_openers_pass_when_the_book_uses_the_word(self):
-        assert _invented_names(['Refuses to answer. Stays silent: Holds still.'],
+        assert invented_names(['Refuses to answer. Stays silent: Holds still.'],
                                'she refused, stayed, holding') == []
 
     def test_capitalized_ordinary_word_the_book_uses_passes(self):
-        assert _invented_names(['she reaches the Basement door'], 'the basement') == []
+        assert invented_names(['she reaches the Basement door'], 'the basement') == []
 
     def test_camel_case_and_hyphenated_names(self):
-        assert _invented_names(['she calls McKenzie and Jean-Luc'],
+        assert invented_names(['she calls McKenzie and Jean-Luc'],
                                'McKenzie spoke to Jean and Luc') == []
-        assert _invented_names(['she calls Luc'], 'Jean-Luc') == []
-        assert _invented_names(['she calls McMallen'], 'McKenzie') == ['McMallen']
+        assert invented_names(['she calls Luc'], 'Jean-Luc') == []
+        assert invented_names(['she calls McMallen'], 'McKenzie') == ['McMallen']
 
     def test_calendar_words_and_titles_pass(self):
-        assert _invented_names(['by Tuesday in March she asks Dr. Hank'], 'Hank') == []
+        assert invented_names(['by Tuesday in March she asks Dr. Hank'], 'Hank') == []
 
 
 REPLY = 'GOAL: {g}\nCONFLICT: {c}\nCRISIS: the door locks\nDECISION: she stays'
