@@ -161,6 +161,7 @@ def test_main_dispatch_table_completeness():
         'write', 'evaluate', 'revise', 'score', 'elaborate', 'extract',
         'validate', 'hone', 'reconcile', 'enrich', 'assemble', 'visualize',
         'timeline', 'cleanup', 'cover', 'scenes-setup', 'review', 'migrate',
+        'export',
     }
     missing = expected - set(COMMANDS.keys())
     assert not missing, f'Commands missing from dispatch table: {missing}'

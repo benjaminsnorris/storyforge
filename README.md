@@ -117,6 +117,7 @@ Run from your project root via the `./storyforge` runner:
 ./storyforge assemble --format epub          # Generate epub
 ./storyforge assemble --format web           # Generate web book
 ./storyforge visualize                       # Write working/dashboard-data.json
+./storyforge export                          # Write working/export/bundle.json
 ```
 
 All scripts support `--interactive` for supervised execution, `--dry-run` for preview, and `--coaching coach|strict` for coaching level override.
