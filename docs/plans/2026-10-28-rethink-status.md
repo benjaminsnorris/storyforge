@@ -220,12 +220,12 @@ Ben asked for work to continue overnight without waiting on him, and approved E6
 
 ## E6 (2026-10-30)
 
-Run-to-run variance of the paid suites: three independent live runs of the same code (v1.87.1, 3c01088d). Run 1 is the default recordings (`evals/fixtures/cassettes/`); runs 2 and 3 are `evals/fixtures/e6/run2` and `run3`. `python3 evals/consistency.py` replays all three (free) and writes `evals/e6/spread.json`; `evals/e6/e8-cases.json` is each E8 case's outcome per run. Not a default suite: the extra runs are a snapshot of one commit's prompts (see `evals/e6/__init__.py`), so they replay at bbeb6310 and miss once a prompt changes. **Range** below is max − min over the three runs; three runs underestimate the true spread, so a move about the size of the range is not evidence either way.
+Run-to-run variance of the paid suites: three independent live runs of the same code (v1.87.1, 3c01088d). Run 1 is the default recordings (`evals/fixtures/cassettes/`); runs 2 and 3 are `evals/fixtures/e6/run2` and `run3`. `python3 evals/consistency.py` replays all three (free) and writes `evals/e6/spread.json`; `evals/e6/e8-cases.json` is each E8 case's outcome per run. Not a default suite: the extra runs are a snapshot of one commit's prompts (see `evals/e6/__init__.py`), so they replay only while the requests match those of 3c01088d; a later prompt change is a miss. **Range** below is max − min over the three runs; three runs underestimate the true spread, so a move about the size of the range is not evidence either way.
 
 | Suite | Metric | run 1, 2, 3 | Range |
 |---|---|---|---|
-| E2-Carol | recall | 0.027, 0, 0.027 | one flag of 37 |
-| E2-drift | recall | 0.078, 0.059, 0.020 | 0.059 (4, 3, 1 of 51 true flags) |
+| E2-Carol | recall | 0.027, 0, 0.027 | one case of 37 |
+| E2-drift | recall | 0.078, 0.059, 0.020 (4, 3, 1 of 51 cases) | 0.059 |
 | E2-drift | precision | 0.40, 0.25, 0.33 | 0.15 |
 | E3 | recall (captured) | 0.286, 0.286, 0.265 (14, 14, 13) | 0.020 |
 | E3 | with partial | 0.755, 0.714, 0.694 | 0.061 |
@@ -240,7 +240,7 @@ Run-to-run variance of the paid suites: three independent live runs of the same 
 **What the claims made from single runs come to:**
 - **E3, structured outputs** (recall 0.245 → 0.286, two more facts captured): twice the range, so probably real but small. "With partial" moved 0.816 → 0.755, the size of its range: noise.
 - **E3 tier comparison:** Opus missed 2 fewer facts than Sonnet; Sonnet's own misses vary by 3. No evidence Opus extracts better, so **no routing change** stands. Haiku missed 4 more than Sonnet, just over the range, so "Haiku drops facts" holds weakly. (The tier runs predate structured outputs; their misses aren't comparable to today's.)
-- **E2-drift, v1.80.0 model re-record** (recall 0.16 → 0.10, precision 0.30 → 0.40): both about the range. Drift recall rests on 1–4 true flags out of 51, so any one-flag change is noise.
+- **E2-drift, v1.80.0 model re-record** (recall 0.16 → 0.10, 8 → 5 of 51 cases; precision 0.30 → 0.40): both the size of the range (recall's 3 cases equals it exactly). Drift recall rests on 1–4 recalled cases of 51, from 1–2 true flags, so a one-case change is noise.
 - **E4, re-pin to 5e9bdf39:** CP10k 18.2 → 16.1 is within the range (2.5). BPS 2.86 → 0.26 is far outside it and stands: the corrupt briefs were real.
 - **E8 gaps** (reintroduced 5 → 6): noise. **The baseline's 6 is the low end:** runs 2 and 3 reintroduced 10 and 11.
 

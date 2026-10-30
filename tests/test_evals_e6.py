@@ -95,3 +95,52 @@ def test_a_claim_gets_no_verdict_without_every_run():
     errored = e6.exceeds(summary, 'e8', 'reintroduced', 1)
     assert errored['within_noise'] is None
     assert errored['why'] == 'suite errored or not run'
+
+
+def test_a_claim_equal_to_the_range_is_within_noise():
+    """Two real claims sit exactly on their range (3 of 51 drift cases)."""
+    summary = e6.summarize({
+        'run1': _report(_result('d', {'recall': 4 / 51})),
+        'run2': _report(_result('d', {'recall': 1 / 51})),
+    })
+    assert e6.exceeds(summary, 'd', 'recall', 3 / 51)['within_noise'] is True
+
+
+def test_a_metric_no_run_measured_is_named_as_such():
+    summary = e6.summarize({'run1': _report(_result('d', {'recall': 0.1}))})
+    assert e6.exceeds(summary, 'd', 'recal', 0.1)['why'] == 'no run measured this metric'
+
+
+def test_an_errored_suite_without_a_message_says_so():
+    summary = e6.summarize({'run1': _report(_result('d', {}, status='error', error=None))})
+    assert summary['errored']['d'] == {'run1': 'errored (no message)'}
+
+
+def test_case_outcomes_reads_each_case_per_run():
+    def e8(*notes):
+        return _report({**_result('e8-revision-safety', {}), 'notes': list(notes)})
+    out = e6.case_outcomes({
+        'run1': e8('excluded 2: holdout (a-1, a-2)', 'gov-016 (scene-x): reintroduced — "quote"'),
+        'run2': e8('gov-016 (scene-x): consistent'),
+    })
+    assert out == {'gov-016': {'run1': 'reintroduced', 'run2': 'consistent'}}
+
+
+def test_every_claim_names_a_measured_metric():
+    """A typo in CLAIMS would otherwise read as 'no verdict'."""
+    import json
+    sys.path.insert(0, str(PLUGIN_DIR / 'evals'))
+    import consistency
+    with open(PLUGIN_DIR / 'evals' / 'e6' / 'spread.json') as f:
+        spread = json.load(f)
+    for suite, metric, _delta, _claim in consistency.CLAIMS:
+        assert metric in spread['suites'][suite], (suite, metric)
+
+
+def test_a_rounded_range_still_meets_an_exact_delta_it_equals():
+    """E3 with partial: 0.7551 - 0.6939 = 0.0612, the claim 3/49 = 0.061224."""
+    summary = e6.summarize({
+        'run1': _report(_result('e3', {'recall_with_partial': 0.7551})),
+        'run2': _report(_result('e3', {'recall_with_partial': 0.6939})),
+    })
+    assert e6.exceeds(summary, 'e3', 'recall_with_partial', 3 / 49)['within_noise'] is True

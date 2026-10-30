@@ -66,9 +66,11 @@ to a model `costs.py` has no price for (they are costed at sonnet rates).
 `evals/fixtures/e6/run2` and `run3` are two more independent recordings of
 the paid suites, beside the default ones (run 1).
 `python3 evals/consistency.py` replays all three and writes the per-metric
-spread to `evals/e6/spread.json`. They replay only at the commit they were
-recorded on (see `evals/e6/__init__.py`); results and reading are in the
-status doc.
+spread to `evals/e6/spread.json` (and each E8 case's outcome per run to
+`evals/e6/e8-cases.json`). Like any recording they replay only while the
+requests match, so a prompt change since they were recorded (v1.87.1,
+3c01088d) is a miss; they are not re-recorded on every change (see
+`evals/e6/__init__.py`). Results and reading are in the status doc.
 
 ## Model-tier comparisons
 

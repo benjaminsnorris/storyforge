@@ -21,6 +21,7 @@ when a variance question needs today's code, not on every change.
 from __future__ import annotations
 
 import math
+import re
 
 SUITES = ('e2-carol', 'e2-corpus-drift', 'e3-extraction', 'e4-generation',
           'e8-revision-safety')
@@ -70,7 +71,8 @@ def summarize(reports: dict[str, dict]) -> dict:
               for run, report in reports.items()}
     suites = sorted({s for results in by_run.values() for s in results})
     for suite in suites:
-        bad = {run: (by_run[run].get(suite) or {}).get('error') or 'suite not in this run'
+        bad = {run: ('suite not in this run' if suite not in by_run[run]
+                     else by_run[run][suite].get('error') or 'errored (no message)')
                for run in runs
                if suite not in by_run[run] or by_run[run][suite]['status'] == 'error'}
         if bad:
@@ -89,6 +91,9 @@ def summarize(reports: dict[str, dict]) -> dict:
     return out
 
 
+_ROUNDING = 5e-4
+
+
 def exceeds(summary: dict, suite: str, metric: str, claimed_delta: float) -> dict:
     """Whether one metric's run-to-run range is at least a claimed improvement.
 
@@ -98,9 +103,32 @@ def exceeds(summary: dict, suite: str, metric: str, claimed_delta: float) -> dic
     """
     row = summary['suites'].get(suite, {}).get(metric)
     if row is None or row.get('missing_in'):
+        why = ('suite errored or not run' if suite not in summary['suites']
+               else 'no run measured this metric' if row is None
+               else 'metric not measured in every run')
         return {'suite': suite, 'metric': metric, 'claimed_delta': claimed_delta,
-                'range': None, 'within_noise': None,
-                'why': 'metric not measured in every run'
-                       if suite in summary['suites'] else 'suite errored or not run'}
+                'range': None, 'within_noise': None, 'why': why}
+    # Suites round their metrics to 4 places, so a range built from them can
+    # fall just short of an exact delta it equals
     return {'suite': suite, 'metric': metric, 'claimed_delta': claimed_delta,
-            'range': row['range'], 'within_noise': row['range'] >= abs(claimed_delta)}
+            'range': row['range'],
+            'within_noise': row['range'] + _ROUNDING >= abs(claimed_delta)}
+
+
+_CASE_NOTE = re.compile(r'^(\S+-\d+) \([^)]*\): (\w+)')
+
+
+def case_outcomes(reports: dict[str, dict], suite: str = 'e8-revision-safety') -> dict:
+    """Each case's outcome per run (``reintroduced``, ``consistent``,
+    ``not_present``, ``halted``), read from the suite's notes, which name
+    every replayed case as ``<case> (<scene>): <outcome>``."""
+    out: dict[str, dict[str, str]] = {}
+    for run, report in reports.items():
+        for result in report['results']:
+            if result['suite'] != suite:
+                continue
+            for note in result.get('notes', []):
+                m = _CASE_NOTE.match(note)
+                if m:
+                    out.setdefault(m.group(1), {})[run] = m.group(2)
+    return out

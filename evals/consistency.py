@@ -6,7 +6,9 @@
 
 Run 1 is ``fixtures/cassettes``; runs 2 and 3 are ``fixtures/e6/run2`` and
 ``run3``. See ``evals/e6`` for why this is not a default suite.
-Exit code: 0 every run replayed, 2 a suite errored in some run.
+Also writes evals/e6/e8-cases.json: each E8 case's outcome per run.
+Exit code: 0 every run replayed, 2 a suite errored in some run (1 from an
+uncaught crash).
 """
 
 from __future__ import annotations
@@ -22,20 +24,23 @@ import e6  # noqa: E402
 from harness import EVALS_DIR, discover, run_all  # noqa: E402
 
 SPREAD_FILE = os.path.join(EVALS_DIR, 'e6', 'spread.json')
+CASES_FILE = os.path.join(EVALS_DIR, 'e6', 'e8-cases.json')
 
 # Moves the status doc reported from single runs, each to be read against
-# E6's range: (suite, metric, claimed delta, where it was claimed).
+# E6's range: (suite, metric, claimed delta, where it was claimed). Deltas
+# are exact counts over the suite's cases, not the rounded figures: a delta
+# equal to the range must compare equal.
 CLAIMS = (
-    ('e3-extraction', 'recall', 0.041,
-     'structured outputs: recall 0.245 -> 0.286 (v1.83.0)'),
-    ('e3-extraction', 'recall_with_partial', 0.061,
-     'structured outputs: with partial 0.816 -> 0.755 (v1.83.0)'),
+    ('e3-extraction', 'recall', 2 / 49,
+     'structured outputs: recall 0.245 -> 0.286 (12 -> 14 of 49; v1.83.0)'),
+    ('e3-extraction', 'recall_with_partial', 3 / 49,
+     'structured outputs: with partial 0.816 -> 0.755 (40 -> 37 of 49; v1.83.0)'),
     ('e3-extraction', 'missing', 2,
      'tier comparison: Opus misses 7, Sonnet 9 (v1.81.0)'),
     ('e3-extraction', 'missing', 4,
      'tier comparison: Haiku misses 13, Sonnet 9 (v1.81.0)'),
-    ('e2-corpus-drift', 'recall', 0.06,
-     'v1.80.0 re-record on new models: recall 0.16 -> 0.10'),
+    ('e2-corpus-drift', 'recall', 3 / 51,
+     'v1.80.0 re-record on new models: recall 0.16 -> 0.10 (8 -> 5 of 51)'),
     ('e2-corpus-drift', 'precision', 0.10,
      'v1.80.0 re-record on new models: precision 0.30 -> 0.40'),
     ('e4-generation', 'cp10k', 2.1,
@@ -50,6 +55,7 @@ def parse_args(argv):
                                      description=__doc__.splitlines()[0])
     parser.add_argument('--report', help='Save each run\'s full report as FILE-runN.json')
     parser.add_argument('--spread-file', default=SPREAD_FILE, help=argparse.SUPPRESS)
+    parser.add_argument('--cases-file', default=CASES_FILE, help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -75,6 +81,9 @@ def main(argv=None) -> int:
                          for suite, metric, delta, claim in CLAIMS]
     with open(args.spread_file, 'w') as f:
         json.dump(summary, f, indent=2, sort_keys=True)
+        f.write('\n')
+    with open(args.cases_file, 'w') as f:
+        json.dump(e6.case_outcomes(reports), f, indent=1, sort_keys=True)
         f.write('\n')
     print(_summary(summary))
     print(f'Spread: {args.spread_file}')
