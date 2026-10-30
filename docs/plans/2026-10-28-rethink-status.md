@@ -1,6 +1,6 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-30 (late), at v1.102.0 (#440's phase 5 steps 5a/5b added; see Next steps 2). **Phase 3 is next and nothing is in flight.** **A fresh session starts here:** read **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-10-30 (late), at v1.103.0 (#440's phase 5 steps 5a–5c added; see Next steps 2). **Phase 3 is next and nothing is in flight.** **A fresh session starts here:** read **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
 
 ## Start here
 
@@ -72,10 +72,11 @@ Suggested order, one PR each (each with a reviewer, evals re-recorded without as
 E4 (`evals/e4`) drafts with `cmd_write._build_prompt` in direct mode today; it must follow the gated loop once it ships (it is the success measure). Budget: E4 live is $5.29; a gated E4 adds extract + check (+ fix) per scene, likely 2–3×.
 
 **2. #440 / F-130: extraction writes the upper reference layers** (a separate track from Phase 3; plan `docs/plans/2026-10-30-extract-upper-layers.md`, which has the design, the step table, the PR order, the costs and Ben's five decisions). The goal is to go from a finished book to every file a Storyforge project has, describing the book as written, so the classics can validate the scorers. New code goes in `storyforge/extract_describe.py` as extract **phase 5**, with only a thin dispatcher (`_run_phase_5`) in `cmd_extract.py`.
-- **Done (v1.101.1 #442, v1.102.0 #444):**
+- **Done (v1.101.1 #442, v1.102.0 #444, v1.103.0 #446):**
   - The write gate: `write_described`, provenance in `working/extraction-provenance.csv`, and the cell record in `working/extraction-cells.csv`. A file or cell is replaced only while it still holds what phase 5 wrote.
   - **5a** writes `spine.csv` and `architecture.csv`, plus blank scene summaries, `architecture_scene` and a placeholder genre.
   - **5b** writes `themes.csv` and `motif-taxonomy.csv`, plus `theme_threads`. Brief `motifs` become ids, and every description moves to the new free-text brief column `motif_details` (Ben: ids in the brief, nothing lost).
+  - **5c** (`run_pitch`) writes `story-summary.md` and `story-architecture.md` from one call. The summary is in `parse_story_summary`'s shape and is checked against the L0–L2 floors with the scorer's own counters (one retry). The architecture's lengths, act shares, POV counts, theme and motif names come from the CSVs; its acts are the book's own (`scenes.csv:act`), while the summary's Act-shape is always three movements (the L2 floor). Live on *Carol* (a clean copy of the E7 run1 reference set, no phase 0 profile): 5a–5c $0.44, 5c $0.15, L0–L4 pass; one bug found and fixed (the model repeated the "Closing image:" label).
   - Fixes on the way:
     - template headers now match `elaborate._FILE_MAP` (and cleanup, migrate-medium, `scenes.py` and the init skill derive from it);
     - phase 3b keeps its scene summaries;
@@ -87,19 +88,18 @@ E4 (`evals/e4`) drafts with `cmd_write._build_prompt` in direct mode today; it m
   - the L3/L4 floors pass;
   - no motif or `architecture_scene` validate errors.
 - **Next, one PR each** (plan "PRs, in order"):
-  1. **5c:** `story-summary.md` (in the shape `common.parse_story_summary` reads; the L0–L2 floors) and `story-architecture.md`, in one call.
-  2. **5d/5e/5f:** character bible, world bible (a systems-bible stub when the book has no formal system), voice guide plus `voice-profile.csv`.
+  1. **5d/5e/5f:** character bible, world bible (a systems-bible stub when the book has no formal system), voice guide plus `voice-profile.csv`.
      - Describe, never prescribe: elaborate's voice prompt is prescriptive, so don't reuse it.
      - Dialogue samples need a new helper (`prose_analysis.extract_dialogue` joins every line).
      - Books with an unmigrated ledger need a stated fallback.
-  3. **5g:** `timeline.md`, `chapter-map.csv` (when missing), and the **E9 replay suite** on *Carol*:
+  2. **5g:** `timeline.md`, `chapter-map.csv` (when missing), and the **E9 replay suite** on *Carol*:
      - every reference file is filled, except `key-decisions.md`, `visual-style.md` and `canon/` (Ben's decision 1);
      - `score --all-levels` passes;
      - `status` gets past the ladder;
      - a rerun writes nothing.
 
      This is the first recording of phase 5's prompts, at about $0.40 for 5a+5b plus the later steps.
-  4. **Hand-off to storyforge-evals:** gold reference notes per book and a re-score of *Carol* and *Gatsby*.
+  3. **Hand-off to storyforge-evals:** gold reference notes per book and a re-score of *Carol* and *Gatsby*.
 - **Each step reuses:** `Run`, `_ask` (one retry with the parser's problems), `_gate` (a step writes all its files or none), `_write_all`, `_set_cells` and `_csv_text` (unquoted; model text never goes through a quoting writer). Each step returns `written` / `skipped` / `partial`. Add each new path to `WRITTEN_PATHS`; a test checks every changed file is committed.
 - **Deferred:** tell 3b's prompt its summary is kept (≤35 words). That's a prompt change, so it re-records E3; fold it into a recording you're making anyway.
 

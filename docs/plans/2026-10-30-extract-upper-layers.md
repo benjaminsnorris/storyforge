@@ -1,6 +1,6 @@
 # Extract the upper reference layers (#440, F-130 part 2)
 
-Status (2026-10-30): PR 0 (#442, v1.101.1) and PR 1 (#444, v1.102.0) are merged: the write gate, and steps 5a and 5b. Next is PR 2 (5c). Live on *Carol*, 5a/5b wrote an 8-event spine, 20 anchors, 6 themes and 26 motifs for $0.79 across three runs, and the L3/L4 floors pass. Handoff: `docs/plans/2026-10-28-rethink-status.md`, Next steps 2.
+Status (2026-10-30): PR 0 (#442, v1.101.1) and PR 1 (#444, v1.102.0) are merged: the write gate, and steps 5a and 5b. PR 2 (#446, v1.103.0) adds 5c. Next is PR 3 (5d–5f). Live on *Carol*, 5a/5b wrote an 8-event spine, 20 anchors, 6 themes and 26 motifs for $0.79 across three runs, and the L3/L4 floors pass; 5a–5c from a clean copy cost $0.44 (5c $0.15) and pass L0–L4. Handoff: `docs/plans/2026-10-28-rethink-status.md`, Next steps 2.
 
 ## Goal
 
