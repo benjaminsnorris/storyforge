@@ -1740,26 +1740,31 @@ No explanation. No markdown. Just the labeled lines."""
 # Briefs domain: hone_briefs
 # ============================================================================
 
+# The files hone's model rewrites write: neither vouches for a name, since
+# an earlier rewrite (hone's, or revise's brief fix) may have invented it
+_REWRITTEN_FILES = ('scene-briefs.csv', 'scene-intent.csv')
+
+
 def _apply_checked_rewrites(row: dict, sid: str, rewrites: dict, current_values: dict,
                             kind: str, project_dir: str, known_reference: str,
                             rejected: dict[str, list[str]]) -> int:
     """Write one reply's changed fields into *row* (a scene's brief or intent),
-    unless the reply names a capitalized word that *known_reference*, the
-    scene's prose and the row's other fields never use; then the row is left
-    as it was and the scene listed in *rejected* with why. Returns the number
-    of fields changed."""
+    unless the reply names a capitalized word that *known_reference* (the
+    reference files but ``_REWRITTEN_FILES``) and the scene's prose never use;
+    then the row is left as it was and the scene listed in *rejected* with
+    why. The row's own fields don't vouch for a name either. Returns the
+    number of fields changed."""
     from storyforge.brief_names import invented_names, read_text
     changed = {f: v for f, v in rewrites.items() if v and v != current_values.get(f)}
     if not changed:
         return 0
     prose_path = os.path.join(project_dir, 'scenes', f'{sid}.md')
     prose = read_text(prose_path) if os.path.isfile(prose_path) else ''
-    kept = ' '.join(str(v) for k, v in row.items() if k not in changed)
-    names = invented_names(list(changed.values()), '\n'.join((known_reference, prose, kept)))
+    names = invented_names(list(changed.values()), '\n'.join((known_reference, prose)))
     if names:
         reason = f'{kind} rewrite of {", ".join(sorted(changed))} named {", ".join(names)}'
         log(f'    WARNING: not rewriting {sid}: the {reason}, which appear nowhere in the '
-            f'reference files, its prose or its other fields')
+            f'reference files or its prose')
         rejected.setdefault(sid, []).append(reason)
         return 0
     row.update(changed)
@@ -1793,9 +1798,11 @@ def hone_briefs(
             scene-briefs.csv are merged into all_issues before processing.
 
     Returns:
-        Dict with scenes_flagged, scenes_rewritten, fields_rewritten and
-        rejected: scene id -> why a rewrite was refused (it named a word the
-        book never uses; see ``brief_names``).
+        Dict with scenes_flagged, scenes_rewritten, fields_rewritten,
+        changed (the ids of the scenes whose brief changed) and rejected:
+        scene id -> why a rewrite was refused (it named a word the book never
+        uses; see ``brief_names``). The early returns (dry run, strict, no
+        issues) carry only the counts.
     """
     briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
     scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
@@ -1865,8 +1872,9 @@ def hone_briefs(
         by_scene.setdefault(issue['scene_id'], []).append(issue)
 
     from storyforge.brief_names import reference_text
-    known_reference = reference_text(project_dir)
+    known_reference = reference_text(project_dir, exclude=_REWRITTEN_FILES)
     rejected: dict[str, list[str]] = {}
+    changed_ids: list[str] = []
 
     scenes_rewritten = 0
     fields_rewritten = 0
@@ -1973,6 +1981,7 @@ def hone_briefs(
         if changed:
             scenes_rewritten += 1
             fields_rewritten += changed
+            changed_ids.append(sid)
 
     # Write back if any changes were made
     if fields_rewritten > 0:
@@ -1988,6 +1997,7 @@ def hone_briefs(
         'scenes_flagged': len(by_scene),
         'scenes_rewritten': scenes_rewritten,
         'fields_rewritten': fields_rewritten,
+        'changed': changed_ids,
         'rejected': rejected,
     }
 
@@ -2569,6 +2579,7 @@ def hone_intent(
     # character_presence scoring rewards characters being in on_stage, so we
     # expand the characters list rather than shrinking on_stage.
     det_fields_rewritten = 0
+    det_changed: set[str] = set()
     not_subset_issues = [i for i in all_issues if i['issue'] == 'not_subset']
     for issue in not_subset_issues:
         sid = issue['scene_id']
@@ -2584,6 +2595,7 @@ def hone_intent(
             new_chars = existing_chars + missing
             intent_map[sid]['characters'] = ';'.join(new_chars)
             det_fields_rewritten += 1
+            det_changed.add(sid)
 
     # Write deterministic fixes immediately if any
     if det_fields_rewritten > 0:
@@ -2629,8 +2641,9 @@ def hone_intent(
                         if det_fields_rewritten > 0 else 0)
     api_fields_rewritten = 0
     from storyforge.brief_names import reference_text
-    known_reference = reference_text(project_dir, rewritten='scene-intent.csv')
+    known_reference = reference_text(project_dir, exclude=_REWRITTEN_FILES)
     rejected: dict[str, list[str]] = {}
+    changed_ids: list[str] = []
     total_scenes = len(by_scene)
 
     for idx, (sid, issues) in enumerate(by_scene.items(), 1):
@@ -2716,6 +2729,7 @@ def hone_intent(
 
         if scene_fields_rewritten > 0:
             scenes_rewritten += 1
+            changed_ids.append(sid)
 
     # Write back if any API-driven changes were made (deterministic writes already happened above)
     if api_fields_rewritten > 0:
@@ -2727,6 +2741,7 @@ def hone_intent(
         'scenes_flagged': len(set(f['scene_id'] for f in all_issues)),
         'scenes_rewritten': scenes_rewritten,
         'fields_rewritten': det_fields_rewritten + api_fields_rewritten,
+        'changed': sorted(set(changed_ids) | det_changed),
         'rejected': rejected,
     }
 

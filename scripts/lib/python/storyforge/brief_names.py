@@ -86,12 +86,13 @@ def read_text(path: str) -> str:
         return f.read()
 
 
-def reference_text(project_dir: str, rewritten: str = 'scene-briefs.csv') -> str:
+def reference_text(project_dir: str,
+                   exclude: tuple[str, ...] = ('scene-briefs.csv',)) -> str:
     """The reference docs and registries, which make a name the book's own.
-    The file being rewritten (*rewritten*) is left out on purpose: names an
-    earlier rewrite invented live there."""
+    The files model rewrites write (*exclude*) are left out on purpose: names
+    an earlier rewrite invented live there."""
     ref_dir = os.path.join(project_dir, 'reference')
     return '\n'.join(
         read_text(os.path.join(ref_dir, name))
         for name in (sorted(os.listdir(ref_dir)) if os.path.isdir(ref_dir) else [])
-        if name != rewritten and name.endswith(('.md', '.csv')))
+        if name not in exclude and name.endswith(('.md', '.csv')))

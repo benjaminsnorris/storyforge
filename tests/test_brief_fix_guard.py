@@ -269,3 +269,15 @@ class TestHoneBriefsGuard:
         assert result['rejected'] == {
             'act1-sc01': ['evaluation rewrite of function named Mallen']}
         assert _read_csv_as_map(intent_csv)['act1-sc01']['function'] == before
+
+    def test_a_name_only_in_the_briefs_or_intent_files_does_not_vouch(
+            self, project_dir, monkeypatch):
+        """An earlier rewrite may have put the name there: hone trusts only
+        the other reference files and the scene's prose."""
+        from storyforge.csv_cli import update_field
+        update_field(os.path.join(project_dir, 'reference', 'scene-briefs.csv'),
+                     'act1-sc01', 'conflict', 'Voss blocks the audit')
+        update_field(os.path.join(project_dir, 'reference', 'scene-intent.csv'),
+                     'act1-sc01', 'function', 'Voss takes the office')
+        result = self._hone(project_dir, monkeypatch, 'goal: get past Voss before the audit')
+        assert result['rejected'] == {'act1-sc01': ['evaluation rewrite of goal named Voss']}

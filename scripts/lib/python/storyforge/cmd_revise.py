@@ -2480,14 +2480,18 @@ def main(argv=None):
             fields_changed = hone_result.get('fields_rewritten', 0)
             scenes_changed = hone_result.get('scenes_rewritten', 0)
             log(f'  Upstream: {scenes_changed} scenes, {fields_changed} fields rewritten')
+            for sid, reasons in (hone_result.get('rejected') or {}).items():
+                log(f'  Rewrite refused for {sid}: {"; ".join(reasons)}')
 
-            # Track or execute redraft
+            # Track or execute redraft: only scenes whose brief or intent
+            # changed (a refused rewrite leaves its prose alone)
             if effective_coaching == 'full' and targets:
-                affected = [t.strip() for t in targets.split(';') if t.strip()]
+                changed_ids = set(hone_result.get('changed') or [])
+                affected = [s for s in (target_scenes or []) if s in changed_ids]
                 if defer_redraft:
                     redraft_needed.update(affected)
                     log(f'  Deferred redraft for {len(affected)} scenes (will batch after all upstream passes)')
-                else:
+                elif affected:
                     try:
                         _redraft_from_briefs(project_dir, affected, pass_model,
                                              log_dir, system=system)

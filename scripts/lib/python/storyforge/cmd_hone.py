@@ -237,11 +237,12 @@ def _run_registry_domain(domain: str, ref_dir: str, project_dir: str,
 
 
 def _log_rejected(result: dict) -> None:
-    """Name the scenes whose brief or intent rewrite was refused for naming
-    someone or something the book never mentions; those fields are unchanged."""
+    """Name the scenes with a brief or intent rewrite refused for naming
+    someone or something the book never mentions; the fields that rewrite
+    would have changed are as they were."""
     rejected = result.get('rejected') or {}
     if rejected:
-        log(f'  Left unchanged ({len(rejected)} scene(s)): the rewrite named words the book never uses')
+        log(f'  Rewrites refused in {len(rejected)} scene(s): they named words the book never uses')
         for sid, reasons in rejected.items():
             log(f'    {sid}: {"; ".join(reasons)}')
 
@@ -493,7 +494,10 @@ def _run_loop(ref_dir: str, project_dir: str, log_dir: str, model: str,
                             ['reference/', 'working/'])
 
         if rewritten == 0:
-            log('  Nothing rewritten — converged')
+            if result.get('rejected'):
+                log('  Nothing rewritten: every rewrite was refused (above). Stopping.')
+            else:
+                log('  Nothing rewritten — converged')
             break
     else:
         log(f'\n  Reached max iterations ({max_loops})')
