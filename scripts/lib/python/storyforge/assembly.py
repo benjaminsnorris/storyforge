@@ -1277,6 +1277,11 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
                                    read_yaml_field as _common_read_yaml_field)
 
     # Check freshness
+    if not os.path.isfile(_chapter_map_path(project_dir)):
+        raise ValueError('No chapter map (reference/chapter-map.csv): publish '
+                         'needs one to know the chapters. Create it with the '
+                         'produce skill, or let scenes-setup write it when it '
+                         'splits a manuscript')
     is_fresh, missing, extra = check_chapter_map_freshness(project_dir)
     if not is_fresh:
         parts = []

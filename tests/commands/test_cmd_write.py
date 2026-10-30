@@ -436,6 +436,7 @@ class TestScopeFiltering:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_write.detect_project_root',
                             lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_write.time.sleep', lambda s: None)  # 10s between scenes
 
         # Write a marker to act-1 scene file so we can verify it wasn't touched
         act1_scene = os.path.join(project_dir, 'scenes', 'act1-sc01.md')

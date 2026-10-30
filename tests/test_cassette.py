@@ -105,7 +105,8 @@ def test_every_failure_is_logged_for_the_harness(tape, monkeypatch, live_calls):
     assert [e['error'].split(':')[0] for e in _log(tape)] == ['CassetteMiss', 'CassetteError']
 
 
-@pytest.mark.parametrize('content', [b'{truncated', b'not gzip at all', gzip.compress(b'{"request": {}}'), gzip.compress(b'[]'), gzip.compress(b'{"x": 1')[:-6]])
+@pytest.mark.parametrize('content', [b'{truncated', b'not gzip at all', gzip.compress(b'{"request": {}}', mtime=0), gzip.compress(b'[]', mtime=0),
+                                     gzip.compress(b'{"x": 1', mtime=0)[:-6]])
 def test_unreadable_recording_is_an_error_not_an_answer(tape, monkeypatch, live_calls, content):
     monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'replay')
     target = cassette.recording_path(os.environ['STORYFORGE_CASSETTE'],
