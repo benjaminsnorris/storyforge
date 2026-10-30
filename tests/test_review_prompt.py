@@ -158,34 +158,168 @@ class TestReviewGuidance:
     def test_extraction_has_its_own_criteria(self, nested_repo, monkeypatch):
         prompt = _capture_prompt(nested_repo, monkeypatch)
         assert 'Overall quality of the changes' not in prompt
+        assert 'Do the extracted rows match the scene prose shown' in prompt
+
+
+PARA = ('He walked on through the fog and the dark. ' * 40).strip()
+
+
+def _big_book(project, n=300):
+    """n long scenes whose slug order is the reverse of their seq order, with
+    scenes.csv and a long scene-briefs.csv keyed by scene id."""
+    _write(os.path.join(project, 'storyforge.yaml'), "project:\n  title: 'Big'\n")
+    ids = [f'scene-event-{i:03d}' for i in range(n)]
+    seq_of = {sid: n - i for i, sid in enumerate(ids)}  # 299 is first in story
+    for sid in ids:
+        _write(os.path.join(project, 'scenes', f'{sid}.md'),
+               f'OPENING-{sid} ' + '\n'.join([PARA] * 20) + f' CLOSING-{sid}\n')
+    _write(os.path.join(project, 'reference', 'scenes.csv'),
+           'id|seq|title\n' + ''.join(f'{sid}|{seq_of[sid]}|T\n' for sid in ids))
+    _write(os.path.join(project, 'reference', 'scene-briefs.csv'),
+           'id|goal\n' + ''.join(f'{sid}|BRIEF-{sid} ' + 'g' * 600 + '\n' for sid in ids))
+    _write(os.path.join(project, 'reference', 'characters.csv'),
+           'id|name\n' + ''.join(f'c{i}|CHARACTER-{i}\n' for i in range(50)))
+    _write(os.path.join(project, 'working', 'notes.md'), 'OTHER_FILE_BODY\n')
+    return ids, seq_of
+
+
+def _contents(prompt):
+    return prompt[prompt.index('## File Contents'):prompt.index('## How to read these files')]
+
+
+def _shown(prompt, rel):
+    return f'=== FILE: {rel} ===' in prompt
 
 
 class TestReviewBudget:
-    def test_large_book_is_excerpted_within_budget(self, tmp_path, monkeypatch):
-        import storyforge.git as sfgit
+    @pytest.fixture(scope='class')
+    @classmethod
+    def big_diff(cls, tmp_path_factory):
+        """A real diff: main holds only the yaml, the branch adds the book.
+        Shared by the class; tests only read it."""
+        project = str(tmp_path_factory.mktemp('bigdiff') / 'big')
+        _write(os.path.join(project, 'storyforge.yaml'), "project:\n  title: 'Big'\n")
+        _git(project, 'init', '-b', 'main')
+        _git(project, 'add', '-A')
+        _git(project, 'commit', '-m', 'init')
+        _git(project, 'checkout', '-b', 'storyforge/extract-x')
+        ids, seq_of = _big_book(project)
+        _git(project, 'add', '-A')
+        _git(project, 'commit', '-m', 'extract')
+        return project, ids, seq_of
 
+    def test_diff_review_is_excerpted_within_budget(self, big_diff, monkeypatch):
+        import storyforge.git as sfgit
+        project, ids, _ = big_diff
+        prompt = _capture_prompt(project, monkeypatch)
+        assert 'changed since it branched from `main`' in prompt
+        assert len(_contents(prompt)) < sfgit.REVIEW_CONTENT_BUDGET + 3000
+        for sid in ids:  # every file is named, even past the budget
+            assert f'scenes/{sid}.md' in prompt
+        assert 'omitted' in prompt
+        assert 'the content budget ran out' in prompt
+
+    def test_files_past_budget_are_marked_in_the_manifest(self, big_diff, monkeypatch):
+        project, ids, _ = big_diff
+        prompt = _capture_prompt(project, monkeypatch)
+        hidden = [sid for sid in ids if not _shown(prompt, f'scenes/{sid}.md')]
+        assert hidden
+        for sid in hidden:
+            line = next(ln for ln in prompt.splitlines() if ln.startswith(f'- scenes/{sid}.md'))
+            assert line.endswith('— not shown (budget)')
+        shown_line = next(ln for ln in prompt.splitlines() if ln.startswith(f'- scenes/{ids[-1]}.md'))
+        assert 'not shown' not in shown_line
+
+    def test_scenes_follow_seq_not_slug(self, big_diff, monkeypatch):
+        project, ids, _ = big_diff
+        prompt = _capture_prompt(project, monkeypatch)
+        # seq runs opposite to slug order: the last slug is the first scene.
+        assert _shown(prompt, f'scenes/{ids[-1]}.md')
+        assert not _shown(prompt, f'scenes/{ids[0]}.md')
+        assert prompt.index(f'=== FILE: scenes/{ids[-1]}.md') < prompt.index(f'=== FILE: scenes/{ids[-2]}.md')
+
+    def test_scene_csv_rows_line_up_with_scenes_shown(self, big_diff, monkeypatch):
+        project, ids, _ = big_diff
+        prompt = _capture_prompt(project, monkeypatch)
+        for sid in ids:
+            assert _shown(prompt, f'scenes/{sid}.md') == (f'BRIEF-{sid} ' in prompt), sid
+        line = next(ln for ln in prompt.splitlines() if ln.startswith('- reference/scene-briefs.csv'))
+        assert 'cut to the rows of the' in line
+        # Rows are whole, never cut mid-row.
+        briefs = prompt.split('=== FILE: reference/scene-briefs.csv ===')[1].split('=== END FILE')[0]
+        assert 'omitted' not in briefs
+
+    def test_whole_project_fallback_uses_smaller_budget(self, tmp_path, monkeypatch):
+        import storyforge.git as sfgit
         project = str(tmp_path / 'big')
-        _project_files(project)
-        para = ('He walked on through the fog and the dark. ' * 40).strip()
-        for i in range(300):
-            _write(os.path.join(project, 'scenes', f'scene-event-{i:03d}.md'),
-                   f'OPENING-{i:03d} ' + '\n'.join([para] * 20) + f' CLOSING-{i:03d}\n')
+        _big_book(project)
         _git(project, 'init', '-b', 'only')
         _git(project, 'add', '-A')
         _git(project, 'commit', '-m', 'extract')
-
         prompt = _capture_prompt(project, monkeypatch)
-        assert len(prompt) < sfgit.REVIEW_CONTENT_BUDGET + 60000
-        # Every file is at least named, with its size, even past the budget.
-        for i in range(300):
-            assert f'scenes/scene-event-{i:03d}.md' in prompt
-        # Early files are excerpted (head shown, middle omitted), not skipped.
-        assert 'OPENING-000' in prompt
-        assert 'omitted' in prompt
-        # Past the budget, files are named but not shown, and the prompt says so.
-        assert 'not shown: the content budget ran out' in prompt
-        # Reference CSVs come before scenes, so they are always shown.
-        assert 'marley-was-dead|1|Marley Was Dead' in prompt
+        assert 'no base branch' in prompt
+        assert len(_contents(prompt)) < sfgit.WHOLE_PROJECT_BUDGET + 3000
+        # Structure whole, scenes excerpted, the rest listed but not shown.
+        assert 'CHARACTER-49' in prompt and 'CHARACTER-0' in prompt
+        assert _shown(prompt, 'scenes/scene-event-299.md')
+        assert 'OTHER_FILE_BODY' not in prompt
+        assert '- working/notes.md — 1 words, 1 lines — not shown (budget)' in prompt
+
+
+class TestReviewScopeCases:
+    def test_merged_branch_reviews_whole_project(self, nested_repo, monkeypatch):
+        repo = os.path.dirname(os.path.dirname(nested_repo))
+        _git(repo, 'checkout', 'main')
+        _git(repo, 'merge', '--no-ff', '-m', 'merge', 'pilot/carol')
+        _git(repo, 'push', 'origin', 'main')
+        _git(repo, 'checkout', 'pilot/carol')
+        prompt = _capture_prompt(nested_repo, monkeypatch)
+        assert 'Nothing in this project changed since `origin/' in prompt
+        assert 'Marley was dead: to begin with.' in prompt
+
+    def test_uncommitted_edit_to_tracked_file_is_reviewed(self, nested_repo, monkeypatch):
+        _write(os.path.join(nested_repo, 'reference', 'scenes.csv'),
+               'id|seq|title\nmarley-was-dead|1|UNCOMMITTED_TITLE\n')
+        prompt = _capture_prompt(nested_repo, monkeypatch)
+        assert 'UNCOMMITTED_TITLE' in prompt
+
+    def test_deleted_file_is_marked(self, nested_repo, monkeypatch):
+        repo = os.path.dirname(os.path.dirname(nested_repo))
+        _git(repo, 'rm', '-q', 'projects/carol/storyforge.yaml')
+        _git(repo, 'commit', '-m', 'rm')
+        prompt = _capture_prompt(nested_repo, monkeypatch)
+        assert '- storyforge.yaml — deleted' in prompt
+
+    def test_binary_file_is_named_not_inlined(self, nested_repo, monkeypatch):
+        repo = os.path.dirname(os.path.dirname(nested_repo))
+        with open(os.path.join(nested_repo, 'cover.png'), 'wb') as f:
+            f.write(b'\x89PNG\0\0BINARY_BODY')
+        _git(repo, 'add', '-A')
+        _git(repo, 'commit', '-m', 'cover')
+        prompt = _capture_prompt(nested_repo, monkeypatch)
+        assert '- cover.png — binary, ' in prompt
+        assert 'BINARY_BODY' not in prompt
+
+    def test_detached_head(self, nested_repo, monkeypatch):
+        repo = os.path.dirname(os.path.dirname(nested_repo))
+        _git(repo, 'checkout', '-q', '--detach')
+        prompt = _capture_prompt(nested_repo, monkeypatch)
+        assert 'changed since it branched from' in prompt
+        assert 'Marley was dead: to begin with.' in prompt
+        assert 'HARNESS_SECRET' not in prompt
+
+    def test_gitignored_project_walks_the_directory(self, tmp_path, monkeypatch):
+        repo = str(tmp_path / 'outer')
+        project = os.path.join(repo, 'books', 'carol')
+        _project_files(project)
+        _write(os.path.join(project, 'scenes', 'marley-was-dead.md'), SCENE_TEXT)
+        _write(os.path.join(repo, '.gitignore'), 'books/\n')
+        _git(repo, 'init', '-b', 'only')
+        _git(repo, 'add', '-A')
+        _git(repo, 'commit', '-m', 'init')
+        prompt = _capture_prompt(project, monkeypatch)
+        assert 'gitignored' in prompt
+        assert 'Marley was dead: to begin with.' in prompt
 
 
 class TestFillLevel:
@@ -196,7 +330,7 @@ class TestFillLevel:
 
     def test_everything_fits(self):
         from storyforge.git import _fill_level
-        assert _fill_level([10, 20], 1000) >= 20
+        assert _fill_level([10, 20], 1000) == 1000
 
     def test_small_project_keeps_every_file(self, no_base_repo):
         from storyforge.git import review_file_sections

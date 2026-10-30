@@ -306,6 +306,10 @@ REVIEW_FILE_MAX = 20_000
 # Fewest characters worth showing of a file; below this, low-priority files
 # are left out (named, not shown) so the rest get a useful excerpt.
 REVIEW_FILE_MIN = 1_500
+# The whole-project fallback (no base branch, or nothing changed) reviews
+# structure plus scene excerpts on a smaller budget, and lists the rest.
+WHOLE_PROJECT_BUDGET = 70_000
+WHOLE_PROJECT_SCENE_CAP = 2_000
 # Pipeline output the review must not judge: earlier reviews and logs.
 _REVIEW_SKIP_PREFIXES = ('working/reviews/', 'working/logs/')
 
@@ -364,27 +368,35 @@ def _paths(project_dir: str, *args: str) -> list[str]:
     return [p for p in r.stdout.split('\0') if p]
 
 
-def _project_tree(project_dir: str) -> list[str]:
-    """Every file in the project, relative to it (tracked and untracked)."""
+def _project_tree(project_dir: str) -> tuple[list[str], str]:
+    """Every file in the project, relative to it, and a note on how they were
+    found ('' when git listed them)."""
     if _git(project_dir, 'rev-parse', '--is-inside-work-tree', check=False).returncode == 0:
         tracked = _paths(project_dir, 'ls-files')
         untracked = _paths(project_dir, 'ls-files', '--others', '--exclude-standard')
-        return sorted(set(tracked) | set(untracked))
+        listed = set(tracked) | set(untracked)
+        if listed:
+            return sorted(listed), ''
+        how = ('Git lists no files in this directory (the project may be gitignored), '
+               'so the files were found by walking the directory.')
+    else:
+        how = 'This directory is not in a git repository, so the files were found by walking it.'
     files = []
     for root, dirs, names in os.walk(project_dir):
         dirs[:] = [d for d in dirs if not d.startswith('.')]
         for n in names:
             if not n.startswith('.'):
-                files.append(os.path.relpath(os.path.join(root, n), project_dir))
-    return sorted(files)
+                files.append(os.path.relpath(os.path.join(root, n), project_dir).replace(os.sep, '/'))
+    return sorted(files), how
 
 
-def review_scope(project_dir: str) -> tuple[str, list[str], str]:
+def review_scope(project_dir: str) -> tuple[str, list[str], str, bool]:
     """What the pipeline review looks at.
 
-    Returns (scope_note, files, diff_stat). Paths are relative to project_dir,
-    and nothing outside project_dir is included, even when the project sits
-    inside a larger repository.
+    Returns (scope_note, files, diff_stat, whole_project). Paths are relative
+    to project_dir, and nothing outside project_dir is included, even when the
+    project sits inside a larger repository. whole_project is True when there
+    is no diff to review (no base branch, or nothing changed since it).
     """
     base, mb = _review_base(project_dir)
     if mb:
@@ -396,28 +408,54 @@ def review_scope(project_dir: str) -> tuple[str, list[str], str]:
         files = _in_review(set(changed) | set(untracked))
         if files:
             stat = _git(project_dir, 'diff', '--stat=120', '--relative', mb, check=False).stdout.strip()
-            return (f'Files in this project changed since it branched from `{base}`.', files, stat)
+            return (f'Files in this project changed since it branched from `{base}`.', files, stat, False)
         note = (f'Nothing in this project changed since `{base}` (the work may already be on '
                 f'that branch), so this review covers the whole project as it stands.')
     else:
         note = ('This repository has no base branch to compare against, so this review '
                 'covers the whole project as it stands.')
-    return note, _in_review(_project_tree(project_dir)), ''
+    files, how = _project_tree(project_dir)
+    if how:
+        note = f'{note} {how}'
+    return note, _in_review(files), '', True
 
 
 def _in_review(files) -> list[str]:
     return sorted(f for f in files if not f.startswith(_REVIEW_SKIP_PREFIXES))
 
 
-def _review_priority(rel: str) -> tuple[int, str]:
-    """Order files so the budget goes to structure first, then prose."""
-    if rel == 'storyforge.yaml':
-        return 0, rel
-    if rel.startswith('reference/'):
-        return 1, rel
-    if rel.startswith('scenes/'):
-        return 2, rel
-    return 3, rel
+def _is_scene(rel: str) -> bool:
+    return rel.startswith('scenes/') and rel.endswith('.md') and rel.count('/') == 1
+
+
+def _scene_id(rel: str) -> str:
+    return rel[len('scenes/'):-len('.md')]
+
+
+def _scene_seq(project_dir: str) -> dict[str, float]:
+    """Scene id -> seq from reference/scenes.csv ({} if unreadable)."""
+    path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    try:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return {}
+    if not lines:
+        return {}
+    header = [h.strip() for h in lines[0].split('|')]
+    if 'id' not in header or 'seq' not in header:
+        return {}
+    i_id, i_seq = header.index('id'), header.index('seq')
+    seqs = {}
+    for line in lines[1:]:
+        cells = line.split('|')
+        if len(cells) <= max(i_id, i_seq):
+            continue
+        try:
+            seqs[cells[i_id].strip()] = float(cells[i_seq])
+        except ValueError:
+            continue
+    return seqs
 
 
 def _read_text(path: str) -> str | None:
@@ -455,49 +493,157 @@ def _fill_level(sizes: list[int], budget: int) -> int:
     return budget  # everything fits whole
 
 
+# Characters a shown file adds beyond its text: the === FILE === wrapper
+# and an omission marker.
+_BLOCK_OVERHEAD = 160
+
+
+def _per_scene_rows(text: str, scene_ids: set[str]) -> tuple[str, list[tuple[str, str]]] | None:
+    """(header, [(id, row)]) for a pipe CSV keyed by scene id, else None."""
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].split('|')[0].strip() != 'id':
+        return None
+    rows = [(ln.split('|', 1)[0].strip(), ln) for ln in lines[1:] if ln.strip()]
+    if not any(rid in scene_ids for rid, _ in rows):
+        return None
+    return lines[0], rows
+
+
 def review_file_sections(project_dir: str, files: list[str],
-                         budget: int = REVIEW_CONTENT_BUDGET) -> tuple[str, str]:
+                         budget: int = REVIEW_CONTENT_BUDGET,
+                         scene_cap: int = REVIEW_FILE_MAX,
+                         show_others: bool = True) -> tuple[str, str]:
     """Build the manifest and the file-contents sections of the review prompt.
 
-    Every file gets a manifest line with its word and line counts. Contents
-    are shown in priority order (structure, then scenes, then the rest).
-    Small files are shown whole and long ones excerpted to an equal share of
-    the budget; when the budget is too thin, the lowest-priority files are
-    named in the manifest but not shown.
+    Order: storyforge.yaml and reference/ (structure), then scenes in `seq`
+    order from scenes.csv, then everything else. Reference CSVs keyed by
+    scene id are cut to whole rows for the scenes shown, so rows and prose
+    line up. The rest is water-filled: small files whole, long ones excerpted
+    (scenes to at most scene_cap). When the budget is thin, files are left out
+    from the end (others first, then the latest scenes); show_others=False
+    leaves out everything but structure and scenes. Every file gets a manifest
+    line, and one left out says "not shown (budget)".
     """
-    ordered = sorted(files, key=_review_priority)
-    texts: dict[str, str | None] = {}
-    manifest = []
-    for rel in ordered:
+    texts: dict[str, str] = {}
+    status: dict[str, str] = {}
+    for rel in files:
         path = os.path.join(project_dir, rel)
         if not os.path.isfile(path):
-            manifest.append(f'- {rel} — deleted')
+            status[rel] = 'deleted'
             continue
         try:
             text = _read_text(path)
         except OSError as e:
-            manifest.append(f'- {rel} — unreadable ({e.strerror})')
+            status[rel] = f'unreadable ({e.strerror})'
             continue
-        texts[rel] = text
         if text is None:
-            manifest.append(f'- {rel} — binary, {os.path.getsize(path)} bytes')
+            status[rel] = f'binary, {os.path.getsize(path)} bytes'
         else:
-            manifest.append(f'- {rel} — {len(text.split())} words, '
-                            f'{len(text.splitlines())} lines')
+            texts[rel] = text
 
-    readable = [r for r in ordered if texts.get(r) is not None]
-    sizes = [min(len(texts[r]), REVIEW_FILE_MAX) for r in readable]
-    # Drop the lowest-priority files until every kept file gets at least
-    # REVIEW_FILE_MIN characters (or is shown whole).
-    keep = len(readable)
-    while keep > 1 and _fill_level(sizes[:keep], budget) < REVIEW_FILE_MIN:
-        keep -= 1
-    level = _fill_level(sizes[:keep], budget)
-    blocks = [f'=== FILE: {rel} ===\n{_excerpt(texts[rel], min(size, level))}\n=== END FILE ==='
-              for rel, size in zip(readable[:keep], sizes[:keep])]
-    not_shown = len(readable) - keep
+    seq = _scene_seq(project_dir)
+    inf = float('inf')
+
+    def scene_key(rel: str) -> tuple:
+        return (seq.get(_scene_id(rel), inf), rel)
+
+    scenes = sorted((r for r in texts if _is_scene(r)), key=scene_key)
+    scene_ids = [_scene_id(r) for r in scenes]
+    per_scene = {}
+    for rel in sorted(texts):
+        if rel.startswith('reference/') and rel.endswith('.csv') and scene_ids:
+            parsed = _per_scene_rows(texts[rel], set(scene_ids))
+            if parsed:
+                per_scene[rel] = parsed
+    structure = sorted((r for r in texts if (r == 'storyforge.yaml' or r.startswith('reference/'))
+                        and r not in per_scene), key=lambda r: (r != 'storyforge.yaml', r))
+    others = sorted(r for r in texts if r not in per_scene and r not in structure and r not in scenes)
+
+    row_cost: dict[str, int] = {}
+    for _, rows in per_scene.values():
+        for rid, line in rows:
+            row_cost[rid] = row_cost.get(rid, 0) + len(line)
+    header_cost = sum(len(h) for h, _ in per_scene.values())
+    cum = [0]
+    for sid in scene_ids:
+        cum.append(cum[-1] + row_cost.get(sid, 0))
+
+    s_sizes = [min(len(texts[r]), REVIEW_FILE_MAX) for r in structure]
+    sc_sizes = [min(len(texts[r]), scene_cap) for r in scenes]
+    o_sizes = [min(len(texts[r]), REVIEW_FILE_MAX) for r in others] if show_others else []
+
+    def level_for(k: int, m: int) -> int | None:
+        sizes = s_sizes + sc_sizes[:k] + o_sizes[:m]
+        # Each shown file also costs its === FILE === wrapper and, if cut,
+        # the omission marker.
+        rem = (budget - header_cost - cum[k]
+               - _BLOCK_OVERHEAD * (len(sizes) + len(per_scene)))
+        if rem < 0:
+            return None
+        if sum(sizes) <= rem:
+            return rem
+        lvl = _fill_level(sizes, rem)
+        return lvl if lvl >= REVIEW_FILE_MIN else None
+
+    k = len(scenes)
+    while k > 0 and level_for(k, 0) is None:
+        k -= 1
+    m = 0
+    if k == len(scenes):
+        m = len(o_sizes)
+        while m > 0 and level_for(k, m) is None:
+            m -= 1
+    level = level_for(k, m)
+    if level is None:  # structure alone overflows: share what there is
+        level = _fill_level(s_sizes, max(0, budget - header_cost - _BLOCK_OVERHEAD
+                                         * (len(s_sizes) + len(per_scene))))
+
+    shown_ids = set(scene_ids[:k])
+    shown: dict[str, str] = {}
+    notes: dict[str, str] = {}
+    for rel, size in zip(structure, s_sizes):
+        shown[rel] = _excerpt(texts[rel], min(size, level))
+    for rel, (header, rows) in per_scene.items():
+        kept = [line for rid, line in rows if rid in shown_ids]
+        shown[rel] = header + ''.join(kept)
+        if len(kept) < len(rows):
+            notes[rel] = (f'cut to the rows of the {k} scenes shown '
+                          f'({len(kept)} of {len(rows)} rows)')
+    for rel, size in zip(scenes[:k], sc_sizes[:k]):
+        shown[rel] = _excerpt(texts[rel], min(size, level))
+    for rel, size in zip(others[:m], o_sizes[:m]):
+        shown[rel] = _excerpt(texts[rel], min(size, level))
+
+    def manifest_key(rel: str) -> tuple:
+        if rel == 'storyforge.yaml':
+            return (0, 0, rel)
+        if rel.startswith('reference/'):
+            return (1, 0, rel)
+        if _is_scene(rel):
+            return (2,) + scene_key(rel)
+        return (3, 0, rel)
+
+    manifest = []
+    blocks = []
+    not_shown = 0
+    for rel in sorted(files, key=manifest_key):
+        if rel in status:
+            manifest.append(f'- {rel} — {status[rel]}')
+            continue
+        text = texts[rel]
+        line = f'- {rel} — {len(text.split())} words, {len(text.splitlines())} lines'
+        if rel not in shown:
+            not_shown += 1
+            manifest.append(f'{line} — not shown (budget)')
+            continue
+        if rel in notes:
+            line += f' — {notes[rel]}'
+        elif len(shown[rel]) < len(text):
+            line += ' — excerpted'
+        manifest.append(line)
+        blocks.append(f'=== FILE: {rel} ===\n{shown[rel]}\n=== END FILE ===')
     if not_shown:
-        blocks.append(f'({not_shown} more files are listed above but not shown: '
+        blocks.append(f'({not_shown} more files are listed above as "not shown (budget)": '
                       f'the content budget ran out. You have not read them.)')
     return '\n'.join(manifest), '\n\n'.join(blocks)
 
@@ -508,8 +654,14 @@ def build_review_prompt(review_type: str, project_dir: str) -> str:
     genre = read_yaml_field('project.genre', project_dir) or read_yaml_field('genre', project_dir) or ''
     review_criteria = _REVIEW_CRITERIA.get(review_type, _REVIEW_GENERIC_CRITERIA)
 
-    scope_note, files, diff_stat = review_scope(project_dir)
-    manifest, contents = review_file_sections(project_dir, files)
+    scope_note, files, diff_stat, whole_project = review_scope(project_dir)
+    if whole_project:
+        # No diff to focus on: keep the whole-project review cheap.
+        manifest, contents = review_file_sections(
+            project_dir, files, budget=WHOLE_PROJECT_BUDGET,
+            scene_cap=WHOLE_PROJECT_SCENE_CAP, show_others=False)
+    else:
+        manifest, contents = review_file_sections(project_dir, files)
     stat_section = f'\n## Diff Summary\n\n{diff_stat}\n' if diff_stat else ''
 
     genre_note = f' ({genre})' if genre else ''
@@ -526,7 +678,7 @@ Review only these files. Everything outside this project directory is out of sco
 {stat_section}
 ## File Contents
 
-Long files are excerpted: the start and end are shown and the middle is marked as omitted.
+Long files are excerpted: the start and end are shown and the middle is marked as omitted. Scenes appear in story order (`seq`), and reference CSVs keyed by scene id are cut to the rows of the scenes shown, so rows and prose line up.
 
 {contents or '(no readable files)'}
 
