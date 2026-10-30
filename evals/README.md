@@ -61,6 +61,15 @@ Cost is reported per suite: `usd_spent` (live calls this run) and `usd_if_live`
 (what the run would cost without recordings). `unpriced_calls` counts calls
 to a model `costs.py` has no price for (they are costed at sonnet rates).
 
+## Run-to-run spread (E6)
+
+`evals/fixtures/e6/run2` and `run3` are two more independent recordings of
+the paid suites, beside the default ones (run 1).
+`python3 evals/consistency.py` replays all three and writes the per-metric
+spread to `evals/e6/spread.json`. They replay only at the commit they were
+recorded on (see `evals/e6/__init__.py`); results and reading are in the
+status doc.
+
 ## Model-tier comparisons
 
 `evals/fixtures/tier-comparison/<model>/` holds recordings of a suite run with
