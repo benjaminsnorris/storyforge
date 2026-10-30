@@ -473,7 +473,8 @@ def fill_quote(rows: list[dict[str, str]], fact_id: str, quote: str) -> bool:
     (`docs/plans/2026-10-30-gate-ledger-design.md`).
 
     The quote is not checked against the prose here: the gate passes only
-    quotes the checker found verbatim in the scene.
+    quotes `quotes.quote_in` found in the scene (whole words, quote marks,
+    dashes and spacing normalized), of at least `checker.MIN_KEPT_WORDS`.
 
     Raises:
         ValueError: `fact_id` is not in `rows`; is a commitment, not a binding

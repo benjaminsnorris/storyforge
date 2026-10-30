@@ -380,8 +380,8 @@ class TestKnown:
     ORDER = {'s1': 0, 's2': 1, 's3': 2}
 
     def _known(self, rows, scene='s2', subjects=frozenset()):
-        from storyforge.cmd_extract import _phase4_known
-        known, recorded, _ = _phase4_known(rows, scene, self.ORDER, set(subjects))
+        from storyforge.extract import known_for_scene
+        known, recorded, _ = known_for_scene(rows, scene, self.ORDER, set(subjects))
         return [r['id'] for r in known], [r['id'] for r in recorded]
 
     def test_registry_and_commitment_rows_in_force_and_what_the_scene_has(self):
@@ -404,9 +404,9 @@ class TestKnown:
         assert self._known(rows)[0] == ['heals-here', 'fixed', 'new']
 
     def test_past_the_limit_the_scenes_people_and_place_come_first(self, monkeypatch):
-        from storyforge import cmd_extract
-        monkeypatch.setattr(cmd_extract, 'MAX_KNOWN_COMMITMENTS', 3)
-        from storyforge.cmd_extract import _phase4_known
+        from storyforge import extract
+        monkeypatch.setattr(extract, 'MAX_KNOWN_COMMITMENTS', 3)
+        from storyforge.extract import known_for_scene
         rows = [_ledger_row('tessa-early', scene_id='', subject='tessa'),
                 _ledger_row('knows', scene_id='', known_by='kael;tessa'),
                 _ledger_row('pell-name', scene_id='', subject='pell', mutable='fixed'),
@@ -414,4 +414,4 @@ class TestKnown:
                 _ledger_row('other-2', scene_id='s1', subject='pell')]
         # about the scene first, then a fixed fact before a more recent state
         assert self._known(rows, subjects={'tessa'})[0] == ['tessa-early', 'knows', 'pell-name']
-        assert _phase4_known(rows, 's2', self.ORDER, {'tessa'})[2] == 2
+        assert known_for_scene(rows, 's2', self.ORDER, {'tessa'})[2] == 2

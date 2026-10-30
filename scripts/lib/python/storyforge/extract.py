@@ -836,6 +836,167 @@ def parse_commitments_response(response: str, scene_id: str) -> list[dict[str, s
     return out
 
 
+#: Facts in force offered to a scene's prompt. Past it, those about the
+#: scene's characters and location are kept first (F-128), fixed facts
+#: before states, then the most recent.
+MAX_KNOWN_COMMITMENTS = 200
+
+
+def known_for_scene(rows, scene_id, order, scene_subjects):
+    """What phase 4 and the gate offer `scene_id` (F-128): `(known, recorded,
+    left_out)`.
+
+    `known`: binding facts in force entering the scene, from earlier scenes
+    or with no scene (backstory), registry and commitment rows alike: not
+    superseded by then, and no `state` whose `resolves` scene is already
+    past. A fact tied to a scene id that isn't in `order` is left out (it
+    may come later; F-123; `unplaced_rows` names them). Over
+    `MAX_KNOWN_COMMITMENTS`, the facts about `scene_subjects` (subject or
+    `known_by`) are kept first, `fixed` before `state`, then the most recent;
+    the result is in reading order, and `left_out` counts the rest.
+
+    `recorded`: facts another writer than phase 4 already recorded for the
+    scene itself (registry facts, and the gate's commitments), which the
+    scene must not restate.
+    """
+    from . import ledger
+    at = order[scene_id]
+
+    def pos(r):
+        sid = r.get('scene_id', '').strip()
+        return -1 if not sid else order.get(sid)
+
+    binding = [r for r in rows if r.get('status') == 'binding' and pos(r) is not None]
+    earlier = [r for r in binding if pos(r) < at]
+    superseded = {old for r in earlier for old in ledger._split(r.get('supersedes', ''))}
+
+    def in_force(r):
+        if r['id'] in superseded:
+            return False
+        ends = r.get('resolves', '').strip()
+        return not (r.get('mutable') == 'state' and ends in order and order[ends] < at)
+    known = sorted((r for r in earlier if in_force(r)), key=pos)
+    left_out = max(0, len(known) - MAX_KNOWN_COMMITMENTS)
+    if left_out:
+        def about_scene(r):
+            return (r.get('subject', '') in scene_subjects
+                    or bool(set(ledger._split(r.get('known_by', ''))) & scene_subjects))
+        ranked = sorted(range(len(known)),
+                        key=lambda i: (not about_scene(known[i]),
+                                       known[i].get('mutable') != 'fixed', -i))
+        keep = set(ranked[:MAX_KNOWN_COMMITMENTS])
+        known = [r for i, r in enumerate(known) if i in keep]
+    recorded = [r for r in binding if pos(r) == at
+                and r.get('introduced_by') != ledger.COMMITMENTS_PASS]
+    return known, recorded, left_out
+
+
+def unplaced_rows(rows, order):
+    """Binding rows whose scene id is neither blank nor in `order`: no scene
+    can be told when they hold, so none is offered them."""
+    return [r['id'] for r in rows if r.get('status') == 'binding'
+            and r.get('scene_id', '').strip()
+            and r['scene_id'].strip() not in order]
+
+
+def commitment_id(scene_id: str, statement: str, taken: set[str]) -> str:
+    """`{scene_id}--{first words of the statement}`, unique in the ledger."""
+    words = re.sub(r'[^a-z0-9]+', '-', statement.lower()).strip('-').split('-')
+    base = f'{scene_id}--{"-".join(words[:6])}'.rstrip('-')
+    rid, n = base, 2
+    while rid in taken:
+        rid, n = f'{base}-{n}', n + 1
+    return rid
+
+
+#: The kinds `commitment_rows` reports, each a list of strings in `problems`
+COMMITMENT_PROBLEMS = ('quote', 'no quote', 'subject', 'supersedes', 'disagrees',
+                       'ends', 'ends registry', 'ends again', 'cap', 'unplaced')
+
+
+def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
+                    rows: list[dict[str, str]], known: list[dict[str, str]],
+                    recorded: list[dict[str, str]], subjects: dict[str, str],
+                    introduced_by: str, problems: dict[str, list[str]],
+                    own_writers: tuple[str, ...],
+                    registry_is_plan: bool = False) -> list[dict[str, str]]:
+    """Ledger rows for one scene's parsed commitments (`parse_commitments_response`).
+
+    Each is binding, `origin=prose`, `introduced_by`, with an id unique in
+    `rows`. A subject is resolved through `subjects` (lowercased name → id).
+    A `supersedes` is kept only when it names an offered fact (`known`); an
+    `ends` sets `resolves` in place on an offered state whose
+    `introduced_by` is in `own_writers` (the one change made to `rows`):
+    phase 4 edits only its own rows, the gate any commitment. With
+    `registry_is_plan` (the gate), a `supersedes` naming any registry fact is
+    `disagrees`: the prose changing what the plan recorded. A quote is
+    matched with `quotes.quote_in`. Everything else goes in `problems` (keys
+    `COMMITMENT_PROBLEMS`) for the caller to report or halt on: a quote not
+    in the scene or missing, an unresolved subject, a `supersedes` naming a
+    registry fact recorded for this scene (`disagrees`: the prose and the
+    plan differ) or nothing offered, an `ends` naming nothing offered,
+    another writer's state (`ends registry`) or a state already ended
+    elsewhere.
+    """
+    from .common import csv_safe
+    from . import ledger
+    taken = {r['id'] for r in rows}
+    offered = {r['id']: r for r in known}
+    here = {r['id']: r for r in recorded}
+    from .quotes import quote_in
+    out = []
+    for item in found:
+        row = {c: '' for c in ledger.COLUMNS}
+        row.update(id=commitment_id(scene_id, item['statement'], taken),
+                   scene_id=scene_id, type=item['type'] or 'world',
+                   statement=item['statement'], quote=item['quote'],
+                   origin='prose', status='binding',
+                   mutable=item['mutable'] or 'state',
+                   introduced_by=introduced_by)
+        # A `|` or line break would corrupt the row (write_ledger refuses it)
+        subject = ' '.join(item['subject'].replace('|', ',').split())
+        if subject:
+            resolved = subjects.get(subject.lower())
+            if resolved:
+                subject = resolved
+            else:
+                problems['subject'].append(f'{scene_id}: {csv_safe(subject)}')
+        row['subject'] = subject
+        if item['supersedes']:
+            target = offered.get(item['supersedes'])
+            if target is not None and registry_is_plan and not ledger.is_commitment(target):
+                problems['disagrees'].append(f'{scene_id}: {item["supersedes"]} '
+                                             f'(prose: {row["id"]})')
+            elif target is not None:
+                row['supersedes'] = item['supersedes']
+            elif item['supersedes'] in here:
+                problems['disagrees'].append(f'{scene_id}: {item["supersedes"]} '
+                                             f'(prose: {row["id"]})')
+            else:
+                problems['supersedes'].append(f'{scene_id}: {item["supersedes"]}')
+        for gone in item['ends']:
+            old = offered.get(gone)
+            ends = (old or {}).get('resolves', '').strip()
+            if old is None or old.get('mutable') != 'state':
+                problems['ends'].append(f'{scene_id}: {gone}')
+            elif ends == scene_id:
+                pass   # already ends here
+            elif (old.get('introduced_by') or '').strip() not in own_writers:
+                problems['ends registry'].append(
+                    f'{scene_id}: {gone} (resolves: {ends or "blank"})')
+            elif ends:
+                problems['ends again'].append(f'{scene_id}: {gone} (resolves: {ends})')
+            else:
+                old['resolves'] = scene_id
+        if not item['quote']:
+            problems['no quote'].append(f'{scene_id}: {row["id"]}')
+        elif not quote_in(scene_text, item['quote']):
+            problems['quote'].append(f'{scene_id}: {row["id"]}')
+        taken.add(row['id'])
+        out.append(row)
+    return out
+
+
 KNOWLEDGE_COLUMNS = ['id', 'name', 'aliases', 'category', 'origin']
 
 
