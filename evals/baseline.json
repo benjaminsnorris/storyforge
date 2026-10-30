@@ -1,15 +1,15 @@
 {
   "cost": {
-    "calls": 2210,
-    "input_tokens": 8714025,
-    "output_tokens": 2405386,
-    "replayed_calls": 2210,
+    "calls": 2206,
+    "input_tokens": 8689285,
+    "output_tokens": 2394699,
+    "replayed_calls": 2206,
     "unpriced_calls": 0,
-    "usd_if_live": 20.1107,
+    "usd_if_live": 19.6735,
     "usd_spent": 0.0
   },
-  "git_dirty": false,
-  "git_sha": "1e8009be1e314db0383b54de135dd01568a72fe8",
+  "git_dirty": true,
+  "git_sha": "91bf1517575557e6595dd1542574bc86b185c2bb",
   "mode": "replay",
   "results": [
     {
@@ -82,7 +82,7 @@
       },
       "mode": "replay",
       "notes": [],
-      "started_at": "2026-10-30T03:10:10+00:00",
+      "started_at": "2026-10-30T04:00:52+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -140,7 +140,7 @@
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 6.33,
+      "duration_s": 10.15,
       "error": null,
       "gates": [
         {
@@ -204,7 +204,7 @@
         "missed 37 of 37: e2-carol-001, e2-carol-002, e2-carol-003, e2-carol-004, e2-carol-005, e2-carol-006, e2-carol-007, e2-carol-008, e2-carol-009, e2-carol-010, e2-carol-011, e2-carol-012, e2-carol-013, e2-carol-014, e2-carol-015, e2-carol-016, e2-carol-017, e2-carol-018, e2-carol-019, e2-carol-020, e2-carol-021, e2-carol-022, e2-carol-023, e2-carol-024, e2-carol-025, e2-carol-026, e2-carol-027, e2-carol-028, e2-carol-029, e2-carol-030, e2-carol-031, e2-carol-032, e2-carol-033, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
-      "started_at": "2026-10-30T03:10:10+00:00",
+      "started_at": "2026-10-30T04:00:52+00:00",
       "status": "fail",
       "suite": "e2-carol"
     },
@@ -252,7 +252,7 @@
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 140.7,
+      "duration_s": 347.83,
       "error": null,
       "gates": [
         {
@@ -316,7 +316,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-30T03:10:16+00:00",
+      "started_at": "2026-10-30T04:01:02+00:00",
       "status": "fail",
       "suite": "e2-corpus-drift"
     },
@@ -366,7 +366,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 115.45,
+      "duration_s": 255.03,
       "error": null,
       "gates": [
         {
@@ -430,7 +430,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-10-30T03:12:37+00:00",
+      "started_at": "2026-10-30T04:06:50+00:00",
       "status": "fail",
       "suite": "e2-corpus-validate"
     },
@@ -471,7 +471,7 @@
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 33.7,
+      "duration_s": 66.11,
       "error": null,
       "gates": [
         {
@@ -552,7 +552,7 @@
         "thornwall-029 (journals-of-the-east-wing): partial",
         "thornwall-030 (ivra-visits-sera): partial"
       ],
-      "started_at": "2026-10-30T03:14:32+00:00",
+      "started_at": "2026-10-30T04:11:05+00:00",
       "status": "fail",
       "suite": "e3-extraction"
     },
@@ -584,7 +584,7 @@
         "usd_spent": 0.0
       },
       "description": "Draft shared-dark Act 1 with write; CP10k, BPS, length, voice",
-      "duration_s": 5.94,
+      "duration_s": 7.48,
       "error": null,
       "gates": [
         {
@@ -638,7 +638,7 @@
         "checker engineer: the text says \"three days\" (about 3 day(s)), but the calendar puts it 0 day(s) on",
         "Judge stands in for the plan's human spot-check (still owed). Drafted in direct mode; batch mode is refused under a cassette."
       ],
-      "started_at": "2026-10-30T03:15:06+00:00",
+      "started_at": "2026-10-30T04:12:11+00:00",
       "status": "pass",
       "suite": "e4-generation"
     },
@@ -670,7 +670,7 @@
         "usd_spent": 0.0
       },
       "description": "Redraft from plan + ledger; facts the redraft changes",
-      "duration_s": 2.66,
+      "duration_s": 2.73,
       "error": null,
       "gates": [
         {
@@ -699,7 +699,7 @@
         "name-surfaces: 7 mismatch(es)\n    PHY: The number of pages of notes on the legal pad differs.\n    TIM: When the notes were written differs: the original has him writing them at 11:40 p.m. and 12:15, with 2:47 the moment the name surfaces; the \n    PHY: The building's door and lock differ: a steel personnel door with a padlock hasp welded to the frame and a Master 6271 tubular-key padlock, v\n    PHY: The water ration differs: eight ounces every six hours versus water by the capful.\n    PHY: The space heater is placed two meters from the chair to keep the subject alive in the original, but sits against the east wall unplugged in \n    KNO: How Hank learns the name Claire differs: a coworker calling it out in a parking lot versus the captor's thumb reading it off a laminated lan\n    KNO: In the original Hank has location clues (driving directions, Oregon plates, a Coos Bay receipt), while in the redraft he says the site could",
         "voicemail: 7 mismatch(es)\n    TIM: When Marie first called the office: two days ago in the original, eleven days ago in the redraft.\n    PHY: Where Claire's car was found: her apartment lot in the original, the hospital lot in the redraft.\n    PHY: The sixth message is an angry spoken complaint in the original but only twelve seconds of breathing in the redraft.\n    PHY: The fifth message lists different details: license plate, shift schedule and coworker Jennifer in the original; height, hair and a gap in he\n    PHY: Where Marie was during the seventh message: indoors in Claire's apartment on the landline in the original, outside in the wind in the redraf\n    PHY: The seventh message is cut off by the time limit right after the hinge in the original, but runs nine more seconds after the hinge in the re\n    TIM: When Maren heard the hinge in her vision: two nights ago in the original, at four that morning in the redraft."
       ],
-      "started_at": "2026-10-30T03:15:12+00:00",
+      "started_at": "2026-10-30T04:12:18+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -727,7 +727,7 @@
         "usd_spent": 0.0
       },
       "description": "Continuity flags raised on classics with no known errors",
-      "duration_s": 0.05,
+      "duration_s": 0.06,
       "error": null,
       "gates": [
         {
@@ -761,7 +761,7 @@
         "christmas-carol/run2: 35 flag(s)",
         "christmas-carol/run1: 25 flag(s)"
       ],
-      "started_at": "2026-10-30T03:15:15+00:00",
+      "started_at": "2026-10-30T04:12:21+00:00",
       "status": "fail",
       "suite": "e7-classics"
     },
@@ -772,16 +772,16 @@
           "replayed": 3
         },
         "PHY": {
-          "reintroduced": 1,
-          "replayed": 11
+          "reintroduced": 0,
+          "replayed": 10
         },
         "REL": {
           "reintroduced": 0,
           "replayed": 1
         },
         "TIM": {
-          "reintroduced": 4,
-          "replayed": 8
+          "reintroduced": 3,
+          "replayed": 7
         },
         "TRT": {
           "reintroduced": 2,
@@ -793,27 +793,27 @@
         }
       },
       "cost": {
-        "calls": 84,
-        "input_tokens": 575964,
-        "output_tokens": 203367,
-        "replayed_calls": 84,
+        "calls": 80,
+        "input_tokens": 551224,
+        "output_tokens": 192680,
+        "replayed_calls": 80,
         "unpriced_calls": 0,
-        "usd_if_live": 9.0663,
+        "usd_if_live": 8.6291,
         "usd_spent": 0.0
       },
       "description": "Current revision passes vs the E1 errors past passes introduced",
-      "duration_s": 71.63,
+      "duration_s": 83.52,
       "error": null,
       "gates": [
         {
-          "actual": 37,
+          "actual": 35,
           "name": "replayed",
           "op": ">=",
           "passed": true,
           "threshold": 15
         },
         {
-          "actual": 8,
+          "actual": 6,
           "name": "reintroduced",
           "op": "==",
           "passed": false,
@@ -821,26 +821,26 @@
         }
       ],
       "metrics": {
-        "errors_per_10k_words": 2.214,
+        "errors_per_10k_words": 1.72,
         "family.brief-fix.reintroduced": 0,
         "family.brief-fix.replayed": 2,
         "family.hone-physical-states.reintroduced": 0,
         "family.hone-physical-states.replayed": 2,
         "family.illustrate-prompts.reintroduced": 0,
         "family.illustrate-prompts.replayed": 1,
-        "family.illustrate-state.reintroduced": 1,
-        "family.illustrate-state.replayed": 4,
+        "family.illustrate-state.reintroduced": 0,
+        "family.illustrate-state.replayed": 3,
         "family.naturalness-upstream.reintroduced": 1,
         "family.naturalness-upstream.replayed": 2,
-        "family.redraft-from-brief.reintroduced": 4,
-        "family.redraft-from-brief.replayed": 19,
+        "family.redraft-from-brief.reintroduced": 3,
+        "family.redraft-from-brief.replayed": 18,
         "family.revision-plan.reintroduced": 2,
         "family.revision-plan.replayed": 7,
         "halted": 2,
-        "reintroduced": 8,
-        "reintroduction_rate": 0.216,
-        "replayed": 37,
-        "unreplayable": 13
+        "reintroduced": 6,
+        "reintroduction_rate": 0.171,
+        "replayed": 35,
+        "unreplayable": 15
       },
       "mode": "replay",
       "notes": [
@@ -848,7 +848,10 @@
         "excluded 1: no introducing commit recorded (lantern-folk-034)",
         "excluded 1: unreplayable: introducing commit wrote only the established side (a11-in-the-dark), not a contradicted scene (lantern-folk-027)",
         "excluded 2: unreplayable: pre-pass project has no scene-briefs.csv (shared-dark-018, shared-dark-023)",
-        "excluded 10: unreplayable: pre-pass project keeps its scenes in scenes/scene-index.yaml and its plan in YAML; current revise refuses YAML plans and Storyforge has no migration for them (governor-011, thornwall-002, thornwall-005, thornwall-008, thornwall-011, thornwall-013, thornwall-014, thornwall-015, thornwall-019, thornwall-021)",
+        "excluded 9: unreplayable: pre-pass project keeps its scenes in scenes/scene-index.yaml and its plan in YAML (current revise refuses YAML plans); Storyforge has no migration for it (governor-011, thornwall-002, thornwall-005, thornwall-008, thornwall-011, thornwall-013, thornwall-014, thornwall-019, thornwall-021)",
+        "excluded 1: unreplayable: pre-pass project keeps its scenes in scenes/scene-index.yaml; Storyforge has no migration for it (thornwall-015)",
+        "excluded 1: unreplayable: the --state pass logged the pre-pass prose faithfully (\"Two relit. Two still dark.\"); the error is the log going stale after a later prose fix (37bc78e), which a replay of the pass cannot show (lantern-folk-032)",
+        "excluded 1: unreplayable: the introducing commit wrote both sides (the six years and the nine), so the pre-pass project has no established fact for the replay to contradict (thornwall-028)",
         "governor-013 (walking-the-eastern-development): consistent",
         "governor-014 (elias-disarms): consistent",
         "governor-016 (routine-maintenance): reintroduced \u2014 \"Through the sealed glass, on Block Fourteen, the stone-cutters had settled into their afternoon rhythm: two strikes and \"",
@@ -866,7 +869,6 @@
         "lantern-folk-029 (a10-the-lamp-goes-dark): consistent",
         "lantern-folk-030 (a04-the-great-lamp): not_present",
         "lantern-folk-031 (a01-moving-night): not_present",
-        "lantern-folk-032 (a09-the-worst-night): reintroduced \u2014 \"the-village-lanterns|a09-the-worst-night|perimeter lanterns snuffed; two relit, two still dark|Two relit. Two still dark\"",
         "lantern-folk-033 (a10-the-lamp-goes-dark): consistent",
         "shared-dark-030 (woodpile): not_present",
         "shared-dark-034 (call): consistent",
@@ -882,20 +884,19 @@
         "thornwall-025 (thessan-vigil): consistent",
         "thornwall-026 (thessan-rides): reintroduced \u2014 \"He'd thanked her for her service, as if she'd done him a kindness, and signed where she showed him to sign.\"",
         "thornwall-027 (thessan-at-verath): not_present",
-        "thornwall-028 (corvins-dispatch): reintroduced \u2014 \"Nine years ago she had sat in the room above the regional office and built this template line by line.\"",
         "thornwall-029 (evidence-room): not_present",
         "thornwall-030 (ivra-seals-archive): reintroduced \u2014 \"At Garren's Watch the figures had told the same story over nine years, each reduction justified by a different administr\"",
         "thornwall-033 (shell-breaks-open): consistent",
         "thornwall-035 (riders-approach): consistent",
         "thornwall-037 (evening-visit): consistent"
       ],
-      "started_at": "2026-10-30T03:15:15+00:00",
+      "started_at": "2026-10-30T04:12:21+00:00",
       "status": "fail",
       "suite": "e8-revision-safety"
     }
   ],
   "schema_version": 1,
   "status": "fail",
-  "storyforge_version": "1.86.2",
+  "storyforge_version": "1.86.3",
   "suite_count": 9
 }
