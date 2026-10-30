@@ -145,6 +145,7 @@ Asset-specific failure modes:
 | Failure | Meaning | Fix |
 |---------|---------|-----|
 | refused: assets declared with `none with role "cover"` | The manifest would have cleared the live cover, so nothing was sent | Add a publishable cover, or point `production.cover_image` at one |
+| `production.cover_image names '...', which does not exist` | The configured cover file is missing; publish won't swap in another cover or none | Fix the path in `storyforge.yaml`, or remove the key to let publish auto-detect |
 | refused: `declares N assets ... at most 200` | Bookshelf caps the manifest array at 200, so uploading first would waste the whole transfer | Set plan rows you no longer ship to `status=superseded` |
 | `illus_unpublishable_id` from `cleanup` / `validate` | A plan id contains `_`, or is over 128 characters — legal as a marker, rejected as an asset key | Rename the row and its scene marker, using hyphens |
 | `no longer matches its recorded digest` | A file changed after ingest | `storyforge illustrate --ingest <path>` to re-record it |

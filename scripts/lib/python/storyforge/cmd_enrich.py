@@ -204,8 +204,6 @@ def parse_args(argv):
                         help='Comma-separated fields to enrich (default: all)')
     parser.add_argument('--force', action='store_true',
                         help='Re-enrich scenes that already have data')
-    # Deprecated no-op: enrich does not run the timeline (step 8)
-    parser.add_argument('--skip-timeline', action='store_true', help=argparse.SUPPRESS)
     # Deprecated no-op: enrich no longer renders a dashboard (#371)
     parser.add_argument('--skip-dashboard', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--dry-run', action='store_true',
@@ -809,17 +807,6 @@ def main(argv=None):
 
         log('')
         log(f'Enrichment complete: {enriched} scenes enriched, {len(failed)} failures')
-
-    # ========================================================================
-    # Step 8: Timeline
-    # ========================================================================
-    # This step ran scripts/storyforge-timeline, removed with the shell
-    # scripts in v1.0.0 (#123); since then it only ever logged "not found,
-    # skipping". It is not run from here: say so, rather than imply a check.
-    if not args.dry_run:
-        log('')
-        log('Step 8: Timeline: not run by enrich. Run `storyforge timeline` to read '
-            'time cues and place scenes on the calendar.')
 
     # ========================================================================
     # Update PR tasks

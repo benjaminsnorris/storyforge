@@ -122,12 +122,18 @@ def run(cases: list[dict], detector, work_dir: str, prepare_tree=None,
 def validate_detector(project_dir: str, scenes: list[str], log_dir: str) -> list[dict]:
     """Storyforge's deterministic continuity checks (physical state, timeline,
     knowledge) over the project's CSVs. Not scoped to ``scenes``: it reports
-    what it reports, and the scorer decides what lands."""
+    what it reports, and the scorer decides what lands.
+
+    A finding over several scenes (a timeline-order run lists them in
+    ``scenes``) gives one flag per scene: the scorer keys flags by scene, so
+    keying a run by its first scene alone would hide a scene an edit moved
+    into a run the unedited book already has."""
     from storyforge.elaborate import validate_structure
-    return [{'scene_id': c.get('scene_id', ''), 'code': CODE_BY_CATEGORY[c['category']],
+    return [{'scene_id': sid, 'code': CODE_BY_CATEGORY[c['category']],
              'check': c['check'], 'message': c['message']}
             for c in validate_structure(os.path.join(project_dir, 'reference'))['checks']
-            if not c['passed'] and c['category'] in CODE_BY_CATEGORY]
+            if not c['passed'] and c['category'] in CODE_BY_CATEGORY
+            for sid in (c.get('scenes') or [c.get('scene_id', '')])]
 
 
 def bootstrap_cues(project_dir: str) -> None:

@@ -990,7 +990,7 @@ def _run_cleanup(ref_dir: str, project_dir: str) -> None:
 
     if coaching == 'strict':
         log('  Coaching level: strict — reporting issues only')
-        from storyforge.elaborate import validate_structure
+        from storyforge.elaborate import validate_structure, finding_scene_list
         report = validate_structure(ref_dir)
         categories = {}
         for f in report['failures']:
@@ -1001,6 +1001,8 @@ def _run_cleanup(ref_dir: str, project_dir: str) -> None:
             for fail in failures[:3]:
                 scene = fail.get('scene_id', '')
                 log(f'    [{scene}] {fail["message"][:100]}')
+                if finding_scene_list(fail):
+                    log(f'      {finding_scene_list(fail)}')
             if len(failures) > 3:
                 log(f'    ... and {len(failures) - 3} more')
         log(f'  Total: {len(report["failures"])} issues for author to review')

@@ -1159,11 +1159,18 @@ def _run_lightweight_score(project_dir: str, scene_ids: list[str],
 
     generate_diagnosis(cycle_dir, prev_dir or '-', weights_file)
 
-    # Update latest symlink
-    latest_link = os.path.join(scores_base, 'latest')
-    if os.path.islink(latest_link):
-        os.remove(latest_link)
-    os.symlink(f'cycle-{cycle}', latest_link)
+    # latest stays on the last complete cycle (as in cmd_score)
+    from storyforge.project import mark_cycle_incomplete
+    mark_cycle_incomplete(cycle_dir, [f'scene scores: {", ".join(failed)}']
+                          if failed else [])
+    if failed:
+        log(f'  latest not moved: cycle-{cycle} has no scores for '
+            f'{", ".join(failed)}')
+    else:
+        latest_link = os.path.join(scores_base, 'latest')
+        if os.path.islink(latest_link):
+            os.remove(latest_link)
+        os.symlink(f'cycle-{cycle}', latest_link)
 
     diag_rows = _read_diagnosis(cycle_dir)
     return cycle_dir, diag_rows
