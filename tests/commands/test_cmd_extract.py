@@ -1195,3 +1195,32 @@ class TestFactsWithNoKnownScene:
         ledger.save_to(ref, rows, command='test')
         _prune_registries(ref, set(), set())
         assert ledger.view_map(ref, 'knowledge')['map-anomaly-exists']['origin'] == 'burnside'
+
+
+class TestKnowledgeChainKeepsSceneSummaries:
+    """#440: phase 3b asks for a one-sentence summary of every scene, used it
+    only as rolling context and dropped it, so scenes.csv:summary stayed
+    blank on every extracted book. It is kept where the scene has none."""
+
+    _run = TestKnowledgeChainOffersOnlyEarlierFacts._run
+
+    def test_the_summary_fills_a_blank_cell(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        from storyforge.elaborate import get_scene
+        replies = {'act1-sc01': _structured(
+            'KNOWLEDGE_SCHEMA', scene_summary='Dorren finds the gap | in the map.')}
+        self._run(project_dir, mock_api, monkeypatch, replies)
+        ref_dir = os.path.join(project_dir, 'reference')
+        # csv_safe: a `|` would shift every later column
+        assert get_scene('act1-sc01', ref_dir)['summary'] == \
+            'Dorren finds the gap / in the map.'
+
+    def test_an_existing_summary_is_kept_even_when_forced(
+            self, project_dir, mock_api, mock_git, mock_costs, monkeypatch):
+        from storyforge.elaborate import get_scene, update_scene
+        ref_dir = os.path.join(project_dir, 'reference')
+        update_scene('act1-sc01', ref_dir, {'summary': 'The author wrote this.'})
+        replies = {'act1-sc01': _structured(
+            'KNOWLEDGE_SCHEMA', scene_summary='The model wrote this.')}
+        self._run(project_dir, mock_api, monkeypatch, replies, force=True)
+        assert get_scene('act1-sc01', ref_dir)['summary'] == 'The author wrote this.'
