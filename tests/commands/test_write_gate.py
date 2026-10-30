@@ -20,6 +20,23 @@ BAD = Finding(kind='contradiction', code='TIM', scene_quote='word', established_
               established_quote='y', fact_id='', explanation='why')
 
 
+
+@pytest.fixture(autouse=True)
+def _pure_prose_scenes(request):
+    """Scene files are pure prose (the gate refuses frontmatter); the shared
+    fixture's older scenes still carry it."""
+    if 'project_dir' not in request.fixturenames:
+        return
+    import glob
+    import re as _re
+    for path in glob.glob(os.path.join(request.getfixturevalue('project_dir'), 'scenes', '*.md')):
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+        stripped = _re.sub(r'\A---\n.*?\n---\n\s*', '', text, flags=_re.S)
+        if stripped != text:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(stripped)
+
 def _result(sid, passed):
     r = gate.GateResult(sid, check=CheckResult(sid, findings=[] if passed else [BAD]))
     r.committed = passed

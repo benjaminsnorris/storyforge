@@ -13,13 +13,19 @@ extracted, checked against the rest of the book and its brief, and reported.
 Nothing in the prose is ever edited.
 
 A scene that passes has its commitments committed to the ledger (and any
-brief fact it was found to establish gets its quote); one that doesn't
-leaves the ledger as it was, its findings are the report, and it is listed
-in `working/gate-pending.csv` (`write` won't draft past it until a check or
-redraft passes). Later scenes
-are still checked, but without a failing scene's facts in the ledger: the
-report says so. The report is written to `working/check-report.md` and
-committed with the ledger. Exit 1 when any scene did not pass.
+brief fact it was found to establish gets its quote). The first scene that
+doesn't pass (or can't be checked) stops the run: the ledger keeps what it
+had for that scene, its findings are the report, it is listed in
+`working/gate-pending.csv` (`write` won't draft past it until a check or
+redraft passes), and the later scenes are listed as not checked, since
+they'd be checked against a ledger without its facts (plan §3.2: fail
+loud). The report is written to `working/check-report.md` and committed
+with the ledger. Exit 1 when a scene did not pass, a named scene isn't one
+that can be checked, or the commit fails.
+
+Once later scenes' facts lean on an earlier scene's commitments, checking
+that earlier scene again stops with "later facts lean on ..." (Phase 4's
+re-check set will handle it).
 """
 
 from __future__ import annotations
@@ -71,6 +77,13 @@ def main(argv=None):
     set_log_file(os.path.join(log_dir, 'check-log.txt'))
 
     scene_ids = _scene_ids(args, project_dir)
+    unknown = [s for s in _named(args) if s not in scene_ids]
+    if unknown:
+        log(f'ERROR: not scenes that can be checked (no such id, or cut or merged): '
+            f'{", ".join(unknown)}')
+        sys.exit(1)
+    order = ledger.scene_order(project_dir)
+    scene_ids = sorted(scene_ids, key=lambda s: order.get(s, -1))
     missing = [s for s in scene_ids if not os.path.isfile(
         os.path.join(project_dir, 'scenes', f'{s}.md'))]
     if missing:
@@ -79,47 +92,66 @@ def main(argv=None):
     if not scene_ids:
         log('ERROR: no scene matches.')
         sys.exit(1)
-    create_branch('check', project_dir)
+    if not create_branch('check', project_dir):
+        log('ERROR: could not create or find a branch to work on; nothing checked.')
+        sys.exit(1)
 
     report = ['# Check report', '']
-    failed, unchecked_after = [], []
-    for scene_id in scene_ids:
+    passed, stopped_at = 0, ''
+    for n, scene_id in enumerate(scene_ids):
         log(f'--- Checking {scene_id} ---')
         try:
             result = gate.gate_scene(project_dir, scene_id, command='advisor',
                                      log_dir=os.path.join(log_dir, 'check'))
         except gate.GateError as e:
-            log(f'ERROR: {e}')
-            report += [f'## {scene_id}: not checked', '', f'- {e}', '']
-            gate.mark_pending(project_dir, scene_id, 'advisor', f'not checked: {e}')
-            failed.append(scene_id)
-            continue
-        lines = gate.report_lines(result)
-        verdict = 'passed' if result.passed else 'did not pass'
-        log(f'{scene_id}: {verdict}' + (f' ({len(result.proposed)} fact(s) committed)'
-                                        if result.committed else ''))
-        for line in lines:
-            log(f'  {line}')
-        report += [f'## {scene_id}: {verdict}', ''] + [f'- {line}' for line in lines] \
-            + ([] if lines else ['- nothing to report']) + ['']
-        if result.passed:
-            if failed:
-                unchecked_after.append(scene_id)
+            why = ' '.join(str(e).split())
+            log(f'ERROR: {why}')
+            report += [f'## {scene_id}: not checked', '', f'- {why}', '']
+            gate.mark_pending(project_dir, scene_id, 'advisor', f'not checked: {why}')
+            stopped_at = scene_id
         else:
-            gate.mark_pending(project_dir, scene_id, 'advisor',
-                              f'{len(lines)} problem(s); see {REPORT_PATH}')
-            failed.append(scene_id)
+            lines = gate.report_lines(result)
+            verdict = 'passed' if result.passed else 'did not pass'
+            log(f'{scene_id}: {verdict}')
+            for line in lines:
+                log(f'  {line}')
+            report += [f'## {scene_id}: {verdict}', ''] + [f'- {line}' for line in lines] \
+                + ([] if lines else ['- nothing to report']) + ['']
+            if result.passed:
+                passed += 1
+            else:
+                gate.mark_pending(project_dir, scene_id, 'advisor',
+                                  f'{sum(1 for x in lines if not x.startswith(("NOTE", "COMMITTED")))} '
+                                  f'problem(s); see {REPORT_PATH}')
+                stopped_at = scene_id
+        if stopped_at:
+            rest = scene_ids[n + 1:]
+            if rest:
+                report += ['## Not checked', '', f'Stopped at {stopped_at}: later scenes would '
+                           f'be checked against a ledger without its facts. Not checked: '
+                           f'{", ".join(rest)}.', '']
+            break
 
-    if unchecked_after:
-        report += ['## Note', '', f'Checked without the facts of the scene(s) that did not '
-                   f'pass ({", ".join(failed)}): {", ".join(unchecked_after)}.', '']
     path = os.path.join(project_dir, REPORT_PATH)
     with open(path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(report))
     log(f'Report: {path}')
-    commit_and_push(project_dir, f'Check: {len(scene_ids) - len(failed)} of '
-                    f'{len(scene_ids)} scene(s) passed',
-                    ['reference/commitments.csv', 'working/'])
-    if failed:
-        log(f'ERROR: {len(failed)} scene(s) did not pass: {", ".join(failed)}')
+    if not commit_and_push(project_dir, f'Check: {passed} of {len(scene_ids)} scene(s) passed',
+                           ['reference/commitments.csv', 'working/']):
+        log('ERROR: the commit failed: the ledger and report are written but not committed.')
         sys.exit(1)
+    if stopped_at:
+        log(f'ERROR: stopped at {stopped_at}, which did not pass; {passed} of '
+            f'{len(scene_ids)} scene(s) passed. Edit it and check it again.')
+        sys.exit(1)
+
+
+def _named(args) -> list[str]:
+    """The scene ids the command line names one by one (not a range or an act)."""
+    if args.scenes:
+        return [s.strip() for s in args.scenes.split(',') if s.strip()]
+    if len(args.positional) == 1:
+        return list(args.positional)
+    if len(args.positional) == 2:
+        return list(args.positional)
+    return []

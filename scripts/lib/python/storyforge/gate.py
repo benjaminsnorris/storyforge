@@ -58,7 +58,9 @@ REPORTED = ('subject', 'cap', 'unplaced')
 
 
 class GateError(RuntimeError):
-    """A gate step couldn't finish; nothing was written."""
+    """A gate step couldn't finish; nothing was written. From `gate_and_fix`,
+    `.first` is the first gate run when there was one."""
+    first: 'GateResult | None' = None
 
 
 @dataclass
@@ -139,7 +141,8 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
                            registry_is_plan=True)
 
 
-def _plan_halts(problems: dict[str, list[str]]) -> list[audit.Halt]:
+def _plan_halts(problems: dict[str, list[str]],
+                rows: list[dict[str, str]]) -> list[audit.Halt]:
     """`plan-contradiction` halts from `commitment_rows`' problem strings:
     `disagrees` is `scene: registry-id (prose: proposed-id)`, `ends registry`
     is `scene: registry-id (resolves: ...)`. A halt's `fact_id` is the
@@ -150,14 +153,19 @@ def _plan_halts(problems: dict[str, list[str]]) -> list[audit.Halt]:
         m = re.match(r'[^:]+: (\S+) \(prose: (\S+)\)$', item)
         reg, proposed = (m.group(1), m.group(2)) if m else (item, item)
         halts.append(audit.Halt('plan-contradiction', proposed,
-                                f'the prose supersedes the registry fact {reg}'))
+                                f'the prose supersedes the registry fact {reg} '
+                                f'({_statement(rows, reg)!r})'))
     for item in problems.get('ends registry', []):
         m = re.match(r'[^:]+: (\S+) \(resolves: ([^)]*)\)$', item)
         reg, ends = (m.group(1), m.group(2)) if m else (item, '?')
         halts.append(audit.Halt('plan-contradiction', reg,
-                                f'the prose ends the registry state {reg} here; its '
-                                f'resolves says {ends}'))
+                                f'the prose ends the registry state {reg} '
+                                f'({_statement(rows, reg)!r}) here; its resolves says {ends}'))
     return halts
+
+
+def _statement(rows: list[dict[str, str]], rid: str) -> str:
+    return next((r.get('statement', '') for r in rows if r.get('id') == rid), '')
 
 
 def _leaning_on(rows: list[dict[str, str]], gone: set[str]) -> list[str]:
@@ -201,6 +209,9 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
             raise GateError(f'{scene_id}: no prose to gate ({e})') from e
     if not prose.strip():
         raise GateError(f'{scene_id}: no prose to gate (the scene is empty)')
+    if prose.lstrip().startswith('---\n'):
+        raise GateError(f'{scene_id}: the scene starts with frontmatter; scene files are '
+                        f'pure prose (`storyforge cleanup` strips it)')
     try:
         rows = ledger.load(project_dir)
         order = ledger.scene_order(project_dir)
@@ -230,7 +241,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     result.proposed = _extract(project_dir, scene_id, prose, rows, order, command,
                                extract_model or select_model('evaluation'), log_dir,
                                result.problems)
-    result.halts = audit.halting_conditions(result.proposed, rows) + _plan_halts(result.problems)
+    result.halts = audit.halting_conditions(result.proposed, rows) + _plan_halts(result.problems, rows)
     try:
         result.check = check_scene(project_dir, scene_id, prose=prose, model=check_model,
                                    log_file=os.path.join(log_dir, f'gate-check-{scene_id}.json'),
@@ -279,18 +290,28 @@ FIX_SCHEMA = {
 
 
 def problems_to_fix(result: GateResult) -> list[str]:
-    """What a fix should address, one line each: halts, contradictions and
-    broken promises, unverified findings (the checker may be right). An
+    """What a fix should address, one line each: halts (with the scene's
+    words that set the fact), contradictions and broken promises, and
+    unverified findings, marked as such with why their quotes failed. An
     extraction problem isn't a prose problem, so it isn't here: the re-check
     extracts again."""
-    lines = [f'Stop: {h.detail} (fact {h.fact_id})' for h in result.halts]
-    for f in result.findings + result.unverified:
+    proposed = {r['id']: r for r in result.proposed}
+    lines = []
+    for h in result.halts:
+        row = proposed.get(h.fact_id)
+        said = (f' The scene says: "{row.get("quote") or row.get("statement")}".'
+                if row else '')
+        lines.append(f'The scene changes something the book fixed: {h.detail}.{said}')
+    for f, unverified in ([(f, False) for f in result.findings]
+                          + [(f, True) for f in result.unverified]):
+        tag = (f'UNVERIFIED (the check\'s quotes did not hold up: {f.problem}; edit only '
+               f'if the scene clearly contradicts the book) ' if unverified else '')
         if f.kind == 'contradiction':
             where = f.established_scene or 'the ledger'
-            lines.append(f'{f.code} contradiction: the scene says "{f.scene_quote}", but '
-                         f'{where} establishes "{f.established_quote}". {f.explanation}')
+            lines.append(f'{tag}{f.code} contradiction: the scene says "{f.scene_quote}", '
+                         f'but {where} establishes "{f.established_quote}". {f.explanation}')
         else:
-            lines.append(f'Broken promise ({f.fact_id}): the brief promises '
+            lines.append(f'{tag}Broken promise ({f.fact_id}): the brief promises '
                          f'"{f.established_quote}". {f.explanation}'
                          + (f' Nearest words: "{f.scene_quote}".' if f.scene_quote else ''))
     return lines
@@ -306,7 +327,7 @@ def build_fix_prompt(scene_id: str, prose: str, problems: list[str]) -> str:
 
 ## Rules
 
-- Change the scene so it agrees with what the book established; never assume the established fact is the one that is wrong.
+- Change the scene so it agrees with what the book established; never assume the established fact is the one that is wrong. A problem marked UNVERIFIED may be the check's mistake: edit for it only if the scene clearly contradicts the book.
 - A broken promise: add or change the fewest words that deliver it, in the scene's voice, where it fits the action.
 - Each edit replaces `find`, words copied exactly from the scene that occur in it once, with `replace`. Keep `find` short: the sentence or clause that changes. Edits must not overlap.
 - Change nothing else: no polishing, no other improvements. `problem` is the number of the problem the edit fixes.
@@ -326,7 +347,9 @@ def apply_edits(prose: str, edits: list[dict]) -> str:
     """
     spans = []
     for e in edits:
-        find = e.get('find') or ''
+        find = (e.get('find') or '').replace('\r\n', '\n')
+        if '\r\n' in prose:
+            find = find.replace('\n', '\r\n')
         count = prose.count(find) if find else 0
         if count != 1:
             raise GateError(f'a fix edit\'s text occurs {count} times in the scene: '
@@ -373,7 +396,7 @@ def fix_scene(scene_id: str, prose: str, result: GateResult, *, log_dir: str,
 class GatedScene:
     """`gate_and_fix`'s answer: the prose to keep and the gate's last word."""
     prose: str
-    result: GateResult          # the last gate run (the re-check when fixed)
+    result: GateResult          # the last gate run (the re-check when there was one)
     first: GateResult           # the first gate run
     fixed: bool = False         # whether the fix changed the prose
 
@@ -382,50 +405,73 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                  log_dir: str, extract_model: str | None = None,
                  check_model: str | None = None, fix_model: str | None = None) -> GatedScene:
     """Gate `prose`; if it doesn't pass, fix it once and gate the fixed prose
-    (plan §3.2 step 3). The caller writes `.prose` to the scene file: the
-    ledger is committed only when `.result.passed`. A first run that fails
-    only on extraction problems is re-gated without an edit.
+    (plan §3.2 step 3).
+
+    - A first run that fails only on extraction problems (nothing for the fix)
+      is re-gated without an edit: extraction runs again.
+    - A fix that changes nothing (every problem judged a false alarm) is not
+      re-gated: the first verdict stands, and a re-roll of the same prose
+      won't overturn it.
+
+    The caller must write `.prose` to the scene file at once, whether or not
+    `.result.passed`: when it passed, the ledger was already committed with
+    quotes from that prose.
 
     Raises:
-        GateError: from either gate run or the fix.
+        GateError: from either gate run or the fix; it carries the first run
+            as `.first` (None when the first run itself failed), so its
+            findings can still be reported.
     """
     os.makedirs(log_dir, exist_ok=True)
     first = gate_scene(project_dir, scene_id, command=command, prose=prose, log_dir=log_dir,
                        extract_model=extract_model, check_model=check_model)
     if first.passed:
         return GatedScene(prose, first, first)
-    fixed = fix_scene(scene_id, prose, first, log_dir=log_dir, model=fix_model)
-    again = gate_scene(project_dir, scene_id, command=command, prose=fixed,
-                       log_dir=os.path.join(log_dir, 'recheck'),
-                       extract_model=extract_model, check_model=check_model)
+    try:
+        fixed = fix_scene(scene_id, prose, first, log_dir=log_dir, model=fix_model)
+        if problems_to_fix(first) and fixed == prose:
+            return GatedScene(prose, first, first)
+        again = gate_scene(project_dir, scene_id, command=command, prose=fixed,
+                           log_dir=os.path.join(log_dir, 'recheck'),
+                           extract_model=extract_model, check_model=check_model)
+    except GateError as e:
+        e.first = first
+        raise
     return GatedScene(fixed, again, first, fixed=fixed != prose)
 
 
+def _one_line(text: str) -> str:
+    return ' '.join(str(text).split())
+
+
 def report_lines(result: GateResult) -> list[str]:
-    """The gate's verdict on a scene as log lines: everything that stopped
-    the commit, then what is reported either way. Empty only for a pass
-    with nothing to report."""
-    from storyforge.common import csv_safe
+    """The gate's verdict on a scene as one-line strings (log lines, list
+    items): everything that stopped the commit, then what is reported
+    either way, then what was committed."""
     lines = []
     for h in result.halts:
-        lines.append(f'HALT ({h.kind}): {csv_safe(str(h))}')
+        lines.append(f'HALT ({h.kind}): {_one_line(h)}')
     for item in result.unresolved:
-        lines.append(f'EXTRACTION: {csv_safe(item)}')
+        lines.append(f'EXTRACTION: {_one_line(item)}')
     for f in result.findings:
-        lines.append(f'{f.kind.upper()}: {csv_safe(f.message())}')
+        lines.append(f'{f.kind.upper()}: {_one_line(f.message())}')
     for f in result.unverified:
-        lines.append(f'UNVERIFIED ({f.problem}): {csv_safe(f.message())}')
+        lines.append(f'UNVERIFIED ({f.problem}): {_one_line(f.message())}')
     for kind in REPORTED:
         items = result.problems.get(kind, [])
         if items:
-            lines.append(f'NOTE ({kind}): ' + '; '.join(csv_safe(i) for i in items[:20])
+            lines.append(f'NOTE ({kind}): ' + '; '.join(_one_line(i) for i in items[:20])
                          + (' ...' if len(items) > 20 else ''))
     if result.check:
         for rid, quote, why in result.check.kept_unverified:
             lines.append(f'NOTE (kept, not filled): {rid}: {why}')
         if result.check.unknown_brief_items:
             lines.append('NOTE (brief items no binding fact matches, not checked): '
-                         + '; '.join(result.check.unknown_brief_items))
+                         + _one_line('; '.join(result.check.unknown_brief_items)))
+    if result.committed:
+        lines.append(f'COMMITTED: {len(result.proposed)} fact(s)'
+                     + (f'; quotes filled: {", ".join(result.quotes_filled)}'
+                        if result.quotes_filled else ''))
     return lines
 
 
