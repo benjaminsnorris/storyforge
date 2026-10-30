@@ -46,6 +46,21 @@ def _fresh_fallback_replies(monkeypatch):
     monkeypatch.setattr(api, '_fallback_replies', [])
 
 
+@pytest.fixture(autouse=True)
+def _gate_passes_in_write(request, monkeypatch):
+    """`write` gates every drafted scene (storyforge.gate), which makes model
+    calls of its own. Tests about drafting itself mock one reply per scene,
+    so the gate is a pass here unless a test is marked `real_gate`."""
+    if request.node.get_closest_marker('real_gate'):
+        return
+    import storyforge.cmd_write as cmd_write
+    monkeypatch.setattr(cmd_write, '_gate_drafted_scene', lambda *a, **k: (True, ''))
+
+
+def pytest_configure(config):
+    config.addinivalue_line('markers', 'real_gate: run write\'s gate instead of the pass stub')
+
+
 @pytest.fixture
 def fixture_dir_gn():
     """Path to the graphic-novel test-project fixture."""
