@@ -118,6 +118,16 @@ class TestGeneratePublishManifest:
         with pytest.raises(ValueError, match='stale'):
             generate_publish_manifest(str(tmp_path))
 
+    def test_missing_chapter_map_says_missing_not_stale(self, tmp_path):
+        # F-102 (storyforge-evals): a classic split by scenes-setup had no map,
+        # and publish called the map that didn't exist "stale".
+        from storyforge.assembly import generate_publish_manifest
+        proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
+        os.remove(os.path.join(proj, 'reference', 'chapter-map.csv'))
+        with pytest.raises(ValueError, match='No chapter map') as exc:
+            generate_publish_manifest(proj)
+        assert 'stale' not in str(exc.value)
+
     def test_strips_yaml_frontmatter(self, tmp_path):
         from storyforge.assembly import generate_publish_manifest
         proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])

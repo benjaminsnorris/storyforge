@@ -997,3 +997,83 @@ class TestSetextUnderlineIsNotABreak:
         main(['--split-chapters', '--source', 'chapters', '--yes'])
         _, rows = _new_rows(project_dir, 'scenes.csv')
         assert len(rows) == 2   # split at the blank-preceded marker only
+
+
+class TestChapterMap:
+    """F-102 (storyforge-evals): split-manuscript knew every chapter but never
+    wrote reference/chapter-map.csv, so publish failed on every classic."""
+
+    def _split(self, project_dir, monkeypatch, text, keep_map=False):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        map_csv = os.path.join(project_dir, 'reference', 'chapter-map.csv')
+        if not keep_map:
+            os.remove(map_csv)
+        with open(os.path.join(project_dir, 'manuscript.md'), 'w') as f:
+            f.write(text)
+        main(['--split-manuscript', '--yes'])
+        with open(map_csv) as f:
+            lines = f.read().strip().splitlines()
+        header = lines[0].split('|')
+        return [dict(zip(header, l.split('|'))) for l in lines[1:]]
+
+    @staticmethod
+    def _chapter(n):
+        return f'# Chapter {n}\n\nOpening of {n}.\n\n***\n\nClose of {n}.\n\n'
+
+    def test_split_manuscript_writes_the_map(self, mock_api, mock_git,
+                                             mock_costs, project_dir, monkeypatch):
+        text = ('PART ONE\n\n' + self._chapter('I') + self._chapter('II')
+                + 'PART TWO\n\n' + self._chapter('III'))
+        rows = self._split(project_dir, monkeypatch, text)
+        assert [r['chapter'] for r in rows] == ['1', '2', '3']
+        assert [r['title'] for r in rows] == ['Chapter I', 'Chapter II', 'Chapter III']
+        assert [r['part'] for r in rows] == ['1', '1', '2']
+        # The heading stays in the first scene's text: assembly adds none.
+        assert {r['heading'] for r in rows} == {'none'}
+        for r in rows:
+            ids = r['scenes'].split(';')
+            assert len(ids) == 2
+            assert _opening(project_dir, ids[0]) == f'# {r["title"]}'
+
+    def test_written_map_is_fresh(self, mock_api, mock_git, mock_costs,
+                                  project_dir, monkeypatch):
+        from storyforge.common import check_chapter_map_freshness
+        # The fixture's own scenes are not in a new map; drop them.
+        for name in ('scenes.csv', 'scene-intent.csv'):
+            path = os.path.join(project_dir, 'reference', name)
+            with open(path) as f:
+                header = f.readline()
+            with open(path, 'w') as f:
+                f.write(header)
+        self._split(project_dir, monkeypatch,
+                    self._chapter(1) + self._chapter(2))
+        is_fresh, missing, extra = check_chapter_map_freshness(project_dir)
+        assert (is_fresh, missing, extra) == (True, [], [])
+
+    def test_existing_map_is_left_alone(self, mock_api, mock_git, mock_costs,
+                                        project_dir, monkeypatch):
+        map_csv = os.path.join(project_dir, 'reference', 'chapter-map.csv')
+        with open(map_csv) as f:
+            before = f.read()
+        self._split(project_dir, monkeypatch, self._chapter(1), keep_map=True)
+        with open(map_csv) as f:
+            assert f.read() == before
+
+    def test_split_chapters_without_headings_titles_by_file(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        os.remove(os.path.join(project_dir, 'reference', 'chapter-map.csv'))
+        ch_dir = os.path.join(project_dir, 'chapters')
+        os.makedirs(ch_dir)
+        with open(os.path.join(ch_dir, 'the-arrival.md'), 'w') as f:
+            f.write('They came at dusk.\n\n***\n\nNobody slept.\n')
+        main(['--split-chapters', '--source', 'chapters', '--yes'])
+        with open(os.path.join(project_dir, 'reference', 'chapter-map.csv')) as f:
+            lines = f.read().strip().splitlines()
+        row = lines[1].split('|')
+        assert row[:4] == ['1', 'the-arrival', 'numbered', '']
+        assert len(row[4].split(';')) == 2
