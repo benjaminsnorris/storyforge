@@ -1,0 +1,187 @@
+{
+ "governor-013": {
+  "run1": "consistent",
+  "run2": "not_present",
+  "run3": "consistent"
+ },
+ "governor-014": {
+  "run1": "consistent",
+  "run2": "consistent",
+  "run3": "reintroduced"
+ },
+ "governor-016": {
+  "run1": "reintroduced",
+  "run2": "reintroduced",
+  "run3": "reintroduced"
+ },
+ "governor-018": {
+  "run1": "not_present",
+  "run2": "consistent",
+  "run3": "not_present"
+ },
+ "governor-020": {
+  "run1": "consistent",
+  "run2": "consistent",
+  "run3": "consistent"
+ },
+ "governor-022": {
+  "run1": "not_present",
+  "run2": "consistent",
+  "run3": "reintroduced"
+ },
+ "governor-023": {
+  "run1": "reintroduced",
+  "run2": "reintroduced",
+  "run3": "reintroduced"
+ },
+ "governor-024": {
+  "run1": "not_present",
+  "run2": "reintroduced",
+  "run3": "not_present"
+ },
+ "governor-025": {
+  "run1": "halted",
+  "run2": "consistent",
+  "run3": "not_present"
+ },
+ "governor-026": {
+  "run1": "not_present",
+  "run2": "not_present",
+  "run3": "not_present"
+ },
+ "governor-027": {
+  "run1": "not_present",
+  "run2": "consistent",
+  "run3": "consistent"
+ },
+ "governor-028": {
+  "run1": "halted",
+  "run2": "not_present",
+  "run3": "consistent"
+ },
+ "lantern-folk-015": {
+  "run1": "consistent",
+  "run2": "consistent",
+  "run3": "consistent"
+ },
+ "lantern-folk-020": {
+  "run1": "consistent",
+  "run2": "consistent",
+  "run3": "consistent"
+ },
+ "lantern-folk-029": {
+  "run1": "consistent",
+  "run2": "consistent",
+  "run3": "consistent"
+ },
+ "lantern-folk-030": {
+  "run1": "not_present",
+  "run2": "not_present",
+  "run3": "not_present"
+ },
+ "lantern-folk-031": {
+  "run1": "not_present",
+  "run2": "not_present",
+  "run3": "not_present"
+ },
+ "lantern-folk-033": {
+  "run1": "consistent",
+  "run2": "consistent",
+  "run3": "consistent"
+ },
+ "shared-dark-030": {
+  "run1": "not_present",
+  "run2": "consistent",
+  "run3": "not_present"
+ },
+ "shared-dark-034": {
+  "run1": "consistent",
+  "run2": "consistent",
+  "run3": "not_present"
+ },
+ "shared-dark-035": {
+  "run1": "consistent",
+  "run2": "consistent",
+  "run3": "consistent"
+ },
+ "shared-dark-037": {
+  "run1": "not_present",
+  "run2": "reintroduced",
+  "run3": "reintroduced"
+ },
+ "shared-dark-038": {
+  "run1": "consistent",
+  "run2": "consistent",
+  "run3": "consistent"
+ },
+ "shared-dark-040": {
+  "run1": "reintroduced",
+  "run2": "reintroduced",
+  "run3": "reintroduced"
+ },
+ "shared-dark-041": {
+  "run1": "not_present",
+  "run2": "reintroduced",
+  "run3": "reintroduced"
+ },
+ "thornwall-020": {
+  "run1": "reintroduced",
+  "run2": "reintroduced",
+  "run3": "reintroduced"
+ },
+ "thornwall-022": {
+  "run1": "not_present",
+  "run2": "not_present",
+  "run3": "not_present"
+ },
+ "thornwall-023": {
+  "run1": "consistent",
+  "run2": "consistent",
+  "run3": "consistent"
+ },
+ "thornwall-024": {
+  "run1": "not_present",
+  "run2": "not_present",
+  "run3": "not_present"
+ },
+ "thornwall-025": {
+  "run1": "consistent",
+  "run2": "reintroduced",
+  "run3": "reintroduced"
+ },
+ "thornwall-026": {
+  "run1": "reintroduced",
+  "run2": "reintroduced",
+  "run3": "reintroduced"
+ },
+ "thornwall-027": {
+  "run1": "not_present",
+  "run2": "not_present",
+  "run3": "not_present"
+ },
+ "thornwall-029": {
+  "run1": "not_present",
+  "run2": "not_present",
+  "run3": "not_present"
+ },
+ "thornwall-030": {
+  "run1": "reintroduced",
+  "run2": "reintroduced",
+  "run3": "reintroduced"
+ },
+ "thornwall-033": {
+  "run1": "consistent",
+  "run2": "consistent",
+  "run3": "consistent"
+ },
+ "thornwall-035": {
+  "run1": "consistent",
+  "run2": "consistent",
+  "run3": "halted"
+ },
+ "thornwall-037": {
+  "run1": "consistent",
+  "run2": "consistent",
+  "run3": "consistent"
+ }
+}

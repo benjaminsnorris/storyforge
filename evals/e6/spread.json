@@ -1,0 +1,1665 @@
+{
+  "claims": [
+    {
+      "claim": "structured outputs: recall 0.245 -> 0.286 (v1.83.0)",
+      "claimed_delta": 0.041,
+      "metric": "recall",
+      "range": 0.0204,
+      "suite": "e3-extraction",
+      "within_noise": false
+    },
+    {
+      "claim": "structured outputs: with partial 0.816 -> 0.755 (v1.83.0)",
+      "claimed_delta": 0.061,
+      "metric": "recall_with_partial",
+      "range": 0.0612,
+      "suite": "e3-extraction",
+      "within_noise": true
+    },
+    {
+      "claim": "tier comparison: Opus misses 7, Sonnet 9 (v1.81.0)",
+      "claimed_delta": 2,
+      "metric": "missing",
+      "range": 3,
+      "suite": "e3-extraction",
+      "within_noise": true
+    },
+    {
+      "claim": "tier comparison: Haiku misses 13, Sonnet 9 (v1.81.0)",
+      "claimed_delta": 4,
+      "metric": "missing",
+      "range": 3,
+      "suite": "e3-extraction",
+      "within_noise": false
+    },
+    {
+      "claim": "v1.80.0 re-record on new models: recall 0.16 -> 0.10",
+      "claimed_delta": 0.06,
+      "metric": "recall",
+      "range": 0.0588,
+      "suite": "e2-corpus-drift",
+      "within_noise": false
+    },
+    {
+      "claim": "v1.80.0 re-record on new models: precision 0.30 -> 0.40",
+      "claimed_delta": 0.1,
+      "metric": "precision",
+      "range": 0.15,
+      "suite": "e2-corpus-drift",
+      "within_noise": true
+    },
+    {
+      "claim": "re-pin to 5e9bdf39: CP10k 18.2 -> 16.1 (v1.84.2)",
+      "claimed_delta": 2.1,
+      "metric": "cp10k",
+      "range": 2.528,
+      "suite": "e4-generation",
+      "within_noise": true
+    },
+    {
+      "claim": "E8 gaps: reintroduced 5 -> 6 (#383; one new case, thornwall-020)",
+      "claimed_delta": 1,
+      "metric": "reintroduced",
+      "range": 5,
+      "suite": "e8-revision-safety",
+      "within_noise": true
+    }
+  ],
+  "errored": {},
+  "git_sha": {
+    "run1": "3c01088d44598167018f5e23fb331fa15ebab8d6",
+    "run2": "3c01088d44598167018f5e23fb331fa15ebab8d6",
+    "run3": "3c01088d44598167018f5e23fb331fa15ebab8d6"
+  },
+  "runs": [
+    "run1",
+    "run2",
+    "run3"
+  ],
+  "suites": {
+    "e2-carol": {
+      "KNO.cases": {
+        "max": 5,
+        "mean": 5.0,
+        "min": 5,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          5,
+          5,
+          5
+        ]
+      },
+      "KNO.recall": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "KNO.recall_code_match": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "PHY.cases": {
+        "max": 6,
+        "mean": 6.0,
+        "min": 6,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          6,
+          6,
+          6
+        ]
+      },
+      "PHY.recall": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "PHY.recall_code_match": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "PRM.cases": {
+        "max": 5,
+        "mean": 5.0,
+        "min": 5,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          5,
+          5,
+          5
+        ]
+      },
+      "PRM.recall": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "PRM.recall_code_match": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "REL.cases": {
+        "max": 5,
+        "mean": 5.0,
+        "min": 5,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          5,
+          5,
+          5
+        ]
+      },
+      "REL.recall": {
+        "max": 0.2,
+        "mean": 0.133333,
+        "min": 0.0,
+        "range": 0.2,
+        "sd": 0.11547,
+        "values": [
+          0.2,
+          0.0,
+          0.2
+        ]
+      },
+      "REL.recall_code_match": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "TIM.cases": {
+        "max": 5,
+        "mean": 5.0,
+        "min": 5,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          5,
+          5,
+          5
+        ]
+      },
+      "TIM.precision": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "TIM.recall": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "TIM.recall_code_match": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "TRT.cases": {
+        "max": 6,
+        "mean": 6.0,
+        "min": 6,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          6,
+          6,
+          6
+        ]
+      },
+      "TRT.recall": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "TRT.recall_code_match": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "VOI.cases": {
+        "max": 2,
+        "mean": 2.0,
+        "min": 2,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          2,
+          2,
+          2
+        ]
+      },
+      "VOI.recall": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "VOI.recall_code_match": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "WLD.cases": {
+        "max": 3,
+        "mean": 3.0,
+        "min": 3,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          3,
+          3,
+          3
+        ]
+      },
+      "WLD.recall": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "WLD.recall_code_match": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "benign_cases": {
+        "max": 8,
+        "mean": 8.0,
+        "min": 8,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          8,
+          8,
+          8
+        ]
+      },
+      "benign_flagged": {
+        "max": 1,
+        "mean": 0.333333,
+        "min": 0,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          1,
+          0,
+          0
+        ]
+      },
+      "cases": {
+        "max": 37,
+        "mean": 37.0,
+        "min": 37,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          37,
+          37,
+          37
+        ]
+      },
+      "control_flags": {
+        "max": 1,
+        "mean": 0.333333,
+        "min": 0,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          0,
+          1,
+          0
+        ]
+      },
+      "flags_false": {
+        "max": 1,
+        "mean": 1.0,
+        "min": 1,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          1,
+          1,
+          1
+        ]
+      },
+      "flags_true": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
+        ]
+      },
+      "precision": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "recall": {
+        "max": 0.027,
+        "mean": 0.018,
+        "min": 0.0,
+        "range": 0.027,
+        "sd": 0.015588,
+        "values": [
+          0.027,
+          0.0,
+          0.027
+        ]
+      },
+      "recall_code_match": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "e2-corpus-drift": {
+      "KNO.cases": {
+        "max": 5,
+        "mean": 5.0,
+        "min": 5,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          5,
+          5,
+          5
+        ]
+      },
+      "KNO.recall": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "KNO.recall_code_match": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "PHY.cases": {
+        "max": 14,
+        "mean": 14.0,
+        "min": 14,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          14,
+          14,
+          14
+        ]
+      },
+      "PHY.recall": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "PHY.recall_code_match": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "PRM.cases": {
+        "max": 1,
+        "mean": 1.0,
+        "min": 1,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          1,
+          1,
+          1
+        ]
+      },
+      "PRM.recall": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "PRM.recall_code_match": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "TIM.cases": {
+        "max": 12,
+        "mean": 12.0,
+        "min": 12,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          12,
+          12,
+          12
+        ]
+      },
+      "TIM.precision": {
+        "max": 0.4,
+        "mean": 0.327767,
+        "min": 0.25,
+        "range": 0.15,
+        "sd": 0.075153,
+        "values": [
+          0.4,
+          0.25,
+          0.3333
+        ]
+      },
+      "TIM.recall": {
+        "max": 0.1667,
+        "mean": 0.1111,
+        "min": 0.0833,
+        "range": 0.0834,
+        "sd": 0.048151,
+        "values": [
+          0.1667,
+          0.0833,
+          0.0833
+        ]
+      },
+      "TIM.recall_code_match": {
+        "max": 0.1667,
+        "mean": 0.1111,
+        "min": 0.0833,
+        "range": 0.0834,
+        "sd": 0.048151,
+        "values": [
+          0.1667,
+          0.0833,
+          0.0833
+        ]
+      },
+      "TRT.cases": {
+        "max": 14,
+        "mean": 14.0,
+        "min": 14,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          14,
+          14,
+          14
+        ]
+      },
+      "TRT.recall": {
+        "max": 0.1429,
+        "mean": 0.095267,
+        "min": 0.0,
+        "range": 0.1429,
+        "sd": 0.082503,
+        "values": [
+          0.1429,
+          0.1429,
+          0.0
+        ]
+      },
+      "TRT.recall_code_match": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "WLD.cases": {
+        "max": 5,
+        "mean": 5.0,
+        "min": 5,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          5,
+          5,
+          5
+        ]
+      },
+      "WLD.recall": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "WLD.recall_code_match": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "benign_cases": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
+        ]
+      },
+      "benign_flagged": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
+        ]
+      },
+      "cases": {
+        "max": 51,
+        "mean": 51.0,
+        "min": 51,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          51,
+          51,
+          51
+        ]
+      },
+      "control_flags": {
+        "max": 1,
+        "mean": 1.0,
+        "min": 1,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          1,
+          1,
+          1
+        ]
+      },
+      "flags_false": {
+        "max": 3,
+        "mean": 2.666667,
+        "min": 2,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          3,
+          3,
+          2
+        ]
+      },
+      "flags_true": {
+        "max": 2,
+        "mean": 1.333333,
+        "min": 1,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          2,
+          1,
+          1
+        ]
+      },
+      "precision": {
+        "max": 0.4,
+        "mean": 0.327767,
+        "min": 0.25,
+        "range": 0.15,
+        "sd": 0.075153,
+        "values": [
+          0.4,
+          0.25,
+          0.3333
+        ]
+      },
+      "recall": {
+        "max": 0.0784,
+        "mean": 0.052267,
+        "min": 0.0196,
+        "range": 0.0588,
+        "sd": 0.029939,
+        "values": [
+          0.0784,
+          0.0588,
+          0.0196
+        ]
+      },
+      "recall_code_match": {
+        "max": 0.0392,
+        "mean": 0.026133,
+        "min": 0.0196,
+        "range": 0.0196,
+        "sd": 0.011316,
+        "values": [
+          0.0392,
+          0.0196,
+          0.0196
+        ]
+      }
+    },
+    "e3-extraction": {
+      "KNO.facts": {
+        "max": 3,
+        "mean": 3.0,
+        "min": 3,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          3,
+          3,
+          3
+        ]
+      },
+      "KNO.recall": {
+        "max": 1.0,
+        "mean": 1.0,
+        "min": 1.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "PHY.facts": {
+        "max": 14,
+        "mean": 14.0,
+        "min": 14,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          14,
+          14,
+          14
+        ]
+      },
+      "PHY.recall": {
+        "max": 0.2143,
+        "mean": 0.2143,
+        "min": 0.2143,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.2143,
+          0.2143,
+          0.2143
+        ]
+      },
+      "PRM.facts": {
+        "max": 1,
+        "mean": 1.0,
+        "min": 1,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          1,
+          1,
+          1
+        ]
+      },
+      "PRM.recall": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "TIM.facts": {
+        "max": 12,
+        "mean": 12.0,
+        "min": 12,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          12,
+          12,
+          12
+        ]
+      },
+      "TIM.recall": {
+        "max": 0.1667,
+        "mean": 0.1389,
+        "min": 0.0833,
+        "range": 0.0834,
+        "sd": 0.048151,
+        "values": [
+          0.1667,
+          0.1667,
+          0.0833
+        ]
+      },
+      "TRT.facts": {
+        "max": 14,
+        "mean": 14.0,
+        "min": 14,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          14,
+          14,
+          14
+        ]
+      },
+      "TRT.recall": {
+        "max": 0.2857,
+        "mean": 0.2857,
+        "min": 0.2857,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.2857,
+          0.2857,
+          0.2857
+        ]
+      },
+      "WLD.facts": {
+        "max": 5,
+        "mean": 5.0,
+        "min": 5,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          5,
+          5,
+          5
+        ]
+      },
+      "WLD.recall": {
+        "max": 0.4,
+        "mean": 0.4,
+        "min": 0.4,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.4,
+          0.4,
+          0.4
+        ]
+      },
+      "captured": {
+        "max": 14,
+        "mean": 13.666667,
+        "min": 13,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          14,
+          14,
+          13
+        ]
+      },
+      "facts": {
+        "max": 49,
+        "mean": 49.0,
+        "min": 49,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          49,
+          49,
+          49
+        ]
+      },
+      "missing": {
+        "max": 15,
+        "mean": 13.666667,
+        "min": 12,
+        "range": 3,
+        "sd": 1.527525,
+        "values": [
+          12,
+          14,
+          15
+        ]
+      },
+      "partial": {
+        "max": 23,
+        "mean": 21.666667,
+        "min": 21,
+        "range": 2,
+        "sd": 1.154701,
+        "values": [
+          23,
+          21,
+          21
+        ]
+      },
+      "recall": {
+        "max": 0.2857,
+        "mean": 0.2789,
+        "min": 0.2653,
+        "range": 0.0204,
+        "sd": 0.011778,
+        "values": [
+          0.2857,
+          0.2857,
+          0.2653
+        ]
+      },
+      "recall_with_partial": {
+        "max": 0.7551,
+        "mean": 0.7211,
+        "min": 0.6939,
+        "range": 0.0612,
+        "sd": 0.031162,
+        "values": [
+          0.7551,
+          0.7143,
+          0.6939
+        ]
+      }
+    },
+    "e4-generation": {
+      "KNO.contradictions": {
+        "max": 7,
+        "mean": 5.0,
+        "min": 3,
+        "range": 4,
+        "sd": 2.0,
+        "values": [
+          7,
+          3,
+          5
+        ]
+      },
+      "PHY.contradictions": {
+        "max": 18,
+        "mean": 16.666667,
+        "min": 15,
+        "range": 3,
+        "sd": 1.527525,
+        "values": [
+          18,
+          15,
+          17
+        ]
+      },
+      "PRM.broken_promises": {
+        "max": 7,
+        "mean": 6.333333,
+        "min": 6,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          6,
+          7,
+          6
+        ]
+      },
+      "REL.contradictions": {
+        "max": 6,
+        "mean": 4.0,
+        "min": 2,
+        "range": 4,
+        "sd": 2.0,
+        "values": [
+          4,
+          2,
+          6
+        ]
+      },
+      "TIM.contradictions": {
+        "max": 10,
+        "mean": 7.333333,
+        "min": 6,
+        "range": 4,
+        "sd": 2.309401,
+        "values": [
+          6,
+          10,
+          6
+        ]
+      },
+      "WLD.contradictions": {
+        "max": 2,
+        "mean": 1.5,
+        "min": 1,
+        "missing_in": [
+          "run1"
+        ],
+        "range": 1,
+        "sd": 0.707107,
+        "values": [
+          1,
+          2
+        ]
+      },
+      "bps": {
+        "max": 0.304,
+        "mean": 0.275333,
+        "min": 0.261,
+        "range": 0.043,
+        "sd": 0.024826,
+        "values": [
+          0.261,
+          0.304,
+          0.261
+        ]
+      },
+      "broken_promises": {
+        "max": 7,
+        "mean": 6.333333,
+        "min": 6,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          6,
+          7,
+          6
+        ]
+      },
+      "checker_flags": {
+        "max": 2,
+        "mean": 1.333333,
+        "min": 1,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          1,
+          2,
+          1
+        ]
+      },
+      "contradictions": {
+        "max": 36,
+        "mean": 34.0,
+        "min": 31,
+        "range": 5,
+        "sd": 2.645751,
+        "values": [
+          35,
+          31,
+          36
+        ]
+      },
+      "cp10k": {
+        "max": 16.737,
+        "mean": 15.672667,
+        "min": 14.209,
+        "range": 2.528,
+        "sd": 1.310457,
+        "values": [
+          16.072,
+          14.209,
+          16.737
+        ]
+      },
+      "cp10k_checker": {
+        "max": 0.917,
+        "mean": 0.613667,
+        "min": 0.459,
+        "range": 0.458,
+        "sd": 0.262712,
+        "values": [
+          0.459,
+          0.917,
+          0.465
+        ]
+      },
+      "length_drift": {
+        "max": 0.046,
+        "mean": 0.044333,
+        "min": 0.043,
+        "range": 0.003,
+        "sd": 0.001528,
+        "values": [
+          0.046,
+          0.043,
+          0.044
+        ]
+      },
+      "refused": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
+        ]
+      },
+      "scenes": {
+        "max": 23,
+        "mean": 23.0,
+        "min": 23,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          23,
+          23,
+          23
+        ]
+      },
+      "target_words": {
+        "max": 21370,
+        "mean": 21370.0,
+        "min": 21370,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          21370,
+          21370,
+          21370
+        ]
+      },
+      "voi": {
+        "max": 4.804,
+        "mean": 4.764667,
+        "min": 4.707,
+        "range": 0.097,
+        "sd": 0.051033,
+        "values": [
+          4.804,
+          4.783,
+          4.707
+        ]
+      },
+      "voi_author": {
+        "max": 4.652,
+        "mean": 4.652,
+        "min": 4.652,
+        "range": 0.0,
+        "sd": 0.0,
+        "values": [
+          4.652,
+          4.652,
+          4.652
+        ]
+      },
+      "words": {
+        "max": 21817,
+        "mean": 21701.0,
+        "min": 21509,
+        "range": 308,
+        "sd": 167.475371,
+        "values": [
+          21777,
+          21817,
+          21509
+        ]
+      }
+    },
+    "e8-revision-safety": {
+      "KNO.reintroduced": {
+        "max": 1,
+        "mean": 0.666667,
+        "min": 0,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          0,
+          1,
+          1
+        ]
+      },
+      "KNO.replayed": {
+        "max": 3,
+        "mean": 3.0,
+        "min": 3,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          3,
+          3,
+          3
+        ]
+      },
+      "PHY.reintroduced": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
+        ]
+      },
+      "PHY.replayed": {
+        "max": 11,
+        "mean": 10.666667,
+        "min": 10,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          10,
+          11,
+          11
+        ]
+      },
+      "REL.reintroduced": {
+        "max": 1,
+        "mean": 0.333333,
+        "min": 0,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          0,
+          0,
+          1
+        ]
+      },
+      "REL.replayed": {
+        "max": 1,
+        "mean": 1.0,
+        "min": 1,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          1,
+          1,
+          1
+        ]
+      },
+      "TIM.reintroduced": {
+        "max": 5,
+        "mean": 4.0,
+        "min": 3,
+        "range": 2,
+        "sd": 1.0,
+        "values": [
+          3,
+          4,
+          5
+        ]
+      },
+      "TIM.replayed": {
+        "max": 7,
+        "mean": 7.0,
+        "min": 7,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          7,
+          7,
+          7
+        ]
+      },
+      "TRT.reintroduced": {
+        "max": 4,
+        "mean": 3.0,
+        "min": 2,
+        "range": 2,
+        "sd": 1.0,
+        "values": [
+          2,
+          4,
+          3
+        ]
+      },
+      "TRT.replayed": {
+        "max": 14,
+        "mean": 13.333333,
+        "min": 13,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          13,
+          14,
+          13
+        ]
+      },
+      "WLD.reintroduced": {
+        "max": 1,
+        "mean": 1.0,
+        "min": 1,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          1,
+          1,
+          1
+        ]
+      },
+      "WLD.replayed": {
+        "max": 1,
+        "mean": 1.0,
+        "min": 1,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          1,
+          1,
+          1
+        ]
+      },
+      "errors_per_10k_words": {
+        "max": 2.94,
+        "mean": 2.44,
+        "min": 1.72,
+        "range": 1.22,
+        "sd": 0.639062,
+        "values": [
+          1.72,
+          2.66,
+          2.94
+        ]
+      },
+      "family.brief-fix.reintroduced": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
+        ]
+      },
+      "family.brief-fix.replayed": {
+        "max": 2,
+        "mean": 1.666667,
+        "min": 1,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          2,
+          2,
+          1
+        ]
+      },
+      "family.hone-physical-states.reintroduced": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
+        ]
+      },
+      "family.hone-physical-states.replayed": {
+        "max": 2,
+        "mean": 2.0,
+        "min": 2,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          2,
+          2,
+          2
+        ]
+      },
+      "family.illustrate-prompts.reintroduced": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
+        ]
+      },
+      "family.illustrate-prompts.replayed": {
+        "max": 1,
+        "mean": 1.0,
+        "min": 1,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          1,
+          1,
+          1
+        ]
+      },
+      "family.illustrate-state.reintroduced": {
+        "max": 0,
+        "mean": 0.0,
+        "min": 0,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          0,
+          0,
+          0
+        ]
+      },
+      "family.illustrate-state.replayed": {
+        "max": 3,
+        "mean": 3.0,
+        "min": 3,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          3,
+          3,
+          3
+        ]
+      },
+      "family.naturalness-upstream.reintroduced": {
+        "max": 2,
+        "mean": 1.666667,
+        "min": 1,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          1,
+          2,
+          2
+        ]
+      },
+      "family.naturalness-upstream.replayed": {
+        "max": 3,
+        "mean": 2.666667,
+        "min": 2,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          2,
+          3,
+          3
+        ]
+      },
+      "family.redraft-from-brief.reintroduced": {
+        "max": 5,
+        "mean": 4.333333,
+        "min": 3,
+        "range": 2,
+        "sd": 1.154701,
+        "values": [
+          3,
+          5,
+          5
+        ]
+      },
+      "family.redraft-from-brief.replayed": {
+        "max": 19,
+        "mean": 18.666667,
+        "min": 18,
+        "range": 1,
+        "sd": 0.57735,
+        "values": [
+          18,
+          19,
+          19
+        ]
+      },
+      "family.revision-plan.reintroduced": {
+        "max": 4,
+        "mean": 3.0,
+        "min": 2,
+        "range": 2,
+        "sd": 1.0,
+        "values": [
+          2,
+          3,
+          4
+        ]
+      },
+      "family.revision-plan.replayed": {
+        "max": 7,
+        "mean": 7.0,
+        "min": 7,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          7,
+          7,
+          7
+        ]
+      },
+      "halted": {
+        "max": 2,
+        "mean": 1.0,
+        "min": 0,
+        "range": 2,
+        "sd": 1.0,
+        "values": [
+          2,
+          0,
+          1
+        ]
+      },
+      "reintroduced": {
+        "max": 11,
+        "mean": 9.0,
+        "min": 6,
+        "range": 5,
+        "sd": 2.645751,
+        "values": [
+          6,
+          10,
+          11
+        ]
+      },
+      "reintroduction_rate": {
+        "max": 0.306,
+        "mean": 0.249,
+        "min": 0.171,
+        "range": 0.135,
+        "sd": 0.069907,
+        "values": [
+          0.171,
+          0.27,
+          0.306
+        ]
+      },
+      "replayed": {
+        "max": 37,
+        "mean": 36.0,
+        "min": 35,
+        "range": 2,
+        "sd": 1.0,
+        "values": [
+          35,
+          37,
+          36
+        ]
+      },
+      "unreplayable": {
+        "max": 15,
+        "mean": 15.0,
+        "min": 15,
+        "range": 0,
+        "sd": 0.0,
+        "values": [
+          15,
+          15,
+          15
+        ]
+      }
+    }
+  }
+}
