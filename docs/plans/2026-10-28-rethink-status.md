@@ -22,7 +22,7 @@ Last updated 2026-10-29 (night), at v1.86.2 (E8 gaps done). Handoff for the next
 - `tests/test_hone.py::test_a_mapping_never_takes_an_alias_from_its_owner` (meridian-line `5433d3f`).
 
 **Left in Phase 1:**
-- the remaining `KEY: value` parsers. Characterize, intent and brief fields moved to structured outputs in v1.85.0 (#377). Extract's skeleton phase is next: it shares the time-cue lines with `timeline.parse_cues`, whose wording evals-56 is testing;
+- the remaining `KEY: value` parsers. Characterize, intent and brief fields moved to structured outputs in v1.85.0 (#377). Extract's skeleton phase is next: it shares the time-cue lines with `timeline.parse_cues`, whose wording settled in v1.86.1 (#380);
 - the remaining warn-and-continue sites.
 
 **Dashboard (v1.86.0, #378, closes #371):** Storyforge sends versioned `dashboard_data` (schema version 1, contract in `docs/agent-reference.md`), and Bookshelf renders it (bookshelf#30). The renderer and `dashboard_html` are gone, and `storyforge visualize` writes `working/dashboard-data.json`. Folding the data into the Phase 2 `export` bundle is still to do.
@@ -168,7 +168,7 @@ Start by reading this doc, `CLAUDE.md` and `docs/agent-reference.md`.
 - **Spending:** estimate before any recording.
 
 1. ~~**E8 gaps.**~~ Done (PR after #382; $3.88 recorded). 39 cases are run, up from 23. 37 are judged and 2 halt, as before (a refused redraft and a naturalness redraft with no reply). Of the 37, 8 are reintroduced, up from 5. What changed:
-   - **Scene metadata migrated:** a pre-pass tree with `scene-metadata.csv` gets a port of Storyforge's own `storyforge-migrate-elaborate` (removed in e22a58c4), applied in the copy. This adds governor-013 and -014, shared-dark-030, -037 and -038, and thornwall-020.
+   - **Scene metadata migrated:** a pre-pass tree with `scene-metadata.csv` gets a port of the scenes.csv step of Storyforge's removed `storyforge-migrate-elaborate` (e22a58c4), applied in the copy. It approximates the books' history: they actually got `scenes.csv` from `extract`'s skeleton phase. This adds governor-013 and -014, shared-dark-030, -037 and -038, and thornwall-020.
    - **Data passes judged on what they write:** brief fix (thornwall-033, -035), `hone` physical-states (governor-020, thornwall-037), `illustrate --state` (lantern-folk-029 to -032) and `illustrate --prompts` (lantern-folk-033). A separate judge prompt reads what the pass wrote. The prose judge prompt is unchanged.
    - **Renamed scenes** are found through E1's id-maps.
    - **The suite's notes** now list every unreplayable case.
@@ -186,7 +186,7 @@ Start by reading this doc, `CLAUDE.md` and `docs/agent-reference.md`.
      - **lantern-folk-034:** no introducing commit, because the prompt files were untracked render output.
 2. **E6** (approved, about $40): two more independent E4 runs plus the paid E2 suites, under separate recording keys, to measure run-to-run variance. Plan §4.2 has the design. E3's tier comparison and E3's recall moves are both "inside noise until E6"; report them against E6's spread.
 3. **Phase 1 leftovers:**
-   - Extract's **skeleton** phase still parses `KEY: value` lines. It shares the cue lines with `timeline.parse_cues`, The CUE_INSTRUCTIONS experiment settled in v1.86.1 (#380, TIME_GAP/TIME_SPAN wording), so the skeleton can move now, with that wording.
+   - Extract's **skeleton** phase still parses `KEY: value` lines. It shares the cue lines with `timeline.parse_cues`. The CUE_INSTRUCTIONS experiment settled in v1.86.1 (#380, TIME_GAP/TIME_SPAN wording), so the skeleton can move now, with that wording.
    - Then the remaining **warn-and-continue** sites. Grep for `WARNING` followed by `continue` in paths that write output.
 4. **Follow-ups noted in PRs:**
    - `hone.hone_briefs` also rewrites briefs and should use the brief-fix name check (`cmd_revise._invented_names`; move it to a shared module).

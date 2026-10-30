@@ -30,12 +30,22 @@ def main(argv=None) -> int:
     sel = e8.select(e1.load_cases(), e1.load_holdout())
     model = select_model('creative')
     total = 0.0
+    data_cases = 0
     with tempfile.TemporaryDirectory(prefix='e8-plan-') as work:
         for case in sel.cases:
             try:
                 project, scene_id = e8.prepare(case, work)
             except LookupError as e:
                 sel.exclude(f'unreplayable: {e}', case['id'])
+                continue
+            if e8.family(case) in e8.DATA_FAMILIES:
+                # a data pass's own calls depend on the project (hone batches,
+                # one illustrate call over the whole book); only its judge is priced
+                data_cases += 1
+                usd = calculate_cost(model_for_tier('opus'), 4000, JUDGE_OUTPUT_TOKENS)
+                total += usd
+                print(f'{case["id"]:18} {case["code"]} {scene_id:32} data pass ({e8.family(case)}): '
+                      f'judge ~${usd:.2f}, pass not priced')
                 continue
             system = build_shared_context(project, model=model)
             prompt = _build_prompt(scene_id, project, 'full', use_briefs=True,
@@ -49,7 +59,9 @@ def main(argv=None) -> int:
         print(f'excluded {len(ids):>2}: {reason}  ({", ".join(ids[:6])}{" ..." if len(ids) > 6 else ""})')
     replay = len(sel.cases) - sum(len(v) for k, v in sel.excluded.items() if k.startswith('unreplayable'))
     print(f'{replay} case(s) to replay; estimated recording cost ~${total:.2f} '
-          f'(model {model}; no prompt-cache discount assumed)')
+          f'(model {model}; no prompt-cache discount assumed'
+          + (f'; the own calls of {data_cases} data pass(es) are not included' if data_cases else '')
+          + ')')
     return 0
 
 
