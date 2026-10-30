@@ -345,6 +345,8 @@ def _chain_or_csv_reply(prompt):
     if 'Track the physical state' in prompt:
         return json.dumps({'physical_state_in': [], 'physical_state_out': [],
                            'new_states': [], 'resolved_states': []})
+    if 'Extract every commitment the scene makes' in prompt:
+        return json.dumps({'commitments': []})
     return 'id|seq|title\nact1-sc01|1|Test\n'
 
 
