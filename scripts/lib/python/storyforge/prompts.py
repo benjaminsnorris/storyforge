@@ -1427,14 +1427,21 @@ def build_scene_prompt_from_briefs(
     state_in = scene.get('physical_state_in', '').strip()
     if state_in:
         state_ids = [s.strip() for s in state_in.split(';') if s.strip()]
-        # The ledger's physical states, for descriptions
+        # The ledger's physical states, for descriptions; a character is
+        # shown by its characters.csv name (the subject is its id; a subject
+        # left blank shows the name the migration kept)
         from . import ledger
+        from .elaborate import _read_csv
         states_registry = ledger.view_map(ref_dir, 'physical')
+        names = {r['id'].strip(): (r.get('name') or '').strip()
+                 for r in _read_csv(os.path.join(ref_dir, 'characters.csv'))
+                 if (r.get('id') or '').strip()}
 
         state_lines = []
         for sid in state_ids:
             entry = states_registry.get(sid, {})
             char = entry.get('character', '')
+            char = names.get(char) or char
             desc = entry.get('description', sid)
             gating = entry.get('action_gating', 'false').lower() == 'true'
             line = f"- **{char}**: {desc}" if char else f"- {desc}"

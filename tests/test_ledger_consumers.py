@@ -110,14 +110,50 @@ def test_knowledge_aliases_resolve_from_the_ledger(project_dir):
 
 
 def test_the_drafting_prompt_reads_states_from_the_ledger(project_dir, plugin_dir):
+    """Characters show by name (the ledger holds the id); an unresolved
+    character shows the name the migration kept in aliases."""
     from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP
     from storyforge.prompts import build_scene_prompt_from_briefs
-    briefs = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    ref = os.path.join(project_dir, 'reference')
+    rows = ledger.load_from(ref)
+    scar = next(r for r in rows if r['id'] == 'scar-left-hand-kael')
+    scar.update(subject='', aliases='Garren')
+    ledger.save_to(ref, rows)
+    briefs = os.path.join(ref, 'scene-briefs.csv')
     rows = _read_csv(briefs)
-    rows[0]['physical_state_in'] = 'archive-key-dorren'
+    rows[0]['physical_state_in'] = 'archive-key-dorren;scar-left-hand-kael'
     _write_csv(briefs, rows, _FILE_MAP['scene-briefs.csv'])
     prompt = build_scene_prompt_from_briefs(rows[0]['id'], project_dir, str(plugin_dir))
-    assert '- **dorren-hayle**: holds the restricted archive key *(action-gating)*' in prompt
+    assert '- **Dorren Hayle**: holds the restricted archive key *(action-gating)*' in prompt
+    assert '- **Garren**: old scar across left palm from archive incident' in prompt
+
+
+def test_validate_stops_on_a_ledger_it_cannot_read(project_dir, monkeypatch, capsys):
+    from storyforge import cmd_validate
+    path = ledger.ledger_path(project_dir)
+    with open(path) as f:
+        lines = f.read().splitlines()
+    with open(path, 'w') as f:
+        f.write('\n'.join(lines + [lines[1]]) + '\n')   # a duplicate id
+    monkeypatch.setattr(cmd_validate, 'detect_project_root', lambda: project_dir)
+    with pytest.raises(SystemExit) as exc:
+        cmd_validate.main([])
+    assert exc.value.code == 1
+    assert "id 'map-anomaly-exists' is also on line 2" in capsys.readouterr().out
+
+
+def test_elaborate_reports_a_gating_state_with_no_character(project_dir):
+    from storyforge.elaborate import validate_structure
+    ref = os.path.join(project_dir, 'reference')
+    rows = ledger.load_from(ref)
+    key = next(r for r in rows if r['id'] == 'archive-key-dorren')
+    key.update(subject='', aliases='Garren')
+    ledger.save_to(ref, rows)
+    flags = [c for c in validate_structure(ref)['checks']
+             if c.get('check') == 'state-owner-unknown']
+    assert [c['message'] for c in flags] == [
+        "Physical state 'archive-key-dorren' gates action but has no character id "
+        "(written as 'Garren', not in characters.csv): its on-stage relevance is not checked"]
 
 
 class TestSchemaAgainstTheLedger:
