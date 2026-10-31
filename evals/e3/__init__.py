@@ -92,9 +92,12 @@ def select(root: str | None = None) -> tuple[list[dict], dict[str, list[str]]]:
     return items, excluded
 
 
-def extract(project_dir: str, scene_id: str) -> tuple[str, str, str]:
+def extract(project_dir: str, scene_id: str) -> tuple[str, str, str, int]:
     """Today's knowledge, physical-state and commitments responses for one
-    scene, scene-local. The commitments pass is offered nothing as known:
+    scene, scene-local, and how many commitments the persistence check
+    dropped. The commitments response is what phase 4 records: its reply
+    after the persistence check (`persistence.judge`), as JSON, so a fact
+    the check drops counts as not captured. The commitments pass is offered nothing as known:
     `storyforge extract` offers it the registry facts in force and those
     already recorded for the scene (F-128, so it doesn't restate them), but
     E3 asks whether the rubric itself captures the fact, so it measures the
@@ -132,6 +135,8 @@ def extract(project_dir: str, scene_id: str) -> tuple[str, str, str]:
     commitments_prompt = build_commitments_prompt(
         scene_id, text, {k: scene.get(k, '') for k in ('title', 'pov', 'location')},
         registries_text=format_registries_for_prompt(project_dir, exclude=('knowledge',)))
+    from storyforge import persistence
+    from storyforge.extract import parse_commitments_response
     out = []
     for prompt, kind, schema, tokens in (
             (knowledge_prompt, 'knowledge', KNOWLEDGE_SCHEMA, 1024),
@@ -142,7 +147,13 @@ def extract(project_dir: str, scene_id: str) -> tuple[str, str, str]:
         if not response.strip():
             raise RuntimeError(f'empty {kind} extraction for {scene_id}')
         out.append(response)
-    return out[0], out[1], out[2]
+    found = parse_commitments_response(out[2], scene_id)
+    log_dir = os.path.join(project_dir, 'working', 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    verdict = persistence.judge(scene_id, text, found, model=model,
+                                log_file=os.path.join(log_dir, f'e3-persistence-{scene_id}.json'))
+    kept = json.dumps({'commitments': verdict.kept}, ensure_ascii=False)
+    return out[0], out[1], kept, len(verdict.dropped)
 
 
 def parse_verdict(text: str) -> dict:

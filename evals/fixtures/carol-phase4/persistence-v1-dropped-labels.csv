@@ -1,0 +1,118 @@
+n|scene_id|verdict|gold_id|note
+1|scrooge-in-counting-house|commitment|C05|Christmas Eve fog and bitter cold; the only counting-house weather row; contrasts with the clear Stave V morning (T5). Gold C05 now partial
+2|scrooge-in-counting-house|incidental||one-moment set dressing
+3|scrooge-in-counting-house|commitment||door open to watch the clerk; reused in the final scene (Scrooge sits with door wide open to catch Bob); prior scoring labelled it commitment
+4|scrooge-in-counting-house|commitment|C07|white comforter; why says nothing hinges on it; no recall loss (kept scrooge-dismisses-clerk row has it)
+5|nephew-visits-scrooge|incidental||momentary reaction; the threat is kept
+6|charity-collectors-visit-scrooge|commitment||introduces the portly charity gentleman who returns in Stave V; part of C15/C76 setup; no recall loss
+7|city-at-christmas-eve|incidental||street scenery
+8|city-at-christmas-eve|incidental||weather progression; C05 weather carried by n=1
+9|city-at-christmas-eve|commitment|C16|carol boy at the keyhole driven off by the ruler; recalled in the school scene (C35); no recall loss (kept ruler row)
+10|scrooge-dismisses-clerk|incidental||staging
+11|scrooge-dismisses-clerk|incidental||momentary
+12|scrooge-walks-home|incidental||one evening activity (precedent: habitual tavern incidental)
+13|scrooge-walks-home|incidental||weather at the gateway (precedent)
+14|marley-face-on-knocker|commitment|C20|only phase-4 row stating Marley face appeared in the knocker; detail is texture but the event is the commitment; C20 phase-4 now partial
+15|marley-face-on-knocker|incidental||staging
+16|marley-face-on-knocker|incidental||staging; door itself minor
+17|scrooge-settles-in-chambers|commitment|C22|double-locked, not his custom; why claims it is covered; covered only by combining habit row with ghost-departs double-locked row
+18|scrooge-settles-in-chambers|commitment|C23|nightcap/dressing-gown; recurs at waking; covered by later phase-4 row and migration
+19|scrooge-settles-in-chambers|incidental||hypothetical image
+20|scrooge-settles-in-chambers|incidental||momentary
+21|marley-ghost-arrives|incidental||momentary
+22|marley-ghost-arrives|commitment||ghost entered through the locked heavy door; called back in ghost-departs (bolts undisturbed) and on waking (the door by which the Ghost entered)
+23|marley-ghost-arrives|incidental||momentary incredulity (precedent)
+24|scrooge-confronts-marley-ghost|incidental||staging
+25|scrooge-confronts-marley-ghost|incidental||one-time effect; kerchief kept elsewhere
+26|scrooge-confronts-marley-ghost|incidental||staging
+27|scrooge-confronts-marley-ghost|incidental||momentary perception; chain kept elsewhere
+28|scrooge-confronts-marley-ghost|incidental||prop
+29|ghost-departs-phantoms-appear|commitment|C29|Marley leaves by the window; no other row; C29 now partial
+30|ghost-departs-phantoms-appear|incidental||vision scenery; Scrooge-saw-phantoms and chain rule kept elsewhere
+31|ghost-departs-phantoms-appear|incidental||staging
+32|ghost-departs-phantoms-appear|incidental||momentary
+33|scrooge-wakes-awaits-spirit|commitment|C31|woke as the bell tolled twelve; covered by repeater-watch row
+34|scrooge-wakes-awaits-spirit|incidental||visual effect
+35|scrooge-wakes-awaits-spirit|incidental||gesture (precedent)
+36|scrooge-wakes-awaits-spirit|incidental||weather at waking (precedent)
+37|scrooge-wakes-awaits-spirit|incidental||narrator joke read literally as a possession (misread)
+38|spirit-transports-scrooge-past|incidental||transition staging
+39|spirit-transports-scrooge-past|incidental||weather in vision (precedent)
+40|spirit-transports-scrooge-past|incidental||vision scenery
+41|scrooge-sees-boyhood-school|incidental||set dressing
+42|scrooge-sees-boyhood-school|incidental||room inside vision
+43|scrooge-sees-boyhood-school|incidental||yard texture (precedent)
+44|scrooge-sees-boyhood-school|commitment|C34|boy left alone reading at school; covered by kept row
+45|scrooge-sees-boyhood-school|commitment|C34|Ali Baba / Robinson Crusoe reading; covered by kept row
+46|scrooge-sees-boyhood-school|incidental||momentary feeling
+47|scrooge-sees-boyhood-school|incidental||gesture
+48|scrooge-revisits-second-christmas|incidental||coach detail (precedent)
+49|fezziwig-warehouse-christmas-party|incidental||guest list
+50|fezziwig-warehouse-christmas-party|incidental||comic aside
+51|fezziwig-warehouse-christmas-party|incidental||time grows short (precedent)
+52|belle-releases-young-scrooge|incidental||costume
+53|belle-releases-young-scrooge|incidental||in-moment protest; Gain rows kept
+54|belle-releases-young-scrooge|incidental||momentary plea
+55|belle-family-happy-without-scrooge|incidental||staging; C42 kept elsewhere
+56|belle-family-happy-without-scrooge|incidental||restates shadows rule already kept
+57|belle-family-happy-without-scrooge|incidental||fleeting visual
+58|scrooge-awaits-second-spirit|incidental||staging
+59|scrooge-awaits-second-spirit|incidental||momentary intention
+60|scrooge-awaits-second-spirit|incidental||light staging (precedent)
+61|scrooge-awaits-second-spirit|incidental||staging
+62|ghost-of-christmas-present-revealed|incidental||room decoration
+63|ghost-of-christmas-present-revealed|incidental||throne of food (precedent)
+64|ghost-of-christmas-present-revealed|incidental||momentary manner
+65|spirit-tours-christmas-morning-city|commitment|C47|snow scraped from pavements on Christmas morning (gold quote); covered by kept snow row
+66|spirit-tours-christmas-morning-city|incidental||scenery
+67|spirit-tours-christmas-morning-city|incidental||dialogue; the Spirit disavowal is kept
+68|cratchit-family-christmas-dinner|incidental||comic texture
+69|cratchit-family-christmas-dinner|incidental||costume
+70|cratchit-family-christmas-dinner|incidental||anecdote
+71|cratchit-family-christmas-dinner|incidental||one-time song
+72|cratchit-family-christmas-dinner|commitment|C53|surplus population thrown back at Scrooge; only phase-4 row; C53 now migration-only
+73|cratchit-family-christmas-dinner|commitment|C51|goose dinner; set against the Stave V turkey (T4); no other row; C51 lost
+74|cratchit-family-christmas-dinner|commitment|C50|Bob carries Tim on his shoulder from church; Tim church remark depends on it (precedent commitment)
+75|spirit-visits-moor-and-sea|incidental||moor scenery (precedent)
+76|spirit-visits-moor-and-sea|commitment||sunset on the moor marks time through Christmas Day (precedent commitment)
+77|spirit-visits-moor-and-sea|incidental||set dressing
+78|spirit-visits-moor-and-sea|incidental||minor figure
+79|spirit-visits-moor-and-sea|incidental||set dressing
+80|spirit-visits-moor-and-sea|incidental||travel staging (precedent)
+81|nephew-fred-christmas-party|incidental||aside
+82|nephew-fred-christmas-party|incidental||hedged headcount
+83|spirit-ages-ignorance-and-want|incidental||reveal staging (precedent); children kept
+84|spirit-ages-ignorance-and-want|incidental||summary
+85|scrooge-meets-final-phantom|incidental||staging
+86|merchants-discuss-dead-man|incidental||crowd texture
+87|merchants-discuss-dead-man|incidental||one-scene merchant appearance (precedent)
+88|wealthy-men-exchange-cold-words|incidental||weather small talk (precedent)
+89|wealthy-men-exchange-cold-words|incidental||staging
+90|wealthy-men-exchange-cold-words|commitment||Scrooge accustomed corner at the Exchange taken by another: his habit and the clue to his death
+91|thieves-sell-dead-mans-belongings|incidental||shop inventory
+92|thieves-sell-dead-mans-belongings|incidental||staging
+93|thieves-sell-dead-mans-belongings|incidental||passing question
+94|thieves-sell-dead-mans-belongings|incidental||how Joe pays (precedent)
+95|scrooge-confronts-shrouded-corpse|commitment||bare uncurtained bed ties to stolen curtains and curtains still there on waking (prior scoring labelled the same fact commitment)
+96|scrooge-confronts-shrouded-corpse|incidental||sensory texture
+97|scrooge-confronts-shrouded-corpse|incidental||restates the covered face (precedent)
+98|debtors-rejoice-at-creditors-death|incidental||scene setting (precedent)
+99|debtors-rejoice-at-creditors-death|commitment|C67|only pleasure shown at the death: the relief half of C67, answers Scrooge request; phase-4 C67 now partial
+100|cratchit-family-mourns-tiny-tim|incidental||staging
+101|cratchit-family-mourns-tiny-tim|incidental||momentary
+102|cratchit-family-mourns-tiny-tim|incidental||scene setting (precedent)
+103|cratchit-family-mourns-tiny-tim|incidental||scenery
+104|cratchit-family-mourns-tiny-tim|commitment|C07|comforter recurs in the future scene; re-asserts C07; no recall loss
+105|scrooge-reads-his-own-gravestone|commitment||in the future his office belongs to another: clue that Scrooge is gone
+106|scrooge-reads-his-own-gravestone|incidental||churchyard scenery
+107|scrooge-reads-his-own-gravestone|incidental||momentary
+108|scrooge-wakes-transformed|commitment|C72|bed-curtains not torn down, rings and all: deliberate callback to the stolen curtains (T6); why says it does not carry forward; C72 lost
+109|scrooge-wakes-transformed|incidental||momentary business
+110|scrooge-buys-prize-turkey|incidental||figurative comparison
+111|scrooge-buys-prize-turkey|incidental||momentary; tremor in migration
+112|scrooge-pledges-donation-streets|incidental||momentary feeling
+113|scrooge-pledges-donation-streets|incidental||momentary
+114|scrooge-visits-nephews-dinner|incidental||walk texture
+115|scrooge-visits-nephews-dinner|incidental||table staging (precedent)
+116|scrooge-visits-nephews-dinner|incidental||momentary surprise
+117|scrooge-raises-bobs-salary|incidental||momentary reaction

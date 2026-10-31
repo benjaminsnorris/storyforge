@@ -1,6 +1,7 @@
 """Tests for storyforge.gate: extract → halt → check → commit for one scene.
 The API is mocked at `api._api_request`: a request with tools is the
-checker, one without is extraction."""
+checker, one whose schema asks for `verdicts` the persistence check, any
+other extraction."""
 
 import json
 import os
@@ -51,9 +52,36 @@ def _contradiction():
             'established_quote': 'Dorren Hayle pressed the brass calipers against the vellum'}
 
 
-def _gate(project_dir, tmp_path, commitments=(), findings=(), kept=(), cleared=None, **kw):
+def _persistence_reply(body, drop=()):
+    """The persistence check's answer: every numbered fact lasts, except the
+    statements in `drop`."""
+    import re
+    prompt = body['messages'][0]['content']
+    items = re.findall(r'^(\d+)\. \[[^\]]*\] [^:]*: (.*?)(?: — "|$)', prompt, re.M)
+    return _text({'verdicts': [{'n': int(n), 'persists': st not in drop, 'why': 'w'}
+                               for n, st in items]})
+
+
+def _is_persistence(body):
+    schema = (body.get('output_config') or {}).get('format', {}).get('schema', {})
+    return 'verdicts' in schema.get('properties', {})
+
+
+def _with_persistence(fake, drop=()):
+    """`fake`, with the persistence check answered first (every fact lasts,
+    except the statements in `drop`)."""
+    def route(path, body, **k):
+        if _is_persistence(body):
+            return _persistence_reply(body, drop)
+        return fake(path, body, **k)
+    return route
+
+
+def _gate(project_dir, tmp_path, commitments=(), findings=(), kept=(), cleared=None,
+          drop=(), **kw):
     """`cleared`: the disputes the check clears; None clears every one it
-    is asked about (a request with disputes asks for `cleared`)."""
+    is asked about (a request with disputes asks for `cleared`). `drop`:
+    statements the persistence check says don't last."""
     def fake(path, body, **k):
         if 'tools' in body:
             reply = {'findings': list(findings), 'kept': list(kept)}
@@ -65,7 +93,7 @@ def _gate(project_dir, tmp_path, commitments=(), findings=(), kept=(), cleared=N
                 reply['cleared'] = asked if cleared is None else list(cleared)
             return _text(reply)
         return _text({'commitments': list(commitments)})
-    with patch('storyforge.api._api_request', side_effect=fake):
+    with patch('storyforge.api._api_request', side_effect=_with_persistence(fake, drop)):
         return gate_scene(project_dir, SCENE, command=kw.pop('command', 'draft'),
                           log_dir=str(tmp_path / 'logs'), extract_model='m',
                           check_model='m', **kw)
@@ -199,7 +227,7 @@ class TestFailsLoud:
     def test_an_extraction_cut_off_raises(self, project_dir, tmp_path):
         def fake(path, body, **k):
             return _text({'commitments': []}, stop='max_tokens')
-        with patch('storyforge.api._api_request', side_effect=fake), \
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)), \
                 pytest.raises(GateError, match='extraction failed'):
             gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path),
                        extract_model='m', check_model='m')
@@ -210,7 +238,7 @@ class TestFailsLoud:
                 return {'stop_reason': 'refusal', 'content': [], 'usage': {}}
             return _text({'commitments': []})
         before = ledger.load(project_dir)
-        with patch('storyforge.api._api_request', side_effect=fake), \
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)), \
                 pytest.raises(GateError, match='refused'):
             gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path),
                        extract_model='m', check_model='m')
@@ -263,7 +291,7 @@ class TestReview439:
                      'input': {'subject': '', 'type': 'world', 'text': 'hollow'}}]}
             seen.append(body['messages'][2]['content'][0]['content'])
             return _text({'findings': [], 'kept': []})
-        with patch('storyforge.api._api_request', side_effect=fake):
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
             result = gate_scene(project_dir, SCENE, command='redraft', log_dir=str(tmp_path),
                                 extract_model='m', check_model='m')
         assert result.committed
@@ -289,7 +317,7 @@ class TestReview439:
                 ledger.save(project_dir, rows, command='hand')
                 return _text({'findings': [], 'kept': []})
             return _text({'commitments': [_commitment()]})
-        with patch('storyforge.api._api_request', side_effect=fake), \
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)), \
                 pytest.raises(GateError, match='changed while'):
             gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path),
                        extract_model='m', check_model='m')
@@ -301,7 +329,7 @@ class TestReview439:
             if ('tools' in body) == (fail_on == 'check'):
                 raise RuntimeError('API returned HTTP 500')
             return _text({'commitments': []})
-        with patch('storyforge.api._api_request', side_effect=fake), \
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)), \
                 pytest.raises(GateError, match='HTTP 500'):
             gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path),
                        extract_model='m', check_model='m')
@@ -312,3 +340,57 @@ class TestReview439:
         ledger.save(project_dir, rows, command='test')
         result = _gate(project_dir, tmp_path, [_commitment()])
         assert result.problems['unplaced'] == [rows[0]['id']]
+
+
+class TestPersistence:
+    """The second question on extracted facts: does it last beyond the scene?"""
+
+    def test_a_fact_that_does_not_last_is_not_committed_and_is_reported(
+            self, project_dir, tmp_path):
+        staging = _commitment(statement='Dorren sets the cup down on the left',
+                              mutable='state')
+        result = _gate(project_dir, tmp_path, [_commitment(), staging],
+                       drop={'Dorren sets the cup down on the left'})
+        assert result.committed
+        assert [r['statement'] for r in result.proposed] == ["Tarren's Hollow had 412 people"]
+        assert result.dropped == [('Dorren sets the cup down on the left', 'w')]
+        assert any(line.startswith('NOTE (not recorded, judged not to last')
+                   for line in gate.report_lines(result))
+        assert 'cup' not in ' '.join(r['statement'] for r in ledger.load(project_dir))
+
+    def test_a_fact_that_changes_another_is_not_asked_about(self, project_dir, tmp_path):
+        TestEnds()._state(project_dir, 'bleeding', 'draft')
+        asked = []
+
+        def fake(path, body, **k):
+            if _is_persistence(body):
+                asked.append(body['messages'][0]['content'])
+                return _persistence_reply(body, drop={'The bleeding stopped'})
+            if 'tools' in body:
+                return _text({'findings': [], 'kept': []})
+            return _text({'commitments': [_commitment(statement='The bleeding stopped',
+                                                      ends=['bleeding'])]})
+        with patch('storyforge.api._api_request', side_effect=fake):
+            result = gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path),
+                                extract_model='m', check_model='m')
+        assert asked == [] and result.dropped == []
+        assert [r['statement'] for r in result.proposed] == ['The bleeding stopped']
+
+    @pytest.mark.parametrize('reply', [
+        {'verdicts': []},                                              # one unanswered
+        {'verdicts': [{'n': 1, 'persists': True, 'why': ''}] * 2},     # answered twice
+        {'verdicts': [{'n': 2, 'persists': True, 'why': ''}]},         # out of range
+    ])
+    def test_a_reply_that_does_not_answer_each_fact_once_is_a_gate_error(
+            self, project_dir, tmp_path, reply):
+        before = ledger.load(project_dir)
+
+        def fake(path, body, **k):
+            if _is_persistence(body):
+                return _text(reply)
+            return _text({'commitments': [_commitment()]})
+        with patch('storyforge.api._api_request', side_effect=fake), \
+                pytest.raises(GateError, match='persistence check failed'):
+            gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path),
+                       extract_model='m', check_model='m')
+        assert ledger.load(project_dir) == before

@@ -1177,7 +1177,9 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                  force, dry_run, system=None):
     """Phase 4: every commitment each scene makes, by the reader-noticeable
-    rubric (plan decision 5), into the ledger.
+    rubric (plan decision 5), into the ledger. Each scene's reply then goes
+    through the persistence check (`persistence.judge`): a fact judged not
+    to last beyond the scene is not recorded, and is logged with why.
 
     Sequential: each scene is offered the facts in force entering it and the
     registry facts already recorded for it (`extract.known_for_scene`, F-128), so one
@@ -1194,7 +1196,7 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     scene, a subject not in the registries, or a `supersedes` naming no
     offered commitment is kept as given and counted in a WARNING.
     """
-    from storyforge import ledger
+    from storyforge import ledger, persistence
     from storyforge.elaborate import get_scene
     from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps
     from storyforge.extract import (COMMITMENT_PROBLEMS, COMMITMENTS_SCHEMA,
@@ -1231,6 +1233,7 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             'run, so no scene is offered them: ' + ', '.join(unplaced[:20])
             + (' ...' if len(unplaced) > 20 else ''))
     written = 0
+    dropped = 0
 
     for scene_id in sorted_scene_ids:
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
@@ -1259,6 +1262,8 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                   f'{len(sorted_scene_ids)} scenes: {scene_id} =====')
             print(prompt)
             print('===== END DRY RUN =====')
+            print('Each scene also gets a second call, the persistence check '
+                  '(storyforge/persistence.py), on the commitments the first returns.')
             return
 
         log_file = os.path.join(log_dir, f'extract-commitments-{scene_id}.json')
@@ -1273,13 +1278,29 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             _halt_chain(project_dir, '4 — commitments', scene_id, e,
                         ['reference/commitments.csv', 'working/'])
 
-        new = commitment_rows(found, scene_id, scene_text, rows, known, recorded,
+        # The scene is in the persistence prompt: the shared system context
+        # would only add cache reads
+        persistence_log = os.path.join(log_dir, f'extract-persistence-{scene_id}.json')
+        try:
+            verdict = persistence.judge(scene_id, scene_text, found, model=model,
+                                        log_file=persistence_log)
+        except persistence.PersistenceError as e:
+            _halt_chain(project_dir, '4 — commitments', scene_id, e,
+                        ['reference/commitments.csv', 'working/'])
+        if verdict.asked:
+            _log_api_usage(persistence_log, 'extract-persistence', scene_id, model, project_dir)
+        new = commitment_rows(verdict.kept, scene_id, scene_text, rows, known, recorded,
                               subjects, ledger.COMMITMENTS_PASS, problems,
                               own_writers=(ledger.COMMITMENTS_PASS,))
         rows.extend(new)
         written += len(new)
+        dropped += len(verdict.dropped)
         ledger.save_to(ref_dir, rows, command=ledger.COMMITMENTS_PASS)
-        log(f'  {scene_id}: {len(found)} commitment(s)')
+        log(f'  {scene_id}: {len(verdict.kept)} commitment(s)'
+            + (f'; {len(verdict.dropped)} judged not to last beyond the scene, not '
+               f'recorded' if verdict.dropped else ''))
+        for entry, why in verdict.dropped:
+            log(f'    not recorded: {entry["statement"][:160]} ({why[:120]})')
 
     for kind, what in (('quote', 'quote(s) not found verbatim in their scene'),
                        ('no quote', 'commitment(s) with no quote'),
@@ -1301,7 +1322,9 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             log(f'  WARNING: {len(problems[kind])} {what}: '
                 + '; '.join(problems[kind][:20])
                 + (' ...' if len(problems[kind]) > 20 else ''))
-    log(f'  Phase 4: {written} commitment(s) written')
+    log(f'  Phase 4: {written} commitment(s) written'
+        + (f'; {dropped} judged not to last beyond their scene and not recorded '
+           f'(listed above, per scene)' if dropped else ''))
     commit_and_push(project_dir, 'Extract: Phase 4 — commitments',
                     ['reference/commitments.csv', 'working/'])
 
