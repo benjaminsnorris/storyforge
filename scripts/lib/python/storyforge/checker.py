@@ -50,9 +50,9 @@ PROMISE_FIELDS = ('outcome', 'key_actions', 'key_dialogue')
 REGISTRY_PROMISE_FIELDS = {'knowledge_out': 'knowledge', 'physical_state_out': 'physical'}
 REGISTRY_ENTERING_FIELDS = {'knowledge_in': 'knowledge', 'physical_state_in': 'physical'}
 
-#: Search hits shown: up to `FULL_HITS` as whole paragraphs (cut to
-#: `PASSAGE_CHARS` around the match); past that, up to `MAX_SEARCH_HITS` as
-#: `SNIPPET_CHARS` snippets. E4 run 5's checker searched "scar thumb", got 42
+#: Search hits shown: at most `FULL_HITS` hits are each cut to
+#: `PASSAGE_CHARS` around the match; more than that, and up to
+#: `MAX_SEARCH_HITS` are shown, each cut to `SNIPPET_CHARS`. E4 run 5's checker searched "scar thumb", got 42
 #: hits, saw the first 12 and missed the one it needed.
 FULL_HITS = 12
 MAX_SEARCH_HITS = 40
@@ -277,13 +277,15 @@ def _search(book: Book, at: str, args: dict) -> str:
         for para in re.split(r'\n\s*\n', book.prose[sid]):
             low = _norm(para)
             if all(re.search(r'\b' + re.escape(w), low) for w in words):
-                hits.append((sid, _flat(para)))
+                hits.append((sid, len(hits), _flat(para)))
     if not hits:
         return f'No passage in another scene contains all of: {", ".join(words)}.'
     # Nearest first: the earlier scenes back from this one, then the later
     # ones forward (a slip is usually against what the reader saw last)
+    # (within an earlier scene, its last paragraphs first)
     here = book.order[at]
-    hits.sort(key=lambda h: (book.order[h[0]] > here, abs(book.order[h[0]] - here)))
+    hits.sort(key=lambda h: (book.order[h[0]] > here, abs(book.order[h[0]] - here),
+                             h[1] if book.order[h[0]] > here else -h[1]))
     shown = hits[:MAX_SEARCH_HITS]
     width = PASSAGE_CHARS if len(hits) <= FULL_HITS else SNIPPET_CHARS
     # Centre each cut on the query's longest word, the most specific
@@ -293,10 +295,12 @@ def _search(book: Book, at: str, args: dict) -> str:
                 f'(add a word to narrow the search)')
              + ('' if width == PASSAGE_CHARS else f', cut to {width} characters (read_scene '
                 f'for a whole scene)') + '; nearest first, earlier scenes before later ones']
-    for sid, para in shown:
+    for sid, _, para in shown:
         if len(para) > width:
-            i = _norm(para).find(key)
-            start = max(0, i - width // 2)
+            # in `para` itself (normalizing shifts offsets), at a word start
+            # as the search matched
+            m = re.search(r'(?<!\w)' + re.escape(key), para, re.I)
+            start = max(0, (m.start() if m else 0) - width // 2)
             para = ('…' if start else '') + para[start:start + width] + '…'
         lines.append(f'[{sid}, {book.where(sid, at)}] {para}')
     return '\n'.join(lines)

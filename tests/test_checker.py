@@ -387,3 +387,19 @@ class TestSearchShowsTheNearestHits:
         assert len(lines) == checker.MAX_SEARCH_HITS + 1
         assert lines[1].startswith('[s58, earlier]')
         assert all(len(line) < checker.SNIPPET_CHARS + 40 for line in lines[1:])
+
+
+    def test_a_snippet_is_centred_on_the_match_despite_italics_and_prefixes(self):
+        from storyforge.checker import Book
+        para = 'Oscar ' + '*so* ' * 120 + 'the scar on his thumb ' + 'y ' * 300
+        prose = {f's{i}': para for i in range(14)}
+        book = Book({f's{i}': i for i in range(14)}, {}, prose, [])
+        out = checker._search(book, 's13', {'query': 'scar thumb'})
+        assert all('the scar on his thumb' in line for line in out.splitlines()[1:])
+
+    def test_within_an_earlier_scene_its_last_paragraph_comes_first(self):
+        from storyforge.checker import Book
+        prose = {'a': 'first scar thumb.\n\nsecond scar thumb.', 'b': 'here'}
+        out = checker._search(Book({'a': 0, 'b': 1}, {}, prose, []), 'b',
+                              {'query': 'scar thumb'})
+        assert out.splitlines()[1].endswith('second scar thumb.')
