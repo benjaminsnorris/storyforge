@@ -864,6 +864,41 @@ class TestChecks:
         assert [(f['scene_id'], f['check']) for f in findings] == [('past-it', 'flashback_not_earlier')]
         assert 'end of the previous summary (day 51)' in findings[0]['message']
 
+    def test_a_stated_year_is_compared_with_an_unstated_one(self):
+        """Five Weeks in a Balloon: the arrival certificate is dated
+        1862-05-24, the scene before it XXXX-05-27 (Verne's slip for the
+        23rd). Comparing only within one written year skipped the pair, so the
+        one flag that sits where the slip is never fired."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('mountains', '130', 'scene', 'XXXX-05-27'),
+                          ('certificate', '131', 'scene', '1862-05-24'))
+        found = check_timeline(rows, {})
+        assert [(f['scene_id'], f['check']) for f in found] == [('certificate', 'date_mismatch')]
+
+    def test_a_step_back_within_an_unstated_year_passes(self):
+        """Around the World in Eighty Days: the Carnatic sails on the 7th, told
+        after Fix's 8th, a day back on both counts. The year-turn reading
+        (+364) replaced the same-year one (-1), so every correct step back in
+        an unstated year was flagged."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('fix-on-the-8th', '38', 'scene', 'XXXX-11-08'),
+                          ('carnatic-sails', '37', 'scene', 'XXXX-11-07'))
+        assert check_timeline(rows, {}) == []
+
+    def test_a_step_back_that_disagrees_is_still_flagged(self):
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('fix-on-the-8th', '38', 'scene', 'XXXX-11-08'),
+                          ('carnatic-sails', '30', 'scene', 'XXXX-11-07'))
+        assert [f['check'] for f in check_timeline(rows, {})] == ['date_mismatch']
+
+    def test_a_stated_and_an_unstated_year_that_agree_pass(self):
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('departure', '1', 'scene', '1872-10-02'),
+                          ('suez', '8', 'scene', 'XXXX-10-09'),
+                          ('new-year', '92', 'scene', 'XXXX-01-01'),
+                          ('later', '93', 'scene', '1873-01-02'))
+        assert check_timeline(rows, {}) == []
+
     def test_an_approximate_date_has_slack(self):
         """The Brimming Cup: "here we are the first of June and past", said at
         the June 10 supper, was dated XXXX-06-01~ and compared to the day."""
@@ -920,10 +955,12 @@ class TestChecks:
 
     def test_a_year_less_date_that_steps_back_says_so(self):
         """F-059: a Christmas Eve after a Christmas Day, with the year
-        unstated, read as "364 day(s) after"; it is one day before."""
+        unstated, read as "364 day(s) after"; it is one day before. The days
+        disagree by more than the one day of slack: on the same day, the
+        dates' one day back is within it, as it is with a stated year."""
         from storyforge.timeline import check_timeline
         rows = self._rows(('wakes', '1', 'scene', 'XXXX-12-25'),
-                          ('fezziwig', '1', 'scene', 'XXXX-12-24'))
+                          ('fezziwig', '3', 'scene', 'XXXX-12-24'))
         found = check_timeline(rows, {})
         assert [f['check'] for f in found] == ['date_mismatch']
         message = found[0]['message']

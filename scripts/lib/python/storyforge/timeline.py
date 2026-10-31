@@ -1056,23 +1056,41 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     from datetime import date
     for (s1, d1, (y1, m1, dd1), a1), (s2, d2, (y2, m2, dd2), a2) in zip(dated, dated[1:]):
         # Compare within one stated year, or within an unstated one when the
-        # days are less than a year apart
-        if y1 != y2 or ('X' in y1 and abs(d2 - d1) >= 365):
+        # days are less than a year apart. A stated year beside an unstated
+        # one counts as unstated, in the stated year: Five Weeks in a
+        # Balloon's certificate "1862-05-24" after "XXXX-05-27" was skipped,
+        # though the two are a day apart
+        if y1 != y2 and ('X' in y1) != ('X' in y2):
+            stated = int(y2 if 'X' in y1 else y1)
+            y1 = 'XXXX'
+        elif y1 != y2:
             continue
-        year = 2001 if 'X' in y1 else int(y1)
+        else:
+            stated = None
+        if 'X' in y1 and abs(d2 - d1) >= 365:
+            continue
+        year = stated or (2001 if 'X' in y1 else int(y1))
         try:
             between = same_year = (date(year, m2, dd2) - date(year, m1, dd1)).days
-            # With the year unstated, December 30 then January 2 may
-            # simply cross into the next year
-            if 'X' in y1 and between < 0:
-                between = (date(year + 1, m2, dd2) - date(year, m1, dd1)).days
-            # ... and a step back may cross into the year before:
-            # Middlemarch's Christmas Eve recalled after New Year's Day is a
-            # week back, not "357 days after" (F-118)
-            elif 'X' in y1 and d2 < d1:
-                back = (date(year - 1, m2, dd2) - date(year, m1, dd1)).days
-                if abs(back - (d2 - d1)) < abs(between - (d2 - d1)):
-                    between = back
+            if 'X' in y1:
+                # With the year unstated, December 30 then January 2 may
+                # simply cross into the next year, and a step back may cross
+                # into the year before: Middlemarch's Christmas Eve recalled
+                # after New Year's Day is a week back, not "357 days after"
+                # (F-118). Take whichever reading fits the days best, the
+                # same year included: Eighty Days' Carnatic on the 7th, told
+                # after Fix's 8th, is a day back, not "364 days after"
+                readings = [same_year]
+                forward = back = None
+                if same_year < 0:
+                    forward = (date(year + 1, m2, dd2) - date(year, m1, dd1)).days
+                    readings.append(forward)
+                if d2 < d1:
+                    back = (date(year - 1, m2, dd2) - date(year, m1, dd1)).days
+                    readings.append(back)
+                between = min(readings, key=lambda b: abs(b - (d2 - d1)))
+            else:
+                forward = back = None
         except ValueError:
             continue
         off = abs(between - (d2 - d1))
@@ -1085,13 +1103,13 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
             # A year-less date that steps back reads as going back, with the
             # turn of the year as the other reading: Carol's Christmas Eve
             # after Christmas Day isn't "364 days after" (F-059)
-            if between < 0 < same_year:
-                message = (f'its date ({dd2} {_MONTHS[m2 - 1]}) is {-between} day(s) before '
+            if back is not None and back < 0 < same_year:
+                message = (f'its date ({dd2} {_MONTHS[m2 - 1]}) is {-back} day(s) before '
                            f'{s1}\'s ({dd1} {_MONTHS[m1 - 1]}) if the year turned back, or '
                            f'{same_year} day(s) after, but its day is {d2 - d1} day(s) after')
-            elif between != same_year:
+            elif forward is not None:
                 message = (f'its date ({dd2} {_MONTHS[m2 - 1]}) is {-same_year} day(s) before '
-                           f'{s1}\'s ({dd1} {_MONTHS[m1 - 1]}), or {between} day(s) after if the '
+                           f'{s1}\'s ({dd1} {_MONTHS[m1 - 1]}), or {forward} day(s) after if the '
                            f'year turned, but its day is {d2 - d1} day(s) after')
             else:
                 message = (f'its date is {between} day(s) after {s1}\'s, '
