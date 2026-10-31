@@ -104,6 +104,13 @@ def main(argv=None):
         if not scene_ids:
             log('Nothing in the book is waiting on the gate.')
             return
+        from storyforge.costs import check_threshold
+        forecast = len(scene_ids) * gate.RECHECK_COST_PER_SCENE
+        log(f'{len(scene_ids)} scene(s) waiting on the gate, forecast about ${forecast:.2f}')
+        if not check_threshold(forecast):
+            log(f'ERROR: that is over the cost threshold: nothing checked. Raise '
+                f'STORYFORGE_COST_THRESHOLD, or check them a few at a time with --scenes.')
+            sys.exit(1)
         unknown = []
     else:
         scene_ids = _scene_ids(args, project_dir)

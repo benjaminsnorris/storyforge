@@ -259,13 +259,21 @@ def _run(args, emit):
         changed = audit.mark(rows, ids, args.mark)
     except ValueError as e:
         _fail(str(e))
-    recheck = (_reject_recheck(project_dir, rows, changed, list_them=not args.dry_run)
-               if args.mark == 'rejected' else {})
+    try:
+        recheck = _reject_recheck(project_dir, rows, changed) if args.mark == 'rejected' else {}
+    except Exception as e:   # noqa: BLE001 - GateError (a bad pending file), ValueError
+        _fail(f'nothing marked: the rejection\'s scenes could not be worked out: {e}')
     committed = True
     if not args.dry_run and (changed or hand):
         ensure_on_branch('audit', project_dir)
         if changed:
             ledger.save(project_dir, rows, command='audit')
+        if recheck:
+            try:
+                _list_rejected(project_dir, recheck)
+            except Exception as e:   # noqa: BLE001 - the marks are saved; say what wasn't
+                _fail(f'the facts are marked rejected, but working/gate-pending.csv could '
+                      f'not be updated ({e}): list the scenes below by hand')
         n = len(changed)
         message = (f'Audit: mark {n} fact{"" if n == 1 else "s"} {args.mark}' if n
                    else f'Audit: log {len(hand)} hand edit(s) to {ledger.LEDGER_FILE}')
@@ -280,62 +288,98 @@ def _run(args, emit):
         verb = 'Would mark' if args.dry_run else 'Marked'
         lines = [f'{verb} {len(changed)} fact{"" if len(changed) == 1 else "s"} {args.mark}'
                  + (f': {", ".join(changed)}' if changed else ' (already marked)')]
+        from storyforge.gate import RECHECK_COST_PER_SCENE
         for fid, info in recheck.items():
-            lines.append(f'  {fid}: established in {info["scene"] or "backstory"}' +
-                         (' (its prose still says it: revise it)' if info['scene'] else ''))
+            lines.append(f'  {fid}: established in {info["scene"] or "backstory or the plan"}')
+            if info['revise']:
+                lines.append(f'    {"would list" if args.dry_run else "listed"} '
+                             f'{info["scene"]} to revise: its prose still says it (write and '
+                             f'revise won\'t draft past it until it passes `storyforge check`)')
+                if info['later']:
+                    lines.append(f'    once it passes, these are listed for a re-check: '
+                                 f'{", ".join(info["later"])} (forecast about '
+                                 f'${len(info["later"]) * RECHECK_COST_PER_SCENE:.2f})')
             if info['recheck']:
                 lines.append(f'    {"would list" if args.dry_run else "listed"} for a re-check '
-                             f'(`storyforge check --pending`): {", ".join(info["recheck"])}')
+                             f'(`storyforge check --pending`, forecast about '
+                             f'${len(info["recheck"]) * RECHECK_COST_PER_SCENE:.2f}): '
+                             f'{", ".join(info["recheck"])}')
             for note in info['not_listed']:
                 lines.append(f'    not listed: {note}')
             if info['unrelated']:
-                lines.append(f'    WARNING: its dependents can\'t all be found '
+                lines.append(f'    WARNING: the scenes depending on it can\'t all be found '
                              f'({info["unrelated"]}): check the scenes that mention it')
-            if not (info['recheck'] or info['not_listed']):
-                lines.append('    nothing depends on it')
+            elif not (info['recheck'] or info['later'] or info['not_listed']):
+                lines.append('    no later scene depends on it')
         emit('\n'.join(lines))
     if not committed:
         _fail(f'the marks are written to reference/{ledger.LEDGER_FILE} and '
               f'{audit.LOG_PATH}, but the commit failed: commit them by hand')
 
 
-def _reject_recheck(project_dir: str, rows: list[dict], fact_ids: list[str], *,
-                    list_them: bool) -> dict[str, dict]:
-    """For each rejected fact: its scene, the scenes to re-check (its
-    dependents, `ledger.dependents`, and the briefs naming it,
-    `audit.leaning_scenes`, that have prose and aren't waiting on the gate
-    for another reason), why any other is not listed, and why its
-    dependents can't all be traced. With `list_them`, the scenes are listed
-    in `working/gate-pending.csv` as `gate.RECHECK` (design §4)."""
+def _reject_recheck(project_dir: str, rows: list[dict], fact_ids: list[str]) -> dict[str, dict]:
+    """What rejecting each of `fact_ids` asks for (design §4), without
+    writing anything:
+
+    - `scene`: where it was set up; `revise`: True when that scene has
+      prose, which still says it: the author revises it first, and its
+      redraft, once it passes the gate, lists the scenes that depend on the
+      rejection (`gate.REVISE_REJECTED`, then the re-check of #468).
+    - `recheck`: when there is no such prose to revise (backstory, a plan
+      fact, a scene not drafted), the scenes to re-check now: its
+      dependents (`ledger.dependents`) and the briefs naming it, after its
+      scene, with prose, not cut, not waiting for another reason;
+      `not_listed` says why any other isn't; `unrelated` why its
+      dependents can't all be traced; `later`: with `revise`, the scenes
+      that will be listed after the revision, for the author to see."""
     from storyforge import gate
     order = ledger.scene_order(project_dir)
     briefs = audit.leaning_scenes(project_dir, fact_ids)
     waiting = gate.pending(project_dir)
     gone = gate._gone_scenes(project_dir)
-    out = {}
     by_id = {r['id']: r for r in rows}
+    out = {}
     for fid in fact_ids:
         one = ledger.dependents(rows, [fid], order)
         scene = (by_id.get(fid, {}).get('scene_id') or '').strip()
-        candidates = sorted(set(one.scenes) | set(briefs.get(fid, [])), key=lambda s: order.get(s, -1))
-        info = {'scene': scene, 'recheck': [], 'not_listed': [],
-                'unrelated': one.unrelated.get(fid, '')}
+        revise = bool(scene) and scene in order and scene not in gone \
+            and gate._has_prose(project_dir, scene)
+        after = order.get(scene, -1) if scene else -1
+        candidates = sorted({s for s in set(one.scenes) | set(briefs.get(fid, []))
+                             if order.get(s, -1) > after}, key=order.get)
+        info = {'scene': scene, 'revise': revise, 'recheck': [], 'later': [],
+                'not_listed': [], 'unrelated': one.unrelated.get(fid, '')}
         for sid in candidates:
-            if sid == scene:
-                continue
-            if sid not in order or sid in gone:
-                info['not_listed'].append(f'{sid} (cut, merged or not a scene)')
+            if sid in gone:
+                info['not_listed'].append(f'{sid} (cut or merged)')
             elif not gate._has_prose(project_dir, sid):
                 info['not_listed'].append(f'{sid} (no prose yet)')
+            elif revise:
+                info['later'].append(sid)
             elif sid in waiting and waiting[sid]['command'] != gate.RECHECK:
                 info['not_listed'].append(f'{sid} (already waiting on the gate: '
                                           f'{waiting[sid]["command"]})')
             else:
                 info['recheck'].append(sid)
         out[fid] = info
-    if list_them:
-        for fid, info in out.items():
-            for sid in info['recheck']:
-                if sid not in gate.pending(project_dir):
-                    gate.mark_pending(project_dir, sid, gate.RECHECK, f're-check: {fid} rejected')
     return out
+
+
+def _list_rejected(project_dir: str, recheck: dict[str, dict]) -> None:
+    """Write what `_reject_recheck` found into working/gate-pending.csv: each
+    scene to revise as `gate.REVISE_REJECTED` (blocks drafting past it), each
+    scene to re-check now as `gate.RECHECK` (one already listed keeps its
+    row). A scene to revise that was already listed becomes a revise row,
+    keeping its reason."""
+    from storyforge import gate
+    for fid, info in recheck.items():
+        waiting = gate.pending(project_dir)
+        if info['revise']:
+            # merged into any row already there (mark_pending keeps the ids)
+            row = waiting.get(info['scene'])
+            why = row['reason'] if row else 'revise its prose: it states a rejected fact'
+            gate.mark_pending(project_dir, info['scene'], gate.REVISE_REJECTED,
+                              f'{why} [rejected: {fid}]')
+        for sid in info['recheck']:
+            if sid not in waiting:
+                gate.mark_pending(project_dir, sid, gate.RECHECK, f're-check: {fid} rejected')

@@ -162,6 +162,15 @@ class TestPendingAndRecheck:
             cmd_check.main(['--pending', SCENE])
         assert e.value.code == 1
 
+    def test_pending_over_the_cost_threshold_checks_nothing(self, project, monkeypatch):
+        project_dir, _ = project
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '0.1')
+        gate.mark_pending(project_dir, SCENE, 'draft', 'y')
+        monkeypatch.setattr(gate, 'gate_scene', lambda *a, **k: pytest.fail('checked'))
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--pending'])
+        assert e.value.code == 1
+
     def test_nothing_pending_is_said(self, project, capsys):
         cmd_check.main(['--pending'])
         assert 'Nothing is waiting on the gate' in capsys.readouterr().out

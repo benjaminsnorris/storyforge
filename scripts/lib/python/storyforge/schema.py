@@ -720,7 +720,7 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
 
                     bad = _check_registry(value, alias_map,
                                           schema.get('array', False))
-                    stale = [] if bad or not schema.get('ledger_type') else [
+                    stale = [] if not schema.get('ledger_type') else [
                         f'{item} ({ledger_status[alias_map[item.lower()]]})'
                         for item in ([e.strip() for e in value.split(';') if e.strip()]
                                      if schema.get('array') else [value.strip()])
@@ -738,9 +738,9 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                             'reason': f'{scene_id} | {col}: names fact(s) that are no '
                                       f'longer binding: {", ".join(stale)}',
                         })
-                    elif not bad:
+                    if not bad and not stale:
                         passed += 1
-                    else:
+                    elif bad:
                         failed += 1
                         errors.append({
                             'file': filename,

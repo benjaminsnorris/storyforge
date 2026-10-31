@@ -164,35 +164,51 @@ class TestMark:
         row = self._row(project, 'archive-key-dorren')
         assert row['status'] == 'rejected' and row['reviewed'].startswith('rejected:')
         info = result['recheck']['archive-key-dorren']
-        assert info['scene'] == 'act1-sc02'
-        assert info['recheck'] == ['new-x1']                  # its brief names it; has prose
+        # its scene has prose that still says it: revise first, re-check after
+        assert info['scene'] == 'act1-sc02' and info['revise']
+        assert info['recheck'] == [] and info['later'] == ['new-x1']
         assert info['not_listed'] == ['act2-sc03 (no prose yet)']
         entry = audit.read_log(project)[-1]
         assert (entry['fact_id'], entry['change']) == ('archive-key-dorren', 'rejected')
         from storyforge import gate
-        row = gate.pending(project)['new-x1']
-        assert row['command'] == gate.RECHECK and 'archive-key-dorren rejected' in row['reason']
+        waiting = gate.pending(project)
+        assert set(waiting) == {'act1-sc02'}
+        assert waiting['act1-sc02']['command'] == gate.REVISE_REJECTED
+        assert gate.rejected_ids(waiting['act1-sc02']) == ['archive-key-dorren']
 
-    def test_a_rejected_facts_dependents_by_subject_are_listed(self, project, capsys):
+    def test_a_fact_with_no_prose_to_revise_lists_its_dependents_now(self, project, capsys):
         ledger.save(project, ledger.load(project) + [
-            _fact('cloak-later', 'act2-sc01', 'physical', 'kael-maren')], command='test')
-        result = _json(capsys, '--mark', 'rejected', 'cloak')
-        assert result['recheck']['cloak']['recheck'] == ['act2-sc01']
+            _fact('later-trait', 'act2-sc01', 'trait', 'kael-maren', 'fixed')], command='test')
+        result = _json(capsys, '--mark', 'rejected', 'backstory')
+        info = result['recheck']['backstory']
+        assert not info['revise'] and info['scene'] == ''
+        assert info['recheck'] == ['act2-sc01']
+        from storyforge import gate
+        assert gate.pending(project)['act2-sc01']['command'] == gate.RECHECK
 
     def test_a_dry_run_lists_nothing_pending(self, project, capsys):
         from storyforge import gate
         cmd_audit.main(['--mark', 'rejected', 'archive-key-dorren', '--dry-run'])
         out = capsys.readouterr().out
-        assert 'would list for a re-check' in out and gate.pending(project) == {}
+        assert 'would list act1-sc02 to revise' in out and gate.pending(project) == {}
 
     def test_a_scene_waiting_for_another_reason_is_not_listed(self, project, capsys):
         from storyforge import gate
-        gate.mark_pending(project, 'new-x1', 'draft', 'its own problem')
-        result = _json(capsys, '--mark', 'rejected', 'archive-key-dorren')
-        assert result['recheck']['archive-key-dorren']['recheck'] == []
-        assert 'new-x1 (already waiting on the gate: draft)' in \
-            result['recheck']['archive-key-dorren']['not_listed']
-        assert gate.pending(project)['new-x1']['reason'] == 'its own problem'
+        ledger.save(project, ledger.load(project) + [
+            _fact('later-trait', 'act2-sc01', 'trait', 'kael-maren', 'fixed')], command='test')
+        gate.mark_pending(project, 'act2-sc01', 'draft', 'its own problem')
+        result = _json(capsys, '--mark', 'rejected', 'backstory')
+        assert result['recheck']['backstory']['recheck'] == []
+        assert 'act2-sc01 (already waiting on the gate: draft)' in \
+            result['recheck']['backstory']['not_listed']
+        assert gate.pending(project)['act2-sc01']['reason'] == 'its own problem'
+
+    def test_a_second_rejection_in_a_scene_adds_its_id(self, project, capsys):
+        from storyforge import gate
+        _json(capsys, '--mark', 'rejected', 'archive-key-dorren')
+        _json(capsys, '--mark', 'rejected', 'cousin')
+        assert gate.rejected_ids(gate.pending(project)['act1-sc02']) == [
+            'archive-key-dorren', 'cousin']
 
     def test_a_fact_with_no_subject_and_no_link_is_said(self, project, capsys):
         result = _json(capsys, '--mark', 'rejected', 'day-two')

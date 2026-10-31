@@ -1460,13 +1460,47 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
             + '\n\n'.join(sections))
 
 
+#: Brief columns whose items name ledger facts (registry ids, names or aliases)
+_FACT_COLUMNS = {'knowledge_in': 'knowledge', 'knowledge_out': 'knowledge',
+                 'physical_state_in': 'physical', 'physical_state_out': 'physical'}
+
+
+def _without_stale_facts(scene_id: str, scene: dict, ref_dir: str) -> dict:
+    """`scene` with each brief item that names a fact which isn't binding
+    (rejected, superseded, pending) taken out of its fact column, with one
+    WARNING naming them: nothing in the drafting prompt (the brief block,
+    the task's "must know" line, the states blocks) offers it."""
+    if not any((scene.get(c) or '').strip() for c in _FACT_COLUMNS):
+        return scene
+    from . import ledger
+    rows = ledger.load_from(ref_dir)
+    status = {r['id']: r.get('status', '') for r in rows}
+    maps = {t: ledger.alias_map(ledger.view(rows, t)) for t in set(_FACT_COLUMNS.values())}
+    out, stale = dict(scene), []
+    for col, type_ in _FACT_COLUMNS.items():
+        items = [i.strip() for i in (scene.get(col) or '').split(';') if i.strip()]
+        keep = []
+        for item in items:
+            rid = maps[type_].get(item.lower())
+            if rid and status.get(rid) in ('rejected', 'superseded', 'pending'):
+                stale.append(f'{col}: {item} ({status[rid]})')
+            else:
+                keep.append(item)
+        if len(keep) != len(items):
+            out[col] = ';'.join(keep)
+    if stale:
+        from .common import log
+        log(f'WARNING: {scene_id}: the brief names fact(s) that aren\'t binding, left out of '
+            f'the drafting prompt: {"; ".join(stale)}')
+    return out
+
+
 def _states_checklist(scene: dict, ref_dir: str) -> str:
     """The brief's `physical_state_out` as a must-show list for the drafting
     task. An item is matched the way the gate's checker matches it
-    (`ledger.alias_map` over the physical view, any case): a binding state
-    is listed by its character and description; one that isn't binding
-    (rejected, superseded) is left out with a WARNING, as the checker leaves
-    it unchecked; anything else is listed as written ("no sleep 36h"). The
+    (`ledger.alias_map` over the physical view, any case): a state is
+    listed by its character and description (one that isn't binding was
+    already taken out, `_without_stale_facts`); anything else as written ("no sleep 36h"). The
     brief lists these states in its data, and drafts still left them for
     the reader to infer: E4's judge counted 7-9 such broken promises."""
     items = [s.strip() for s in (scene.get('physical_state_out') or '').split(';') if s.strip()]
@@ -1474,16 +1508,12 @@ def _states_checklist(scene: dict, ref_dir: str) -> str:
         return ''
     from . import ledger
     rows = ledger.load_from(ref_dir)
-    by_id = {r['id']: r for r in rows}
     views = {r['id']: r for r in ledger.view(rows, 'physical')}
     aliases = ledger.alias_map(list(views.values()))
     names = _character_names(ref_dir)
-    lines, stale = [], []
-    for item in items:
+    lines = []
+    for item in items:   # non-binding facts were taken out (_without_stale_facts)
         rid = aliases.get(item.lower())
-        if rid is not None and by_id[rid].get('status') != 'binding':
-            stale.append(f'{item} ({rid} is {by_id[rid].get("status")})')
-            continue
         if rid is not None:
             entry = views[rid]
             char = entry.get('character', '')
@@ -1491,10 +1521,6 @@ def _states_checklist(scene: dict, ref_dir: str) -> str:
             desc = entry.get('description') or item
             item = f'{char}: {desc}' if char else desc
         lines.append(f'  - [ ] {item}')
-    if stale:
-        from .common import log
-        log(f'WARNING: {scene.get("id", "")}: physical_state_out names state(s) that '
-            f'aren\'t binding, left out of the drafting checklist: {"; ".join(stale)}')
     if not lines:
         return ''
     return ('\n\n**Physical states checklist — the scene ends with each of these, and each '
@@ -1547,6 +1573,7 @@ def build_scene_prompt_from_briefs(
     scene = get_scene(scene_id, ref_dir)
     if not scene:
         return f"ERROR: Scene {scene_id} not found in scenes.csv"
+    scene = _without_stale_facts(scene_id, scene, ref_dir)
 
     # Build scene data block (exclude subtext — it gets special framing below)
     scene_block = '\n'.join(f"**{k}:** {v}" for k, v in scene.items()
@@ -1610,16 +1637,6 @@ def build_scene_prompt_from_briefs(
         from . import ledger
         states_registry = ledger.view_map(ref_dir, 'physical')
         names = _character_names(ref_dir)
-        # A state the author rejected (or one superseded) isn't drafted from
-        status = {r['id']: r.get('status', '') for r in ledger.load_from(ref_dir)}
-        stale = [f'{sid} ({status[sid]})' for sid in state_ids
-                 if sid in states_registry and status.get(sid) != 'binding']
-        if stale:
-            from .common import log
-            log(f'WARNING: {scene_id}: physical_state_in names state(s) that aren\'t '
-                f'binding, left out of the drafting prompt: {"; ".join(stale)}')
-            state_ids = [sid for sid in state_ids
-                         if not (sid in states_registry and status.get(sid) != 'binding')]
 
         state_lines = []
         for sid in state_ids:

@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 from dataclasses import dataclass, field
 
 from storyforge import audit, ledger, persistence
@@ -59,7 +60,7 @@ from storyforge.checker import CheckError, CheckResult, Dispute, Finding, check_
 GATE_COMMANDS = tuple(w for w in ledger.COMMITMENT_WRITERS if w != ledger.COMMITMENTS_PASS)
 
 #: Extraction problems that would commit a wrong row: they block the commit
-UNRESOLVED = ('quote', 'no quote', 'supersedes', 'ends', 'ends again')
+UNRESOLVED = ('quote', 'no quote', 'supersedes', 'ends', 'ends again', 'rejected')
 #: Extraction problems reported on a pass: a link extraction proposed to a
 #: registry fact, not applied (`disagrees`, `ends registry`: the checker
 #: judges contradictions with the plan), a subject not in the registries
@@ -282,8 +283,14 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
 
     # The scene's earlier commitments (a redraft's) aren't offered back to it
     # and are replaced on commit; what leans on them is re-checked (Phase 4)
+    # (binding ones: a rejected commitment stays, the record of the
+    # author's decision, and prose restating it is a problem below)
     old_rows = [copy.deepcopy(r) for r in rows if ledger.is_commitment(r)
+                and r.get('status') == 'binding'
                 and (r.get('scene_id') or '').strip() == scene_id]
+    rejected_here = {ledger.fact_key(r): r['id'] for r in rows
+                     if r.get('status') == 'rejected'
+                     and (r.get('scene_id') or '').strip() == scene_id}
     old = {r['id'] for r in old_rows}
     ended_before = ledger.ended_by(rows, scene_id)
     rows = [r for r in rows if r['id'] not in old]
@@ -293,12 +300,19 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
         if ledger.is_commitment(r) and (r.get('resolves') or '').strip() == scene_id:
             r['resolves'] = ''
 
-    result = GateResult(scene_id, problems={k: [] for k in COMMITMENT_PROBLEMS})
+    result = GateResult(scene_id, problems={k: [] for k in COMMITMENT_PROBLEMS + ('rejected',)})
     result.proposed = _extract(project_dir, scene_id, prose, rows, order,
                                introduced_by or command,
                                extract_model or select_model('evaluation'), log_dir,
                                result.problems, result.dropped)
-    result.halts = audit.halting_conditions(result.proposed, rows)
+    # A fact the author rejected may not come back as binding
+    for r in result.proposed:
+        rid = rejected_here.get(ledger.fact_key(r))
+        if rid:
+            result.problems['rejected'].append(
+                f'{scene_id}: "{r.get("quote") or r.get("statement")}" restates {rid}, '
+                f'which the author rejected')
+        result.halts = audit.halting_conditions(result.proposed, rows)
     try:
         result.check = check_scene(project_dir, scene_id, prose=prose, model=check_model,
                                    log_file=os.path.join(log_dir, f'gate-check-{scene_id}.json'),
@@ -319,6 +333,10 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     except ledger.LedgerError as e:
         raise GateError(f'{scene_id}: {e}') from e
     _carry_ids(result.proposed, old_rows, rows, scene_id)
+    try:   # a scene revised after the author rejected its facts (design §4)
+        revised_rejection = rejected_ids(pending(project_dir).get(scene_id))
+    except GateError:
+        revised_rejection = []   # clear_pending below reports the bad file
     new = rows + result.proposed
     for rid, quote in result.check.kept:
         if ledger.fill_quote(new, rid, quote):
@@ -327,6 +345,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     new_keys = {ledger._fact_key(r) for r in result.proposed}
     result.changed = [r['id'] for r in old_rows if ledger._fact_key(r) not in new_keys]
     result.changed += sorted(ended_before ^ ledger.ended_by(new, scene_id))
+    result.changed += [i for i in revised_rejection if i not in result.changed]
     if result.changed:
         found = ledger.dependents(old_rows + new, result.changed, order)
         result.unrelated = found.unrelated
@@ -448,6 +467,9 @@ def problems_to_fix(result: GateResult) -> list[str]:
         said = (f' The scene says: "{row.get("quote") or row.get("statement")}".'
                 if row else '')
         lines.append(f'The scene changes something the book fixed: {h.detail}.{said}')
+    for item in result.problems.get('rejected', []):
+        lines.append(f'The scene restates a fact the author rejected; change or remove it: '
+                     f'{item}')
     for d in result.unruled:
         lines.append(f'UNVERIFIED (extraction thinks the scene changes this; the check gave no '
                      f'ruling; edit only if the scene clearly contradicts it): the plan records '
@@ -692,10 +714,29 @@ def _write_pending(project_dir: str, rows: dict[str, dict[str, str]]) -> None:
 
 
 def mark_pending(project_dir: str, scene_id: str, command: str, reason: str) -> None:
+    """List `scene_id`. A `REVISE_REJECTED` row keeps that command and its
+    rejected fact ids whatever replaces it (a failed check of the revision):
+    the ids are what lists the dependents once the scene passes."""
     from storyforge.common import csv_safe
     rows = pending(project_dir)
+    old = rows.get(scene_id)
+    ids = rejected_ids(old) + (rejected_ids({'command': command, 'reason': reason})
+                               if command == REVISE_REJECTED else [])
+    if ids:
+        command = REVISE_REJECTED
+        reason = re.sub(r'\s*\[rejected: [^\]]*\]', '', reason) \
+            + f' [rejected: {";".join(dict.fromkeys(ids))}]'
     rows[scene_id] = {'scene_id': scene_id, 'command': command, 'reason': csv_safe(reason)}
     _write_pending(project_dir, rows)
+
+
+def rejected_ids(row: dict[str, str] | None) -> list[str]:
+    """The rejected fact ids a `REVISE_REJECTED` pending row carries."""
+    if not row or row.get('command') != REVISE_REJECTED:
+        return []
+    ids = [i for group in re.findall(r'\[rejected: ([^\]]*)\]', row.get('reason', ''))
+           for i in group.split(';') if i]
+    return list(dict.fromkeys(ids))
 
 
 def clear_pending(project_dir: str, scene_id: str) -> None:
@@ -718,6 +759,10 @@ RECHECK_COST_PER_SCENE = 0.6
 #: whose re-check didn't pass (not re-run until the author acts:
 #: `storyforge check --pending` or a redraft)
 RECHECK, RECHECK_FAILED = 'recheck', 'recheck-failed'
+#: A scene whose prose states a fact the author rejected: the author revises
+#: it; when it passes the gate, the scenes depending on the rejection are
+#: listed (its reason carries `[rejected: ids]`, kept by `mark_pending`)
+REVISE_REJECTED = 'revise-rejected'
 
 
 @dataclass
