@@ -176,7 +176,7 @@ class TestDirectMode:
         main(['--direct', '--scenes', 'act1-sc01'])
         assert calls
         commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']
-        assert 'Draft scene act1-sc01 (refusal fallback: written by claude-opus-5)' in commits
+        assert 'Coach: act1-sc01 (refusal fallback: written by claude-opus-5)' in commits
         out = capsys.readouterr().out
         assert 'WARNING: 1 reply was written by another model' in out
         assert 'drafting act1-sc01: claude-opus-5 in place of claude-opus-5-5' in out
@@ -187,8 +187,18 @@ class TestDirectMode:
         assert _status(setup, 'act1-sc01') == 'drafted'
 
 
+def _brief(project_dir, sid):
+    path = os.path.join(project_dir, 'working', 'coaching', f'brief-{sid}.md')
+    if not os.path.isfile(path):
+        return None
+    with open(path) as f:
+        return f.read()
+
+
 class TestBatchMode:
-    """Batch results now carry stop_reason, so batch mode is guarded too."""
+    """Batch results now carry stop_reason, so batch mode is guarded too.
+    Batch is for coaching coach and strict only (prose is drafted one scene
+    at a time, gated), so these write briefs."""
 
     REFUSAL = _reply('', 'refusal', stop_details={'type': 'refusal', 'category': 'cyber'})
 
@@ -206,10 +216,10 @@ class TestBatchMode:
             return [sid for sid, r in results.items() if r != 'errored']
         monkeypatch.setattr('storyforge.cmd_write.download_batch_results', fake_download)
         if code is None:
-            main(['--batch', '--scenes', ','.join(results)])
+            main(['--batch', '--coaching', 'coach', '--force', '--scenes', ','.join(results)])
             return
         with pytest.raises(SystemExit) as exc:
-            main(['--batch', '--scenes', ','.join(results)])
+            main(['--batch', '--coaching', 'coach', '--force', '--scenes', ','.join(results)])
         assert exc.value.code == code
 
     @pytest.mark.parametrize('bad, reason', [
@@ -219,13 +229,14 @@ class TestBatchMode:
     ])
     def test_bad_result_skips_scene(self, setup, monkeypatch, capsys, bad, reason):
         self._run(monkeypatch, {'act1-sc01': bad, 'act1-sc02': _reply(GOOD)})
-        assert _scene(setup, 'act1-sc01') is None
-        assert _scene(setup, 'act1-sc02').strip() == GOOD
+        assert _brief(setup, 'act1-sc01') is None
+        assert _brief(setup, 'act1-sc02').strip() == GOOD
         assert reason in capsys.readouterr().out
 
     def test_failed_reply_is_kept_for_the_author(self, setup, monkeypatch, capsys):
         """I2: the batch directory is removed; the paid reply is not."""
-        self._run(monkeypatch, {'act1-sc01': _reply(CUT_OFF), 'act1-sc02': _reply(GOOD)})
+        self._run(monkeypatch, {'act1-sc01': _reply(CUT_OFF, 'max_tokens'),
+                                'act1-sc02': _reply(GOOD)})
         kept = os.path.join(setup, 'working', 'logs', 'drafting-act1-sc01.json')
         with open(kept) as f:
             assert json.load(f)['content'][0]['text'] == CUT_OFF
@@ -239,21 +250,20 @@ class TestBatchMode:
         self._run(monkeypatch, {'act1-sc01': self.REFUSAL, 'act1-sc02': _reply(GOOD)},
                   code=None)
         assert calls == [('act1-sc01', True)]
-        assert _scene(setup, 'act1-sc01').strip() == GOOD
-        assert _status(setup, 'act1-sc01') == 'drafted'
+        assert _brief(setup, 'act1-sc01').strip() == GOOD
         assert 'retrying it directly' in capsys.readouterr().out
         models = [op['model'] for op in mock_costs.operations
                   if op.get('target') == 'act1-sc01']
         assert len(models) == 2 and models[1] == 'claude-opus-5'
         commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']
-        assert 'Draft scene act1-sc01 (refusal fallback: written by claude-opus-5)' in commits
+        assert 'Coach: act1-sc01 (refusal fallback: written by claude-opus-5)' in commits
 
     def test_refused_again_skips_the_scene(self, setup, monkeypatch, capsys):
         retry = dict(self.REFUSAL, id='the-retry')
         _direct_replies(monkeypatch, {'act1-sc01': retry})
         self._run(monkeypatch, {'act1-sc01': self.REFUSAL, 'act1-sc02': _reply(GOOD)})
-        assert _scene(setup, 'act1-sc01') is None
-        assert _scene(setup, 'act1-sc02').strip() == GOOD
+        assert _brief(setup, 'act1-sc01') is None
+        assert _brief(setup, 'act1-sc02').strip() == GOOD
         assert 'refused the request (cyber)' in capsys.readouterr().out
         with open(os.path.join(setup, 'working', 'logs', 'drafting-act1-sc01.json')) as f:
             assert json.load(f)['id'] == 'the-retry'  # the kept log is the retry's
@@ -263,8 +273,8 @@ class TestBatchMode:
             raise RuntimeError('HTTP 529')
         monkeypatch.setattr('storyforge.cmd_write.invoke_to_file', boom)
         self._run(monkeypatch, {'act1-sc01': self.REFUSAL, 'act1-sc02': _reply(GOOD)})
-        assert _scene(setup, 'act1-sc01') is None
-        assert _scene(setup, 'act1-sc02').strip() == GOOD
+        assert _brief(setup, 'act1-sc01') is None
+        assert _brief(setup, 'act1-sc02').strip() == GOOD
         assert 'the retry failed: HTTP 529' in capsys.readouterr().out
 
 
