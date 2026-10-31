@@ -218,8 +218,8 @@ class TestGenerateScenesRows:
     def test_with_part_number(self):
         scenes = [{'title': 'Chapter One'}]
         rows = generate_scenes_rows(scenes, part_num=2)
-        parts = rows[0].split('|')
-        assert parts[3] == '2'  # part column
+        row = dict(zip(scenes_header().split('|'), rows[0].split('|')))
+        assert row['part'] == '2'
 
     def test_seq_start(self):
         scenes = [{'title': 'Scene'}]

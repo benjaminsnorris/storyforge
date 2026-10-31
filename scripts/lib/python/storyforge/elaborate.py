@@ -55,11 +55,18 @@ _BRIEFS_COLS = [
     # Graphic-novel-mode columns (ignored in novel mode, written in GN mode)
     'page_layout', 'panel_breakdown', 'visual_keywords',
     'page_turn_beats', 'caption_strategy',
+    # How each motif appears in this scene, in the brief's own words: `motifs`
+    # holds registry ids, so the description lives here. Last, because the GN
+    # briefs handler reads a model's bare row by position
+    'motif_details',
 ]
 # Structural-anchor tier: discrete CSVs with their own row identity.
 _SPINE_COLS = [
     'id', 'seq', 'title', 'summary', 'function', 'act',
 ]
+# Registries extract phase 5 writes (cmd_cleanup checks them against these)
+_THEMES_COLS = ['id', 'name', 'tier', 'description']
+_MOTIF_COLS = ['id', 'name', 'aliases', 'tier']
 _ARCHITECTURE_COLS = [
     'id', 'seq', 'title', 'summary', 'act', 'pov', 'spine_event',
     'action_sequel', 'emotional_arc', 'value_at_stake',
@@ -296,7 +303,10 @@ def update_scene(scene_id: str, ref_dir: str, updates: dict[str, str]) -> None:
     for filename, cols_to_update in file_updates.items():
         path = os.path.join(ref_dir, filename)
         rows = _read_csv(path)
-        col_order = _FILE_MAP[filename]
+        # Columns the file has beyond the schema (an author's own, or a
+        # newer schema's) are kept after the schema's, not dropped
+        extra = [c for c in (rows[0] if rows else {}) if c not in _FILE_MAP[filename]]
+        col_order = _FILE_MAP[filename] + extra
 
         found = False
         for row in rows:

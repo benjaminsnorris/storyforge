@@ -26,7 +26,7 @@ import argparse
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field, select_model,
     get_coaching_level, install_signal_handlers, get_plugin_dir,
-    build_shared_context,
+    build_shared_context, csv_safe,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr, commit_and_push,
@@ -47,13 +47,15 @@ def parse_args(argv):
     )
     parser.add_argument('--phase', type=int, default=None,
                         help='Run only phase N (0=characterize, 1=skeleton, 2=intent, '
-                             '3=briefs, 4=commitments)')
+                             '3=briefs, 4=commitments, 5=describe: spine, architecture, '
+                             'themes and motifs)')
     parser.add_argument('--cleanup', action='store_true',
                         help='Run cleanup after extraction')
     parser.add_argument('--cleanup-only', action='store_true',
                         help='Run cleanup only (skip extraction)')
     parser.add_argument('--force', action='store_true',
-                        help='Overwrite existing field values')
+                        help='Overwrite existing field values (phase 5: regenerate the '
+                             'files it wrote that nobody has edited since)')
     parser.add_argument('--expand', action='store_true',
                         help='Run expansion analysis after extraction')
     parser.add_argument('--dry-run', action='store_true',
@@ -115,6 +117,7 @@ def main(argv=None):
 - [ ] Phase 1: Extract skeleton (scenes.csv)
 - [ ] Phase 2: Extract intent (scene-intent.csv)
 - [ ] Phase 3: Extract briefs (scene-briefs.csv)
+- [ ] Phase 5: Describe the book (structure, themes, story summary, bibles, voice, timeline, chapter map)
 - [ ] Validate
 - [ ] Review"""
         create_draft_pr(f'Extract: {title} ({scene_count} scenes)',
@@ -198,6 +201,12 @@ def main(argv=None):
     # Cleanup
     if not args.dry_run and (args.cleanup or (args.phase is None and not args.cleanup_only)):
         _run_cleanup(ref_dir, project_dir)
+
+    # Phase 5: Describe (after cleanup on a full run, so it reads cleaned data)
+    if not args.cleanup_only and (args.phase is None or args.phase == 5):
+        if _run_phase_5(project_dir, log_dir, profile_file, args.force, args.dry_run):
+            update_pr_task('Phase 5: Describe the book (structure, themes, story summary, bibles, voice, timeline, chapter map)',
+                           project_dir)
 
     # Validate
     if not args.dry_run:
@@ -299,8 +308,10 @@ def _log_api_usage(log_file: str, operation: str, target: str, model: str,
             cache_read=usage.get('cache_read', 0),
             cache_create=usage.get('cache_create', 0),
         )
-    except Exception:
-        pass
+    except Exception as e:
+        # Unrecorded cost makes the ledger, the threshold check and the
+        # summary all read low: say so
+        log(f'  WARNING: cost of {operation} ({target}) not recorded: {e}')
 
 
 def _run_hone(plugin_dir: str, phase: int) -> None:
@@ -543,6 +554,9 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         log_dir, parse_skeleton_response, alias_maps, force,
         new_row=new_skeleton_row, sort_key=lambda r: int(r.get('seq') or 0))
     _log_merge('scenes.csv', count, len(sorted_scene_ids))
+    marked = _mark_drafted(ref_dir, scenes_dir, sorted_scene_ids)
+    if marked:
+        log(f'  status: {marked} scene(s) with prose and no status marked drafted')
 
     # The timeline pass: store each scene's time cues, then place every scene
     # on one calendar. Nobody authored these days, so they are replaced.
@@ -576,6 +590,30 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     _safe_remove(batch_file)
     _safe_rmdir(skel_output)
+
+
+def _mark_drafted(ref_dir, scenes_dir, scene_ids) -> int:
+    """Mark `drafted` every scene that has prose and a blank status (#440).
+
+    scenes-setup creates the rows before extraction, so phase 1's new-row
+    default never reaches them, and a blank status reads as unstarted to the
+    scene-map floor, `storyforge status` and drafting. A status already set
+    is never replaced. Returns how many were marked.
+    """
+    from storyforge.elaborate import _read_csv_as_map, update_scene
+    rows = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    marked = 0
+    for sid in scene_ids:
+        row = rows.get(sid)
+        path = os.path.join(scenes_dir, f'{sid}.md')
+        if row is None or row.get('status', '').strip() or not os.path.isfile(path):
+            continue
+        with open(path, encoding='utf-8', errors='replace') as f:
+            if not f.read().strip():
+                continue
+        update_scene(sid, ref_dir, {'status': 'drafted'})
+        marked += 1
+    return marked
 
 
 # ============================================================================
@@ -982,7 +1020,8 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             result = parse_knowledge_response(extract_text(response), scene_id)
         except Exception as e:
             _halt_chain(project_dir, '3b — knowledge chain', scene_id, e,
-                        ['reference/scene-briefs.csv', 'reference/commitments.csv', 'working/'])
+                        ['reference/scenes.csv', 'reference/scene-briefs.csv',
+                         'reference/commitments.csv', 'working/'])
 
         # Register the scene's new facts, then resolve both fields to ids:
         # against the facts established up to this scene, so a later fact
@@ -1026,13 +1065,27 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         summary = result.get('_summary', '')
         if summary:
             summaries.append(f'{scene_id}: {summary}')
+            # Fills a blank `summary` only, forced or not: a filled cell may
+            # be the author's outline, and nothing records which ones
+            # extraction wrote. A scene with no scenes.csv row gets none: a
+            # row written here would have no seq or status
+            if not scene_data:
+                log(f'  WARNING: {scene_id} has no scenes.csv row, so its summary '
+                    f'was not recorded (run extract --phase 1)')
+            elif not scene_data.get('summary', '').strip():
+                try:
+                    update_scene(scene_id, ref_dir, {'summary': csv_safe(summary)})
+                except OSError as e:
+                    _halt_chain(project_dir, '3b — knowledge chain', scene_id, e,
+                                ['reference/scenes.csv', 'reference/scene-briefs.csv',
+                                 'reference/commitments.csv', 'working/'])
 
         log(f'  {scene_id}: knowledge extracted')
 
     commit_and_push(project_dir,
                     'Extract: Phase 3b — knowledge chain',
-                    ['reference/scene-briefs.csv', 'reference/commitments.csv',
-                     'working/'])
+                    ['reference/scenes.csv', 'reference/scene-briefs.csv',
+                     'reference/commitments.csv', 'working/'])
 
     # --- Phase 3c: Physical state chain (sequential) ---
     log('')
@@ -1256,6 +1309,171 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 # ============================================================================
 # Cleanup, validation, expansion
 # ============================================================================
+
+def _dry_run_pitch_prompt(describe, project_dir, profile, scenes) -> str:
+    """5c's prompt as it would be built from what is on disk now, or the
+    reason it can't be (an evidence file 5c would stop on)."""
+    try:
+        return describe.build_pitch_prompt(
+            profile, scenes, describe.pitch_evidence(project_dir, scenes))
+    except describe.DescribeFailed as e:
+        print(f'5c pitch: would stop: {e}')
+        return ''
+
+
+def _dry_run_bible_prompts(describe, project_dir, profile, scenes) -> list[tuple[str, str]]:
+    """5d-5f's prompts as they would be built from what is on disk now.
+    Prints each step's notes, and why a step would skip or stop, so a dry
+    run says what the real run would."""
+    title, _ = describe._book_title(project_dir)
+
+    def build(label, evidence, prompt, skip):
+        try:
+            ev, notes, *_ = evidence()
+        except describe.DescribeFailed as e:
+            print(f'{label}: would stop: {e}')
+            return ''
+        for note in notes:
+            print(f'{label}: note: {note}')
+        if skip(ev):
+            print(f'{label}: would skip: {skip(ev)}')
+            return ''
+        return prompt(ev)
+    return [
+        ('5d characters', build(
+            '5d characters', lambda: describe.character_evidence(project_dir, scenes),
+            lambda ev: describe.build_characters_prompt(profile, ev),
+            lambda ev: '' if ev else 'no scene names a character in characters.csv')),
+        ('5e world', build(
+            '5e world', lambda: describe.world_evidence(project_dir, scenes, title),
+            lambda ev: describe.build_world_prompt(profile, scenes, ev),
+            lambda ev: '' if ev.locations else 'no scene is set in a place locations.csv names')),
+        ('5f voice', build(
+            '5f voice', lambda: describe.voice_evidence(project_dir, scenes, title),
+            lambda ev: describe.build_voice_prompt(profile, ev),
+            lambda ev: '' if ev else 'no scene has prose to describe a voice from')),
+    ]
+
+
+def _dry_run_timeline(describe, project_dir, profile, scenes) -> None:
+    """5g (no model) as it would run now: each file it would write, or why
+    not, and its notes. The write gate isn't consulted, so a file the
+    author keeps is reported by the real run, not here."""
+    try:
+        plan = describe.timeline_plan(project_dir, '', profile, scenes)
+    except describe.DescribeFailed as e:
+        print(f'5g timeline: would stop: {e}')
+        return
+    for rel, content, notes in plan:
+        for note in notes:
+            print(f'5g {rel}: note: {note}')
+        print(f'5g {rel}: ' + ('would write (if the gate allows)' if content is not None
+                               else 'would write nothing'))
+
+
+def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
+    """Phase 5, describe (#440): the reference layers above the scenes, from
+    what phases 0-4 found: 5a (structure), 5b (themes and motifs), 5c
+    (story summary and story architecture), 5d (character bible), 5e
+    (world and systems bibles), 5f (voice guide and profile) and 5g
+    (timeline and chapter map, no model); `extract_describe` holds them and
+    the write gate. Returns whether any
+    step wrote.
+
+    A step whose files the author owns is skipped and says so. A step that
+    can't get a usable answer, or any error mid-step, stops the run (exit 1)
+    after committing what the earlier steps wrote: nothing it would have
+    written is guessed.
+    """
+    from storyforge import extract_describe as describe
+    from storyforge.export import storyforge_version
+    from storyforge.common import get_medium
+    log('')
+    log('--- Phase 5: Describe the book ---')
+    if get_medium(project_dir) == 'graphic-novel':
+        log('  Graphic-novel project: phase 5 describes prose books only. Skipped.')
+        return False
+    ref_dir = os.path.join(project_dir, 'reference')
+    scenes = describe.scene_table(ref_dir)
+    if not scenes:
+        log('  No scenes in reference/scenes.csv; run phases 1-3 first. Phase 5 skipped.')
+        return False
+    profile = _load_profile(profile_file)
+    if dry_run:
+        print(f'===== DRY RUN: Phase 5 (describe) — {len(scenes)} scenes =====')
+        for label, prompt in (
+                ('5a structure', describe.build_structure_prompt(profile, scenes)),
+                ('5b themes', describe.build_themes_prompt(
+                    profile, scenes, describe.motif_mentions(scenes))),
+                ('5c pitch', _dry_run_pitch_prompt(describe, project_dir, profile, scenes)),
+                *_dry_run_bible_prompts(describe, project_dir, profile, scenes)):
+            if prompt:
+                print(f'{label}: {len(prompt)} chars')
+        _dry_run_timeline(describe, project_dir, profile, scenes)
+        print('===== END DRY RUN =====')
+        return False
+
+    provenance = describe.read_provenance(project_dir)
+    if provenance is None:
+        log(f'ERROR: {describe.PROVENANCE_FILE} could not be used (see the WARNING above). '
+            f'Fix or delete it, then run extract --phase 5 again.')
+        sys.exit(1)
+    # Books extracted before phase 1 did this have every status blank
+    marked = _mark_drafted(ref_dir, os.path.join(project_dir, 'scenes'),
+                           [s['id'] for s in scenes])
+    if marked:
+        log(f'  status: {marked} scene(s) with prose and no status marked drafted')
+    warnings: list[str] = []
+    version = storyforge_version(warnings)
+    for w in warnings:
+        log(f'  WARNING: {w}')
+    run = describe.Run(
+        project_dir=project_dir, model=select_model('synthesis'), log_dir=log_dir,
+        force=force, version=version, provenance=provenance,
+        on_usage=lambda f, op, target, model: _log_api_usage(f, op, target, model, project_dir))
+    outcomes = {}
+    try:
+        # Each step re-reads the scenes: 5a may have filled blank summaries,
+        # which 5c and 5d read. 5c reads the spine, themes and motifs 5a and
+        # 5b wrote (or the author's). A step that stopped part-way means a
+        # file changed under the run, so nothing after it runs. The steps
+        # run one after another, not in parallel: `write_described` updates
+        # one shared provenance record, and six ~1-minute calls don't
+        # justify locking it
+        for name, step in (('spine and architecture', describe.run_structure),
+                           ('themes and motifs', describe.run_themes),
+                           ('story summary and architecture', describe.run_pitch),
+                           ('character bible', describe.run_characters),
+                           ('world and systems bibles', describe.run_world),
+                           ('voice guide', describe.run_voice),
+                           ('timeline and chapter map', describe.run_timeline)):
+            stopped = [n for n, outcome in outcomes.items() if outcome == 'partial']
+            if stopped:
+                run.reports.append(f'{name} skipped: {stopped[0]} stopped part-way (a file '
+                                   f'changed while phase 5 ran); run it again')
+                outcomes[name] = 'skipped'
+                continue
+            outcomes[name] = step(run, profile, describe.scene_table(ref_dir))
+    except Exception as e:   # anything mid-step: report and commit what is written
+        for line in run.reports:
+            log(f'  {line}')
+        log(f'ERROR: Phase 5 stopped: {e}')
+        commit_and_push(project_dir, 'Extract: Phase 5 — describe (stopped)',
+                        describe.WRITTEN_PATHS)
+        sys.exit(1)
+    for line in run.reports:
+        log(f'  {line}')
+    written = [name for name, outcome in outcomes.items() if outcome == 'written']
+    partial = [name for name, outcome in outcomes.items() if outcome == 'partial']
+    if written or partial or marked:
+        what = ', '.join(written) or 'nothing new'
+        commit_and_push(project_dir, f'Extract: Phase 5 — describe ({what}'
+                        + (f'; {", ".join(partial)} stopped part-way' if partial else '') + ')',
+                        describe.WRITTEN_PATHS)
+    if not written:
+        log('  Phase 5 wrote nothing (see the lines above for why).')
+    return bool(written)
+
 
 def _run_cleanup(ref_dir: str, project_dir: str) -> None:
     """Run post-extraction cleanup."""

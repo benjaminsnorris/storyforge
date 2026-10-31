@@ -310,6 +310,10 @@ COLUMN_SCHEMA = {
         'file': 'scene-briefs.csv', 'stage': 'brief',
         'description': 'Recurring images/symbols deployed. Normalized against reference/motif-taxonomy.csv.',
     },
+    'motif_details': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'How the scene\'s motifs appear in it, in the brief\'s own words (semicolon-separated). `motifs` names them by id; this keeps what each looks like here, including images that recur nowhere else.',
+    },
     'subtext': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
         'description': 'What is happening beneath the surface — phrased as a drafting instruction. "Character says X but means Y; do not state Y directly."',
@@ -1021,6 +1025,10 @@ def dump_schema_markdown() -> str:
 # ============================================================================
 # Voice profile validation
 # ============================================================================
+
+#: reference/chapter-map.csv's columns: assembly reads them, extract 5g and
+#: scenes-setup write them, cleanup checks them
+CHAPTER_MAP_COLUMNS = ['chapter', 'title', 'heading', 'part', 'scenes']
 
 VOICE_PROFILE_COLUMNS = [
     'character', 'preferred_words', 'banned_words', 'metaphor_families',

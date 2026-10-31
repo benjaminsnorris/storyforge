@@ -35,7 +35,9 @@ from storyforge.common import (
 )
 from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge import ledger
+from storyforge.elaborate import _FILE_MAP, _MOTIF_COLS, _THEMES_COLS
 from storyforge.audit import COLUMNS as AUDIT_COLUMNS
+from storyforge.schema import CHAPTER_MAP_COLUMNS, VOICE_PROFILE_COLUMNS
 from storyforge.parsing import clean_scene_content, extract_single_scene
 from storyforge.visual_state import STATE_COLUMNS
 
@@ -73,44 +75,39 @@ PIPELINE_EXPECTED = 'cycle|started|status|evaluation|scoring|plan|review|recomme
 EXPECTED_TOP_DIRS = set('scenes reference working manuscript storyforge .git'.split())
 EXPECTED_TOP_FILES = set('storyforge.yaml CLAUDE.md .gitignore .DS_Store storyforge'.split())
 
+#: Columns only a graphic-novel project uses. A novel project's header may
+#: carry them (the templates do, so either medium can be chosen), so in novel
+#: mode they are neither missing nor extra.
+GN_ONLY_COLUMNS: dict[str, frozenset[str]] = {
+    'reference/scenes.csv': frozenset({'target_pages', 'panel_count', 'page_count'}),
+    'reference/scene-briefs.csv': frozenset({'page_layout', 'panel_breakdown',
+                                             'visual_keywords', 'page_turn_beats',
+                                             'caption_strategy'}),
+}
+
 # Expected CSV schemas — canonical column lists for all known CSV files.
 # Keys are paths relative to project root.
 EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
     # Core scene data (reference/)
-    'reference/scenes.csv': [
-        'id', 'seq', 'title', 'part', 'act', 'pov', 'location',
-        'timeline_day', 'time_of_day', 'duration', 'type', 'status',
-        'word_count', 'target_words',
-    ],
-    'reference/scene-intent.csv': [
-        'id', 'function', 'action_sequel', 'emotional_arc', 'value_at_stake',
-        'value_shift', 'turning_point', 'characters', 'on_stage',
-        'mice_threads',
-    ],
-    'reference/scene-briefs.csv': [
-        'id', 'goal', 'conflict', 'outcome', 'crisis', 'decision',
-        'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
-        'emotions', 'motifs', 'subtext', 'continuity_deps', 'has_overflow',
-        'physical_state_in', 'physical_state_out',
-    ],
+    # The manuscript tier: elaborate._FILE_MAP is the one column list every
+    # writer uses, less the graphic-novel columns (GN_ONLY_COLUMNS)
+    **{f'reference/{name}': [c for c in _FILE_MAP[name]
+                             if c not in GN_ONLY_COLUMNS.get(f'reference/{name}', ())]
+       for name in ('scenes.csv', 'scene-intent.csv', 'scene-briefs.csv')},
     # Registry CSVs (reference/)
     'reference/characters.csv': ['id', 'name', 'aliases', 'role', 'death_scene',
                                  'pronouns'],
     'reference/locations.csv': ['id', 'name', 'aliases'],
     'reference/values.csv': ['id', 'name', 'aliases'],
     'reference/mice-threads.csv': ['id', 'name', 'type', 'aliases'],
-    'reference/motif-taxonomy.csv': ['id', 'name', 'aliases', 'tier'],
+    'reference/motif-taxonomy.csv': list(_MOTIF_COLS),
+    'reference/themes.csv': list(_THEMES_COLS),
     # The commitments ledger: knowledge facts and physical states (it
     # replaced knowledge.csv and physical-states.csv: a project that still has
     # them gets a LEGACY_REGISTRY finding from report_csv_schema)
     f'reference/{ledger.LEDGER_FILE}': list(ledger.COLUMNS),
-    'reference/chapter-map.csv': [
-        'chapter', 'title', 'heading', 'part', 'scenes',
-    ],
-    'reference/voice-profile.csv': [
-        'character', 'preferred_words', 'banned_words', 'metaphor_families',
-        'rhythm_preference', 'register', 'dialogue_style',
-    ],
+    'reference/chapter-map.csv': list(CHAPTER_MAP_COLUMNS),
+    'reference/voice-profile.csv': list(VOICE_PROFILE_COLUMNS),
     # Working CSVs
     'working/craft-weights.csv': [
         'section', 'principle', 'weight', 'author_weight', 'notes',
@@ -149,6 +146,8 @@ ALWAYS_OPTIONAL_CSV_FILES: set[str] = {
     'reference/illustration-plan.csv',
     'reference/visual-state.csv',
     'working/audit-log.csv',
+    # Written by elaborate or extract phase 5; projects predating both lack it
+    'reference/themes.csv',
 }
 
 #: Columns a registered CSV may legally lack — schema additions that older
@@ -163,6 +162,11 @@ OPTIONAL_CSV_COLUMNS: dict[str, set[str]] = {
     # absence is not a finding (an author's `pronouns` column is no longer
     # an unexpected one)
     'reference/characters.csv': {'pronouns'},
+    # Added to the schema after projects existed; elaborate and extract add
+    # them on their next write of the file
+    'reference/scenes.csv': {'summary', 'time_mode', 'timeline_date', 'architecture_scene'},
+    'reference/scene-intent.csv': {'theme_threads'},
+    'reference/scene-briefs.csv': {'motif_details'},
 }
 EXPECTED_WORKING_DIRS = set(
     'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup'.split()
@@ -171,19 +175,8 @@ EXPECTED_WORKING_DIRS = set(
 # Graphic-novel schema overrides — these replace/augment the base schemas for
 # projects where project.medium == 'graphic-novel'.
 GN_CSV_SCHEMA_OVERRIDES: dict[str, list[str]] = {
-    'reference/scenes.csv': [
-        'id', 'seq', 'title', 'part', 'act', 'pov', 'location',
-        'timeline_day', 'time_of_day', 'duration', 'type', 'status',
-        'word_count', 'target_words', 'target_pages', 'panel_count', 'page_count',
-    ],
-    'reference/scene-briefs.csv': [
-        'id', 'goal', 'conflict', 'outcome', 'crisis', 'decision',
-        'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
-        'emotions', 'motifs', 'subtext', 'continuity_deps', 'has_overflow',
-        'physical_state_in', 'physical_state_out',
-        'page_layout', 'panel_breakdown', 'visual_keywords',
-        'page_turn_beats', 'caption_strategy',
-    ],
+    'reference/scenes.csv': list(_FILE_MAP['scenes.csv']),
+    'reference/scene-briefs.csv': list(_FILE_MAP['scene-briefs.csv']),
     'reference/voice-profile.csv': [
         'character', 'preferred_words', 'banned_words', 'metaphor_families',
         'rhythm', 'register', 'dialogue_style', 'caption_voice', 'lettering_style',
@@ -1515,8 +1508,9 @@ def report_csv_schema(project_dir: str) -> list[str]:
             if col not in actual_set and col not in optional_cols:
                 issues.append(f'MISSING_COLUMN:{rel_path}:{col}')
 
+        tolerated = set() if is_gn else GN_ONLY_COLUMNS.get(rel_path, frozenset())
         for col in actual_cols:
-            if col not in expected_set:
+            if col not in expected_set and col not in tolerated:
                 issues.append(f'EXTRA_COLUMN:{rel_path}:{col}')
 
     issues += [f'LEGACY_REGISTRY:reference/{f}' for f in

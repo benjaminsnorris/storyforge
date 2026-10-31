@@ -321,6 +321,28 @@ def test_step5_clears_novel_columns_for_novel_to_gn(project_dir):
         assert row.get('status') == 'mapped'
 
 
+def test_step5_keeps_summaries_and_an_authors_columns(project_dir):
+    """Review I-2 on #442: the hand-kept header had no `summary`, so
+    migrating an extracted book (whose summaries phase 3b now fills)
+    silently deleted every one, and any column of the author's own."""
+    from storyforge.elaborate import update_scene
+    ref = os.path.join(project_dir, 'reference')
+    scenes_csv = os.path.join(ref, 'scenes.csv')
+    update_scene('act1-sc01', ref, {'summary': 'Dorren finds the gap.'})
+    with open(scenes_csv) as f:
+        lines = f.read().splitlines()
+    lines = [lines[0] + '|my_notes'] + [line + '|kept' for line in lines[1:]]
+    with open(scenes_csv, 'w') as f:
+        f.write('\n'.join(lines) + '\n')
+
+    step5_transform_scenes_csv(project_dir, 'novel', 'graphic-novel', dry_run=False)
+
+    _, rows = _read_csv_rows(scenes_csv)
+    row = next(r for r in rows if r['id'] == 'act1-sc01')
+    assert row['summary'] == 'Dorren finds the gap.'
+    assert row['my_notes'] == 'kept'
+
+
 def test_step5_clears_gn_columns_for_gn_to_novel(project_dir_gn):
     """GN→novel clears target_pages, panel_count, page_count."""
     scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')

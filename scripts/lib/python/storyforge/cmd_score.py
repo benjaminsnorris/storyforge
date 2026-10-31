@@ -2069,12 +2069,23 @@ def _generate_report_and_comment(cycle, cycle_dir, project_dir, score_mode,
 
 
 def _read_reference(project_dir: str, candidates: list) -> str:
-    """Read the first existing reference file that isn't still its template."""
+    """Read the first existing reference file that isn't still its template.
+
+    A template copy or an unreadable file is passed over with a log line, so
+    a pass scored without the doc says why.
+    """
     for ref in candidates:
         path = os.path.join(project_dir, ref)
-        if os.path.isfile(path) and not is_unfilled_template(path):
-            with open(path) as f:
+        if not os.path.isfile(path):
+            continue
+        if is_unfilled_template(path):
+            log(f'  {ref} is still its template; scoring without it')
+            continue
+        try:
+            with open(path, encoding='utf-8-sig') as f:
                 return f.read()
+        except (OSError, UnicodeDecodeError) as e:
+            log(f'WARNING: {ref} could not be read ({e}); scoring without it')
     return ''
 
 

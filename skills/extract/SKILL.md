@@ -41,7 +41,7 @@ When extracting data interactively, use canonical IDs from these registries for 
 Based on project state:
 
 - **No scene files** → Author needs to split their manuscript first. Route to `/storyforge:scenes` (setup mode) or help them split interactively.
-- **Scene files exist, no CSV data or old metadata CSV** → Full extraction needed (all 4 phases). The extraction will read the prose and build all three CSVs from scratch.
+- **Scene files exist, no CSV data or old metadata CSV** → Full extraction needed (all phases). The extraction will read the prose and build the scene CSVs, the registries and the ledger from scratch, then describe the spine, architecture, themes and motifs.
 - **Scene files + partial elaboration data** → Targeted extraction — only run phases for missing data.
 
 ## Step 3: Execute Extraction
@@ -59,11 +59,16 @@ Options:
 - `--phase 1` — Extract skeleton (scenes.csv) only
 - `--phase 2` — Extract intent only (needs phase 1)
 - `--phase 3` — Extract briefs only (needs phases 1-2)
+- `--phase 4` — Extract commitments only (needs phases 1-3)
+- `--phase 5` — Describe the book: spine, architecture, themes, motifs, story summary, story architecture, character/world/systems bibles, voice guide, timeline, chapter map (needs phases 1-3; see below)
+- `--force` — Overwrite extracted values (phase 5: regenerate only files it wrote that nobody has edited since)
 - `--expand` — Include expansion analysis (for novella-to-novel work)
 - `--dry-run` — Print prompts without calling the API
 
-For full extraction with cleanup: `./storyforge extract` (runs all phases + cleanup)
+For full extraction with cleanup: `./storyforge extract` (runs all phases + cleanup, then phase 5)
 For expansion planning: `./storyforge extract --expand`
+
+**Phase 5, describe.** Describes the book as written, from what phases 0-4 found: `spine.csv` and `architecture.csv` (the irreducible events, and the anchor scenes that carry them, chosen from existing scenes), `themes.csv` and `motif-taxonomy.csv`, `story-summary.md` (logline, synopsis, three-act shape, theme) and `story-architecture.md` (premise, conflict, the book's own acts with lengths counted from `scenes.csv`, subplots, POV, voice, title), `character-bible.md` (up to 16 characters, ranked by POV, role and scenes, with lines tagged with their names and, once phase 4 has run on a migrated ledger, its fixed facts), `world-bible.md` and `systems-bible.md` (a one-line stub when the book has no formal system), and `voice-guide.md` with `voice-profile.csv` (described from sampled prose, with code-measured sentence length, dialogue share and contractions), plus blank scene summaries, `architecture_scene`, `theme_threads` and a placeholder `project.genre` / `subgenre`. Each brief's `motifs` cell becomes the motif ids its descriptions were grouped into, and the descriptions themselves (every one, including images that recur nowhere else) move to the brief's `motif_details` column, which drafting reads beside the ids. Last, with no model, it writes `timeline.md` (days, earlier time, frames and visions, from the scene CSVs) and, when the project has none, `chapter-map.csv` from the chapter headings at the top of scenes (`# Stave I: Marley's Ghost`). It never replaces the author's work: a step whose files are the author's (or are extracted files the author has since edited) is skipped and says so, and `--force` regenerates only files it wrote that nobody has edited since (`working/extraction-provenance.csv`). It commits itself. About $1 on a 40-scene book (*A Christmas Carol*: $0.99, including one retry). Graphic-novel projects are skipped. Present what it wrote as a description to check, not a plan to follow: if the book's structure fails a floor check, that is a finding about the book or the rubric.
 For cleanup only (on already-extracted data): `./storyforge extract --cleanup-only`
 
 Cleanup runs automatically after full extraction. It normalizes knowledge wording (fuzzy-matches mismatched facts), fills timeline gaps (interpolates from adjacent scenes), and fixes MICE thread issues (removes duplicates and orphaned closes). In full/coach mode, fixes are applied automatically. In strict mode, issues are reported for the author to fix.

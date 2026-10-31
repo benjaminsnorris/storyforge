@@ -1,7 +1,7 @@
 # Storyforge evals
 
 Measures whether Storyforge is reliable, consistent, and accurate. Plan and
-suite definitions (E1–E8): `docs/plans/2026-10-28-storyforge-rethink.md`.
+suite definitions (E1–E8): `docs/plans/2026-10-28-storyforge-rethink.md`; E9 (extract phase 5's reference completeness): `docs/plans/2026-10-30-extract-upper-layers.md`.
 What exists, the baseline, and what's next: `docs/plans/2026-10-28-rethink-status.md`.
 
 ```bash
