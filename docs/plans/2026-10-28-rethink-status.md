@@ -5,20 +5,20 @@ Last updated 2026-10-31 (night), at v1.117.0. **Phase 3 is done** and **Phase 4 
 ## Latest: the re-check-set eval (2026-10-31 night, storyforge-df)
 
 **#473 (eval-only), suite `recheck-set` (`evals/recheck`):**
-- **What it measures:** for each E1 prose case whose established side is earlier than its contradicting side, in a tree with `scenes.csv` (27 cases, 18 trees), rejecting the established fact must list the contradicting scene for a re-check.
+- **What it measures:** for each E1 prose case whose established side is earlier than its contradicting side, in a tree with `scenes.csv` (27 cases, 18 trees), rejecting the established fact must get the contradicting scene re-checked. 38 cases in 18 trees pass `select`; 27 cases in 14 trees are measured.
 - **How:**
-  - Extract phase 4 runs over a subset of each tree: the case's two scenes plus 2 control scenes between them.
+  - Extract phase 4 runs once per tree over a subset: each case's establishing and contradicting scenes, plus up to 2 controls between the establishing scene and the first contradicting one (the scenes next to each side).
   - An Opus judge picks the ledger rows recording the fact.
-  - `cmd_audit._reject_recheck` gives the set.
-- **Cost:** $6.61 to record, 2.3 MB of recordings.
-- **Excluded:** 11 cases whose "established" side reads *after* the contradiction (the author kept the later version; a re-check runs forward). The other exclusions match E3's.
+  - `cmd_audit._reject_recheck` gives what is re-checked: the scenes listed now, or the dependents the revision lists. Scenes listed only because a brief names the fact are left out: after a revision the gate lists dependents only. This is a gap in #470's flow, to close in 3c; `audit` shows them as "listed once it passes".
+- **Cost:** $6.61 spent recording ($6.92 at list price), 2.3 MB of recordings.
+- **Excluded:** 11 cases whose "established" side reads *after* the contradiction (the author kept the later version; a re-check runs forward). The others: 40 trees predate scenes.csv, 25 holdout, 24 contradicted only in the establishing scene, 3 no prose established span.
 
 | Metric | Value |
 |---|---|
 | captured / partial / missing (judge) | 25 / 2 / 0 |
 | **recall** (captured cases whose set holds the contradicting scene) | **0.72** (18/25; gate 0.9) |
-| set size mean; share of the book's later scenes | 3.08; 0.19 (a floor: only the subset has commitments) |
-| control inclusion (controls in the set) | 0.40 |
+| set size mean; share of the book's later scenes | 2.96; 0.19 (a floor: only the subset has commitments) |
+| control inclusion (controls in the set) | 0.40 (an upper bound: the controls sit next to the two sides) |
 | cases with an `unrelated` fact | 4 |
 
 **The 7 misses, read off a replay:**
@@ -35,11 +35,11 @@ Last updated 2026-10-31 (night), at v1.117.0. **Phase 3 is done** and **Phase 4 
 
 | Rule | Recall | Set share | Controls included |
 |---|---|---|---|
-| today: same subject and type (or a link) | 0.72 | 0.19 | 0.40 |
+| today: same subject and type, or a link (knowledge facts: any type, and `known_by`) | 0.72 | 0.19 | 0.40 |
 | same subject, any type | 0.76 | 0.21 | 0.49 |
 | + a blank-subject fact → every later scene with a fact of its type | 0.84 | 0.25 | 0.64 |
 
-The two cross-subject misses need a mention match: a later row whose statement names the fact's subject, or whose subject the fact's statement names, by registry name or alias. With it, the reachable ceiling is 23/25 = 0.92. The other two are extraction gaps or absences, outside any graph.
+The two cross-subject misses need a mention match: a later row whose statement names the fact's subject, or whose subject the fact's statement names, by registry name or alias. If it catches both (not yet simulated), recall would reach 23/25 = 0.92. The other two are extraction gaps or absences, outside any graph.
 
 **Next, in order:**
 1. **PR 3c, widen `ledger.dependents`:**
