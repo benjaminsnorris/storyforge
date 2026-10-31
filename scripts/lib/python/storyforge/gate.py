@@ -197,13 +197,14 @@ def _statement(rows: list[dict[str, str]], rid: str) -> str:
 
 def leaning_on(project_dir: str, scene_id: str) -> list[str]:
     """`fact → commitment` for each later fact that leans on (supersedes or
-    depends on) one of `scene_id`'s commitments. Non-empty means the gate
+    depends on) one of `scene_id`'s commitments, and `scene ends → commitment`
+    for each of its states a later scene ended. Non-empty means the gate
     can't replace them (Phase 4's re-check set), so redrafting the scene
     would be refused after the redraft was paid for: check first."""
     rows = ledger.load(project_dir)
     old = {r['id'] for r in rows if ledger.is_commitment(r)
            and (r.get('scene_id') or '').strip() == scene_id}
-    return _leaning_on(rows, old)
+    return _leaning_on(rows, old, ledger.scene_order(project_dir))
 
 
 def has_commitments(project_dir: str, scene_id: str) -> bool:
@@ -212,17 +213,20 @@ def has_commitments(project_dir: str, scene_id: str) -> bool:
                for r in ledger.load(project_dir))
 
 
-def _leaning_on(rows: list[dict[str, str]], gone: set[str]) -> list[str]:
+def _leaning_on(rows: list[dict[str, str]], gone: set[str],
+                order: dict[str, int] | None = None) -> list[str]:
     """Rows (not themselves going) whose supersedes or depends_on name `gone`,
     and each `gone` state another scene ended (`resolves` names a scene other
-    than its own): replacing it would drop that end, and the state would
-    read as in force for the rest of the book."""
+    than its own, and one in `order` when given: an end at a deleted scene
+    is meaningless, and validate reports it): replacing it would drop that
+    end, and the state would read as in force for the rest of the book."""
     leaning = [f'{r["id"]} → {ref}' for r in rows if r['id'] not in gone
                for col in ('supersedes', 'depends_on') for ref in ledger._split(r.get(col, ''))
                if ref in gone]
     for r in rows:
         ends = (r.get('resolves') or '').strip()
-        if r['id'] in gone and ends not in ('', 'never', (r.get('scene_id') or '').strip()):
+        if r['id'] in gone and ends not in ('', 'never', (r.get('scene_id') or '').strip()) \
+                and (order is None or ends in order):
             leaning.append(f'{ends} ends → {r["id"]}')
     return leaning
 
@@ -244,7 +248,8 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     Raises:
         GateError: a step couldn't finish (extraction or the check failed,
             the scene has no prose, a later fact leans on one of the scene's
-            commitments this would replace, or the ledger changed on disk
+            commitments this would replace or a later scene ended one of its
+            states, or the ledger changed on disk
             while the gate ran); nothing was written.
         ValueError: `command` isn't one of `GATE_COMMANDS`.
     """
@@ -274,11 +279,12 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
         raise GateError(f'{scene_id} is not a scene in reference/scenes.csv')
 
     # The scene's earlier commitments (a redraft's) aren't offered back to it
-    # and are replaced on commit; a later fact leaning on one is Phase 4's
-    # re-check, which doesn't exist yet, so it stops here
+    # and are replaced on commit; a later fact leaning on one, or a later
+    # scene's end of one of its states, is Phase 4's re-check, which doesn't
+    # exist yet, so it stops here
     old = {r['id'] for r in rows if ledger.is_commitment(r)
            and (r.get('scene_id') or '').strip() == scene_id}
-    leaning = _leaning_on(rows, old)
+    leaning = _leaning_on(rows, old, order)
     if leaning:
         raise GateError(f'{scene_id}: later facts lean on commitments this scene would '
                         f'replace: {", ".join(leaning[:10])}')

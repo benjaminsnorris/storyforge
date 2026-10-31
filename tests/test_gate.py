@@ -270,6 +270,11 @@ class TestFailsLoud:
                 {'id': 'c', 'scene_id': 's1', 'resolves': ''}]
         assert gate._leaning_on(rows, {'a', 'b', 'c'}) == []
 
+    def test_an_end_at_a_deleted_scene_does_not_lean(self):
+        rows = [{'id': 'a', 'scene_id': 's1', 'resolves': 'gone'}]
+        assert gate._leaning_on(rows, {'a'}, {'s1': 0}) == []
+        assert gate._leaning_on(rows, {'a'}) == ['gone ends → a']
+
     @pytest.mark.parametrize('command', ['commitments', 'hone', ''])
     def test_only_gate_commands(self, project_dir, tmp_path, command):
         with pytest.raises(ValueError, match='command must be'):

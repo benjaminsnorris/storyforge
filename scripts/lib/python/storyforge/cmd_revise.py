@@ -377,10 +377,11 @@ def _leaning(project_dir: str, scene_id: str) -> str:
     leaning = gate.leaning_on(project_dir, scene_id)
     if not leaning:
         return ''
-    log(f'    ERROR: Not redrafting {scene_id}: later facts lean on its commitments '
-        f'({", ".join(leaning[:5])}), and the gate cannot replace them yet. Revise it '
-        f'by hand and run `storyforge check {scene_id}`.')
-    return f'{scene_id} (later facts lean on its commitments; not redrafted)'
+    log(f'    ERROR: Not redrafting {scene_id}: later facts or ends depend on its '
+        f'commitments ({", ".join(leaning[:5])}), and the gate cannot replace them until '
+        f"Phase 4's re-check exists (storyforge check refuses it too). Revise its prose by "
+        f'hand and leave its ledger rows as they are, or redraft it after the re-check lands.')
+    return f'{scene_id} (later facts or ends depend on its commitments; not redrafted)'
 
 
 def _stopped_at(scene_id: str, why: str, rest: list[str]) -> list[str]:

@@ -878,12 +878,13 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                 break
             leaning = gate.leaning_on(project_dir, scene_id)
             if leaning:
-                log(f'ERROR: Not redrafting {scene_id}: later facts lean on its '
+                log(f'ERROR: Not redrafting {scene_id}: later facts or ends depend on its '
                     f'commitments ({", ".join(leaning[:5])}), and the gate cannot replace '
-                    f"them yet (Phase 4's re-check). Revise it by hand and run "
-                    f'`storyforge check {scene_id}`.')
-                stop(i, scene_id, f'{scene_id} (later facts lean on its commitments; '
-                                  f'not redrafted)')
+                    f"them until Phase 4's re-check exists (storyforge check refuses it "
+                    f'too). Revise its prose by hand and leave its ledger rows as they are, '
+                    f'or redraft it after the re-check lands.')
+                stop(i, scene_id, f'{scene_id} (later facts or ends depend on its '
+                                  f'commitments; not redrafted)')
                 break
 
         prompt = _build_prompt(scene_id, project_dir, coaching, use_briefs,
