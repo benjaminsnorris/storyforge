@@ -287,3 +287,48 @@ def test_a_word_or_two_of_a_named_field_does_not_verify(project_dir):
                     'fact_id': 'outcome', 'established_quote': 'no'})
     result, _ = _run(project_dir, [_answer([f])])
     assert result.findings == [] and 'whole item' in result.unverified[0].problem
+
+
+class TestReference:
+    """The bibles are in the checker's system prompt, and a finding against
+    one verifies against its text (the E4 blind spot: a fact only a bible
+    holds)."""
+    BIBLE_QUOTE = 'Her mentor disappeared investigating a similar anomaly fifteen years ago'
+
+    def test_the_bibles_are_the_system_prompt(self, project_dir):
+        _, bodies = _run(project_dir, [_answer()])
+        system = bodies[0]['system'][0]['text']
+        assert '<reference file="character-bible.md">' in system
+        assert self.BIBLE_QUOTE in system
+        assert 'character-bible.md) also establishes facts' in bodies[0]['messages'][0]['content']
+
+    def test_a_finding_against_a_bible_verifies_by_its_text(self, project_dir):
+        result, _ = _run(project_dir, [_answer([_finding(
+            established_scene='character-bible.md', established_quote=self.BIBLE_QUOTE)])])
+        assert len(result.findings) == 1
+        assert 'contradicts character-bible.md' in result.findings[0].message()
+
+    def test_a_quote_not_in_the_bible_is_unverified(self, project_dir):
+        result, _ = _run(project_dir, [_answer([_finding(
+            established_scene='character-bible.md', established_quote='a sister named Marie')])])
+        assert result.findings == []
+        assert 'not in character-bible.md' in result.unverified[0].problem
+
+    def test_a_template_bible_is_left_out_and_the_prompt_says_so(self, project_dir):
+        import os
+        import shutil
+        from storyforge.common import get_plugin_dir
+        shutil.copy(os.path.join(get_plugin_dir(), 'templates', 'reference', 'character-bible.md'),
+                    os.path.join(project_dir, 'reference', 'character-bible.md'))
+        _, bodies = _run(project_dir, [_answer()])
+        assert 'system' not in bodies[0]
+        assert 'no reference material' in bodies[0]['messages'][0]['content']
+        result, _ = _run(project_dir, [_answer([_finding(
+            established_scene='character-bible.md', established_quote='Role')])])
+        assert result.findings == [] and 'is not a scene' in result.unverified[0].problem
+
+    def test_reference_docs_skips_missing_and_blank(self, project_dir):
+        import os
+        with open(os.path.join(project_dir, 'reference', 'world-bible.md'), 'w') as f:
+            f.write('  \n')
+        assert list(checker.reference_docs(project_dir)) == ['character-bible.md']
