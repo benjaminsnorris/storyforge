@@ -1,8 +1,44 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-31 (morning), at v1.111.0. **Phase 3 steps 1–5 are done and nothing is in flight**: the gate checks with the bibles and a persistence check, revise's redrafts are gated, and drafting sends the whole manuscript so far (see **Latest** for the overnight run's results and what's next). #440's phase 5 is complete and handed to storyforge-evals. **A fresh session starts here:** read **Latest**, **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-10-31 (afternoon), at v1.114.0. **Phase 3 is done** (checker recall, promises in words, parallel vs sequential) and **Phase 4 has started**: its design is decided (`docs/plans/2026-10-31-phase4-safe-revision-design.md`) and PR 1 (#466, `ledger.dependents`) is in review. **A fresh session starts here:** read **Latest**, then the Phase 4 design note's "PRs, in order", then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
-## Latest: the overnight run and what is next (2026-10-31, storyforge-b2)
+## Latest: Phase 3 finished, Phase 4 started (2026-10-31, storyforge-c4)
+
+| PR | Version | What |
+|---|---|---|
+| #460, #464 | — (test-only) | tests that passed or failed by whether `ANTHROPIC_API_KEY` was set; the GN pipeline test's import-order live request (1 run in 4) |
+| #461 | 1.112.0 | **the checker gets the story so far**: earlier scenes whole in its system prompt after the bibles (`prompts.prior_scenes(…, 'full')`); cut/merged scenes left out of everything it sees |
+| #462 | 1.113.0 | **parallel vs sequential**: `STORYFORGE_E4_PARALLEL=1` drafts E4 as `--batch` did; CP10k 13.7 vs 1.8–5.3 sequential, so `write --batch` refuses prose (coach/strict briefs only) |
+| #463 | 1.114.0 | **broken promises in words**: the drafting task lists `physical_state_out` as a must-show checklist |
+| #465 | — (docs) | the Phase 4 design, Ben's three decisions |
+
+**E4** (shared-dark Act 1, gated, `full` prose; targets CP10k ≤ 7.1, broken promises ≤ 3):
+
+| Run | Code | CP10k all | Contradictions all | Broken promises all | Gate fixed / failing | Cost |
+|---|---|---|---|---|---|---|
+| 8 | #458 | 5.3 | 12 | 9 | 6 / 3 | $12.87 |
+| 9 | #461 checker | 4.1 | 9 | 8 | 4 / 0 | $12.45 |
+| 10 | #463 checklist | **3.1** | 7 | **3** | 8 / 3 | $12.50 |
+| parallel | #463 prompt, no prose, no gate | 13.7 | 30 | 1 | — | $5.22 |
+
+- **Both Phase 3 targets are met on every scene** (run 10). The headline (where `write` stops) is 2 scenes in run 10: `harmons-hands` failed on a real broken key-dialogue promise the fix didn't repair (the judge lists the same line). That is the gate doing its job, but it means `write` would stop at scene 2 for the author.
+- **Checker recall** (#461): E2-carol-checker 0.83/0.81 → 0.81/**0.86** precision/recall. On E4 the judge still finds about one contradiction in each of 6–9 passed scenes, finer than before (which way a door swings, hour arithmetic, who spoke after a door shut). The per-scene catch rate (`gate_catch_rate`) ignores scenes the gate fixed, so read it with `gate_fixed`.
+- **E5** 3.4 → 3.7 mismatches per scene (PHY 27 → 32) with the checklist; **E8** reintroduced 7 → 6 → 7. One run each: within noise so far.
+
+**Spend this session:** about $105 (E4 ×3 $30.17, E8 ×3 $58.61, E2-carol-checker $4.69, E5 $2.49, parallel E4 $5.22, E8 thornwall top-up included).
+
+**Found:**
+- `depends_on` is never written by anything: Phase 4's graph is derived from the ledger instead (Ben).
+- A redraft dropped a later scene's end of the scene's states (`resolves` on the replaced row): fixed in #466 (the redraft is refused until the re-check exists).
+- The E8 replay miss after #461's review fix was real, not the flake: a thornwall tree has cut scenes, which the checker no longer sees; that case was re-recorded ($1.74).
+
+**Next, in order** (the design note's "PRs, in order"):
+1. **#466** (PR 1: `ledger.dependents`, `changed_facts`, the `resolves` fix): fix its review findings, merge (minor bump).
+2. **PR 2, the re-check**: after a scene's prose changes and passes the gate, re-gate its dependents' existing prose in reading order (`command='recheck'`), stop at the first failure and list it pending (report and stop, Ben), forecast the cost and run under `check_threshold`. Replaces the redraft refusal in `write --force` and revise; re-record E5 (gated again) and E8.
+3. **PR 3, the reject flow**; **PR 4**, every prose pass through the gate (E8 to zero); **PR 5**, rewrite-from-ledger (E5).
+4. **Smaller:** the low-confidence halt; fill `characters.csv` `pronouns`; measure E4 over 2–3 runs before reading small moves (run 9 vs 10 are one each).
+
+## The overnight run (2026-10-31, storyforge-b2)
 
 Ben's instruction: "look for the handoff note and keep going all through the night; do not stop to ask." Done overnight, all merged:
 
