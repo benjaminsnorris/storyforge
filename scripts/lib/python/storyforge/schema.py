@@ -1026,6 +1026,10 @@ def dump_schema_markdown() -> str:
 # Voice profile validation
 # ============================================================================
 
+#: reference/chapter-map.csv's columns: assembly reads them, extract 5g and
+#: scenes-setup write them, cleanup checks them
+CHAPTER_MAP_COLUMNS = ['chapter', 'title', 'heading', 'part', 'scenes']
+
 VOICE_PROFILE_COLUMNS = [
     'character', 'preferred_words', 'banned_words', 'metaphor_families',
     'rhythm_preference', 'register', 'dialogue_style',

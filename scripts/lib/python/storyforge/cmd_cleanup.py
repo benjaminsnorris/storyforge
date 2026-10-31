@@ -37,6 +37,7 @@ from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge import ledger
 from storyforge.elaborate import _FILE_MAP, _MOTIF_COLS, _THEMES_COLS
 from storyforge.audit import COLUMNS as AUDIT_COLUMNS
+from storyforge.schema import CHAPTER_MAP_COLUMNS, VOICE_PROFILE_COLUMNS
 from storyforge.parsing import clean_scene_content, extract_single_scene
 from storyforge.visual_state import STATE_COLUMNS
 
@@ -105,13 +106,8 @@ EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
     # replaced knowledge.csv and physical-states.csv: a project that still has
     # them gets a LEGACY_REGISTRY finding from report_csv_schema)
     f'reference/{ledger.LEDGER_FILE}': list(ledger.COLUMNS),
-    'reference/chapter-map.csv': [
-        'chapter', 'title', 'heading', 'part', 'scenes',
-    ],
-    'reference/voice-profile.csv': [
-        'character', 'preferred_words', 'banned_words', 'metaphor_families',
-        'rhythm_preference', 'register', 'dialogue_style',
-    ],
+    'reference/chapter-map.csv': list(CHAPTER_MAP_COLUMNS),
+    'reference/voice-profile.csv': list(VOICE_PROFILE_COLUMNS),
     # Working CSVs
     'working/craft-weights.csv': [
         'section', 'principle', 'weight', 'author_weight', 'notes',

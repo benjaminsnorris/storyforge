@@ -42,7 +42,7 @@ from typing import Callable, Literal, TypedDict, get_args
 
 from .common import is_unfilled_template, log
 #: elaborate's voice-profile.csv columns, which `validate_voice_profile` checks
-from .schema import VOICE_PROFILE_COLUMNS
+from .schema import CHAPTER_MAP_COLUMNS, VOICE_PROFILE_COLUMNS
 
 PROVENANCE_FILE = os.path.join('working', 'extraction-provenance.csv')
 
@@ -97,7 +97,8 @@ _POLICY: dict[FileState, tuple[Rule, str]] = {
 #: A one-line CSV is only a header if its fields look like column names and
 #: include a key column; `grief|Grief|core` is a row someone wrote.
 _COLUMN_NAME = re.compile(r'^[a-z_][a-z0-9_]*$')
-_KEY_COLUMNS = frozenset({'id', 'character', 'principle', 'entity', 'scope', 'cycle'})
+_KEY_COLUMNS = frozenset({'id', 'character', 'principle', 'entity', 'scope', 'cycle',
+                          'chapter'})
 
 
 class ProvenanceError(RuntimeError):
@@ -2347,110 +2348,148 @@ def render_voice_guide(reply: dict, ev: VoiceEvidence, header: str) -> str:
 # Step 5g: the timeline and the chapter map (no model)
 # ============================================================================
 
-#: time_mode values that are never the story's present (`schema`): narration
-#: from after the story, and things shown that haven't happened.
+#: Section headings for the time_mode values that are never the story's
+#: present (`elaborate.OFF_PRESENT_MODES`: narration from after the story,
+#: and things shown that haven't happened), in the order listed.
 _OUTSIDE_PRESENT = {'frame': 'Frame', 'vision': 'Visions'}
-_CHAPTER_HEADING = re.compile(r'^#{1,3}[ \t]+(\S.*?)[ \t]*#*[ \t]*$')
-CHAPTER_MAP_COLUMNS = ['chapter', 'title', 'heading', 'part', 'scenes']
+#: An ATX heading of level 1-3 (a closing `#` run needs a space before it,
+#: as in CommonMark, so `# C#` keeps its `#`)
+_CHAPTER_HEADING = re.compile(r'^#{1,3}[ \t]+(\S.*?)(?:[ \t]+#+)?[ \t]*$')
+_WHOLE_NUMBER = re.compile(r'-?[0-9]+')
 
 
-def _scene_line(s: dict[str, str]) -> str:
+def _scene_line(s: dict[str, str], extra: str = '') -> str:
     when = ', '.join(x for x in (s.get('timeline_date', '').strip(),
                                  s.get('time_of_day', '').strip()) if x)
     what = s.get('summary', '').strip() or s.get('function', '').strip()
-    return (f'- {s.get("seq", "")} `{s["id"]}`' + (f' ({when})' if when else '')
+    return (f'- {s.get("seq", "")} `{s["id"]}`' + (f' ({when})' if when else '') + extra
             + (f': {_one_line(what)}' if what else ''))
 
 
 def render_timeline(scenes: list[dict[str, str]], title: str, profile: dict,
                     header: str) -> tuple[str | None, list[str]]:
     """`timeline.md` from the scene CSVs' timeline columns, or None when no
-    scene has a `timeline_day` (a timeline with no days would read as a
-    book with no time); and notes for the report.
+    scene in the story's present has a usable `timeline_day` (a timeline
+    with no days would read as a book with no time); and notes for the
+    report.
 
-    Described, never flagged: a scene set on an earlier day than the
-    latest one already read is listed under earlier time, as the book's
-    choice; frame and vision scenes (`time_mode`) are listed apart."""
+    Described, never flagged: a scene before day 1 (when the book has a day
+    1 or later), or set earlier than the latest day already read, is listed
+    under earlier time as the book's choice; frame and vision scenes are
+    listed apart; a `summary` passage is marked as covering a stretch.
+    Scenes whose `timeline_day` is blank, or isn't a whole number, are
+    listed as not placed, each kind said. The profile's `timeline_span` is
+    the span, and its `timeline` (linear, frame-narrative...) the shape."""
+    from .elaborate import OFF_PRESENT_MODES
+    assert set(_OUTSIDE_PRESENT) == set(OFF_PRESENT_MODES)
+    blank, unreadable = [], []
+
     def day(s: dict[str, str]) -> int | None:
         value = s.get('timeline_day', '').strip()
-        return int(value) if value.lstrip('-').isdecimal() and value.isascii() else None
+        if _WHOLE_NUMBER.fullmatch(value):
+            return int(value)
+        (unreadable if value else blank).append(s)
+        return None
+
+    placed = [(s, s.get('time_mode', '').strip().lower(), day(s)) for s in scenes]
+    has_day_one = any(d is not None and d >= 1 for _, mode, d in placed
+                      if mode not in _OUTSIDE_PRESENT)
     present: dict[int, list[dict[str, str]]] = {}
-    earlier, unplaced, apart, summaries = [], [], {k: [] for k in _OUTSIDE_PRESENT}, []
+    earlier, apart = [], {k: [] for k in _OUTSIDE_PRESENT}
     latest = None
-    for s in scenes:
-        mode, d = s.get('time_mode', '').strip(), day(s)
+    for s, mode, d in placed:
         if mode in _OUTSIDE_PRESENT:
             apart[mode].append(s)
         elif d is None:
-            unplaced.append(s)
+            continue
+        elif has_day_one and d < 1:
+            earlier.append((s, f'day {d}, before day 1'))
         elif latest is not None and d < latest:
-            earlier.append((s, latest))
+            earlier.append((s, f'day {d}, read after day {latest}'))
         else:
             present.setdefault(d, []).append(s)
             latest = d if latest is None else max(latest, d)
-            if mode == 'summary':
-                summaries.append(s)
-    if not present and not earlier:
-        return None, ['no scene has a timeline_day in scenes.csv, so no timeline is written']
+    off_present = {s['id'] for k in apart for s in apart[k]}
+    blank = [s for s in blank if s['id'] not in off_present]
+    unreadable = [s for s in unreadable if s['id'] not in off_present]
+    notes = []
+    if unreadable:
+        notes.append(f'{len(unreadable)} scene(s) have a timeline_day that is not a whole '
+                     f'number, listed as not placed: '
+                     + _first([f'{s["id"]} ({s["timeline_day"].strip()!r})' for s in unreadable]))
+    if blank:
+        notes.append(f'{len(blank)} scene(s) have no timeline_day, listed as not placed: '
+                     f'{_first([s["id"] for s in blank])}')
+    if not present:
+        return None, notes + ['no scene in the story\'s present has a timeline_day, so no '
+                              'timeline is written']
     out = [header, f'# {title or "Untitled"} -- Timeline', '',
            'Described from scenes.csv (`timeline_day`, `timeline_date`, `time_mode`, '
            '`time_of_day`); reading order is `seq`.', '']
-    if profile.get('timeline'):
-        out += ['## Span', '', _one_line(str(profile['timeline'])), '']
+    shape = [(label, profile.get(key)) for label, key in (('Span', 'timeline_span'),
+                                                           ('Shape', 'timeline'))]
+    shape = [(label, value) for label, value in shape if isinstance(value, str) and value.strip()]
+    if shape:
+        out += ['## Span', '', *[f'**{label}:** {_one_line(v)}  ' for label, v in shape], '']
     out += ['---', '', '## Story Present -- Day by Day', '']
     for d in sorted(present):
         dates = list(dict.fromkeys(s.get('timeline_date', '').strip() for s in present[d]
                                    if s.get('timeline_date', '').strip()))
-        out += [f'### Day {d}' + (f' ({", ".join(dates)})' if dates else ''), '',
-                *[_scene_line(s) for s in present[d]], '']
-    if summaries:
-        out += ['### Passages that cover a stretch of time', '',
-                *[_scene_line(s) for s in summaries], '']
+        out += [f'### Day {d}' + (f' ({", ".join(dates)})' if dates else ''), '']
+        out += [_scene_line(s, ' (covers a stretch of time from here)'
+                            if s.get('time_mode', '').strip().lower() == 'summary' else '')
+                for s in present[d]] + ['']
     if earlier:
         out += ['---', '', '## Earlier Time', '',
-                'Scenes set before the latest day already read: the book steps back in time '
-                'here.', '']
-        out += [_scene_line(s) + f' (day {day(s)}, read after day {after})'
-                for s, after in earlier] + ['']
+                'Scenes set before the story\'s first day, or before the latest day already '
+                'read: the book steps back in time here.', '']
+        out += [_scene_line(s, f' ({where})') for s, where in earlier] + ['']
     for mode, heading in _OUTSIDE_PRESENT.items():
         if apart[mode]:
             out += ['---', '', f'## {heading}', '', *[_scene_line(s) for s in apart[mode]], '']
-    notes = []
-    if unplaced:
-        out += ['---', '', '## Not Placed in Time', '',
-                'scenes.csv gives these no `timeline_day`.', '',
-                *[_scene_line(s) for s in unplaced], '']
-        notes.append(f'{len(unplaced)} scene(s) have no timeline_day and are listed as not '
-                     f'placed: {_first([s["id"] for s in unplaced])}')
+    if blank or unreadable:
+        out += ['---', '', '## Not Placed in Time', '']
+        if blank:
+            out += ['scenes.csv gives these no `timeline_day`:', '',
+                    *[_scene_line(s) for s in blank], '']
+        if unreadable:
+            out += ['Their `timeline_day` is not a whole number:', '',
+                    *[_scene_line(s, f' (`{_cell_md(s["timeline_day"].strip())}`)')
+                      for s in unreadable], '']
     return '\n'.join(out), notes
 
 
 def chapter_map_rows(texts: dict[str, str], scenes: list[dict[str, str]],
                      ) -> tuple[list[dict[str, str]], list[str]]:
     """Chapters from the headings scenes-setup left at the top of each
-    chapter's first scene ("# Stave I: Marley's Ghost"), in reading order;
-    [] and a note when no scene starts with one, since a map built any
-    other way would be a guess.
+    chapter's first scene ("# Stave I: MARLEY'S GHOST"), in reading order;
+    [] and a note when the map would be a guess: no scene starts with a
+    heading, a scene has no prose to read (its heading, if any, is
+    unknown), or a heading is also its scene's own `scenes.csv` title
+    (a scene title or a chapter's can't be told apart).
 
     The heading stays in the prose, so each chapter is `heading=none` (the
     book's own line is the heading on the page) with its text as `title`.
-    Frontmatter is skipped, as assembly skips it. A heading that is the
-    scene's own `scenes.csv` title is a scene title, not a chapter's, and
-    is reported. Scenes before the first heading are a chapter of their
-    own, untitled, and reported."""
+    Frontmatter is skipped, as assembly skips it. Scenes before the first
+    heading are a chapter of their own, untitled, and reported."""
+    unread = [s['id'] for s in scenes if s['id'] not in texts]
+    if unread:
+        return [], [f'{len(unread)} scene(s) have no prose to read a chapter heading from, so '
+                    f'no chapter map is written: {_first(unread)}']
     chapters: list[dict] = []
     own_titles = []
     for s in scenes:
-        lines = texts.get(s['id'], '').splitlines()
+        lines = texts[s['id']].lstrip('﻿').splitlines()
         if lines and lines[0].rstrip() == '---':     # frontmatter, as assembly skips it
             close = next((i for i, line in enumerate(lines[1:], 1) if line.rstrip() == '---'),
                          len(lines))
             lines = lines[close + 1:]
         first = next((line for line in lines if line.strip()), '')
         m = _CHAPTER_HEADING.match(first)
-        if m and m.group(1).strip().lower() == s.get('title', '').strip().lower():
-            own_titles.append(s['id'])   # the scene's own title, not a chapter's
-            m = None
+        if m and ' '.join(m.group(1).split()).lower() == \
+                ' '.join(s.get('title', '').split()).lower():
+            own_titles.append(s['id'])
+            continue
         if m:
             chapters.append({'title': m.group(1), 'part': s.get('part', '').strip(),
                              'scenes': [s['id']]})
@@ -2459,11 +2498,13 @@ def chapter_map_rows(texts: dict[str, str], scenes: list[dict[str, str]],
         else:
             chapters.append({'title': '', 'part': s.get('part', '').strip(),
                              'scenes': [s['id']]})
-    notes = [f'{len(own_titles)} scene(s) begin with their own scenes.csv title as a heading, '
-             f'which is not read as a chapter heading: {_first(own_titles)}'] if own_titles else []
+    if own_titles:
+        return [], [f'{len(own_titles)} scene(s) open with a heading that is also their '
+                    f'scenes.csv title, so whether it heads a chapter or the scene can\'t be '
+                    f'told; no chapter map is written: {_first(own_titles)}']
     if not any(c['title'] for c in chapters):
-        return [], notes + ['no scene begins with a chapter heading, so no chapter map is '
-                            'written']
+        return [], ['no scene begins with a chapter heading, so no chapter map is written']
+    notes = []
     if not chapters[0]['title']:
         notes.append(f'{len(chapters[0]["scenes"])} scene(s) before the first chapter '
                      f'heading are an untitled first chapter: '
@@ -2937,33 +2978,48 @@ def run_voice(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutc
     return 'written' if _write_all(run, files, '5f', '5f') else 'partial'
 
 
+def timeline_plan(project_dir: str, version: str, profile: dict, scenes: list[dict[str, str]],
+                  ) -> list[tuple[str, str | None, list[str]]]:
+    """What 5g would write, without writing: per file, its path, its
+    content (None when there is nothing to write) and the notes. Raises
+    DescribeFailed naming a scene file that can't be read."""
+    title, title_notes = _book_title(project_dir)
+    sources = ['scenes'] + (['profile'] if profile.get('timeline_span')
+                            or profile.get('timeline') else [])
+    doc, notes = render_timeline(scenes, title, profile,
+                                 provenance_header(version, '5g', sources))
+    texts, prose_notes = _prose(project_dir, scenes)
+    rows, map_notes = chapter_map_rows(texts, scenes)
+    return [('reference/timeline.md', doc, title_notes + notes),
+            ('reference/chapter-map.csv', _csv_text(rows, CHAPTER_MAP_COLUMNS) if rows else None,
+             prose_notes + map_notes)]
+
+
 def run_timeline(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutcome:
     """Step 5g, no model: timeline.md from the scene CSVs, and
     chapter-map.csv from the chapter headings in the prose. Each file has
-    its own gate (neither depends on the other); written when either is."""
-    title, title_notes = _book_title(run.project_dir)
-    run.reports.extend(f'5g: {n}' for n in title_notes)
-    wrote = []
-    rel = 'reference/timeline.md'
-    if _gate(run, [rel], '5g (timeline)'):
-        doc, notes = render_timeline(scenes, title, profile, provenance_header(
-            run.version, '5g', ['profile', 'scenes'] if profile else ['scenes']))
+    its own gate and is tried whatever happened to the other. `written`
+    when either is written and neither was refused mid-step, `partial` when
+    one was refused (the author changed it during the run), `skipped`
+    otherwise. An earlier extracted file that `--force` would have replaced
+    but that has nothing new to replace it is kept, and said to be out of
+    date."""
+    wrote, refused = False, False
+    for rel, content, notes in timeline_plan(run.project_dir, run.version, profile, scenes):
+        step = f'5g ({"timeline" if rel.endswith(".md") else "chapter map"})'
+        if not _gate(run, [rel], step):
+            continue
         run.reports.extend(f'5g: {n}' for n in notes)
-        if doc is not None:
-            if not _write_all(run, [(rel, doc)], '5g', '5g (timeline)'):
-                return 'partial'
-            wrote.append(rel)
-    rel = 'reference/chapter-map.csv'
-    if _gate(run, [rel], '5g (chapter map)'):
-        texts, notes = _prose(run.project_dir, scenes)
-        rows, map_notes = chapter_map_rows(texts, scenes)
-        run.reports.extend(f'5g: {n}' for n in notes + map_notes)
-        if rows:
-            if not _write_all(run, [(rel, _csv_text(rows, CHAPTER_MAP_COLUMNS))], '5g',
-                              '5g (chapter map)'):
-                return 'partial'
-            wrote.append(rel)
-    return 'written' if wrote else 'skipped'
+        if content is None:
+            if file_state(run.project_dir, rel, run.provenance) == 'extracted':
+                run.reports.append(f'5g: {rel} is kept from an earlier run and is now out of '
+                                   f'date (see above); delete it if it no longer fits the book')
+            continue
+        if _write_all(run, [(rel, content)], '5g', step):
+            wrote = True
+        else:
+            refused = True
+    return 'partial' if refused else 'written' if wrote else 'skipped'
 
 
 #: Every path phase 5 may change, for the commit. `working/` covers the
