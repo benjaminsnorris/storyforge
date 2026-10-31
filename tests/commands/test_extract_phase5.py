@@ -764,27 +764,152 @@ class TestPitch:
         mock_api.set_response_fn(lambda p: _pitch_reply(project_dir))
         scenes = describe.scene_table(os.path.join(project_dir, 'reference'))
         assert describe.run_pitch(run, {}, scenes) == 'written'
-        assert any('has no rows, so the story summary and architecture were written from '
-                   'the scenes alone' in r for r in run.reports)
+        assert '5c: reference/spine.csv is absent' in run.reports
+        assert '5c: reference/themes.csv is absent' in run.reports
+        with open(os.path.join(project_dir, 'reference', 'story-summary.md')) as f:
+            header = f.readline()
+        assert 'from=profile,scenes,motif-taxonomy,mice-threads -->' in header
 
 
-def test_an_echoed_label_is_not_doubled():
-    """Live on Carol: the last act's turning point came back as "Closing
-    image: ...", rendered under its own **Closing image:** label."""
-    from storyforge.extract_describe import ActLength, PitchEvidence, render_story_architecture
-    pitch = {
-        'premise': 'P', 'core_theme': 'Q?', 'motif_meanings': {}, 'promise': [],
-        'conflict': {'external': 'E', 'internal': 'I', 'thematic': 'T'},
-        'structural_model': 'One act.', 'subplots': [],
-        'acts': [{'act': '1', 'title': 'T', 'description': 'D', 'key_beats': ['b'],
-                  'turning_point': 'Closing image: snow falls.'}],
-        'pov': {'pattern': 'P', 'excluded': ''}, 'voice': {'prose_style': 'S', 'pacing': 'P'},
-        'never_does': [], 'title_meaning': {'surface': 'S', 'deeper': 'D', 'final': 'F'},
-        'identity': {'pov': 'P', 'tone': 'T'}}
-    ev = PitchEvidence(title='T', genre='', spine=[], themes=[], motifs=[], threads=[],
-                       acts=[ActLength('1', 1, 10, 0)])
-    doc = render_story_architecture(pitch, ev, [{'act': '1', 'word_count': '10'}], '')
-    assert '**Closing image:** snow falls.' in doc
+def _ev(acts=('1', '2'), motifs=('m', 'n'), title='T'):
+    from storyforge.extract_describe import ActLength, PitchEvidence
+    return PitchEvidence(title=title, genre='', spine=[], themes=[],
+                         motifs=[{'id': m, 'name': m.upper()} for m in motifs], threads=[],
+                         acts=[ActLength(a, scenes=1, words=10, uncounted=0) for a in acts])
+
+
+def _reply(**override):
+    """A valid 5c reply for `_ev()`, with fields overridden."""
+    reply = json.loads(_pitch_reply_for(('1', '2'), ('m', 'n')))
+    for key, value in override.items():
+        target = reply
+        *parents, last = key.split('__')
+        for p in parents:
+            target = target[p]
+        target[last] = value
+    return json.dumps(reply)
+
+
+def _pitch_reply_for(acts, motif_ids):
+    return json.dumps({
+        'logline': 'A cartographer finds a village gone.',
+        'synopsis': 'One. Two. Three. Four. Five.',
+        'act_shape': {'act_1': 'A.', 'act_2': 'B.', 'act_3': 'C.'},
+        'theme': 'T.', 'premise': 'P.', 'core_theme': 'Q?',
+        'motif_meanings': [{'motif_id': m, 'meaning': f'{m} means.'} for m in motif_ids],
+        'conflict': {'external': 'E.', 'internal': 'I.', 'thematic': 'T.'},
+        'promise': ['A.'], 'structural_model': 'S.',
+        'acts': [{'act': a, 'title': f'T{a}', 'description': 'D.', 'key_beats': ['b'],
+                  'turning_point': 'P.'} for a in acts],
+        'subplots': [], 'pov': {'pattern': 'P.', 'excluded': ''},
+        'voice': {'prose_style': 'S.', 'pacing': 'P.'}, 'never_does': ['N.'],
+        'title_meaning': {'surface': 'S.', 'deeper': 'D.', 'final': 'F.'},
+        'identity': {'pov': 'P', 'tone': 'T'}})
+
+
+class TestParsePitch:
+    """Each problem branch of `parse_pitch`, and the review fixes on #446."""
+
+    def _problems(self, reply, ev=None):
+        from storyforge.extract_describe import ReplyProblems, parse_pitch
+        with pytest.raises(ReplyProblems) as e:
+            parse_pitch(reply, ev or _ev())
+        return e.value.problems
+
+    def test_a_valid_reply_parses(self):
+        from storyforge.extract_describe import parse_pitch
+        acts = json.loads(_reply())['acts'][::-1]
+        pitch = parse_pitch(_reply(acts=acts, promise=['A.', '  ']), _ev())
+        assert [a['act'] for a in pitch['acts']] == ['1', '2']    # the book's order
+        assert pitch['promise'] == ['A.']                          # blank item dropped
+        assert pitch['motif_meanings'] == {'m': 'm means.', 'n': 'n means.'}
+
+    @pytest.mark.parametrize('override,expected', [
+        ({'logline': ''}, 'logline is empty'),
+        ({'theme': ' '}, 'theme is empty'),
+        ({'premise': '\n'}, 'premise is empty'),
+        ({'core_theme': ''}, 'core_theme is empty'),
+        ({'act_shape__act_1': ''}, 'act_shape.act_1 is empty'),
+        ({'conflict__internal': ''}, 'conflict.internal is empty'),
+        ({'voice__pacing': ''}, 'voice.pacing is empty'),
+        ({'identity__tone': ''}, 'identity.tone is empty'),
+        ({'title_meaning__final': ''}, 'title_meaning.final is empty'),
+        ({'structural_model': ''}, 'structural_model is empty'),
+        ({'promise': ['', ' ']}, 'promise has no items'),
+        ({'never_does': []}, 'never_does has no items'),
+        ({'synopsis': ' '.join(['S.'] * 9)}, 'synopsis has 9 sentences; expected 4-8'),
+        ({'subplots': [{'name': '', 'characters': 'c', 'function': 'f', 'arc': 'a'}]},
+         'subplots[0].name is empty'),
+    ])
+    def test_an_empty_or_out_of_range_field_is_a_problem(self, override, expected):
+        assert expected in self._problems(_reply(**override))
+
+    def test_act_fields_and_repeats(self):
+        reply = json.loads(_reply())
+        reply['acts'][0].update(title='', key_beats=[], turning_point='Closing image:')
+        reply['acts'].append(dict(reply['acts'][1]))
+        problems = self._problems(json.dumps(reply))
+        assert 'acts[0].title is empty' in problems
+        assert 'acts[0].key_beats has no items' in problems
+        assert 'acts[0].turning_point is empty' in problems     # only an echoed label
+        assert "act '2' is described twice" in problems
+
+    def test_motif_meanings_repeated_or_blank(self):
+        problems = self._problems(_reply(motif_meanings=[
+            {'motif_id': 'm', 'meaning': 'x'}, {'motif_id': 'm', 'meaning': 'y'},
+            {'motif_id': 'n', 'meaning': '  '}]))
+        assert 'motif m is given two meanings' in problems
+        assert '1 motif(s) have no meaning: n' in problems
+
+    def test_a_nested_null_is_malformed_not_the_word_none(self):
+        """TD-1 / SF-8: a nested null became the text "None" in the doc."""
+        from storyforge.extract_describe import parse_pitch
+        with pytest.raises(TypeError, match='conflict.internal is NoneType'):
+            parse_pitch(_reply(conflict__internal=None), _ev())
+
+    def test_ids_are_matched_as_written(self):
+        """TD-2 / SF-9: act and motif ids were cleaned like prose, so an act
+        value with a double space or a leading dash could never match."""
+        from storyforge.extract_describe import parse_pitch
+        ev = _ev(acts=('Part  One', '- Coda'), motifs=('m',))
+        pitch = parse_pitch(_pitch_reply_for(('Part  One', '- Coda'), ('m',)), ev)
+        assert [a['act'] for a in pitch['acts']] == ['Part  One', '- Coda']
+
+    @pytest.mark.parametrize('echo', ['Closing image: snow falls.',
+                                      '**Closing image:** snow falls.',
+                                      'Turning Point — snow falls.'])
+    def test_an_echoed_label_is_stripped(self, echo):
+        """Live on Carol: "**Closing image:** Closing image: ..."; SF-6: the
+        bold and dash forms were missed."""
+        from storyforge.extract_describe import parse_pitch
+        reply = json.loads(_reply())
+        reply['acts'][1]['turning_point'] = echo
+        assert parse_pitch(json.dumps(reply), _ev())['acts'][1]['turning_point'] == \
+            'snow falls.'
+
+    def test_no_title_leaves_title_meaning_optional(self):
+        """SF-2: with no title, the model was asked what "PROJECT_TITLE" means."""
+        from storyforge.extract_describe import parse_pitch
+        parse_pitch(_reply(title_meaning={'surface': '', 'deeper': '', 'final': ''}),
+                    _ev(title=''))
+
+
+@pytest.mark.parametrize('text,expected', [
+    ('## Theme', '\\## Theme'), ('<!-- hide', '\\<!-- hide'), ('> quote', '\\> quote'),
+    ('- item', '\\- item'), ('* item', '\\* item'), ('+ item', '\\+ item'),
+    ('**Bold** start', '**Bold** start'), ('-3 degrees', '-3 degrees'),
+    ('1. First', '1. First'), ('a\n\nb', 'a b'),
+])
+def test_one_line(text, expected):
+    from storyforge.extract_describe import _one_line
+    assert _one_line(text) == expected
+
+
+def test_table_cells_escape_pipes_and_backslashes():
+    """T-5: `\\|` in model text became `\\\\|`, a real cell delimiter."""
+    from storyforge.extract_describe import _cell_md
+    assert _cell_md('x | y') == 'x \\| y'
+    assert _cell_md('x \\| y') == 'x \\\\\\| y'
 
 
 class TestActs:
@@ -800,3 +925,154 @@ class TestActs:
         assert _act_label('2') == 'Act 2'
         assert _act_label('Part One') == 'Part One'
         assert _act_label('') == 'Scenes with no act'
+
+
+class TestPitchReviewFixes:
+    """Regression tests for the #446 review (finding ids in each docstring)."""
+
+    def test_a_file_changed_during_the_call_stops_5c_part_way(self, book, mock_api, mock_git,
+                                                              mock_costs, capsys):
+        """T-1."""
+        arch = os.path.join(book, 'reference', 'story-architecture.md')
+        answer = _answer(book)
+
+        def reply(prompt):
+            if '**logline**' in prompt:
+                with open(arch, 'w') as f:
+                    f.write('# Mine\n')
+            return answer(prompt)
+        mock_api.set_response_fn(reply)
+        _run(book)
+        assert '5c stopped part-way' in capsys.readouterr().out
+        with open(arch) as f:
+            assert f.read() == '# Mine\n'
+        assert 'stopped part-way' in _commits(mock_git)[-1][1]
+
+    def test_force_regenerates_5c_and_an_edit_blocks_both_docs(self, book, mock_api, mock_git,
+                                                               mock_costs, capsys):
+        """T-2."""
+        from storyforge.common import parse_story_summary
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        new = 'A mapmaker learns her maps lie and must choose what to keep.'
+        mock_api.set_response_fn(lambda p: _pitch_reply(book, logline=new)
+                                 if '**logline**' in p else _answer(book)(p))
+        _run(book, force=True)
+        assert parse_story_summary(book)['logline'] == new
+        summary = os.path.join(book, 'reference', 'story-summary.md')
+        with open(summary, 'rb') as f:
+            before = f.read()
+        with open(os.path.join(book, 'reference', 'story-architecture.md'), 'a') as f:
+            f.write('\nMy note.\n')
+        calls = len(mock_api.calls)
+        _run(book, force=True)
+        out = capsys.readouterr().out
+        assert 'reference/story-architecture.md: kept (extracted earlier, then edited' in out
+        assert '5c (story summary and architecture) skipped' in out
+        assert not any('**logline**' in c['prompt'] for c in mock_api.calls[calls:])
+        with open(summary, 'rb') as f:
+            assert f.read() == before
+        assert 'were not filled either' not in out.split('5c (story summary')[1].split('\n')[0]
+
+    def test_a_step_stopped_part_way_stops_the_steps_after_it(self, book, mock_api, mock_git,
+                                                              mock_costs, capsys):
+        """SF-1: 5c ran on a taxonomy and themes 5b had left disagreeing."""
+        taxonomy = os.path.join(book, 'reference', 'motif-taxonomy.csv')
+        answer = _answer(book)
+
+        def reply(prompt):
+            if '**themes**' in prompt:
+                with open(taxonomy, 'w') as f:
+                    f.write('id|name|aliases|tier\nmine|Mine|mine|primary\n')
+            return answer(prompt)
+        mock_api.set_response_fn(reply)
+        _run(book)
+        out = capsys.readouterr().out
+        assert ('story summary and architecture skipped: themes and motifs stopped part-way'
+                in out)
+        assert not any('**logline**' in c['prompt'] for c in mock_api.calls)
+        assert not os.path.exists(os.path.join(book, 'reference', 'story-summary.md'))
+
+    @pytest.mark.parametrize('content,expected', [
+        (b'id|name|description\nx|X|d\n', 'reference/themes.csv has no tier column'),
+        (b'id|name|tier|description\n\xff|X|primary|d\n',
+         'reference/themes.csv could not be read'),
+    ])
+    def test_an_unusable_evidence_file_is_named(self, book, mock_api, mock_git, mock_costs,
+                                                capsys, content, expected):
+        """SF-5: an unreadable or malformed author file stopped 5c without
+        naming it, or was read as if every theme were supporting."""
+        mock_api.set_response_fn(_answer(book))
+        with open(os.path.join(book, 'reference', 'themes.csv'), 'wb') as f:
+            f.write(content)
+        with pytest.raises(SystemExit):
+            _run(book)
+        assert expected in capsys.readouterr().out
+        assert not any('**logline**' in c['prompt'] for c in mock_api.calls)
+
+    def test_the_dry_run_names_5c_or_why_it_would_stop(self, book, mock_api, mock_git,
+                                                       mock_costs, capsys):
+        """T-6 / SF-5: the dry run read 5c's evidence outside any handler."""
+        def dry():
+            cmd_extract._run_phase_5(book, os.path.join(book, 'working', 'logs'),
+                                     os.path.join(book, 'working', 'extraction-profile.json'),
+                                     False, dry_run=True)
+        dry()
+        assert '5c pitch:' in capsys.readouterr().out
+        with open(os.path.join(book, 'reference', 'mice-threads.csv'), 'w') as f:
+            f.write('id|type\nx|inquiry\n')
+        dry()
+        out = capsys.readouterr().out
+        assert '5c pitch: would stop: 5c: reference/mice-threads.csv has no name column' in out
+        assert mock_api.calls == []
+        assert not os.path.exists(os.path.join(book, 'reference', 'story-summary.md'))
+
+    def test_scenes_with_no_act_get_their_own_section(self, book, mock_api, mock_git,
+                                                      mock_costs):
+        """T-4."""
+        from storyforge.elaborate import update_scene
+        update_scene(_scene_ids(book)[0], os.path.join(book, 'reference'), {'act': ''})
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        prompt = next(c['prompt'] for c in mock_api.calls if '**logline**' in c['prompt'])
+        assert '("" is the scenes with no act)' in prompt
+        with open(os.path.join(book, 'reference', 'story-architecture.md')) as f:
+            assert '### Scenes with no act: Part\n' in f.read()
+
+    def test_a_placeholder_title_is_not_described(self, book, mock_api, mock_git, mock_costs,
+                                                  capsys):
+        """SF-2."""
+        yaml = os.path.join(book, 'storyforge.yaml')
+        with open(yaml) as f:
+            text = f.read()
+        with open(yaml, 'w') as f:
+            f.write(text.replace('"The Cartographer\'s Silence"', '"PROJECT_TITLE"', 1))
+        mock_api.set_response_fn(lambda p: _pitch_reply(
+            book, title_meaning={'surface': '', 'deeper': '', 'final': ''})
+            if '**logline**' in p else _answer(book)(p))
+        _run(book)
+        prompt = next(c['prompt'] for c in mock_api.calls if '**logline**' in c['prompt'])
+        assert "title: (none recorded: leave title_meaning's fields empty)" in prompt
+        with open(os.path.join(book, 'reference', 'story-architecture.md')) as f:
+            doc = f.read()
+        assert 'PROJECT_TITLE' not in doc
+        assert 'No title is recorded (`project.title` in storyforge.yaml).' in doc
+        assert '5c: storyforge.yaml has no project.title' in capsys.readouterr().out
+
+    def test_taxonomy_rows_with_no_id_are_left_out_and_said(self, book, mock_api, mock_git,
+                                                            mock_costs, capsys):
+        """TD: a blank-id row put '' among the ids needing a meaning, which
+        no retry could satisfy."""
+        from storyforge.extract_describe import pitch_evidence, scene_table
+        with open(os.path.join(book, 'reference', 'motif-taxonomy.csv'), 'w') as f:
+            f.write('id|name|aliases|tier\nm|M|m|primary\n|Nameless||primary\n')
+        ev = pitch_evidence(book, scene_table(os.path.join(book, 'reference')))
+        assert [m['id'] for m in ev.motifs] == ['m']
+        assert ('1 row(s) of reference/motif-taxonomy.csv have no id and were left out'
+                in ev.notes)
+
+    def test_a_word_count_int_cannot_read_is_uncounted(self):
+        """SF-7: '²'.isdigit() is True and int('²') raises."""
+        from storyforge.extract_describe import ActLength, act_lengths
+        assert act_lengths([{'act': '1', 'word_count': '²'}, {'act': '1', 'word_count': '5'}]) \
+            == [ActLength('1', scenes=2, words=5, uncounted=1)]

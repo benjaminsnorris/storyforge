@@ -117,7 +117,7 @@ def main(argv=None):
 - [ ] Phase 1: Extract skeleton (scenes.csv)
 - [ ] Phase 2: Extract intent (scene-intent.csv)
 - [ ] Phase 3: Extract briefs (scene-briefs.csv)
-- [ ] Phase 5: Describe the book (spine, architecture, themes, motifs, story summary)
+- [ ] Phase 5: Describe the book (spine, architecture, themes, motifs, story summary, story architecture)
 - [ ] Validate
 - [ ] Review"""
         create_draft_pr(f'Extract: {title} ({scene_count} scenes)',
@@ -205,7 +205,7 @@ def main(argv=None):
     # Phase 5: Describe (after cleanup on a full run, so it reads cleaned data)
     if not args.cleanup_only and (args.phase is None or args.phase == 5):
         if _run_phase_5(project_dir, log_dir, profile_file, args.force, args.dry_run):
-            update_pr_task('Phase 5: Describe the book (spine, architecture, themes, motifs, story summary)',
+            update_pr_task('Phase 5: Describe the book (spine, architecture, themes, motifs, story summary, story architecture)',
                            project_dir)
 
     # Validate
@@ -1310,11 +1310,23 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 # Cleanup, validation, expansion
 # ============================================================================
 
+def _dry_run_pitch_prompt(describe, project_dir, profile, scenes) -> str:
+    """5c's prompt as it would be built from what is on disk now, or the
+    reason it can't be (an evidence file 5c would stop on)."""
+    try:
+        return describe.build_pitch_prompt(
+            profile, scenes, describe.pitch_evidence(project_dir, scenes))
+    except describe.DescribeFailed as e:
+        print(f'5c pitch: would stop: {e}')
+        return ''
+
+
 def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
     """Phase 5, describe (#440): the reference layers above the scenes, from
-    what phases 0-4 found. Steps 5a (structure), 5b (themes and motifs) and
-    5c (story summary and story architecture) so far; `extract_describe` holds them and the write gate. Returns
-    whether any step wrote.
+    what phases 0-4 found. Steps 5a (structure), 5b (themes and motifs)
+    and 5c (story summary and story architecture) so far;
+    `extract_describe` holds them and the write gate. Returns whether any
+    step wrote.
 
     A step whose files the author owns is skipped and says so. A step that
     can't get a usable answer, or any error mid-step, stops the run (exit 1)
@@ -1337,9 +1349,9 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
                 ('5a structure', describe.build_structure_prompt(profile, scenes)),
                 ('5b themes', describe.build_themes_prompt(
                     profile, scenes, describe.motif_mentions(scenes))),
-                ('5c pitch', describe.build_pitch_prompt(
-                    profile, scenes, describe.pitch_evidence(project_dir, scenes)))):
-            print(f'{label}: {len(prompt)} chars')
+                ('5c pitch', _dry_run_pitch_prompt(describe, project_dir, profile, scenes))):
+            if prompt:
+                print(f'{label}: {len(prompt)} chars')
         print('===== END DRY RUN =====')
         return False
 
@@ -1364,10 +1376,18 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
     outcomes = {}
     try:
         # Each step re-reads the scenes: 5a may have filled blank summaries.
-        # 5c reads the spine and themes 5a and 5b wrote
+        # 5c reads the spine, themes and motifs 5a and 5b wrote (or the
+        # author's). A step that stopped part-way may have left its files
+        # disagreeing, so nothing after it runs on them
         for name, step in (('spine and architecture', describe.run_structure),
                            ('themes and motifs', describe.run_themes),
                            ('story summary and architecture', describe.run_pitch)):
+            stopped = [n for n, outcome in outcomes.items() if outcome == 'partial']
+            if stopped:
+                run.reports.append(f'{name} skipped: {stopped[0]} stopped part-way, so the '
+                                   f'files this step reads may disagree')
+                outcomes[name] = 'skipped'
+                continue
             outcomes[name] = step(run, profile, describe.scene_table(ref_dir))
     except Exception as e:   # anything mid-step: report and commit what is written
         for line in run.reports:

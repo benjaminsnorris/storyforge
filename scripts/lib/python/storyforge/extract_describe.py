@@ -768,8 +768,9 @@ def parse_themes(response: str, scenes: list[dict[str, str]],
 # ============================================================================
 
 #: The L0-L2 floors (`scoring_levels.score_logline`, `score_synopsis`,
-#: `score_act_shape`), checked here with the scorer's own counters so a
-#: written summary can't fail them.
+#: `score_act_shape`). L0 and L1 are checked here with the scorer's own
+#: counters, and L2 holds by construction (`render_story_summary` writes
+#: exactly three `### Act N`), so a written summary can't fail them.
 LOGLINE_MAX_WORDS = 35
 SYNOPSIS_SENTENCES = (4, 8)
 #: `story-summary.md`'s Act-shape is always three `### Act N` sections (the
@@ -819,53 +820,118 @@ class ActLength:
     uncounted: int     # scenes with no numeric word_count, left out of `words`
 
 
+def _word_count(scene: dict[str, str]) -> int | None:
+    """A scene's `word_count`, or None when it isn't a plain number
+    (`str.isdigit` accepts digits like '²' that `int` rejects)."""
+    words = scene.get('word_count', '').strip()
+    return int(words) if words.isascii() and words.isdecimal() else None
+
+
 def act_lengths(scenes: list[dict[str, str]]) -> list[ActLength]:
-    """The book's acts in reading order, from `scenes.csv:act`, with their
-    scene and word counts. A scene with no act is grouped under ''."""
+    """The book's acts in the order each first appears, from
+    `scenes.csv:act`, with their scene and word counts. An act whose scenes
+    recur later (a frame, braided parts) is counted under its first
+    appearance; a scene with no act is grouped under ''."""
     acts: dict[str, list[int]] = {}
     for s in scenes:
         counts = acts.setdefault(s.get('act', '').strip(), [0, 0, 0])
         counts[0] += 1
-        words = s.get('word_count', '').strip()
-        if words.isdigit():
-            counts[1] += int(words)
-        else:
+        words = _word_count(s)
+        if words is None:
             counts[2] += 1
-    return [ActLength(act, *counts) for act, counts in acts.items()]
+        else:
+            counts[1] += words
+    return [ActLength(act, scenes=n, words=w, uncounted=u)
+            for act, (n, w, u) in acts.items()]
 
 
 @dataclass(frozen=True)
 class PitchEvidence:
-    """What 5c is given beyond the profile and the scenes: the layers 5a and
-    5b wrote (or the author's, when they kept theirs) and the project's own
-    fields. Read by code, so the docs can quote them rather than restate."""
-    title: str
+    """What 5c is given beyond the profile and the scenes: the spine, themes
+    and motifs 5a and 5b wrote (or the author's, when they kept theirs),
+    `mice-threads.csv`, the project's title and genre, and the act lengths
+    from `scenes.csv`. Read by code, so the rendered docs copy them (title,
+    genre, themes, motif names, lengths) rather than ask the model. `acts`
+    comes from the same scenes the prompt shows, so a pitch parsed against
+    this evidence is only valid with it."""
+    title: str              # '' when storyforge.yaml has none or the placeholder
     genre: str
     spine: list[dict[str, str]]
     themes: list[dict[str, str]]
-    motifs: list[dict[str, str]]
+    motifs: list[dict[str, str]]     # rows with a blank id are left out (`notes`)
     threads: list[dict[str, str]]
     acts: list[ActLength]
+    #: The evidence files that had rows, for the provenance header
+    sources: list[str] = field(default_factory=list)
+    #: What 5c had to work without, one sentence each, for the report
+    notes: list[str] = field(default_factory=list)
+
+
+#: The columns 5c reads from each evidence file. A file without them is
+#: one 5c can't describe from, so it stops rather than misread it.
+_EVIDENCE_COLUMNS = {
+    'spine.csv': ('title', 'summary', 'function'),
+    'themes.csv': ('id', 'name', 'tier', 'description'),
+    'motif-taxonomy.csv': ('id', 'name'),
+    'mice-threads.csv': ('id', 'name', 'type'),
+}
+_TITLE_PLACEHOLDERS = frozenset({'', 'PROJECT_TITLE'})
+
+
+def _evidence_rows(project_dir: str, name: str) -> tuple[list[dict[str, str]], str]:
+    """A reference CSV's rows, and why there are none ('' when there are).
+
+    Raises DescribeFailed naming the file when it can't be read or lacks a
+    column 5c reads: the author's file is reported, never guessed around."""
+    from .elaborate import _read_csv
+    rel = f'reference/{name}'
+    path = os.path.join(project_dir, 'reference', name)
+    if not os.path.isfile(path):
+        return [], f'{rel} is absent'
+    try:
+        with open(path, encoding='utf-8') as f:
+            header = f.readline().rstrip('\r\n')
+        rows = _read_csv(path) if header.strip() else []
+    except (OSError, UnicodeDecodeError, csv.Error) as e:
+        raise DescribeFailed(f'5c: {rel} could not be read ({e})') from e
+    if not header.strip():
+        return [], f'{rel} is empty'
+    lacking = [c for c in _EVIDENCE_COLUMNS[name] if c not in header.split('|')]
+    if lacking:
+        raise DescribeFailed(f'5c: {rel} has no {", ".join(lacking)} column; fix its header, '
+                             f'then run phase 5 again')
+    return rows, '' if rows else f'{rel} has no rows'
 
 
 def pitch_evidence(project_dir: str, scenes: list[dict[str, str]]) -> PitchEvidence:
+    """Read 5c's evidence. Raises DescribeFailed when a file can't be used."""
     from .common import read_yaml_field
-    from .elaborate import _read_csv
-
-    def rows(name: str) -> list[dict[str, str]]:
-        path = os.path.join(project_dir, 'reference', name)
-        return _read_csv(path) if os.path.isfile(path) else []
-
+    found, notes, sources = {}, [], []
+    for name in _EVIDENCE_COLUMNS:
+        found[name], why = _evidence_rows(project_dir, name)
+        if why:
+            notes.append(why)
+        else:
+            sources.append(name.removesuffix('.csv'))
+    motifs = [m for m in found['motif-taxonomy.csv'] if m.get('id', '').strip()]
+    if len(motifs) < len(found['motif-taxonomy.csv']):
+        notes.append(f'{len(found["motif-taxonomy.csv"]) - len(motifs)} row(s) of '
+                     f'reference/motif-taxonomy.csv have no id and were left out')
+    title = read_yaml_field('project.title', project_dir)
+    if title in _TITLE_PLACEHOLDERS:
+        title = ''
+        notes.append('storyforge.yaml has no project.title, so the docs say so rather '
+                     'than describe one')
     genre = read_yaml_field('project.genre', project_dir)
     if genre in _PROJECT_PLACEHOLDERS['genre']:
         genre = ''
     subgenre = read_yaml_field('project.subgenre', project_dir)
     return PitchEvidence(
-        title=read_yaml_field('project.title', project_dir),
+        title=title,
         genre=f'{genre} ({subgenre})' if genre and subgenre else genre,
-        spine=rows('spine.csv'), themes=rows('themes.csv'),
-        motifs=rows('motif-taxonomy.csv'), threads=rows('mice-threads.csv'),
-        acts=act_lengths(scenes))
+        spine=found['spine.csv'], themes=found['themes.csv'], motifs=motifs,
+        threads=found['mice-threads.csv'], acts=act_lengths(scenes),
+        sources=sources, notes=notes)
 
 
 def _act_label(act: str) -> str:
@@ -880,8 +946,8 @@ def build_pitch_prompt(profile: dict, scenes: list[dict[str, str]], ev: PitchEvi
     """Step 5c's prompt: the story summary and the story architecture in one
     call, so the logline, the premise and the act shapes can't disagree.
 
-    Lengths, POV counts, the supporting themes and the motif names are
-    rendered by code from the CSVs; the model describes."""
+    Lengths, POV counts, the themes and the motif names are rendered by
+    code from the CSVs; the model describes."""
     lo, hi = SYNOPSIS_SENTENCES
     spine = '\n'.join(f'{i}. {r.get("title", "")}: {r.get("summary", "")} '
                       f'(function: {r.get("function", "")})'
@@ -904,7 +970,7 @@ def build_pitch_prompt(profile: dict, scenes: list[dict[str, str]], ev: PitchEvi
 
 ## The book
 
-- title: {ev.title or '(untitled)'}
+- title: {ev.title or '(none recorded: leave title_meaning\'s fields empty)'}
 - genre: {ev.genre or '(not recorded)'}
 {_profile_lines(profile, ('narrative_mode', 'timeline', 'act_structure', 'central_conflict',
                           'protagonist_arc', 'major_threads', 'tone'))}
@@ -969,57 +1035,96 @@ The story architecture:
     the book slows and where it accelerates).
 15. **never_does**: 2-5 things the book consistently never does (a
     description of its restraint, not advice).
-16. **title_meaning**: surface, deeper and final (what the title means by the end).
+16. **title_meaning**: surface, deeper and final (what the title means by the
+    end); all three empty when the book has no title recorded above.
 17. **identity**: pov (a short phrase, such as "first person, past tense,
     Nick Carraway") and tone (a short phrase).
 """
 
 
 def _one_line(text: str) -> str:
-    """Model prose as one markdown line that can't start a heading or a
-    list item (which would split `parse_story_summary`'s sections)."""
-    text = ' '.join(str(text).split())
-    return '\\' + text if text[:1] in ('#', '-', '*', '+', '>') else text
+    """Model prose as one markdown line that can't start a heading, quote,
+    comment or list item: a `##` line would split `parse_story_summary`'s
+    sections, a `### Act N` would change the L2 act count, a leading
+    `<!--` could hide the rest of the summary from its parser, and any of
+    them would break `story-architecture.md`'s structure."""
+    text = ' '.join(text.split())
+    if text[:1] in ('#', '>', '<') or text[:2] in ('- ', '* ', '+ '):
+        return '\\' + text
+    return text
+
+
+#: A label the model sometimes repeats at the start of a field the doc
+#: already labels ("**Closing image:** Closing image: ...", live on Carol),
+#: bold or not, with a colon or a dash.
+_ECHOED_LABEL = re.compile(r'^\**\s*(?:closing image|turning point)\s*\**\s*[:\u2014\u2013-]'
+                           r'\s*\**\s*', re.IGNORECASE)
+#: Fields matched exactly against the book's own values, so only stripped:
+#: cleaning them like prose could make a real act value unmatchable.
+_ID_FIELDS = frozenset({'act', 'motif_id'})
+
+
+def _clean_reply(value, path: str = ''):
+    """Every string in a reply on one line (`_one_line`; ids only stripped),
+    empty list items dropped. Raises TypeError on a value that isn't a
+    string, which `_ask` reports as a malformed reply: a nested null must
+    not reach the doc as the word "None"."""
+    if isinstance(value, dict):
+        return {k: _clean_reply(v, f'{path}.{k}' if path else k) for k, v in value.items()}
+    if isinstance(value, list):
+        return [c for c in (_clean_reply(v, path) for v in value) if c]
+    if not isinstance(value, str):
+        raise TypeError(f'{path} is {type(value).__name__}, not a string')
+    return value.strip() if path.rsplit('.', 1)[-1] in _ID_FIELDS else _one_line(value)
+
+
+def _empty_fields(value, path: str, optional) -> list[str]:
+    """The paths of the empty strings and lists in a cleaned reply."""
+    if isinstance(value, dict):
+        return [p for k, v in value.items()
+                for p in _empty_fields(v, f'{path}.{k}' if path else k, optional)]
+    if isinstance(value, list) and value and isinstance(value[0], dict):
+        return [p for i, v in enumerate(value) for p in _empty_fields(v, f'{path}[{i}]', optional)]
+    if value or optional(path):
+        return []
+    return [f'{path} has no items' if isinstance(value, list) else f'{path} is empty']
 
 
 def parse_pitch(response: str, ev: PitchEvidence) -> dict:
-    """Read and check step 5c's reply. Returns the reply with every string
-    on one line (`_one_line`) and `acts` in the book's act order.
+    """Read and check step 5c's reply against the evidence it was asked
+    with. Returns the reply cleaned (`_clean_reply`), with each act's
+    turning point stripped of an echoed label, `acts` in the book's act
+    order, and `motif_meanings` as {motif id: meaning} covering every motif
+    in `ev.motifs`.
 
-    Raises ReplyProblems listing every problem: the L0-L2 floors (an empty
-    or overlong logline, a synopsis outside SYNOPSIS_SENTENCES by the
-    scorer's own count, an empty act shape), an empty theme, premise or core
-    theme, an act that isn't one of the book's, repeated or left out, and a
-    motif id unknown, repeated, left out or given no meaning.
+    Raises ValueError (from `_json_answer`) on an unreadable reply,
+    TypeError on a value that isn't a string, and ReplyProblems listing
+    every problem: the L0-L1 floors by the scorer's own counters (an
+    overlong logline, a synopsis outside SYNOPSIS_SENTENCES), any empty
+    field or list (except `pov.excluded`, an act value, and title_meaning
+    when the book has no title), an act that isn't one of the book's,
+    repeated or left out, and a motif id unknown, repeated, left out or
+    given no meaning.
     """
     from .extract import _json_answer
     from .scoring_levels import _count_sentences, _count_words
-    data = _json_answer(response, PITCH_SCHEMA)
+    data = _clean_reply(_json_answer(response, PITCH_SCHEMA))
+    for a in data['acts']:
+        a['turning_point'] = _ECHOED_LABEL.sub('', a['turning_point'])
 
-    def clean(value):
-        if isinstance(value, dict):
-            return {k: clean(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [c for c in (clean(v) for v in value) if c]
-        return _one_line(value)
-    data = clean(data)
-    problems = []
+    def optional(path: str) -> bool:
+        return (path == 'pov.excluded' or path.endswith('.act')
+                or path == 'subplots' or (not ev.title and path.startswith('title_meaning.')))
+    problems = _empty_fields({k: v for k, v in data.items() if k != 'motif_meanings'},
+                             '', optional)
 
     words = _count_words(data['logline'])
-    if not words:
-        problems.append('logline is empty')
-    elif words > LOGLINE_MAX_WORDS:
+    if words > LOGLINE_MAX_WORDS:
         problems.append(f'logline has {words} words; at most {LOGLINE_MAX_WORDS}')
     lo, hi = SYNOPSIS_SENTENCES
     sentences = _count_sentences(data['synopsis'])
     if not lo <= sentences <= hi:
         problems.append(f'synopsis has {sentences} sentences; expected {lo}-{hi}')
-    for key in ACT_SHAPE_KEYS:
-        if not data['act_shape'][key]:
-            problems.append(f'act_shape.{key} is empty')
-    for key in ('theme', 'premise', 'core_theme'):
-        if not data[key]:
-            problems.append(f'{key} is empty')
 
     order = {a.act: i for i, a in enumerate(ev.acts)}
     acts, seen = [], set()
@@ -1038,7 +1143,7 @@ def parse_pitch(response: str, ev: PitchEvidence) -> dict:
         problems.append('acts leaves out act(s): ' + ', '.join(missing))
     data['acts'] = sorted(acts, key=lambda a: order[a['act']])
 
-    known = [m.get('id', '') for m in ev.motifs]
+    known = [m['id'].strip() for m in ev.motifs]
     meanings: dict[str, str] = {}
     for m in data['motif_meanings']:
         mid = m.get('motif_id', '')
@@ -1046,9 +1151,7 @@ def parse_pitch(response: str, ev: PitchEvidence) -> dict:
             problems.append(f'motif_meanings names {mid!r}, which is not a motif id')
         elif mid in meanings:
             problems.append(f'motif {mid} is given two meanings')
-        elif not m.get('meaning'):
-            problems.append(f'motif {mid} has no meaning')
-        else:
+        elif m.get('meaning'):
             meanings[mid] = m['meaning']
     unmeant = [mid for mid in known if mid not in meanings]
     if unmeant:
@@ -1075,13 +1178,10 @@ def render_story_summary(pitch: dict, header: str, today: str) -> str:
             f'## Theme\n\n{pitch["theme"]}\n')
 
 
-#: A label the model sometimes repeats at the start of a field the doc
-#: already labels ("**Closing image:** Closing image: ...", live on Carol).
-_ECHOED_LABEL = re.compile(r'^(?:closing image|turning point)\s*:\s*', re.IGNORECASE)
-
-
 def _cell_md(text: str) -> str:
-    return text.replace('|', '\\|')
+    """Text for a markdown table cell: a backslash or `|` escaped, so `\\|`
+    in model text can't become a cell delimiter."""
+    return text.replace('\\', '\\\\').replace('|', '\\|')
 
 
 def _bullets(items: list[str]) -> str:
@@ -1090,10 +1190,11 @@ def _bullets(items: list[str]) -> str:
 
 def render_story_architecture(pitch: dict, ev: PitchEvidence, scenes: list[dict[str, str]],
                               header: str) -> str:
-    """`story-architecture.md`, in the template's sections with its
+    """`story-architecture.md`, in the template's sections, with the
     prescriptive ones renamed to what they describe ("Things to Avoid" is
-    "What the book never does"). Lengths, shares, POV counts, supporting
-    themes and motif names come from the CSVs."""
+    "What the book never does", "Target Length" is "Length") and the POV
+    section restructured as a pattern plus a counted table. Lengths,
+    shares, POV counts, themes and motif names come from the CSVs."""
     total = sum(a.words for a in ev.acts)
     uncounted = sum(a.uncounted for a in ev.acts)
     meanings = pitch['motif_meanings']
@@ -1131,7 +1232,7 @@ def render_story_architecture(pitch: dict, ev: PitchEvidence, scenes: list[dict[
         out += ['---', '', f'### {_act_label(length.act)}: {a["title"]}',
                 f'**{share} of the novel (~{length.words:,} words, {length.scenes} scenes)**',
                 f'*{a["description"]}*', '', '**Key beats:**', _bullets(a['key_beats']), '',
-                f'**{closing}:** {_ECHOED_LABEL.sub("", a["turning_point"])}', '']
+                f'**{closing}:** {a["turning_point"]}', '']
     out += ['---', '', '## Subplots', '']
     for s in pitch['subplots']:
         out += [f'### {s["name"]}', f'- Characters involved: {s["characters"]}',
@@ -1142,7 +1243,7 @@ def render_story_architecture(pitch: dict, ev: PitchEvidence, scenes: list[dict[
     for s in scenes:
         counts = pov_counts.setdefault(s.get('pov', '').strip() or '(none recorded)', [0, 0])
         counts[0] += 1
-        counts[1] += int(s['word_count']) if s.get('word_count', '').strip().isdigit() else 0
+        counts[1] += _word_count(s) or 0
     out += ['---', '', '## Point of View Structure', '', '### Pattern', pitch['pov']['pattern'],
             '', '| POV | Scenes | Words |', '|---|---|---|']
     out += [f'| {_cell_md(p)} | {n} | {w:,} |'
@@ -1153,11 +1254,15 @@ def render_story_architecture(pitch: dict, ev: PitchEvidence, scenes: list[dict[
     t = pitch['title_meaning']
     out += ['', '---', '', '## Voice & Pacing', '', '### Prose Style', v['prose_style'], '',
             '### Pacing', v['pacing'], '', '### What the book never does',
-            _bullets(pitch['never_does']), '', '---', '', '## The Title', '',
-            f'1. **Surface meaning:** {t["surface"]}', f'2. **Deeper meaning:** {t["deeper"]}',
-            f'3. **Final meaning (by the end):** {t["final"]}', '', '---', '',
-            '## Novel Identity Summary', '',
-            f'**Title:** {ev.title or "Untitled"}  ', f'**Genre:** {ev.genre or "(not recorded)"}  ',
+            _bullets(pitch['never_does']), '', '---', '', '## The Title', '']
+    if ev.title:
+        out += [f'1. **Surface meaning:** {t["surface"]}',
+                f'2. **Deeper meaning:** {t["deeper"]}',
+                f'3. **Final meaning (by the end):** {t["final"]}']
+    else:
+        out += ['No title is recorded (`project.title` in storyforge.yaml).']
+    out += ['', '---', '', '## Novel Identity Summary', '',
+            f'**Title:** {ev.title or "(not recorded)"}  ', f'**Genre:** {ev.genre or "(not recorded)"}  ',
             f'**Length:** {total:,} words, {len(scenes)} scenes  ',
             f'**Structure:** {pitch["structural_model"]}  ',
             f'**POV:** {pitch["identity"]["pov"]}  ', f'**Tone:** {pitch["identity"]["tone"]}  ',
@@ -1523,27 +1628,23 @@ def run_themes(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOut
 def run_pitch(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutcome:
     """Step 5c: story-summary.md and story-architecture.md, from one call.
 
-    Reads the spine and themes 5a and 5b wrote, or the author's when they
-    kept theirs. Writing without them is allowed (the scenes cover the whole
-    book) but said, since the docs then rest on less."""
+    Reads the spine, themes and motifs 5a and 5b wrote, or the author's when
+    they kept theirs, and mice-threads.csv. Working without one of them is
+    allowed (the scenes cover the whole book) but reported, and the
+    provenance header names only the files that had rows."""
     rels = ['reference/story-summary.md', 'reference/story-architecture.md']
     if not _gate(run, rels, '5c (story summary and architecture)'):
         return 'skipped'
     ev = pitch_evidence(run.project_dir, scenes)
-    thin = [name for name, rows in (('spine.csv', ev.spine), ('themes.csv', ev.themes))
-            if not rows]
-    if thin:
-        run.reports.append(f'5c: reference/{" and reference/".join(thin)} has no rows, so the '
-                           f'story summary and architecture were written from the scenes alone')
-    pitch = _ask(run, 'pitch',
-                 lambda problems: build_pitch_prompt(profile, scenes, ev, problems),
-                 lambda text: parse_pitch(text, ev), PITCH_SCHEMA, PITCH_MAX_TOKENS)
+    run.reports.extend(f'5c: {note}' for note in ev.notes)
     uncounted = sum(a.uncounted for a in ev.acts)
     if uncounted:
         run.reports.append(f'5c: {uncounted} scene(s) have no word count in scenes.csv, so '
                            f'story-architecture.md\'s lengths leave them out')
-    header = provenance_header(run.version, '5c', ['profile', 'scenes', 'spine', 'themes',
-                                                   'motif-taxonomy', 'mice-threads'])
+    pitch = _ask(run, 'pitch',
+                 lambda problems: build_pitch_prompt(profile, scenes, ev, problems),
+                 lambda text: parse_pitch(text, ev), PITCH_SCHEMA, PITCH_MAX_TOKENS)
+    header = provenance_header(run.version, '5c', ['profile', 'scenes', *ev.sources])
     today = datetime.now(timezone.utc).date().isoformat()
     if not _write_all(run, [(rels[0], render_story_summary(pitch, header, today)),
                             (rels[1], render_story_architecture(pitch, ev, scenes, header))],
