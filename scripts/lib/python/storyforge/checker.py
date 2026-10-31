@@ -6,8 +6,10 @@ and (with `promises=True`) every promise of its brief it doesn't keep. It
 works the way the design note says the gate checks
 (`docs/plans/2026-10-30-gate-ledger-design.md`): against every binding fact
 in the ledger, registry facts and commitments alike, and against the prose
-of the other scenes, which it searches and reads through tools rather than
-getting one fixed bundle.
+of the other scenes: the earlier ones in its system prompt (below), and any
+scene through tools that search and read it. The ledger is queried by tool,
+never sent as one bundle. Scenes cut or merged (`status`) are not part of
+the book it sees.
 
 - `check_scene(project_dir, scene_id, ...)` → `CheckResult`.
 - Every finding quotes the scene, and a contradiction quotes what it
@@ -22,11 +24,21 @@ getting one fixed bundle.
   are sent uncapped, as drafting's shared context sends them, with their
   own cache breakpoint; one that can't be read as UTF-8 is a `CheckError`.
 - The earlier scenes follow them in the system prompt, whole: the story so
-  far, as drafting sees it (`prompts.prior_scenes` in `full` mode, the
-  window past `prompts.FULL_MAX_WORDS`), cached as it grows. A reader
-  checks a scene against what they have just read, and E4's judge does;
-  searching alone missed most of the slips against earlier prose (E4 run 8
-  caught 2 of 9). Later scenes are found with the tools.
+  far (`prompts.prior_scenes` in `full` mode whatever drafting's
+  `drafting.prior_prose`; past `prompts.FULL_MAX_WORDS`, the window, and
+  the prompt says only some are shown). A reader checks a scene against
+  what they have just read, and E4's judge does; searching alone missed
+  most of the slips against earlier prose (E4 run 8 caught 2 of 9). Later
+  scenes are found with the tools.
+- Caching: the bibles and the last earlier scene each carry a 5-minute
+  breakpoint (the API takes no longer one after a shorter one, and
+  drafting's are 5 minutes), so a check within five minutes of the last
+  reads the story so far from cache. In `write`, drafting and extraction
+  come between two checks, so a slow scene writes the prefix again.
+- Size: `FULL_MAX_WORDS` was sized for drafting; the check adds the scene,
+  the scene list and its tool results. A book near the cap can overflow
+  the model's context, which is an API error (`CheckError`), not a
+  silent cut.
 - Fails loud: a refusal, a reply cut off, a reply that isn't the schema, or
   a tool loop that never ends raises `CheckError`. There is no partial result.
 """
@@ -193,6 +205,8 @@ class Book:
     reference: dict[str, str] = field(default_factory=dict)
     #: the earlier scenes sent whole in the system prompt, in reading order
     earlier: list[str] = field(default_factory=list)
+    #: whether `earlier` is every earlier scene with prose (False: the window)
+    whole: bool = True
 
     @classmethod
     def load(cls, project_dir: str, scene_id: str, prose: str | None = None,
@@ -200,11 +214,15 @@ class Book:
         """`rows` in place of the ledger on disk (the gate passes the ledger
         without the scene's earlier commitments)."""
         from storyforge.elaborate import _read_csv_as_map
+        from storyforge.prompts import _GONE, prior_scenes
         ref_dir = os.path.join(project_dir, 'reference')
         order = ledger.scene_order(project_dir)
         if scene_id not in order:
             raise CheckError(f'{scene_id} is not a scene in reference/scenes.csv')
         scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+        # A cut or merged scene isn't the book: nothing is checked against it
+        order = {sid: i for sid, i in order.items() if sid == scene_id or (
+            scenes.get(sid, {}).get('status') or '').strip().lower() not in _GONE}
         texts = {}
         for sid in order:
             path = os.path.join(project_dir, 'scenes', f'{sid}.md')
@@ -215,9 +233,10 @@ class Book:
             texts[scene_id] = prose
         if not (texts.get(scene_id) or '').strip():
             raise CheckError(f'{scene_id} has no prose to check')
-        from storyforge.prompts import prior_scenes
+        earlier = prior_scenes(scene_id, project_dir, 'full', purpose='the check')
+        every = [sid for sid in texts if order[sid] < order[scene_id] and texts[sid].strip()]
         return cls(order, scenes, texts, ledger.load(project_dir) if rows is None else rows,
-                   reference_docs(project_dir), prior_scenes(scene_id, project_dir, 'full'))
+                   reference_docs(project_dir), earlier, len(earlier) == len(every))
 
     def where(self, sid: str, at: str) -> str:
         if sid not in self.order:
@@ -292,6 +311,15 @@ def _how_to_look(book: Book) -> str:
                 f'scene that a reader could check {claims}, search the manuscript or the '
                 'ledger for where it is set up. Read a scene in full when a passage is not '
                 'enough.')
+    if not book.whole:
+        return ('Some of the scenes before this one are in the system prompt, whole (the '
+                f'story so far: {len(book.earlier)} scene(s), the one just before and the '
+                'latest of each story thread it carries; the manuscript before it is too long '
+                'to send whole). Read this scene the way a reader who has just read them '
+                'would, and go through every specific claim in it that a reader could check '
+                f'{claims}: compare each with what the story so far says about it. Use the '
+                'tools for what it doesn\'t show: the earlier scenes not shown there, later '
+                'scenes, the ledger.')
     return ('The scenes before this one are in the system prompt, whole (the story so far: '
             f'{len(book.earlier)} scene(s)). Read this scene the way a reader who has just '
             'read them would, and go through every specific claim in it that a reader could '

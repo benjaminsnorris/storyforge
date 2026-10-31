@@ -1963,9 +1963,11 @@ def _threads(cell: str) -> set[str]:
             if t.strip().lstrip('+-').strip()}
 
 
-def prior_scenes(scene_id: str, project_dir: str, mode: str) -> list[str]:
+def prior_scenes(scene_id: str, project_dir: str, mode: str,
+                 purpose: str = 'drafting') -> list[str]:
     """The earlier scenes whose prose `scene_id` is drafted with, in reading
-    order: only scenes with prose on disk."""
+    order: only scenes with prose on disk. `purpose` names the caller in the
+    over-the-cap WARNING (the checker sends the same scenes)."""
     from . import ledger
     from .elaborate import get_scenes
     if mode == 'none':
@@ -1982,7 +1984,7 @@ def prior_scenes(scene_id: str, project_dir: str, mode: str) -> list[str]:
         if words <= FULL_MAX_WORDS:
             return earlier
         from .common import log
-        log(f'WARNING: {scene_id}: the manuscript before it is {words:,} words, over '
+        log(f'WARNING: {scene_id} ({purpose}): the manuscript before it is {words:,} words, over '
             f'{FULL_MAX_WORDS:,}; sending the window (the preceding scene and each '
             f'thread\'s latest) with it instead of the whole manuscript')
     if not earlier:
