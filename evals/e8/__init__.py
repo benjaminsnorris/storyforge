@@ -14,13 +14,17 @@ dropped silently. Holdout cases are excluded. Families:
 
 - ``redraft-from-brief``: ``cmd_write._build_prompt`` with briefs, the path
   ``storyforge write`` and ``revise``'s ``_redraft_from_briefs`` take, without
-  their refusal fallback (E8 measures the requested model). Their cut-off
-  guard is not applied here: a refusal halts, a cut-off reply would be
-  replayed as a revision.
+  their refusal fallback (E8 measures the requested model), then their gate
+  (``gate.gate_and_fix``: fix once, re-check); the prose judged is what the
+  gate leaves, passed or not, as both keep it. A scene whose commitments
+  later facts lean on halts before drafting, as both refuse it. Their
+  cut-off guard is not applied here: a refusal halts, a cut-off reply would
+  be replayed as a revision.
 - ``naturalness-upstream``: ``cmd_revise._fix_upstream_briefs`` then
-  ``_redraft_scenes`` on the scene, the path ``revise --naturalness`` takes
-  when the diagnosis names upstream causes. Production code asks for the
-  refusal fallback here; under the cassette it is stripped.
+  ``_redraft_scenes`` on the scene (gated, as above), the path
+  ``revise --naturalness`` takes when the diagnosis names upstream causes.
+  Production code asks for the refusal fallback here; under the cassette it
+  is stripped.
 - ``revision-plan``: a named pass from the book's own plan CSV, prompted by
   today's ``revision.build_revision_prompt`` with the config block assembled
   as ``cmd_revise.main``'s pass loop assembles it (reader-annotation guidance
@@ -327,13 +331,21 @@ def parse_verdict(text: str) -> dict:
     return verdict
 
 
-def redraft(project_dir: str, scene_id: str) -> str:
-    """Run the current redraft-from-brief pass on one scene; return the new prose."""
+def redraft(project_dir: str, scene_id: str, gated: bool = True) -> str:
+    """Run the current redraft-from-brief pass on one scene; return the new
+    prose. With `gated` (E8), as write and revise run it: refused when later
+    facts lean on the scene, then through the gate. Without (E5, which
+    measures what the redraft itself changes), the draft alone."""
     from storyforge.api import RefusalError, extract_text, invoke
     from storyforge.cmd_write import _build_prompt
     from storyforge.common import build_shared_context, select_model
     from storyforge.parsing import clean_scene_content, extract_single_scene
 
+    from storyforge import gate
+    leaning = gate.leaning_on(project_dir, scene_id) if gated else []
+    if leaning:  # write and revise refuse this redraft before spending
+        raise PassHalted(f'later facts lean on {scene_id}\'s commitments: '
+                         f'{", ".join(leaning[:5])}')
     model = select_model('creative')
     system = build_shared_context(project_dir, model=model)
     prompt = _build_prompt(scene_id, project_dir, 'full', use_briefs=True,
@@ -348,7 +360,20 @@ def redraft(project_dir: str, scene_id: str) -> str:
     text = extract_text(response)
     if not text:
         raise RuntimeError(f'empty redraft for {scene_id}')
-    return clean_scene_content(extract_single_scene(text) or text)
+    prose = clean_scene_content(extract_single_scene(text) or text)
+    if not gated:
+        return prose
+    with open(os.path.join(project_dir, 'scenes', f'{scene_id}.md'), 'w',
+              encoding='utf-8') as f:
+        f.write(prose)
+    try:
+        return gate.gate_and_fix(project_dir, scene_id, command='redraft', prose=prose,
+                                 log_dir=os.path.join(project_dir, 'working', 'logs',
+                                                      'gate')).prose
+    except Exception:  # noqa: BLE001 - as write and revise: a gate that can't
+        # finish (GateError, a bug, an I/O failure) leaves the unchecked prose,
+        # listed pending; a cassette miss still errors the suite (its log)
+        return prose
 
 
 def judge(case: dict, scene_text: str) -> dict:
@@ -433,10 +458,16 @@ def naturalness_upstream(project_dir: str, scene_id: str) -> str:
         # that rejects everything shows up there rather than as safety.
         raise PassHalted(f'upstream brief fix rewrote nothing for {scene_id}: '
                          f'{skipped.get(scene_id, "unknown")}')
+    path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
+    before = _read(path)
     try:
         count = _redraft_scenes(project_dir, [scene_id])
-    except RedraftError as e:  # revise halts and writes nothing: safe, not an error
-        raise PassHalted(str(e)) from e
+    except RedraftError as e:
+        if _read(path) != before:
+            # redrafted, but the gate didn't pass it: revise keeps the prose
+            # (listed pending), so a reader would see it
+            return _read(path)
+        raise PassHalted(str(e)) from e  # nothing written: safe, not an error
     if count != 1:
         raise RuntimeError(f'naturalness redraft did not rewrite {scene_id}')
     return _read(os.path.join(project_dir, 'scenes', f'{scene_id}.md'))

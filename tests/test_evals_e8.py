@@ -156,7 +156,13 @@ def test_prepare_refuses_a_project_older_than_scenes_csv(book, tmp_path):
         e8.prepare(case, str(tmp_path / 'work'), str(root))
 
 
-def test_a_naturalness_redraft_that_halts_is_pass_halted(monkeypatch):
+def _scene_dir(tmp_path, text='old prose'):
+    (tmp_path / 'scenes').mkdir()
+    (tmp_path / 'scenes' / 's.md').write_text(text)
+    return str(tmp_path)
+
+
+def test_a_naturalness_redraft_that_halts_is_pass_halted(monkeypatch, tmp_path):
     from storyforge import cmd_revise
     monkeypatch.setattr(cmd_revise, '_fix_upstream_briefs', lambda p, ids: (['s'], {}))
 
@@ -164,7 +170,47 @@ def test_a_naturalness_redraft_that_halts_is_pass_halted(monkeypatch):
         raise cmd_revise.RedraftError('1 scene(s) not re-drafted: s (cut off)')
     monkeypatch.setattr(cmd_revise, '_redraft_scenes', halt)
     with pytest.raises(e8.PassHalted, match='cut off'):
-        e8.naturalness_upstream('/nowhere', 's')
+        e8.naturalness_upstream(_scene_dir(tmp_path), 's')
+
+
+def test_a_naturalness_redraft_the_gate_failed_is_judged(monkeypatch, tmp_path):
+    """revise keeps a redraft the gate didn't pass, so E8 judges it."""
+    from storyforge import cmd_revise
+    monkeypatch.setattr(cmd_revise, '_fix_upstream_briefs', lambda p, ids: (['s'], {}))
+    project = _scene_dir(tmp_path)
+
+    def gate_failed(p, ids):
+        (tmp_path / 'scenes' / 's.md').write_text('new prose')
+        raise cmd_revise.RedraftError('s (redrafted, but the gate did not pass it')
+    monkeypatch.setattr(cmd_revise, '_redraft_scenes', gate_failed)
+    assert e8.naturalness_upstream(project, 's') == 'new prose'
+
+
+def test_a_redraft_is_gated_and_the_gates_prose_judged(monkeypatch, tmp_path):
+    from storyforge import gate
+    project = _scene_dir(tmp_path)
+    monkeypatch.setattr(gate, 'leaning_on', lambda p, s: [])
+    monkeypatch.setattr('storyforge.common.select_model', lambda t: 'm')
+    monkeypatch.setattr('storyforge.common.build_shared_context', lambda p, model='': [])
+    monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda *a, **k: 'prompt')
+    monkeypatch.setattr('storyforge.api.invoke', lambda *a, **k: {
+        'content': [{'type': 'text', 'text': 'Drafted prose.'}]})
+    seen = []
+
+    def gate_and_fix(p, sid, *, command, prose, log_dir):
+        seen.append((sid, command, prose))
+        return gate.GatedScene('Fixed prose.', None, None, fixed=True)
+    monkeypatch.setattr(gate, 'gate_and_fix', gate_and_fix)
+    assert e8.redraft(project, 's') == 'Fixed prose.'
+    assert [(s, c, p.strip()) for s, c, p in seen] == [('s', 'redraft', 'Drafted prose.')]
+
+
+def test_a_redraft_later_facts_lean_on_halts_before_drafting(monkeypatch, tmp_path):
+    from storyforge import gate
+    monkeypatch.setattr(gate, 'leaning_on', lambda p, s: ['later'])
+    monkeypatch.setattr('storyforge.api.invoke', lambda *a, **k: pytest.fail('drafted'))
+    with pytest.raises(e8.PassHalted, match='lean on'):
+        e8.redraft(_scene_dir(tmp_path), 's')
 
 
 def test_a_naturalness_fix_that_rewrites_nothing_is_pass_halted_with_why(monkeypatch):
@@ -537,3 +583,15 @@ def test_old_ids_without_an_id_map_is_empty(tmp_path, monkeypatch):
     assert e8.old_ids('book', 'slug') == []
     (tmp_path / 'book.csv').write_text('old_path|slug\nscenes/lonely.md\nscenes/s1.md|slug\n')
     assert e8.old_ids('book', 'slug') == ['s1']
+
+
+def test_an_ungated_redraft_is_the_draft_alone(monkeypatch, tmp_path):
+    from storyforge import gate
+    monkeypatch.setattr(gate, 'leaning_on', lambda p, s: pytest.fail('checked'))
+    monkeypatch.setattr(gate, 'gate_and_fix', lambda *a, **k: pytest.fail('gated'))
+    monkeypatch.setattr('storyforge.common.select_model', lambda t: 'm')
+    monkeypatch.setattr('storyforge.common.build_shared_context', lambda p, model='': [])
+    monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda *a, **k: 'prompt')
+    monkeypatch.setattr('storyforge.api.invoke', lambda *a, **k: {
+        'content': [{'type': 'text', 'text': 'Drafted prose.'}]})
+    assert e8.redraft(_scene_dir(tmp_path), 's', gated=False).strip() == 'Drafted prose.'

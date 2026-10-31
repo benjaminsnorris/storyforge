@@ -269,7 +269,154 @@ class TestReview443:
         _pend(setup, 'act1-sc01', 'draft', 'drafted with --batch, not gated')
         assert 'batch' in gate.pending(setup)['act1-sc01']['reason']
 
-    def test_revise_redrafts_are_listed_pending(self, project_dir):
-        from storyforge.cmd_revise import _mark_ungated
-        _mark_ungated(project_dir, 'act1-sc01')
+
+
+class TestReviseRedraftsAreGated:
+    """revise's redraft-from-brief goes through write's gate, in reading
+    order, and stops where write would."""
+
+    def _redraft(self, project_dir, monkeypatch, ids, gate_fails=(), leaning=()):
+        from storyforge import cmd_revise, cmd_write
+        drafted, gated = [], []
+
+        def invoke(prompt, model, log_file, **k):
+            drafted.append(os.path.basename(log_file)[len('redraft-'):-len('.json')])
+        monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda sid, *a, **k: sid)
+        monkeypatch.setattr('storyforge.api.invoke_to_file', invoke)
+        monkeypatch.setattr(cmd_write, '_extract_scene_from_response', lambda *a: '')
+        monkeypatch.setattr(cmd_revise, 'commit_and_push', lambda *a, **k: True)
+        monkeypatch.setattr(gate, 'leaning_on',
+                            lambda pd, sid: ['later-fact'] if sid in leaning else [])
+
+        def fake_gate(pd, sid, scene_file, command, log_dir):
+            gated.append((sid, command))
+            return (False, 'a contradiction') if sid in gate_fails else (True, '')
+        monkeypatch.setattr(cmd_write, '_gate_drafted_scene', fake_gate)
+        error = None
+        try:
+            cmd_revise._redraft_from_briefs(project_dir, ids, 'm', str(project_dir),
+                                            system=[{'type': 'text', 'text': 's'}])
+        except cmd_revise.RedraftError as e:
+            error = str(e)
+        return drafted, gated, error
+
+    def test_each_redraft_is_gated_in_reading_order(self, project_dir, monkeypatch):
+        drafted, gated, error = self._redraft(project_dir, monkeypatch,
+                                              ['act2-sc01', 'act1-sc02', 'act1-sc01'])
+        assert drafted == ['act1-sc01', 'act1-sc02', 'act2-sc01']
+        assert gated == [(s, 'redraft') for s in drafted]
+        assert error is None
+
+    def test_a_scene_the_gate_does_not_pass_stops_the_run(self, project_dir, monkeypatch):
+        drafted, _, error = self._redraft(project_dir, monkeypatch,
+                                          ['act1-sc01', 'act1-sc02', 'act2-sc01'],
+                                          gate_fails={'act1-sc02'})
+        assert drafted == ['act1-sc01', 'act1-sc02']
+        assert 'act1-sc02 (redrafted, but the gate did not pass it' in error
+        assert 'act2-sc01 (not redrafted: redrafting stops' in error
+
+    def test_a_scene_later_facts_lean_on_is_not_redrafted(self, project_dir, monkeypatch):
+        drafted, gated, error = self._redraft(project_dir, monkeypatch,
+                                              ['act1-sc01', 'act1-sc02'],
+                                              leaning={'act1-sc01'})
+        assert drafted == [] and gated == []
+        assert 'act1-sc01 (later facts lean on its commitments' in error
+        assert 'act1-sc02 (not redrafted' in error
+
+    def test_the_hone_fix_redraft_is_gated_and_stops_too(self, project_dir, monkeypatch):
+        from storyforge import cmd_revise, cmd_write
+        gated = []
+        monkeypatch.setattr('storyforge.prompts.build_scene_prompt', lambda sid, *a, **k: sid)
+        monkeypatch.setattr('storyforge.common.build_shared_context', lambda *a, **k: [])
+        monkeypatch.setattr(cmd_revise, 'invoke_api', lambda *a, **k: 'New prose. ' * 300)
+        monkeypatch.setattr('storyforge.parsing.unsafe_scene_reason', lambda *a: '')
+        monkeypatch.setattr(gate, 'leaning_on', lambda pd, sid: [])
+
+        def fake_gate(pd, sid, scene_file, command, log_dir):
+            gated.append(sid)
+            return (False, 'a contradiction') if sid == 'act1-sc01' else (True, '')
+        monkeypatch.setattr(cmd_write, '_gate_drafted_scene', fake_gate)
+        with pytest.raises(cmd_revise.RedraftError, match='act1-sc02 \\(not redrafted'):
+            cmd_revise._redraft_scenes(project_dir, ['act1-sc02', 'act1-sc01'])
+        assert gated == ['act1-sc01']
+
+
+@pytest.mark.real_gate
+class TestReviseRedraftsRealGate:
+    """The real `_gate_drafted_scene` (only `gate_and_fix` mocked)."""
+
+    def _setup(self, project_dir, monkeypatch, fails=()):
+        from storyforge import cmd_revise, cmd_write
+        from storyforge.checker import CheckResult
+        monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda sid, *a, **k: sid)
+        monkeypatch.setattr('storyforge.api.invoke_to_file', lambda *a, **k: None)
+        monkeypatch.setattr(cmd_write, '_extract_scene_from_response', lambda *a: '')
+        monkeypatch.setattr(cmd_revise, 'commit_and_push', lambda *a, **k: True)
+        monkeypatch.setattr(gate, 'leaning_on', lambda pd, sid: [])
+        bad = Finding('contradiction', 'TIM', 'x', 'y', 'z', '', 'why')
+        gated = []
+
+        def gate_and_fix(pd, sid, *, command, prose, log_dir, **k):
+            gated.append(sid)
+            result = gate.GateResult(sid, check=CheckResult(
+                sid, findings=[bad] if sid in fails else []))
+            return gate.GatedScene(prose, result, result)
+        monkeypatch.setattr(gate, 'gate_and_fix', gate_and_fix)
+        return gated
+
+    def _run(self, project_dir, ids):
+        from storyforge import cmd_revise
+        with pytest.raises(cmd_revise.RedraftError) as e:
+            cmd_revise._redraft_from_briefs(project_dir, ids, 'm', str(project_dir),
+                                            system=[{'type': 'text', 'text': 's'}])
+        return str(e.value)
+
+    def test_a_redraft_the_gate_fails_is_listed_pending(self, project_dir, monkeypatch):
+        self._setup(project_dir, monkeypatch, fails={'act1-sc01'})
+        error = self._run(project_dir, ['act1-sc01', 'act1-sc02'])
         assert gate.pending(project_dir)['act1-sc01']['command'] == 'redraft'
+        assert 'act1-sc02 (not redrafted' in error
+
+    def test_a_later_run_does_not_redraft_past_a_pending_scene(self, project_dir, monkeypatch):
+        gated = self._setup(project_dir, monkeypatch)
+        gate.mark_pending(project_dir, 'act1-sc01', 'redraft', 'a contradiction')
+        error = self._run(project_dir, ['act1-sc02'])
+        assert gated == []
+        assert 'earlier scene(s) wait on the gate: act1-sc01' in error
+
+    def test_the_advice_names_check_for_a_scene_the_gate_failed(self, capsys):
+        from storyforge import cmd_revise
+        cmd_revise._report_redraft_error(cmd_revise.RedraftError('x'))
+        out = capsys.readouterr().out
+        assert '`storyforge check <id>`' in out and 'gate-pending.csv' in out
+
+
+def test_a_marker_the_gates_fix_drops_is_restored(project_dir, monkeypatch):
+    from storyforge import cmd_revise, cmd_write
+    marker = '<!-- illustration: ill-1 -->'
+    scene = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+    with open(scene, 'w') as f:
+        f.write(f'Old prose.\n\n{marker}\n')
+    monkeypatch.setattr('storyforge.prompts.build_scene_prompt', lambda sid, *a, **k: sid)
+    monkeypatch.setattr('storyforge.common.build_shared_context', lambda *a, **k: [])
+    monkeypatch.setattr(cmd_revise, 'invoke_api', lambda *a, **k: 'New prose. ' * 300)
+    monkeypatch.setattr('storyforge.parsing.unsafe_scene_reason', lambda *a: '')
+    monkeypatch.setattr(gate, 'leaning_on', lambda pd, sid: [])
+
+    def restore(pd, original, rewritten):
+        if marker in original and marker not in rewritten:
+            return {'text': rewritten + f'\n{marker}\n', 'restored': ['ill-1'], 'lost': []}
+        return {'text': rewritten, 'restored': [], 'lost': []}
+    monkeypatch.setattr('storyforge.illustrations.preserve_markers', restore)
+
+    def fix_drops_marker(pd, sid, scene_file, command, log_dir):
+        with open(scene_file) as f:
+            text = f.read()
+        assert marker in text           # restored before the gate
+        with open(scene_file, 'w') as f:
+            f.write(text.replace(marker, ''))
+        return True, ''
+    monkeypatch.setattr(cmd_write, '_gate_drafted_scene', fix_drops_marker)
+    assert cmd_revise._redraft_scenes(project_dir, ['act1-sc01']) == 1
+    with open(scene) as f:
+        assert marker in f.read()
