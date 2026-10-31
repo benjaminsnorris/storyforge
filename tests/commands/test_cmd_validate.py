@@ -344,6 +344,25 @@ class TestMainJson:
         assert 'structural' in data
         assert 'schema' in data
 
+    def test_json_stdout_is_pure_json_with_status_lines(self, project_dir, monkeypatch, capsys):
+        # A valid voice profile (extract phase 5 writes one) and canon findings
+        # log status lines; with --json they must not reach stdout, which
+        # callers parse whole (`validate --json > report.json`).
+        monkeypatch.setattr('storyforge.cmd_validate.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.elaborate.validate_structure',
+                            lambda ref_dir: _passing_structural())
+        monkeypatch.setattr('storyforge.schema.validate_schema',
+                            lambda ref_dir, project_dir=None: _passing_schema())
+        monkeypatch.setattr('storyforge.schema.validate_voice_profile',
+                            lambda pd: _no_errors_voice_profile())
+        with pytest.raises(SystemExit):
+            main(['--json'])
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert 'structural' in data
+        assert 'Voice profile: valid (3 characters)' in captured.err
+
     def test_json_contains_structural_result(self, project_dir, monkeypatch, capsys):
         monkeypatch.setattr('storyforge.cmd_validate.detect_project_root',
                             lambda: project_dir)
