@@ -1,6 +1,6 @@
 # Phase 4: safe revision — design
 
-Date: 2026-10-31. Rethink plan §3.4 and §5 Phase 4; status doc Next steps item 4. **Status: proposed; the three decisions at the end are Ben's.**
+Date: 2026-10-31. Rethink plan §3.4 and §5 Phase 4; status doc Next steps item 4. **Decided by Ben, 2026-10-31:** the three decisions at the end, each as recommended (derived graph; a failing re-check reports and stops; forecast and run under the threshold).
 
 ## What Phase 4 must deliver (plan)
 
@@ -62,7 +62,7 @@ A re-gate is about one extraction (Sonnet), one persistence call and one check (
 4. Prose passes through the gate (§5); E8.
 5. Rewrite-from-ledger (§6); E5.
 
-## Decisions for Ben
+## Decisions (Ben, 2026-10-31: each as recommended)
 
 1. **The graph: derived from the ledger (recommended) or extracted into `depends_on`.** Derived over-includes (more checks, never a missed scene) and needs no prompt change; extracted is tighter but costs a re-record of E3/E4/E5/E8 and trusts a model judgement for completeness.
 2. **A later scene that fails its re-check: report and stop (recommended), or fix it.** Report-and-stop lists it pending with the findings and edits no prose the author didn't ask to change; the author fixes it with `revise` or by hand. Fixing it automatically would change scenes nobody chose to revise.
