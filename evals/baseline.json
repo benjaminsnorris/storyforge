@@ -697,16 +697,16 @@
         }
       },
       "cost": {
-        "calls": 309,
+        "calls": 310,
         "input_tokens": 1512275,
         "output_tokens": 299579,
-        "replayed_calls": 309,
+        "replayed_calls": 310,
         "unpriced_calls": 0,
         "usd_if_live": 13.3734,
         "usd_spent": 0.0
       },
       "description": "Draft shared-dark Act 1 with write; CP10k, BPS, length, voice",
-      "duration_s": 24.89,
+      "duration_s": 24.86,
       "error": null,
       "gates": [
         {
@@ -729,7 +729,7 @@
         "contradictions_passed": 22,
         "cp10k": 6.708,
         "cp10k_all": 11.474,
-        "cp10k_checker": 0.918,
+        "cp10k_checker_all": 0.918,
         "cp10k_passed": 10.585,
         "gate_catch_rate": 0.067,
         "gate_caught": 1,
@@ -742,7 +742,7 @@
         "scenes": 23,
         "scenes_passed": 22,
         "scenes_to_first_gate_failure": 8,
-        "target_words": 21370,
+        "target_words_all": 21370,
         "voi": 4.674,
         "voi_author": 4.652,
         "words": 7454,
@@ -779,11 +779,11 @@
         "  engineer: CONTRADICTION: PHY contradicts the-school: \"Across the gym floor Danny Vasquez was crouched at the base of the bleachers with a flashlight, reading the stair-step crack where it ran through the cream ",
         "  engineer: NOTE (unplaced): maren-reads-bridge-somatically; hank-contamination-through-hands; hanks-professional-language-colonized",
         "  engineer: NOTE (brief items in words, no ledger fact; checked as words): physical_state_in: baseline; physical_state_out: baseline",
-        "cp10k, contradictions, broken_promises and bps count the scenes write would have drafted: through the first gate failure, inclusive. The *_all figures count every drafted scene (the scenes after the first failure are drafted from a ledger missing its facts). cp10k_passed is the rate in the scenes the gate passed, anywhere in the act (what write would commit). gate_caught / gate_missed / gate_false_alarm are per scene against the judge's contradictions, over every drafted scene.",
+        "cp10k, contradictions, broken_promises, bps and words count the scenes write would have drafted: up to the first refusal, or through the first gate failure, inclusive (before this measure they counted every scene; those figures are now *_all). scenes, length_drift and voi cover every drafted scene. The *_all figures count every drafted scene (the scenes after the first failure are drafted from a ledger missing its facts). cp10k_passed is the rate in the scenes the gate passed, anywhere in the act (what write would commit). gate_caught / gate_missed / gate_false_alarm are per scene against the judge's contradictions, over every drafted scene.",
         "The gate's checker and the judge are both Opus continuity reviews, so part of a CP10k drop may be the two agreeing; the human spot-check is still owed.",
         "Judge stands in for the plan's human spot-check (still owed). Drafted sequentially and gated, as write does by default; batch mode is refused under a cassette."
       ],
-      "started_at": "2026-10-31T07:32:40+00:00",
+      "started_at": "2026-10-31T07:36:29+00:00",
       "status": "pass",
       "suite": "e4-generation"
     },

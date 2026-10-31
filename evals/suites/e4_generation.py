@@ -51,8 +51,11 @@ def run(ctx):
                  f'the first; E4 drafts on): {", ".join(gate_failed) or "none"}')
     for sid in gate_failed:
         notes += [f'  {sid}: {line[:200]}' for line in gate_lines(gated[sid].result)]
-    notes.append('cp10k, contradictions, broken_promises and bps count the scenes write '
-                 'would have drafted: through the first gate failure, inclusive. The *_all '
+    notes.append('cp10k, contradictions, broken_promises, bps and words count the scenes '
+                 'write would have drafted: up to the first refusal, or through the first '
+                 'gate failure, inclusive (before this measure they counted every scene; '
+                 'those figures are now *_all). scenes, length_drift and voi cover every '
+                 'drafted scene. The *_all '
                  'figures count every drafted scene (the scenes after the first failure are '
                  'drafted from a ledger missing its facts). cp10k_passed is the rate in the '
                  'scenes the gate passed, anywhere in the act (what write would commit). '
@@ -71,9 +74,9 @@ def run(ctx):
         metrics={
             'scenes': len(drafts),
             'refused': len(refused),
-            'target_words': target,
+            'target_words_all': target,
             'checker_flags': len(flags),
-            'cp10k_checker': e4.per_10k(len(flags), m['words_all']),
+            'cp10k_checker_all': e4.per_10k(len(flags), m['words_all']),
             'gate_fixed': len(gate_fixed),
             'gate_failed': len(gate_failed),
             'length_drift': e4.length_drift(rows, drafts),

@@ -283,8 +283,10 @@ def gate_measure(scene_ids: list[str], drafts: dict[str, str], judged: dict[str,
     """Read the judge against the gate, the way ``write`` would have run.
 
     ``write`` stops at the first scene still failing the gate (keeping its
-    prose, committing nothing), so the **headline** counts the drafted scenes
-    through that one, inclusive; with no failure it is every drafted scene.
+    prose, committing nothing) and at the first scene refused (drafting
+    nothing), so the **headline** counts the drafted scenes before the first
+    of either, plus the failing scene itself; with neither it is every
+    drafted scene.
     E4 drafts on past it, from a ledger missing that scene's facts, and the
     ``*_all`` figures count every drafted scene (the pre-#450 headline).
 
@@ -299,8 +301,13 @@ def gate_measure(scene_ids: list[str], drafts: dict[str, str], judged: dict[str,
     checker's error). Returns the metrics, a label per scene and the
     headline's scene ids."""
     drafted = [s for s in scene_ids if s in drafts]
-    first = next((i for i, s in enumerate(drafted) if s in failed), len(drafted) - 1)
-    headline = drafted[:first + 1]
+    headline = []
+    for sid in scene_ids:
+        if sid not in drafts:   # refused: write stops before drafting on
+            break
+        headline.append(sid)
+        if sid in failed:
+            break
     passed = [s for s in drafted if s not in failed]
 
     def words(ids):
@@ -342,7 +349,8 @@ def gate_measure(scene_ids: list[str], drafts: dict[str, str], judged: dict[str,
             'gate_caught': count['caught'],
             'gate_missed': count['missed'],
             'gate_false_alarm': count['false_alarm'],
-            'gate_catch_rate': round(count['caught'] / judged_bad, 3) if judged_bad else 0.0,
+            # None, not 0, when the judge found nothing for the gate to catch
+            'gate_catch_rate': round(count['caught'] / judged_bad, 3) if judged_bad else None,
         },
         'labels': labels,
         'headline': headline,

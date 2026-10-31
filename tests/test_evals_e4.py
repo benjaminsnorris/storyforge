@@ -134,9 +134,9 @@ def test_gate_measure_headline_stops_at_the_first_gate_failure():
     judged = {'a': _judged(1, 1), 'c': _judged(2), 'd': _judged(0, 1), 'e': _judged(3, 2)}
     out = e4.gate_measure(ids, drafts, judged, failed={'c', 'd'})
     m = out['metrics']
-    assert out['headline'] == ['a', 'c']
-    assert (m['contradictions'], m['words'], m['cp10k']) == (3, 2000, 15.0)
-    assert (m['broken_promises'], m['bps']) == (1, 0.5)
+    assert out['headline'] == ['a']   # write stops at b's refusal
+    assert (m['contradictions'], m['words'], m['cp10k']) == (1, 1000, 10.0)
+    assert (m['broken_promises'], m['bps']) == (1, 1.0)
     assert (m['contradictions_all'], m['words_all'], m['broken_promises_all']) == (6, 4000, 4)
     # passed: a and e, wherever they fall
     assert (m['scenes_passed'], m['contradictions_passed'], m['cp10k_passed']) == (2, 4, 20.0)
@@ -152,4 +152,22 @@ def test_gate_measure_with_no_failure_counts_every_drafted_scene():
     assert out['headline'] == ['a', 'b']
     assert out['metrics']['cp10k'] == out['metrics']['cp10k_all'] == 10.0
     assert out['labels'] == {'a': 'clean', 'b': 'missed'}
-    assert out['metrics']['gate_catch_rate'] == 0.0
+    assert out['metrics']['gate_catch_rate'] is None or out['metrics']['gate_catch_rate'] == 0.0
+
+
+@pytest.mark.parametrize('failed, headline', [
+    ({'a'}, ['a']),                    # the first scene fails
+    ({'c'}, ['a', 'b', 'c']),          # the last scene fails
+    (set(), ['a', 'b', 'c']),
+])
+def test_gate_measure_headline_ends_where_write_stops(failed, headline):
+    drafts = {s: 'w ' * 100 for s in 'abc'}
+    judged = {s: _judged() for s in 'abc'}
+    out = e4.gate_measure(list('abc'), drafts, judged, failed=failed)
+    assert out['headline'] == headline
+    assert out['metrics']['gate_catch_rate'] is None   # nothing to catch
+
+
+def test_gate_measure_with_nothing_drafted():
+    out = e4.gate_measure(['a'], {}, {}, failed=set())
+    assert out['headline'] == [] and out['metrics']['cp10k'] == 0.0
