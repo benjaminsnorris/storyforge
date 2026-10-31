@@ -367,11 +367,14 @@ def _log_blockers(blocking: list[str]) -> None:
 
 
 def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, command: str,
-                        log_dir: str) -> tuple[bool, str]:
+                        log_dir: str, skip: set[str] | frozenset[str] = frozenset()
+                        ) -> tuple[bool, str]:
     """Gate the scene just written to `scene_file` (fix once, re-check; plan
     §3.2), writing the fixed prose back. Returns (passed, why not). A scene
     that doesn't pass, or that the gate couldn't finish, is listed in
-    `gate.pending` with the first problems; its prose stays."""
+    `gate.pending` with the first problems; its prose stays. On a pass, the
+    later scenes whose facts depend on what it changed are re-checked
+    (`run_recheck`; not those in `skip`, which the run redrafts anyway)."""
     from storyforge import gate
     with open(scene_file, encoding='utf-8') as f:
         prose = f.read()
@@ -401,12 +404,50 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
         log(f'  {line}')
     if out.result.passed:
         log(f'  Gate passed: {len(out.result.proposed)} fact(s) added to the ledger.')
+        run_recheck(project_dir, out.result, os.path.join(log_dir, 'gate'), skip)
         return True, ''
     problems = [line for line in lines if not line.startswith(('NOTE', 'COMMITTED'))]
     return False, _pend(project_dir, scene_id, command,
                         f'{len(problems)} problem(s) after one fix: '
                         + ' / '.join(problems[:3]) + ('; ...' if len(problems) > 3 else '')
                         + stale)
+
+
+def _drafted(scenes_dir: str, scene_id: str) -> bool:
+    """Whether a scene has prose the run's skip rule keeps (over 200 words)."""
+    path = os.path.join(scenes_dir, f'{scene_id}.md')
+    if not os.path.isfile(path):
+        return False
+    with open(path, encoding='utf-8') as f:
+        return len(f.read().split()) > 200
+
+
+def run_recheck(project_dir: str, result, log_dir: str,
+                skip: set[str] | frozenset[str] = frozenset()):
+    """After `result` (a committed gate run) changed facts later scenes
+    depend on: say which can't be traced, then re-gate the scenes pending a
+    re-check (`gate.recheck_pending`: reading order, report and stop, under
+    the cost threshold) and log the outcome. Returns the `gate.Recheck`, or
+    None when nothing was pending. A scene that fails stays listed, and
+    `write`/`revise` won't draft past it."""
+    from storyforge import gate
+    for fid, why in result.unrelated.items():
+        log(f'  WARNING: {result.scene_id} changed {fid}, whose dependents can\'t all be '
+            f'found ({why}): check the later scenes that mention it with `storyforge check`.')
+    if not gate.recheck_queue(project_dir, skip):
+        return None
+    if result.recheck:
+        log(f'  {result.scene_id} changed {len(result.changed)} fact(s) later scenes depend '
+            f'on; re-checking: {", ".join(result.recheck)}')
+    run = gate.recheck_pending(project_dir, log_dir=log_dir, skip=skip)
+    for sid in run.passed:
+        log(f'  Re-check passed: {sid}')
+    if run.failed:
+        log(f'  ERROR: the re-check of {run.failed} did not pass: {run.why}. It stays in '
+            f'{gate_pending_path()}' + (f' with {", ".join(s for s in run.left if s != run.failed)}'
+                                        if len(run.left) > 1 else '')
+            + '; fix it with revise or by hand, then `storyforge check --pending`.')
+    return run
 
 
 def _interactive_problem(scene_file: str, before: str) -> str:
@@ -876,16 +917,6 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                 stop(i, scene_id, f'{scene_id} (not attempted: an earlier scene did not '
                                   f'pass the gate)')
                 break
-            leaning = gate.leaning_on(project_dir, scene_id)
-            if leaning:
-                log(f'ERROR: Not redrafting {scene_id}: later facts or ends depend on its '
-                    f'commitments ({", ".join(leaning[:5])}), and the gate cannot replace '
-                    f"them until Phase 4's re-check exists (storyforge check refuses it "
-                    f'too). Revise its prose by hand and leave its ledger rows as they are, '
-                    f'or redraft it after the re-check lands.')
-                stop(i, scene_id, f'{scene_id} (later facts or ends depend on its '
-                                  f'commitments; not redrafted)')
-                break
 
         prompt = _build_prompt(scene_id, project_dir, coaching, use_briefs,
                                system_context=bool(system))
@@ -985,8 +1016,10 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
         gate_problem = ''
         if gated:
+            # Scenes this run redrafts anyway aren't re-checked first
+            later = {s for s in pending_ids[i + 1:] if force or not _drafted(scenes_dir, s)}
             _, gate_problem = _gate_drafted_scene(project_dir, scene_id, scene_file,
-                                                  command, log_dir)
+                                                  command, log_dir, skip=later)
 
         # The prose is committed either way: a scene the gate stopped is kept
         # for the author and listed in gate.pending

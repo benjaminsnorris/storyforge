@@ -86,6 +86,16 @@ class GateResult:
     #: (statement, why) for each extracted fact the persistence check judged
     #: not to last beyond the scene: not proposed, so never committed
     dropped: list[tuple[str, str]] = field(default_factory=list)
+    #: on commit (Phase 4): the scene's earlier commitments this version
+    #: dropped or changed, and the earlier states whose end in this scene
+    #: came or went
+    changed: list[str] = field(default_factory=list)
+    #: on commit: the later scenes, with prose, listed pending for a re-check
+    #: because their facts depend on `changed` (`recheck_pending` runs it)
+    recheck: list[str] = field(default_factory=list)
+    #: on commit: changed fact id → why its dependents can't all be found
+    #: (`ledger.Dependents.unrelated`), for the caller to report
+    unrelated: dict[str, str] = field(default_factory=dict)
 
     @property
     def findings(self) -> list[Finding]:
@@ -195,45 +205,16 @@ def _statement(rows: list[dict[str, str]], rid: str) -> str:
     return next((r.get('statement', '') for r in rows if r.get('id') == rid), '')
 
 
-def leaning_on(project_dir: str, scene_id: str) -> list[str]:
-    """`fact → commitment` for each later fact that leans on (supersedes or
-    depends on) one of `scene_id`'s commitments, and `scene ends → commitment`
-    for each of its states a later scene ended. Non-empty means the gate
-    can't replace them (Phase 4's re-check set), so redrafting the scene
-    would be refused after the redraft was paid for: check first."""
-    rows = ledger.load(project_dir)
-    old = {r['id'] for r in rows if ledger.is_commitment(r)
-           and (r.get('scene_id') or '').strip() == scene_id}
-    return _leaning_on(rows, old, ledger.scene_order(project_dir))
-
-
 def has_commitments(project_dir: str, scene_id: str) -> bool:
     """Whether the ledger holds commitments from `scene_id`'s prose."""
     return any(ledger.is_commitment(r) and (r.get('scene_id') or '').strip() == scene_id
                for r in ledger.load(project_dir))
 
 
-def _leaning_on(rows: list[dict[str, str]], gone: set[str],
-                order: dict[str, int] | None = None) -> list[str]:
-    """Rows (not themselves going) whose supersedes or depends_on name `gone`,
-    and each `gone` state another scene ended (`resolves` names a scene other
-    than its own, and one in `order` when given: an end at a deleted scene
-    is meaningless, and validate reports it): replacing it would drop that
-    end, and the state would read as in force for the rest of the book."""
-    leaning = [f'{r["id"]} → {ref}' for r in rows if r['id'] not in gone
-               for col in ('supersedes', 'depends_on') for ref in ledger._split(r.get(col, ''))
-               if ref in gone]
-    for r in rows:
-        ends = (r.get('resolves') or '').strip()
-        if r['id'] in gone and ends not in ('', 'never', (r.get('scene_id') or '').strip()) \
-                and (order is None or ends in order):
-            leaning.append(f'{ends} ends → {r["id"]}')
-    return leaning
-
-
 def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | None = None,
                log_dir: str, extract_model: str | None = None,
-               check_model: str | None = None) -> GateResult:
+               check_model: str | None = None,
+               introduced_by: str | None = None) -> GateResult:
     """Extract, halt, check and (if all clear) commit `scene_id`'s prose:
     `prose`, or the scene file when None. `command` is the command that
     wrote the prose (one of `GATE_COMMANDS`), recorded as the new rows'
@@ -243,13 +224,22 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     earlier version's commitments, and the `resolves` that version set on
     earlier commitments are cleared (this version's `ends` set them again).
     A `resolves` it set on a registry state isn't touched: the gate never
-    sets one there.
+    sets one there. `introduced_by` (default `command`) is what the new rows
+    record; a re-check keeps the prose's writer.
+
+    On commit (Phase 4, `docs/plans/2026-10-31-phase4-safe-revision-design.md`):
+    a new commitment stating the same fact as an earlier one of the scene
+    (`ledger.fact_key`) keeps its id, and a later scene's end of it, so
+    links to it hold. The earlier commitments with no such match, and the
+    earlier states whose end in this scene came or went, are `changed`;
+    the later scenes whose facts depend on them (`ledger.dependents`) and
+    have prose are listed in `working/gate-pending.csv` as `recheck`
+    (`recheck_pending` re-gates them). A fact new to the scene doesn't list
+    anything: its own check already reads it against the later scenes.
 
     Raises:
         GateError: a step couldn't finish (extraction or the check failed,
-            the scene has no prose, a later fact leans on one of the scene's
-            commitments this would replace or a later scene ended one of its
-            states, or the ledger changed on disk
+            the scene has no prose, or the ledger changed on disk
             while the gate ran); nothing was written.
         ValueError: `command` isn't one of `GATE_COMMANDS`.
     """
@@ -279,15 +269,11 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
         raise GateError(f'{scene_id} is not a scene in reference/scenes.csv')
 
     # The scene's earlier commitments (a redraft's) aren't offered back to it
-    # and are replaced on commit; a later fact leaning on one, or a later
-    # scene's end of one of its states, is Phase 4's re-check, which doesn't
-    # exist yet, so it stops here
-    old = {r['id'] for r in rows if ledger.is_commitment(r)
-           and (r.get('scene_id') or '').strip() == scene_id}
-    leaning = _leaning_on(rows, old, order)
-    if leaning:
-        raise GateError(f'{scene_id}: later facts lean on commitments this scene would '
-                        f'replace: {", ".join(leaning[:10])}')
+    # and are replaced on commit; what leans on them is re-checked (Phase 4)
+    old_rows = [copy.deepcopy(r) for r in rows if ledger.is_commitment(r)
+                and (r.get('scene_id') or '').strip() == scene_id]
+    old = {r['id'] for r in old_rows}
+    ended_before = ledger.ended_by(rows, scene_id)
     rows = [r for r in rows if r['id'] not in old]
     # ... and the ends the earlier version set: this version's extraction
     # sets its own
@@ -296,7 +282,8 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
             r['resolves'] = ''
 
     result = GateResult(scene_id, problems={k: [] for k in COMMITMENT_PROBLEMS})
-    result.proposed = _extract(project_dir, scene_id, prose, rows, order, command,
+    result.proposed = _extract(project_dir, scene_id, prose, rows, order,
+                               introduced_by or command,
                                extract_model or select_model('evaluation'), log_dir,
                                result.problems, result.dropped)
     result.halts = audit.halting_conditions(result.proposed, rows)
@@ -319,19 +306,85 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                             f'scene was being gated; nothing written, gate it again')
     except ledger.LedgerError as e:
         raise GateError(f'{scene_id}: {e}') from e
+    _carry_ids(result.proposed, old_rows, rows, scene_id)
     new = rows + result.proposed
     for rid, quote in result.check.kept:
         if ledger.fill_quote(new, rid, quote):
             result.quotes_filled.append(rid)
+    proposed_ids = {r['id'] for r in result.proposed}
+    result.changed = [rid for rid in ledger.changed_facts(old_rows, result.proposed)
+                      if rid not in proposed_ids]
+    result.changed += sorted(ended_before ^ ledger.ended_by(new, scene_id))
+    if result.changed:
+        found = ledger.dependents(old_rows + new, result.changed, order)
+        result.unrelated = found.unrelated
+        result.recheck = [s for s in found.scenes if s != scene_id
+                          and _has_prose(project_dir, s)]
     ledger.save(project_dir, new, command=command)
     result.committed = True
     try:
         clear_pending(project_dir, scene_id)
+        waiting = pending(project_dir)
+        for sid in result.recheck:
+            if sid not in waiting:   # one waiting for another reason stays as it is
+                mark_pending(project_dir, sid, 'recheck',
+                             f're-check: {scene_id} changed {len(result.changed)} fact(s) '
+                             f'its facts depend on')
     except GateError as e:   # the ledger is written; say why the list wasn't updated
         from storyforge.common import log
         log(f'WARNING: {scene_id} passed, but {PENDING_PATH} could not be updated: {e}. '
-            f'Remove its row by hand.')
+            f'Fix it by hand: remove {scene_id}\'s row'
+            + (f' and add {", ".join(result.recheck)} for a re-check' if result.recheck else '')
+            + '.')
     return result
+
+
+def _has_prose(project_dir: str, scene_id: str) -> bool:
+    path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
+    try:
+        with open(path, encoding='utf-8') as f:
+            return bool(f.read().strip())
+    except OSError:
+        return False
+
+
+def _carry_ids(proposed: list[dict[str, str]], old_rows: list[dict[str, str]],
+               rows: list[dict[str, str]], scene_id: str) -> None:
+    """Give each proposed row that states the same fact as one of the
+    scene's earlier commitments (`ledger.fact_key`) that row's id, and its
+    end in a later scene when the new row has none: links to it (a later
+    `supersedes`, the later scene's end) keep holding. Every other proposed
+    row gets an id no other row has (extraction chose ids without the old
+    rows, so one may repeat a carried id), and links between proposed rows
+    follow the renames. In place."""
+    from storyforge.extract import commitment_id
+    by_key: dict[tuple, dict[str, str]] = {}
+    for o in old_rows:
+        by_key.setdefault(ledger.fact_key(o), o)
+    rename: dict[str, str] = {}
+    carried: set[str] = set()
+    for p in proposed:
+        o = by_key.get(ledger.fact_key(p))
+        if o is None or o['id'] in carried:
+            continue
+        carried.add(o['id'])
+        rename[p['id']] = o['id']
+        if not (p.get('resolves') or '').strip() and ledger._ends_elsewhere(o):
+            p['resolves'] = o['resolves']
+    taken = {r['id'] for r in rows} | carried
+    for p in proposed:
+        if p['id'] in rename:
+            p['id'] = rename[p['id']]
+        elif p['id'] in taken:
+            new_id = commitment_id(scene_id, p.get('statement', ''), taken)
+            rename[p['id']] = new_id
+            p['id'] = new_id
+        taken.add(p['id'])
+    for p in proposed:
+        for col in ('supersedes', 'depends_on'):
+            refs = ledger._split(p.get(col, ''))
+            if any(r in rename for r in refs):
+                p[col] = ';'.join(rename.get(r, r) for r in refs)
 
 
 # ============================================================================
@@ -619,3 +672,100 @@ def clear_pending(project_dir: str, scene_id: str) -> None:
     rows = pending(project_dir)
     if rows.pop(scene_id, None) is not None:
         _write_pending(project_dir, rows)
+
+
+# ============================================================================
+# The re-check (Phase 4, docs/plans/2026-10-31-phase4-safe-revision-design.md §3)
+# ============================================================================
+
+#: What one re-gated scene is forecast to cost: an extraction and a
+#: persistence call (Sonnet) and a check (Opus, the story so far cached).
+#: E4's gate ran about $0.35-0.45 a scene on shared-dark; rounded up.
+RECHECK_COST_PER_SCENE = 0.6
+
+
+@dataclass
+class Recheck:
+    """`recheck_pending`'s answer."""
+    passed: list[str] = field(default_factory=list)
+    #: the scene that didn't pass, and why ('' when none failed)
+    failed: str = ''
+    why: str = ''
+    result: GateResult | None = None
+    #: the re-check scenes still pending when it stopped
+    left: list[str] = field(default_factory=list)
+    #: the forecast was over the cost threshold, so it stopped before a scene
+    over_budget: bool = False
+    forecast: float = 0.0
+
+
+def recheck_queue(project_dir: str, skip: set[str] | frozenset[str] = frozenset()) -> list[str]:
+    """The scenes pending a re-check, in reading order, without `skip`."""
+    order = ledger.scene_order(project_dir)
+    return sorted((s for s, r in pending(project_dir).items()
+                   if r['command'] == 'recheck' and s not in skip and s in order),
+                  key=order.get)
+
+
+def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozenset[str] = frozenset(),
+                    extract_model: str | None = None,
+                    check_model: str | None = None) -> Recheck:
+    """Re-gate the scenes pending a re-check (design §3), one at a time in
+    reading order, never editing their prose: each one's commitments are
+    extracted again against the ledger as it now is, checked, and committed
+    when clean, which may list later scenes in turn (the cascade). Stops at
+    the first scene that doesn't pass, which stays pending with the reason
+    (Ben, 2026-10-31: report and stop); the rest stay pending too. `skip`
+    is scenes the caller is about to redraft anyway.
+
+    Cost (Ben: forecast, and run under the threshold): before each scene the
+    spend so far plus the queue left at `RECHECK_COST_PER_SCENE` must be
+    within `costs.check_threshold`; otherwise it stops with `over_budget`
+    and everything stays pending for `storyforge check --pending`."""
+    from storyforge.common import log
+    from storyforge.costs import check_threshold
+    run = Recheck()
+    spent = 0.0
+    while True:
+        queue = recheck_queue(project_dir, skip)
+        if not queue:
+            return run
+        run.forecast = spent + len(queue) * RECHECK_COST_PER_SCENE
+        if not check_threshold(run.forecast):
+            run.over_budget, run.left = True, queue
+            log(f'WARNING: re-checking {len(queue)} scene(s) is forecast at about '
+                f'${run.forecast:.2f}, over the cost threshold: not run. They stay in '
+                f'{PENDING_PATH}; run `storyforge check --pending` (with '
+                f'STORYFORGE_COST_THRESHOLD raised) to re-check them.')
+            return run
+        sid = queue[0]
+        log(f'Re-checking {sid} ({len(queue)} pending)...')
+        try:
+            result = gate_scene(project_dir, sid, command='recheck',
+                                log_dir=os.path.join(log_dir, 'recheck', sid),
+                                extract_model=extract_model, check_model=check_model,
+                                introduced_by=_writer(project_dir, sid))
+        except GateError as e:
+            why = ' '.join(str(e).split())
+            mark_pending(project_dir, sid, 'recheck', f're-check could not run: {why}')
+            run.failed, run.why, run.left = sid, why, recheck_queue(project_dir, skip)
+            return run
+        spent += RECHECK_COST_PER_SCENE
+        if not result.passed:
+            lines = [x for x in report_lines(result) if not x.startswith(('NOTE', 'COMMITTED'))]
+            mark_pending(project_dir, sid, 'recheck',
+                         f're-check did not pass: {len(lines)} problem(s): '
+                         + '; '.join(_one_line(x) for x in lines[:3]))
+            run.failed, run.why, run.result = sid, '; '.join(lines[:3]), result
+            run.left = recheck_queue(project_dir, skip)
+            return run
+        run.passed.append(sid)
+
+
+def _writer(project_dir: str, scene_id: str) -> str:
+    """The command that wrote `scene_id`'s prose, as its commitments record
+    it (the most common), so a re-check keeps it; `recheck` when none do."""
+    from collections import Counter
+    writers = Counter((r.get('introduced_by') or '').strip() for r in ledger.load(project_dir)
+                      if ledger.is_commitment(r) and (r.get('scene_id') or '').strip() == scene_id)
+    return writers.most_common(1)[0][0] if writers else 'recheck'

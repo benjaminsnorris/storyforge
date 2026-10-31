@@ -323,7 +323,8 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
             failed.append(f'{sid} ({reason})')
         else:
             written += 1
-            why = _gate_redraft(project_dir, sid, scene_file, log_dir)
+            why = _gate_redraft(project_dir, sid, scene_file, log_dir,
+                                skip=set(scene_ids[i:]))
             if why:
                 failed += _stopped_at(sid, why, scene_ids[i:])
                 break
@@ -338,15 +339,18 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
         raise RedraftError(f'{len(failed)} scene(s) not re-drafted: {"; ".join(failed)}')
 
 
-def _gate_redraft(project_dir: str, scene_id: str, scene_file: str, log_dir: str) -> str:
+def _gate_redraft(project_dir: str, scene_id: str, scene_file: str, log_dir: str,
+                  skip: set[str] | frozenset[str] = frozenset()) -> str:
     """Gate the redraft just written to `scene_file` as `write` gates a
     draft (`cmd_write._gate_drafted_scene`: fix once, re-check; the fixed
     prose is written back, the scene's facts replace its earlier ones in the
-    ledger on a pass). Returns '' when it passed, else why not; the scene is
-    then listed in `gate.pending` with its prose kept."""
+    ledger on a pass, and the later scenes depending on what it changed are
+    re-checked, except `skip`, which this run redrafts). Returns '' when it
+    passed, else why not; the scene is then listed in `gate.pending` with
+    its prose kept."""
     from storyforge import cmd_write
     passed, why = cmd_write._gate_drafted_scene(project_dir, scene_id, scene_file,
-                                                'redraft', log_dir)
+                                                'redraft', log_dir, skip=skip)
     return '' if passed else why
 
 
@@ -360,10 +364,10 @@ def _reading_order(project_dir: str, scene_ids: list[str]) -> list[str]:
 
 def _leaning(project_dir: str, scene_id: str) -> str:
     """Why `scene_id` can't be redrafted before spending ('' when it can),
-    the checks `write` makes: an earlier scene waits on the gate
-    (`working/gate-pending.csv`), so the ledger lacks its facts; or later
-    facts lean on its commitments, which the gate would replace (it can't
-    yet: Phase 4's re-check)."""
+    the check `write` makes: an earlier scene waits on the gate
+    (`working/gate-pending.csv`), so the ledger lacks its facts. Later facts
+    leaning on its commitments are no reason: the scenes they are in are
+    re-checked after its redraft passes (Phase 4)."""
     from storyforge import cmd_write, gate
     try:
         blocking = cmd_write._gate_blockers(project_dir, scene_id)
@@ -374,14 +378,7 @@ def _leaning(project_dir: str, scene_id: str) -> str:
         cmd_write._log_blockers(blocking)
         return (f'{scene_id} (not redrafted: earlier scene(s) wait on the gate: '
                 + '; '.join(b.split(':')[0] for b in blocking) + ')')
-    leaning = gate.leaning_on(project_dir, scene_id)
-    if not leaning:
-        return ''
-    log(f'    ERROR: Not redrafting {scene_id}: later facts or ends depend on its '
-        f'commitments ({", ".join(leaning[:5])}), and the gate cannot replace them until '
-        f"Phase 4's re-check exists (storyforge check refuses it too). Revise its prose by "
-        f'hand and leave its ledger rows as they are, or redraft it after the re-check lands.')
-    return f'{scene_id} (later facts or ends depend on its commitments; not redrafted)'
+    return ''
 
 
 def _stopped_at(scene_id: str, why: str, rest: list[str]) -> list[str]:

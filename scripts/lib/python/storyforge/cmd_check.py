@@ -5,6 +5,7 @@ Usage:
     storyforge check act1-sc01 act1-sc05       # a range, in reading order
     storyforge check --scenes a,b,c
     storyforge check --act 2
+    storyforge check --pending                 # every scene waiting on the gate
 
 For prose the author wrote (rethink plan §3.2, "in advisor mode, step 3
 becomes a report"): each scene, in reading order, goes through the gate
@@ -23,9 +24,12 @@ loud). The report is written to `working/check-report.md` and committed
 with the ledger. Exit 1 when a scene did not pass, a named scene isn't one
 that can be checked, or the commit fails.
 
-Once later scenes' facts lean on an earlier scene's commitments, checking
-that earlier scene again stops with "later facts lean on ..." (Phase 4's
-re-check set will handle it).
+A scene that passes and changed facts later scenes depend on lists those
+scenes for a re-check (Phase 4, `docs/plans/2026-10-31-phase4-safe-revision-design.md`),
+and they are re-checked after it, in reading order, under the cost threshold
+(`gate.recheck_pending`); scenes later in this run are checked by the run
+itself. `--pending` checks every scene in `working/gate-pending.csv`; one
+listed for a re-check keeps the command that wrote its prose.
 """
 
 from __future__ import annotations
@@ -49,6 +53,8 @@ def parse_args(argv):
     parser.add_argument('--scenes', help='Comma-separated scene IDs')
     parser.add_argument('--act', '--part', help='Every scene in act N')
     parser.add_argument('--from-seq', help='From sequence number (N or N-M range)')
+    parser.add_argument('--pending', action='store_true',
+                        help='Every scene waiting on the gate (working/gate-pending.csv)')
     return parser.parse_args(argv)
 
 
@@ -69,15 +75,39 @@ def main(argv=None):
     from storyforge.git import commit_and_push, create_branch
     ledger.exit_if_not_migrated(project_dir)
     ledger.exit_if_unordered(project_dir)
-    if not (args.positional or args.scenes or args.act or args.from_seq):
-        log('ERROR: name the scenes to check (an id, a range, --scenes, --act or --from-seq).')
+    if not (args.positional or args.scenes or args.act or args.from_seq or args.pending):
+        log('ERROR: name the scenes to check (an id, a range, --scenes, --act, --from-seq '
+            'or --pending).')
+        sys.exit(1)
+    if args.pending and (args.positional or args.scenes or args.act or args.from_seq):
+        log('ERROR: --pending checks the scenes waiting on the gate; name no others with it.')
         sys.exit(1)
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)
     set_log_file(os.path.join(log_dir, 'check-log.txt'))
 
-    scene_ids = _scene_ids(args, project_dir)
-    unknown = [s for s in _named(args) if s not in scene_ids]
+    try:
+        waiting = gate.pending(project_dir)
+    except gate.GateError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    if args.pending:
+        if not waiting:
+            log('Nothing is waiting on the gate.')
+            return
+        in_book = ledger.scene_order(project_dir)
+        gone = [s for s in waiting if s not in in_book]
+        if gone:
+            log(f'WARNING: {", ".join(gone)} in {gate.PENDING_PATH} are no longer scenes in '
+                f'scenes.csv: not checked; remove their rows.')
+        scene_ids = [s for s in waiting if s in in_book]
+        if not scene_ids:
+            log('Nothing in the book is waiting on the gate.')
+            return
+        unknown = []
+    else:
+        scene_ids = _scene_ids(args, project_dir)
+        unknown = [s for s in _named(args) if s not in scene_ids]
     if unknown:
         log(f'ERROR: not scenes that can be checked (no such id, or cut or merged): '
             f'{", ".join(unknown)}')
@@ -100,9 +130,12 @@ def main(argv=None):
     passed, stopped_at = 0, ''
     for n, scene_id in enumerate(scene_ids):
         log(f'--- Checking {scene_id} ---')
+        recheck = waiting.get(scene_id, {}).get('command') == 'recheck'
         try:
-            result = gate.gate_scene(project_dir, scene_id, command='advisor',
-                                     log_dir=os.path.join(log_dir, 'check'))
+            result = gate.gate_scene(
+                project_dir, scene_id, command='recheck' if recheck else 'advisor',
+                log_dir=os.path.join(log_dir, 'check'),
+                introduced_by=gate._writer(project_dir, scene_id) if recheck else None)
         except gate.GateError as e:
             why = ' '.join(str(e).split())
             log(f'ERROR: {why}')
@@ -119,6 +152,12 @@ def main(argv=None):
                 + ([] if lines else ['- nothing to report']) + ['']
             if result.passed:
                 passed += 1
+                lines, run = _recheck_after(project_dir, result, log_dir,
+                                            set(scene_ids[n + 1:]))
+                report += lines
+                if run is not None and (run.failed or run.over_budget) and scene_ids[n + 1:]:
+                    # later scenes would be checked against a ledger missing its facts
+                    stopped_at = run.failed or run.left[0]
             else:
                 gate.mark_pending(project_dir, scene_id, 'advisor',
                                   f'{sum(1 for x in lines if not x.startswith(("NOTE", "COMMITTED")))} '
@@ -144,6 +183,25 @@ def main(argv=None):
         log(f'ERROR: stopped at {stopped_at}, which did not pass; {passed} of '
             f'{len(scene_ids)} scene(s) passed. Edit it and check it again.')
         sys.exit(1)
+
+
+def _recheck_after(project_dir: str, result, log_dir: str, skip: set[str]):
+    """Re-check the scenes `result` listed (not those later in this run),
+    as `write` does. Returns the report lines and the `gate.Recheck` (None
+    when nothing was pending)."""
+    from storyforge.cmd_write import run_recheck
+    run = run_recheck(project_dir, result, os.path.join(log_dir, 'check'), skip)
+    lines = [f'- {result.scene_id} changed {fid}; its dependents can\'t all be found: {why}'
+             for fid, why in result.unrelated.items()]
+    if run is None:
+        return lines + ([''] if lines else []), None
+    lines += [f'- re-check passed: {s}' for s in run.passed]
+    if run.failed:
+        lines.append(f'- re-check of {run.failed} did not pass: {run.why} (listed pending)')
+    if run.over_budget:
+        lines.append(f'- re-check of {len(run.left)} scene(s) not run: forecast '
+                     f'${run.forecast:.2f} is over the cost threshold (listed pending)')
+    return [f'### Re-check after {result.scene_id}', ''] + lines + [''], run
 
 
 def _named(args) -> list[str]:
