@@ -149,6 +149,7 @@ def _seed_story_summary(project_dir):
 
 def test_boundary_flag_invokes_score_boundary(project_dir, monkeypatch, capsys):
     """`storyforge score --boundary 0->1` dispatches to scoring_boundary."""
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')  # the command checks for one
     _seed_story_summary(project_dir)
     monkeypatch.chdir(project_dir)
 
@@ -175,6 +176,7 @@ def test_invalid_boundary_string_exits_nonzero(project_dir, monkeypatch):
 
 
 def test_all_boundaries_runs_all(project_dir, monkeypatch, capsys):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')  # the command checks for one
     _seed_story_summary(project_dir)
     monkeypatch.chdir(project_dir)
 
@@ -195,6 +197,7 @@ def test_all_boundaries_runs_all(project_dir, monkeypatch, capsys):
 
 def test_bible_consistency_flag(project_dir, monkeypatch, capsys):
     """`storyforge score --bible-consistency` dispatches to scoring_bible."""
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')  # the command checks for one
     # Seed bibles + a drafted scene
     ref = os.path.join(project_dir, 'reference')
     with open(os.path.join(ref, 'character-bible.md'), 'w') as f:
@@ -229,6 +232,7 @@ def test_bible_consistency_flag(project_dir, monkeypatch, capsys):
 
 def test_compare_semantic_flag_populates_ceiling(project_dir, monkeypatch, capsys):
     """`--compare ... --semantic` populates the ceiling axes table."""
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')  # the command checks for one
     monkeypatch.chdir(project_dir)
 
     fake = _mock_boundary_invoke({
