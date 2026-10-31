@@ -1,37 +1,65 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-30 (night), at v1.106.0 on PR #450 (open). **Phase 3 steps 1–4 are done; #450 is the one thing in flight** (see **In flight** below). #440's phase 5 is complete (5a–5g, with the E9 suite; see Next steps 2) and handed to storyforge-evals. **A fresh session starts here:** read **In flight**, **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-10-31 (morning), at v1.111.0. **Phase 3 steps 1–5 are done and nothing is in flight**: the gate checks with the bibles and a persistence check, revise's redrafts are gated, and drafting sends the whole manuscript so far (see **Latest** for the overnight run's results and what's next). #440's phase 5 is complete and handed to storyforge-evals. **A fresh session starts here:** read **Latest**, **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
 
-## In flight (2026-10-30 night, storyforge-e9)
+## Latest: the overnight run and what is next (2026-10-31, storyforge-b2)
 
-**PR #450** (branch `storyforge/brief-word-promises-20261030-1732`, v1.106.0 after merging main at v1.105.0): brief items written in words become promises; extraction's `supersedes`/`ends` on a registry fact become **disputes** the checker must rule on (contradiction or `cleared`; no ruling blocks as `UNRULED`), replacing the `plan-contradiction` halt (Ben's decision). Review: 3 high, 3 medium, 2 low, all fixed and listed in the PR's comments. Full suite green (7,750). E4 run 4 recorded and pruned to the 312 recordings its replay reads.
+Ben's instruction: "look for the handoff note and keep going all through the night; do not stop to ask." Done overnight, all merged:
 
-**To finish it:** run `python evals/run.py --baseline` on the branch (free replay; every suite should replay with no errors and only E4 and E2-carol-checker numbers differing from main), commit `evals/baseline.json`, then `gh pr merge 450 --merge --delete-branch`. Ben approved merging with run 4 as the baseline. Then tell evals-b6 nothing (their trigger is the persistence check, below).
+| PR | Version | What |
+|---|---|---|
+| #450 | 1.106.0 | finished: merged main, re-recorded E4/E5/E8 (main hadn't replayed them since #444's `motif_details` guardrail), baseline |
+| #453 | — (eval-only) | E4 measured the way `write` runs: headline to the first refusal or gate failure; `*_all`; `cp10k_passed`; the gate's catch rate against the judge |
+| #454 | 1.107.0 | the checker reads the character/world/systems bibles (cached system block; template copies left out, F-130) |
+| #455 | 1.108.0 | **the persistence check** (`storyforge/persistence.py`): phase 4 and the gate ask of each extracted fact "does it last beyond the scene?" and don't record one that doesn't; evals told (their nine books were waiting on it) |
+| #456 | 1.109.0 | revise's redraft-from-brief (both paths) goes in reading order through `write`'s gate and stops where `write` stops |
+| #457 | 1.110.0 | drafting sends earlier prose (decision 4): `--prior-prose window|full|none`, `drafting.prior_prose` |
+| #458 | 1.111.0 | the checker's search shows up to 40 hits, nearest first; **`full` prior prose is the default** |
 
-**E4 through the gated `write`, four runs** (one each; target CP10k ≤ 7.1, broken promises ≤ 3):
+Each PR had one general reviewer and every finding was fixed (listed in the PR comments). Tests can no longer reach the API (an autouse fixture raises a `BaseException` from `api.urlopen`).
 
-| Run | Code | CP10k | Broken promises | Gate still failing | Cost |
-|---|---|---|---|---|---|
-| pre-gate | v1.98.0 | 14.2 | 6 | — | — |
-| 1 | #443 | 6.0 | 11 | 3 | $13.23 |
-| 2 | + promises in words | 6.8 | 6 | 8 | $13.99 |
-| 3 | + checker decides (no plan halt) | 9.7 | 4 | 9 | $14.00 |
-| 4 | + disputes (#450 as merged) | 12.1 | 5 | 6 | $12.88 |
+**E4 runs** (shared-dark Act 1, gated `write`; target CP10k ≤ 7.1, broken promises ≤ 3). "Headline" stops where `write` stops (#453); "all" is every scene, the old headline.
 
-Run 4's 26 contradictions: 12 in scenes the gate failed (caught; `write` would stop there), 14 in scenes it passed (missed), 20 after the first failure (E4 drafts on where `write` stops, from a ledger missing that scene's facts). The headline mixes all three, and run-to-run variance is large: neither target can be called met or missed yet.
+| Run | Code | CP10k headline | CP10k all | CP10k gate-passed | Broken promises (all) | Catch rate | Cost |
+|---|---|---|---|---|---|---|---|
+| 1–4 | #443–#450 | — | 6.0 / 6.8 / 9.7 / 12.1 | — | 11 / 6 / 4 / 5 | — | ~$13.5 each |
+| 5 | #450 merged | 6.7 | 11.5 | 10.6 | 9 | 1 of 15 | $13.37 |
+| 6 | + bibles, persistence, gated redrafts, window prose (#457) | 5.9 | 8.5 | 6.7 | 7 | 3 of 14 | $20.93 (one recording failed) |
+| 7 | as 6 but `full` prose | 1.8 | 1.8 | 1.8 | 8 | 0 of 3 | $12.53 |
+| 8 | + #458 (search, `full` default) | 5.3 | 5.3 | 4.0 | 9 | 2 of 9 | $12.87 |
 
-**Next, in order (Ben agreed, 2026-10-30):**
-1. **Fix E4's measure** (eval-only PR, no recording: re-score the existing cassettes). Report CP10k over scenes that passed the gate (what `write` would commit), the gate's catch rate against the judge (caught vs missed per scene), and make the headline stop at the first gate failure, as `write` does.
-2. **Close the checker's blind spot.** The judge reads the character and world bibles; the checker sees only the ledger and the manuscript, so a fact that lives only in a bible ("Marie is Claire's sister") can't be checked. Give the checker the bibles (a tool or a prompt section; mind F-130: skip template-identical bibles), re-record E2-carol-checker and E4 (~$18). Most direct lever on the CP10k target.
-3. **The persistence check** (Ben's trigger for running phase 4 on the seven books; see Open follow-ups): a second gate question on extracted facts, "does this fact last beyond the scene?". When it is on main, tell evals (evals-b6; their NEXT step 2, F-127).
-4. **Gate revise's redraft-from-brief** through `gate_and_fix` like `write` (today it warns and lists the scenes pending). Revise's prose passes wait for Phase 4.
-5. **Step 5, the context-size experiment** (decision 4): preceding scene + latest scene per thread vs the whole manuscript so far with caching, on E4 and cost per scene.
-6. **Parallel vs sequential on E4**, which decides whether `--batch` stays or is deleted.
-7. **Smaller:** the low-confidence halt (a `confidence` field on phase 4's schema; re-records E3 and E5, ~$5); fill `characters.csv` `pronouns`.
+**What the numbers say:**
+- **Earlier prose is the biggest lever found so far.**
+  - With the whole manuscript so far, the drafts barely contradict themselves (4 contradictions in 23 scenes), and the gate has little left to catch.
+  - The CP10k target is met with room to spare in run 7. The broken-promises target is not (7–9): mostly `physical_state_out` items written in words (sleep, exhaustion) that the drafts don't show.
+- **The checker's recall is still the weak part of the gate.**
+  - Run 5 caught 1 of 15 scenes the judge found contradictions in, run 6 caught 3 of 14.
+  - The misses are mostly against earlier drafted prose (a thumb scar, three nights vs four, a car left at the diner), not bible facts.
+  - Run 5's `dark-road` check searched "scar thumb", got 42 hits and saw only the first 12; that led to #458, which shows up to 40 hits nearest first. It had no measurable effect: E2-carol-checker 0.87/0.84 → 0.83/0.81 precision/recall, catch rate 0.21 → 0.22.
+- **One run each.** The five pre-prose runs ranged 6.0–12.1 CP10k (all scenes). The two `full` runs (1.8, 5.3; mean ~3.5) are below every earlier run, so `full` is the default since #458 (the plan's rule: equal or better, ties to more context).
 
-Then **Phase 4** (safe revision): dependency graph and re-check set (which also unblocks redrafting a scene later facts lean on), reject-fact flow, every revision pass through the gate.
+**Spend overnight:** about $137 (E4 $59.7 over five recordings; E8 $51.1 over three; E5 $8.2; E3 $4.57; E2-carol-checker $7.88; Carol phase 4 and the persistence check $5.3).
 
-**Budget note:** each E4 recording is about $13–14 and varies a lot between runs. Plan two or three runs per decision that matters, or say when one is being read alone. E4 spent today: $54.10; E2-carol-checker $7.83.
+**Found overnight, for Ben:**
+- **Phase 4 on a book blocks mid-book redrafts.** Once phase 4 has run, later facts lean on earlier scenes' commitments (`depends_on`), and `write` / revise refuse to redraft such a scene until Phase 4's re-check exists. E5 hit this (its redraft is now ungated). This matters before phase 4 runs on Ben's seven books.
+- **E8's cost tripled** ($7 → $20): its redraft families now go through the gate, as revise does. Reintroduced 6 → 10 (#450's re-record) → 8 (gated, window prose).
+- **An unexplained flake:** run 6's first recording errored in E4's judge with the temp tree's reference files gone, and its requests didn't replay. Replays are deterministic under two hash seeds, so it isn't set ordering. Watch for it.
+- **Persistence check on *Carol*** (`evals/fixtures/carol-phase4/README.md`):
+  - kept precision 58% → ~78% (estimated), rows per 1,000 words 16.0 → ~14.6, ledger recall ~79 of 80;
+  - one model reply skipped facts, so the check now retries once with what was wrong.
+
+**Next, in order:**
+1. **Checker recall** (#458's search didn't move it): read the missed scenes' check logs, and consider a second, targeted pass (one question per earlier scene the draft leans on) or a stronger search (scene-scoped, entity-indexed).
+2. **Broken promises in words**: the drafter doesn't show states like "no sleep 36h". Try the brief's `physical_state_out` in words as an explicit "must show" list in the drafting prompt; measure on E4.
+3. **Parallel vs sequential on E4** (decides `--batch`). Batch is refused under a cassette, so this needs a parallel-waves mode that can be recorded, or a live comparison.
+4. **Phase 4 proper** (safe revision): dependency graph and re-check set. This unblocks redrafting a scene later facts lean on, which phase 4 on the books will otherwise block. Also the reject-fact flow, and every revision pass through the gate.
+5. **Smaller:** the low-confidence halt (a `confidence` field on phase 4's schema; re-records E3/E5); fill `characters.csv` `pronouns`; measure E4 over 2–3 runs at `full` before reading small moves.
+
+**Budget note:** an E4 recording is now $12–14 (`full` costs no more than the window, thanks to the cache). E8 is ~$20 because of the gate.
+
+## E4 runs 1–4 (2026-10-30 night, #443–#450)
+
+Run 4's 26 contradictions: 12 in scenes the gate failed, 14 in scenes it passed, 20 after the first failure. That mix led to #453's measure. Run costs: $13.23, $13.99, $14.00, $12.88.
 
 ## Start here
 
@@ -60,7 +88,7 @@ Then **Phase 4** (safe revision): dependency graph and re-check set (which also 
 | — E4, E6 | done | #361, #363, #397, #399 |
 | 5 Phase 1 | done | #359–#405 |
 | 6 Phase 2 | done | #401, #416, #417, #420–#424, #430, #432 |
-| 7 Phase 3 | in progress: steps 1–4 done (design, gate, fix + check, gated write) | #436, #437, #439, #443 |
+| 7 Phase 3 | steps 1–5 done (design, gate, fix + check, gated write, context size); parallel vs sequential open | #436, #437, #439, #443, #450, #453–#458 |
 
 ## Next steps, in order (handoff for a new session)
 
