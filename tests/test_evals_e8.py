@@ -583,3 +583,15 @@ def test_old_ids_without_an_id_map_is_empty(tmp_path, monkeypatch):
     assert e8.old_ids('book', 'slug') == []
     (tmp_path / 'book.csv').write_text('old_path|slug\nscenes/lonely.md\nscenes/s1.md|slug\n')
     assert e8.old_ids('book', 'slug') == ['s1']
+
+
+def test_an_ungated_redraft_is_the_draft_alone(monkeypatch, tmp_path):
+    from storyforge import gate
+    monkeypatch.setattr(gate, 'leaning_on', lambda p, s: pytest.fail('checked'))
+    monkeypatch.setattr(gate, 'gate_and_fix', lambda *a, **k: pytest.fail('gated'))
+    monkeypatch.setattr('storyforge.common.select_model', lambda t: 'm')
+    monkeypatch.setattr('storyforge.common.build_shared_context', lambda p, model='': [])
+    monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda *a, **k: 'prompt')
+    monkeypatch.setattr('storyforge.api.invoke', lambda *a, **k: {
+        'content': [{'type': 'text', 'text': 'Drafted prose.'}]})
+    assert e8.redraft(_scene_dir(tmp_path), 's', gated=False).strip() == 'Drafted prose.'

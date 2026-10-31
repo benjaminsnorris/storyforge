@@ -331,15 +331,18 @@ def parse_verdict(text: str) -> dict:
     return verdict
 
 
-def redraft(project_dir: str, scene_id: str) -> str:
-    """Run the current redraft-from-brief pass on one scene; return the new prose."""
+def redraft(project_dir: str, scene_id: str, gated: bool = True) -> str:
+    """Run the current redraft-from-brief pass on one scene; return the new
+    prose. With `gated` (E8), as write and revise run it: refused when later
+    facts lean on the scene, then through the gate. Without (E5, which
+    measures what the redraft itself changes), the draft alone."""
     from storyforge.api import RefusalError, extract_text, invoke
     from storyforge.cmd_write import _build_prompt
     from storyforge.common import build_shared_context, select_model
     from storyforge.parsing import clean_scene_content, extract_single_scene
 
     from storyforge import gate
-    leaning = gate.leaning_on(project_dir, scene_id)
+    leaning = gate.leaning_on(project_dir, scene_id) if gated else []
     if leaning:  # write and revise refuse this redraft before spending
         raise PassHalted(f'later facts lean on {scene_id}\'s commitments: '
                          f'{", ".join(leaning[:5])}')
@@ -358,6 +361,8 @@ def redraft(project_dir: str, scene_id: str) -> str:
     if not text:
         raise RuntimeError(f'empty redraft for {scene_id}')
     prose = clean_scene_content(extract_single_scene(text) or text)
+    if not gated:
+        return prose
     with open(os.path.join(project_dir, 'scenes', f'{scene_id}.md'), 'w',
               encoding='utf-8') as f:
         f.write(prose)

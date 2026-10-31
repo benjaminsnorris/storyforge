@@ -148,5 +148,7 @@ def roundtrip(project_dir: str, scene_id: str) -> tuple[str, list[dict]]:
     """Redraft one scene from its brief and judge it against the original."""
     with open(os.path.join(project_dir, 'scenes', f'{scene_id}.md'), encoding='utf-8') as f:
         original = f.read()
-    redrafted = redraft(project_dir, scene_id)
+    # The draft alone: E5 measures what the redraft changes, not the gate
+    # (which, after phase 4, refuses a scene later facts lean on)
+    redrafted = redraft(project_dir, scene_id, gated=False)
     return redrafted, judge(original, redrafted, scene_id)
