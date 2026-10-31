@@ -121,3 +121,35 @@ def test_each_draft_is_gated_before_the_next_and_a_failure_drafts_on(monkeypatch
     assert order == [('prompt', 'a'), ('gate', 'a'), ('prompt', 'b'), ('gate', 'b')]
     assert drafts['a'].endswith('Fixed.') and not gated['a'].result.passed
     assert (tmp_path / 'scenes' / 'a.md').read_text().endswith('Fixed.')
+
+
+def _judged(contradictions=0, promises=0):
+    return {'contradictions': [{'code': 'TIM'}] * contradictions,
+            'broken_promises': [{'field': 'outcome'}] * promises}
+
+
+def test_gate_measure_headline_stops_at_the_first_gate_failure():
+    ids = ['a', 'b', 'c', 'd', 'e']
+    drafts = {s: 'word ' * 1000 for s in ids if s != 'b'}  # b refused
+    judged = {'a': _judged(1, 1), 'c': _judged(2), 'd': _judged(0, 1), 'e': _judged(3, 2)}
+    out = e4.gate_measure(ids, drafts, judged, failed={'c', 'd'})
+    m = out['metrics']
+    assert out['headline'] == ['a', 'c']
+    assert (m['contradictions'], m['words'], m['cp10k']) == (3, 2000, 15.0)
+    assert (m['broken_promises'], m['bps']) == (1, 0.5)
+    assert (m['contradictions_all'], m['words_all'], m['broken_promises_all']) == (6, 4000, 4)
+    # passed: a and e, wherever they fall
+    assert (m['scenes_passed'], m['contradictions_passed'], m['cp10k_passed']) == (2, 4, 20.0)
+    assert m['contradictions_in_failed'] == 2
+    assert out['labels'] == {'a': 'missed', 'c': 'caught', 'd': 'false_alarm', 'e': 'missed'}
+    assert (m['gate_caught'], m['gate_missed'], m['gate_false_alarm']) == (1, 2, 1)
+    assert m['gate_catch_rate'] == 0.333
+
+
+def test_gate_measure_with_no_failure_counts_every_drafted_scene():
+    drafts = {'a': 'w ' * 500, 'b': 'w ' * 500}
+    out = e4.gate_measure(['a', 'b'], drafts, {'a': _judged(), 'b': _judged(1)}, failed=set())
+    assert out['headline'] == ['a', 'b']
+    assert out['metrics']['cp10k'] == out['metrics']['cp10k_all'] == 10.0
+    assert out['labels'] == {'a': 'clean', 'b': 'missed'}
+    assert out['metrics']['gate_catch_rate'] == 0.0

@@ -276,3 +276,74 @@ def length_drift(rows: list[dict], drafts: dict[str, str]) -> float:
 
 def per_10k(count: int, words: int) -> float:
     return round(count * 10000 / words, 3) if words else 0.0
+
+
+def gate_measure(scene_ids: list[str], drafts: dict[str, str], judged: dict[str, dict],
+                 failed: set[str]) -> dict:
+    """Read the judge against the gate, the way ``write`` would have run.
+
+    ``write`` stops at the first scene still failing the gate (keeping its
+    prose, committing nothing), so the **headline** counts the drafted scenes
+    through that one, inclusive; with no failure it is every drafted scene.
+    E4 drafts on past it, from a ledger missing that scene's facts, and the
+    ``*_all`` figures count every drafted scene (the pre-#450 headline).
+
+    ``passed`` are the drafted scenes the gate let through, anywhere in the
+    act: ``cp10k_passed`` is the rate in prose ``write`` would commit.
+
+    The gate's catch rate is per scene, against the judge's contradictions:
+    a scene the judge finds a contradiction in is ``caught`` when the gate
+    failed it and ``missed`` when the gate passed it; a scene the gate failed
+    but the judge found clean is a ``false_alarm`` (the gate also blocks on
+    broken promises and extraction problems, so not every false alarm is the
+    checker's error). Returns the metrics, a label per scene and the
+    headline's scene ids."""
+    drafted = [s for s in scene_ids if s in drafts]
+    first = next((i for i, s in enumerate(drafted) if s in failed), len(drafted) - 1)
+    headline = drafted[:first + 1]
+    passed = [s for s in drafted if s not in failed]
+
+    def words(ids):
+        return sum(len(drafts[s].split()) for s in ids)
+
+    def contradictions(ids):
+        return sum(len(judged[s]['contradictions']) for s in ids)
+
+    def promises(ids):
+        return sum(len(judged[s]['broken_promises']) for s in ids)
+
+    labels = {}
+    for sid in drafted:
+        flagged = bool(judged[sid]['contradictions'])
+        if sid in failed:
+            labels[sid] = 'caught' if flagged else 'false_alarm'
+        else:
+            labels[sid] = 'missed' if flagged else 'clean'
+    count = {k: sum(1 for v in labels.values() if v == k)
+             for k in ('caught', 'missed', 'false_alarm', 'clean')}
+    judged_bad = count['caught'] + count['missed']
+    return {
+        'metrics': {
+            'scenes_to_first_gate_failure': len(headline),
+            'words': words(headline),
+            'contradictions': contradictions(headline),
+            'cp10k': per_10k(contradictions(headline), words(headline)),
+            'broken_promises': promises(headline),
+            'bps': round(promises(headline) / len(headline), 3) if headline else 0.0,
+            'words_all': words(drafted),
+            'contradictions_all': contradictions(drafted),
+            'cp10k_all': per_10k(contradictions(drafted), words(drafted)),
+            'broken_promises_all': promises(drafted),
+            'bps_all': round(promises(drafted) / len(drafted), 3) if drafted else 0.0,
+            'scenes_passed': len(passed),
+            'contradictions_passed': contradictions(passed),
+            'cp10k_passed': per_10k(contradictions(passed), words(passed)),
+            'contradictions_in_failed': contradictions([s for s in drafted if s in failed]),
+            'gate_caught': count['caught'],
+            'gate_missed': count['missed'],
+            'gate_false_alarm': count['false_alarm'],
+            'gate_catch_rate': round(count['caught'] / judged_bad, 3) if judged_bad else 0.0,
+        },
+        'labels': labels,
+        'headline': headline,
+    }
