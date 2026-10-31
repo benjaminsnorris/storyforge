@@ -67,10 +67,11 @@ def parse_args(argv):
     parser.add_argument('--coaching', choices=['full', 'coach', 'strict'],
                         help='Set coaching level')
     parser.add_argument('--prior-prose', choices=['window', 'full', 'none'],
-                        help='Earlier prose each scene is drafted with: the preceding scene '
-                             'and the latest scene of each thread it carries (window, the '
-                             'default), the whole manuscript so far (full), or none. '
-                             'Default: storyforge.yaml drafting.prior_prose, else window')
+                        help='Earlier prose each scene is drafted with: the whole manuscript '
+                             'so far (full, the default; past 100,000 words, the window), the '
+                             'preceding scene and the latest scene of each thread it carries '
+                             '(window), or none. Default: storyforge.yaml '
+                             'drafting.prior_prose, else full')
     parser.add_argument('--interactive', '-i', action='store_true',
                         help='Draft with supervision')
     parser.add_argument('--scenes', type=str, default=None,

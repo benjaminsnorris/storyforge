@@ -6,7 +6,8 @@ from .test_write_guard import GOOD, _reply, setup  # noqa: F401
 
 
 @pytest.mark.parametrize('flag, earlier', [
-    ([], ['act1-sc01']),                  # window: the scene just drafted
+    ([], ['act1-sc01']),                  # full (the default): the scene just drafted
+    (['--prior-prose', 'window'], ['act1-sc01']),
     (['--prior-prose', 'none'], []),
     (['--prior-prose', 'full'], ['act1-sc01']),
 ])

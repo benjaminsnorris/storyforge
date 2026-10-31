@@ -46,8 +46,8 @@ def test_full_requests_extend_each_other(project_dir):
 
 
 def test_mode_comes_from_the_override_then_the_yaml(project_dir):
-    assert prompts.prior_prose_mode(project_dir) == 'window'
-    assert prompts.prior_prose_mode(project_dir, 'full') == 'full'
+    assert prompts.prior_prose_mode(project_dir) == 'full'
+    assert prompts.prior_prose_mode(project_dir, 'window') == 'window'
     path = os.path.join(project_dir, 'storyforge.yaml')
     with open(path, 'a') as f:
         f.write('\ndrafting:\n  prior_prose: none\n')
