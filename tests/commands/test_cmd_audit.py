@@ -156,16 +156,47 @@ class TestMark:
         commits = [c for c in mock_git.calls if c[0] == 'commit_and_push']
         assert commits == [('commit_and_push', 'Audit: mark 2 facts seen',
                             ['reference/commitments.csv', 'working/audit-log.csv',
-                             'working/.audit-snapshot.csv'])]
+                             'working/.audit-snapshot.csv', 'working/gate-pending.csv'])]
         assert ('ensure_on_branch', 'audit') in mock_git.calls
 
     def test_rejected_sets_status_and_lists_scenes_to_recheck(self, project, capsys):
         result = _json(capsys, '--mark', 'rejected', 'archive-key-dorren')
         row = self._row(project, 'archive-key-dorren')
         assert row['status'] == 'rejected' and row['reviewed'].startswith('rejected:')
-        assert result['recheck']['archive-key-dorren']   # briefs name it
+        info = result['recheck']['archive-key-dorren']
+        assert info['scene'] == 'act1-sc02'
+        assert info['recheck'] == ['new-x1']                  # its brief names it; has prose
+        assert info['not_listed'] == ['act2-sc03 (no prose yet)']
         entry = audit.read_log(project)[-1]
         assert (entry['fact_id'], entry['change']) == ('archive-key-dorren', 'rejected')
+        from storyforge import gate
+        row = gate.pending(project)['new-x1']
+        assert row['command'] == gate.RECHECK and 'archive-key-dorren rejected' in row['reason']
+
+    def test_a_rejected_facts_dependents_by_subject_are_listed(self, project, capsys):
+        ledger.save(project, ledger.load(project) + [
+            _fact('cloak-later', 'act2-sc01', 'physical', 'kael-maren')], command='test')
+        result = _json(capsys, '--mark', 'rejected', 'cloak')
+        assert result['recheck']['cloak']['recheck'] == ['act2-sc01']
+
+    def test_a_dry_run_lists_nothing_pending(self, project, capsys):
+        from storyforge import gate
+        cmd_audit.main(['--mark', 'rejected', 'archive-key-dorren', '--dry-run'])
+        out = capsys.readouterr().out
+        assert 'would list for a re-check' in out and gate.pending(project) == {}
+
+    def test_a_scene_waiting_for_another_reason_is_not_listed(self, project, capsys):
+        from storyforge import gate
+        gate.mark_pending(project, 'new-x1', 'draft', 'its own problem')
+        result = _json(capsys, '--mark', 'rejected', 'archive-key-dorren')
+        assert result['recheck']['archive-key-dorren']['recheck'] == []
+        assert 'new-x1 (already waiting on the gate: draft)' in \
+            result['recheck']['archive-key-dorren']['not_listed']
+        assert gate.pending(project)['new-x1']['reason'] == 'its own problem'
+
+    def test_a_fact_with_no_subject_and_no_link_is_said(self, project, capsys):
+        result = _json(capsys, '--mark', 'rejected', 'day-two')
+        assert 'no subject' in result['recheck']['day-two']['unrelated']
 
     def test_explicit_ids_are_not_limited_to_the_current_act(self, project, capsys):
         cmd_audit.main(['--mark', 'seen', 'ridge'])

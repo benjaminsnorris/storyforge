@@ -1610,6 +1610,16 @@ def build_scene_prompt_from_briefs(
         from . import ledger
         states_registry = ledger.view_map(ref_dir, 'physical')
         names = _character_names(ref_dir)
+        # A state the author rejected (or one superseded) isn't drafted from
+        status = {r['id']: r.get('status', '') for r in ledger.load_from(ref_dir)}
+        stale = [f'{sid} ({status[sid]})' for sid in state_ids
+                 if sid in states_registry and status.get(sid) != 'binding']
+        if stale:
+            from .common import log
+            log(f'WARNING: {scene_id}: physical_state_in names state(s) that aren\'t '
+                f'binding, left out of the drafting prompt: {"; ".join(stale)}')
+            state_ids = [sid for sid in state_ids
+                         if not (sid in states_registry and status.get(sid) != 'binding')]
 
         state_lines = []
         for sid in state_ids:
@@ -1623,11 +1633,12 @@ def build_scene_prompt_from_briefs(
                 line += " *(action-gating)*"
             state_lines.append(line)
 
-        state_block = (
-            "## Active Physical States\n\n"
-            "Characters entering this scene carry these states:\n\n"
-            + '\n'.join(state_lines)
-        )
+        if state_lines:
+            state_block = (
+                "## Active Physical States\n\n"
+                "Characters entering this scene carry these states:\n\n"
+                + '\n'.join(state_lines)
+            )
 
     ledger_block = _established_facts_block(
         scene_id, scene, project_dir,

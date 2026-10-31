@@ -97,6 +97,20 @@ class TestValidateSchema:
         errors = [e for e in report['errors'] if e['constraint'] == 'registry']
         assert len(errors) == 0
 
+    def test_a_brief_naming_a_rejected_fact_is_reported(self, project_dir):
+        from storyforge.schema import validate_schema
+        path = os.path.join(project_dir, 'reference', 'commitments.csv')
+        with open(path) as f:
+            text = f.read()
+        with open(path, 'w') as f:
+            f.write(text.replace('|migrated|binding|state|||||migration|equipment|',
+                                 '|migrated|rejected|state|||||migration|equipment|'))
+        report = validate_schema(os.path.join(project_dir, 'reference'), project_dir)
+        stale = [e for e in report['errors'] if e['constraint'] == 'ledger'
+                 and 'no longer binding' in e.get('reason', '')]
+        assert {e['row'] for e in stale} >= {'new-x1', 'act2-sc03'}
+        assert all('archive-key-dorren (rejected)' in e['reason'] for e in stale)
+
     def test_catches_bad_enum(self, tmp_path):
         from storyforge.schema import validate_schema
         ref = str(tmp_path / 'reference')

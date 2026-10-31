@@ -42,6 +42,7 @@ For the changed facts, take the dependents in reading order and **re-gate each l
 `storyforge audit --mark rejected <id>`:
 - the typed views and `extract.known_for_scene` leave non-binding rows out (the open follow-up), so nothing drafts from a rejected fact;
 - the fact's dependents (§1) are listed pending with "re-check: {id} rejected", and `storyforge check --pending` re-gates them in reading order (§3, advisor mode: reports, never edits).
+- **Built in PR 3a (#470):** `audit --mark rejected` lists the dependents (and the briefs naming the fact) for a re-check and names the fact's own scene for the author; drafting's entering-states block and the must-show checklist leave non-binding states out with a WARNING; `validate` reports a brief naming a rejected, superseded or pending fact. **Not done:** the typed views still include non-binding rows, because writers (hone, extract 3b/3c, enrich) read a view and write it back, and a view without a rejected row would delete it; readers that need binding facts filter on `status` themselves (drafting, checker, `known_for_scene`, `drafting_slice`). Scoring and visualization still read the full view.
 - Measured on E1 cases: each case's established fact, rejected, must yield a re-check set that contains the scene where the error was introduced.
 
 ### 5. Every prose pass through the gate

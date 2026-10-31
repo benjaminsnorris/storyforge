@@ -243,6 +243,19 @@ class TestDraftingPrompts:
         assert 'exhausted' not in checklist and checklist.count('- [ ]') == 1
         assert 'exhaustion-tessa is rejected' in capsys.readouterr().out
 
+    def test_a_rejected_entering_state_is_not_drafted_from(self, project_dir, plugin_dir,
+                                                          capsys):
+        from storyforge.prompts import build_scene_prompt_from_briefs
+        path = os.path.join(project_dir, 'reference', 'commitments.csv')
+        with open(path) as f:
+            text = f.read()
+        with open(path, 'w') as f:
+            f.write(text.replace('|migrated|binding|state|||||migration|equipment|',
+                                 '|migrated|rejected|state|||||migration|equipment|'))
+        prompt = build_scene_prompt_from_briefs('act2-sc03', project_dir, plugin_dir)
+        assert 'holds the restricted archive key' not in prompt.split('## Task')[0]
+        assert 'archive-key-dorren (rejected)' in capsys.readouterr().out
+
     def test_only_full_coaching_gets_the_checklist(self, project_dir, plugin_dir):
         assert self._checklist(project_dir, plugin_dir, 'coach') is None
         assert self._checklist(project_dir, plugin_dir, 'strict') is None

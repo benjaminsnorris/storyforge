@@ -27,8 +27,12 @@ the audit, and a first digest of hundreds of them would bury the new ones.
 `--mark seen|rejected IDS` sets `reviewed` to `seen:<date>` or
 `rejected:<date>` (rejected also sets `status=rejected`), writes through the
 ledger (so the marks are in `working/audit-log.csv`), and commits. A rejected
-fact's scenes are listed (the briefs that name it) for re-checking; the
-dependency graph that finds every scene leaning on it is Phase 4.
+fact's scene is named (its prose still says it: the author's to revise), and
+the scenes that depend on it (Phase 4: `ledger.dependents`, plus the briefs
+that name it) are listed in `working/gate-pending.csv` for a re-check, which
+`storyforge check --pending` runs; one without prose yet, cut, or waiting on
+the gate for another reason is said, not listed. A fact whose dependents
+can't all be traced is said too.
 
 Re-marking a fact with the verdict it already has changes nothing. A
 superseded fact can't be rejected (it would stop saying it was replaced):
@@ -255,7 +259,8 @@ def _run(args, emit):
         changed = audit.mark(rows, ids, args.mark)
     except ValueError as e:
         _fail(str(e))
-    recheck = audit.leaning_scenes(project_dir, changed) if args.mark == 'rejected' else {}
+    recheck = (_reject_recheck(project_dir, rows, changed, list_them=not args.dry_run)
+               if args.mark == 'rejected' else {})
     committed = True
     if not args.dry_run and (changed or hand):
         ensure_on_branch('audit', project_dir)
@@ -264,9 +269,10 @@ def _run(args, emit):
         n = len(changed)
         message = (f'Audit: mark {n} fact{"" if n == 1 else "s"} {args.mark}' if n
                    else f'Audit: log {len(hand)} hand edit(s) to {ledger.LEDGER_FILE}')
+        from storyforge.gate import PENDING_PATH
         committed = commit_and_push(project_dir, message,
                                     [f'reference/{ledger.LEDGER_FILE}', audit.LOG_PATH,
-                                     audit.SNAPSHOT_PATH])
+                                     audit.SNAPSHOT_PATH, PENDING_PATH])
     if args.json_output:
         emit({'verdict': args.mark, 'marked': changed, 'dry_run': args.dry_run,
               'committed': committed, 'recheck': recheck, 'notes': digest.notes})
@@ -274,10 +280,62 @@ def _run(args, emit):
         verb = 'Would mark' if args.dry_run else 'Marked'
         lines = [f'{verb} {len(changed)} fact{"" if len(changed) == 1 else "s"} {args.mark}'
                  + (f': {", ".join(changed)}' if changed else ' (already marked)')]
-        for fid, scenes in recheck.items():
-            lines.append(f'  {fid}: ' + (f'named by the briefs of {", ".join(scenes)} — '
-                                         f're-check them' if scenes else 'no brief names it'))
+        for fid, info in recheck.items():
+            lines.append(f'  {fid}: established in {info["scene"] or "backstory"}' +
+                         (' (its prose still says it: revise it)' if info['scene'] else ''))
+            if info['recheck']:
+                lines.append(f'    {"would list" if args.dry_run else "listed"} for a re-check '
+                             f'(`storyforge check --pending`): {", ".join(info["recheck"])}')
+            for note in info['not_listed']:
+                lines.append(f'    not listed: {note}')
+            if info['unrelated']:
+                lines.append(f'    WARNING: its dependents can\'t all be found '
+                             f'({info["unrelated"]}): check the scenes that mention it')
+            if not (info['recheck'] or info['not_listed']):
+                lines.append('    nothing depends on it')
         emit('\n'.join(lines))
     if not committed:
         _fail(f'the marks are written to reference/{ledger.LEDGER_FILE} and '
               f'{audit.LOG_PATH}, but the commit failed: commit them by hand')
+
+
+def _reject_recheck(project_dir: str, rows: list[dict], fact_ids: list[str], *,
+                    list_them: bool) -> dict[str, dict]:
+    """For each rejected fact: its scene, the scenes to re-check (its
+    dependents, `ledger.dependents`, and the briefs naming it,
+    `audit.leaning_scenes`, that have prose and aren't waiting on the gate
+    for another reason), why any other is not listed, and why its
+    dependents can't all be traced. With `list_them`, the scenes are listed
+    in `working/gate-pending.csv` as `gate.RECHECK` (design §4)."""
+    from storyforge import gate
+    order = ledger.scene_order(project_dir)
+    briefs = audit.leaning_scenes(project_dir, fact_ids)
+    waiting = gate.pending(project_dir)
+    gone = gate._gone_scenes(project_dir)
+    out = {}
+    by_id = {r['id']: r for r in rows}
+    for fid in fact_ids:
+        one = ledger.dependents(rows, [fid], order)
+        scene = (by_id.get(fid, {}).get('scene_id') or '').strip()
+        candidates = sorted(set(one.scenes) | set(briefs.get(fid, [])), key=lambda s: order.get(s, -1))
+        info = {'scene': scene, 'recheck': [], 'not_listed': [],
+                'unrelated': one.unrelated.get(fid, '')}
+        for sid in candidates:
+            if sid == scene:
+                continue
+            if sid not in order or sid in gone:
+                info['not_listed'].append(f'{sid} (cut, merged or not a scene)')
+            elif not gate._has_prose(project_dir, sid):
+                info['not_listed'].append(f'{sid} (no prose yet)')
+            elif sid in waiting and waiting[sid]['command'] != gate.RECHECK:
+                info['not_listed'].append(f'{sid} (already waiting on the gate: '
+                                          f'{waiting[sid]["command"]})')
+            else:
+                info['recheck'].append(sid)
+        out[fid] = info
+    if list_them:
+        for fid, info in out.items():
+            for sid in info['recheck']:
+                if sid not in gate.pending(project_dir):
+                    gate.mark_pending(project_dir, sid, gate.RECHECK, f're-check: {fid} rejected')
+    return out
