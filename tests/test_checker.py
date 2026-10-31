@@ -206,7 +206,8 @@ class TestReview439:
         book = checker.Book.load(project_dir, SCENE)
         brief = checker._brief(book, project_dir, SCENE)
         assert 'village-vanished' not in brief.promised
-        assert 'knowledge_out: village-vanished' in brief.unknown
+        assert brief.stale == ['knowledge_out: village-vanished (village-vanished is rejected)']
+        assert 'village-vanished' not in brief.fields.get('knowledge_out', '')
 
     def test_an_api_failure_is_a_check_error(self, project_dir):
         def boom(path, body, **k):
@@ -252,3 +253,37 @@ def test_a_broken_promise_under_a_made_up_id_verifies_by_its_words(project_dir):
                     'fact_id': 'sleepless-dorren', 'established_quote': 'no sleep 36h'})
     result, _ = _run(project_dir, [_answer([f])])
     assert [x.fact_id for x in result.findings] == ['physical_state_out']
+
+
+class TestReview450:
+    """Fixes from #450's review."""
+
+    @pytest.mark.parametrize('quote', ['no', 'sleep', 'no sleep'])
+    def test_a_short_quote_under_a_made_up_id_does_not_verify(self, project_dir, quote):
+        TestBriefItemsInWords()._words(project_dir)
+        f = _finding(**{'kind': 'broken-promise', 'established_scene': '', 'scene_quote': '',
+                        'fact_id': 'invented-thing', 'established_quote': quote})
+        result, _ = _run(project_dir, [_answer([f])])
+        assert result.findings == [] and len(result.unverified) == 1
+
+    def test_an_entering_item_in_words_can_be_contradicted(self, project_dir):
+        from storyforge.csv_cli import update_field
+        update_field(f'{project_dir}/reference/scene-briefs.csv', SCENE,
+                     'physical_state_in', 'left arm in a sling')
+        f = _finding(established_scene='', fact_id='physical_state_in',
+                     established_quote='left arm in a sling')
+        result, _ = _run(project_dir, [_answer([f])])
+        assert len(result.findings) == 1
+
+    def test_without_disputes_the_schema_is_unchanged(self, project_dir):
+        _, bodies = _run(project_dir, [_answer()])
+        schema = bodies[0]['output_config']['format']['schema']
+        assert 'cleared' not in schema['properties']
+        assert 'may change' not in bodies[0]['messages'][0]['content']
+
+
+def test_a_word_or_two_of_a_named_field_does_not_verify(project_dir):
+    f = _finding(**{'kind': 'broken-promise', 'established_scene': '', 'scene_quote': '',
+                    'fact_id': 'outcome', 'established_quote': 'no'})
+    result, _ = _run(project_dir, [_answer([f])])
+    assert result.findings == [] and 'whole item' in result.unverified[0].problem

@@ -51,10 +51,19 @@ def _contradiction():
             'established_quote': 'Dorren Hayle pressed the brass calipers against the vellum'}
 
 
-def _gate(project_dir, tmp_path, commitments=(), findings=(), kept=(), **kw):
+def _gate(project_dir, tmp_path, commitments=(), findings=(), kept=(), cleared=None, **kw):
+    """`cleared`: the disputes the check clears; None clears every one it
+    is asked about (a request with disputes asks for `cleared`)."""
     def fake(path, body, **k):
         if 'tools' in body:
-            return _text({'findings': list(findings), 'kept': list(kept)})
+            reply = {'findings': list(findings), 'kept': list(kept)}
+            schema = body['output_config']['format']['schema']
+            if 'cleared' in schema['properties']:
+                prompt = body['messages'][0]['content']
+                asked = [line.split(':')[0][2:] for line in prompt.split(
+                    'may change\n\n')[1].split('\n\n')[1].split('\n') if line.startswith('- ')]
+                reply['cleared'] = asked if cleared is None else list(cleared)
+            return _text(reply)
         return _text({'commitments': list(commitments)})
     with patch('storyforge.api._api_request', side_effect=fake):
         return gate_scene(project_dir, SCENE, command=kw.pop('command', 'draft'),
@@ -115,11 +124,11 @@ class TestNothingWrittenUnlessClean:
         self._unchanged(project_dir, before)
 
     @pytest.mark.parametrize('recorded_here', [False, True])
-    def test_extraction_superseding_a_registry_fact_is_reported_not_halted(
+    def test_extraction_superseding_a_registry_fact_goes_to_the_checker(
             self, project_dir, tmp_path, recorded_here):
         """Ben, 2026-10-30 (E4 run 2): extraction marks added detail as
         superseding a registry fact, which stopped write at 8 of 23 scenes.
-        The link isn't applied, it's reported; the checker judges."""
+        The link isn't applied; the checker rules on it (#450 review)."""
         rows = ledger.load(project_dir)
         target = next(r for r in rows if not ledger.is_commitment(r))
         if recorded_here:
@@ -127,9 +136,29 @@ class TestNothingWrittenUnlessClean:
             ledger.save(project_dir, rows, command='test')
         result = _gate(project_dir, tmp_path, [_commitment(supersedes=target['id'])])
         assert result.halts == [] and result.committed
-        assert target['id'] in result.problems['disagrees'][0]
+        assert [d.fact_id for d in result.check.cleared] == [target['id']]
         assert result.proposed[0]['supersedes'] == ''
-        assert any(line.startswith('NOTE (disagrees)') for line in gate.report_lines(result))
+        assert any(target['id'] in line and target['statement'] in line
+                   for line in gate.report_lines(result) if line.startswith('NOTE (plan fact'))
+
+    def test_a_dispute_the_checker_gives_no_ruling_on_blocks(self, project_dir, tmp_path):
+        rows = ledger.load(project_dir)
+        target = next(r for r in rows if not ledger.is_commitment(r))
+        before = ledger.load(project_dir)
+        result = _gate(project_dir, tmp_path, [_commitment(supersedes=target['id'])], cleared=[])
+        assert [d.fact_id for d in result.unruled] == [target['id']]
+        assert not result.passed and ledger.load(project_dir) == before
+        assert any(line.startswith('UNRULED') for line in gate.report_lines(result))
+        assert gate.problems_to_fix(result)[0].startswith('UNVERIFIED (extraction thinks')
+
+    def test_a_dispute_ruled_a_contradiction_is_a_finding(self, project_dir, tmp_path):
+        rows = ledger.load(project_dir)
+        target = next(r for r in rows if not ledger.is_commitment(r))
+        finding = dict(_contradiction(), established_scene='', fact_id=target['id'],
+                       established_quote=target['statement'])
+        result = _gate(project_dir, tmp_path, [_commitment(supersedes=target['id'])],
+                       findings=[finding], cleared=[])
+        assert result.unruled == [] and len(result.findings) == 1 and not result.passed
 
     def test_a_checker_finding_against_a_registry_fact_still_blocks(self, project_dir, tmp_path):
         rows = ledger.load(project_dir)
@@ -156,11 +185,13 @@ class TestEnds:
         assert result.committed
         assert {r['id']: r for r in ledger.load(project_dir)}['bleeding']['resolves'] == SCENE
 
-    def test_ending_a_registry_state_is_reported_and_not_applied(self, project_dir, tmp_path):
+    def test_ending_a_registry_state_goes_to_the_checker_and_is_not_applied(
+            self, project_dir, tmp_path):
         self._state(project_dir, 'limp', 'extract')
         result = _gate(project_dir, tmp_path, [_commitment(ends=['limp'])])
         assert result.halts == [] and result.committed
-        assert 'limp' in result.problems['ends registry'][0]
+        assert [d.fact_id for d in result.check.cleared] == ['limp']
+        assert 'ends in this scene' in result.check.cleared[0].claim
         assert {r['id']: r for r in ledger.load(project_dir)}['limp']['resolves'] == ''
 
 

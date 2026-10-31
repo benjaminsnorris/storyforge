@@ -21,7 +21,7 @@ The registry is the **plan's vocabulary**: the facts a brief promises, by id. Co
 
 **What halts (decision 2's immediate tier):**
 - `audit.halting_conditions` on the proposed commitments: one supersedes or changes a binding `fixed` fact, or extraction flagged it low-confidence.
-- **A contradiction with the plan**, which `halting_conditions` can't see: a proposed commitment that supersedes or contradicts a registry fact recorded for this scene or in force entering it. Phase 4 reports this today (its `disagrees` and `ends registry` WARNINGs); the gate halts on it instead. The checker's contradictions with any binding fact are the same tier.
+- **A contradiction with the plan**, which `halting_conditions` can't see: a proposed commitment that supersedes or contradicts a registry fact recorded for this scene or in force entering it. Phase 4 reports this (its `disagrees` and `ends registry` WARNINGs); the gate gives each to the checker to rule on (see "Halting on the plan" below). The checker's contradictions with any binding fact are the same tier.
 
 **What the gate writes:**
 - **Commitments only**, as binding rows with their quotes, through `ledger.save(…, command=)`, so each is in the audit log. `introduced_by` is the command that wrote the prose (`draft`, `redraft`, `revise`, …; plan §3.1), not `commitments`.
@@ -31,7 +31,7 @@ The registry is the **plan's vocabulary**: the facts a brief promises, by id. Co
 ## What changes in code
 
 - **Telling the two apart.** Today a commitment is `introduced_by == ledger.COMMITMENTS_PASS`, which `ledger._in_view`, `extract.build_commitments_prompt` (the `, registry` mark), `extract.known_for_scene` and `schema.py`'s owner check test. Gate rows carry the drafting command instead, so that test becomes membership in a named set, `ledger.COMMITMENT_WRITERS` (`commitments` plus the gate's commands), behind one helper `ledger.is_commitment(row)`. A blank `introduced_by` stays a registry row, so a hand-added registry fact still reaches the views.
-- **Halting on the plan.** Superseded (Ben, 2026-10-30, after E4 run 2): extraction marks added detail as superseding a registry fact and a registry `resolves` is the author's estimate, so stopping on extraction's links stopped `write` at 8 of 23 scenes. Extraction's `supersedes`/`ends` on a registry fact are not applied and are reported; a contradiction with the plan is a checker finding, which blocks the commit.
+- **Halting on the plan.** Superseded (Ben, 2026-10-30, after E4 run 2): extraction marks added detail as superseding a registry fact and a registry `resolves` is the author's estimate, so stopping on extraction's links stopped `write` at 8 of 23 scenes. Extraction's `supersedes`/`ends` on a registry fact are not applied; each goes to the checker as a dispute it must rule on (a contradiction finding, or cleared), and one it gives no ruling blocks the commit (PR #450 review: the Marie mother/sister error in E4 run 1 was caught only by the old stop, not by the checker unprompted).
 - **Writing a quote.** A small ledger function, `ledger.fill_quote`, that sets a blank `quote` on a binding knowledge or physical registry row by id. A quote already there is left as it is (it returns False); a commitment row, another type, a non-binding row or an unknown id is refused. Saved through `ledger.save`, so the audit log shows it as `changed`.
 
 ## Rejected alternatives
