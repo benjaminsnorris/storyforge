@@ -279,8 +279,11 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
         system = build_shared_context(project_dir, model=model)
 
     from storyforge.prompts import prior_prose_blocks, prior_prose_mode
+    from storyforge import ledger
     try:
         prior_prose = prior_prose_mode(project_dir)
+        if prior_prose != 'none':
+            ledger.scene_order(project_dir)
     except ValueError as e:
         raise RedraftError(f'{len(scene_ids)} scene(s) not re-drafted: {e}') from e
     log(f'  Redrafting {len(scene_ids)} scenes from updated briefs (prior prose: '

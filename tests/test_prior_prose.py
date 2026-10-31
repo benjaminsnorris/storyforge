@@ -52,8 +52,27 @@ def test_mode_comes_from_the_override_then_the_yaml(project_dir):
     with open(path, 'a') as f:
         f.write('\ndrafting:\n  prior_prose: none\n')
     assert prompts.prior_prose_mode(project_dir) == 'none'
-    with open(path, 'a') as f:
-        f.write('')
     with pytest.raises(ValueError, match='prior_prose'):
         prompts.prior_prose_mode(project_dir, 'everything')
 
+
+
+def test_a_cut_or_merged_scene_is_never_earlier_prose(project_dir):
+    from storyforge.csv_cli import update_field
+    update_field(os.path.join(project_dir, 'reference', 'scenes.csv'), 'act2-sc01',
+                 'status', 'cut')
+    assert prompts.prior_scenes('act2-sc03', project_dir, 'window') == ['act1-sc01', 'new-x1']
+    assert 'act2-sc01' not in prompts.prior_scenes('act2-sc03', project_dir, 'full')
+
+
+def test_full_past_the_cap_falls_back_to_the_window_and_says_so(
+        project_dir, monkeypatch, capsys):
+    monkeypatch.setattr(prompts, 'FULL_MAX_WORDS', 10)
+    assert prompts.prior_scenes('act2-sc03', project_dir, 'full') == \
+        prompts.prior_scenes('act2-sc03', project_dir, 'window')
+    assert 'WARNING: act2-sc03' in capsys.readouterr().out
+
+
+def test_thread_signs_are_ignored(project_dir):
+    # act2-sc02 closes uncharted-reaches (-), which act2-sc01 opened (+)
+    assert 'act2-sc01' in prompts.prior_scenes('act2-sc02', project_dir, 'window')

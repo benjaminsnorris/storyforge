@@ -152,6 +152,18 @@ def main(argv=None):
             'the ledger. Each scene is listed in working/gate-pending.csv until '
             '`storyforge check` passes it.')
     # Cost forecasting
+    # Earlier prose needs a valid mode and every scene's place in the book:
+    # checked before anything is spent or set up
+    from storyforge import ledger
+    from storyforge.prompts import prior_prose_mode
+    try:
+        prior_prose = prior_prose_mode(project_dir, args.prior_prose)
+        if prior_prose != 'none':
+            ledger.scene_order(project_dir)
+    except ValueError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+
     if not args.dry_run:
         model = select_model('drafting')
         avg_words = _avg_word_count(metadata_csv)
@@ -213,12 +225,6 @@ def main(argv=None):
 
     # Detect briefs
     use_briefs = _detect_briefs(project_dir)
-    from storyforge.prompts import prior_prose_mode
-    try:
-        prior_prose = prior_prose_mode(project_dir, args.prior_prose)
-    except ValueError as e:
-        log(f'ERROR: {e}')
-        sys.exit(1)
     if write_mode == 'batch':
         log('Prior prose: none (batch drafts every scene at once)')
     elif write_mode == 'interactive':
