@@ -18,7 +18,9 @@ getting one fixed bundle.
   way drafting sees them: a fact that lives only in a bible ("Marie is
   Claire's sister") can be contradicted, and a finding against one names
   the file as its `established_scene`. A missing, empty or unfilled
-  template bible is left out (F-130), and the prompt names what is.
+  template bible is left out (F-130), and the prompt names what is. They
+  are sent uncapped, as drafting's shared context sends them, with their
+  own cache breakpoint; one that can't be read as UTF-8 is a `CheckError`.
 - Fails loud: a refusal, a reply cut off, a reply that isn't the schema, or
   a tool loop that never ends raises `CheckError`. There is no partial result.
 """
@@ -218,24 +220,32 @@ def reference_docs(project_dir: str) -> dict[str, str]:
     docs = {}
     for name in REFERENCE_DOCS:
         path = os.path.join(project_dir, 'reference', name)
-        if not os.path.isfile(path) or is_unfilled_template(path):
+        if not os.path.isfile(path):
             continue
-        with open(path, encoding='utf-8') as f:
-            text = f.read()
-        if text.strip():
+        try:
+            # utf-8-sig drops a BOM, as is_unfilled_template does
+            with open(path, encoding='utf-8-sig') as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError) as e:
+            raise CheckError(f'reference/{name} can\'t be read as UTF-8 text ({e}); '
+                             f'the checker needs it') from e
+        if text.strip() and not is_unfilled_template(path):
             docs[name] = text
     return docs
 
 
 def _system(book: Book) -> list[dict] | None:
-    """The bibles as the system prompt (the same for every scene, so the
-    request's cache reuses it across a run), or None when there are none."""
+    """The bibles as the system prompt, or None when there are none. It is
+    the same for every scene, and its own cache breakpoint lets each scene's
+    check read it from cache (the request's automatic breakpoint, at the end,
+    only serves the turns of one scene)."""
     if not book.reference:
         return None
     parts = [f'<reference file="{name}">\n{text.strip()}\n</reference>'
              for name, text in book.reference.items()]
     return [{'type': 'text', 'text': "The book's reference material, which every scene "
-             'must agree with:\n\n' + '\n\n'.join(parts)}]
+             'must agree with:\n\n' + '\n\n'.join(parts),
+             'cache_control': {'type': 'ephemeral'}}]
 
 
 def _reference_note(book: Book) -> str:
@@ -540,9 +550,13 @@ def _verify(f: Finding, book: Book, at: str, brief: Brief) -> str:
         return ('' if any(_whole_item(i, f.established_quote)
                           for i in brief.entering[f.fact_id])
                 else f'its established quote is not an item of the brief\'s {f.fact_id}')
-    if f.established_scene in book.reference:
-        return ('' if _contains(book.reference[f.established_scene], f.established_quote)
-                else f'its established quote is not in {f.established_scene}')
+    name = os.path.basename(f.established_scene)
+    if name in book.reference:
+        f.established_scene = name
+        return ('' if _contains(book.reference[name], f.established_quote)
+                else f'its established quote is not in {name}')
+    if name in REFERENCE_DOCS:
+        return f'{name} was not given to the checker (missing, empty or still the template)'
     if f.established_scene:
         if f.established_scene not in book.prose:
             return f'{f.established_scene!r} is not a scene'
