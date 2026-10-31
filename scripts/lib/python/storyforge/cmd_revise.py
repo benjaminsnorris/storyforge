@@ -260,10 +260,16 @@ def _resolve_targets_to_scene_ids(targets, valid_scene_ids, ref_dir):
 def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
     """Re-draft scenes from their updated briefs and commit those written.
 
+    Scenes go in reading order, and each redraft is gated as ``write``
+    gates a draft (``_gate_redraft``). Like ``write``, redrafting stops at
+    the first scene the gate doesn't pass: the scenes after it would be
+    checked against a ledger missing its facts.
+
     Raises RedraftError (after that commit) naming every scene whose prose
-    was not re-drafted: no prompt, or a reply refused, cut off or unsafe per
-    ``cmd_write._extract_scene_from_response``. Its brief changed but its
-    prose did not, so the run must not report success."""
+    was not re-drafted (no prompt, or a reply refused, cut off or unsafe per
+    ``cmd_write._extract_scene_from_response``: its brief changed but its
+    prose did not), a redraft the gate didn't pass, and the scenes not
+    reached after it, so the run must not report success."""
     from storyforge.cmd_write import _build_prompt, _extract_scene_from_response
     from storyforge.api import invoke_to_file as _invoke_to_file, RefusalError
 
@@ -278,8 +284,13 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
     failed: list[str] = []
     written = 0
 
+    scene_ids = _reading_order(project_dir, scene_ids)
     for i, sid in enumerate(scene_ids, 1):
         log(f'    [{i}/{len(scene_ids)}] Redrafting: {sid}')
+        stop = _leaning(project_dir, sid)
+        if stop:
+            failed += [stop] + _not_reached(scene_ids[i:])
+            break
         prompt = _build_prompt(sid, project_dir, 'full', use_briefs=True,
                                system_context=bool(system))
         if not prompt:
@@ -301,7 +312,10 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
             failed.append(f'{sid} ({reason})')
         else:
             written += 1
-            _mark_ungated(project_dir, sid)
+            why = _gate_redraft(project_dir, sid, scene_file, log_dir)
+            if why:
+                failed += _stopped_at(sid, why, scene_ids[i:])
+                break
 
     commit_and_push(
         project_dir,
@@ -313,19 +327,55 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
         raise RedraftError(f'{len(failed)} scene(s) not re-drafted: {"; ".join(failed)}')
 
 
-def _mark_ungated(project_dir: str, scene_id: str) -> None:
-    """A redraft isn't gated yet (Phase 4 routes revision through the gate):
-    say so, and list the scene in `gate.pending` so `write` won't draft past
-    it until `storyforge check` passes it. Its earlier facts stay in the
-    ledger and may no longer match the prose."""
+def _gate_redraft(project_dir: str, scene_id: str, scene_file: str, log_dir: str) -> str:
+    """Gate the redraft just written to `scene_file` as `write` gates a
+    draft (`cmd_write._gate_drafted_scene`: fix once, re-check; the fixed
+    prose is written back, the scene's facts replace its earlier ones in the
+    ledger on a pass). Returns '' when it passed, else why not; the scene is
+    then listed in `gate.pending` with its prose kept."""
+    from storyforge import cmd_write
+    passed, why = cmd_write._gate_drafted_scene(project_dir, scene_id, scene_file,
+                                                'redraft', log_dir)
+    return '' if passed else why
+
+
+def _reading_order(project_dir: str, scene_ids: list[str]) -> list[str]:
+    """`scene_ids` in reading order (revise stops up front on a scene
+    without a numeric seq, `ledger.exit_if_unordered`)."""
+    from storyforge import ledger
+    order = ledger.scene_order(project_dir)
+    return sorted(scene_ids, key=lambda s: (s not in order, order.get(s, 0), s))
+
+
+def _leaning(project_dir: str, scene_id: str) -> str:
+    """Why `scene_id` can't be redrafted before spending ('' when it can):
+    later facts lean on its commitments, which the gate would replace (it
+    can't yet: Phase 4's re-check). `write` stops on the same check."""
     from storyforge import gate
-    log(f'    WARNING: the redraft of {scene_id} is not gated; run '
-        f'`storyforge check {scene_id}` (listed in {gate.PENDING_PATH})')
-    try:
-        gate.mark_pending(project_dir, scene_id, 'redraft',
-                          'redrafted by revise, not gated: run storyforge check')
-    except (gate.GateError, OSError) as e:
-        log(f'    ERROR: could not list {scene_id} in {gate.PENDING_PATH}: {e}')
+    leaning = gate.leaning_on(project_dir, scene_id)
+    if not leaning:
+        return ''
+    log(f'    ERROR: Not redrafting {scene_id}: later facts lean on its commitments '
+        f'({", ".join(leaning[:5])}), and the gate cannot replace them yet. Revise it '
+        f'by hand and run `storyforge check {scene_id}`.')
+    return f'{scene_id} (later facts lean on its commitments; not redrafted)'
+
+
+def _stopped_at(scene_id: str, why: str, rest: list[str]) -> list[str]:
+    """What `RedraftError` says when the gate stops a run of redrafts."""
+    log(f'    ERROR: the gate did not pass the redraft of {scene_id}: {why}')
+    return [f'{scene_id} (redrafted, but the gate did not pass it and it is listed in '
+            f'working/gate-pending.csv: {why})'] + _not_reached(rest)
+
+
+def _not_reached(rest: list[str]) -> list[str]:
+    out = []
+    if rest:
+        log(f'    Stopping: {len(rest)} later scene(s) not redrafted, as write stops '
+            f'at a scene the gate does not pass')
+        out.append(f'{", ".join(rest)} (not redrafted: redrafting stops at a scene the '
+                   f'gate does not pass)')
+    return out
 
 
 def _report_redraft_error(e: 'RedraftError') -> None:
@@ -1413,7 +1463,10 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     ``parsing.unsafe_scene_reason`` (truncated, or a collapsed word count) is
     never written. Every scene that could not be re-drafted is collected and
     RedraftError is raised after the rest are written, since its rewritten
-    brief and its prose now disagree. Returns number of scenes re-drafted.
+    brief and its prose now disagree. Scenes go in reading order and each
+    redraft is gated (``_gate_redraft``); redrafting stops at the first one
+    the gate doesn't pass, which RedraftError names with the scenes not
+    reached. Returns number of scenes re-drafted.
     """
     from storyforge.prompts import build_scene_prompt
     from storyforge.common import get_coaching_level, build_shared_context
@@ -1428,12 +1481,18 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     # Build shared context for prompt caching across all re-drafts
     system = build_shared_context(project_dir, model=model)
 
-    for scene_id in scene_ids:
+    log_dir = os.path.join(project_dir, 'working', 'logs')
+    scene_ids = _reading_order(project_dir, scene_ids)
+    for i, scene_id in enumerate(scene_ids, 1):
         scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
         if not os.path.isfile(scene_file):
             log(f'  Skipping re-draft of {scene_id} (not yet drafted)')
             continue
 
+        stop = _leaning(project_dir, scene_id)
+        if stop:
+            failed += [stop] + _not_reached(scene_ids[i:])
+            break
         log(f'  Re-drafting scene: {scene_id}')
         with open(scene_file, encoding='utf-8') as f:
             original_prose = f.read()
@@ -1479,10 +1538,12 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
 
         with open(scene_file, 'w', encoding='utf-8') as f:
             f.write(preserved['text'])
-        _mark_ungated(project_dir, scene_id)
-
         count += 1
         log(f'  Re-drafted {scene_id}')
+        why = _gate_redraft(project_dir, scene_id, scene_file, log_dir)
+        if why:
+            failed += _stopped_at(scene_id, why, scene_ids[i:])
+            break
 
     if failed:
         raise RedraftError(f'{len(failed)} scene(s) not re-drafted: {"; ".join(failed)}')
