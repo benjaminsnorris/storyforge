@@ -787,7 +787,7 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
         reason = _extract_scene_from_response(
             scene_json, _output_file(project_dir, scene_id, coaching),
-            prose=coaching == 'full')
+            prose=False)  # batch writes briefs and constraints only
         if reason:
             # Keep the paid reply: the batch directory is removed below.
             kept = os.path.join(log_dir, f'drafting-{scene_id}.json')

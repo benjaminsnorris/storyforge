@@ -28,8 +28,11 @@ Each scene is drafted with the earlier prose ``write`` sends
 (``prompts.prior_prose_blocks``; the project's mode, or
 ``STORYFORGE_E4_PRIOR_PROSE`` for the context-size experiment).
 
-Each draft is gated as ``write`` gates it (``gate.gate_and_fix``) before
-the next prompt is built; ``gate_fixed`` and ``gate_failed`` count the
+With ``STORYFORGE_E4_PARALLEL=1`` (``PARALLEL_ENV``) E4 drafts as
+``write --batch`` would have: no earlier prose and no gate, the parallel side
+of Phase 3's comparison (``write --batch`` now refuses prose because of it).
+Otherwise each draft is gated as ``write`` gates it (``gate.gate_and_fix``)
+before the next prompt is built; ``gate_fixed`` and ``gate_failed`` count the
 scenes the fix changed and those still failing after it.
 
 Stated simplifications: a scene still failing the gate doesn't stop E4 as it

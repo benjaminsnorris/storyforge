@@ -124,6 +124,20 @@ class TestGatedWrite:
         assert exc.value.code == 1 and ran == []
         assert '--batch is for coaching coach or strict' in capsys.readouterr().out
 
+    @pytest.mark.parametrize('extra', [['--interactive'], ['--dry-run']])
+    def test_batch_prose_is_refused_with_other_flags_too(self, setup, capsys, extra):
+        with pytest.raises(SystemExit) as exc:
+            main(['--batch', *extra, '--scenes', 'act1-sc01'])
+        assert exc.value.code == 1
+        assert '--batch is for coaching coach or strict' in capsys.readouterr().out
+
+    def test_batch_prose_is_refused_when_the_level_comes_from_the_environment(
+            self, setup, monkeypatch, capsys):
+        monkeypatch.setenv('STORYFORGE_COACHING', 'full')
+        with pytest.raises(SystemExit):
+            main(['--batch', '--scenes', 'act1-sc01'])
+        assert '--batch is for coaching' in capsys.readouterr().out
+
     def test_batch_runs_for_coaching_briefs(self, setup, monkeypatch):
         ran = []
         monkeypatch.setattr('storyforge.cmd_write._run_batch_mode',

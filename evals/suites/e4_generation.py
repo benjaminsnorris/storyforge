@@ -9,6 +9,12 @@ from storyforge.gate import report_lines as gate_lines
 from harness import Gate, Suite, SuiteOutput
 
 
+#: gate_measure's figures that mean nothing when no scene was gated
+PARALLEL_DROPPED = ('gate_caught', 'gate_missed', 'gate_false_alarm', 'gate_catch_rate',
+                    'scenes_passed', 'contradictions_passed', 'cp10k_passed',
+                    'contradictions_in_failed', 'scenes_to_first_gate_failure')
+
+
 def run(ctx):
     project = e4.project(ctx.work_dir)
     rows = e4.act_scenes(project)
@@ -38,8 +44,8 @@ def run(ctx):
             by_code.update(c['code'] for c in found['contradictions'])
         notes.append(f'{sid}: {len(drafts[sid].split())} words, '
                      f'{len(found["contradictions"])} contradiction(s), '
-                     f'{len(found["broken_promises"])} broken promise(s), gate '
-                     f'{labels[sid].replace("_", " ")}'
+                     f'{len(found["broken_promises"])} broken promise(s)'
+                     + ('' if parallel else f', gate {labels[sid].replace("_", " ")}')
                      + ('' if sid in headline else ' (after write would have stopped)')
                      + ''.join(f'\n    {c["code"]}: {c.get("fact", "")[:160]}'
                                for c in found['contradictions'])
@@ -47,9 +53,10 @@ def run(ctx):
                                for p in found['broken_promises']))
     notes += [f'checker {f["scene_id"]}: {f["message"][:160]}' for f in flags]
     gate_fixed = [s for s, g in gated.items() if g.fixed]
-    notes.append(f'gate: {len(gated)} scene(s) gated, {len(gate_fixed)} fixed, '
-                 f'{len(gate_failed)} still failing after the fix (write would stop at '
-                 f'the first; E4 drafts on): {", ".join(gate_failed) or "none"}')
+    if not parallel:
+        notes.append(f'gate: {len(gated)} scene(s) gated, {len(gate_fixed)} fixed, '
+                     f'{len(gate_failed)} still failing after the fix (write would stop at '
+                     f'the first; E4 drafts on): {", ".join(gate_failed) or "none"}')
     for sid in gate_failed:
         notes += [f'  {sid}: {line[:200]}' for line in gate_lines(gated[sid].result)]
     notes.append('cp10k, contradictions, broken_promises, bps and words count the scenes '
@@ -69,13 +76,14 @@ def run(ctx):
     notes.append('Judge stands in for the plan\'s human spot-check (still owed). '
                  + ('Drafted as write --batch drafts (STORYFORGE_E4_PARALLEL=1): no earlier '
                     'prose and no gate, so no prompt depends on another scene\'s draft; the '
-                    'Batch API itself is refused under a cassette. The gate_* figures are '
-                    'left out (nothing was gated).' if parallel else
+                    'Batch API itself is refused under a cassette. The gate figures (gate_*, *_passed, '
+                    'contradictions_in_failed, scenes_to_first_gate_failure) are left out: '
+                    'nothing was gated, so the headline counts stop only at a refusal.' if parallel else
                     'Drafted sequentially and gated, as write does by default; batch mode '
                     'is refused under a cassette.'))
     m = measure['metrics']
     if parallel:
-        m = {k: v for k, v in m.items() if not k.startswith('gate_')}
+        m = {k: v for k, v in m.items() if k not in PARALLEL_DROPPED}
     code_counts = {code: {'contradictions': n} for code, n in by_code.items()}
     code_counts['PRM'] = {'broken_promises': m['broken_promises']}
     return SuiteOutput(
@@ -85,8 +93,8 @@ def run(ctx):
             'target_words_all': target,
             'checker_flags': len(flags),
             'cp10k_checker_all': e4.per_10k(len(flags), m['words_all']),
-            'gate_fixed': len(gate_fixed),
-            'gate_failed': len(gate_failed),
+            **({} if parallel else {'gate_fixed': len(gate_fixed),
+                                    'gate_failed': len(gate_failed)}),
             'length_drift': e4.length_drift(rows, drafts),
             'voi': e4.mean_voice(list(drafts.values())),
             'voi_author': e4.mean_voice([original[s] for s in scene_ids
