@@ -108,7 +108,8 @@ Run 4's 26 contradictions: 12 in scenes the gate failed, 14 in scenes it passed,
   - **Done:** `reference/commitments.csv` (`storyforge/ledger.py`) replaces `knowledge.csv` and `physical-states.csv`, and every consumer uses it (#416, #417). All seven books are migrated and merged on their `main`. Derived per-character state exists (`ledger.active_states`). The rubric-driven extraction is extract **phase 4** (#424). The audit log and `storyforge audit` exist (#423). `storyforge export` writes the versioned bundle with `dashboard_data` folded in (#422).
   - **Success criteria (plan §5):** E3 recall ≥ 0.85: **met, 0.898** (was 0.286). Export round-trips: **met** (`evals/export_check.py`: 7 of 7 books byte-identical). E5 mismatches below baseline: **met, 64 → 23** (6.4 → 2.3 per scene; v1.97.0). E4 did not get worse (CP10k 16.1 → 14.2, contradictions 35 → 31, 23/23 drafted). E8 unchanged (reintroduced 6, per 10k words 1.74 → 1.69).
   - **Drafting reads the ledger** (v1.97.0): `build_scene_prompt_from_briefs` (write and revise's redraft-from-brief) has an "Established Facts" section from `ledger.drafting_slice`: for the POV, on-stage characters and location, `pronouns` from characters.csv, `fixed` facts before the scene, states entering it (at most `prompts.MAX_STATES_PER_SUBJECT` = 25 each, the rest named), and the scene's own facts ("the brief wins where they differ"). E5 now runs extract phase 4 over its sample first (10 Sonnet calls), so the redraft sees the prose's commitments. **Not like-for-like with the old E5 number:** part of the fall is the redraft being shown facts read off the prose it is judged against, which is the design (a pinned fact should survive a redraft). The character bible is still sent whole: slimming it to fixed facts + voice is author data, left for Ben.
-- **Phase 3 (the gate and sequential loop): next** (Next steps 1). Phase 4's rubric was tightened and linked to the registry (F-127/F-128, v1.98.0) and re-scored on *Carol* (below).
+- **Phase 3 (the gate and sequential loop): done** (v1.114.0; see **Latest**): E4 CP10k 3.1 and 3 broken promises (targets ≤ 7.1, ≤ 3), E2 checker precision 0.81 (≥ 0.8); sequential kept, `--batch` refuses prose.
+- **Phase 4 (safe revision): in progress** (v1.117.0). Design and Ben's decisions: `docs/plans/2026-10-31-phase4-safe-revision-design.md`; its "PRs, in order" is the plan. Done: PR 1 (#466), PR 2 (#468), PR 3a (#470). **Next: PR 3b, the re-check-set eval** (see **Latest**, Next), then PR 4 (every prose pass through the gate, E8 to zero), PR 5 (rewrite-from-ledger, E5).
 
 **What exists now, for orientation** (contracts in `docs/agent-reference.md`):
 - **Ledger:** `ledger.load`/`save(…, command=)` (every save appends to `working/audit-log.csv`); typed views `knowledge_view`/`physical_view` (registry rows only, which briefs reference by id); `active_states`, `established_before`, `scene_order`, `drafting_slice` (a scene's share, for the drafting prompt); `LedgerError` / `NotMigratedError`.
@@ -126,9 +127,12 @@ Run 4's 26 contradictions: 12 in scenes the gate failed, 14 in scenes it passed,
 | — E4, E6 | done | #361, #363, #397, #399 |
 | 5 Phase 1 | done | #359–#405 |
 | 6 Phase 2 | done | #401, #416, #417, #420–#424, #430, #432 |
-| 7 Phase 3 | steps 1–5 done (design, gate, fix + check, gated write, context size); parallel vs sequential open | #436, #437, #439, #443, #450, #453–#458 |
+| 7 Phase 3 | done | #436, #437, #439, #443, #450, #453–#458, #461–#463 |
+| 8 Phase 4 | PRs 1, 2, 3a done; 3b (eval), 4, 5 next | #465, #466, #468, #470 |
 
 ## Next steps, in order (handoff for a new session)
+
+**What to do next is in Latest (top of this file) and the Phase 4 design note.** This section keeps the setup notes (**Before starting**, still current) and the record of how Phase 3 and #440 were done; item 1 below is history.
 
 **Before starting:**
 - **Environment:** use `~/.venvs/storyforge` (Python 3.12, has pytest). Put it first on `PATH` for the suite, because three `test_illustrate_cmd.py` tests shell out to `python3`, which is 3.9 here. The book repos under `~/Developer` are read-only unless Ben says otherwise: work on copies.
@@ -157,7 +161,7 @@ Run 4's 26 contradictions: 12 in scenes the gate failed, 14 in scenes it passed,
   - **One real disagreement found:** Carol's migrated `fan-died-leaving-nephew-fred` says Fan "died young"; the prose says "She died a woman". The report path worked (phase 4 flagged it, unlinked). The other two flags were the same fact worded differently: noise to cut in the gate.
 - **Still open from Phase 2:** fill `characters.csv` `pronouns` (phase 4 output or a hone gap; drafting already shows it). Ben wants phase 4 run on the seven books (and the classics, about $75) now that F-127/F-128 landed; **his call when**, given the precision above.
 
-**1. Phase 3: the gate and sequential loop** (plan §3.2–3.3, §5 Phase 3, decisions 2 and 4; chunk 7). Success: **E4 CP10k and BPS halve** against the last pre-gate numbers at the 5e9bdf39 pin (v1.98.0 baseline: CP10k 14.2, BPS 0.26 = 6 broken promises in 23 scenes; so ≤ 7.1 and ≤ 3 promises), and **E2 precision ≥ 0.8** (today 0 / 0.40 / 0.03 for Carol / drift / validate). Then parallel waves vs sequential on E4; keep parallel only if equal.
+**1. (Done, history) Phase 3: the gate and sequential loop** (plan §3.2–3.3, §5 Phase 3, decisions 2 and 4; chunk 7). Success: **E4 CP10k and BPS halve** against the last pre-gate numbers at the 5e9bdf39 pin (v1.98.0 baseline: CP10k 14.2, BPS 0.26 = 6 broken promises in 23 scenes; so ≤ 7.1 and ≤ 3 promises), and **E2 precision ≥ 0.8** (today 0 / 0.40 / 0.03 for Carol / drift / validate). Then parallel waves vs sequential on E4; keep parallel only if equal.
 
 Suggested order, one PR each (each with a reviewer, evals re-recorded without asking):
 1. **Done: the merge of registry facts and commitments** (`docs/plans/2026-10-30-gate-ledger-design.md`; Ben decided 2026-10-30). Two roles in one ledger: registry rows are the plan's vocabulary (what briefs name), commitments are what the prose said. The gate checks prose against every binding fact in force (both kinds) and the brief's promises (an unestablished `knowledge_out` / `physical_state_out` is a broken promise), halts on a contradiction with a registry fact, writes only commitments (`introduced_by` = the drafting command, so `ledger.is_commitment` replaces the `== COMMITMENTS_PASS` tests), and fills a confirmed registry fact's blank `quote`.
