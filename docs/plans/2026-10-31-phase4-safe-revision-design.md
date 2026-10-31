@@ -33,6 +33,7 @@ For the changed facts, take the dependents in reading order and **re-gate each l
 
 - **The redraft itself is no longer refused** for leaning facts: the re-check replaces the refusal. The leaning rows are replaced when their scene is re-gated, so no link is left dangling once the re-check finishes.
 - **Order:** the redrafted scene commits first, then each dependent in reading order, one at a time (each sees the ledger the earlier ones left).
+- **From PR 1's review, for this step:** skip dependents with no prose yet (`gate_scene` raises on them); report `Dependents.unrelated` (a fact with no subject and no link, such as a knowledge registry fact) rather than skip it silently; compare `ledger.ended_by` before and after each re-gate (a scene that no longer ends an earlier state changed it); and carry links by the old-to-new fact match, not by id (`extract.commitment_id` uses six words, so ids can swap between two similar facts).
 - **Atomicity:** the ledger is consistent after each step, not only at the end. A run interrupted mid-cascade leaves the remaining dependents listed in `working/gate-pending.csv` with the reason "re-check after {scene}", and `write`/`revise` refuse to draft past a pending scene, as today.
 
 ### 4. Reject-fact flow

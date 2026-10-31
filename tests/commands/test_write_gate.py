@@ -204,7 +204,7 @@ class TestReview443:
         with pytest.raises(SystemExit):
             main(['--force', '--scenes', 'act1-sc01'])
         assert calls == []
-        assert 'later facts lean on its commitments' in capsys.readouterr().out
+        assert 'later facts or ends depend on its commitments' in capsys.readouterr().out
         assert gate.pending(setup) == {}
 
     def test_a_pending_id_that_is_no_longer_a_scene_warns_and_does_not_block(
@@ -342,7 +342,7 @@ class TestReviseRedraftsAreGated:
                                               ['act1-sc01', 'act1-sc02'],
                                               leaning={'act1-sc01'})
         assert drafted == [] and gated == []
-        assert 'act1-sc01 (later facts lean on its commitments' in error
+        assert 'act1-sc01 (later facts or ends depend on its commitments' in error
         assert 'act1-sc02 (not redrafted' in error
 
     def test_the_hone_fix_redraft_is_gated_and_stops_too(self, project_dir, monkeypatch):
