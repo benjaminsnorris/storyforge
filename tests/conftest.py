@@ -40,6 +40,19 @@ def _stub_model_catalog(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_api(monkeypatch):
+    """No test reaches the network: `api`'s HTTP call fails the test instead
+    of spending (a test that mocks `urlopen`, `_live_request`, `_api_request`
+    or a caller replaces or never reaches this)."""
+    import storyforge.api as api
+
+    def live(*a, **k):
+        raise AssertionError('a test tried a live API request (mock api._api_request '
+                             'or the function calling it)')
+    monkeypatch.setattr(api, 'urlopen', live)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_fallback_replies(monkeypatch):
     """api records refusal-fallback replies per process; keep them per test."""
     import storyforge.api as api
