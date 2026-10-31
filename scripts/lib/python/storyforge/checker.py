@@ -405,7 +405,9 @@ Return every finding, and an empty list when the scene is clean."""
 def _verify(f: Finding, book: Book, at: str, brief: Brief) -> str:
     """Why `f`'s quotes don't hold up ('' when they do). A broken promise
     must name a promise the brief makes: a promised registry id, or a
-    promise field whose text holds its `established_quote`."""
+    promise field whose text holds its `established_quote`; under another
+    id, a quote found in a promise field's text verifies it, and `fact_id`
+    becomes that field."""
     if f.scene_quote and not _contains(book.prose[at], f.scene_quote):
         return 'its scene quote is not in the scene'
     if f.kind == 'broken-promise':
@@ -414,6 +416,12 @@ def _verify(f: Finding, book: Book, at: str, brief: Brief) -> str:
         if f.fact_id in brief.fields:
             return ('' if _contains(brief.fields[f.fact_id], f.established_quote)
                     else f'its promised item is not in the brief\'s {f.fact_id}')
+        # A made-up id for an item the brief does make: found by its words
+        field_ = next((col for col, text in brief.fields.items()
+                       if f.established_quote and _contains(text, f.established_quote)), '')
+        if field_:
+            f.fact_id = field_
+            return ''
         return f'{f.fact_id!r} is not a promise of this scene\'s brief'
     if not f.scene_quote:
         return 'a contradiction with no scene quote'

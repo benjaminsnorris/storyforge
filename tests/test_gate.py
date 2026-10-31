@@ -114,28 +114,31 @@ class TestNothingWrittenUnlessClean:
         assert [h.kind for h in result.halts] == ['supersedes-fixed']
         self._unchanged(project_dir, before)
 
-    def test_superseding_a_registry_fact_in_force_is_a_plan_contradiction(
-            self, project_dir, tmp_path):
-        """Review of #439 (M4): the design note halts on superseding a
-        registry fact in force entering the scene, not only one recorded for
-        it, as ending one already did."""
+    @pytest.mark.parametrize('recorded_here', [False, True])
+    def test_extraction_superseding_a_registry_fact_is_reported_not_halted(
+            self, project_dir, tmp_path, recorded_here):
+        """Ben, 2026-10-30 (E4 run 2): extraction marks added detail as
+        superseding a registry fact, which stopped write at 8 of 23 scenes.
+        The link isn't applied, it's reported; the checker judges."""
         rows = ledger.load(project_dir)
-        before = ledger.load(project_dir)
-        result = _gate(project_dir, tmp_path, [_commitment(supersedes=rows[0]['id'])])
-        assert [(h.kind, h.fact_id) for h in result.halts] == [
-            ('plan-contradiction', result.proposed[0]['id'])]
-        assert rows[0]['id'] in result.halts[0].detail
-        self._unchanged(project_dir, before)
+        target = next(r for r in rows if not ledger.is_commitment(r))
+        if recorded_here:
+            target['scene_id'] = SCENE
+            ledger.save(project_dir, rows, command='test')
+        result = _gate(project_dir, tmp_path, [_commitment(supersedes=target['id'])])
+        assert result.halts == [] and result.committed
+        assert target['id'] in result.problems['disagrees'][0]
+        assert result.proposed[0]['supersedes'] == ''
+        assert any(line.startswith('NOTE (disagrees)') for line in gate.report_lines(result))
 
-    def test_disagreeing_with_the_scenes_registry_fact_is_a_plan_contradiction(
-            self, project_dir, tmp_path):
+    def test_a_checker_finding_against_a_registry_fact_still_blocks(self, project_dir, tmp_path):
         rows = ledger.load(project_dir)
-        here = next(r for r in rows if not ledger.is_commitment(r))
-        here['scene_id'] = SCENE
-        ledger.save(project_dir, rows, command='test')
-        result = _gate(project_dir, tmp_path, [_commitment(supersedes=here['id'])])
-        assert [h.kind for h in result.halts] == ['plan-contradiction']
-        assert not result.committed
+        reg = next(r for r in rows if not ledger.is_commitment(r))
+        finding = dict(_contradiction(), established_scene='', fact_id=reg['id'],
+                       established_quote=reg['statement'])
+        before = ledger.load(project_dir)
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[finding])
+        assert not result.passed and ledger.load(project_dir) == before
 
 
 class TestEnds:
@@ -153,11 +156,11 @@ class TestEnds:
         assert result.committed
         assert {r['id']: r for r in ledger.load(project_dir)}['bleeding']['resolves'] == SCENE
 
-    def test_ending_a_registry_state_its_resolves_does_not_end_here_halts(
-            self, project_dir, tmp_path):
+    def test_ending_a_registry_state_is_reported_and_not_applied(self, project_dir, tmp_path):
         self._state(project_dir, 'limp', 'extract')
         result = _gate(project_dir, tmp_path, [_commitment(ends=['limp'])])
-        assert [h.kind for h in result.halts] == ['plan-contradiction']
+        assert result.halts == [] and result.committed
+        assert 'limp' in result.problems['ends registry'][0]
         assert {r['id']: r for r in ledger.load(project_dir)}['limp']['resolves'] == ''
 
 

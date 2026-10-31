@@ -242,3 +242,13 @@ class TestBriefItemsInWords:
                         'established_quote': 'no sleep 36h'})
         result, _ = _run(project_dir, [_answer([f])])
         assert len(result.findings) == 1 and result.unverified == []
+
+
+def test_a_broken_promise_under_a_made_up_id_verifies_by_its_words(project_dir):
+    """E4 run 2: the checker named a word item 'gravel-abrasions-claire'
+    and the finding was rejected as unverified, stopping the gate."""
+    TestBriefItemsInWords()._words(project_dir)
+    f = _finding(**{'kind': 'broken-promise', 'established_scene': '', 'scene_quote': '',
+                    'fact_id': 'sleepless-dorren', 'established_quote': 'no sleep 36h'})
+    result, _ = _run(project_dir, [_answer([f])])
+    assert [x.fact_id for x in result.findings] == ['physical_state_out']

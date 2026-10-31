@@ -6,12 +6,14 @@ For one scene's prose, `gate_scene` runs:
    (`extract.build_commitments_prompt`), offered the facts in force entering
    it and the registry facts recorded for it (`extract.known_for_scene`).
 2. **Halt** on decision 2's immediate tier: `audit.halting_conditions` on the
-   proposed rows (a `fixed` fact superseded or changed), plus
-   `plan-contradiction`: the prose supersedes a registry fact (one recorded
-   for the scene, or in force entering it), or ends a registry state its
-   `resolves` doesn't end there. The third trigger, a fact extraction
-   flagged low-confidence, is not wired: phase 4's schema has no confidence
-   yet (adding it re-records E3 and E5).
+   proposed rows (a `fixed` fact superseded or changed). The third trigger,
+   a fact extraction flagged low-confidence, is not wired: phase 4's schema
+   has no confidence yet (adding it re-records E3 and E5). A contradiction
+   with the plan is the checker's to find (step 3), not extraction's
+   (Ben, 2026-10-30): extraction marks added detail as superseding a
+   registry fact, and a registry `resolves` is the author's estimate, so a
+   `supersedes` or `ends` it proposes on a registry fact is not applied and
+   is reported (`disagrees`, `ends registry` in `REPORTED`).
 3. **Check** the scene against the book and its brief (`checker.check_scene`):
    contradictions and broken promises, by code.
 4. **Commit** only when nothing halted, extraction left nothing unresolved
@@ -47,14 +49,14 @@ from storyforge.checker import CheckError, CheckResult, Finding, check_scene
 #: without the extract pass)
 GATE_COMMANDS = tuple(w for w in ledger.COMMITMENT_WRITERS if w != ledger.COMMITMENTS_PASS)
 
-#: Extraction problems that mean the prose contradicts the plan
-PLAN_PROBLEMS = ('disagrees', 'ends registry')
 #: Extraction problems that would commit a wrong row: they block the commit
 UNRESOLVED = ('quote', 'no quote', 'supersedes', 'ends', 'ends again')
-#: Extraction problems reported on a pass: a subject not in the registries
+#: Extraction problems reported on a pass: a link extraction proposed to a
+#: registry fact, not applied (`disagrees`, `ends registry`: the checker
+#: judges contradictions with the plan), a subject not in the registries
 #: (an object has none), facts left out past the offer cap, facts tied to a
 #: scene id that isn't a scene
-REPORTED = ('subject', 'cap', 'unplaced')
+REPORTED = ('disagrees', 'ends registry', 'subject', 'cap', 'unplaced')
 
 
 class GateError(RuntimeError):
@@ -139,29 +141,6 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
     return commitment_rows(found, scene_id, prose, rows, known, recorded, subjects,
                            introduced_by, problems, own_writers=ledger.COMMITMENT_WRITERS,
                            registry_is_plan=True)
-
-
-def _plan_halts(problems: dict[str, list[str]],
-                rows: list[dict[str, str]]) -> list[audit.Halt]:
-    """`plan-contradiction` halts from `commitment_rows`' problem strings:
-    `disagrees` is `scene: registry-id (prose: proposed-id)`, `ends registry`
-    is `scene: registry-id (resolves: ...)`. A halt's `fact_id` is the
-    proposed fact where there is one, else the registry fact."""
-    import re
-    halts = []
-    for item in problems.get('disagrees', []):
-        m = re.match(r'[^:]+: (\S+) \(prose: (\S+)\)$', item)
-        reg, proposed = (m.group(1), m.group(2)) if m else (item, item)
-        halts.append(audit.Halt('plan-contradiction', proposed,
-                                f'the prose supersedes the registry fact {reg} '
-                                f'({_statement(rows, reg)!r})'))
-    for item in problems.get('ends registry', []):
-        m = re.match(r'[^:]+: (\S+) \(resolves: ([^)]*)\)$', item)
-        reg, ends = (m.group(1), m.group(2)) if m else (item, '?')
-        halts.append(audit.Halt('plan-contradiction', reg,
-                                f'the prose ends the registry state {reg} '
-                                f'({_statement(rows, reg)!r}) here; its resolves says {ends}'))
-    return halts
 
 
 def _statement(rows: list[dict[str, str]], rid: str) -> str:
@@ -258,7 +237,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     result.proposed = _extract(project_dir, scene_id, prose, rows, order, command,
                                extract_model or select_model('evaluation'), log_dir,
                                result.problems)
-    result.halts = audit.halting_conditions(result.proposed, rows) + _plan_halts(result.problems, rows)
+    result.halts = audit.halting_conditions(result.proposed, rows)
     try:
         result.check = check_scene(project_dir, scene_id, prose=prose, model=check_model,
                                    log_file=os.path.join(log_dir, f'gate-check-{scene_id}.json'),

@@ -208,7 +208,7 @@ class TestFix:
         result = gate.GateResult(SCENE, check=CheckResult(
             SCENE, unverified=[Finding(**BAD, problem='its established quote is not in x')]))
         result.proposed = [{'id': 'p1', 'statement': 'S', 'quote': 'the words'}]
-        result.halts = [audit.Halt('plan-contradiction', 'p1',
+        result.halts = [audit.Halt('supersedes-fixed', 'p1',
                                    "the prose supersedes the registry fact r1 ('R')")]
         lines = gate.problems_to_fix(result)
         assert 'The scene says: "the words"' in lines[0] and "'R'" in lines[0]

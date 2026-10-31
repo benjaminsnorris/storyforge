@@ -31,7 +31,7 @@ The registry is the **plan's vocabulary**: the facts a brief promises, by id. Co
 ## What changes in code
 
 - **Telling the two apart.** Today a commitment is `introduced_by == ledger.COMMITMENTS_PASS`, which `ledger._in_view`, `extract.build_commitments_prompt` (the `, registry` mark), `extract.known_for_scene` and `schema.py`'s owner check test. Gate rows carry the drafting command instead, so that test becomes membership in a named set, `ledger.COMMITMENT_WRITERS` (`commitments` plus the gate's commands), behind one helper `ledger.is_commitment(row)`. A blank `introduced_by` stays a registry row, so a hand-added registry fact still reaches the views.
-- **Halting on the plan.** A `plan-contradiction` kind beside `audit.HALT_KINDS`, raised by the gate from the checker's findings and from extraction's `supersedes` / `ends` naming a registry fact.
+- **Halting on the plan.** Superseded (Ben, 2026-10-30, after E4 run 2): extraction marks added detail as superseding a registry fact and a registry `resolves` is the author's estimate, so stopping on extraction's links stopped `write` at 8 of 23 scenes. Extraction's `supersedes`/`ends` on a registry fact are not applied and are reported; a contradiction with the plan is a checker finding, which blocks the commit.
 - **Writing a quote.** A small ledger function, `ledger.fill_quote`, that sets a blank `quote` on a binding knowledge or physical registry row by id. A quote already there is left as it is (it returns False); a commitment row, another type, a non-binding row or an unknown id is refused. Saved through `ledger.save`, so the audit log shows it as `changed`.
 
 ## Rejected alternatives
