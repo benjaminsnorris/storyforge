@@ -117,7 +117,7 @@ def main(argv=None):
 - [ ] Phase 1: Extract skeleton (scenes.csv)
 - [ ] Phase 2: Extract intent (scene-intent.csv)
 - [ ] Phase 3: Extract briefs (scene-briefs.csv)
-- [ ] Phase 5: Describe the book (structure, themes, story summary, bibles, voice)
+- [ ] Phase 5: Describe the book (structure, themes, story summary, bibles, voice, timeline)
 - [ ] Validate
 - [ ] Review"""
         create_draft_pr(f'Extract: {title} ({scene_count} scenes)',
@@ -205,7 +205,7 @@ def main(argv=None):
     # Phase 5: Describe (after cleanup on a full run, so it reads cleaned data)
     if not args.cleanup_only and (args.phase is None or args.phase == 5):
         if _run_phase_5(project_dir, log_dir, profile_file, args.force, args.dry_run):
-            update_pr_task('Phase 5: Describe the book (structure, themes, story summary, bibles, voice)',
+            update_pr_task('Phase 5: Describe the book (structure, themes, story summary, bibles, voice, timeline)',
                            project_dir)
 
     # Validate
@@ -1359,8 +1359,9 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
     """Phase 5, describe (#440): the reference layers above the scenes, from
     what phases 0-4 found: 5a (structure), 5b (themes and motifs), 5c
     (story summary and story architecture), 5d (character bible), 5e
-    (world and systems bibles) and 5f (voice guide and profile);
-    `extract_describe` holds them and the write gate. Returns whether any
+    (world and systems bibles), 5f (voice guide and profile) and 5g
+    (timeline and chapter map, no model); `extract_describe` holds them and
+    the write gate. Returns whether any
     step wrote.
 
     A step whose files the author owns is skipped and says so. A step that
@@ -1427,7 +1428,8 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
                            ('story summary and architecture', describe.run_pitch),
                            ('character bible', describe.run_characters),
                            ('world and systems bibles', describe.run_world),
-                           ('voice guide', describe.run_voice)):
+                           ('voice guide', describe.run_voice),
+                           ('timeline and chapter map', describe.run_timeline)):
             stopped = [n for n, outcome in outcomes.items() if outcome == 'partial']
             if stopped:
                 run.reports.append(f'{name} skipped: {stopped[0]} stopped part-way (a file '

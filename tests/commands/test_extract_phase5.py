@@ -233,7 +233,7 @@ class TestPhase5:
             'reference/story-summary.md', 'reference/story-architecture.md',
             'reference/character-bible.md', 'reference/world-bible.md',
             'reference/systems-bible.md', 'reference/voice-guide.md',
-            'reference/voice-profile.csv'}
+            'reference/voice-profile.csv', 'reference/timeline.md'}
         commits = [c for c in mock_git.calls if c[0] == 'commit_and_push']
         assert 'reference/spine.csv' in commits[-1][2]
         assert all(c['model'] for c in mock_api.calls)
@@ -589,7 +589,8 @@ class TestReviewFixes:
             os.path.join(project_dir, 'working', 'extraction-profile.json'), False, False)
         assert _commits(mock_git)[-1][1] == ('Extract: Phase 5 — describe (spine and '
                                               'architecture, story summary and architecture, '
-                                              'world and systems bibles)')
+                                              'world and systems bibles, timeline and chapter '
+                                              'map)')
 
     def test_nothing_written_returns_false(self, book, mock_api, mock_git, mock_costs, capsys):
         mock_api.set_response_fn(_answer(book))
@@ -1886,3 +1887,76 @@ class TestBiblesGateAndSteps:
                                           'flaw_as_strength', 'voice', 'relational',
                                           'arc_start', 'arc_turns', 'arc_end')})
         parse_characters(json.dumps(reply), chars)
+
+
+class TestTimelineAndChapterMap:
+    """Step 5g (no model)."""
+
+    def _scenes(self, book):
+        from storyforge.extract_describe import scene_table
+        return scene_table(os.path.join(book, 'reference'))
+
+    def test_the_timeline_describes_days_earlier_time_and_frames(self, book):
+        from storyforge.elaborate import update_scene
+        from storyforge.extract_describe import render_timeline
+        ref = os.path.join(book, 'reference')
+        ids = _scene_ids(book)
+        update_scene(ids[0], ref, {'time_mode': 'frame'})
+        update_scene(ids[1], ref, {'timeline_day': '3', 'timeline_date': 'XXXX-12-24'})
+        update_scene(ids[2], ref, {'timeline_day': '1'})      # read after day 3: earlier
+        update_scene(ids[3], ref, {'timeline_day': ''})
+        doc, notes = render_timeline(self._scenes(book), 'T', {'timeline': 'Three days.'}, 'H')
+        assert '## Span\n\nThree days.' in doc
+        assert f'### Day 3 (XXXX-12-24)' in doc
+        assert f'`{ids[2]}`' in doc.split('## Earlier Time')[1] and 'read after day 3' in doc
+        assert f'`{ids[0]}`' in doc.split('## Frame')[1]
+        assert f'`{ids[3]}`' in doc.split('## Not Placed in Time')[1]
+        assert any('have no timeline_day' in n for n in notes)
+
+    def test_no_days_writes_no_timeline(self, book):
+        from storyforge.elaborate import update_scene
+        from storyforge.extract_describe import render_timeline
+        for sid in _scene_ids(book):
+            update_scene(sid, os.path.join(book, 'reference'), {'timeline_day': ''})
+        doc, notes = render_timeline(self._scenes(book), 'T', {}, 'H')
+        assert doc is None and 'no timeline is written' in notes[0]
+
+    def test_the_chapter_map_comes_from_the_headings(self, book, mock_api, mock_git,
+                                                     mock_costs):
+        from storyforge.assembly import get_chapter_scenes, read_chapter_field
+        ids = _scene_ids(book)
+        os.remove(os.path.join(book, 'reference', 'chapter-map.csv'))
+        _write_scene(book, ids[0], '# Stave I: Marley\'s Ghost\n\nMarley was dead.\n')
+        _write_scene(book, ids[2], '## Stave II | The First Spirit\n\nWhen Scrooge awoke.\n')
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        assert read_chapter_field(1, book, 'title') == "Stave I: Marley's Ghost"
+        assert read_chapter_field(1, book, 'heading') == 'none'
+        assert get_chapter_scenes(1, book) == ids[:2]
+        assert read_chapter_field(2, book, 'title') == 'Stave II / The First Spirit'
+        assert get_chapter_scenes(2, book) == ids[2:]
+        assert 'reference/chapter-map.csv' in read_provenance(book)
+
+    def test_an_authors_chapter_map_is_kept_and_no_headings_writes_none(
+            self, book, mock_api, mock_git, mock_costs, capsys):
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        out = capsys.readouterr().out
+        assert "reference/chapter-map.csv: kept (the author's own" in out
+        os.remove(os.path.join(book, 'reference', 'chapter-map.csv'))
+        _run(book)
+        out = capsys.readouterr().out
+        # new-x1 opens with "# The Archivist's Warning", its own title
+        assert ("5g: 1 scene(s) begin with their own scenes.csv title as a heading, which is "
+                "not read as a chapter heading: new-x1") in out
+        assert '5g: no scene begins with a chapter heading' in out
+        assert not os.path.exists(os.path.join(book, 'reference', 'chapter-map.csv'))
+
+    def test_scenes_before_the_first_heading_are_reported(self):
+        from storyforge.extract_describe import chapter_map_rows
+        scenes = [{'id': 'a'}, {'id': 'b'}, {'id': 'c'}]
+        rows, notes = chapter_map_rows({'a': 'Prologue text.',
+                                        'b': '---\nid: b\n---\n\n# One\n\nText.',
+                                        'c': 'More.'}, scenes)
+        assert [(r['title'], r['scenes']) for r in rows] == [('', 'a'), ('One', 'b;c')]
+        assert 'untitled first chapter: a' in notes[0]
