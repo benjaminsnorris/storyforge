@@ -1,9 +1,10 @@
 """Extract phase 5, "describe": the reference layers above the scenes (#440).
 
-Phases 0-4 build the scene layer. Phase 5 is to write what sits above it
-(spine, architecture, story summary, story architecture, the bibles, the
-voice guide, themes and motifs) from what those phases found, describing the
-book as written. Plan: docs/plans/2026-10-30-extract-upper-layers.md.
+Phases 0-4 build the scene layer. Phase 5 writes what sits above it
+(spine, architecture, themes and motifs, story summary and architecture,
+the character, world and systems bibles, the voice guide and profile) from
+what those phases found, describing the book as written; `timeline.md` and
+the chapter map (5g) are still to come. Plan: docs/plans/2026-10-30-extract-upper-layers.md.
 
 It holds the one gate every phase 5 writer goes through (`write_described`)
 and the provenance record it keeps, the scene evidence the steps share, and
@@ -40,6 +41,8 @@ from datetime import datetime, timezone
 from typing import Callable, Literal, TypedDict, get_args
 
 from .common import is_unfilled_template, log
+#: elaborate's voice-profile.csv columns, which `validate_voice_profile` checks
+from .schema import VOICE_PROFILE_COLUMNS
 
 PROVENANCE_FILE = os.path.join('working', 'extraction-provenance.csv')
 
@@ -1276,11 +1279,17 @@ def render_story_architecture(pitch: dict, ev: PitchEvidence, scenes: list[dict[
 UNSHOWN = 'Not shown in the text.'
 #: Words that open an instruction. A described habit is a statement about
 #: the book ("The narrator never explains the Spirits"), never an order to
-#: a writer (decision 2: describe, never prescribe).
+#: a writer (decision 2: describe, never prescribe). "Never"/"always" are
+#: instructions only before a bare verb ("Never explain"), not a described
+#: one ("Never explains"); words that are as often nouns ("Close third",
+#: "End-of-chapter hooks", "Use of dialect") aren't listed.
 _IMPERATIVE = re.compile(
-    r"^(?:do|don't|do not|avoid|use|keep|let|make|write|never|always|prefer|show|"
-    r"vary|anchor|trust|reserve|start|end|open|close|limit|cut|give|be)\b", re.IGNORECASE)
-_TIER_ENUM = {'type': 'string', 'enum': ['primary', 'secondary']}
+    r"^(?:(?:do|don't|do not|avoid|keep|let|make|write|prefer|vary|anchor|trust|"
+    r"reserve|limit|be)\b|use\b(?! of)|(?:never|always)\s+(?![a-z']+s\b)[a-z']+\b)",
+    re.IGNORECASE)
+CharacterTier = Literal['primary', 'secondary']
+CHARACTER_TIERS: tuple[CharacterTier, ...] = get_args(CharacterTier)
+_TIER_ENUM = {'type': 'string', 'enum': list(CHARACTER_TIERS)}
 
 
 def _shown(text: str) -> str:
@@ -1294,51 +1303,64 @@ def _imperatives(items: list[str], path: str) -> list[str]:
 
 
 def _sample(items: list, n: int) -> list:
-    """At most `n` of `items`, spread evenly, keeping the first and last."""
+    """At most `n` (two or more) of `items`, spread evenly, keeping the
+    first and last."""
     if len(items) <= n:
         return list(items)
-    step = (len(items) - 1) / (n - 1)
-    return [items[round(i * step)] for i in range(n)]
+    step = (len(items) - 1) / (max(n, 2) - 1)
+    return [items[round(i * step)] for i in range(max(n, 2))]
 
 
-def _scene_text(project_dir: str, scene_id: str) -> str | None:
-    """A scene's prose with illustration markers removed; None when it has
-    no file (or the file can't be read, which the caller reports)."""
-    from .illustrations import strip_markers
-    path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
-    try:
-        with open(path, encoding='utf-8') as f:
-            return strip_markers(f.read())
-    except (OSError, UnicodeDecodeError):
-        return None
+def _first(ids: list[str], n: int = 5) -> str:
+    return ', '.join(ids[:n]) + ('…' if len(ids) > n else '')
 
 
 def _prose(project_dir: str, scenes: list[dict[str, str]]) -> tuple[dict[str, str], list[str]]:
-    """Every scene's prose that can be read, and a note when some can't."""
-    texts = {}
+    """Every scene's prose (illustration markers removed), and a note
+    naming the scenes with no file or a blank one.
+
+    Raises DescribeFailed naming the file when one exists but can't be
+    read: describing the voice from the scenes that are left would state
+    wrong measures as the whole book's."""
+    from .illustrations import strip_markers
+    texts, absent = {}, []
     for s in scenes:
-        text = _scene_text(project_dir, s['id'])
-        if text is not None and text.strip():
+        rel = f'scenes/{s["id"]}.md'
+        path = os.path.join(project_dir, rel)
+        if not os.path.isfile(path):
+            absent.append(s['id'])
+            continue
+        try:
+            with open(path, encoding='utf-8') as f:
+                text = strip_markers(f.read())
+        except (OSError, UnicodeDecodeError) as e:
+            raise DescribeFailed(f'{rel} could not be read ({e})') from e
+        if text.strip():
             texts[s['id']] = text
-    missing = len(scenes) - len(texts)
-    notes = [f'{missing} of {len(scenes)} scene(s) have no readable prose in scenes/'] \
-        if missing else []
+        else:
+            absent.append(s['id'])
+    notes = [f'{len(absent)} of {len(scenes)} scene(s) have no prose in scenes/ (absent or '
+             f'blank): {_first(absent)}'] if absent else []
     return texts, notes
 
 
 def _fixed_facts(project_dir: str, types: tuple[str, ...]) -> tuple[list[dict[str, str]], list[str]]:
     """The ledger's binding facts of `types` that don't change (`fixed`),
-    with their quotes, and a note when the ledger can't be read. A book not
-    yet migrated, or with a broken ledger, is described without them, and
-    that is said: the bibles then rest on the scenes and registries alone."""
+    with their quotes, and a note when there are none to read: no ledger,
+    one not yet migrated, or one that can't be read. The bibles are then
+    described without facts, and that is said."""
     from . import ledger
+    if not os.path.isfile(ledger.ledger_path(project_dir)) and \
+            not ledger.legacy_files(os.path.join(project_dir, 'reference')):
+        return [], ['reference/commitments.csv is absent, so the bibles use no established '
+                    'facts']
     try:
         rows = ledger.load(project_dir)
     except ledger.NotMigratedError:
         return [], ['the ledger is not migrated (reference/knowledge.csv or '
                     'physical-states.csv is still there), so the bibles use no established '
                     'facts; run `storyforge migrate` to use them']
-    except ledger.LedgerError as e:
+    except (ledger.LedgerError, OSError, UnicodeDecodeError) as e:
         return [], [f'the ledger could not be read ({e}), so the bibles use no established facts']
     return [r for r in rows if r.get('status') == 'binding' and r.get('mutable') == 'fixed'
             and r.get('type') in types and r.get('statement', '').strip()], []
@@ -1350,14 +1372,41 @@ def _fact_line(row: dict[str, str]) -> str:
             + (f' ("{quote}")' if quote else ''))
 
 
-def _registry(project_dir: str, name: str) -> tuple[list[dict[str, str]], dict[str, str]]:
-    """A registry's rows and its lowercase name/alias/id → id map."""
+def _registry(project_dir: str, name: str,
+              ) -> tuple[list[dict[str, str]], dict[str, str], list[str]]:
+    """A registry's rows (ids stripped), its lowercase name/alias/id → id
+    map, and notes: the file absent or empty, rows with no id (left out).
+
+    Raises DescribeFailed naming the file when it can't be read or has no
+    `id` or `name` column: names could then resolve to nothing, or to a
+    name `load_alias_map` falls back on, and the step would describe the
+    wrong people or places."""
     from .elaborate import _read_csv
     from .enrich import load_alias_map
+    rel = f'reference/{name}'
     path = os.path.join(project_dir, 'reference', name)
     if not os.path.isfile(path):
-        return [], {}
-    return [r for r in _read_csv(path) if r.get('id', '').strip()], load_alias_map(path)
+        return [], {}, [f'{rel} is absent']
+    try:
+        with open(path, encoding='utf-8') as f:
+            header = f.readline().rstrip('\r\n')
+        rows = _read_csv(path) if header.strip() else []
+        alias = load_alias_map(path) if header.strip() else {}
+    except (OSError, UnicodeDecodeError, csv.Error) as e:
+        raise DescribeFailed(f'{rel} could not be read ({e})') from e
+    if not header.strip():
+        return [], {}, [f'{rel} is empty']
+    lacking = [c for c in ('id', 'name') if c not in header.split('|')]
+    if lacking:
+        raise DescribeFailed(f'{rel} has no {", ".join(lacking)} column; fix its header, then '
+                             f'run phase 5 again')
+    kept = [{**r, 'id': r['id'].strip()} for r in rows if r.get('id', '').strip()]
+    ids = {r['id'] for r in kept}
+    notes = [f'{len(rows) - len(kept)} row(s) of {rel} have no id and are left out'] \
+        if len(kept) < len(rows) else []
+    if not kept:
+        notes.append(f'{rel} has no rows')
+    return kept, {k: v for k, v in alias.items() if v in ids}, notes
 
 
 def _names(cell: str) -> list[str]:
@@ -1366,8 +1415,8 @@ def _names(cell: str) -> list[str]:
 
 # --- 5d: characters ---------------------------------------------------------
 
-#: The most characters 5d describes; past it the least-seen are left out,
-#: and that is reported.
+#: The most characters 5d describes; past it the lowest-ranked (by POV
+#: scenes, role, then scenes on stage) are left out, and that is reported.
 MAX_CHARACTERS = 16
 MAX_FACTS_PER_CHARACTER = 15
 MAX_MOMENTS = 12
@@ -1377,14 +1426,27 @@ MAX_LINES = 8
 #: minor one on stage twice. Roles not listed rank between supporting and minor.
 _ROLE_RANK = {'protagonist': 0, 'antagonist': 0, 'deuteragonist': 0, 'supporting': 1,
               'minor': 3, 'referenced': 4}
-#: How far either side of a quote an attribution ("said Scrooge") is looked for.
+#: How far either side of a quote a speech tag ("said Scrooge") is looked
+#: for, never past the neighbouring quote.
 _ATTRIBUTION_CHARS = 80
+_SPEECH_VERBS = (r'said|says|asked|asks|cried|replied|returned|exclaimed|answered|'
+                 r'whispered|muttered|shouted|added|continued|observed|rejoined|repeated|'
+                 r'called|murmured|demanded|retorted|told')
+
+
+def single_quoted(texts: list[str]) -> bool:
+    """Whether the prose quotes speech with single quotation marks, which
+    `prose_analysis` doesn't read as dialogue: then dialogue can't be
+    measured or sampled, and callers say so rather than report none."""
+    joined = ''.join(texts)
+    return joined.count('\u2018') >= 10 and joined.count('\u2018') > joined.count('\u201c')
 
 
 @dataclass(frozen=True)
 class CharacterEvidence:
-    """One character as code measured them. `lines` are quoted speech with
-    the character's name beside it: likely theirs, not certainly."""
+    """One character as code measured them. `lines` are quoted speech
+    with a speech tag naming them beside it ("said Scrooge"). A reply parsed
+    against this evidence renders only with it (by id)."""
     id: str
     name: str
     role: str
@@ -1399,7 +1461,8 @@ class CharacterEvidence:
 
 def _who(scene: dict[str, str], alias: dict[str, str]) -> tuple[str, list[str], list[str]]:
     """A scene's POV id, the ids on stage, and the names that resolve to no
-    character. `on_stage` is read first, then `characters`."""
+    character. The ids on stage come from `on_stage`, or from `characters`
+    when `on_stage` is empty, plus the POV character."""
     unresolved = []
     pov = alias.get(scene.get('pov', '').strip().lower(), '')
     if scene.get('pov', '').strip() and not pov:
@@ -1417,51 +1480,83 @@ def _who(scene: dict[str, str], alias: dict[str, str]) -> tuple[str, list[str], 
 
 
 def _speech(text: str, names: list[str]) -> list[str]:
-    """Quoted speech in `text` with one of `names` within _ATTRIBUTION_CHARS
-    of it. Lines under four words or over 300 characters are left out."""
+    """Quoted speech in `text` with a speech tag naming one of `names`
+    against it: "said NAME" or "NAME said" right after the quote, or right
+    before it ending in a comma or colon, within _ATTRIBUTION_CHARS and never
+    reaching past the neighbouring quote; never a possessive ("Scrooge's
+    nephew" tags the nephew). Lines under four words or over 300 characters
+    are left out."""
     from .prose_analysis import dialogue_spans
     if not names:
         return []
-    near = re.compile(r'\b(?:' + '|'.join(re.escape(n) for n in names) + r')\b')
+    name = r'(?:' + '|'.join(re.escape(n) for n in names) + r')(?![\'\u2019]s)\b'
+    tag = rf'(?:(?:{_SPEECH_VERBS})\s+(?:the\s+)?{name}|{name}\s+(?:{_SPEECH_VERBS})\b)'
+    # The tag sits against the quote: right after it ('"Bah!" said
+    # Scrooge'), or right before it, ending in a comma or colon ('Scrooge
+    # said, "Bah!"'). A tag ending the sentence before belongs to the quote
+    # before that
+    tag_after = re.compile(rf'\s*(?:[\u2014\u2013-]\s*)?{tag}')
+    tag_before = re.compile(rf'\b{tag}\s*[,:]\s*$')
+    spans = dialogue_spans(text)
     out = []
-    for start, end, inner in dialogue_spans(text):
+    for i, (start, end, inner) in enumerate(spans):
         line = ' '.join(inner.split())
-        if not 4 <= len(line.split()) or len(line) > 300:
+        if len(line.split()) < 4 or len(line) > 300:
             continue
-        if near.search(text[max(0, start - _ATTRIBUTION_CHARS):start]) or \
-                near.search(text[end:end + _ATTRIBUTION_CHARS]):
+        before = text[max(start - _ATTRIBUTION_CHARS, spans[i - 1][1] if i else 0):start]
+        after = text[end:min(end + _ATTRIBUTION_CHARS,
+                             spans[i + 1][0] if i + 1 < len(spans) else len(text))]
+        if tag_after.match(after) or tag_before.search(before):
             out.append(line)
     return out
 
 
 def _speaker_names(characters: list[dict[str, str]]) -> dict[str, list[str]]:
-    """Per character, the names an attribution may use: the name, each
-    alias, and each capitalized word of the name no other character's name
-    shares ("Scrooge" for Ebenezer Scrooge, but not "Mrs")."""
+    """Per character, the names a speech tag may use: the name, each alias,
+    and each capitalized word of four or more letters in the name that
+    belongs to them alone. A word in one name only is theirs; a word in
+    several is the one character's whose name ends with it ("Scrooge" is
+    Ebenezer Scrooge's, not "Boy Scrooge Sends for Turkey"'s), and no one's
+    when several names end with it ("Cratchit": Bob and Mrs Cratchit).
+    Shorter words like "Bob" count only through `aliases`."""
     words: dict[str, set[str]] = {}
+    ends: dict[str, set[str]] = {}
     for c in characters:
-        for w in re.findall(r"[A-Z][\w']{3,}", c.get('name', '')):
+        found = re.findall(r"[A-Z][\w']{3,}", c.get('name', ''))
+        for w in found:
             words.setdefault(w, set()).add(c['id'])
+        if found and c.get('name', '').rstrip().endswith(found[-1]):
+            ends.setdefault(found[-1], set()).add(c['id'])
     out = {}
     for c in characters:
         names = [c.get('name', '').strip()] + _names(c.get('aliases', ''))
-        names += [w for w, ids in words.items() if ids == {c['id']} and w in c.get('name', '')]
+        names += [w for w, ids in words.items() if w in c.get('name', '')
+                  and (ids == {c['id']} or ends.get(w) == {c['id']})]
         out[c['id']] = list(dict.fromkeys(n for n in names if n))
     return out
 
 
 def character_evidence(project_dir: str, scenes: list[dict[str, str]],
-                       ) -> tuple[list[CharacterEvidence], list[str]]:
+                       ) -> tuple[list[CharacterEvidence], list[str], list[str]]:
     """The characters 5d describes, POV characters first (most scenes
     first), then by role (`_ROLE_RANK`), scenes on stage and scenes
-    mentioned, with what code can say about each; and
-    the notes for the report (names that resolve to no character, those
-    left out past MAX_CHARACTERS, prose or facts that couldn't be read)."""
-    rows, alias = _registry(project_dir, 'characters.csv')
+    mentioned, with what code can say about each; the notes for the report
+    (the registry, prose or ledger missing, names that resolve to no
+    character, those past the caps); and the sources that had something
+    (for the provenance header).
+
+    Raises DescribeFailed naming the file when characters.csv or a scene
+    file can't be read."""
+    rows, alias, notes = _registry(project_dir, 'characters.csv')
     by_id = {r['id']: r for r in rows}
-    texts, notes = _prose(project_dir, scenes)
+    texts, prose_notes = _prose(project_dir, scenes)
     facts, fact_notes = _fixed_facts(project_dir, ('trait', 'relationship', 'physical'))
-    notes += fact_notes
+    notes += prose_notes + fact_notes
+    sources = ['scenes'] + (['characters'] if rows else []) + \
+        (['commitments'] if not fact_notes else []) + (['prose'] if texts else [])
+    if texts and single_quoted(list(texts.values())):
+        notes.append('the prose quotes speech with single quotation marks, which are not read '
+                     'as dialogue, so no lines are sampled')
     pov_count: dict[str, int] = {}
     seen: dict[str, list[dict[str, str]]] = {}
     mentioned: dict[str, int] = {}
@@ -1479,28 +1574,29 @@ def character_evidence(project_dir: str, scenes: list[dict[str, str]],
                 mentioned[cid] = mentioned.get(cid, 0) + 1
     if unresolved:
         notes.append(f'{len(unresolved)} name(s) in the scene CSVs match no character in '
-                     f'characters.csv: ' + ', '.join(sorted(unresolved)[:5])
-                     + ('…' if len(unresolved) > 5 else ''))
+                     f'characters.csv: {_first(sorted(unresolved))}')
+
     def rank(cid: str) -> tuple:
         role = by_id.get(cid, {}).get('role', '').strip().lower()
         return (-pov_count.get(cid, 0), _ROLE_RANK.get(role, 2), -len(seen[cid]),
                 -mentioned.get(cid, 0), cid)
     order = sorted(seen, key=rank)
     if len(order) > MAX_CHARACTERS:
-        notes.append(f'{len(order) - MAX_CHARACTERS} character(s) ranked lowest (by role, '
-                     f'then scenes on stage) are left out of the character bible (it '
+        notes.append(f'{len(order) - MAX_CHARACTERS} character(s) ranked lowest (by POV scenes, '
+                     f'role, then scenes on stage) are left out of the character bible (it '
                      f'describes {MAX_CHARACTERS})')
     speakers = _speaker_names(rows)
-    out = []
+    out, capped = [], []
     for cid in order[:MAX_CHARACTERS]:
         appears = seen[cid]
         lines: list[str] = []
         for s in appears:
             lines += _speech(texts.get(s['id'], ''), speakers.get(cid, []))[:2]
         own = [f for f in facts if f.get('subject', '').strip() == cid]
+        if len(own) > MAX_FACTS_PER_CHARACTER:
+            capped.append(cid)
         out.append(CharacterEvidence(
-            id=cid, name=by_id.get(cid, {}).get('name', '') or cid,
-            role=by_id.get(cid, {}).get('role', ''),
+            id=cid, name=by_id[cid].get('name', '') or cid, role=by_id[cid].get('role', ''),
             pov_scenes=pov_count.get(cid, 0), on_stage=len(appears),
             first=appears[0]['id'], last=appears[-1]['id'],
             moments=[f'{s.get("seq", "")} {s["id"]}: '
@@ -1508,7 +1604,11 @@ def character_evidence(project_dir: str, scenes: list[dict[str, str]],
                      for s in _sample(appears, MAX_MOMENTS)],
             facts=[_fact_line(f) for f in own[:MAX_FACTS_PER_CHARACTER]],
             lines=_sample(lines, MAX_LINES)))
-    return out, notes
+    if capped:
+        notes.append(f'{len(capped)} character(s) have more than {MAX_FACTS_PER_CHARACTER} '
+                     f'established facts; the first {MAX_FACTS_PER_CHARACTER} are used: '
+                     f'{_first(capped)}')
+    return out, notes, sources
 
 
 CHARACTERS_SCHEMA = _object({
@@ -1597,11 +1697,14 @@ def _ids_once(items: list[dict], key: str, known, label: str, problems: list[str
 
 
 def parse_characters(response: str, chars: list[CharacterEvidence]) -> dict:
-    """Read and check step 5d's reply. Returns it cleaned (`_clean_reply`),
-    `characters` in evidence order. Raises ReplyProblems for: an id unknown,
-    repeated or left out, a POV character not primary, an empty role, voice
-    or arc end for a primary character, a relationship naming an unknown id
-    or one character twice, and a POV entry missing, unknown or empty."""
+    """Read and check step 5d's reply against the evidence it was asked
+    with. Returns it cleaned (`_clean_reply`), `characters` in evidence
+    order. Raises ReplyProblems for: an id unknown, repeated or left out, a
+    POV character not primary, an empty role for any character, or an empty
+    voice, arc start or arc end for a primary one; a `left_open` item that
+    reads as an instruction; a relationship naming an unknown id, one
+    character twice, or with no nature; and a POV entry missing, unknown,
+    repeated or with an empty `gives`."""
     from .extract import _json_answer
     data = _clean_reply(_json_answer(response, CHARACTERS_SCHEMA))
     ids = [c.id for c in chars]
@@ -1617,6 +1720,7 @@ def parse_characters(response: str, chars: list[CharacterEvidence]) -> dict:
             problems.append(f'{c["id"]} has a point of view, so is primary')
         need = ('role',) + (('voice', 'arc_start', 'arc_end') if c['tier'] == 'primary' else ())
         problems += [f'{c["id"]}.{k} is empty' for k in need if not c[k]]
+        problems += _imperatives(c['left_open'], f'{c["id"]}.left_open')
     for r in data['relationships']:
         if r['a'] not in ids or r['b'] not in ids or r['a'] == r['b']:
             problems.append(f'relationship {r["a"]!r}-{r["b"]!r} must name two different '
@@ -1650,7 +1754,7 @@ def render_character_bible(reply: dict, chars: list[CharacterEvidence], title: s
 
     out = [header, f'# {title or "Untitled"} -- Character Bible', '', '---', '',
            '## Primary Characters', '']
-    for tier in ('primary', 'secondary'):
+    for tier in CHARACTER_TIERS:
         if tier == 'secondary':
             out += ['---', '', '## Secondary Characters', '']
         for c in (x for x in reply['characters'] if x['tier'] == tier):
@@ -1663,9 +1767,11 @@ def render_character_bible(reply: dict, chars: list[CharacterEvidence], title: s
                         f'- **Want:** {_shown(c["want"])}', f'- **Need:** {_shown(c["need"])}',
                         f'- **Wound:** {_shown(c["wound"])}', f'- **Lie:** {_shown(c["lie"])}',
                         f'- **Flaw-as-Strength:** {_shown(c["flaw_as_strength"])}', '',
-                        '**Voice Fingerprint:**', f'- {c["voice"]}']
-                out += [f'- "{line}"' for line in e.lines[:3]]
-                out += ['', '**Relational:**', f'- {_shown(c["relational"])}', '']
+                        '**Voice Fingerprint:**', f'- {c["voice"]}', '']
+                if e.lines:
+                    out += ['**Lines tagged with their name:**',
+                            *[f'- "{line}"' for line in e.lines[:3]], '']
+                out += ['**Relational:**', f'- {_shown(c["relational"])}', '']
             else:
                 out += ['**Profile:**', f'- {_shown(c["physical"])}',
                         f'- Voice: {_shown(c["voice"])}',
@@ -1695,15 +1801,31 @@ def render_character_bible(reply: dict, chars: list[CharacterEvidence], title: s
 MAX_LOCATIONS = 15
 MAX_WORLD_FACTS = 60
 
-_WORLD_SECTIONS: dict[str, tuple[str, ...]] = {
-    'society': ('class_structure', 'norms', 'knowledge', 'family', 'other'),
-    'power': ('structure', 'laws', 'tensions'),
-    'economy': ('drivers', 'wealth', 'details'),
-    'technology': ('level', 'extraordinary'),
-    'history': ('deep', 'recent', 'inciting'),
-    'daily_life': ('typical_day', 'material'),
-    'senses': ('sight', 'sound', 'smell', 'touch', 'taste'),
+#: The world bible's described sections: reply key → (heading, {field →
+#: subheading}). The schema and the prompt are derived from it, so a field
+#: asked for is always rendered.
+_SECTION_TITLES = {
+    'society': ('Society & Culture', {'class_structure': 'Class & Social Structure',
+                                      'norms': 'Cultural Norms',
+                                      'knowledge': 'Education & Knowledge',
+                                      'family': 'Gender, Family, & Relationships',
+                                      'other': 'Other Cultural Notes'}),
+    'power': ('Politics & Power', {'structure': 'Power Structure',
+                                   'laws': 'Laws & Governance',
+                                   'tensions': 'Political Tensions'}),
+    'economy': ('Economy', {'drivers': 'What Drives the Economy',
+                            'wealth': 'Wealth & Inequality', 'details': 'Key Economic Details'}),
+    'technology': ('Technology / Magic', {'level': 'Technology Level',
+                                          'extraordinary': 'Magic or Extraordinary Abilities'}),
+    'history': ('History', {'deep': 'Deep History', 'recent': 'Recent History',
+                            'inciting': 'The Inciting Backstory'}),
+    'daily_life': ('Daily Life', {'typical_day': 'What a Typical Day Looks Like',
+                                  'material': 'Food, Drink, & Material Culture'}),
+    'senses': ('Sensory Palette', {'sight': 'Sight', 'sound': 'Sound', 'smell': 'Smell',
+                                   'touch': 'Touch', 'taste': 'Taste'}),
 }
+_WORLD_SECTIONS: dict[str, tuple[str, ...]] = {
+    section: tuple(fields) for section, (_, fields) in _SECTION_TITLES.items()}
 _SYSTEM_FIELDS = ('name', 'what_it_is', 'who', 'how', 'costs', 'feels', 'social')
 
 WORLD_SCHEMA = _object({
@@ -1721,16 +1843,36 @@ WORLD_SCHEMA = _object({
 
 
 @dataclass(frozen=True)
+class LocationEvidence:
+    """A place as code counted it: how many scenes are set there, and the first."""
+    id: str
+    name: str
+    scenes: int
+    first: str
+
+
+@dataclass(frozen=True)
 class WorldEvidence:
+    """What 5e is given. A reply parsed against this evidence renders only
+    with it (by location id)."""
     title: str
-    locations: list[dict[str, str]]    # id, name, scenes (count as str), first
+    locations: list[LocationEvidence]    # most scenes first
     facts: list[str]
-    required: list[str]                # location ids 5e must describe
+    sources: list[str]
+
+    @property
+    def required(self) -> list[str]:
+        """The places 5e must describe: those set in two or more scenes, or
+        every place when none is."""
+        return [loc.id for loc in self.locations if loc.scenes >= 2] \
+            or [loc.id for loc in self.locations]
 
 
 def world_evidence(project_dir: str, scenes: list[dict[str, str]], title: str,
                    ) -> tuple[WorldEvidence, list[str]]:
-    rows, alias = _registry(project_dir, 'locations.csv')
+    """The places and world facts 5e describes from, and the notes for the
+    report. Raises DescribeFailed naming locations.csv when it can't be read."""
+    rows, alias, notes = _registry(project_dir, 'locations.csv')
     by_id = {r['id']: r for r in rows}
     counts: dict[str, list[str]] = {}
     unresolved = set()
@@ -1742,32 +1884,34 @@ def world_evidence(project_dir: str, scenes: list[dict[str, str]], title: str,
                 counts.setdefault(lid, []).append(s['id'])
             else:
                 unresolved.add(loc)
-    facts, notes = _fixed_facts(project_dir, ('world',))
+    facts, fact_notes = _fixed_facts(project_dir, ('world',))
+    notes += fact_notes
     if len(facts) > MAX_WORLD_FACTS:
         notes.append(f'{len(facts) - MAX_WORLD_FACTS} world fact(s) past the first '
                      f'{MAX_WORLD_FACTS} are left out of 5e\'s evidence')
     if unresolved:
         notes.append(f'{len(unresolved)} scene location(s) match no entry in locations.csv: '
-                     + ', '.join(sorted(unresolved)[:5]) + ('…' if len(unresolved) > 5 else ''))
+                     f'{_first(sorted(unresolved))}')
     order = sorted(counts, key=lambda lid: -len(counts[lid]))[:MAX_LOCATIONS]
     if len(counts) > MAX_LOCATIONS:
         notes.append(f'{len(counts) - MAX_LOCATIONS} location(s) used in the fewest scenes '
                      f'are left out of the world bible')
-    locations = [{'id': lid, 'name': by_id[lid].get('name', '') or lid,
-                  'scenes': str(len(counts[lid])), 'first': counts[lid][0]} for lid in order]
-    required = [loc['id'] for loc in locations if int(loc['scenes']) >= 2] \
-        or [loc['id'] for loc in locations]
+    locations = [LocationEvidence(lid, by_id[lid].get('name', '') or lid, len(counts[lid]),
+                                  counts[lid][0]) for lid in order]
+    sources = ['scenes'] + (['locations'] if locations else []) + \
+        (['commitments'] if not fact_notes else [])
     return WorldEvidence(title=title, locations=locations,
                          facts=[_fact_line(f) for f in facts[:MAX_WORLD_FACTS]],
-                         required=required), notes
+                         sources=sources), notes
 
 
 def build_world_prompt(profile: dict, scenes: list[dict[str, str]], ev: WorldEvidence,
                        problems: list[str] | None = None) -> str:
-    locations = '\n'.join(f'- {loc["id"]} ({loc["name"]}): {loc["scenes"]} scene(s), first '
-                          f'{loc["first"]}' for loc in ev.locations) or '(none recorded)'
+    locations = '\n'.join(f'- {loc.id} ({loc.name}): {loc.scenes} scene(s), first '
+                          f'{loc.first}' for loc in ev.locations) or '(none recorded)'
     facts = '\n'.join(f'- {f}' for f in ev.facts) or '(none recorded)'
     sections = '\n'.join(f'   - {s}: {", ".join(keys)}' for s, keys in _WORLD_SECTIONS.items())
+    required = f' ({", ".join(ev.required)} at least)' if ev.required else ''
     return f"""{_DESCRIBE_STANCE}
 
 ## The book
@@ -1794,9 +1938,9 @@ book shows of that city, not what an encyclopedia would.
 
 1. **overview**: one paragraph on the world and what makes it distinct.
 2. **macro**: the landscape, climate and wider setting, as the book shows them.
-3. **locations**: for each place above, by id exactly ({", ".join(ev.required)} at
-   least): description (how the text renders it), function (what happens
-   there, what it carries), occupants (who is there and why).
+3. **locations**: for each place above, by id exactly{required}: description
+   (how the text renders it), function (what happens there, what it
+   carries), occupants (who is there and why).
 4. The sections below, each field one or two sentences or empty:
 {sections}
 5. **institutions**: the institutions the book shows (name, function, notes); may be empty.
@@ -1812,18 +1956,20 @@ book shows of that city, not what an encyclopedia would.
 
 
 def parse_world(response: str, ev: WorldEvidence) -> dict:
-    """Read and check step 5e's reply. Returns it cleaned, `locations` in
-    evidence order. Raises ReplyProblems for: an empty overview, a location
-    id unknown, repeated or (when required) left out, a location with no
-    description, an imperative open question, and a system marked present
-    with no name, description or rules, or absent with no reason."""
+    """Read and check step 5e's reply against the evidence it was asked
+    with. Returns it cleaned, `locations` in evidence order. Raises
+    ReplyProblems for: an empty overview, a location id unknown, repeated or
+    (when required) left out, a location with no description, an open
+    question that reads as an instruction, and a system marked present with
+    no name, description or rules, or absent with no reason."""
     from .extract import _json_answer
     data = _clean_reply(_json_answer(response, WORLD_SCHEMA))
     problems: list[str] = []
     if not data['overview']:
         problems.append('overview is empty')
-    ids = [loc['id'] for loc in ev.locations]
+    ids = [loc.id for loc in ev.locations]
     described = _ids_once(data['locations'], 'id', ids, 'locations', problems)
+    problems += _imperatives(data['open_questions'], 'open_questions')
     left = [lid for lid in ev.required if lid not in {loc['id'] for loc in described}]
     if left:
         problems.append('locations leaves out: ' + ', '.join(left[:5]))
@@ -1843,39 +1989,17 @@ def parse_world(response: str, ev: WorldEvidence) -> dict:
     return data
 
 
-_SECTION_TITLES = {
-    'society': ('Society & Culture', {'class_structure': 'Class & Social Structure',
-                                      'norms': 'Cultural Norms',
-                                      'knowledge': 'Education & Knowledge',
-                                      'family': 'Gender, Family, & Relationships',
-                                      'other': 'Other Cultural Notes'}),
-    'power': ('Politics & Power', {'structure': 'Power Structure',
-                                   'laws': 'Laws & Governance',
-                                   'tensions': 'Political Tensions'}),
-    'economy': ('Economy', {'drivers': 'What Drives the Economy',
-                            'wealth': 'Wealth & Inequality', 'details': 'Key Economic Details'}),
-    'technology': ('Technology / Magic', {'level': 'Technology Level',
-                                          'extraordinary': 'Magic or Extraordinary Abilities'}),
-    'history': ('History', {'deep': 'Deep History', 'recent': 'Recent History',
-                            'inciting': 'The Inciting Backstory'}),
-    'daily_life': ('Daily Life', {'typical_day': 'What a Typical Day Looks Like',
-                                  'material': 'Food, Drink, & Material Culture'}),
-    'senses': ('Sensory Palette', {'sight': 'Sight', 'sound': 'Sound', 'smell': 'Smell',
-                                   'touch': 'Touch', 'taste': 'Taste'}),
-}
-
-
 def render_world_bible(reply: dict, ev: WorldEvidence, header: str) -> str:
     """`world-bible.md` in the template's sections, described: "Open
     Questions" is "What the text leaves open". Location scene counts are
     code's."""
-    name = {loc['id']: loc for loc in ev.locations}
+    name = {loc.id: loc for loc in ev.locations}
     out = [header, f'# {ev.title or "Untitled"} -- World Bible', '', '## Overview', '',
            reply['overview'], '', '---', '', '## Geography & Setting', '', '### The Macro',
            _shown(reply['macro']), '', '### Key Locations', '']
     for loc in reply['locations']:
         e = name[loc['id']]
-        out += [f'**{e["name"]}** ({e["scenes"]} scene(s))',
+        out += [f'**{e.name}** ({e.scenes} scene(s))',
                 f'- {loc["description"]}', f'- Function: {_shown(loc["function"])}',
                 f'- Occupants: {_shown(loc["occupants"])}', '']
     if ev.facts:
@@ -1922,80 +2046,127 @@ DIALOGUE_SAMPLES = 3
 _CONTRACTION = re.compile(r"\b\w+(?:n['’]t|['’](?:re|ve|ll|d|m))\b", re.IGNORECASE)
 
 
+#: The fewest words a measure is taken over; below it a percentage or a
+#: rate per 1,000 words says more about the sample than the voice.
+MIN_MEASURE_WORDS = 1_000
+
+
 @dataclass(frozen=True)
 class VoiceEvidence:
+    """What 5f is given. A reply parsed against this evidence renders only
+    with it (by character id)."""
     title: str
     samples: list[tuple[str, str, str]]   # (label, scene id, text)
     measures: list[tuple[str, str]]       # (what, value), measured by code
     pov: list[str]                        # POV character ids, most scenes first
-    characters: list[str]                 # every characters.csv id
+    names: dict[str, str]                 # every characters.csv id → its name
+    sources: list[str]
 
 
-def _measure(text: str) -> dict[str, str]:
+def _measure(text: str, quoted_singly: bool) -> dict[str, str]:
+    """Code's measures of `text`. Dialogue share isn't stated for prose that
+    quotes speech with single quotation marks (it would read 0%), and
+    sentence length is left out, and said, when there are too few sentences."""
     from .exemplars import compute_rhythm_signature
     from .prose_analysis import extract_dialogue
     words = len(text.split())
     sig = compute_rhythm_signature(text)
     dialogue, _ = extract_dialogue(text)
-    out = {'words': f'{words:,}',
-           'dialogue share': f'{round(100 * len(dialogue.split()) / words) if words else 0}% '
-                             f'of words are inside quotation marks',
-           'contractions': f'{round(1000 * len(_CONTRACTION.findall(text)) / words, 1) if words else 0} '
-                           f'per 1,000 words'}
+    out = {'dialogue share': (
+        'not measured: speech is in single quotation marks, which are not read as dialogue'
+        if quoted_singly else
+        f'{round(100 * len(dialogue.split()) / words)}% of words are inside quotation marks'),
+        'contractions': f'{round(1000 * len(_CONTRACTION.findall(text)) / words, 1)} '
+                        f'per 1,000 words'}
     if sig:
         b = sig['buckets']
         out['sentence length'] = (
             f'mean {sig["mean_sentence_words"]} words (sd {sig["stddev_sentence_words"]}, '
             f'range {sig["min_sentence_words"]}-{sig["max_sentence_words"]}); {b["short"]}% '
             f'under 8, {b["long"] + b["very_long"]}% over 25')
+    else:
+        out['sentence length'] = 'not measured: too few sentences'
     return out
 
 
 def voice_evidence(project_dir: str, scenes: list[dict[str, str]], title: str,
                    ) -> tuple[VoiceEvidence | None, list[str]]:
-    """The prose 5f reads and the measures code takes of it; None, with a
-    note, when no scene has readable prose (a voice can't be described
-    from summaries)."""
+    """The prose 5f reads and the measures code takes of it, each labelled
+    with what it covers; None when no scene has prose (a voice can't be
+    described from summaries), with the notes saying why.
+
+    Raises DescribeFailed naming the file when characters.csv or a scene
+    file can't be read."""
     from .prose_analysis import extract_dialogue
     texts, notes = _prose(project_dir, scenes)
     if not texts:
-        return None, notes + ['no scene has prose to describe a voice from']
+        return None, notes
     ordered = [s['id'] for s in scenes if s['id'] in texts]
+    quoted_singly = single_quoted(list(texts.values()))
 
     def cut(text: str) -> str:
         words = text.split()
         return text if len(words) <= SAMPLE_WORDS else ' '.join(words[:SAMPLE_WORDS]) + ' […]'
-    picks = [('opening', ordered[0]), ('middle', ordered[len(ordered) // 2]),
-             ('close', ordered[-1])]
-    share = {sid: len(extract_dialogue(texts[sid])[0].split()) / max(1, len(texts[sid].split()))
-             for sid in ordered if len(texts[sid].split()) >= 300}
-    chosen = {sid for _, sid in picks}
-    for sid in sorted(share, key=lambda k: -share[k]):
-        if len(picks) >= 3 + DIALOGUE_SAMPLES:
-            break
-        if sid not in chosen:
-            picks.append(('most dialogue', sid))
-            chosen.add(sid)
-    whole = _measure('\n\n'.join(texts[sid] for sid in ordered))
-    measures = [(f'whole book: {k}', v) for k, v in whole.items()]
-    rows, alias = _registry(project_dir, 'characters.csv')
+    picks: list[tuple[str, str]] = []
+    for label, sid in (('opening', ordered[0]), ('middle', ordered[len(ordered) // 2]),
+                       ('close', ordered[-1])):
+        if sid not in {p for _, p in picks}:     # a short book has fewer than three
+            picks.append((label, sid))
+    if not quoted_singly:
+        share = {sid: len(extract_dialogue(texts[sid])[0].split()) / len(texts[sid].split())
+                 for sid in ordered if len(texts[sid].split()) >= 300}
+        for sid in sorted(share, key=lambda k: -share[k]):
+            if len([p for p in picks if p[0] == 'most dialogue']) >= DIALOGUE_SAMPLES:
+                break
+            if sid not in {p for _, p in picks}:
+                picks.append(('most dialogue', sid))
+    else:
+        notes.append('the prose quotes speech with single quotation marks, which are not read '
+                     'as dialogue, so dialogue is neither measured nor used to pick samples')
+
+    def measured(label: str, ids: list[str]) -> list[tuple[str, str]]:
+        text = '\n\n'.join(texts[sid] for sid in ids)
+        words = len(text.split())
+        if words < MIN_MEASURE_WORDS:
+            notes.append(f'{label} has {words:,} words of prose, under {MIN_MEASURE_WORDS:,}, '
+                         f'so it is not measured')
+            return []
+        what = f'{label} ({len(ids)} of {len(scenes)} scenes, {words:,} words)'
+        return [(f'{what}: {k}', v) for k, v in _measure(text, quoted_singly).items()]
+    measures = measured('the book', ordered)
+    rows, alias, registry_notes = _registry(project_dir, 'characters.csv')
+    notes += registry_notes
     pov_scenes: dict[str, list[str]] = {}
+    unresolved = set()
     for s in scenes:
-        pid = alias.get(s.get('pov', '').strip().lower())
-        if pid and s['id'] in texts:
+        named = s.get('pov', '').strip()
+        pid = alias.get(named.lower())
+        if named and not pid:
+            unresolved.add(named)
+        elif pid and s['id'] in texts:
             pov_scenes.setdefault(pid, []).append(s['id'])
+    if unresolved:
+        notes.append(f'{len(unresolved)} POV name(s) match no character in characters.csv, so '
+                     f'their voices are not described: {_first(sorted(unresolved))}')
     pov = sorted(pov_scenes, key=lambda p: -len(pov_scenes[p]))
     for pid in pov:
-        m = _measure('\n\n'.join(texts[sid] for sid in pov_scenes[pid]))
-        measures += [(f'{pid}\'s scenes: {k}', v) for k, v in m.items() if k != 'words']
+        measures += measured(f"{pid}'s scenes", pov_scenes[pid])
     return VoiceEvidence(title=title, samples=[(label, sid, cut(texts[sid]))
                                                for label, sid in picks],
                          measures=measures, pov=pov,
-                         characters=[r['id'] for r in rows]), notes
+                         names={r['id']: r.get('name', '') or r['id'] for r in rows},
+                         sources=['prose'] + (['characters'] if rows else [])), notes
 
 
-_POV_VOICE_FIELDS = ('interiority', 'sentence_patterns', 'metaphor_domain', 'notices',
-                     'emotional_register', 'speech')
+#: The POV voice fields, with the guide's label for each; the schema and
+#: the renderer both read this, so a field asked for is always rendered.
+_POV_VOICE_LABELS = {'interiority': 'Interiority style', 'sentence_patterns': 'Sentence patterns',
+                     'metaphor_domain': 'Metaphor domain', 'notices': 'What they notice',
+                     'emotional_register': 'Emotional register', 'speech': 'Speech patterns'}
+_POV_VOICE_FIELDS = tuple(_POV_VOICE_LABELS)
+#: The fewest items the voice guide's lists may have (the prompt asks for
+#: more); an empty list would render as if the book had none.
+_VOICE_LIST_MINIMUMS = {'lineage': 1, 'habits': 1, 'never_does': 1, 'pacing': 1}
 
 VOICE_SCHEMA = _object({
     'lineage': {'type': 'array', 'items': _object({'influence': _STRING, 'what': _STRING})},
@@ -2073,19 +2244,28 @@ directly"), never as an instruction ("Address the reader").
 
 
 def parse_voice(response: str, ev: VoiceEvidence) -> dict:
-    """Read and check step 5f's reply. Returns it cleaned. Raises
-    ReplyProblems for: a POV voice or profile missing, unknown or repeated,
-    an empty POV voice field, a list item that reads as an instruction
-    (decision 2), a profile word with a `;` (it would split the CSV list),
-    and an empty blend or register."""
+    """Read and check step 5f's reply against the evidence it was asked
+    with. Returns it cleaned. Raises ReplyProblems for: a POV voice missing,
+    unknown or repeated, a profile unknown (not in characters.csv),
+    repeated or missing for a POV character, an empty POV voice field, a
+    list shorter than _VOICE_LIST_MINIMUMS or no key moment, a list item
+    or pacing description that reads as an instruction (decision 2), a
+    profile word with a `;` (it would split the CSV list), and an empty
+    blend, register or dialogue balance."""
     from .extract import _json_answer
     data = _clean_reply(_json_answer(response, VOICE_SCHEMA))
     problems: list[str] = []
     problems += [f'{k} is empty' for k in ('blend', 'register') if not data[k]]
+    if not data['dialogue']['balance']:
+        problems.append('dialogue.balance is empty')
+    problems += [f'{k} has {len(data[k])} item(s); at least {n}'
+                 for k, n in _VOICE_LIST_MINIMUMS.items() if len(data[k]) < n]
+    if not data['emotion']['key_moments']:
+        problems.append('emotion.key_moments has no items')
     voices = _ids_once(data['pov_voices'], 'id', ev.pov, 'pov_voices', problems)
     for v in voices:
         problems += [f'pov_voices {v["id"]}.{k} is empty' for k in _POV_VOICE_FIELDS if not v[k]]
-    profiles = _ids_once(data['profiles'], 'id', ev.characters, 'profiles', problems)
+    profiles = _ids_once(data['profiles'], 'id', list(ev.names), 'profiles', problems)
     for label, got in (('pov_voices', voices), ('profiles', profiles)):
         left = [p for p in ev.pov if p not in {g['id'] for g in got}]
         if left:
@@ -2098,19 +2278,20 @@ def parse_voice(response: str, ev: VoiceEvidence) -> dict:
     for key in ('habits', 'never_does'):
         problems += _imperatives(data[key], key)
     problems += _imperatives(data['emotion']['key_moments'], 'emotion.key_moments')
+    problems += _imperatives([p['description'] for p in data['pacing']], 'pacing')
     if problems:
         raise ReplyProblems(problems)
     data['pov_voices'], data['profiles'] = voices, profiles
     return data
 
 
-VOICE_PROFILE_COLUMNS = ['character', 'preferred_words', 'banned_words', 'metaphor_families',
-                         'rhythm_preference', 'register', 'dialogue_style']
+
 
 
 def voice_profile_rows(reply: dict) -> list[dict[str, str]]:
     """`voice-profile.csv` in elaborate's shape: a `_project` row with the
-    register, then one row per POV character. `banned_words` stays empty: a
+    register, then one row per profile in the reply (every POV character,
+    and any other character it profiled). `banned_words` stays empty: a
     word the book never uses isn't banned."""
     rows = [{'character': '_project', 'register': reply['register']}]
     rows += [{'character': p['id'], 'preferred_words': ';'.join(p['preferred_words']),
@@ -2120,8 +2301,7 @@ def voice_profile_rows(reply: dict) -> list[dict[str, str]]:
     return rows
 
 
-def render_voice_guide(reply: dict, ev: VoiceEvidence, names: dict[str, str],
-                       header: str) -> str:
+def render_voice_guide(reply: dict, ev: VoiceEvidence, header: str) -> str:
     """`voice-guide.md`, described. The template's prescriptive sections
     become descriptions ("Influence Blend" is "Lineage", "Style Rules" is
     "What the prose does" and "What the prose never does", "Pacing Rules"
@@ -2132,14 +2312,12 @@ def render_voice_guide(reply: dict, ev: VoiceEvidence, names: dict[str, str],
     out += [f'| {_cell_md(x["influence"])} | {_cell_md(x["what"])} |' for x in reply['lineage']] \
         or ['| (none named) | |']
     out += ['', f'**The blend:** {reply["blend"]}', '', '---', '', '## Measured', '']
-    out += [f'- **{what}:** {value}' for what, value in ev.measures]
+    out += [f'- **{what}:** {value}' for what, value in ev.measures] \
+        or ['- Nothing was measured: too little prose (see the extraction report).']
     out += ['', '---', '', '## POV Voices', '']
-    labels = {'interiority': 'Interiority style', 'sentence_patterns': 'Sentence patterns',
-              'metaphor_domain': 'Metaphor domain', 'notices': 'What they notice',
-              'emotional_register': 'Emotional register', 'speech': 'Speech patterns'}
     for v in reply['pov_voices']:
-        out += [f'### {names.get(v["id"], v["id"])}', '']
-        out += [f'**{label}:** {v[k]}\n' for k, label in labels.items()]
+        out += [f'### {ev.names.get(v["id"], v["id"])}', '']
+        out += [f'**{label}:** {v[k]}\n' for k, label in _POV_VOICE_LABELS.items()]
     out += ['---', '', '## Sensory Palette', '']
     for k in ('sight', 'sound', 'smell', 'touch', 'taste'):
         out += [f'### {k.title()}', _shown(reply['senses'][k]), '']
@@ -2566,11 +2744,11 @@ def run_pitch(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutc
 
 def run_characters(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutcome:
     """Step 5d: character-bible.md, from the characters the scenes put on
-    stage, their established facts and lines spoken near their name."""
+    stage, their established facts and lines tagged with their name."""
     rel = 'reference/character-bible.md'
     if not _gate(run, [rel], '5d (character bible)'):
         return 'skipped'
-    chars, notes = character_evidence(run.project_dir, scenes)
+    chars, notes, sources = character_evidence(run.project_dir, scenes)
     title, title_notes = _book_title(run.project_dir)
     run.reports.extend(f'5d: {n}' for n in notes + title_notes)
     if not chars:
@@ -2581,25 +2759,28 @@ def run_characters(run: Run, profile: dict, scenes: list[dict[str, str]]) -> Ste
                  lambda problems: build_characters_prompt(profile, chars, problems),
                  lambda text: parse_characters(text, chars),
                  CHARACTERS_SCHEMA, CHARACTERS_MAX_TOKENS)
-    header = provenance_header(run.version, '5d', ['profile', 'scenes', 'characters',
-                                                   'commitments', 'prose'])
+    header = provenance_header(run.version, '5d', ['profile', *sources])
     doc = render_character_bible(reply, chars, title, header)
     return 'written' if _write_all(run, [(rel, doc)], '5d', '5d') else 'partial'
 
 
 def run_world(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutcome:
     """Step 5e: world-bible.md, and systems-bible.md (the book's formal
-    system, or a stub saying it has none and why)."""
+    system, or a stub saying it has none and why). Skipped, and said, when
+    no scene's location is in locations.csv: a world bible with no places
+    would read as a book set nowhere."""
     rels = ['reference/world-bible.md', 'reference/systems-bible.md']
     if not _gate(run, rels, '5e (world and systems bibles)'):
         return 'skipped'
     title, title_notes = _book_title(run.project_dir)
     ev, notes = world_evidence(run.project_dir, scenes, title)
     run.reports.extend(f'5e: {n}' for n in notes + title_notes)
+    if not ev.locations:
+        run.reports.append('5e skipped: no scene is set in a place locations.csv names')
+        return 'skipped'
     reply = _ask(run, 'world', lambda problems: build_world_prompt(profile, scenes, ev, problems),
                  lambda text: parse_world(text, ev), WORLD_SCHEMA, WORLD_MAX_TOKENS)
-    header = provenance_header(run.version, '5e', ['profile', 'scenes', 'locations',
-                                                   'commitments'])
+    header = provenance_header(run.version, '5e', ['profile', *ev.sources])
     files = [(rels[0], render_world_bible(reply, ev, header)),
              (rels[1], render_systems_bible(reply, title, header))]
     return 'written' if _write_all(run, files, '5e', '5e') else 'partial'
@@ -2614,16 +2795,15 @@ def run_voice(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOutc
         return 'skipped'
     title, title_notes = _book_title(run.project_dir)
     ev, notes = voice_evidence(run.project_dir, scenes, title)
-    run.reports.extend(f'5f: {n}' for n in notes + title_notes)
+    run.reports.extend(f'5f: {n}' for n in title_notes + (notes if ev else []))
     if ev is None:
-        run.reports.append('5f skipped: no scene has prose to describe a voice from')
+        run.reports.append('5f skipped: no scene has prose to describe a voice from ('
+                           + '; '.join(notes) + ')')
         return 'skipped'
     reply = _ask(run, 'voice', lambda problems: build_voice_prompt(profile, ev, problems),
                  lambda text: parse_voice(text, ev), VOICE_SCHEMA, VOICE_MAX_TOKENS)
-    rows, _ = _registry(run.project_dir, 'characters.csv')
-    names = {r['id']: r.get('name', '') or r['id'] for r in rows}
-    header = provenance_header(run.version, '5f', ['profile', 'prose', 'characters'])
-    files = [(rels[0], render_voice_guide(reply, ev, names, header)),
+    header = provenance_header(run.version, '5f', ['profile', *ev.sources])
+    files = [(rels[0], render_voice_guide(reply, ev, header)),
              (rels[1], _csv_text(voice_profile_rows(reply), VOICE_PROFILE_COLUMNS))]
     return 'written' if _write_all(run, files, '5f', '5f') else 'partial'
 
