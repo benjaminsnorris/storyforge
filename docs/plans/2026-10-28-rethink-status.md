@@ -1,6 +1,6 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-31 (evening), at v1.116.0. **Phase 3 is done** (checker recall, promises in words, parallel vs sequential) and **Phase 4 PRs 1–2 are merged** (#466 `ledger.dependents`, #468 the re-check): a redraft is no longer refused for what leans on it; the later scenes depending on what it changed are re-checked. Next is PR 3, the reject flow (design: `docs/plans/2026-10-31-phase4-safe-revision-design.md`). **A fresh session starts here:** read **Latest**, then the Phase 4 design note's "PRs, in order", then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-10-31 (evening), at v1.117.0. **Phase 3 is done** (checker recall, promises in words, parallel vs sequential) and **Phase 4 PRs 1, 2 and 3a are merged** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow): a redraft is no longer refused for what leans on it, the later scenes depending on what it changed are re-checked, and a rejected fact's scene is listed for revision before its dependents are re-checked. Next is PR 3b, **the first eval of the re-check set** (design: `docs/plans/2026-10-31-phase4-safe-revision-design.md`). **A fresh session starts here:** read **Latest**, then the Phase 4 design note's "PRs, in order", then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
 ## Latest: Phase 3 finished, Phase 4 started (2026-10-31, storyforge-c4)
 
@@ -12,6 +12,7 @@ Last updated 2026-10-31 (evening), at v1.116.0. **Phase 3 is done** (checker rec
 | #463 | 1.114.0 | **broken promises in words**: the drafting task lists `physical_state_out` as a must-show checklist |
 | #465 | — (docs) | the Phase 4 design, Ben's three decisions |
 | #466 | 1.115.0 | Phase 4 PR 1: `ledger.dependents` (→ `Dependents`: scenes, unrelated), `changed_facts`, `ended_by`; a redraft that would drop a later scene's end was refused |
+| #470 | 1.117.0 | **Phase 4 PR 3a, the reject flow**: `audit --mark rejected` lists the fact's scene `revise-rejected` (its revision, once it passes, lists the dependents) or, with no prose to revise, the dependents for a re-check now; the gate keeps rejected commitments and won't pass prose restating one; drafting drops non-binding facts from the brief's fact columns; validate reports briefs naming them |
 | #468 | 1.116.0 | **Phase 4 PR 2, the re-check**: no redraft refusal; on commit a restated fact keeps its id; the later scenes (with prose) depending on what was dropped/changed are listed `recheck` and `gate.recheck_pending` re-gates them (report and stop; `recheck-failed` not re-run; cost forecast against the threshold across a run); write/revise/check run it; `check --pending` |
 
 **E4** (shared-dark Act 1, gated, `full` prose; targets CP10k ≤ 7.1, broken promises ≤ 3):
@@ -35,7 +36,7 @@ Last updated 2026-10-31 (evening), at v1.116.0. **Phase 3 is done** (checker rec
 - The E8 replay miss after #461's review fix was real, not the flake: a thornwall tree has cut scenes, which the checker no longer sees; that case was re-recorded ($1.74).
 
 **Next, in order** (the design note's "PRs, in order"):
-1. **PR 3, the reject flow** (design §4): the typed views and `extract.known_for_scene` leave non-binding rows out; `audit --mark rejected` lists the fact's dependents for a re-check (`gate.RECHECK`); and **an eval for the re-check set on E1 cases** (each case's established fact, rejected or changed, must yield a set containing the scene where the error was introduced). **No eval exercises the re-check end to end yet** (E8 had no case the old refusal stopped; E4 drafts fresh scenes), so this eval is the first measure of PR 2.
+1. **PR 3b, an eval of the re-check set on E1 cases** (plan Phase 4 success criterion): each case's established fact, rejected or changed, must yield a re-check set containing the scene where the error was introduced. **No eval exercises the re-check yet** (E8 had no case the old refusal stopped; E4 drafts fresh scenes). The books have no commitments until phase 4 runs on them, and knowledge registry facts have no subject (so `dependents` can't trace them: `unrelated`), so the eval likely needs phase 4 commitments for the case scenes (E3 already extracts them) and may show the subject/type graph is too coarse or too broad; report precision (set size) as well as recall. A live end-to-end run of `write --force` on a mid-book scene of a copy of shared-dark would also show cost.
 2. **PR 4**, every prose pass (polish, naturalness, continuity-audit) through the gate, then the re-check (E8 to zero); **PR 5**, rewrite-from-ledger (E5).
 4. **Smaller:** the low-confidence halt; fill `characters.csv` `pronouns`; measure E4 over 2–3 runs before reading small moves (run 9 vs 10 are one each).
 
