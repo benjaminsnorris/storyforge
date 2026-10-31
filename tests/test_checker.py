@@ -365,3 +365,25 @@ class TestReference:
         result, _ = _run(project_dir, [_answer([_finding(
             established_scene='world-bible.md', established_quote='x')])])
         assert 'not given to the checker' in result.unverified[0].problem
+
+
+class TestSearchShowsTheNearestHits:
+    def _book(self, n):
+        from storyforge.checker import Book
+        order = {f's{i}': i for i in range(n)}
+        prose = {f's{i}': f'The scar on his thumb, scene {i}. ' + 'x ' * 400 for i in range(n)}
+        return Book(order, {}, prose, [])
+
+    def test_nearest_earlier_first_then_later(self):
+        out = checker._search(self._book(6), 's3', {'query': 'scar thumb'})
+        order = [line.split(',')[0][1:] for line in out.splitlines()[1:]]
+        assert order == ['s2', 's1', 's0', 's4', 's5']
+        assert 'all shown' in out
+
+    def test_many_hits_are_snippets_and_the_cap_is_said(self):
+        out = checker._search(self._book(60), 's59', {'query': 'scar thumb'})
+        lines = out.splitlines()
+        assert f'the nearest {checker.MAX_SEARCH_HITS} shown' in lines[0]
+        assert len(lines) == checker.MAX_SEARCH_HITS + 1
+        assert lines[1].startswith('[s58, earlier]')
+        assert all(len(line) < checker.SNIPPET_CHARS + 40 for line in lines[1:])
