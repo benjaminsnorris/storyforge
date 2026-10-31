@@ -62,6 +62,8 @@ A re-gate is about one extraction (Sonnet), one persistence call and one check (
 1. `ledger.dependents` and changed facts (§1–2), no model calls; tests on fixtures. Close the `resolves` gap in `_leaning_on` meanwhile.
 2. The re-check (§3) in `gate`, used by `write --force` and revise's redrafts in place of the refusal; E5 and E8 re-recorded (E5's redraft gated again).
 3. Reject flow (§4): views filter on status; `audit --mark rejected` lists dependents; `check --pending`. A new E1-based eval for the re-check set.
+   - **3b (#473), the eval `recheck-set`: recall 0.72** (gate 0.9). Misses: same subject in another type, the same thing under different subjects, blank-subject world facts, and two no graph can catch (status doc, Latest).
+   - **3c:** widen `dependents`: same subject in any type; a blank subject falls back to later scenes with a fact of its type; a mention match through registry names and aliases. Replayed: 0.76 with the first rule, 0.84 with the first two; ceiling 0.92.
 4. Prose passes through the gate (§5); E8.
 5. Rewrite-from-ledger (§6); E5.
 
