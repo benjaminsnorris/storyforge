@@ -1276,13 +1276,17 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             _halt_chain(project_dir, '4 — commitments', scene_id, e,
                         ['reference/commitments.csv', 'working/'])
 
+        # The scene is in the persistence prompt: the shared system context
+        # would only add cache reads
+        persistence_log = os.path.join(log_dir, f'extract-persistence-{scene_id}.json')
         try:
-            verdict = persistence.judge(
-                scene_id, scene_text, found, model=model, system=system,
-                log_file=os.path.join(log_dir, f'extract-persistence-{scene_id}.json'))
+            verdict = persistence.judge(scene_id, scene_text, found, model=model,
+                                        log_file=persistence_log)
         except persistence.PersistenceError as e:
             _halt_chain(project_dir, '4 — commitments', scene_id, e,
                         ['reference/commitments.csv', 'working/'])
+        if verdict.asked:
+            _log_api_usage(persistence_log, 'extract-persistence', scene_id, model, project_dir)
         new = commitment_rows(verdict.kept, scene_id, scene_text, rows, known, recorded,
                               subjects, ledger.COMMITMENTS_PASS, problems,
                               own_writers=(ledger.COMMITMENTS_PASS,))
