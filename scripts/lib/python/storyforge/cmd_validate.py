@@ -28,6 +28,7 @@ def parse_args(argv):
 def main(argv=None):
     args = parse_args(argv or [])
     project_dir = detect_project_root()
+    say = _status_logger(args)
     ref_dir = os.path.join(project_dir, 'reference')
 
     if not os.path.isfile(os.path.join(ref_dir, 'scenes.csv')):
@@ -64,25 +65,25 @@ def main(argv=None):
     from storyforge.schema import validate_voice_profile
     vp_result = validate_voice_profile(project_dir)
     if vp_result['errors']:
-        log(f'Voice profile: {len(vp_result["errors"])} issues')
+        say(f'Voice profile: {len(vp_result["errors"])} issues')
         for err in vp_result['errors']:
-            log(f'  {err["row"]}: {err["message"]}')
+            say(f'  {err["row"]}: {err["message"]}')
     elif vp_result['has_project_row']:
-        log(f'Voice profile: valid ({vp_result["character_count"]} characters)')
+        say(f'Voice profile: valid ({vp_result["character_count"]} characters)')
 
     from storyforge.schema import validate_illustration_plan
     illus_result = validate_illustration_plan(project_dir)
     if illus_result['row_count'] or illus_result['errors']:
         if illus_result['errors']:
-            log(f'Illustration plan: {len(illus_result["errors"])} error(s)')
+            say(f'Illustration plan: {len(illus_result["errors"])} error(s)')
             for err in illus_result['errors']:
-                log(f'  {err["row"]}: {err["message"]}')
+                say(f'  {err["row"]}: {err["message"]}')
         if illus_result['warnings']:
-            log(f'Illustration plan: {len(illus_result["warnings"])} warning(s)')
+            say(f'Illustration plan: {len(illus_result["warnings"])} warning(s)')
             for warn in illus_result['warnings']:
-                log(f'  {warn["row"]}: {warn["message"]}')
+                say(f'  {warn["row"]}: {warn["message"]}')
         if not illus_result['errors'] and not illus_result['warnings']:
-            log(f'Illustration plan: valid '
+            say(f'Illustration plan: valid '
                 f'({illus_result["row_count"]} illustrations)')
 
     # Canon joins the gate here rather than staying advisory in `cleanup`, whose
@@ -93,13 +94,13 @@ def main(argv=None):
     from storyforge.canon import canon_gate
     canon_result = canon_gate(project_dir)
     if canon_result['errors']:
-        log(f'Canon files: {len(canon_result["errors"])} error(s)')
+        say(f'Canon files: {len(canon_result["errors"])} error(s)')
         for f in canon_result['errors']:
-            log(f'  {f["file"]}: [{f["type"]}] {f["detail"]}')
+            say(f'  {f["file"]}: [{f["type"]}] {f["detail"]}')
     if canon_result['other']:
-        log(f'Canon files: {len(canon_result["other"])} non-blocking finding(s)')
+        say(f'Canon files: {len(canon_result["other"])} non-blocking finding(s)')
         for f in canon_result['other']:
-            log(f'  {f["file"]}: [{f["severity"]}] {f["type"]}')
+            say(f'  {f["file"]}: [{f["severity"]}] {f["type"]}')
 
     structural_scores = None
     scores_previous = None
@@ -137,6 +138,16 @@ def main(argv=None):
     canon_ok = not canon_result['errors']
     sys.exit(0 if structural_ok and schema_ok and illustrations_ok and canon_ok
              else 1)
+
+
+def _status_logger(args):
+    """Where main()'s status lines go. --json keeps stdout for the JSON report,
+    which callers parse whole (`validate --json > report.json`), so the lines
+    go to stderr. Otherwise stdout, --quiet included: it drops the report, not
+    a blocking finding's reason."""
+    if args.json_output:
+        return lambda msg: print(msg, file=sys.stderr, flush=True)
+    return log
 
 
 def _print_human_readable(combined):
