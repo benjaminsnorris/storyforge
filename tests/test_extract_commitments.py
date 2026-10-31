@@ -542,3 +542,20 @@ class TestPhase4PersistenceWiring:
             TestPhase4()._run(project_dir, monkeypatch, replies, judge='real')
         assert not [r for r in ledger.load(project_dir)
                     if r['introduced_by'] == ledger.COMMITMENTS_PASS and r['scene_id'] == first]
+
+    def test_a_reply_that_skips_facts_is_asked_again_once(self, monkeypatch, tmp_path):
+        from storyforge import api, persistence
+        replies = [{'verdicts': [{'n': 1, 'persists': True, 'why': ''}]},
+                   {'verdicts': [{'n': 1, 'persists': True, 'why': ''},
+                                 {'n': 2, 'persists': False, 'why': 'staging'}]}]
+        prompts = []
+
+        def call(prompt, *a, **k):
+            prompts.append(prompt)
+            return {'content': [{'type': 'text', 'text': json.dumps(replies.pop(0))}],
+                    'stop_reason': 'end_turn', 'usage': {}}
+        monkeypatch.setattr(api, 'invoke_to_file', call)
+        v = persistence.judge('s1', 'P', self._found('A', 'B'), model='m',
+                              log_file=str(tmp_path / 'p.json'))
+        assert [e['statement'] for e, _ in v.dropped] == ['B']
+        assert 'not usable' in prompts[1] and 'item(s) 2' in prompts[1]

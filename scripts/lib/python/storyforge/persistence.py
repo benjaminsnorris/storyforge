@@ -15,8 +15,9 @@ only the second question: **does this fact last beyond the scene?**
   parsed reply before it becomes ledger rows. The callers report what was
   dropped: phase 4 logs each with why and totals them, the gate keeps them
   on its result (a NOTE in `report_lines`).
-- Fails loud: a refusal, a reply cut off or off-schema, or a verdict list
-  that doesn't answer every item exactly once raises `PersistenceError`.
+- Fails loud: a refusal, or a reply cut off, off-schema or not answering
+  every item exactly once twice running (one retry names what was wrong),
+  raises `PersistenceError`.
   There is no partial answer, and no item is dropped by default.
 """
 
@@ -148,15 +149,28 @@ def judge(scene_id: str, prose: str, found: list[dict], *, model: str,
     verdict.asked = len(asked)
     answers: dict[int, tuple[bool, str]] = {}
     if asked:
-        try:
-            response = api.invoke_to_file(build_prompt(scene_id, prose, asked), model,
-                                          log_file, max_tokens(len(asked)), output_schema=SCHEMA,
-                                          label=f'persistence {scene_id}')
-            if api.is_truncated(response):
-                raise ValueError('the reply hit its token limit')
-            answers = parse(api.extract_text(response), len(asked))
-        except (RuntimeError, ValueError) as e:   # RefusalError, an API failure, a bad reply
-            raise PersistenceError(f'{scene_id}: the persistence check failed: {e}') from e
+        prompt = build_prompt(scene_id, prose, asked)
+        for attempt in (1, 2):
+            try:
+                response = api.invoke_to_file(prompt, model, log_file, max_tokens(len(asked)),
+                                              output_schema=SCHEMA,
+                                              label=f'persistence {scene_id}')
+                if api.is_truncated(response):
+                    raise ValueError('the reply hit its token limit')
+                answers = parse(api.extract_text(response), len(asked))
+                break
+            except ValueError as e:
+                if attempt == 2:
+                    raise PersistenceError(f'{scene_id}: the persistence check failed '
+                                           f'twice: {e}') from e
+                # One retry, telling the model what was wrong (a reply that
+                # skipped items has happened); the request differs, so a
+                # recording replays each answer in turn
+                prompt = (build_prompt(scene_id, prose, asked)
+                          + f'\n\nYour last answer was not usable: {e}. Answer every fact, '
+                          f'1 to {len(asked)}, exactly once.')
+            except RuntimeError as e:   # RefusalError, an API failure
+                raise PersistenceError(f'{scene_id}: the persistence check failed: {e}') from e
     numbers = {id(e): i for i, e in enumerate(asked, 1)}
     for e in found:
         n = numbers.get(id(e))
