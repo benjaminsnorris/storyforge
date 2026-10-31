@@ -321,7 +321,7 @@ class TestReference:
         shutil.copy(os.path.join(get_plugin_dir(), 'templates', 'reference', 'character-bible.md'),
                     os.path.join(project_dir, 'reference', 'character-bible.md'))
         _, bodies = _run(project_dir, [_answer()])
-        assert 'system' not in bodies[0]
+        assert '<reference' not in ''.join(b['text'] for b in bodies[0]['system'])
         assert 'no reference material' in bodies[0]['messages'][0]['content']
         result, _ = _run(project_dir, [_answer([_finding(
             established_scene='character-bible.md', established_quote='Role')])])
@@ -338,7 +338,7 @@ class TestReference:
         with patch('storyforge.api._api_request', side_effect=[_answer()]) as api:
             check_scene(project_dir, 'act1-sc01', model='claude-opus-5-5')
         other = api.call_args[0][1]
-        assert first[0]['system'] == other['system']
+        assert first[0]['system'][0] == other['system'][0]
         assert first[0]['system'][0]['cache_control'] == {'type': 'ephemeral'}
 
     def test_a_bible_that_is_not_utf8_is_a_check_error(self, project_dir):
@@ -403,3 +403,66 @@ class TestSearchShowsTheNearestHits:
         out = checker._search(Book({'a': 0, 'b': 1}, {}, prose, []), 'b',
                               {'query': 'scar thumb'})
         assert out.splitlines()[1].endswith('second scar thumb.')
+
+
+class TestStorySoFar:
+    """The earlier scenes follow the bibles in the system prompt, whole, the
+    way drafting sees them (E4 run 8: searching alone caught 2 of 9 scenes
+    the judge, which reads them, found contradictions in)."""
+    LATER = 'act2-sc01'
+
+    def _system(self, project_dir, scene=LATER):
+        with patch('storyforge.api._api_request', side_effect=[_answer()]) as api:
+            check_scene(project_dir, scene, model='claude-opus-5-5')
+        body = api.call_args[0][1]
+        return body.get('system', []), body['messages'][0]['content']
+
+    def test_earlier_scenes_follow_the_bibles_in_reading_order_cached(self, project_dir):
+        system, prompt = self._system(project_dir)
+        assert system[0]['text'].startswith("The book's reference material")
+        assert 'THE STORY SO FAR' in system[1]['text']
+        ids = [b['text'].split('"')[1] for b in system[2:]]
+        assert ids == ['act1-sc01', 'act1-sc02', 'new-x1']
+        assert THERE in system[2]['text']
+        assert [b.get('cache_control') for b in system] == [
+            {'type': 'ephemeral'}, None, None, None, {'type': 'ephemeral'}]
+        assert 'story so far: 3 scene(s)' in prompt
+
+    def test_the_scene_checked_and_later_ones_are_not_sent(self, project_dir):
+        system, _ = self._system(project_dir, 'act1-sc02')
+        text = ''.join(b['text'] for b in system)
+        assert '<scene id="act1-sc01">' in text
+        assert 'id="act1-sc02"' not in text and 'id="new-x1"' not in text
+
+    def test_the_first_scene_gets_no_story_and_the_search_instruction(self, project_dir):
+        system, prompt = self._system(project_dir, 'act1-sc01')
+        assert len(system) == 1
+        assert 'Use the tools before you report anything' in prompt
+        assert 'story so far:' not in prompt
+
+    def test_without_bibles_the_story_is_the_whole_system_prompt(self, project_dir):
+        import os
+        for name in checker.REFERENCE_DOCS:
+            path = os.path.join(project_dir, 'reference', name)
+            if os.path.exists(path):
+                os.remove(path)
+        system, prompt = self._system(project_dir)
+        assert 'THE STORY SO FAR' in system[0]['text']
+        assert 'no reference material' in prompt
+
+    def test_past_the_cap_it_gets_the_window_and_says_so(self, project_dir, monkeypatch, capsys):
+        from storyforge import prompts
+        monkeypatch.setattr(prompts, 'FULL_MAX_WORDS', 10)
+        system, prompt = self._system(project_dir)
+        ids = [b['text'].split('"')[1] for b in system[2:]]
+        assert ids == ['new-x1']
+        assert 'story so far: 1 scene(s)' in prompt
+        assert 'sending the window' in capsys.readouterr().out
+
+    def test_the_scene_given_as_prose_is_checked_not_its_file(self, project_dir):
+        with patch('storyforge.api._api_request', side_effect=[_answer()]) as api:
+            check_scene(project_dir, self.LATER, prose='Fresh draft words.',
+                        model='claude-opus-5-5')
+        body = api.call_args[0][1]
+        assert 'Fresh draft words.' in body['messages'][0]['content']
+        assert 'Fresh draft words.' not in ''.join(b['text'] for b in body['system'])

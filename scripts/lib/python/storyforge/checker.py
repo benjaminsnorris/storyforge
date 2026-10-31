@@ -21,6 +21,12 @@ getting one fixed bundle.
   template bible is left out (F-130), and the prompt names what is. They
   are sent uncapped, as drafting's shared context sends them, with their
   own cache breakpoint; one that can't be read as UTF-8 is a `CheckError`.
+- The earlier scenes follow them in the system prompt, whole: the story so
+  far, as drafting sees it (`prompts.prior_scenes` in `full` mode, the
+  window past `prompts.FULL_MAX_WORDS`), cached as it grows. A reader
+  checks a scene against what they have just read, and E4's judge does;
+  searching alone missed most of the slips against earlier prose (E4 run 8
+  caught 2 of 9). Later scenes are found with the tools.
 - Fails loud: a refusal, a reply cut off, a reply that isn't the schema, or
   a tool loop that never ends raises `CheckError`. There is no partial result.
 """
@@ -185,6 +191,8 @@ class Book:
     prose: dict[str, str]
     rows: list[dict[str, str]]
     reference: dict[str, str] = field(default_factory=dict)
+    #: the earlier scenes sent whole in the system prompt, in reading order
+    earlier: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, project_dir: str, scene_id: str, prose: str | None = None,
@@ -207,8 +215,9 @@ class Book:
             texts[scene_id] = prose
         if not (texts.get(scene_id) or '').strip():
             raise CheckError(f'{scene_id} has no prose to check')
+        from storyforge.prompts import prior_scenes
         return cls(order, scenes, texts, ledger.load(project_dir) if rows is None else rows,
-                   reference_docs(project_dir))
+                   reference_docs(project_dir), prior_scenes(scene_id, project_dir, 'full'))
 
     def where(self, sid: str, at: str) -> str:
         if sid not in self.order:
@@ -241,17 +250,27 @@ def reference_docs(project_dir: str) -> dict[str, str]:
 
 
 def _system(book: Book) -> list[dict] | None:
-    """The bibles as the system prompt, or None when there are none. It is
-    the same for every scene, and its own cache breakpoint lets each scene's
-    check read it from cache (the request's automatic breakpoint, at the end,
-    only serves the turns of one scene)."""
-    if not book.reference:
-        return None
-    parts = [f'<reference file="{name}">\n{text.strip()}\n</reference>'
-             for name, text in book.reference.items()]
-    return [{'type': 'text', 'text': "The book's reference material, which every scene "
-             'must agree with:\n\n' + '\n\n'.join(parts),
-             'cache_control': {'type': 'ephemeral'}}]
+    """The bibles, then the earlier scenes, as the system prompt; None when
+    there are neither. The bibles are the same for every scene, and their
+    own cache breakpoint lets each scene's check read them from cache; the
+    last earlier scene has another, so each scene's check extends the last
+    one's (the request's automatic breakpoint, at the end, only serves the
+    turns of one scene)."""
+    blocks = []
+    if book.reference:
+        parts = [f'<reference file="{name}">\n{text.strip()}\n</reference>'
+                 for name, text in book.reference.items()]
+        blocks.append({'type': 'text', 'text': "The book's reference material, which every "
+                       'scene must agree with:\n\n' + '\n\n'.join(parts),
+                       'cache_control': {'type': 'ephemeral'}})
+    if book.earlier:
+        blocks.append({'type': 'text', 'text': (
+            '=== THE STORY SO FAR ===\n\nThe prose of the scenes before the one being '
+            'checked, in reading order. The scene must agree with what they establish.')})
+        blocks += [{'type': 'text', 'text': f'<scene id="{sid}">\n{book.prose[sid].strip()}\n</scene>'}
+                   for sid in book.earlier]
+        blocks[-1]['cache_control'] = {'type': 'ephemeral'}
+    return blocks or None
 
 
 def _reference_note(book: Book) -> str:
@@ -263,6 +282,22 @@ def _reference_note(book: Book) -> str:
             + ') also establishes facts: a scene that contradicts it is a contradiction, '
             'with `established_scene` the file name and `established_quote` its exact '
             'words.')
+
+
+def _how_to_look(book: Book) -> str:
+    claims = ('(a name, number, age, date, elapsed time, kinship, who knows what, where '
+              'someone or something is, an injury or possession, what a character promised)')
+    if not book.earlier:
+        return ('Use the tools before you report anything. For every specific claim in the '
+                f'scene that a reader could check {claims}, search the manuscript or the '
+                'ledger for where it is set up. Read a scene in full when a passage is not '
+                'enough.')
+    return ('The scenes before this one are in the system prompt, whole (the story so far: '
+            f'{len(book.earlier)} scene(s)). Read this scene the way a reader who has just '
+            'read them would, and go through every specific claim in it that a reader could '
+            f'check {claims}: compare each with what the story so far says about it. Use the '
+            'tools for what it doesn\'t show: later scenes, any scene not shown there, the '
+            'ledger.')
 
 
 def _search(book: Book, at: str, args: dict) -> str:
@@ -525,11 +560,11 @@ Title: {s.get('title', '')}; POV: {s.get('pov') or '-'}; location: {s.get('locat
 
 **Contradictions.** Report each place where this scene contradicts something the book establishes elsewhere: in another scene (earlier or later), in the reference material, or in the ledger of recorded facts. {_reference_note(book)} Codes: PHY a physical state (injury, possession, where a person or object is), TIM time (dates, ages, elapsed time, time of day, durations), KNO who knows what, REL how people are related or connected, TRT a fixed trait (name, appearance, history, habit), WLD a rule or fact of the world, PRM a promise or threat a character made.
 
-Use the tools before you report anything. For every specific claim in the scene that a reader could check (a name, number, age, date, elapsed time, kinship, who knows what, where someone or something is, an injury or possession, what a character promised), search the manuscript or the ledger for where it is set up. Read a scene in full when a passage is not enough.
+{_how_to_look(book)}
 
 Report only a real contradiction, both sides quoted:
 - `scene_quote`: the scene's exact words that break it, copied verbatim.
-- `established_scene` and `established_quote`: the other scene's id and its exact words, copied verbatim from a tool result (or a reference file's name and its exact words); for a ledger fact with no scene, `established_scene` empty, `fact_id` its id and `established_quote` its statement.
+- `established_scene` and `established_quote`: the other scene's id and its exact words, copied verbatim from the story so far or a tool result (or a reference file's name and its exact words); for a ledger fact with no scene, `established_scene` empty, `fact_id` its id and `established_quote` its statement.
 - Not a contradiction: a character who lies, misremembers or is mistaken where the text signals it; a change the story shows happening; a vision, dream or story-within-the-story that the narrative frames as such; figurative language; anything you could not find established. When in doubt, leave it out: a false report costs the author more than a miss.
 {promise_rules}
 Return every finding, and an empty list when the scene is clean."""

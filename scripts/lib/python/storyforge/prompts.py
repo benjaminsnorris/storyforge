@@ -1983,8 +1983,8 @@ def prior_scenes(scene_id: str, project_dir: str, mode: str) -> list[str]:
             return earlier
         from .common import log
         log(f'WARNING: {scene_id}: the manuscript before it is {words:,} words, over '
-            f'{FULL_MAX_WORDS:,}; drafting it with the window (the preceding scene and '
-            f'each thread\'s latest) instead of the whole manuscript')
+            f'{FULL_MAX_WORDS:,}; sending the window (the preceding scene and each '
+            f'thread\'s latest) with it instead of the whole manuscript')
     if not earlier:
         return earlier
     threads = {r['id']: _threads(r.get('mice_threads', '')) for r in rows}
