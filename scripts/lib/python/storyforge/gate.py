@@ -28,6 +28,11 @@ For one scene's prose, `gate_scene` runs:
    command that wrote the prose), each registry fact the prose was found to
    establish gets its blank quote filled (`ledger.fill_quote`), and the
    ledger is saved through `ledger.save`, so the audit log has every fact.
+5. **Re-check** (Phase 4, `docs/plans/2026-10-31-phase4-safe-revision-design.md`):
+   a fact restated keeps its id; the later scenes depending on what the
+   scene dropped or changed are listed `RECHECK`, and `recheck_pending`
+   re-gates them in reading order (report and stop, under the cost
+   threshold). The caller runs it once the scene is committed.
 
 **Fix** (plan §3.2 step 3) is the caller's: a result that didn't pass names
 what to fix. The caller must also report `result.problems`' report-only
@@ -96,6 +101,13 @@ class GateResult:
     #: on commit: changed fact id → why its dependents can't all be found
     #: (`ledger.Dependents.unrelated`), for the caller to report
     unrelated: dict[str, str] = field(default_factory=dict)
+    #: on commit: later scenes depending on `changed` that can't be re-checked
+    #: (`scene (why)`: no prose yet, cut or merged), for the caller to report
+    not_rechecked: list[str] = field(default_factory=list)
+    #: on commit: registry rows (the author's) whose `supersedes`/`depends_on`
+    #: names a commitment this version removed (`row → id`): a re-check
+    #: replaces only commitments, so the author must fix the link
+    dangling: list[str] = field(default_factory=list)
 
     @property
     def findings(self) -> list[Finding]:
@@ -311,15 +323,23 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     for rid, quote in result.check.kept:
         if ledger.fill_quote(new, rid, quote):
             result.quotes_filled.append(rid)
-    proposed_ids = {r['id'] for r in result.proposed}
-    result.changed = [rid for rid in ledger.changed_facts(old_rows, result.proposed)
-                      if rid not in proposed_ids]
+    # the old side only: a fact new to the scene lists nothing
+    new_keys = {ledger._fact_key(r) for r in result.proposed}
+    result.changed = [r['id'] for r in old_rows if ledger._fact_key(r) not in new_keys]
     result.changed += sorted(ended_before ^ ledger.ended_by(new, scene_id))
     if result.changed:
         found = ledger.dependents(old_rows + new, result.changed, order)
         result.unrelated = found.unrelated
-        result.recheck = [s for s in found.scenes if s != scene_id
-                          and _has_prose(project_dir, s)]
+        # only what follows the scene can depend on how the scene changed
+        later = [s for s in found.scenes if order[s] > order[scene_id]]
+        gone = _gone_scenes(project_dir)
+        result.recheck = [s for s in later if s not in gone and _has_prose(project_dir, s)]
+        result.not_rechecked = [f'{s} ({"cut or merged" if s in gone else "no prose yet"})'
+                                for s in later if s not in result.recheck]
+        removed = set(result.changed) - {r['id'] for r in result.proposed}
+        result.dangling = [f'{r["id"]} → {ref}' for r in rows if not ledger.is_commitment(r)
+                           for col in ('supersedes', 'depends_on')
+                           for ref in ledger._split(r.get(col, '')) if ref in removed]
     ledger.save(project_dir, new, command=command)
     result.committed = True
     try:
@@ -327,7 +347,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
         waiting = pending(project_dir)
         for sid in result.recheck:
             if sid not in waiting:   # one waiting for another reason stays as it is
-                mark_pending(project_dir, sid, 'recheck',
+                mark_pending(project_dir, sid, RECHECK,
                              f're-check: {scene_id} changed {len(result.changed)} fact(s) '
                              f'its facts depend on')
     except GateError as e:   # the ledger is written; say why the list wasn't updated
@@ -337,6 +357,13 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
             + (f' and add {", ".join(result.recheck)} for a re-check' if result.recheck else '')
             + '.')
     return result
+
+
+def _gone_scenes(project_dir: str) -> set[str]:
+    from storyforge.elaborate import get_scenes
+    from storyforge.prompts import _GONE
+    return {r['id'] for r in get_scenes(os.path.join(project_dir, 'reference'))
+            if (r.get('status') or '').strip().lower() in _GONE}
 
 
 def _has_prose(project_dir: str, scene_id: str) -> bool:
@@ -354,9 +381,10 @@ def _carry_ids(proposed: list[dict[str, str]], old_rows: list[dict[str, str]],
     scene's earlier commitments (`ledger.fact_key`) that row's id, and its
     end in a later scene when the new row has none: links to it (a later
     `supersedes`, the later scene's end) keep holding. Every other proposed
-    row gets an id no other row has (extraction chose ids without the old
-    rows, so one may repeat a carried id), and links between proposed rows
-    follow the renames. In place."""
+    row gets an id no other row and no earlier commitment of the scene has
+    (extraction chose ids without the old rows, so one may repeat an old id:
+    a later link to that id would then land on a different fact), and links
+    between proposed rows follow the renames. In place."""
     from storyforge.extract import commitment_id
     by_key: dict[tuple, dict[str, str]] = {}
     for o in old_rows:
@@ -371,7 +399,9 @@ def _carry_ids(proposed: list[dict[str, str]], old_rows: list[dict[str, str]],
         rename[p['id']] = o['id']
         if not (p.get('resolves') or '').strip() and ledger._ends_elsewhere(o):
             p['resolves'] = o['resolves']
-    taken = {r['id'] for r in rows} | carried
+    # an old id not carried is never reused: links to it must not land on
+    # a different fact
+    taken = {r['id'] for r in rows} | {o['id'] for o in old_rows}
     for p in proposed:
         if p['id'] in rename:
             p['id'] = rename[p['id']]
@@ -684,6 +714,12 @@ def clear_pending(project_dir: str, scene_id: str) -> None:
 RECHECK_COST_PER_SCENE = 0.6
 
 
+#: A pending row's command for a scene listed for a re-check, and for one
+#: whose re-check didn't pass (not re-run until the author acts:
+#: `storyforge check --pending` or a redraft)
+RECHECK, RECHECK_FAILED = 'recheck', 'recheck-failed'
+
+
 @dataclass
 class Recheck:
     """`recheck_pending`'s answer."""
@@ -697,49 +733,60 @@ class Recheck:
     #: the forecast was over the cost threshold, so it stopped before a scene
     over_budget: bool = False
     forecast: float = 0.0
+    #: what the run is forecast to have spent, `spent_before` included
+    spent: float = 0.0
 
 
 def recheck_queue(project_dir: str, skip: set[str] | frozenset[str] = frozenset()) -> list[str]:
-    """The scenes pending a re-check, in reading order, without `skip`."""
+    """The scenes pending a re-check (`RECHECK`, not `RECHECK_FAILED`), in
+    reading order, without `skip`."""
     order = ledger.scene_order(project_dir)
     return sorted((s for s, r in pending(project_dir).items()
-                   if r['command'] == 'recheck' and s not in skip and s in order),
+                   if r['command'] == RECHECK and s not in skip and s in order),
                   key=order.get)
 
 
 def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozenset[str] = frozenset(),
-                    extract_model: str | None = None,
+                    spent_before: float = 0.0, extract_model: str | None = None,
                     check_model: str | None = None) -> Recheck:
     """Re-gate the scenes pending a re-check (design §3), one at a time in
     reading order, never editing their prose: each one's commitments are
     extracted again against the ledger as it now is, checked, and committed
-    when clean, which may list later scenes in turn (the cascade). Stops at
-    the first scene that doesn't pass, which stays pending with the reason
-    (Ben, 2026-10-31: report and stop); the rest stay pending too. `skip`
-    is scenes the caller is about to redraft anyway.
+    when clean, which may list later scenes in turn (the cascade only moves
+    forward: a scene lists only scenes after it). Stops at the first scene
+    that doesn't pass, listed `RECHECK_FAILED` with the reason so it isn't
+    re-run until the author acts (Ben, 2026-10-31: report and stop); the
+    rest stay pending. `skip` is scenes the caller is about to redraft.
 
-    Cost (Ben: forecast, and run under the threshold): before each scene the
-    spend so far plus the queue left at `RECHECK_COST_PER_SCENE` must be
-    within `costs.check_threshold`; otherwise it stops with `over_budget`
-    and everything stays pending for `storyforge check --pending`."""
+    Cost (Ben: forecast, and run under the threshold): the forecast is
+    logged first; before each scene, `spent_before` (what the caller's run
+    already spent on re-checks) plus this call's spend plus the queue left
+    at `RECHECK_COST_PER_SCENE` must be within `costs.check_threshold`,
+    otherwise it stops with `over_budget` and everything stays pending for
+    `storyforge check --pending`."""
     from storyforge.common import log
     from storyforge.costs import check_threshold
-    run = Recheck()
-    spent = 0.0
+    run = Recheck(spent=spent_before)
+    announced = False
     while True:
         queue = recheck_queue(project_dir, skip)
         if not queue:
             return run
-        run.forecast = spent + len(queue) * RECHECK_COST_PER_SCENE
+        run.forecast = run.spent + len(queue) * RECHECK_COST_PER_SCENE
         if not check_threshold(run.forecast):
             run.over_budget, run.left = True, queue
-            log(f'WARNING: re-checking {len(queue)} scene(s) is forecast at about '
-                f'${run.forecast:.2f}, over the cost threshold: not run. They stay in '
-                f'{PENDING_PATH}; run `storyforge check --pending` (with '
-                f'STORYFORGE_COST_THRESHOLD raised) to re-check them.')
+            log(f'WARNING: re-checking {len(queue)} scene(s) ({", ".join(queue[:8])}) would '
+                f'bring this run\'s re-checks to about ${run.forecast:.2f}, over the cost '
+                f'threshold: not run. They stay in {PENDING_PATH}; run `storyforge check '
+                f'--pending` (with STORYFORGE_COST_THRESHOLD raised if needed).')
             return run
+        if not announced:
+            log(f'Re-checking {len(queue)} scene(s) whose facts depend on what changed, '
+                f'forecast about ${len(queue) * RECHECK_COST_PER_SCENE:.2f}: {", ".join(queue)}')
+            announced = True
         sid = queue[0]
-        log(f'Re-checking {sid} ({len(queue)} pending)...')
+        log(f'Re-checking {sid}...')
+        run.spent += RECHECK_COST_PER_SCENE   # paid whether or not it finishes
         try:
             result = gate_scene(project_dir, sid, command='recheck',
                                 log_dir=os.path.join(log_dir, 'recheck', sid),
@@ -747,13 +794,12 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
                                 introduced_by=_writer(project_dir, sid))
         except GateError as e:
             why = ' '.join(str(e).split())
-            mark_pending(project_dir, sid, 'recheck', f're-check could not run: {why}')
+            mark_pending(project_dir, sid, RECHECK_FAILED, f're-check could not run: {why}')
             run.failed, run.why, run.left = sid, why, recheck_queue(project_dir, skip)
             return run
-        spent += RECHECK_COST_PER_SCENE
         if not result.passed:
             lines = [x for x in report_lines(result) if not x.startswith(('NOTE', 'COMMITTED'))]
-            mark_pending(project_dir, sid, 'recheck',
+            mark_pending(project_dir, sid, RECHECK_FAILED,
                          f're-check did not pass: {len(lines)} problem(s): '
                          + '; '.join(_one_line(x) for x in lines[:3]))
             run.failed, run.why, run.result = sid, '; '.join(lines[:3]), result

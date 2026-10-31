@@ -197,7 +197,7 @@ class TestReview443:
             in capsys.readouterr().out
 
     def test_a_redraft_is_not_refused_and_its_dependents_are_rechecked(
-            self, setup, monkeypatch, capsys):
+            self, setup, monkeypatch, capsys, mock_git):
         """Phase 4: what leans on the scene is re-checked after it passes,
         not a reason to refuse it; scenes the run redrafts anyway are skipped."""
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
@@ -213,6 +213,10 @@ class TestReview443:
         main(['--force', '--scenes', 'act1-sc01,act1-sc02'])
         assert runs == [{'act1-sc02'}]   # after act1-sc01; act1-sc02 is redrafted next
         assert 'Re-check passed: new-x1' in capsys.readouterr().out
+        commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']
+        # the scene is committed before the re-check runs, then the re-check
+        assert commits.index('Draft scene act1-sc01') < commits.index(
+            'Re-check after act1-sc01: 1 passed')
 
     def test_a_failed_recheck_blocks_drafting_past_it(self, setup, monkeypatch, capsys):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
@@ -329,10 +333,11 @@ class TestReviseRedraftsAreGated:
         monkeypatch.setattr('storyforge.api.invoke_to_file', invoke)
         monkeypatch.setattr(cmd_write, '_extract_scene_from_response', lambda *a: '')
         monkeypatch.setattr(cmd_revise, 'commit_and_push', lambda *a, **k: True)
-        def fake_gate(pd, sid, scene_file, command, log_dir, skip=frozenset()):
+        def fake_gate(pd, sid, scene_file, command, log_dir):
             gated.append((sid, command))
-            skips.append(set(skip))
             return (False, 'a contradiction') if sid in gate_fails else (True, '')
+        monkeypatch.setattr(cmd_write, 'run_recheck', lambda pd, ld, skip=frozenset(),
+                            spent_before=0.0: skips.append(set(skip)))
         monkeypatch.setattr(cmd_write, '_gate_drafted_scene', fake_gate)
         error = None
         try:
@@ -369,13 +374,27 @@ class TestReviseRedraftsAreGated:
         monkeypatch.setattr('storyforge.common.build_shared_context', lambda *a, **k: [])
         monkeypatch.setattr(cmd_revise, 'invoke_api', lambda *a, **k: 'New prose. ' * 300)
         monkeypatch.setattr('storyforge.parsing.unsafe_scene_reason', lambda *a: '')
-        def fake_gate(pd, sid, scene_file, command, log_dir, skip=frozenset()):
+        def fake_gate(pd, sid, scene_file, command, log_dir):
             gated.append(sid)
             return (False, 'a contradiction') if sid == 'act1-sc01' else (True, '')
         monkeypatch.setattr(cmd_write, '_gate_drafted_scene', fake_gate)
         with pytest.raises(cmd_revise.RedraftError, match='act1-sc02 \\(not redrafted'):
             cmd_revise._redraft_scenes(project_dir, ['act1-sc02', 'act1-sc01'])
         assert gated == ['act1-sc01']
+
+    def test_the_hone_fix_redraft_skips_the_rest_of_its_run_in_the_recheck(
+            self, project_dir, monkeypatch):
+        from storyforge import cmd_revise, cmd_write
+        monkeypatch.setattr('storyforge.prompts.build_scene_prompt', lambda sid, *a, **k: sid)
+        monkeypatch.setattr('storyforge.common.build_shared_context', lambda *a, **k: [])
+        monkeypatch.setattr(cmd_revise, 'invoke_api', lambda *a, **k: 'New prose. ' * 300)
+        monkeypatch.setattr('storyforge.parsing.unsafe_scene_reason', lambda *a: '')
+        monkeypatch.setattr(cmd_write, '_gate_drafted_scene', lambda *a: (True, ''))
+        skips = []
+        monkeypatch.setattr(cmd_write, 'run_recheck', lambda pd, ld, skip=frozenset(),
+                            spent_before=0.0: skips.append(set(skip)))
+        cmd_revise._redraft_scenes(project_dir, ['act1-sc02', 'act1-sc01'])
+        assert skips == [{'act1-sc02'}, set()]
 
 
 @pytest.mark.real_gate
@@ -444,7 +463,7 @@ def test_a_marker_the_gates_fix_drops_is_restored(project_dir, monkeypatch):
         return {'text': rewritten, 'restored': [], 'lost': []}
     monkeypatch.setattr('storyforge.illustrations.preserve_markers', restore)
 
-    def fix_drops_marker(pd, sid, scene_file, command, log_dir, skip=frozenset()):
+    def fix_drops_marker(pd, sid, scene_file, command, log_dir):
         with open(scene_file) as f:
             text = f.read()
         assert marker in text           # restored before the gate

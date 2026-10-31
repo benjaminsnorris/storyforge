@@ -127,10 +127,16 @@ def main(argv=None):
         sys.exit(1)
 
     report = ['# Check report', '']
-    passed, stopped_at = 0, ''
+    passed, stopped_at, stop_why, recheck_trouble = 0, '', '', ''
+    spent = 0.0   # this run's re-checks, forecast
     for n, scene_id in enumerate(scene_ids):
         log(f'--- Checking {scene_id} ---')
-        recheck = waiting.get(scene_id, {}).get('command') == 'recheck'
+        # read again for each scene: earlier scenes' re-checks list more
+        row = gate.pending(project_dir).get(scene_id, {})
+        recheck = row.get('command') in (gate.RECHECK, gate.RECHECK_FAILED)
+        # a failed scene stays listed as it was listed: a re-check keeps its
+        # prose's writer
+        listed_as = gate.RECHECK_FAILED if recheck else 'advisor'
         try:
             result = gate.gate_scene(
                 project_dir, scene_id, command='recheck' if recheck else 'advisor',
@@ -140,8 +146,8 @@ def main(argv=None):
             why = ' '.join(str(e).split())
             log(f'ERROR: {why}')
             report += [f'## {scene_id}: not checked', '', f'- {why}', '']
-            gate.mark_pending(project_dir, scene_id, 'advisor', f'not checked: {why}')
-            stopped_at = scene_id
+            gate.mark_pending(project_dir, scene_id, listed_as, f'not checked: {why}')
+            stopped_at, stop_why = scene_id, 'did not pass'
         else:
             lines = gate.report_lines(result)
             verdict = 'passed' if result.passed else 'did not pass'
@@ -153,16 +159,30 @@ def main(argv=None):
             if result.passed:
                 passed += 1
                 lines, run = _recheck_after(project_dir, result, log_dir,
-                                            set(scene_ids[n + 1:]))
+                                            set(scene_ids[n + 1:]), spent)
                 report += lines
-                if run is not None and (run.failed or run.over_budget) and scene_ids[n + 1:]:
-                    # later scenes would be checked against a ledger missing its facts
-                    stopped_at = run.failed or run.left[0]
+                if run is not None:
+                    spent = run.spent
+                    blocked = [s for s in ([run.failed] if run.failed else run.left)
+                               if run.failed or run.over_budget]
+                    if blocked:
+                        recheck_trouble = (f're-check of {run.failed} did not pass'
+                                           if run.failed else
+                                           f're-check of {", ".join(run.left)} not run '
+                                           f'(over the cost threshold)')
+                    # a scene of this run after one left stale would be checked
+                    # against a ledger missing its facts
+                    order = ledger.scene_order(project_dir)
+                    first = min(blocked, key=order.get) if blocked else ''
+                    if first and any(order[s] > order[first] for s in scene_ids[n + 1:]):
+                        stopped_at = first
+                        stop_why = ('was re-checked and did not pass' if run.failed
+                                    else 'was not re-checked (over the cost threshold)')
             else:
-                gate.mark_pending(project_dir, scene_id, 'advisor',
+                gate.mark_pending(project_dir, scene_id, listed_as,
                                   f'{sum(1 for x in lines if not x.startswith(("NOTE", "COMMITTED")))} '
                                   f'problem(s); see {REPORT_PATH}')
-                stopped_at = scene_id
+                stopped_at, stop_why = scene_id, 'did not pass'
         if stopped_at:
             rest = scene_ids[n + 1:]
             if rest:
@@ -180,19 +200,28 @@ def main(argv=None):
         log('ERROR: the commit failed: the ledger and report are written but not committed.')
         sys.exit(1)
     if stopped_at:
-        log(f'ERROR: stopped at {stopped_at}, which did not pass; {passed} of '
+        log(f'ERROR: stopped at {stopped_at}, which {stop_why}; {passed} of '
             f'{len(scene_ids)} scene(s) passed. Edit it and check it again.')
+        sys.exit(1)
+    if recheck_trouble:
+        log(f'ERROR: {passed} of {len(scene_ids)} scene(s) passed, but the {recheck_trouble}; '
+            f'it is listed in {gate.PENDING_PATH} (`storyforge check --pending`).')
         sys.exit(1)
 
 
-def _recheck_after(project_dir: str, result, log_dir: str, skip: set[str]):
+def _recheck_after(project_dir: str, result, log_dir: str, skip: set[str], spent: float):
     """Re-check the scenes `result` listed (not those later in this run),
     as `write` does. Returns the report lines and the `gate.Recheck` (None
     when nothing was pending)."""
-    from storyforge.cmd_write import run_recheck
-    run = run_recheck(project_dir, result, os.path.join(log_dir, 'check'), skip)
+    from storyforge.cmd_write import report_changes, run_recheck
+    report_changes(result)
+    run = run_recheck(project_dir, os.path.join(log_dir, 'check'), skip, spent_before=spent)
     lines = [f'- {result.scene_id} changed {fid}; its dependents can\'t all be found: {why}'
              for fid, why in result.unrelated.items()]
+    lines += [f'- depends on {result.scene_id} but can\'t be re-checked now: {x}'
+              for x in result.not_rechecked]
+    lines += [f'- registry link to a commitment {result.scene_id} no longer makes: {x}'
+              for x in result.dangling]
     if run is None:
         return lines + ([''] if lines else []), None
     lines += [f'- re-check passed: {s}' for s in run.passed]
