@@ -125,6 +125,15 @@ def test_full_gn_pipeline(project_dir_gn, monkeypatch):
     # Stub the API
     from storyforge import api
     monkeypatch.setattr(api, 'invoke_to_file', _fake_invoke_to_file_for_pipeline)
+    # assemble asks the model for a style guide when a key is set, through
+    # the invoke_to_file cmd_script_package bound at import: whether the stub
+    # above reached it depended on which test imported it first (a live
+    # request on some xdist workers). Its LLM error path is the fallback.
+    from storyforge import cmd_script_package
+
+    def no_style_guide_model(*a, **k):
+        raise RuntimeError('no model in this test')
+    monkeypatch.setattr(cmd_script_package, 'invoke_to_file', no_style_guide_model)
 
     # Write a chapter map
     map_path = os.path.join(project_dir_gn, 'reference', 'chapter-map.csv')
