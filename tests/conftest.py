@@ -39,15 +39,21 @@ def _stub_model_catalog(monkeypatch):
     monkeypatch.setattr(common, '_catalog', [dict(m) for m in STUB_MODEL_CATALOG])
 
 
+class LiveAPIRequest(BaseException):
+    """A test reached the Anthropic API. A BaseException, so no
+    `except Exception` in the code under test can turn it into a pass."""
+
+
 @pytest.fixture(autouse=True)
 def _no_live_api(monkeypatch):
-    """No test reaches the network: `api`'s HTTP call fails the test instead
-    of spending (a test that mocks `urlopen`, `_live_request`, `_api_request`
-    or a caller replaces or never reaches this)."""
+    """No test reaches the Anthropic API: `api`'s HTTP call raises
+    `LiveAPIRequest` instead of spending. A test that mocks `urlopen`,
+    `_live_request`, `_api_request` or a caller replaces or never reaches
+    it. (Other network callers, such as `bookshelf`, aren't covered.)"""
     import storyforge.api as api
 
     def live(*a, **k):
-        raise AssertionError('a test tried a live API request (mock api._api_request '
+        raise LiveAPIRequest('a test tried a live API request (mock api._api_request '
                              'or the function calling it)')
     monkeypatch.setattr(api, 'urlopen', live)
 

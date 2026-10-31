@@ -13,7 +13,8 @@ only the second question: **does this fact last beyond the scene?**
   already recorded, so it is kept without asking (`exempt`).
 - Called by extract phase 4 and by the gate (`gate._extract`), on the
   parsed reply before it becomes ledger rows. The callers report what was
-  dropped: phase 4 in its log and a WARNING count, the gate on its result.
+  dropped: phase 4 logs each with why and totals them, the gate keeps them
+  on its result (a NOTE in `report_lines`).
 - Fails loud: a refusal, a reply cut off or off-schema, or a verdict list
   that doesn't answer every item exactly once raises `PersistenceError`.
   There is no partial answer, and no item is dropped by default.
@@ -89,6 +90,12 @@ class Verdict:
     asked: int = 0
 
 
+def max_tokens(items: int) -> int:
+    """The reply's allowance: room for a verdict and a short why per item,
+    so a dense scene isn't cut off (which would halt the chain)."""
+    return min(32000, 2000 + 80 * items)
+
+
 def _is_link(entry: dict) -> bool:
     return bool((entry.get('supersedes') or '').strip() or entry.get('ends'))
 
@@ -143,7 +150,7 @@ def judge(scene_id: str, prose: str, found: list[dict], *, model: str,
     if asked:
         try:
             response = api.invoke_to_file(build_prompt(scene_id, prose, asked), model,
-                                          log_file, 4000, output_schema=SCHEMA,
+                                          log_file, max_tokens(len(asked)), output_schema=SCHEMA,
                                           label=f'persistence {scene_id}')
             if api.is_truncated(response):
                 raise ValueError('the reply hit its token limit')

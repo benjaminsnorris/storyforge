@@ -1262,6 +1262,8 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                   f'{len(sorted_scene_ids)} scenes: {scene_id} =====')
             print(prompt)
             print('===== END DRY RUN =====')
+            print('Each scene also gets a second call, the persistence check '
+                  '(storyforge/persistence.py), on the commitments the first returns.')
             return
 
         log_file = os.path.join(log_dir, f'extract-commitments-{scene_id}.json')
