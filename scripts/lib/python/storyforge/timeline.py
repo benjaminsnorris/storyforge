@@ -1057,42 +1057,56 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     for (s1, d1, (y1, m1, dd1), a1), (s2, d2, (y2, m2, dd2), a2) in zip(dated, dated[1:]):
         # Compare within one stated year, or within an unstated one when the
         # days are less than a year apart. A stated year beside an unstated
-        # one counts as unstated, in the stated year: Five Weeks in a
-        # Balloon's certificate "1862-05-24" after "XXXX-05-27" was skipped,
-        # though the two are a day apart
-        if y1 != y2 and ('X' in y1) != ('X' in y2):
-            stated = int(y2 if 'X' in y1 else y1)
-            y1 = 'XXXX'
-        elif y1 != y2:
+        # one is compared like an unstated pair, the stated date keeping its
+        # year: Five Weeks in a Balloon's certificate "1862-05-24" after
+        # "XXXX-05-27" was skipped, though the two are a day apart
+        if y1 != y2 and ('X' in y1) == ('X' in y2):
             continue
+        unstated = 'X' in y1 or 'X' in y2
+        if unstated and abs(d2 - d1) >= 365:
+            continue
+
+        def gap(ya, yb):
+            try:
+                return (date(yb, m2, dd2) - date(ya, m1, dd1)).days
+            except ValueError:
+                return None
+
+        # (first date's year, second's) for the same year, the year turned
+        # forward between them, and turned back
+        if not unstated:
+            same, turn_forward, turn_back = (int(y1), int(y1)), None, None
+        elif 'X' not in y1:
+            y = int(y1)
+            same, turn_forward, turn_back = (y, y), (y, y + 1), (y, y - 1)
+        elif 'X' not in y2:
+            y = int(y2)
+            same, turn_forward, turn_back = (y, y), (y - 1, y), (y + 1, y)
         else:
-            stated = None
-        if 'X' in y1 and abs(d2 - d1) >= 365:
+            same, turn_forward, turn_back = (2001, 2001), (2001, 2002), (2001, 2000)
+        same_year = gap(*same)
+        if same_year is None:
             continue
-        year = stated or (2001 if 'X' in y1 else int(y1))
-        try:
-            between = same_year = (date(year, m2, dd2) - date(year, m1, dd1)).days
-            if 'X' in y1:
-                # With the year unstated, December 30 then January 2 may
-                # simply cross into the next year, and a step back may cross
-                # into the year before: Middlemarch's Christmas Eve recalled
-                # after New Year's Day is a week back, not "357 days after"
-                # (F-118). Take whichever reading fits the days best, the
-                # same year included: Eighty Days' Carnatic on the 7th, told
-                # after Fix's 8th, is a day back, not "364 days after"
-                readings = [same_year]
-                forward = back = None
-                if same_year < 0:
-                    forward = (date(year + 1, m2, dd2) - date(year, m1, dd1)).days
+        between = same_year
+        forward = back = None
+        if unstated:
+            # December 30 then January 2 may simply cross into the next
+            # year, and a step back may cross into the year before:
+            # Middlemarch's Christmas Eve recalled after New Year's Day is a
+            # week back, not "357 days after" (F-118). Take whichever reading
+            # fits the days best, the same year included: Eighty Days'
+            # Carnatic on the 7th, told after Fix's 8th, is a day back, not
+            # "364 days after"
+            readings = [same_year]
+            if same_year < 0:
+                forward = gap(*turn_forward)
+                if forward is not None:
                     readings.append(forward)
-                if d2 < d1:
-                    back = (date(year - 1, m2, dd2) - date(year, m1, dd1)).days
+            if d2 < d1:
+                back = gap(*turn_back)
+                if back is not None:
                     readings.append(back)
-                between = min(readings, key=lambda b: abs(b - (d2 - d1)))
-            else:
-                forward = back = None
-        except ValueError:
-            continue
+            between = min(readings, key=lambda r: abs(r - (d2 - d1)))
         off = abs(between - (d2 - d1))
         if a1 or a2:
             # An approximate date may sit either side of the other

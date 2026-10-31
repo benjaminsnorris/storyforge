@@ -891,6 +891,25 @@ class TestChecks:
                           ('carnatic-sails', '30', 'scene', 'XXXX-11-07'))
         assert [f['check'] for f in check_timeline(rows, {})] == ['date_mismatch']
 
+    def test_a_stated_year_on_the_second_date_counts_its_own_leap_day(self):
+        """From 1 November to 1 March 1872 is 121 days (1872 is a leap
+        year): the stated year belongs to the second date, not both."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('autumn', '0', 'scene', 'XXXX-11-01'),
+                          ('spring', '121', 'scene', '1872-03-01'))
+        assert check_timeline(rows, {}) == []
+        rows = self._rows(('autumn', '0', 'scene', 'XXXX-11-01'),
+                          ('spring', '119', 'scene', '1872-03-01'))
+        assert [f['check'] for f in check_timeline(rows, {})] == ['date_mismatch']
+
+    def test_an_impossible_other_reading_does_not_skip_the_pair(self):
+        """29 February 1872 has no year-turned reading (1871 and 1873 have
+        no leap day); the same-year reading is still compared."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('winter', '0', 'scene', 'XXXX-12-30'),
+                          ('leap-day', '200', 'scene', '1872-02-29'))
+        assert [f['check'] for f in check_timeline(rows, {})] == ['date_mismatch']
+
     def test_a_stated_and_an_unstated_year_that_agree_pass(self):
         from storyforge.timeline import check_timeline
         rows = self._rows(('departure', '1', 'scene', '1872-10-02'),
