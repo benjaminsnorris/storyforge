@@ -52,6 +52,9 @@ PROMPT = """You are reviewing facts extracted from one scene of a novel, to deci
 For each fact, ask one thing: **does it last beyond this scene?** A reader carries it forward, and a later scene that said otherwise would be a slip.
 
 It lasts (persists: true):
+- what happened: an event or a one-off action is part of the story's past once it is over (a meal served, a letter burned, a door bolted that night, who arrived with whom and how). A later scene that says otherwise is a slip;
+- what a vision, dream or ghost shows happening or being so (a past event, a future, who is where in it): the story treats it as real;
+- a character's possession, clothing, habit or usual place, and an object that could come back (a scarf she always wears, the seat he always takes, a lamp left burning);
 - names, spellings, pronouns, ages, dates, how people are related, backstory;
 - an injury, an illness, a possession, where a person lives or an object is kept, a state that carries into the next scene;
 - who knows what, and who told them;
@@ -61,14 +64,13 @@ It lasts (persists: true):
 - a momentary detail that reveals a lasting state (hands shaking because he has been poisoned: the poisoning lasts).
 
 It doesn't (persists: false):
-- staging inside the scene: who stands where, which hand holds the cup, a door opened then closed;
+- how something looked or was done in the moment, when nothing later could depend on it: who stands where, which hand holds the cup, a glance, a gesture;
 - set dressing and sensory texture the story never returns to: the light, the weather of the moment, the furniture of a room seen once;
 - a feeling or reaction in the moment;
 - the narrator's opinions and asides;
-- the scenery and staging inside a vision, dream or story-within-the-story (what a vision shows happening, though, lasts like any other fact: a past event, who someone is to whom, a future that comes true);
 - figurative language.
 
-When you are unsure, keep it (persists: true): a fact dropped here is a contradiction no one checks later.
+Drop only what is clearly incidental. When you are unsure, or a later scene could plausibly call it back, keep it (persists: true): a fact dropped here is a contradiction no one checks later.
 
 Answer with one JSON object: `verdicts`, one entry per fact above, by its number `n`, with `persists` and a short `why`."""
 
@@ -123,7 +125,7 @@ def parse(text: str, count: int) -> dict[int, tuple[bool, str]]:
 
 
 def judge(scene_id: str, prose: str, found: list[dict], *, model: str,
-          log_file: str, system: list[dict] | None = None) -> Verdict:
+          log_file: str) -> Verdict:
     """Ask, for each entry of `found` (phase 4's parsed reply) that doesn't
     supersede or end another fact, whether it lasts beyond the scene.
     Order is kept. No entries to ask about: no call.
@@ -140,9 +142,9 @@ def judge(scene_id: str, prose: str, found: list[dict], *, model: str,
     answers: dict[int, tuple[bool, str]] = {}
     if asked:
         try:
-            response = api.invoke_to_file(build_prompt(scene_id, prose, asked), model, log_file,
-                                      4000, system=system, output_schema=SCHEMA,
-                                      label=f'persistence {scene_id}')
+            response = api.invoke_to_file(build_prompt(scene_id, prose, asked), model,
+                                          log_file, 4000, output_schema=SCHEMA,
+                                          label=f'persistence {scene_id}')
             if api.is_truncated(response):
                 raise ValueError('the reply hit its token limit')
             answers = parse(api.extract_text(response), len(asked))
