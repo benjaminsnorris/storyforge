@@ -1,6 +1,6 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-31 (afternoon), at v1.114.0. **Phase 3 is done** (checker recall, promises in words, parallel vs sequential) and **Phase 4 has started**: its design is decided (`docs/plans/2026-10-31-phase4-safe-revision-design.md`) and PR 1 (#466, `ledger.dependents`) is in review. **A fresh session starts here:** read **Latest**, then the Phase 4 design note's "PRs, in order", then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-10-31 (evening), at v1.116.0. **Phase 3 is done** (checker recall, promises in words, parallel vs sequential) and **Phase 4 PRs 1–2 are merged** (#466 `ledger.dependents`, #468 the re-check): a redraft is no longer refused for what leans on it; the later scenes depending on what it changed are re-checked. Next is PR 3, the reject flow (design: `docs/plans/2026-10-31-phase4-safe-revision-design.md`). **A fresh session starts here:** read **Latest**, then the Phase 4 design note's "PRs, in order", then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
 ## Latest: Phase 3 finished, Phase 4 started (2026-10-31, storyforge-c4)
 
@@ -11,6 +11,8 @@ Last updated 2026-10-31 (afternoon), at v1.114.0. **Phase 3 is done** (checker r
 | #462 | 1.113.0 | **parallel vs sequential**: `STORYFORGE_E4_PARALLEL=1` drafts E4 as `--batch` did; CP10k 13.7 vs 1.8–5.3 sequential, so `write --batch` refuses prose (coach/strict briefs only) |
 | #463 | 1.114.0 | **broken promises in words**: the drafting task lists `physical_state_out` as a must-show checklist |
 | #465 | — (docs) | the Phase 4 design, Ben's three decisions |
+| #466 | 1.115.0 | Phase 4 PR 1: `ledger.dependents` (→ `Dependents`: scenes, unrelated), `changed_facts`, `ended_by`; a redraft that would drop a later scene's end was refused |
+| #468 | 1.116.0 | **Phase 4 PR 2, the re-check**: no redraft refusal; on commit a restated fact keeps its id; the later scenes (with prose) depending on what was dropped/changed are listed `recheck` and `gate.recheck_pending` re-gates them (report and stop; `recheck-failed` not re-run; cost forecast against the threshold across a run); write/revise/check run it; `check --pending` |
 
 **E4** (shared-dark Act 1, gated, `full` prose; targets CP10k ≤ 7.1, broken promises ≤ 3):
 
@@ -33,9 +35,8 @@ Last updated 2026-10-31 (afternoon), at v1.114.0. **Phase 3 is done** (checker r
 - The E8 replay miss after #461's review fix was real, not the flake: a thornwall tree has cut scenes, which the checker no longer sees; that case was re-recorded ($1.74).
 
 **Next, in order** (the design note's "PRs, in order"):
-1. **#466** (PR 1: `ledger.dependents`, `changed_facts`, the `resolves` fix): fix its review findings, merge (minor bump).
-2. **PR 2, the re-check**: after a scene's prose changes and passes the gate, re-gate its dependents' existing prose in reading order (`command='recheck'`), stop at the first failure and list it pending (report and stop, Ben), forecast the cost and run under `check_threshold`. Replaces the redraft refusal in `write --force` and revise; re-record E5 (gated again) and E8.
-3. **PR 3, the reject flow**; **PR 4**, every prose pass through the gate (E8 to zero); **PR 5**, rewrite-from-ledger (E5).
+1. **PR 3, the reject flow** (design §4): the typed views and `extract.known_for_scene` leave non-binding rows out; `audit --mark rejected` lists the fact's dependents for a re-check (`gate.RECHECK`); and **an eval for the re-check set on E1 cases** (each case's established fact, rejected or changed, must yield a set containing the scene where the error was introduced). **No eval exercises the re-check end to end yet** (E8 had no case the old refusal stopped; E4 drafts fresh scenes), so this eval is the first measure of PR 2.
+2. **PR 4**, every prose pass (polish, naturalness, continuity-audit) through the gate, then the re-check (E8 to zero); **PR 5**, rewrite-from-ledger (E5).
 4. **Smaller:** the low-confidence halt; fill `characters.csv` `pronouns`; measure E4 over 2–3 runs before reading small moves (run 9 vs 10 are one each).
 
 ## The overnight run (2026-10-31, storyforge-b2)
