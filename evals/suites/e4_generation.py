@@ -14,8 +14,9 @@ def run(ctx):
     rows = e4.act_scenes(project)
     scene_ids = [r['id'] for r in rows]
     original = e4.clear_prose(project, scene_ids)
+    parallel = e4.parallel()
     gated = {}
-    drafts, refused = e4.draft(project, scene_ids, gated=gated,
+    drafts, refused = e4.draft(project, scene_ids, gated=None if parallel else gated,
                                log_dir=os.path.join(ctx.work_dir, 'gate-logs'))
     judged = e4.judge(project, scene_ids, drafts)
     flags = e4.checker_flags(project, scene_ids)
@@ -66,9 +67,15 @@ def run(ctx):
                  'still owed.')
     notes.append(f'Prior prose: {e4.prior_prose(project)}.')
     notes.append('Judge stands in for the plan\'s human spot-check (still owed). '
-                 'Drafted sequentially and gated, as write does by default; batch mode '
-                 'is refused under a cassette.')
+                 + ('Drafted as write --batch drafts (STORYFORGE_E4_PARALLEL=1): no earlier '
+                    'prose and no gate, so no prompt depends on another scene\'s draft; the '
+                    'Batch API itself is refused under a cassette. The gate_* figures are '
+                    'left out (nothing was gated).' if parallel else
+                    'Drafted sequentially and gated, as write does by default; batch mode '
+                    'is refused under a cassette.'))
     m = measure['metrics']
+    if parallel:
+        m = {k: v for k, v in m.items() if not k.startswith('gate_')}
     code_counts = {code: {'contradictions': n} for code, n in by_code.items()}
     code_counts['PRM'] = {'broken_promises': m['broken_promises']}
     return SuiteOutput(
