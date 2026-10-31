@@ -178,7 +178,8 @@ class TestEstablishedFacts:
         row['physical_state_in'] = 'archive-key-dorren'
         _write_csv(briefs, rows, _FILE_MAP['scene-briefs.csv'])
         prompt = self._prompt(project_dir, plugin_dir, 'act1-sc02')
-        assert prompt.count('holds the restricted archive key') == 1
+        # once above the task (which lists it again: the scene also ends with it)
+        assert prompt.split('## Task')[0].count('holds the restricted archive key') == 1
 
     def test_pronouns_from_characters_csv(self, project_dir, plugin_dir):
         """The survey's case was slipform's Pell: a pronoun fixed by hand,
