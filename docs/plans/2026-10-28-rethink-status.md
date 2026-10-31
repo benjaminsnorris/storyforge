@@ -1,6 +1,37 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-30 (late), at v1.105.0 (#440's phase 5 is complete, 5a–5g, with the E9 suite; see Next steps 2). **Phase 3 is next; #440's phase 5 is done and handed to storyforge-evals.** **A fresh session starts here:** read **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-10-30 (night), at v1.106.0 on PR #450 (open). **Phase 3 steps 1–4 are done; #450 is the one thing in flight** (see **In flight** below). #440's phase 5 is complete (5a–5g, with the E9 suite; see Next steps 2) and handed to storyforge-evals. **A fresh session starts here:** read **In flight**, **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
+
+## In flight (2026-10-30 night, storyforge-e9)
+
+**PR #450** (branch `storyforge/brief-word-promises-20261030-1732`, v1.106.0 after merging main at v1.105.0): brief items written in words become promises; extraction's `supersedes`/`ends` on a registry fact become **disputes** the checker must rule on (contradiction or `cleared`; no ruling blocks as `UNRULED`), replacing the `plan-contradiction` halt (Ben's decision). Review: 3 high, 3 medium, 2 low, all fixed and listed in the PR's comments. Full suite green (7,750). E4 run 4 recorded and pruned to the 312 recordings its replay reads.
+
+**To finish it:** run `python evals/run.py --baseline` on the branch (free replay; every suite should replay with no errors and only E4 and E2-carol-checker numbers differing from main), commit `evals/baseline.json`, then `gh pr merge 450 --merge --delete-branch`. Ben approved merging with run 4 as the baseline. Then tell evals-b6 nothing (their trigger is the persistence check, below).
+
+**E4 through the gated `write`, four runs** (one each; target CP10k ≤ 7.1, broken promises ≤ 3):
+
+| Run | Code | CP10k | Broken promises | Gate still failing | Cost |
+|---|---|---|---|---|---|
+| pre-gate | v1.98.0 | 14.2 | 6 | — | — |
+| 1 | #443 | 6.0 | 11 | 3 | $13.23 |
+| 2 | + promises in words | 6.8 | 6 | 8 | $13.99 |
+| 3 | + checker decides (no plan halt) | 9.7 | 4 | 9 | $14.00 |
+| 4 | + disputes (#450 as merged) | 12.1 | 5 | 6 | $12.88 |
+
+Run 4's 26 contradictions: 12 in scenes the gate failed (caught; `write` would stop there), 14 in scenes it passed (missed), 20 after the first failure (E4 drafts on where `write` stops, from a ledger missing that scene's facts). The headline mixes all three, and run-to-run variance is large: neither target can be called met or missed yet.
+
+**Next, in order (Ben agreed, 2026-10-30):**
+1. **Fix E4's measure** (eval-only PR, no recording: re-score the existing cassettes). Report CP10k over scenes that passed the gate (what `write` would commit), the gate's catch rate against the judge (caught vs missed per scene), and make the headline stop at the first gate failure, as `write` does.
+2. **Close the checker's blind spot.** The judge reads the character and world bibles; the checker sees only the ledger and the manuscript, so a fact that lives only in a bible ("Marie is Claire's sister") can't be checked. Give the checker the bibles (a tool or a prompt section; mind F-130: skip template-identical bibles), re-record E2-carol-checker and E4 (~$18). Most direct lever on the CP10k target.
+3. **The persistence check** (Ben's trigger for running phase 4 on the seven books; see Open follow-ups): a second gate question on extracted facts, "does this fact last beyond the scene?". When it is on main, tell evals (evals-b6; their NEXT step 2, F-127).
+4. **Gate revise's redraft-from-brief** through `gate_and_fix` like `write` (today it warns and lists the scenes pending). Revise's prose passes wait for Phase 4.
+5. **Step 5, the context-size experiment** (decision 4): preceding scene + latest scene per thread vs the whole manuscript so far with caching, on E4 and cost per scene.
+6. **Parallel vs sequential on E4**, which decides whether `--batch` stays or is deleted.
+7. **Smaller:** the low-confidence halt (a `confidence` field on phase 4's schema; re-records E3 and E5, ~$5); fill `characters.csv` `pronouns`.
+
+Then **Phase 4** (safe revision): dependency graph and re-check set (which also unblocks redrafting a scene later facts lean on), reject-fact flow, every revision pass through the gate.
+
+**Budget note:** each E4 recording is about $13–14 and varies a lot between runs. Plan two or three runs per decision that matters, or say when one is being read alone. E4 spent today: $54.10; E2-carol-checker $7.83.
 
 ## Start here
 
@@ -100,6 +131,7 @@ E4 (`evals/e4`) drafts with `cmd_write._build_prompt` in direct mode today; it m
 - **Deferred:** tell 3b's prompt its summary is kept (≤35 words). That's a prompt change, so it re-records E3; fold it into a recording you're making anyway.
 
 **Open follow-ups, not scheduled:**
+- **The gate's persistence check (Ben, 2026-10-30, via evals-b6):** phase 4 is not run on the seven books until the gate has a second check on extracted facts: "does this fact last beyond the scene?" (the Carol re-score's 42% incidental rows). Then run it once. When that check is on main, tell evals (their NEXT step 2, F-127).
 - **E3 fails its gate on main since #443:** recall 0.841 < 0.85, with 49 → 44 facts. Replaying on a clean worktree of main gives the same result, so it isn't #442 or #444. Check with whoever owns #443's re-baseline.
 - **F-130 (evals-8b; Ben approved): extraction never fills the reference docs.** *Next steps 2 (#440): phase 5 is done (5a–5g, E9); the hand-off to storyforge-evals remains.* On all eight classics `story-architecture.md`, `world-bible.md`, `voice-guide.md`, `character-bible.md`, `story-summary.md` (and `spine.csv`, `themes.csv`, `motif-taxonomy.csv`) are untouched templates, yet score's character and narrative passes and `scoring_bible.py` read them. evals-8b is adding the guard (a file identical to its template counts as absent; `cmd_score.py`, `scoring_bible.py`, about v1.98.1). **The real fix is ours:** an extract phase that writes those docs from the Phase 0 profile (`working/extraction-profile.json`: narrative_mode, act_structure, major_threads, central_conflict, protagonist_arc, tone, key_locations) and the CSVs. It fits the plan's "bible = fixed facts + voice" (the bible could be generated from the ledger's `fixed` facts). Also check `build_shared_context`, which sends `character-bible.md` and `world-bible.md` to every drafting call: a template there is noise in E4, E5 and E8.
 - **The summary's three acts vs a book's own acts:** 5c's `story-summary.md` Act-shape is always `### Act 1–3` (the L2 floor), and `scoring_coverage._coverage_acts_to_spine` wants a spine row with `act` 1, 2 and 3. That holds on *Carol*, but a book whose `scenes.csv:act` values aren't 1–3 (five staves numbered 1–5, `Part One`) fails coverage although L0–L4 pass. Whether L2 should follow the book's own division is a rubric question, not a 5c fix.

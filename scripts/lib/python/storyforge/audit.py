@@ -597,9 +597,7 @@ def leaning_scenes(project_dir: str, ids: list[str]) -> dict[str, list[str]]:
 # The immediate tier (Phase 3's gate calls this)
 # ============================================================================
 
-#: `plan-contradiction` is raised by the gate (`storyforge.gate`), which sees
-#: what this module can't: the prose disagreeing with a registry fact
-HALT_KINDS = ('supersedes-fixed', 'changes-fixed', 'low-confidence', 'plan-contradiction')
+HALT_KINDS = ('supersedes-fixed', 'changes-fixed', 'low-confidence')
 
 
 @dataclass(frozen=True)
@@ -626,7 +624,8 @@ def halting_conditions(proposed: list[dict[str, str]],
       added, and a fact that reaches the ledger has passed this check.
 
     The third trigger, a contradiction with the plan, needs extraction and
-    the checker: `storyforge.gate` adds those halts (`plan-contradiction`).
+    the checker: the gate's checker reports it as a finding, which blocks
+    the commit like a halt.
     """
     fixed = {r.get('id', ''): r for r in rows
              if r.get('status') == 'binding' and r.get('mutable') == 'fixed'}

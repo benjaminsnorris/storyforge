@@ -78,6 +78,23 @@ SCHEMA = {
     'additionalProperties': False,
 }
 
+#: SCHEMA plus `cleared`: the disputes the checker found are no contradiction.
+#: Only sent when there are disputes, so a scene without any asks what it
+#: always asked
+DISPUTE_SCHEMA = {**SCHEMA,
+                  'properties': {**SCHEMA['properties'],
+                                 'cleared': {'type': 'array', 'items': {'type': 'string'}}},
+                  'required': SCHEMA['required'] + ['cleared']}
+
+
+@dataclass
+class Dispute:
+    """A registry fact extraction says the scene changes (supersedes, or ends
+    a state its `resolves` doesn't end here): the checker must rule on it."""
+    fact_id: str        # the registry fact
+    statement: str      # its statement
+    claim: str          # what extraction read in the scene
+
 
 class CheckError(RuntimeError):
     """The check could not be completed; the message says why."""
@@ -113,9 +130,17 @@ class CheckResult:
     #: (id, quote, why) for a `kept` item that didn't hold up: an id the brief
     #: doesn't promise, or a quote not in the scene
     kept_unverified: list[tuple[str, str, str]] = field(default_factory=list)
-    #: brief items (`column: item`) that name no binding ledger fact: the
-    #: checker was told so, but can't check them
+    #: brief items (`column: item`) written in words rather than naming a
+    #: binding ledger fact: checked against their words (no quote to fill)
     unknown_brief_items: list[str] = field(default_factory=list)
+    #: brief items naming a ledger fact that isn't binding (rejected,
+    #: superseded, pending): an author problem, not checked
+    stale_brief_items: list[str] = field(default_factory=list)
+    #: disputes the checker ruled out (no contradiction)
+    cleared: list[Dispute] = field(default_factory=list)
+    #: disputes it neither reported as a contradiction nor cleared: they
+    #: block the commit like an unverified finding
+    unruled: list[Dispute] = field(default_factory=list)
     run: ToolRun | None = None
 
 
@@ -313,33 +338,50 @@ class Brief:
     """The brief as the checker uses it."""
     text: str = ''                                          # the prompt section
     promised: dict[str, str] = field(default_factory=dict)  # registry id → statement
-    fields: dict[str, str] = field(default_factory=dict)    # PROMISE_FIELDS → text
-    unknown: list[str] = field(default_factory=list)        # brief items no ledger fact matches
+    fields: dict[str, str] = field(default_factory=dict)    # promise field → text
+    #: promise field → its items in words, each a whole promise
+    items: dict[str, list[str]] = field(default_factory=dict)
+    #: entering field → its items in words (not to be contradicted)
+    entering: dict[str, list[str]] = field(default_factory=dict)
+    unknown: list[str] = field(default_factory=list)        # brief items in words, no ledger fact
+    stale: list[str] = field(default_factory=list)          # brief items naming a non-binding fact
 
 
 def _brief(book: Book, project_dir: str, at: str) -> Brief:
     """The scene's brief: what holds entering it (not to be contradicted)
-    and what it promises (to be delivered). A registry item matches binding
-    facts only, by id, statement or alias."""
+    and what it promises (to be delivered). A registry item is matched
+    against every ledger fact, by id, statement or alias: a binding one is
+    a fact; one that isn't binding (rejected, superseded) is the author's to
+    fix and isn't checked (`stale`); none at all is an item in words."""
     from storyforge.elaborate import get_scene
     scene = get_scene(at, os.path.join(project_dir, 'reference')) or {}
     brief = Brief()
-    binding = [r for r in book.rows if r.get('status') == 'binding']
-    by_id = {r['id']: r for r in binding}
+    by_id = {r['id']: r for r in book.rows}
     entering, promises = [], []
     for col in PROMISE_FIELDS:
         if (scene.get(col) or '').strip():
             brief.fields[col] = scene[col].strip()
+            brief.items[col] = _split_cell(scene[col]) or [scene[col].strip()]
             promises.append(f'- **{col}**: {brief.fields[col]}')
     for fields, lines in ((REGISTRY_ENTERING_FIELDS, entering),
                           (REGISTRY_PROMISE_FIELDS, promises)):
         for col, type_ in fields.items():
-            aliases = ledger.alias_map(ledger.view(binding, type_))
+            aliases = ledger.alias_map(ledger.view(book.rows, type_))
             for item in _split_cell(scene.get(col, '')):
                 rid = aliases.get(item.lower())
+                if rid is not None and by_id[rid].get('status') != 'binding':
+                    brief.stale.append(f'{col}: {item} ({rid} is {by_id[rid].get("status")})')
+                    continue
                 if rid is None:
+                    # Written in words rather than naming a ledger fact: still
+                    # part of the brief, checked against its words
                     brief.unknown.append(f'{col}: {item}')
-                    lines.append(f'- **{col}**: "{item}" (not a binding fact in the ledger)')
+                    lines.append(f'- **{col}**: "{item}" (in words; no ledger fact names it)')
+                    if col in REGISTRY_PROMISE_FIELDS:
+                        brief.fields[col] = '; '.join(filter(None, [brief.fields.get(col), item]))
+                        brief.items.setdefault(col, []).append(item)
+                    else:
+                        brief.entering.setdefault(col, []).append(item)
                     continue
                 lines.append(f'- **{col}**: {rid}: {by_id[rid]["statement"]}')
                 if col in REGISTRY_PROMISE_FIELDS:
@@ -355,18 +397,34 @@ def _brief(book: Book, project_dir: str, at: str) -> Brief:
     return brief
 
 
-def build_prompt(book: Book, at: str, brief_text: str) -> str:
+def _disputes_text(disputes: list[Dispute]) -> str:
+    if not disputes:
+        return ''
+    lines = '\n'.join(f'- {d.fact_id}: the plan records "{d.statement}"; extraction read '
+                      f'in this scene: "{d.claim}"' for d in disputes)
+    return ('\n## Facts the plan recorded that this scene may change\n\n'
+            'Extraction thinks the scene changes each of these. Rule on every one: if '
+            'the scene really contradicts it, report a contradiction with `fact_id` its '
+            'id, `established_scene` empty and `established_quote` its statement; if it '
+            'doesn\'t (the scene adds detail, or the change is one the story shows), put '
+            'its id in `cleared`.\n\n' + lines + '\n')
+
+
+def build_prompt(book: Book, at: str, brief_text: str,
+                 disputes: list[Dispute] | None = None) -> str:
     s = book.scenes.get(at, {})
     promise_rules = '' if "## The brief's promises" not in brief_text else (
         "\n**Broken promises.** Each item under \"The brief's promises\" is a promise. "
         'Report one the scene does not deliver (kind `broken-promise`; `fact_id` the registry id, or the '
-        'brief field for outcome / key_actions / key_dialogue; `established_quote` the '
+        'brief field for outcome / key_actions / key_dialogue or for an item written in '
+        'words; `established_quote` the '
         'promised item; `established_scene` empty; `scene_quote` the scene\'s nearest '
         'words, or empty if nothing in the scene comes near). A close paraphrase keeps a '
         'key_dialogue promise. For each registry fact the scene must establish and does, '
         'add it to `kept` with the scene\'s words that establish it, copied verbatim (a '
         'full clause or sentence). A fact that holds entering the scene and is '
-        'contradicted is a contradiction, not a broken promise.\n')
+        'contradicted is a contradiction, not a broken promise: for one written in '
+        'words, `fact_id` is its brief field and `established_quote` the item.\n')
     return f"""You are checking one scene of a novel for continuity, the way a careful reader would notice a slip.
 
 ## Scene being checked: {at}
@@ -374,7 +432,7 @@ def build_prompt(book: Book, at: str, brief_text: str) -> str:
 Title: {s.get('title', '')}; POV: {s.get('pov') or '-'}; location: {s.get('location') or '-'}
 
 {book.prose[at]}
-{brief_text}
+{brief_text}{_disputes_text(disputes or [])}
 ## Every scene, in reading order
 
 {_scene_index(book, at)}
@@ -400,18 +458,37 @@ Return every finding, and an empty list when the scene is clean."""
 def _verify(f: Finding, book: Book, at: str, brief: Brief) -> str:
     """Why `f`'s quotes don't hold up ('' when they do). A broken promise
     must name a promise the brief makes: a promised registry id, or a
-    promise field whose text holds its `established_quote`."""
+    promise field whose text holds its `established_quote`; under another
+    id, a quote found in a promise field's text verifies it, and `fact_id`
+    becomes that field."""
     if f.scene_quote and not _contains(book.prose[at], f.scene_quote):
         return 'its scene quote is not in the scene'
     if f.kind == 'broken-promise':
         if f.fact_id in brief.promised:
             return ''
         if f.fact_id in brief.fields:
-            return ('' if _contains(brief.fields[f.fact_id], f.established_quote)
-                    else f'its promised item is not in the brief\'s {f.fact_id}')
-        return f'{f.fact_id!r} is not a promise of this scene\'s brief'
+            whole = any(_whole_item(i, f.established_quote)
+                        for i in brief.items.get(f.fact_id, []))
+            inside = (_contains(brief.fields[f.fact_id], f.established_quote)
+                      and word_count(f.established_quote) >= MIN_KEPT_WORDS)
+            return ('' if whole or inside
+                    else f'its promised item is not in the brief\'s {f.fact_id} (a whole '
+                         f'item, or {MIN_KEPT_WORDS}+ words of it)')
+        # A made-up id for an item the brief does make: found when its quote
+        # is one whole item, of one field only
+        fields_ = [col for col, items in brief.items.items()
+                   if any(_whole_item(item, f.established_quote) for item in items)]
+        if len(fields_) == 1:
+            f.fact_id = fields_[0]
+            return ''
+        return (f'{f.fact_id!r} is not a promise of this scene\'s brief'
+                + (' (its quote matches items in more than one field)' if fields_ else ''))
     if not f.scene_quote:
         return 'a contradiction with no scene quote'
+    if not f.established_scene and f.fact_id in brief.entering:
+        return ('' if any(_whole_item(i, f.established_quote)
+                          for i in brief.entering[f.fact_id])
+                else f'its established quote is not an item of the brief\'s {f.fact_id}')
     if f.established_scene:
         if f.established_scene not in book.prose:
             return f'{f.established_scene!r} is not a scene'
@@ -425,12 +502,21 @@ def _verify(f: Finding, book: Book, at: str, brief: Brief) -> str:
     return ''
 
 
+def _whole_item(item: str, quote: str) -> bool:
+    """Whether `quote` is the brief item `item` (normalized), not a word or
+    two found inside it."""
+    return bool(quote.strip()) and normalize(item).strip(' .;') == normalize(quote).strip(' .;')
+
+
 def check_scene(project_dir: str, scene_id: str, *, prose: str | None = None,
                 promises: bool = True, model: str | None = None,
-                log_file: str = '', rows: list[dict[str, str]] | None = None) -> CheckResult:
+                log_file: str = '', rows: list[dict[str, str]] | None = None,
+                disputes: list[Dispute] | None = None) -> CheckResult:
     """Check `scene_id` (its file, or `prose` in its place) against the rest
     of the book; with `promises`, against its brief too. `rows` replaces the
-    ledger on disk.
+    ledger on disk. `disputes` are registry facts extraction says the scene
+    changes: each must come back as a contradiction or `cleared`, else it is
+    `unruled`.
 
     Raises:
         CheckError: the scene can't be checked, or the check didn't finish
@@ -447,9 +533,12 @@ def check_scene(project_dir: str, scene_id: str, *, prose: str | None = None,
         'query_ledger': lambda a: _query_ledger(book, scene_id, a),
     }
     try:
-        run = converse(build_prompt(book, scene_id, brief.text), model or select_model('checking'),
+        run = converse(build_prompt(book, scene_id, brief.text, disputes),
+                       model or select_model('checking'),
                        TOOLS, handlers, max_tokens=8000, max_turns=MAX_TURNS,
-                       label=f'check {scene_id}', output_schema=SCHEMA, log_file=log_file)
+                       label=f'check {scene_id}',
+                       output_schema=DISPUTE_SCHEMA if disputes else SCHEMA,
+                       log_file=log_file)
     except RuntimeError as e:   # RefusalError, ToolLoopError, an API failure
         error = CheckError(f'{scene_id}: {e}')
         error.run = getattr(e, 'run', None)
@@ -459,10 +548,12 @@ def check_scene(project_dir: str, scene_id: str, *, prose: str | None = None,
     try:
         data = json.loads(extract_text(run.response))
         items, kept = data['findings'], data['kept']
+        cleared = set(data['cleared']) if disputes else set()
     except (ValueError, KeyError, TypeError) as e:
         raise CheckError(f'{scene_id}: the checker\'s reply is not the schema ({e})') from e
 
-    result = CheckResult(scene_id, run=run, unknown_brief_items=brief.unknown)
+    result = CheckResult(scene_id, run=run, unknown_brief_items=brief.unknown,
+                         stale_brief_items=brief.stale)
     for item in items:
         f = Finding(**{k: (item.get(k) or '').strip() for k in
                        ('kind', 'code', 'scene_quote', 'established_scene',
@@ -479,4 +570,9 @@ def check_scene(project_dir: str, scene_id: str, *, prose: str | None = None,
             result.kept_unverified.append((rid, quote, f'fewer than {MIN_KEPT_WORDS} words'))
         else:
             result.kept.append((rid, quote))
+    reported = {f.fact_id for f in result.findings + result.unverified}
+    for d in disputes or []:
+        if d.fact_id in reported:
+            continue            # ruled a contradiction: a finding
+        (result.cleared if d.fact_id in cleared else result.unruled).append(d)
     return result

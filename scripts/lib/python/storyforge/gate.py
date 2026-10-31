@@ -6,12 +6,15 @@ For one scene's prose, `gate_scene` runs:
    (`extract.build_commitments_prompt`), offered the facts in force entering
    it and the registry facts recorded for it (`extract.known_for_scene`).
 2. **Halt** on decision 2's immediate tier: `audit.halting_conditions` on the
-   proposed rows (a `fixed` fact superseded or changed), plus
-   `plan-contradiction`: the prose supersedes a registry fact (one recorded
-   for the scene, or in force entering it), or ends a registry state its
-   `resolves` doesn't end there. The third trigger, a fact extraction
-   flagged low-confidence, is not wired: phase 4's schema has no confidence
-   yet (adding it re-records E3 and E5).
+   proposed rows (a `fixed` fact superseded or changed). The third trigger,
+   a fact extraction flagged low-confidence, is not wired: phase 4's schema
+   has no confidence yet (adding it re-records E3 and E5). A contradiction
+   with the plan is the checker's to find (step 3), not extraction's
+   (Ben, 2026-10-30): extraction marks added detail as superseding a
+   registry fact, and a registry `resolves` is the author's estimate, so a
+   `supersedes` or `ends` it proposes on a registry fact is not applied:
+   it goes to the checker as a dispute to rule on (a contradiction, or
+   cleared), and one it doesn't rule on blocks the commit.
 3. **Check** the scene against the book and its brief (`checker.check_scene`):
    contradictions and broken promises, by code.
 4. **Commit** only when nothing halted, extraction left nothing unresolved
@@ -41,20 +44,20 @@ import os
 from dataclasses import dataclass, field
 
 from storyforge import audit, ledger
-from storyforge.checker import CheckError, CheckResult, Finding, check_scene
+from storyforge.checker import CheckError, CheckResult, Dispute, Finding, check_scene
 
 #: The commands whose prose the gate commits (`ledger.COMMITMENT_WRITERS`
 #: without the extract pass)
 GATE_COMMANDS = tuple(w for w in ledger.COMMITMENT_WRITERS if w != ledger.COMMITMENTS_PASS)
 
-#: Extraction problems that mean the prose contradicts the plan
-PLAN_PROBLEMS = ('disagrees', 'ends registry')
 #: Extraction problems that would commit a wrong row: they block the commit
 UNRESOLVED = ('quote', 'no quote', 'supersedes', 'ends', 'ends again')
-#: Extraction problems reported on a pass: a subject not in the registries
+#: Extraction problems reported on a pass: a link extraction proposed to a
+#: registry fact, not applied (`disagrees`, `ends registry`: the checker
+#: judges contradictions with the plan), a subject not in the registries
 #: (an object has none), facts left out past the offer cap, facts tied to a
 #: scene id that isn't a scene
-REPORTED = ('subject', 'cap', 'unplaced')
+REPORTED = ('disagrees', 'ends registry', 'subject', 'cap', 'unplaced')
 
 
 class GateError(RuntimeError):
@@ -69,9 +72,9 @@ class GateResult:
     #: the scene's commitments, as they would be (or were) committed
     proposed: list[dict[str, str]] = field(default_factory=list)
     halts: list[audit.Halt] = field(default_factory=list)
-    #: extraction's problems (`extract.COMMITMENT_PROBLEMS` → strings): the
-    #: plan ones are also `halts`, `UNRESOLVED` block the commit, `REPORTED`
-    #: are for the caller to report
+    #: extraction's problems (`extract.COMMITMENT_PROBLEMS` → strings):
+    #: `UNRESOLVED` block the commit; `disagrees` and `ends registry` go to
+    #: the checker as disputes; the rest of `REPORTED` are for the caller
     problems: dict[str, list[str]] = field(default_factory=dict)
     check: CheckResult | None = None
     committed: bool = False
@@ -95,8 +98,15 @@ class GateResult:
                 for item in self.problems.get(kind, [])]
 
     @property
+    def unruled(self) -> list[Dispute]:
+        """Registry facts extraction said the scene changes that the checker
+        neither ruled a contradiction nor cleared: they block the commit."""
+        return self.check.unruled if self.check else []
+
+    @property
     def passed(self) -> bool:
-        return not (self.halts or self.unresolved or self.findings or self.unverified)
+        return not (self.halts or self.unresolved or self.findings or self.unverified
+                    or self.unruled)
 
 
 def _subjects(project_dir: str) -> dict[str, str]:
@@ -141,27 +151,30 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
                            registry_is_plan=True)
 
 
-def _plan_halts(problems: dict[str, list[str]],
-                rows: list[dict[str, str]]) -> list[audit.Halt]:
-    """`plan-contradiction` halts from `commitment_rows`' problem strings:
-    `disagrees` is `scene: registry-id (prose: proposed-id)`, `ends registry`
-    is `scene: registry-id (resolves: ...)`. A halt's `fact_id` is the
-    proposed fact where there is one, else the registry fact."""
+def _disputes(result: GateResult, rows: list[dict[str, str]]) -> list[Dispute]:
+    """Each registry fact extraction says the scene changes, for the
+    checker to rule on (Ben, 2026-10-30: the checker decides). From
+    `commitment_rows`' problem strings: `disagrees` is `scene: registry-id
+    (prose: proposed-id)`, `ends registry` is `scene: registry-id
+    (resolves: ...)`."""
     import re
-    halts = []
-    for item in problems.get('disagrees', []):
+    proposed = {r['id']: r for r in result.proposed}
+    out: dict[str, Dispute] = {}
+    for item in result.problems.get('disagrees', []):
         m = re.match(r'[^:]+: (\S+) \(prose: (\S+)\)$', item)
-        reg, proposed = (m.group(1), m.group(2)) if m else (item, item)
-        halts.append(audit.Halt('plan-contradiction', proposed,
-                                f'the prose supersedes the registry fact {reg} '
-                                f'({_statement(rows, reg)!r})'))
-    for item in problems.get('ends registry', []):
+        if not m:
+            continue
+        row = proposed.get(m.group(2), {})
+        out.setdefault(m.group(1), Dispute(m.group(1), _statement(rows, m.group(1)),
+                                           row.get('quote') or row.get('statement', '')))
+    for item in result.problems.get('ends registry', []):
         m = re.match(r'[^:]+: (\S+) \(resolves: ([^)]*)\)$', item)
-        reg, ends = (m.group(1), m.group(2)) if m else (item, '?')
-        halts.append(audit.Halt('plan-contradiction', reg,
-                                f'the prose ends the registry state {reg} '
-                                f'({_statement(rows, reg)!r}) here; its resolves says {ends}'))
-    return halts
+        if not m:
+            continue
+        out.setdefault(m.group(1), Dispute(
+            m.group(1), _statement(rows, m.group(1)),
+            f'the state ends in this scene (the plan says it ends at {m.group(2)})'))
+    return list(out.values())
 
 
 def _statement(rows: list[dict[str, str]], rid: str) -> str:
@@ -258,11 +271,11 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     result.proposed = _extract(project_dir, scene_id, prose, rows, order, command,
                                extract_model or select_model('evaluation'), log_dir,
                                result.problems)
-    result.halts = audit.halting_conditions(result.proposed, rows) + _plan_halts(result.problems, rows)
+    result.halts = audit.halting_conditions(result.proposed, rows)
     try:
         result.check = check_scene(project_dir, scene_id, prose=prose, model=check_model,
                                    log_file=os.path.join(log_dir, f'gate-check-{scene_id}.json'),
-                                   rows=rows)
+                                   rows=rows, disputes=_disputes(result, rows))
     except CheckError as e:
         error = GateError(str(e))
         error.run = getattr(e, 'run', None)
@@ -324,6 +337,10 @@ def problems_to_fix(result: GateResult) -> list[str]:
         said = (f' The scene says: "{row.get("quote") or row.get("statement")}".'
                 if row else '')
         lines.append(f'The scene changes something the book fixed: {h.detail}.{said}')
+    for d in result.unruled:
+        lines.append(f'UNVERIFIED (extraction thinks the scene changes this; the check gave no '
+                     f'ruling; edit only if the scene clearly contradicts it): the plan records '
+                     f'"{d.statement}", and the scene says "{d.claim}".')
     for f, unverified in ([(f, False) for f in result.findings]
                           + [(f, True) for f in result.unverified]):
         tag = (f'UNVERIFIED (the check\'s quotes did not hold up: {f.problem}; edit only '
@@ -479,7 +496,18 @@ def report_lines(result: GateResult) -> list[str]:
         lines.append(f'{f.kind.upper()}: {_one_line(f.message())}')
     for f in result.unverified:
         lines.append(f'UNVERIFIED ({f.problem}): {_one_line(f.message())}')
+    for d in result.unruled:
+        lines.append(f'UNRULED: the scene may change the plan\'s {d.fact_id} '
+                     f'("{_one_line(d.statement)}"): "{_one_line(d.claim)}"; the check gave '
+                     f'no ruling')
+    if result.check:
+        for d in result.check.cleared:
+            lines.append(f'NOTE (plan fact kept, link not applied; the check found no '
+                         f'contradiction): {d.fact_id} ("{_one_line(d.statement)}") vs '
+                         f'"{_one_line(d.claim)}"')
     for kind in REPORTED:
+        if kind in ('disagrees', 'ends registry'):
+            continue    # every one is a dispute: a finding, UNRULED or the note above
         items = result.problems.get(kind, [])
         if items:
             lines.append(f'NOTE ({kind}): ' + '; '.join(_one_line(i) for i in items[:20])
@@ -488,8 +516,11 @@ def report_lines(result: GateResult) -> list[str]:
         for rid, quote, why in result.check.kept_unverified:
             lines.append(f'NOTE (kept, not filled): {rid}: {why}')
         if result.check.unknown_brief_items:
-            lines.append('NOTE (brief items no binding fact matches, not checked): '
+            lines.append('NOTE (brief items in words, no ledger fact; checked as words): '
                          + _one_line('; '.join(result.check.unknown_brief_items)))
+        if result.check.stale_brief_items:
+            lines.append('NOTE (brief items naming a fact that is not binding; not checked, '
+                         'fix the brief): ' + _one_line('; '.join(result.check.stale_brief_items)))
     if result.committed:
         lines.append(f'COMMITTED: {len(result.proposed)} fact(s)'
                      + (f'; quotes filled: {", ".join(result.quotes_filled)}'
