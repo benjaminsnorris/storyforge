@@ -3,6 +3,15 @@ manuscript/reference-images.md outputs (issue #260)."""
 
 import os
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_api_key(monkeypatch):
+    """With a key set, full coaching asks the model for a style guide; these
+    tests cover the packaging, so they run the keyless (template) path."""
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+
 
 def _write_page(pages_dir, page_id, scene_id, within, total, body, *,
                 references=None):
