@@ -113,11 +113,37 @@ class TestGatedWrite:
         main(['--scenes', 'act1-sc01'])
         assert calls == [('act1-sc01', 'draft')]
 
-    def test_batch_warns_that_it_is_not_gated(self, setup, monkeypatch, capsys):
+    def test_batch_prose_is_refused_before_anything_is_spent(self, setup, monkeypatch, capsys):
+        ran = []
         monkeypatch.setattr('storyforge.cmd_write._run_batch_mode',
-                            lambda *a, **k: (0, 0, []))
-        main(['--batch', '--scenes', 'act1-sc01'])
-        assert 'no scene is gated' in capsys.readouterr().out
+                            lambda *a, **k: ran.append(1) or (0, 0, []))
+        monkeypatch.setattr('storyforge.cmd_write.estimate_cost',
+                            lambda *a, **k: ran.append('cost') or 0.0)
+        with pytest.raises(SystemExit) as exc:
+            main(['--batch', '--scenes', 'act1-sc01'])
+        assert exc.value.code == 1 and ran == []
+        assert '--batch is for coaching coach or strict' in capsys.readouterr().out
+
+    @pytest.mark.parametrize('extra', [['--interactive'], ['--dry-run']])
+    def test_batch_prose_is_refused_with_other_flags_too(self, setup, capsys, extra):
+        with pytest.raises(SystemExit) as exc:
+            main(['--batch', *extra, '--scenes', 'act1-sc01'])
+        assert exc.value.code == 1
+        assert '--batch is for coaching coach or strict' in capsys.readouterr().out
+
+    def test_batch_prose_is_refused_when_the_level_comes_from_the_environment(
+            self, setup, monkeypatch, capsys):
+        monkeypatch.setenv('STORYFORGE_COACHING', 'full')
+        with pytest.raises(SystemExit):
+            main(['--batch', '--scenes', 'act1-sc01'])
+        assert '--batch is for coaching' in capsys.readouterr().out
+
+    def test_batch_runs_for_coaching_briefs(self, setup, monkeypatch):
+        ran = []
+        monkeypatch.setattr('storyforge.cmd_write._run_batch_mode',
+                            lambda *a, **k: ran.append(a[5]) or (0, 0, []))
+        main(['--batch', '--coaching', 'coach', '--force', '--scenes', 'act1-sc01'])
+        assert ran == ['coach']
 
     def test_coaching_replies_are_not_gated(self, setup, monkeypatch):
         _direct_replies(monkeypatch, {'act1-sc01': _reply('A brief. ' * 30)})
@@ -264,10 +290,6 @@ class TestReview443:
                     f.write(written)
             assert why in _interactive_problem(path, 'same')
 
-    def test_batch_lists_every_scene_it_writes_as_pending(self, setup, monkeypatch):
-        from storyforge.cmd_write import _pend
-        _pend(setup, 'act1-sc01', 'draft', 'drafted with --batch, not gated')
-        assert 'batch' in gate.pending(setup)['act1-sc01']['reason']
 
 
 
