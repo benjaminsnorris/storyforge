@@ -117,7 +117,7 @@ def main(argv=None):
 - [ ] Phase 1: Extract skeleton (scenes.csv)
 - [ ] Phase 2: Extract intent (scene-intent.csv)
 - [ ] Phase 3: Extract briefs (scene-briefs.csv)
-- [ ] Phase 5: Describe the book (spine, architecture, themes, motifs, story summary, story architecture)
+- [ ] Phase 5: Describe the book (structure, themes, story summary, bibles, voice)
 - [ ] Validate
 - [ ] Review"""
         create_draft_pr(f'Extract: {title} ({scene_count} scenes)',
@@ -205,7 +205,7 @@ def main(argv=None):
     # Phase 5: Describe (after cleanup on a full run, so it reads cleaned data)
     if not args.cleanup_only and (args.phase is None or args.phase == 5):
         if _run_phase_5(project_dir, log_dir, profile_file, args.force, args.dry_run):
-            update_pr_task('Phase 5: Describe the book (spine, architecture, themes, motifs, story summary, story architecture)',
+            update_pr_task('Phase 5: Describe the book (structure, themes, story summary, bibles, voice)',
                            project_dir)
 
     # Validate
@@ -1321,10 +1321,22 @@ def _dry_run_pitch_prompt(describe, project_dir, profile, scenes) -> str:
         return ''
 
 
+def _dry_run_bible_prompts(describe, project_dir, profile, scenes) -> list[tuple[str, str]]:
+    """5d-5f's prompts as they would be built from what is on disk now."""
+    title, _ = describe._book_title(project_dir)
+    chars, _ = describe.character_evidence(project_dir, scenes)
+    world, _ = describe.world_evidence(project_dir, scenes, title)
+    voice, _ = describe.voice_evidence(project_dir, scenes, title)
+    return [('5d characters', describe.build_characters_prompt(profile, chars) if chars else ''),
+            ('5e world', describe.build_world_prompt(profile, scenes, world)),
+            ('5f voice', describe.build_voice_prompt(profile, voice) if voice else '')]
+
+
 def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
     """Phase 5, describe (#440): the reference layers above the scenes, from
-    what phases 0-4 found. Steps 5a (structure), 5b (themes and motifs)
-    and 5c (story summary and story architecture) so far;
+    what phases 0-4 found: 5a (structure), 5b (themes and motifs), 5c
+    (story summary and story architecture), 5d (character bible), 5e
+    (world and systems bibles) and 5f (voice guide and profile);
     `extract_describe` holds them and the write gate. Returns whether any
     step wrote.
 
@@ -1349,7 +1361,8 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
                 ('5a structure', describe.build_structure_prompt(profile, scenes)),
                 ('5b themes', describe.build_themes_prompt(
                     profile, scenes, describe.motif_mentions(scenes))),
-                ('5c pitch', _dry_run_pitch_prompt(describe, project_dir, profile, scenes))):
+                ('5c pitch', _dry_run_pitch_prompt(describe, project_dir, profile, scenes)),
+                *_dry_run_bible_prompts(describe, project_dir, profile, scenes)):
             if prompt:
                 print(f'{label}: {len(prompt)} chars')
         print('===== END DRY RUN =====')
@@ -1381,7 +1394,10 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
         # disagreeing, so nothing after it runs on them
         for name, step in (('spine and architecture', describe.run_structure),
                            ('themes and motifs', describe.run_themes),
-                           ('story summary and architecture', describe.run_pitch)):
+                           ('story summary and architecture', describe.run_pitch),
+                           ('character bible', describe.run_characters),
+                           ('world and systems bibles', describe.run_world),
+                           ('voice guide', describe.run_voice)):
             stopped = [n for n, outcome in outcomes.items() if outcome == 'partial']
             if stopped:
                 run.reports.append(f'{name} skipped: {stopped[0]} stopped part-way, so the '

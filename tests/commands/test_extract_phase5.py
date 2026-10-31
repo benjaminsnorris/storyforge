@@ -75,6 +75,80 @@ def _pitch_reply(project_dir, **override):
     return json.dumps(reply)
 
 
+def _evidence(project_dir):
+    from storyforge import extract_describe as d
+    scenes = d.scene_table(os.path.join(project_dir, 'reference'))
+    title, _ = d._book_title(project_dir)
+    return (scenes, d.character_evidence(project_dir, scenes)[0],
+            d.world_evidence(project_dir, scenes, title)[0],
+            d.voice_evidence(project_dir, scenes, title)[0])
+
+
+def _characters_reply(project_dir, **override):
+    """A valid 5d reply for the characters the project's scenes show."""
+    _, chars, _, _ = _evidence(project_dir)
+    full = {k: f'{k} shown.' for k in ('physical', 'want', 'need', 'wound', 'lie',
+                                       'flaw_as_strength', 'voice', 'relational',
+                                       'arc_start', 'arc_turns', 'arc_end')}
+    reply = {
+        'characters': [{'id': c.id, 'tier': 'primary' if c.pov_scenes else 'secondary',
+                        'role': f'{c.name}\'s role.', **full, 'left_open': ['Their past.']}
+                       for c in chars],
+        'relationships': ([{'a': chars[0].id, 'b': chars[1].id, 'nature': 'Mentor.'}]
+                          if len(chars) > 1 else []),
+        'pov': [{'id': c.id, 'gives': 'Close access.'} for c in chars if c.pov_scenes],
+        'pov_excluded': '',
+    }
+    reply.update(override)
+    return json.dumps(reply)
+
+
+def _world_reply(project_dir, **override):
+    from storyforge.extract_describe import _WORLD_SECTIONS
+    _, _, world, _ = _evidence(project_dir)
+    reply = {
+        'overview': 'A city of maps.', 'macro': 'Cold coast.',
+        'locations': [{'id': loc['id'], 'description': f'{loc["name"]} is grey.',
+                       'function': 'Work.', 'occupants': 'Clerks.'} for loc in world.locations],
+        **{sec: {k: '' for k in keys} for sec, keys in _WORLD_SECTIONS.items()},
+        'institutions': [{'name': 'The Office', 'function': 'Maps.', 'notes': ''}],
+        'open_questions': ['Who erased the village.'],
+        'system': {'present': 'yes', 'name': 'Pressure cartography',
+                   'what_it_is': 'Maps that record pressure.', 'who': 'Cartographers.',
+                   'how': 'Ink and instrument.', 'rules': ['A map shows what is.'],
+                   'costs': '', 'feels': '', 'social': ''},
+    }
+    reply.update(override)
+    return json.dumps(reply)
+
+
+def _voice_reply(project_dir, **override):
+    _, _, _, voice = _evidence(project_dir)
+    pov = voice.pov if voice else []
+    reply = {
+        'lineage': [{'influence': 'Le Guin', 'what': 'Plain lyricism.'}],
+        'blend': 'Measured and cool.',
+        'pov_voices': [{'id': p, **{k: f'{k}.' for k in (
+            'interiority', 'sentence_patterns', 'metaphor_domain', 'notices',
+            'emotional_register', 'speech')}} for p in pov],
+        'senses': {k: '' for k in ('sight', 'sound', 'smell', 'touch', 'taste')},
+        'dialogue': {k: 'Sparse.' for k in ('balance', 'use', 'subtext', 'declarations',
+                                            'silence')},
+        'emotion': {'restraint': 'Held.', 'key_moments': ['The village vanishes.'],
+                    'physical': 'Hands.'},
+        'habits': ['The narrator names instruments precisely.'],
+        'never_does': ['The narrator never explains the cartography.'],
+        'pacing': [{'scene_type': 'Office', 'description': 'Slow.'}],
+        'recurring': [{'phrase': 'pressure', 'usage': 'Maps.', 'significance': 'Truth.'}],
+        'register': 'Formal, close third.',
+        'profiles': [{'id': p, 'preferred_words': ['meridian', 'ink'],
+                      'metaphor_families': ['cartography'], 'rhythm': 'Long.',
+                      'dialogue_style': 'Clipped.'} for p in pov],
+    }
+    reply.update(override)
+    return json.dumps(reply)
+
+
 @pytest.fixture
 def book(project_dir):
     """The fixture with its upper layers as extraction leaves them: the
@@ -92,6 +166,13 @@ def book(project_dir):
     ids = [r['id'] for r in _read_csv(os.path.join(ref, 'scenes.csv'))]
     for sid in ids[:2]:
         update_scene(sid, ref, {'motifs': 'the brass compass'})
+    # The bibles and voice guide as init leaves them: templates, no profile
+    import shutil
+    from storyforge.common import get_plugin_dir
+    for name in ('character-bible.md', 'voice-guide.md'):
+        shutil.copy(os.path.join(get_plugin_dir(), 'templates', 'reference', name),
+                    os.path.join(ref, name))
+    os.remove(os.path.join(ref, 'voice-profile.csv'))
     return project_dir
 
 
@@ -108,6 +189,12 @@ def _answer(project_dir, structure=None, themes=None, pitch=None):
     def reply(prompt):
         if '**logline**' in prompt:
             return pitch or _pitch_reply(project_dir)
+        if '## Its characters, as the scenes show them' in prompt:
+            return _characters_reply(project_dir)
+        if '**overview**' in prompt:
+            return _world_reply(project_dir)
+        if '**lineage**' in prompt:
+            return _voice_reply(project_dir)
         return themes if '**themes**' in prompt else structure
     return reply
 
@@ -143,7 +230,10 @@ class TestPhase5:
         assert set(read_provenance(book)) == {
             'reference/spine.csv', 'reference/architecture.csv',
             'reference/themes.csv', 'reference/motif-taxonomy.csv',
-            'reference/story-summary.md', 'reference/story-architecture.md'}
+            'reference/story-summary.md', 'reference/story-architecture.md',
+            'reference/character-bible.md', 'reference/world-bible.md',
+            'reference/systems-bible.md', 'reference/voice-guide.md',
+            'reference/voice-profile.csv'}
         commits = [c for c in mock_git.calls if c[0] == 'commit_and_push']
         assert 'reference/spine.csv' in commits[-1][2]
         assert all(c['model'] for c in mock_api.calls)
@@ -180,7 +270,7 @@ class TestPhase5:
         out = capsys.readouterr().out
         assert 'reference/themes.csv: kept (extracted earlier, then edited' in out
         assert '5b (themes and motifs) skipped' in out
-        assert len(mock_api.calls) == calls + 2     # 5a and 5c
+        assert len(mock_api.calls) == calls + 5     # all but 5b
         with open(themes) as f:
             assert 'The author added this.' in f.read()
 
@@ -201,8 +291,8 @@ class TestPhase5:
         bad['architecture'][0]['scene_id'] = 'no-such-scene'
         replies = iter([json.dumps(bad), _structure_reply(ids)])
         themes = _themes_reply(ids, 'the brass compass')
-        mock_api.set_response_fn(lambda p: _pitch_reply(book) if '**logline**' in p
-                                 else themes if '**themes**' in p else next(replies))
+        answer = _answer(book)
+        mock_api.set_response_fn(lambda p: next(replies) if '**spine**' in p else answer(p))
         _run(book)
         structure_prompts = [c['prompt'] for c in mock_api.calls
                              if '**spine**' in c['prompt']]
@@ -498,7 +588,8 @@ class TestReviewFixes:
             project_dir, os.path.join(project_dir, 'working', 'logs'),
             os.path.join(project_dir, 'working', 'extraction-profile.json'), False, False)
         assert _commits(mock_git)[-1][1] == ('Extract: Phase 5 — describe (spine and '
-                                              'architecture, story summary and architecture)')
+                                              'architecture, story summary and architecture, '
+                                              'world and systems bibles)')
 
     def test_nothing_written_returns_false(self, book, mock_api, mock_git, mock_costs, capsys):
         mock_api.set_response_fn(_answer(book))
@@ -1076,3 +1167,252 @@ class TestPitchReviewFixes:
         from storyforge.extract_describe import ActLength, act_lengths
         assert act_lengths([{'act': '1', 'word_count': '²'}, {'act': '1', 'word_count': '5'}]) \
             == [ActLength('1', scenes=2, words=5, uncounted=1)]
+
+
+def _add_facts(project_dir, *facts):
+    """Append ledger rows: (subject, type, mutable, status, statement, quote)."""
+    from storyforge import ledger
+    rows = ledger.load(project_dir)
+    for i, (subject, type_, mutable, status, statement, quote) in enumerate(facts):
+        rows.append({'id': f'fact-{i}', 'scene_id': 'act1-sc01', 'type': type_,
+                     'subject': subject, 'statement': statement, 'quote': quote,
+                     'origin': 'prose', 'status': status, 'mutable': mutable,
+                     'introduced_by': 'commitments'})
+    ledger.save(project_dir, rows, command='test')
+
+
+def _write_scene(project_dir, sid, text):
+    with open(os.path.join(project_dir, 'scenes', f'{sid}.md'), 'w') as f:
+        f.write(text)
+
+
+class TestCharacters:
+    """Step 5d."""
+
+    def test_evidence_orders_pov_first_and_reads_facts_and_lines(self, book):
+        from storyforge.extract_describe import character_evidence, scene_table
+        cid = 'dorren-hayle'
+        _add_facts(book, (cid, 'trait', 'fixed', 'binding', 'Dorren is left-handed',
+                          'her left hand'),
+                   (cid, 'physical', 'state', 'binding', 'Dorren is soaked', ''),
+                   (cid, 'trait', 'fixed', 'rejected', 'Dorren is a liar', ''))
+        _write_scene(book, 'act1-sc01', 'The office was cold.\n\n"The map is wrong, and '
+                     'I know it," said Dorren, folding it.\n\n"Nonsense," Pell said.\n')
+        scenes = scene_table(os.path.join(book, 'reference'))
+        chars, notes = character_evidence(book, scenes)
+        assert [c.pov_scenes > 0 for c in chars] == sorted((c.pov_scenes > 0 for c in chars),
+                                                           reverse=True)
+        dorren = next(c for c in chars if c.id == cid)
+        assert dorren.facts == ['trait: Dorren is left-handed ("her left hand")']  # fixed, binding
+        assert dorren.lines == ['The map is wrong, and I know it,']
+        assert notes == [] or all('ledger' not in n for n in notes)
+
+    def test_an_unmigrated_ledger_is_said_not_guessed(self, book):
+        from storyforge.extract_describe import character_evidence, scene_table
+        with open(os.path.join(book, 'reference', 'knowledge.csv'), 'w') as f:
+            f.write('id|name|aliases|category|origin\n')
+        chars, notes = character_evidence(book, scene_table(os.path.join(book, 'reference')))
+        assert chars and all(c.facts == [] for c in chars)
+        assert any('the ledger is not migrated' in n for n in notes)
+
+    def test_the_cap_and_unknown_names_are_reported(self, book, monkeypatch):
+        from storyforge import extract_describe as d
+        from storyforge.elaborate import update_scene
+        monkeypatch.setattr(d, 'MAX_CHARACTERS', 1)
+        update_scene('act1-sc02', os.path.join(book, 'reference'), {'on_stage': 'Nobody Known'})
+        chars, notes = d.character_evidence(book, d.scene_table(os.path.join(book, 'reference')))
+        assert len(chars) == 1
+        assert any('are left out of the character bible' in n for n in notes)
+        assert any('match no character in characters.csv' in n and 'Nobody Known' in n
+                   for n in notes)
+
+    def test_the_bible_is_written_with_code_counts(self, book, mock_api, mock_git, mock_costs):
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        with open(os.path.join(book, 'reference', 'character-bible.md')) as f:
+            doc = f.read()
+        assert doc.startswith('<!-- storyforge:extracted v')
+        assert '**Appears:** POV in 3 scene(s); on stage in 4' in doc
+        assert '**What the text leaves open:**' in doc and 'Expansion Opportunities' not in doc
+        assert '## POV Decisions' in doc and '- **Dorren Hayle:** 3 scene(s). Close access.' in doc
+
+    @pytest.mark.parametrize('mutate,expected', [
+        (lambda r, ids: r['characters'].pop(), 'characters leaves out'),
+        (lambda r, ids: r['characters'][0].update(id='nobody'),
+         "characters names 'nobody', which is not one of the ids given"),
+        (lambda r, ids: r['characters'][0].update(tier='secondary'), 'so is primary'),
+        (lambda r, ids: r['characters'][0].update(voice=''), '.voice is empty'),
+        (lambda r, ids: r['characters'][-1].update(role=''), '.role is empty'),
+        (lambda r, ids: r['relationships'].append({'a': ids[0], 'b': ids[0], 'nature': 'x'}),
+         'must name two different character ids'),
+        (lambda r, ids: r['pov'].pop(0), 'pov leaves out POV character(s)'),
+    ])
+    def test_problems(self, book, mutate, expected):
+        from storyforge.extract_describe import ReplyProblems, parse_characters
+        _, chars, _, _ = _evidence(book)
+        reply = json.loads(_characters_reply(book))
+        mutate(reply, [c.id for c in chars])
+        with pytest.raises(ReplyProblems) as e:
+            parse_characters(json.dumps(reply), chars)
+        assert any(expected in p for p in e.value.problems)
+
+
+class TestWorld:
+    """Step 5e."""
+
+    def test_a_book_with_no_system_gets_a_stub_saying_why(self, book, mock_api, mock_git,
+                                                          mock_costs):
+        none = {'present': 'no', 'name': '', 'what_it_is': 'The maps work by no stated rules.',
+                'who': '', 'how': '', 'rules': [], 'costs': '', 'feels': '', 'social': ''}
+        answer = _answer(book)
+        mock_api.set_response_fn(lambda p: _world_reply(book, system=none)
+                                 if '**overview**' in p else answer(p))
+        _run(book)
+        ref = os.path.join(book, 'reference')
+        with open(os.path.join(ref, 'systems-bible.md')) as f:
+            assert 'No formal system: The maps work by no stated rules.' in f.read()
+        with open(os.path.join(ref, 'world-bible.md')) as f:
+            world = f.read()
+        assert '### Formal System\nNone. The maps work by no stated rules.' in world
+        assert '**Pressure Cartography Office** (1 scene(s))' in world
+        assert '## What the text leaves open' in world and 'Open Questions' not in world
+
+    def test_a_system_is_written_with_its_rules(self, book, mock_api, mock_git, mock_costs):
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        with open(os.path.join(book, 'reference', 'systems-bible.md')) as f:
+            doc = f.read()
+        assert '## System 1: Pressure cartography' in doc and '1. A map shows what is.' in doc
+
+    @pytest.mark.parametrize('override,expected', [
+        ({'overview': ''}, 'overview is empty'),
+        ({'locations': []}, 'locations leaves out'),
+        ({'system': {'present': 'yes', 'name': 'X', 'what_it_is': 'Y', 'who': '', 'how': '',
+                     'rules': [], 'costs': '', 'feels': '', 'social': ''}},
+         'system.rules has no items'),
+        ({'system': {'present': 'no', 'name': '', 'what_it_is': '', 'who': '', 'how': '',
+                     'rules': [], 'costs': '', 'feels': '', 'social': ''}},
+         'say why the book has no formal system'),
+    ])
+    def test_problems(self, book, override, expected):
+        from storyforge.extract_describe import ReplyProblems, parse_world
+        _, _, world, _ = _evidence(book)
+        with pytest.raises(ReplyProblems) as e:
+            parse_world(_world_reply(book, **override), world)
+        assert any(expected in p for p in e.value.problems)
+
+    def test_world_facts_come_from_the_ledger(self, book):
+        from storyforge.extract_describe import scene_table, world_evidence
+        _add_facts(book, ('', 'world', 'fixed', 'binding', 'Maps record pressure', 'pressure'),
+                   ('', 'world', 'state', 'binding', 'It is raining', ''))
+        ev, _ = world_evidence(book, scene_table(os.path.join(book, 'reference')), 'T')
+        assert ev.facts == ['world: Maps record pressure ("pressure")']
+
+
+class TestVoice:
+    """Step 5f."""
+
+    def test_the_guide_and_profile_are_described_and_loadable(self, book, mock_api, mock_git,
+                                                              mock_costs):
+        import re
+        from storyforge.extract_describe import VOICE_PROFILE_COLUMNS
+        from storyforge.prompts import load_voice_profile
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        ref = os.path.join(book, 'reference')
+        with open(os.path.join(ref, 'voice-guide.md')) as f:
+            guide = f.read()
+        assert '## Measured' in guide and '- **whole book: dialogue share:**' in guide
+        for gone in ('Influence Blend', 'Style Rules', 'Prose Naturalness', '### Do Not'):
+            assert gone not in guide
+        # No bullet reads as an instruction (decision 2)
+        from storyforge.extract_describe import _IMPERATIVE
+        bullets = [line[2:] for line in guide.splitlines() if line.startswith('- ')]
+        assert not [b for b in bullets if _IMPERATIVE.match(b)]
+        with open(os.path.join(ref, 'voice-profile.csv')) as f:
+            assert f.readline().strip().split('|') == VOICE_PROFILE_COLUMNS
+        project, chars = load_voice_profile(book)
+        assert project == {'register': 'Formal, close third.'}     # no banned_words
+        assert chars['dorren-hayle']['preferred_words'] == 'meridian;ink'
+
+    def test_an_instruction_is_sent_back(self, book):
+        from storyforge.extract_describe import ReplyProblems, parse_voice
+        _, _, _, voice = _evidence(book)
+        with pytest.raises(ReplyProblems) as e:
+            parse_voice(_voice_reply(book, never_does=['Never explain the maps.']), voice)
+        assert any('reads as an instruction' in p for p in e.value.problems)
+
+    def test_profile_words_with_a_semicolon_and_missing_pov_are_problems(self, book):
+        from storyforge.extract_describe import ReplyProblems, parse_voice
+        _, _, _, voice = _evidence(book)
+        reply = json.loads(_voice_reply(book))
+        reply['profiles'][0]['preferred_words'] = ['a;b']
+        reply['pov_voices'].pop()
+        with pytest.raises(ReplyProblems) as e:
+            parse_voice(json.dumps(reply), voice)
+        assert any('semicolon' in p for p in e.value.problems)
+        assert any('pov_voices leaves out POV character(s)' in p for p in e.value.problems)
+
+    def test_samples_are_chosen_by_position_and_dialogue(self, book):
+        from storyforge.extract_describe import scene_table, voice_evidence
+        long = ' '.join(['word'] * 400)
+        _write_scene(book, 'act1-sc02', long + ' "' + ' '.join(['talk'] * 300) + '," she said.')
+        ev, _ = voice_evidence(book, scene_table(os.path.join(book, 'reference')), 'T')
+        labels = [(label, sid) for label, sid, _ in ev.samples]
+        ids = [sid for sid in _scene_ids(book)        # the scenes with prose
+               if os.path.exists(os.path.join(book, 'scenes', f'{sid}.md'))]
+        assert labels[:3] == [('opening', ids[0]), ('middle', ids[len(ids) // 2]),
+                              ('close', ids[-1])]
+        assert ('most dialogue', 'act1-sc02') in labels
+
+    def test_no_prose_skips_5f_and_says_so(self, book, mock_api, mock_git, mock_costs, capsys):
+        import shutil
+        shutil.rmtree(os.path.join(book, 'scenes'))
+        os.makedirs(os.path.join(book, 'scenes'))
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        out = capsys.readouterr().out
+        assert '5f skipped: no scene has prose to describe a voice from' in out
+        assert not any('**lineage**' in c['prompt'] for c in mock_api.calls)
+        assert not os.path.exists(os.path.join(book, 'reference', 'voice-profile.csv'))
+
+
+def test_dialogue_spans_keep_lines_apart():
+    from storyforge.prose_analysis import dialogue_spans
+    text = '"One," he said. "Two."'
+    assert [inner for _, _, inner in dialogue_spans(text)] == ['One,', 'Two.']
+    assert text[dialogue_spans(text)[1][0]:dialogue_spans(text)[1][1]] == '"Two."'
+
+
+def test_a_supporting_character_outranks_minor_ones(book, monkeypatch):
+    """Live on Carol: Tiny Tim (supporting, on stage once) was cut while
+    minor characters on stage twice made the bible."""
+    from storyforge import extract_describe as d
+    from storyforge.elaborate import update_scene
+    ref = os.path.join(book, 'reference')
+    with open(os.path.join(ref, 'characters.csv'), 'a') as f:
+        f.write('tim|Tim||supporting|\nmaid|Maid||minor|\n')
+    with open(os.path.join(ref, 'characters.csv')) as f:
+        header = f.readline().strip().split('|')
+    assert header[:2] == ['id', 'name']
+    update_scene('act1-sc02', ref, {'on_stage': 'Dorren Hayle;Maid;Tim'})
+    update_scene('act2-sc02', ref, {'on_stage': 'Tessa Merrin;Maid'})
+    monkeypatch.setattr(d, 'MAX_CHARACTERS', 6)
+    chars, _ = d.character_evidence(book, d.scene_table(ref))
+    ids = [c.id for c in chars]
+    assert 'tim' in ids and ids.index('tim') < ids.index('maid')
+
+
+def test_a_scene_set_in_several_places_counts_each(book):
+    """Live on Carol: `belles-family-home;scrooges-bedroom` was read as one
+    unknown name."""
+    from storyforge.elaborate import update_scene
+    from storyforge.extract_describe import scene_table, world_evidence
+    ref = os.path.join(book, 'reference')
+    _, alias = __import__('storyforge.extract_describe', fromlist=['x'])._registry(
+        book, 'locations.csv')
+    first, second = list(dict.fromkeys(alias.values()))[:2]
+    update_scene('act1-sc01', ref, {'location': f'{first};{second}'})
+    ev, notes = world_evidence(book, scene_table(ref), 'T')
+    assert {first, second} <= {loc['id'] for loc in ev.locations}
+    assert not any(f'{first};{second}' in n for n in notes)

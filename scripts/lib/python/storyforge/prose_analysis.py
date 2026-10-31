@@ -116,6 +116,17 @@ def extract_dialogue(text: str) -> tuple[str, str]:
     return ' '.join(dialogue_parts), narration
 
 
+def dialogue_spans(text: str) -> list[tuple[int, int, str]]:
+    """Each quoted span in `text` as (start, end, inner text), in order.
+
+    `extract_dialogue` joins every line into one string; this keeps them
+    apart, with offsets, so a caller can read what surrounds each (an
+    attribution like "said Scrooge"). Offsets are into `text` as given:
+    strip markers first if the text may have them.
+    """
+    return [(m.start(), m.end(), m.group(1)) for m in _DIALOGUE_RE.finditer(text)]
+
+
 # ============================================================================
 # Adverb detection
 # ============================================================================
