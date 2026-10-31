@@ -253,6 +253,23 @@ class TestFailsLoud:
         with pytest.raises(GateError, match='lean on'):
             _gate(project_dir, tmp_path, [_commitment()], command='redraft')
 
+    def test_a_replaced_state_a_later_scene_ended_raises(self, project_dir, tmp_path):
+        """Replacing it would drop the later scene's end: the state would read
+        as in force for the rest of the book."""
+        _gate(project_dir, tmp_path, [_commitment()])
+        rows = ledger.load(project_dir)
+        mine = next(r for r in rows if r['scene_id'] == SCENE and ledger.is_commitment(r))
+        mine['resolves'] = 'act2-sc01'
+        ledger.save(project_dir, rows, command='test')
+        with pytest.raises(GateError, match='act2-sc01 ends'):
+            _gate(project_dir, tmp_path, [_commitment()], command='redraft')
+
+    def test_a_state_ended_in_its_own_scene_or_never_does_not_lean(self):
+        rows = [{'id': 'a', 'scene_id': 's1', 'resolves': 's1'},
+                {'id': 'b', 'scene_id': 's1', 'resolves': 'never'},
+                {'id': 'c', 'scene_id': 's1', 'resolves': ''}]
+        assert gate._leaning_on(rows, {'a', 'b', 'c'}) == []
+
     @pytest.mark.parametrize('command', ['commitments', 'hone', ''])
     def test_only_gate_commands(self, project_dir, tmp_path, command):
         with pytest.raises(ValueError, match='command must be'):

@@ -661,6 +661,63 @@ def established_before(rows: list[dict[str, str]], scene_id: str,
     return sorted(found, key=lambda r: order[r['scene_id'].strip()])
 
 
+# ============================================================================
+# Phase 4: what depends on a fact (docs/plans/2026-10-31-phase4-safe-revision-design.md)
+# ============================================================================
+
+def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
+               order: dict[str, int]) -> list[str]:
+    """The scenes after each of `fact_ids` whose binding facts depend on it,
+    in reading order: the re-check set when those facts change (design §1,
+    derived from the ledger, decided by Ben 2026-10-31).
+
+    A binding fact in a later scene depends on fact F when it
+    - supersedes F or names it in `depends_on`, or
+    - is about the same `subject` (non-blank) in the same `type`;
+    and the scene F's `resolves` names (the scene that ends it) depends on F.
+    "Later" is after F's scene; a fact with no scene (backstory) is before
+    every scene. Over-includes by design: a needless check costs a call, a
+    missed scene is a silent hole. Facts not in `rows` are ignored; the
+    caller passes removed facts' rows in `rows` (old and new together)."""
+    wanted = set(fact_ids)
+    targets = [r for r in rows if r.get('id') in wanted]
+    out: set[str] = set()
+    for f in targets:
+        sid = (f.get('scene_id') or '').strip()
+        if sid and sid not in order:
+            continue                      # unplaced: when it holds is unknown
+        after = order[sid] if sid else -1
+        ends = (f.get('resolves') or '').strip()
+        if ends in order and order[ends] > after:
+            out.add(ends)
+        subject = (f.get('subject') or '').strip()
+        for r in rows:
+            rs = (r.get('scene_id') or '').strip()
+            if r is f or r.get('status') != 'binding' or rs not in order or order[rs] <= after:
+                continue
+            linked = f['id'] in _split(r.get('supersedes', '')) + _split(r.get('depends_on', ''))
+            same = bool(subject) and (r.get('subject') or '').strip() == subject \
+                and r.get('type') == f.get('type')
+            if linked or same:
+                out.add(rs)
+    return sorted(out, key=order.get)
+
+
+def _fact_key(row: dict[str, str]) -> tuple[str, str, str]:
+    statement = ' '.join((row.get('statement') or '').lower().split()).rstrip(' .;')
+    return ((row.get('subject') or '').strip(), row.get('type') or '', statement)
+
+
+def changed_facts(old: list[dict[str, str]], new: list[dict[str, str]]) -> list[str]:
+    """The ids of facts in `old` with no fact of the same subject, type and
+    statement (case and spacing aside) in `new`, then those in `new` with no
+    match in `old` (design §2): what a scene's re-extraction changed."""
+    old_keys = {_fact_key(r) for r in old}
+    new_keys = {_fact_key(r) for r in new}
+    return ([r['id'] for r in old if _fact_key(r) not in new_keys]
+            + [r['id'] for r in new if _fact_key(r) not in old_keys])
+
+
 @dataclass
 class DraftingSlice:
     """What drafting `scene_id` must agree with (rethink plan §3.1, §3.3)."""

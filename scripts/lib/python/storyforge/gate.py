@@ -213,10 +213,18 @@ def has_commitments(project_dir: str, scene_id: str) -> bool:
 
 
 def _leaning_on(rows: list[dict[str, str]], gone: set[str]) -> list[str]:
-    """Rows (not themselves going) whose supersedes or depends_on name `gone`."""
-    return [f'{r["id"]} → {ref}' for r in rows if r['id'] not in gone
-            for col in ('supersedes', 'depends_on') for ref in ledger._split(r.get(col, ''))
-            if ref in gone]
+    """Rows (not themselves going) whose supersedes or depends_on name `gone`,
+    and each `gone` state another scene ended (`resolves` names a scene other
+    than its own): replacing it would drop that end, and the state would
+    read as in force for the rest of the book."""
+    leaning = [f'{r["id"]} → {ref}' for r in rows if r['id'] not in gone
+               for col in ('supersedes', 'depends_on') for ref in ledger._split(r.get(col, ''))
+               if ref in gone]
+    for r in rows:
+        ends = (r.get('resolves') or '').strip()
+        if r['id'] in gone and ends not in ('', 'never', (r.get('scene_id') or '').strip()):
+            leaning.append(f'{ends} ends → {r["id"]}')
+    return leaning
 
 
 def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | None = None,
