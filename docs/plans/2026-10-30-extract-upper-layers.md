@@ -1,6 +1,6 @@
 # Extract the upper reference layers (#440, F-130 part 2)
 
-Status (2026-10-30): PR 0 (#442, v1.101.1) and PR 1 (#444, v1.102.0) are merged: the write gate, and steps 5a and 5b. PR 2 (#446, v1.103.0) adds 5c; PR 3 (#447, v1.104.0) adds 5d–5f, run one after another rather than in parallel (`write_described` updates one shared provenance record; three ~1-minute calls don't justify locking). Next is PR 4 (5g and E9). Live on *Carol*, 5a/5b wrote an 8-event spine, 20 anchors, 6 themes and 26 motifs for $0.79 across three runs, and the L3/L4 floors pass; 5a–5c from a clean copy cost $0.44 (5c $0.15) and pass L0–L4; 5a–5f on the E2 *Carol* book (with prose) cost $0.99. Handoff: `docs/plans/2026-10-28-rethink-status.md`, Next steps 2.
+Status (2026-10-30): PR 0 (#442, v1.101.1) and PR 1 (#444, v1.102.0) are merged: the write gate, and steps 5a and 5b. PR 2 (#446, v1.103.0) adds 5c; PR 3 (#447, v1.104.0) adds 5d–5f, run one after another rather than in parallel (`write_described` updates one shared provenance record; three ~1-minute calls don't justify locking). PR 4 (#448, v1.105.0) adds 5g and the E9 replay suite. Next is the hand-off to storyforge-evals. Live on *Carol*, 5a/5b wrote an 8-event spine, 20 anchors, 6 themes and 26 motifs for $0.79 across three runs, and the L3/L4 floors pass; 5a–5c from a clean copy cost $0.44 (5c $0.15) and pass L0–L4; 5a–5f on the E2 *Carol* book (with prose) cost $0.99. Handoff: `docs/plans/2026-10-28-rethink-status.md`, Next steps 2.
 
 ## Goal
 
@@ -108,13 +108,14 @@ Each PR has its own reviewer. Re-recording eval cassettes doesn't need a separat
 3. **5d + 5e + 5f (minor).** Bibles and voice. Tests: evidence builders (fixed facts only, quotes kept, the `NotMigratedError` fallback stated), the no-imperatives lint, the `voice-profile.csv` schema, the systems-bible stub.
 4. **5g + eval suite + docs (minor).**
    - `timeline.md` and the chapter map.
-   - A new replay suite, **E9 (reference completeness)**, on the Carol fixture:
-     - run phase 5 from cassettes;
-     - assert no file in `reference/` is template-identical and no registry is header-only (with the decision 1 exemptions);
-     - `score --all-levels` passes the L0–L6 floors;
-     - `status` walks past the elaboration ladder;
-     - `validate` passes on schema;
-     - a second run with no `--force` writes nothing.
+   - A new replay suite, **E9 (reference completeness)**, on the Carol fixture. **Done (#448)**, as built (`evals/suites/e9_reference.py`):
+     - run phase 5 from cassettes (the E2 *Carol* book, registries migrated);
+     - no file init's reference templates provide (plus `chapter-map.csv` and `voice-profile.csv`) is missing, empty, header-only or still its template, with the decision 1 exemptions;
+     - every file phase 5 changed is in what it commits;
+     - the L0–L6 floors pass, and L0–L4 (phase 5's own) alone; on Carol two L5 checks fail on the scene layer, a finding for storyforge-evals;
+     - every `status` ladder rung is solid (fails on Carol for the same reason);
+     - `validate` finds no schema problem;
+     - a second run with no `--force` calls no model, writes nothing and changes nothing.
    - The rethink status doc. (`docs/agent-reference.md` and `skills/extract/SKILL.md` describe phase 5 since PR 1, and each later PR keeps them current.)
 
 After that, a hand-off to storyforge-evals: we don't touch `~/Developer/evals`, so they would add `gold/<slug>/reference-notes.md` (critical consensus per doc), run phase 5 on *Carol* and *Gatsby*, judge the docs against the text and gold, and re-score character, act and narrative against noise (*Carol* character noise is about 0.5).
@@ -133,7 +134,7 @@ Opus 5.5 at $4 per million input tokens and $20 per million output tokens (`cost
 | 5f voice | ~40k | ~6k | ~$0.28 |
 | **Total** | | | **~$1.40, ~$2 with floor retries** (measured on *Carol*, 40 scenes: **$0.99** for 5a–5f with one 5b retry, about $0.83 without) |
 
-- E9 record on *Carol* + *Gatsby*: **about $3–4**.
+- E9 record on *Carol* + *Gatsby*: **about $3–4** (as built, Carol only: **$0.82**, 7 calls).
 - All eight classics: **about $12–16**.
 - Re-scoring (story-power and the character and narrative passes) is extra, at storyforge-evals' existing per-book figures.
 - Worth weighing: on Sonnet 5.5 ($2/$10) the whole phase is about half the cost. 5a and 5b are mostly selection and could go to Sonnet; the descriptive docs should stay on Opus.

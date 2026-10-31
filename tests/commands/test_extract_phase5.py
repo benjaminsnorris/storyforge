@@ -233,7 +233,7 @@ class TestPhase5:
             'reference/story-summary.md', 'reference/story-architecture.md',
             'reference/character-bible.md', 'reference/world-bible.md',
             'reference/systems-bible.md', 'reference/voice-guide.md',
-            'reference/voice-profile.csv'}
+            'reference/voice-profile.csv', 'reference/timeline.md'}
         commits = [c for c in mock_git.calls if c[0] == 'commit_and_push']
         assert 'reference/spine.csv' in commits[-1][2]
         assert all(c['model'] for c in mock_api.calls)
@@ -589,7 +589,8 @@ class TestReviewFixes:
             os.path.join(project_dir, 'working', 'extraction-profile.json'), False, False)
         assert _commits(mock_git)[-1][1] == ('Extract: Phase 5 — describe (spine and '
                                               'architecture, story summary and architecture, '
-                                              'world and systems bibles)')
+                                              'world and systems bibles, timeline and chapter '
+                                              'map)')
 
     def test_nothing_written_returns_false(self, book, mock_api, mock_git, mock_costs, capsys):
         mock_api.set_response_fn(_answer(book))
@@ -1886,3 +1887,235 @@ class TestBiblesGateAndSteps:
                                           'flaw_as_strength', 'voice', 'relational',
                                           'arc_start', 'arc_turns', 'arc_end')})
         parse_characters(json.dumps(reply), chars)
+
+
+class TestTimelineAndChapterMap:
+    """Step 5g (no model), with the #448 review's regression tests."""
+
+    def _scenes(self, book):
+        from storyforge.extract_describe import scene_table
+        return scene_table(os.path.join(book, 'reference'))
+
+    def _all_prose(self, book):
+        """Give every fixture scene a file (two have none)."""
+        for sid in _scene_ids(book):
+            path = os.path.join(book, 'scenes', f'{sid}.md')
+            if not os.path.exists(path):
+                _write_scene(book, sid, 'Text.\n')
+
+    def _set(self, book, **cells):
+        from storyforge.elaborate import update_scene
+        for sid, values in cells.items():
+            update_scene(sid, os.path.join(book, 'reference'), values)
+
+    def test_the_timeline_describes_days_earlier_time_and_frames(self, book):
+        from storyforge.extract_describe import render_timeline
+        ids = _scene_ids(book)
+        self._set(book, **{ids[0]: {'time_mode': 'Frame'},       # any case
+                           ids[1]: {'timeline_day': '3', 'timeline_date': 'XXXX-12-24'},
+                           ids[2]: {'timeline_day': '1'},
+                           ids[3]: {'timeline_day': ''},
+                           ids[4]: {'timeline_day': '3', 'time_mode': 'summary'}})
+        doc, notes = render_timeline(self._scenes(book), 'T', {}, 'H')
+        assert '### Day 3 (XXXX-12-24)' in doc
+        assert f'`{ids[2]}`' in doc.split('## Earlier Time')[1]
+        assert 'day 1, read after day 3' in doc
+        assert f'`{ids[0]}`' in doc.split('## Frame')[1]
+        assert f'`{ids[3]}`' in doc.split('## Not Placed in Time')[1]
+        assert '(covers a stretch of time from here)' in next(
+            line for line in doc.splitlines() if f'`{ids[4]}`' in line)
+        assert doc.count(f'`{ids[4]}`') == 1            # listed once
+        assert any('have no timeline_day' in n for n in notes)
+
+    def test_the_span_is_timeline_span_not_the_shape(self, book):
+        """Review: `timeline` is the shape (linear, frame-narrative); the span
+        is `timeline_span`."""
+        from storyforge.extract_describe import render_timeline
+        doc, _ = render_timeline(self._scenes(book), 'T',
+                                 {'timeline': 'frame-narrative', 'timeline_span': 'One night'},
+                                 'H')
+        assert '**Span:** One night' in doc and '**Shape:** frame-narrative' in doc
+
+    def test_a_prologue_read_first_is_earlier_time(self, book):
+        """Review: a flashback read first was listed as the story's present."""
+        from storyforge.extract_describe import render_timeline
+        ids = _scene_ids(book)
+        self._set(book, **{ids[0]: {'timeline_day': '-3650'}, ids[1]: {'timeline_day': '1'}})
+        doc, _ = render_timeline(self._scenes(book), 'T', {}, 'H')
+        assert '### Day -3650' not in doc
+        assert 'day -3650, before day 1' in doc
+
+    @pytest.mark.parametrize('value', ['--1', '3a', '1.5', '+2', '\u0663'])
+    def test_an_unreadable_day_is_listed_and_said_not_a_crash(self, book, value):
+        """Review: '--1' crashed the phase; non-numbers were called blank."""
+        from storyforge.extract_describe import render_timeline
+        ids = _scene_ids(book)
+        self._set(book, **{ids[0]: {'timeline_day': value}})
+        doc, notes = render_timeline(self._scenes(book), 'T', {}, 'H')
+        assert 'is not a whole number' in doc
+        assert any('not a whole number' in n and ids[0] in n for n in notes)
+
+    def test_no_days_writes_no_timeline_and_says_so(self, book, mock_api, mock_git,
+                                                    mock_costs, capsys):
+        for sid in _scene_ids(book):
+            self._set(book, **{sid: {'timeline_day': ''}})
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        out = capsys.readouterr().out
+        assert "5g: no scene in the story's present has a timeline_day" in out
+        assert not os.path.exists(os.path.join(book, 'reference', 'timeline.md'))
+
+    def test_force_with_nothing_new_says_the_old_file_is_out_of_date(
+            self, book, mock_api, mock_git, mock_costs, capsys):
+        """Review: the stale extracted file stayed while the note said none
+        is written."""
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        for sid in _scene_ids(book):
+            self._set(book, **{sid: {'timeline_day': ''}})
+        _run(book, force=True)
+        assert ('5g: reference/timeline.md is kept from an earlier run and is now out of date'
+                in capsys.readouterr().out)
+
+    def test_the_chapter_map_comes_from_the_headings(self, book, mock_api, mock_git,
+                                                     mock_costs):
+        from storyforge.assembly import (_CHAPTER_HEADINGS, get_chapter_scenes,
+                                         read_chapter_field)
+        ids = _scene_ids(book)
+        self._all_prose(book)
+        os.remove(os.path.join(book, 'reference', 'chapter-map.csv'))
+        _write_scene(book, ids[0], '\ufeff# Stave I: Marley\'s Ghost\n\nMarley was dead.\n')
+        _write_scene(book, 'new-x1', '## Stave II | The First Spirit ##\n\nWhen he woke.\n')
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        assert read_chapter_field(1, book, 'title') == "Stave I: Marley's Ghost"
+        assert read_chapter_field(1, book, 'heading') == 'none' in _CHAPTER_HEADINGS
+        assert read_chapter_field(1, book, 'part') == '1'
+        split = ids.index('new-x1')
+        assert get_chapter_scenes(1, book) == ids[:split]
+        assert read_chapter_field(2, book, 'title') == 'Stave II / The First Spirit'
+        assert get_chapter_scenes(2, book) == ids[split:]
+        assert 'reference/chapter-map.csv' in read_provenance(book)
+
+    def test_a_scene_with_no_prose_writes_no_map(self, book):
+        """Review: a missing chapter-opening scene merged two chapters."""
+        from storyforge.extract_describe import chapter_map_rows
+        rows, notes = chapter_map_rows({'a': '# One\n\nText.'},
+                                       [{'id': 'a'}, {'id': 'b'}])
+        assert rows == [] and 'no prose to read a chapter heading from' in notes[0]
+
+    def test_a_heading_that_is_the_scenes_title_writes_no_map(self, book, mock_api, mock_git,
+                                                              mock_costs, capsys):
+        """Review: the guess dropped a chapter; the fixture's new-x1 opens
+        with its own title."""
+        self._all_prose(book)
+        os.remove(os.path.join(book, 'reference', 'chapter-map.csv'))
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        assert ("5g: 1 scene(s) open with a heading that is also their scenes.csv title"
+                in capsys.readouterr().out)
+        assert not os.path.exists(os.path.join(book, 'reference', 'chapter-map.csv'))
+
+    def test_an_authors_map_is_kept_and_a_header_only_one_is_filled(self, book, mock_api,
+                                                                    mock_git, mock_costs,
+                                                                    capsys):
+        """Review: a header-only map (cleanup tells authors to copy the
+        template) read as the author's own."""
+        from storyforge.extract_describe import file_state
+        from storyforge.schema import CHAPTER_MAP_COLUMNS
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        assert "reference/chapter-map.csv: kept (the author's own" in capsys.readouterr().out
+        with open(os.path.join(book, 'reference', 'chapter-map.csv'), 'w') as f:
+            f.write('|'.join(CHAPTER_MAP_COLUMNS) + '\n')
+        assert file_state(book, 'reference/chapter-map.csv', {}) == 'header_only'
+
+    def test_scenes_before_the_first_heading_and_frontmatter(self):
+        from storyforge.extract_describe import chapter_map_rows
+        scenes = [{'id': 'a', 'part': '1'}, {'id': 'b', 'part': '2'}, {'id': 'c', 'part': '2'}]
+        rows, notes = chapter_map_rows({'a': 'Prologue text.',
+                                        'b': '---\nid: b\n---\n\n# One\n\nText.',
+                                        'c': 'More.'}, scenes)
+        assert [(r['title'], r['part'], r['scenes']) for r in rows] == \
+            [('', '1', 'a'), ('One', '2', 'b;c')]
+        assert 'untitled first chapter: a' in notes[0]
+
+    @pytest.mark.parametrize('line,title', [
+        ('# One', 'One'), ('### Three ###', 'Three'), ('# C#', 'C#'),
+        ('#### Four', None), ('   # Indented', None), ('#NoSpace', None),
+    ])
+    def test_heading_forms(self, line, title):
+        from storyforge.extract_describe import _CHAPTER_HEADING
+        m = _CHAPTER_HEADING.match(line)
+        assert (m.group(1) if m else None) == title
+
+    def test_the_dry_run_says_what_5g_would_do(self, book, mock_api, mock_git, mock_costs,
+                                               capsys):
+        """Review: the dry run said nothing about 5g."""
+        cmd_extract._run_phase_5(book, os.path.join(book, 'working', 'logs'),
+                                 os.path.join(book, 'working', 'extraction-profile.json'),
+                                 False, dry_run=True)
+        out = capsys.readouterr().out
+        assert '5g reference/timeline.md: would write' in out
+        assert '5g reference/chapter-map.csv: note: 2 of 6 scene(s) have no prose' in out
+        assert not os.path.exists(os.path.join(book, 'reference', 'timeline.md'))
+
+    def test_a_placeholder_title_in_the_timeline(self, book, mock_api, mock_git, mock_costs):
+        yaml = os.path.join(book, 'storyforge.yaml')
+        with open(yaml) as f:
+            text = f.read()
+        with open(yaml, 'w') as f:
+            f.write(text.replace('"The Cartographer\'s Silence"', '"PROJECT_TITLE"', 1))
+        answer = _answer(book)
+        mock_api.set_response_fn(lambda p: _pitch_reply(
+            book, title_meaning={'surface': '', 'deeper': '', 'final': ''})
+            if '**logline**' in p else answer(p))
+        _run(book)
+        with open(os.path.join(book, 'reference', 'timeline.md')) as f:
+            assert f.read().splitlines()[1] == '# Untitled -- Timeline'
+
+    def test_one_refused_file_does_not_stop_the_other(self, book, mock_api, mock_git,
+                                                      mock_costs, monkeypatch, capsys):
+        """Review: a refused timeline returned before the chapter map was tried."""
+        from storyforge import extract_describe as d
+        self._all_prose(book)
+        _write_scene(book, _scene_ids(book)[0], '# One\n\nText.\n')
+        _write_scene(book, 'new-x1', 'Text.\n')
+        os.remove(os.path.join(book, 'reference', 'chapter-map.csv'))
+        real = d._write_all
+
+        def refuse_timeline(run, files, step, label):
+            if files[0][0] == 'reference/timeline.md':
+                run.reports.append(f'{label} stopped part-way')
+                return False
+            return real(run, files, step, label)
+        monkeypatch.setattr(d, '_write_all', refuse_timeline)
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        assert '5g (timeline) stopped part-way' in capsys.readouterr().out
+        assert os.path.exists(os.path.join(book, 'reference', 'chapter-map.csv'))
+
+
+def test_the_chapter_map_columns_are_one_declaration():
+    """Review: three hand copies of the header (and of voice-profile's)."""
+    from storyforge.cmd_cleanup import EXPECTED_CSV_SCHEMAS
+    from storyforge.common import get_plugin_dir
+    from storyforge.schema import CHAPTER_MAP_COLUMNS, VOICE_PROFILE_COLUMNS
+    with open(os.path.join(get_plugin_dir(), 'templates', 'production', 'chapter-map.csv')) as f:
+        assert f.readline().strip().split('|') == CHAPTER_MAP_COLUMNS
+    assert EXPECTED_CSV_SCHEMAS['reference/chapter-map.csv'] == CHAPTER_MAP_COLUMNS
+    assert EXPECTED_CSV_SCHEMAS['reference/voice-profile.csv'] == VOICE_PROFILE_COLUMNS
+
+
+def test_e9_snapshot_skips_only_the_projects_own_working(tmp_path):
+    """Review: a path with '/working' anywhere above emptied the snapshot,
+    so the rerun gate passed comparing nothing."""
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'evals'))
+    from suites.e9_reference import _snapshot
+    project = tmp_path / 'working-copy' / 'book'
+    (project / 'reference' / 'working-notes').mkdir(parents=True)
+    (project / 'working').mkdir()
+    (project / 'reference' / 'working-notes' / 'a.md').write_text('a')
+    (project / 'working' / 'log.json').write_text('{}')
+    assert set(_snapshot(str(project))) == {os.path.join('reference', 'working-notes', 'a.md')}
