@@ -1,6 +1,6 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-30 (late), at v1.105.0 (#440's phase 5 is complete, 5a–5g, with the E9 suite; see Next steps 2). **Phase 3 is next and nothing is in flight.** **A fresh session starts here:** read **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-10-30 (late), at v1.105.0 (#440's phase 5 is complete, 5a–5g, with the E9 suite; see Next steps 2). **Phase 3 is next; #440's phase 5 is done and handed to storyforge-evals.** **A fresh session starts here:** read **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
 
 ## Start here
 
@@ -95,7 +95,7 @@ E4 (`evals/e4`) drafts with `cmd_write._build_prompt` in direct mode today; it m
      - Describe, never prescribe: elaborate's voice prompt is prescriptive, so don't reuse it.
      - Dialogue samples need a new helper (`prose_analysis.extract_dialogue` joins every line).
      - Books with an unmigrated ledger need a stated fallback.
-  2. **Hand-off to storyforge-evals:** gold reference notes per book and a re-score of *Carol* and *Gatsby*.
+  2. **Hand-off to storyforge-evals:** gold reference notes per book and a re-score of *Carol* and *Gatsby*. **Posted** on #440 (https://github.com/benjaminsnorris/storyforge/issues/440#issuecomment-6536796072), with E9's L5 findings and the three-act coverage question; #440 stays open until evals reports back.
 - **Each step reuses:** `Run`, `_ask` (one retry with the parser's problems), `_gate` (a step writes all its files or none), `_write_all`, `_set_cells` and `_csv_text` (unquoted; model text never goes through a quoting writer). Each step returns `written` / `skipped` / `partial`. Add each new path to `WRITTEN_PATHS`; a test checks every changed file is committed.
 - **Deferred:** tell 3b's prompt its summary is kept (≤35 words). That's a prompt change, so it re-records E3; fold it into a recording you're making anyway.
 
