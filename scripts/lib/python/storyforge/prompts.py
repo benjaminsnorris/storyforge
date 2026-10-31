@@ -1460,6 +1460,36 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
             + '\n\n'.join(sections))
 
 
+def _states_checklist(scene: dict, ref_dir: str) -> str:
+    """The brief's `physical_state_out` as a must-show list for the drafting
+    task: each item named by its registry description, or as written when no
+    registry state has that id (shared-dark's briefs write "no sleep 36h").
+    The brief lists these states in its data, and drafts still left them for
+    the reader to infer: E4's judge counted 7-9 such broken promises."""
+    items = [s.strip() for s in (scene.get('physical_state_out') or '').split(';') if s.strip()]
+    if not items:
+        return ''
+    from . import ledger
+    from .elaborate import _read_csv
+    registry = ledger.view_map(ref_dir, 'physical')
+    names = {r['id'].strip(): (r.get('name') or '').strip()
+             for r in _read_csv(os.path.join(ref_dir, 'characters.csv'))
+             if (r.get('id') or '').strip()}
+    lines = []
+    for item in items:
+        entry = registry.get(item)
+        if entry:
+            char = entry.get('character', '')
+            char = names.get(char) or char
+            desc = entry.get('description') or item
+            item = f'{char}: {desc}' if char else desc
+        lines.append(f'  - [ ] {item}')
+    return ('\n\n**Physical states checklist — the scene ends with each of these, and each '
+            'MUST be on the page (in action, sensation, dialogue or a stated fact), not left '
+            'for the reader to infer, even when it carries over from an earlier scene:**\n'
+            + '\n'.join(lines))
+
+
 def build_scene_prompt_from_briefs(
     scene_id: str,
     project_dir: str,
@@ -1667,6 +1697,8 @@ def build_scene_prompt_from_briefs(
             items = '\n'.join(f'  - [ ] {line}' for line in lines)
             dialogue_checklist = f"\n\n**Key dialogue checklist — every line below MUST appear in the scene (verbatim or close paraphrase). Do not end the scene until all are delivered:**\n{items}"
 
+    states_checklist = _states_checklist(scene, ref_dir)
+
     # Coaching-specific instructions
     if coaching_level == 'full':
         task_block = f"""## Task
@@ -1679,7 +1711,7 @@ The brief is your contract. Deliver:
 - The outcome specified ({scene.get('outcome', '')})
 - The emotional arc from {scene.get('emotional_arc', '')}
 - The POV character must know {scene.get('knowledge_out', '')} by scene end
-{dialogue_checklist}
+{dialogue_checklist}{states_checklist}
 
 **Prose rules:**
 - Em dashes rare (max one per scene)

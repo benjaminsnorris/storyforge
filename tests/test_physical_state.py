@@ -193,6 +193,28 @@ class TestDraftingPrompts:
         prompt = build_scene_prompt_from_briefs('act1-sc01', fixture_dir, plugin_dir)
         assert 'Active Physical States' not in prompt
 
+    def test_states_out_are_a_must_show_checklist(self, fixture_dir, plugin_dir):
+        from storyforge.prompts import build_scene_prompt_from_briefs
+        prompt = build_scene_prompt_from_briefs('act1-sc02', fixture_dir, plugin_dir)
+        task = prompt[prompt.index('## Task'):]
+        assert 'Physical states checklist' in task
+        checklist = task[task.index('Physical states checklist'):].split('**Prose rules')[0]
+        assert checklist.count('- [ ]') == 2
+        assert 'archive-key-dorren' not in checklist     # its description, not its id
+
+    def test_a_state_in_words_is_listed_as_written(self, project_dir, plugin_dir):
+        from storyforge.prompts import build_scene_prompt_from_briefs
+        from storyforge.elaborate import update_scene
+        update_scene('act1-sc02', os.path.join(project_dir, 'reference'),
+                     {'physical_state_out': 'no sleep 36h'})
+        prompt = build_scene_prompt_from_briefs('act1-sc02', project_dir, plugin_dir)
+        assert '  - [ ] no sleep 36h' in prompt[prompt.index('## Task'):]
+
+    def test_no_states_out_no_checklist(self, fixture_dir, plugin_dir):
+        from storyforge.prompts import build_scene_prompt_from_briefs
+        prompt = build_scene_prompt_from_briefs('act1-sc01', fixture_dir, plugin_dir)
+        assert 'Physical states checklist' not in prompt
+
 
 class TestExtraction:
     def test_build_physical_state_prompt(self):
