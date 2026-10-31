@@ -50,10 +50,16 @@ PROMISE_FIELDS = ('outcome', 'key_actions', 'key_dialogue')
 REGISTRY_PROMISE_FIELDS = {'knowledge_out': 'knowledge', 'physical_state_out': 'physical'}
 REGISTRY_ENTERING_FIELDS = {'knowledge_in': 'knowledge', 'physical_state_in': 'physical'}
 
-MAX_SEARCH_HITS = 12
+#: Search hits shown: at most `FULL_HITS` hits are each cut to
+#: `PASSAGE_CHARS` around the match; more than that, and up to
+#: `MAX_SEARCH_HITS` are shown, each cut to `SNIPPET_CHARS`. E4 run 5's checker searched "scar thumb", got 42
+#: hits, saw the first 12 and missed the one it needed.
+FULL_HITS = 12
+MAX_SEARCH_HITS = 40
 MAX_LEDGER_ROWS = 60
 #: A passage longer than this is cut, around the match, in a search result
 PASSAGE_CHARS = 700
+SNIPPET_CHARS = 300
 MAX_TURNS = 24
 #: The reference docs the checker reads whole (the ones drafting's shared
 #: context sends, and E4's judge reads)
@@ -271,16 +277,31 @@ def _search(book: Book, at: str, args: dict) -> str:
         for para in re.split(r'\n\s*\n', book.prose[sid]):
             low = _norm(para)
             if all(re.search(r'\b' + re.escape(w), low) for w in words):
-                hits.append((sid, _flat(para)))
+                hits.append((sid, len(hits), _flat(para)))
     if not hits:
         return f'No passage in another scene contains all of: {", ".join(words)}.'
-    lines = [f'{len(hits)} passage(s) contain all of: {", ".join(words)}'
-             + (f' (first {MAX_SEARCH_HITS} in reading order)' if len(hits) > MAX_SEARCH_HITS else '')]
-    for sid, para in hits[:MAX_SEARCH_HITS]:
-        if len(para) > PASSAGE_CHARS:
-            i = _norm(para).find(words[0])
-            start = max(0, i - PASSAGE_CHARS // 2)
-            para = ('…' if start else '') + para[start:start + PASSAGE_CHARS] + '…'
+    # Nearest first: the earlier scenes back from this one, then the later
+    # ones forward (a slip is usually against what the reader saw last)
+    # (within an earlier scene, its last paragraphs first)
+    here = book.order[at]
+    hits.sort(key=lambda h: (book.order[h[0]] > here, abs(book.order[h[0]] - here),
+                             h[1] if book.order[h[0]] > here else -h[1]))
+    shown = hits[:MAX_SEARCH_HITS]
+    width = PASSAGE_CHARS if len(hits) <= FULL_HITS else SNIPPET_CHARS
+    # Centre each cut on the query's longest word, the most specific
+    key = max(words, key=len)
+    lines = [f'{len(hits)} passage(s) contain all of: {", ".join(words)}; '
+             + ('all shown' if len(hits) == len(shown) else f'the nearest {len(shown)} shown '
+                f'(add a word to narrow the search)')
+             + ('' if width == PASSAGE_CHARS else f', cut to {width} characters (read_scene '
+                f'for a whole scene)') + '; nearest first, earlier scenes before later ones']
+    for sid, _, para in shown:
+        if len(para) > width:
+            # in `para` itself (normalizing shifts offsets), at a word start
+            # as the search matched
+            m = re.search(r'(?<!\w)' + re.escape(key), para, re.I)
+            start = max(0, (m.start() if m else 0) - width // 2)
+            para = ('…' if start else '') + para[start:start + width] + '…'
         lines.append(f'[{sid}, {book.where(sid, at)}] {para}')
     return '\n'.join(lines)
 
@@ -354,8 +375,10 @@ TOOLS = [
      'description': 'Find the paragraphs of the other scenes that contain every word of '
                     'the query (case-insensitive; a word matches any word it starts). Use it '
                     'to find where a name, number, date, place, object or relationship is '
-                    'set up elsewhere. Each hit names its scene and whether it is earlier or '
-                    'later than the scene being checked.',
+                    'set up elsewhere. Hits come nearest first (earlier scenes, then later '
+                    'ones), each naming its scene and whether it is earlier or later than '
+                    'the scene being checked; when there are many, they are cut short and '
+                    'the result says how many were left out: add a word to narrow it.',
      'input_schema': {'type': 'object', 'properties': {'query': {'type': 'string'}},
                       'required': ['query'], 'additionalProperties': False}},
     {'name': 'read_scene',

@@ -1928,13 +1928,15 @@ if __name__ == '__main__':
 # Prior prose for drafting (rethink plan decision 4)
 # ============================================================================
 
-#: What earlier prose a scene is drafted with. `window` (decision 4's
-#: baseline): the preceding scene, and the latest earlier scene of each
-#: MICE thread the scene carries, in full. `full`: every earlier scene (the
-#: manuscript so far), cached as it grows. `none`: no prose, only the briefs
-#: and the ledger (drafting before v1.107).
+#: What earlier prose a scene is drafted with. `full` (the default since
+#: v1.112, decision 4's experiment: on E4 CP10k 1.8 against the window's
+#: 5.9-8.5, at the same cost): every earlier scene (the manuscript so far),
+#: cached as it grows. `window`: the preceding scene, and the latest earlier
+#: scene of each MICE thread the scene carries, in full (decision 4's
+#: baseline, the default in v1.110-1.111). `none`: no prose, only the briefs
+#: and the ledger (drafting before v1.110).
 PRIOR_PROSE_MODES = ('window', 'full', 'none')
-DEFAULT_PRIOR_PROSE = 'window'
+DEFAULT_PRIOR_PROSE = 'full'
 #: `full` past this many words of earlier prose would crowd the drafting
 #: model's context with the shared context and the reply on top: such a
 #: scene gets `window` instead, with a WARNING

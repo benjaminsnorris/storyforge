@@ -365,3 +365,41 @@ class TestReference:
         result, _ = _run(project_dir, [_answer([_finding(
             established_scene='world-bible.md', established_quote='x')])])
         assert 'not given to the checker' in result.unverified[0].problem
+
+
+class TestSearchShowsTheNearestHits:
+    def _book(self, n):
+        from storyforge.checker import Book
+        order = {f's{i}': i for i in range(n)}
+        prose = {f's{i}': f'The scar on his thumb, scene {i}. ' + 'x ' * 400 for i in range(n)}
+        return Book(order, {}, prose, [])
+
+    def test_nearest_earlier_first_then_later(self):
+        out = checker._search(self._book(6), 's3', {'query': 'scar thumb'})
+        order = [line.split(',')[0][1:] for line in out.splitlines()[1:]]
+        assert order == ['s2', 's1', 's0', 's4', 's5']
+        assert 'all shown' in out
+
+    def test_many_hits_are_snippets_and_the_cap_is_said(self):
+        out = checker._search(self._book(60), 's59', {'query': 'scar thumb'})
+        lines = out.splitlines()
+        assert f'the nearest {checker.MAX_SEARCH_HITS} shown' in lines[0]
+        assert len(lines) == checker.MAX_SEARCH_HITS + 1
+        assert lines[1].startswith('[s58, earlier]')
+        assert all(len(line) < checker.SNIPPET_CHARS + 40 for line in lines[1:])
+
+
+    def test_a_snippet_is_centred_on_the_match_despite_italics_and_prefixes(self):
+        from storyforge.checker import Book
+        para = 'Oscar ' + '*so* ' * 120 + 'the scar on his thumb ' + 'y ' * 300
+        prose = {f's{i}': para for i in range(14)}
+        book = Book({f's{i}': i for i in range(14)}, {}, prose, [])
+        out = checker._search(book, 's13', {'query': 'scar thumb'})
+        assert all('the scar on his thumb' in line for line in out.splitlines()[1:])
+
+    def test_within_an_earlier_scene_its_last_paragraph_comes_first(self):
+        from storyforge.checker import Book
+        prose = {'a': 'first scar thumb.\n\nsecond scar thumb.', 'b': 'here'}
+        out = checker._search(Book({'a': 0, 'b': 1}, {}, prose, []), 'b',
+                              {'query': 'scar thumb'})
+        assert out.splitlines()[1].endswith('second scar thumb.')
