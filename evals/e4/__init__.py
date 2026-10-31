@@ -24,6 +24,10 @@ Metrics (plan §4.2):
   adverbs; 1–5) over the drafts; ``voi_author`` is the same over the author's
   Act 1 prose at the pinned commit, for scale.
 
+Each scene is drafted with the earlier prose ``write`` sends
+(``prompts.prior_prose_blocks``; the project's mode, or
+``STORYFORGE_E4_PRIOR_PROSE`` for the context-size experiment).
+
 Each draft is gated as ``write`` gates it (``gate.gate_and_fix``) before
 the next prompt is built; ``gate_fixed`` and ``gate_failed`` count the
 scenes the fix changed and those still failing after it.
@@ -142,8 +146,10 @@ def draft(project_dir: str, scene_ids: list[str], gated: dict | None = None,
     from storyforge.csv_cli import update_field
     from storyforge.parsing import clean_scene_content, extract_single_scene
 
+    from storyforge.prompts import prior_prose_blocks
     model = select_model('drafting')
     system = build_shared_context(project_dir, model=model)
+    mode = prior_prose(project_dir)
     metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
     drafts = {}
     refused = {}
@@ -153,8 +159,10 @@ def draft(project_dir: str, scene_ids: list[str], gated: dict | None = None,
         if not prompt:
             raise RuntimeError(f'could not build a drafting prompt for {sid}')
         try:
+            scene_system = (list(system) + prior_prose_blocks(sid, project_dir, mode)
+                            if system else system)
             text = extract_text(invoke(prompt, model, max_tokens=DRAFT_MAX_TOKENS,
-                                       label=f'e4 draft {sid}', system=system or None))
+                                       label=f'e4 draft {sid}', system=scene_system or None))
         except RefusalError as e:
             refused[sid] = str(e)
             continue
@@ -178,6 +186,20 @@ def draft(project_dir: str, scene_ids: list[str], gated: dict | None = None,
         update_field(metadata_csv, sid, 'status', 'drafted')
         drafts[sid] = prose
     return drafts, refused
+
+
+#: Set to window, full or none to draft E4 with that prior prose instead of
+#: the project's (the decision-4 context-size experiment). Recordings key on
+#: the request, so a run with it set needs its own cassettes directory
+#: (`run.py --cassettes-dir`).
+PRIOR_PROSE_ENV = 'STORYFORGE_E4_PRIOR_PROSE'
+
+
+def prior_prose(project_dir: str) -> str:
+    """The prior-prose mode E4 drafts with: `PRIOR_PROSE_ENV`, else what
+    `write` would use for the project."""
+    from storyforge.prompts import prior_prose_mode
+    return prior_prose_mode(project_dir, os.environ.get(PRIOR_PROSE_ENV) or None)
 
 
 def brief_block(project_dir: str, scene_id: str) -> str:

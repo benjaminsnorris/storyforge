@@ -352,6 +352,10 @@ def redraft(project_dir: str, scene_id: str, gated: bool = True) -> str:
                            system_context=bool(system))
     if not prompt:
         raise RuntimeError(f'could not build a redraft prompt for {scene_id}')
+    from storyforge.prompts import prior_prose_blocks, prior_prose_mode
+    if system:  # the earlier prose write and revise send with it
+        system = list(system) + prior_prose_blocks(scene_id, project_dir,
+                                                   prior_prose_mode(project_dir))
     try:
         response = invoke(prompt, model, max_tokens=16384, label=f'e8 redraft {scene_id}',
                           system=system or None)

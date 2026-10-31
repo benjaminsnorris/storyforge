@@ -1922,3 +1922,110 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+# ============================================================================
+# Prior prose for drafting (rethink plan decision 4)
+# ============================================================================
+
+#: What earlier prose a scene is drafted with. `window` (decision 4's
+#: baseline): the preceding scene, and the latest earlier scene of each
+#: MICE thread the scene carries, in full. `full`: every earlier scene (the
+#: manuscript so far), cached as it grows. `none`: no prose, only the briefs
+#: and the ledger (drafting before v1.107).
+PRIOR_PROSE_MODES = ('window', 'full', 'none')
+DEFAULT_PRIOR_PROSE = 'window'
+#: `full` past this many words of earlier prose would crowd the drafting
+#: model's context with the shared context and the reply on top: such a
+#: scene gets `window` instead, with a WARNING
+FULL_MAX_WORDS = 100_000
+#: Scenes no longer in the book: never sent as earlier prose
+_GONE = ('cut', 'merged')
+
+
+def prior_prose_mode(project_dir: str, override: str | None = None) -> str:
+    """The prior-prose mode: `override` (the CLI), else storyforge.yaml's
+    `drafting.prior_prose`, else `DEFAULT_PRIOR_PROSE`. An unknown value
+    raises ValueError rather than drafting with less context than asked."""
+    value = override or read_yaml_field(os.path.join(project_dir, 'storyforge.yaml'),
+                                        'drafting.prior_prose') or DEFAULT_PRIOR_PROSE
+    value = value.strip().lower()
+    if value not in PRIOR_PROSE_MODES:
+        raise ValueError(f'drafting.prior_prose must be one of {", ".join(PRIOR_PROSE_MODES)}, '
+                         f'not {value!r}')
+    return value
+
+
+def _threads(cell: str) -> set[str]:
+    return {t.strip().lstrip('+-').strip() for t in (cell or '').split(';')
+            if t.strip().lstrip('+-').strip()}
+
+
+def prior_scenes(scene_id: str, project_dir: str, mode: str) -> list[str]:
+    """The earlier scenes whose prose `scene_id` is drafted with, in reading
+    order: only scenes with prose on disk."""
+    from . import ledger
+    from .elaborate import get_scenes
+    if mode == 'none':
+        return []
+    order = ledger.scene_order(project_dir)
+    if scene_id not in order:
+        return []
+    rows = get_scenes(os.path.join(project_dir, 'reference'))
+    gone = {r['id'] for r in rows if (r.get('status') or '').strip().lower() in _GONE}
+    earlier = [s for s in sorted(order, key=order.get) if order[s] < order[scene_id]
+               and s not in gone and _has_prose(project_dir, s)]
+    if mode == 'full':
+        words = sum(_words(project_dir, s) for s in earlier)
+        if words <= FULL_MAX_WORDS:
+            return earlier
+        from .common import log
+        log(f'WARNING: {scene_id}: the manuscript before it is {words:,} words, over '
+            f'{FULL_MAX_WORDS:,}; drafting it with the window (the preceding scene and '
+            f'each thread\'s latest) instead of the whole manuscript')
+    if not earlier:
+        return earlier
+    threads = {r['id']: _threads(r.get('mice_threads', '')) for r in rows}
+    chosen = {earlier[-1]}
+    for thread in threads.get(scene_id, set()):
+        latest = next((s for s in reversed(earlier) if thread in threads.get(s, set())), None)
+        if latest:
+            chosen.add(latest)
+    return [s for s in earlier if s in chosen]
+
+
+def _words(project_dir: str, scene_id: str) -> int:
+    with open(os.path.join(project_dir, 'scenes', f'{scene_id}.md'), encoding='utf-8') as f:
+        return len(f.read().split())
+
+
+def _has_prose(project_dir: str, scene_id: str) -> bool:
+    path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
+    if not os.path.isfile(path):
+        return False
+    with open(path, encoding='utf-8') as f:
+        return bool(f.read().strip())
+
+
+def prior_prose_blocks(scene_id: str, project_dir: str, mode: str) -> list[dict]:
+    """The earlier prose as system blocks, one per scene, to follow the
+    shared context. The last carries a cache breakpoint: in `full` mode each
+    scene's request extends the last one's, so the manuscript so far is read
+    from cache. The breakpoint is the default 5 minutes (a longer one can't
+    follow the shared context's 5-minute breakpoint), so a scene whose gate
+    takes longer writes the prefix again. Empty when there is none."""
+    ids = prior_scenes(scene_id, project_dir, mode)
+    if not ids:
+        return []
+    what = ('the whole manuscript so far' if mode == 'full' else
+            'the scene just before this one and the latest scene of each story thread '
+            'this one carries')
+    blocks = [{'type': 'text', 'text': (
+        f'=== THE STORY SO FAR ===\n\nThe prose of earlier scenes, in reading order '
+        f'({what}). Continue from them: names, facts, states and voice must agree with '
+        f'what they establish. Don\'t repeat or summarize them.')}]
+    for sid in ids:
+        with open(os.path.join(project_dir, 'scenes', f'{sid}.md'), encoding='utf-8') as f:
+            blocks.append({'type': 'text', 'text': f'<scene id="{sid}">\n{f.read().strip()}\n</scene>'})
+    blocks[-1]['cache_control'] = {'type': 'ephemeral'}
+    return blocks
