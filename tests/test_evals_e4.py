@@ -171,3 +171,31 @@ def test_gate_measure_headline_ends_where_write_stops(failed, headline):
 def test_gate_measure_with_nothing_drafted():
     out = e4.gate_measure(['a'], {}, {}, failed=set())
     assert out['headline'] == [] and out['metrics']['cp10k'] == 0.0
+
+
+def test_parallel_drafts_with_no_prior_prose(monkeypatch, tmp_path):
+    monkeypatch.delenv(e4.PRIOR_PROSE_ENV, raising=False)
+    monkeypatch.setenv(e4.PARALLEL_ENV, '1')
+    assert e4.parallel()
+    assert e4.prior_prose(str(tmp_path)) == 'none'
+    monkeypatch.setenv(e4.PRIOR_PROSE_ENV, 'none')
+    assert e4.prior_prose(str(tmp_path)) == 'none'
+
+
+def test_parallel_with_prior_prose_is_an_error(monkeypatch, tmp_path):
+    monkeypatch.setenv(e4.PARALLEL_ENV, '1')
+    monkeypatch.setenv(e4.PRIOR_PROSE_ENV, 'full')
+    with pytest.raises(ValueError, match='no prior prose'):
+        e4.prior_prose(str(tmp_path))
+
+
+@pytest.mark.parametrize('value, expected', [('', False), ('0', False), ('1', True)])
+def test_parallel_reads_its_switch(monkeypatch, value, expected):
+    monkeypatch.setenv(e4.PARALLEL_ENV, value)
+    assert e4.parallel() is expected
+
+
+def test_parallel_rejects_other_values(monkeypatch):
+    monkeypatch.setenv(e4.PARALLEL_ENV, 'yes')
+    with pytest.raises(ValueError):
+        e4.parallel()

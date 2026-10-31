@@ -28,8 +28,11 @@ Each scene is drafted with the earlier prose ``write`` sends
 (``prompts.prior_prose_blocks``; the project's mode, or
 ``STORYFORGE_E4_PRIOR_PROSE`` for the context-size experiment).
 
-Each draft is gated as ``write`` gates it (``gate.gate_and_fix``) before
-the next prompt is built; ``gate_fixed`` and ``gate_failed`` count the
+With ``STORYFORGE_E4_PARALLEL=1`` (``PARALLEL_ENV``) E4 drafts as
+``write --batch`` would have: no earlier prose and no gate, the parallel side
+of Phase 3's comparison (``write --batch`` now refuses prose because of it).
+Otherwise each draft is gated as ``write`` gates it (``gate.gate_and_fix``)
+before the next prompt is built; ``gate_fixed`` and ``gate_failed`` count the
 scenes the fix changed and those still failing after it.
 
 Stated simplifications: a scene still failing the gate doesn't stop E4 as it
@@ -195,10 +198,31 @@ def draft(project_dir: str, scene_ids: list[str], gated: dict | None = None,
 PRIOR_PROSE_ENV = 'STORYFORGE_E4_PRIOR_PROSE'
 
 
+#: Set to 1 to draft E4 the way `write --batch` does (the parallel side of
+#: Phase 3's parallel-vs-sequential comparison): no earlier prose and no gate,
+#: so every prompt is what it would be with all scenes drafted at once. The
+#: Batch API itself can't be recorded; the requests it sends are these. Needs
+#: its own cassettes directory, like `PRIOR_PROSE_ENV`.
+PARALLEL_ENV = 'STORYFORGE_E4_PARALLEL'
+
+
+def parallel() -> bool:
+    value = (os.environ.get(PARALLEL_ENV) or '').strip()
+    if value not in ('', '0', '1'):
+        raise ValueError(f'{PARALLEL_ENV} must be 1 or 0, not {value!r}')
+    return value == '1'
+
+
 def prior_prose(project_dir: str) -> str:
-    """The prior-prose mode E4 drafts with: `PRIOR_PROSE_ENV`, else what
-    `write` would use for the project."""
+    """The prior-prose mode E4 drafts with: `none` when drafting as in
+    parallel, else `PRIOR_PROSE_ENV`, else what `write` would use for the
+    project."""
     from storyforge.prompts import prior_prose_mode
+    if parallel():
+        if (os.environ.get(PRIOR_PROSE_ENV) or 'none') != 'none':
+            raise ValueError(f'{PARALLEL_ENV}=1 drafts with no prior prose; unset '
+                             f'{PRIOR_PROSE_ENV}')
+        return 'none'
     return prior_prose_mode(project_dir, os.environ.get(PRIOR_PROSE_ENV) or None)
 
 

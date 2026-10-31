@@ -5,10 +5,12 @@ from its brief and the ledger as of that scene, and gates each before the
 next (plan §3.2, `storyforge.gate`): its facts are extracted and checked
 against the book and its brief, fixed once if needed, and committed to the
 ledger only when clean. A scene that still fails is kept, listed in
-`working/gate-pending.csv`, and stops the run. `--batch` drafts every scene
-at once through the Batch API, ungated, until the E4 comparison of parallel
-and sequential drafting decides whether it stays. Coaching levels coach and
-strict write briefs or constraints, not prose, and are not gated.
+`working/gate-pending.csv`, and stops the run. Coaching levels coach and
+strict write briefs or constraints, not prose, and are not gated; only they
+take `--batch` (every scene at once through the Batch API). Prose is never
+drafted in parallel: on E4, drafting every scene at once (no earlier prose,
+no gate) gave CP10k 13.7 against 1.8 and 5.3 sequential and gated (rethink
+plan Phase 3: parallel stays only if equal).
 
 Usage:
     storyforge write                        # Draft all remaining scenes
@@ -16,7 +18,7 @@ Usage:
     storyforge write act1-sc01 act1-sc15    # Draft a range (by position)
     storyforge write --act 2                # Draft all scenes in act 2
     storyforge write --dry-run act1-sc01    # Build prompt without invoking
-    storyforge write --batch --act 2        # Batch API, ungated (WARNING)
+    storyforge write --coaching coach --batch --act 2   # briefs via the Batch API
 """
 
 import argparse
@@ -62,8 +64,9 @@ def parse_args(argv):
                         help='Draft one scene at a time, each gated (the default; '
                              'kept for scripts that pass it)')
     parser.add_argument('--batch', action='store_true',
-                        help='Draft through the Batch API: half price, but no scene '
-                             'is gated (nothing checks it against the book)')
+                        help='Coaching coach or strict only: write every scene\'s brief '
+                             'or constraints at once through the Batch API (half price). '
+                             'Prose is drafted one scene at a time, each gated')
     parser.add_argument('--coaching', choices=['full', 'coach', 'strict'],
                         help='Set coaching level')
     parser.add_argument('--prior-prose', choices=['window', 'full', 'none'],
@@ -106,6 +109,13 @@ def main(argv=None):
     # Resolve coaching level
     coaching = args.coaching or get_coaching_level(project_dir)
 
+    if args.batch and coaching == 'full':
+        log('ERROR: --batch is for coaching coach or strict. Prose is drafted one scene at '
+            'a time, each from the scenes before it and gated before the next: drafted all '
+            'at once, ungated, E4 had several times the contradictions (CP10k 13.7 against '
+            '1.8-5.3). Drop --batch, or pass --coaching coach|strict for briefs.')
+        sys.exit(1)
+
     # Resolve write mode
     if args.interactive:
         write_mode = 'interactive'
@@ -147,11 +157,6 @@ def main(argv=None):
     # after it would draft from an incomplete ledger
     if coaching == 'full' and not args.dry_run:
         _exit_if_gate_pending(project_dir, pending_ids)
-    if write_mode == 'batch' and coaching == 'full':
-        log('WARNING: --batch drafts every scene at once, so no scene is gated: nothing '
-            'checks the prose against the book or its brief, and no facts are added to '
-            'the ledger. Each scene is listed in working/gate-pending.csv until '
-            '`storyforge check` passes it.')
     # Cost forecasting
     # Earlier prose needs a valid mode and every scene's place in the book:
     # checked before anything is spent or set up
@@ -782,7 +787,7 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
         reason = _extract_scene_from_response(
             scene_json, _output_file(project_dir, scene_id, coaching),
-            prose=coaching == 'full')
+            prose=False)  # batch writes briefs and constraints only
         if reason:
             # Keep the paid reply: the batch directory is removed below.
             kept = os.path.join(log_dir, f'drafting-{scene_id}.json')
@@ -792,12 +797,6 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
             log(f'See full output: {kept}')
             failed.append(f'{scene_id} ({reason.rstrip(".")})')
             continue
-
-        # Not gated: listed, so the next write won't draft past it until it
-        # is checked
-        if coaching == 'full':
-            _pend(project_dir, scene_id, 'draft',
-                  'drafted with --batch, not gated: run `storyforge check`')
 
         # Verify and commit
         wc, ok = _verify_and_commit_scene(
