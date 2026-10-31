@@ -117,7 +117,7 @@ def main(argv=None):
 - [ ] Phase 1: Extract skeleton (scenes.csv)
 - [ ] Phase 2: Extract intent (scene-intent.csv)
 - [ ] Phase 3: Extract briefs (scene-briefs.csv)
-- [ ] Phase 5: Describe the book (spine, architecture, themes, motifs, story summary, story architecture)
+- [ ] Phase 5: Describe the book (structure, themes, story summary, bibles, voice)
 - [ ] Validate
 - [ ] Review"""
         create_draft_pr(f'Extract: {title} ({scene_count} scenes)',
@@ -205,7 +205,7 @@ def main(argv=None):
     # Phase 5: Describe (after cleanup on a full run, so it reads cleaned data)
     if not args.cleanup_only and (args.phase is None or args.phase == 5):
         if _run_phase_5(project_dir, log_dir, profile_file, args.force, args.dry_run):
-            update_pr_task('Phase 5: Describe the book (spine, architecture, themes, motifs, story summary, story architecture)',
+            update_pr_task('Phase 5: Describe the book (structure, themes, story summary, bibles, voice)',
                            project_dir)
 
     # Validate
@@ -1321,10 +1321,45 @@ def _dry_run_pitch_prompt(describe, project_dir, profile, scenes) -> str:
         return ''
 
 
+def _dry_run_bible_prompts(describe, project_dir, profile, scenes) -> list[tuple[str, str]]:
+    """5d-5f's prompts as they would be built from what is on disk now.
+    Prints each step's notes, and why a step would skip or stop, so a dry
+    run says what the real run would."""
+    title, _ = describe._book_title(project_dir)
+
+    def build(label, evidence, prompt, skip):
+        try:
+            ev, notes, *_ = evidence()
+        except describe.DescribeFailed as e:
+            print(f'{label}: would stop: {e}')
+            return ''
+        for note in notes:
+            print(f'{label}: note: {note}')
+        if skip(ev):
+            print(f'{label}: would skip: {skip(ev)}')
+            return ''
+        return prompt(ev)
+    return [
+        ('5d characters', build(
+            '5d characters', lambda: describe.character_evidence(project_dir, scenes),
+            lambda ev: describe.build_characters_prompt(profile, ev),
+            lambda ev: '' if ev else 'no scene names a character in characters.csv')),
+        ('5e world', build(
+            '5e world', lambda: describe.world_evidence(project_dir, scenes, title),
+            lambda ev: describe.build_world_prompt(profile, scenes, ev),
+            lambda ev: '' if ev.locations else 'no scene is set in a place locations.csv names')),
+        ('5f voice', build(
+            '5f voice', lambda: describe.voice_evidence(project_dir, scenes, title),
+            lambda ev: describe.build_voice_prompt(profile, ev),
+            lambda ev: '' if ev else 'no scene has prose to describe a voice from')),
+    ]
+
+
 def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
     """Phase 5, describe (#440): the reference layers above the scenes, from
-    what phases 0-4 found. Steps 5a (structure), 5b (themes and motifs)
-    and 5c (story summary and story architecture) so far;
+    what phases 0-4 found: 5a (structure), 5b (themes and motifs), 5c
+    (story summary and story architecture), 5d (character bible), 5e
+    (world and systems bibles) and 5f (voice guide and profile);
     `extract_describe` holds them and the write gate. Returns whether any
     step wrote.
 
@@ -1335,8 +1370,12 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
     """
     from storyforge import extract_describe as describe
     from storyforge.export import storyforge_version
+    from storyforge.common import get_medium
     log('')
     log('--- Phase 5: Describe the book ---')
+    if get_medium(project_dir) == 'graphic-novel':
+        log('  Graphic-novel project: phase 5 describes prose books only. Skipped.')
+        return False
     ref_dir = os.path.join(project_dir, 'reference')
     scenes = describe.scene_table(ref_dir)
     if not scenes:
@@ -1349,7 +1388,8 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
                 ('5a structure', describe.build_structure_prompt(profile, scenes)),
                 ('5b themes', describe.build_themes_prompt(
                     profile, scenes, describe.motif_mentions(scenes))),
-                ('5c pitch', _dry_run_pitch_prompt(describe, project_dir, profile, scenes))):
+                ('5c pitch', _dry_run_pitch_prompt(describe, project_dir, profile, scenes)),
+                *_dry_run_bible_prompts(describe, project_dir, profile, scenes)):
             if prompt:
                 print(f'{label}: {len(prompt)} chars')
         print('===== END DRY RUN =====')
@@ -1375,17 +1415,23 @@ def _run_phase_5(project_dir, log_dir, profile_file, force, dry_run) -> bool:
         on_usage=lambda f, op, target, model: _log_api_usage(f, op, target, model, project_dir))
     outcomes = {}
     try:
-        # Each step re-reads the scenes: 5a may have filled blank summaries.
-        # 5c reads the spine, themes and motifs 5a and 5b wrote (or the
-        # author's). A step that stopped part-way may have left its files
-        # disagreeing, so nothing after it runs on them
+        # Each step re-reads the scenes: 5a may have filled blank summaries,
+        # which 5c and 5d read. 5c reads the spine, themes and motifs 5a and
+        # 5b wrote (or the author's). A step that stopped part-way means a
+        # file changed under the run, so nothing after it runs. The steps
+        # run one after another, not in parallel: `write_described` updates
+        # one shared provenance record, and six ~1-minute calls don't
+        # justify locking it
         for name, step in (('spine and architecture', describe.run_structure),
                            ('themes and motifs', describe.run_themes),
-                           ('story summary and architecture', describe.run_pitch)):
+                           ('story summary and architecture', describe.run_pitch),
+                           ('character bible', describe.run_characters),
+                           ('world and systems bibles', describe.run_world),
+                           ('voice guide', describe.run_voice)):
             stopped = [n for n, outcome in outcomes.items() if outcome == 'partial']
             if stopped:
-                run.reports.append(f'{name} skipped: {stopped[0]} stopped part-way, so the '
-                                   f'files this step reads may disagree')
+                run.reports.append(f'{name} skipped: {stopped[0]} stopped part-way (a file '
+                                   f'changed while phase 5 ran); run it again')
                 outcomes[name] = 'skipped'
                 continue
             outcomes[name] = step(run, profile, describe.scene_table(ref_dir))

@@ -1,6 +1,6 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-30 (late), at v1.103.0 (#440's phase 5 steps 5a–5c added; see Next steps 2). **Phase 3 is next and nothing is in flight.** **A fresh session starts here:** read **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-10-30 (late), at v1.104.0 (#440's phase 5 steps 5a–5f added; see Next steps 2). **Phase 3 is next and nothing is in flight.** **A fresh session starts here:** read **Start here** and **Next steps** below, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`; the corpus survey is `docs/plans/2026-10-28-storyforge-corpus-survey.md`. Everything after **Next steps** is reference and history.
 
 ## Start here
 
@@ -72,23 +72,24 @@ Suggested order, one PR each (each with a reviewer, evals re-recorded without as
 E4 (`evals/e4`) drafts with `cmd_write._build_prompt` in direct mode today; it must follow the gated loop once it ships (it is the success measure). Budget: E4 live is $5.29; a gated E4 adds extract + check (+ fix) per scene, likely 2–3×.
 
 **2. #440 / F-130: extraction writes the upper reference layers** (a separate track from Phase 3; plan `docs/plans/2026-10-30-extract-upper-layers.md`, which has the design, the step table, the PR order, the costs and Ben's five decisions). The goal is to go from a finished book to every file a Storyforge project has, describing the book as written, so the classics can validate the scorers. New code goes in `storyforge/extract_describe.py` as extract **phase 5**, with only a thin dispatcher (`_run_phase_5`) in `cmd_extract.py`.
-- **Done (v1.101.1 #442, v1.102.0 #444, v1.103.0 #446):**
+- **Done (v1.101.1 #442, v1.102.0 #444, v1.103.0 #446, v1.104.0 #447):**
   - The write gate: `write_described`, provenance in `working/extraction-provenance.csv`, and the cell record in `working/extraction-cells.csv`. A file or cell is replaced only while it still holds what phase 5 wrote.
   - **5a** writes `spine.csv` and `architecture.csv`, plus blank scene summaries, `architecture_scene` and a placeholder genre.
   - **5b** writes `themes.csv` and `motif-taxonomy.csv`, plus `theme_threads`. Brief `motifs` become ids, and every description moves to the new free-text brief column `motif_details` (Ben: ids in the brief, nothing lost).
   - **5c** (`run_pitch`) writes `story-summary.md` and `story-architecture.md` from one call. The summary is in `parse_story_summary`'s shape and is checked against the L0–L2 floors with the scorer's own counters (one retry). The architecture's lengths, act shares, POV counts, theme and motif names come from the CSVs; its acts are the book's own (`scenes.csv:act`), while the summary's Act-shape is always three movements (the L2 floor). Live on *Carol* (a clean copy of the E7 run1 reference set, no phase 0 profile): 5a–5c $0.44, 5c $0.15, L0–L4 pass; one bug found and fixed (the model repeated the "Closing image:" label).
+  - **5d/5e/5f** (`run_characters`, `run_world`, `run_voice`), one after another: `character-bible.md` (up to 16 characters ranked POV, role, scenes; the ledger's fixed facts with quotes; lines with a speech tag naming the character, via `prose_analysis.dialogue_spans`), `world-bible.md` and `systems-bible.md` (a stub saying why when the book has no formal system), `voice-guide.md` (described from sampled prose with code-measured sentence length, dialogue share and contractions; imperative list items are sent back) and `voice-profile.csv` (elaborate's shape, `banned_words` empty). An unmigrated ledger is described without facts, and said. Live on the E2 *Carol* book (with prose, ledger migrated): 5a–5f $0.99, every step wrote; two bugs fixed (a `supporting` Tiny Tim was ranked below minor characters; `;`-separated location cells were read as one name). The migrated ledger has only `state` rows, so facts in the bibles were tested, not seen live; a phase 4 run first would show them.
   - Fixes on the way:
     - template headers now match `elaborate._FILE_MAP` (and cleanup, migrate-medium, `scenes.py` and the init skill derive from it);
     - phase 3b keeps its scene summaries;
     - extracted scenes get `status=drafted`;
     - `update_scene` keeps unknown columns.
-  - All three PRs had the 5-agent review, with every finding fixed (see their PR comments).
+  - All four PRs had the 5-agent review, with every finding fixed (see their PR comments).
 - **Live on *Carol*** (the E7 fixture copy, migrated; $0.79 in all):
   - an 8-event spine, 20 anchors, 6 themes and 26 motifs;
   - the L3/L4 floors pass;
   - no motif or `architecture_scene` validate errors.
 - **Next, one PR each** (plan "PRs, in order"):
-  1. **5d/5e/5f:** character bible, world bible (a systems-bible stub when the book has no formal system), voice guide plus `voice-profile.csv`.
+  1. ~~**5d/5e/5f:**~~ done in #447 (notes kept for the record): character bible, world bible (a systems-bible stub when the book has no formal system), voice guide plus `voice-profile.csv`.
      - Describe, never prescribe: elaborate's voice prompt is prescriptive, so don't reuse it.
      - Dialogue samples need a new helper (`prose_analysis.extract_dialogue` joins every line).
      - Books with an unmigrated ledger need a stated fallback.
@@ -98,14 +99,14 @@ E4 (`evals/e4`) drafts with `cmd_write._build_prompt` in direct mode today; it m
      - `status` gets past the ladder;
      - a rerun writes nothing.
 
-     This is the first recording of phase 5's prompts: about $0.44 for 5a–5c on *Carol*, plus 5d–5g.
+     This is the first recording of phase 5's prompts: about $1 for 5a–5f on *Carol*, plus 5g.
   3. **Hand-off to storyforge-evals:** gold reference notes per book and a re-score of *Carol* and *Gatsby*.
 - **Each step reuses:** `Run`, `_ask` (one retry with the parser's problems), `_gate` (a step writes all its files or none), `_write_all`, `_set_cells` and `_csv_text` (unquoted; model text never goes through a quoting writer). Each step returns `written` / `skipped` / `partial`. Add each new path to `WRITTEN_PATHS`; a test checks every changed file is committed.
 - **Deferred:** tell 3b's prompt its summary is kept (≤35 words). That's a prompt change, so it re-records E3; fold it into a recording you're making anyway.
 
 **Open follow-ups, not scheduled:**
 - **E3 fails its gate on main since #443:** recall 0.841 < 0.85, with 49 → 44 facts. Replaying on a clean worktree of main gives the same result, so it isn't #442 or #444. Check with whoever owns #443's re-baseline.
-- **F-130 (evals-8b; Ben approved): extraction never fills the reference docs.** *In progress as Next steps 2 (#440); 5a–5c are done.* On all eight classics `story-architecture.md`, `world-bible.md`, `voice-guide.md`, `character-bible.md`, `story-summary.md` (and `spine.csv`, `themes.csv`, `motif-taxonomy.csv`) are untouched templates, yet score's character and narrative passes and `scoring_bible.py` read them. evals-8b is adding the guard (a file identical to its template counts as absent; `cmd_score.py`, `scoring_bible.py`, about v1.98.1). **The real fix is ours:** an extract phase that writes those docs from the Phase 0 profile (`working/extraction-profile.json`: narrative_mode, act_structure, major_threads, central_conflict, protagonist_arc, tone, key_locations) and the CSVs. It fits the plan's "bible = fixed facts + voice" (the bible could be generated from the ledger's `fixed` facts). Also check `build_shared_context`, which sends `character-bible.md` and `world-bible.md` to every drafting call: a template there is noise in E4, E5 and E8.
+- **F-130 (evals-8b; Ben approved): extraction never fills the reference docs.** *In progress as Next steps 2 (#440); 5a–5f are done.* On all eight classics `story-architecture.md`, `world-bible.md`, `voice-guide.md`, `character-bible.md`, `story-summary.md` (and `spine.csv`, `themes.csv`, `motif-taxonomy.csv`) are untouched templates, yet score's character and narrative passes and `scoring_bible.py` read them. evals-8b is adding the guard (a file identical to its template counts as absent; `cmd_score.py`, `scoring_bible.py`, about v1.98.1). **The real fix is ours:** an extract phase that writes those docs from the Phase 0 profile (`working/extraction-profile.json`: narrative_mode, act_structure, major_threads, central_conflict, protagonist_arc, tone, key_locations) and the CSVs. It fits the plan's "bible = fixed facts + voice" (the bible could be generated from the ledger's `fixed` facts). Also check `build_shared_context`, which sends `character-bible.md` and `world-bible.md` to every drafting call: a template there is noise in E4, E5 and E8.
 - **The summary's three acts vs a book's own acts:** 5c's `story-summary.md` Act-shape is always `### Act 1–3` (the L2 floor), and `scoring_coverage._coverage_acts_to_spine` wants a spine row with `act` 1, 2 and 3. That holds on *Carol*, but a book whose `scenes.csv:act` values aren't 1–3 (five staves numbered 1–5, `Part One`) fails coverage although L0–L4 pass. Whether L2 should follow the book's own division is a rubric question, not a 5c fix.
 - **The books' validate findings** are the author's. Thornwall's Garren (16 states) and governor's `governor` (9) have no `characters.csv` entry. Briefs name physical states the ledger doesn't hold, in the hundreds for shared-dark, governor and meridian-line. Understory has 16 cells with parenthetical text that `migrate` step 5 left for hand edits.
 - **Rejected facts are still used** by consumers, because the views don't filter on `status`. This is Phase 4's reject flow.
