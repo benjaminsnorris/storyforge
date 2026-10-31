@@ -176,7 +176,7 @@ class TestDirectMode:
         main(['--direct', '--scenes', 'act1-sc01'])
         assert calls
         commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']
-        assert 'Coach: act1-sc01 (refusal fallback: written by claude-opus-5)' in commits
+        assert 'Draft scene act1-sc01 (refusal fallback: written by claude-opus-5)' in commits
         out = capsys.readouterr().out
         assert 'WARNING: 1 reply was written by another model' in out
         assert 'drafting act1-sc01: claude-opus-5 in place of claude-opus-5-5' in out
