@@ -82,7 +82,7 @@ E4 (`evals/e4`) drafts with `cmd_write._build_prompt` in direct mode today; it m
     - phase 3b keeps its scene summaries;
     - extracted scenes get `status=drafted`;
     - `update_scene` keeps unknown columns.
-  - Both PRs had the 5-agent review, with every finding fixed (see their PR comments).
+  - All three PRs had the 5-agent review, with every finding fixed (see their PR comments).
 - **Live on *Carol*** (the E7 fixture copy, migrated; $0.79 in all):
   - an 8-event spine, 20 anchors, 6 themes and 26 motifs;
   - the L3/L4 floors pass;
@@ -98,14 +98,15 @@ E4 (`evals/e4`) drafts with `cmd_write._build_prompt` in direct mode today; it m
      - `status` gets past the ladder;
      - a rerun writes nothing.
 
-     This is the first recording of phase 5's prompts, at about $0.40 for 5a+5b plus the later steps.
+     This is the first recording of phase 5's prompts: about $0.44 for 5a–5c on *Carol*, plus 5d–5g.
   3. **Hand-off to storyforge-evals:** gold reference notes per book and a re-score of *Carol* and *Gatsby*.
 - **Each step reuses:** `Run`, `_ask` (one retry with the parser's problems), `_gate` (a step writes all its files or none), `_write_all`, `_set_cells` and `_csv_text` (unquoted; model text never goes through a quoting writer). Each step returns `written` / `skipped` / `partial`. Add each new path to `WRITTEN_PATHS`; a test checks every changed file is committed.
 - **Deferred:** tell 3b's prompt its summary is kept (≤35 words). That's a prompt change, so it re-records E3; fold it into a recording you're making anyway.
 
 **Open follow-ups, not scheduled:**
 - **E3 fails its gate on main since #443:** recall 0.841 < 0.85, with 49 → 44 facts. Replaying on a clean worktree of main gives the same result, so it isn't #442 or #444. Check with whoever owns #443's re-baseline.
-- **F-130 (evals-8b; Ben approved): extraction never fills the reference docs.** *In progress as Next steps 2 (#440); 5a/5b are done.* On all eight classics `story-architecture.md`, `world-bible.md`, `voice-guide.md`, `character-bible.md`, `story-summary.md` (and `spine.csv`, `themes.csv`, `motif-taxonomy.csv`) are untouched templates, yet score's character and narrative passes and `scoring_bible.py` read them. evals-8b is adding the guard (a file identical to its template counts as absent; `cmd_score.py`, `scoring_bible.py`, about v1.98.1). **The real fix is ours:** an extract phase that writes those docs from the Phase 0 profile (`working/extraction-profile.json`: narrative_mode, act_structure, major_threads, central_conflict, protagonist_arc, tone, key_locations) and the CSVs. It fits the plan's "bible = fixed facts + voice" (the bible could be generated from the ledger's `fixed` facts). Also check `build_shared_context`, which sends `character-bible.md` and `world-bible.md` to every drafting call: a template there is noise in E4, E5 and E8.
+- **F-130 (evals-8b; Ben approved): extraction never fills the reference docs.** *In progress as Next steps 2 (#440); 5a–5c are done.* On all eight classics `story-architecture.md`, `world-bible.md`, `voice-guide.md`, `character-bible.md`, `story-summary.md` (and `spine.csv`, `themes.csv`, `motif-taxonomy.csv`) are untouched templates, yet score's character and narrative passes and `scoring_bible.py` read them. evals-8b is adding the guard (a file identical to its template counts as absent; `cmd_score.py`, `scoring_bible.py`, about v1.98.1). **The real fix is ours:** an extract phase that writes those docs from the Phase 0 profile (`working/extraction-profile.json`: narrative_mode, act_structure, major_threads, central_conflict, protagonist_arc, tone, key_locations) and the CSVs. It fits the plan's "bible = fixed facts + voice" (the bible could be generated from the ledger's `fixed` facts). Also check `build_shared_context`, which sends `character-bible.md` and `world-bible.md` to every drafting call: a template there is noise in E4, E5 and E8.
+- **The summary's three acts vs a book's own acts:** 5c's `story-summary.md` Act-shape is always `### Act 1–3` (the L2 floor), and `scoring_coverage._coverage_acts_to_spine` wants a spine row with `act` 1, 2 and 3. That holds on *Carol*, but a book whose `scenes.csv:act` values aren't 1–3 (five staves numbered 1–5, `Part One`) fails coverage although L0–L4 pass. Whether L2 should follow the book's own division is a rubric question, not a 5c fix.
 - **The books' validate findings** are the author's. Thornwall's Garren (16 states) and governor's `governor` (9) have no `characters.csv` entry. Briefs name physical states the ledger doesn't hold, in the hundreds for shared-dark, governor and meridian-line. Understory has 16 cells with parenthetical text that `migrate` step 5 left for hand edits.
 - **Rejected facts are still used** by consumers, because the views don't filter on `status`. This is Phase 4's reject flow.
 - **F-123 limitation:** a hand-added fact that no brief's `knowledge_out` lists isn't offered to later 3b scenes.
