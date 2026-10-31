@@ -365,8 +365,9 @@ def redraft(project_dir: str, scene_id: str) -> str:
         return gate.gate_and_fix(project_dir, scene_id, command='redraft', prose=prose,
                                  log_dir=os.path.join(project_dir, 'working', 'logs',
                                                       'gate')).prose
-    except gate.GateError:
-        # write and revise keep the unchecked prose and list the scene pending
+    except Exception:  # noqa: BLE001 - as write and revise: a gate that can't
+        # finish (GateError, a bug, an I/O failure) leaves the unchecked prose,
+        # listed pending; a cassette miss still errors the suite (its log)
         return prose
 
 

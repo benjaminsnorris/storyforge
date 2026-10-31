@@ -348,10 +348,21 @@ def _reading_order(project_dir: str, scene_ids: list[str]) -> list[str]:
 
 
 def _leaning(project_dir: str, scene_id: str) -> str:
-    """Why `scene_id` can't be redrafted before spending ('' when it can):
-    later facts lean on its commitments, which the gate would replace (it
-    can't yet: Phase 4's re-check). `write` stops on the same check."""
-    from storyforge import gate
+    """Why `scene_id` can't be redrafted before spending ('' when it can),
+    the checks `write` makes: an earlier scene waits on the gate
+    (`working/gate-pending.csv`), so the ledger lacks its facts; or later
+    facts lean on its commitments, which the gate would replace (it can't
+    yet: Phase 4's re-check)."""
+    from storyforge import cmd_write, gate
+    try:
+        blocking = cmd_write._gate_blockers(project_dir, scene_id)
+    except gate.GateError as e:
+        log(f'    ERROR: {e}')
+        return f'{scene_id} (not redrafted: {e})'
+    if blocking:
+        cmd_write._log_blockers(blocking)
+        return (f'{scene_id} (not redrafted: earlier scene(s) wait on the gate: '
+                + '; '.join(b.split(':')[0] for b in blocking) + ')')
     leaning = gate.leaning_on(project_dir, scene_id)
     if not leaning:
         return ''
@@ -378,12 +389,21 @@ def _not_reached(rest: list[str]) -> list[str]:
     return out
 
 
+REDRAFT_ADVICE = (
+    'Their briefs were rewritten. For each scene named above: one the gate did not '
+    'pass was redrafted and is listed in working/gate-pending.csv: fix its prose and run '
+    '`storyforge check <id>`. One later facts lean on: revise it by hand, then '
+    '`storyforge check <id>`. Any other (no reply, an earlier scene waiting on the gate, '
+    'or not reached) still has its old prose: once the scenes before it pass the gate, '
+    'redraft it with `storyforge write --force --coaching full --scenes <id>`.')
+
+
 def _report_redraft_error(e: 'RedraftError') -> None:
-    """Tell the author how to re-draft what ``_redraft_from_briefs`` could not.
-    Their passes are already completed, so re-running revise would not."""
+    """Tell the author what to do about what ``_redraft_from_briefs`` could
+    not redraft or the gate did not pass. Their passes are already
+    completed, so re-running revise would not."""
     log(f'ERROR: {e}')
-    log('Their briefs were rewritten but their prose was not. Re-draft them with '
-        '`storyforge write --force --coaching full --scenes <id>[,<id>...]`.')
+    log(REDRAFT_ADVICE)
 
 
 def _count_passes(rows):
@@ -1447,8 +1467,12 @@ def _redraft_or_halt(project_dir: str, scene_ids: list[str]) -> int:
         return _redraft_scenes(project_dir, scene_ids)
     except RedraftError as e:
         log(f'ERROR: {e}')
-        log('Their briefs were rewritten; nothing is committed. Inspect with '
-            '`git diff`, then re-run or restore with `git checkout -- reference/ scenes/`.')
+        log(REDRAFT_ADVICE)
+        log('Nothing is committed: a scene the gate passed has its facts in '
+            'reference/commitments.csv, and one it did not pass is listed in '
+            'working/gate-pending.csv. To undo the whole run instead, restore with '
+            '`git checkout -- reference/ scenes/` and delete those scenes\' rows from '
+            'working/gate-pending.csv.')
         sys.exit(1)
 
 
@@ -1541,6 +1565,20 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
         count += 1
         log(f'  Re-drafted {scene_id}')
         why = _gate_redraft(project_dir, scene_id, scene_file, log_dir)
+        # The gate's fix edits the prose with find/replace and knows nothing
+        # of illustration markers: restore any it dropped
+        with open(scene_file, encoding='utf-8') as f:
+            gated = f.read()
+        kept = preserve_markers(project_dir, original_prose, gated)
+        if kept['text'] != gated:
+            with open(scene_file, 'w', encoding='utf-8') as f:
+                f.write(kept['text'])
+            log(f'  restored {len(kept["restored"])} illustration marker(s) the gate\'s '
+                f'fix dropped: {", ".join(kept["restored"])}')
+        for lost in [m for m in kept['lost'] if m not in preserved['lost']]:
+            log(f'  WARNING: illustration marker {lost!r} was in {scene_id} and the gate\'s '
+                f'fix dropped it; re-anchor the plan row and run '
+                f'`storyforge illustrate --embed`')
         if why:
             failed += _stopped_at(scene_id, why, scene_ids[i:])
             break
