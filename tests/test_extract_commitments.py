@@ -99,7 +99,7 @@ class TestViews:
 
 
 class TestPhase4:
-    def _run(self, project_dir, monkeypatch, replies, force=False, only=None):
+    def _run(self, project_dir, monkeypatch, replies, force=False, only=None, judge=None):
         from storyforge import cmd_extract
         calls = []
 
@@ -114,6 +114,10 @@ class TestPhase4:
             return response
         monkeypatch.setattr(cmd_extract, 'invoke_to_file', invoke_to_file)
         monkeypatch.setattr(cmd_extract, 'commit_and_push', lambda *a, **k: True)
+        # The persistence check keeps everything unless a test says otherwise
+        from storyforge import persistence
+        monkeypatch.setattr(persistence, 'judge', judge or (
+            lambda sid, prose, found, **k: persistence.Verdict(kept=list(found))))
         ref = os.path.join(project_dir, 'reference')
         scenes = os.path.join(project_dir, 'scenes')
         order = only or cmd_extract._build_sorted_scene_ids(scenes, ref)
@@ -415,3 +419,74 @@ class TestKnown:
         # about the scene first, then a fixed fact before a more recent state
         assert self._known(rows, subjects={'tessa'})[0] == ['tessa-early', 'knows', 'pell-name']
         assert known_for_scene(rows, 's2', self.ORDER, {'tessa'})[2] == 2
+
+
+class TestPhase4Persistence:
+    """Phase 4 records only the facts the persistence check says last."""
+
+    def test_a_dropped_fact_is_not_recorded_and_is_logged(self, project_dir, monkeypatch, capsys):
+        from storyforge import persistence
+        from storyforge.cmd_extract import _build_sorted_scene_ids
+        ref = os.path.join(project_dir, 'reference')
+        first = _build_sorted_scene_ids(os.path.join(project_dir, 'scenes'), ref)[0]
+        with open(os.path.join(project_dir, 'scenes', f'{first}.md')) as f:
+            words = ' '.join(f.read().split()[:6])
+
+        def judge(sid, prose, found, **k):
+            keep = [e for e in found if 'cup' not in e['statement']]
+            return persistence.Verdict(kept=keep, dropped=[(e, 'staging') for e in found
+                                                           if e not in keep])
+        TestPhase4()._run(project_dir, monkeypatch, {first: _reply(
+            {'statement': 'Dorren keeps the archive key.', 'subject': 'Dorren',
+             'type': 'physical', 'mutable': 'state', 'quote': words},
+            {'statement': 'Dorren sets her cup down.', 'subject': 'Dorren',
+             'type': 'physical', 'mutable': 'state', 'quote': words})}, judge=judge)
+        mine = [r['statement'] for r in ledger.load(project_dir)
+                if r['introduced_by'] == ledger.COMMITMENTS_PASS]
+        assert mine == ['Dorren keeps the archive key.']
+        out = capsys.readouterr().out
+        assert 'not recorded: Dorren sets her cup down. (staging)' in out
+        assert '1 judged not to last beyond their scene' in out
+
+
+class TestPersistenceModule:
+    def _found(self, *statements, **over):
+        return [dict({'type': 'world', 'subject': '', 'statement': s, 'quote': '',
+                      'mutable': 'state', 'supersedes': '', 'ends': []}, **over)
+                for s in statements]
+
+    def test_the_prompt_numbers_each_fact(self):
+        from storyforge import persistence
+        prompt = persistence.build_prompt('s1', 'Prose.', self._found('A lasts', 'B'))
+        assert '1. [world, state] -: A lasts' in prompt and '2. [world, state] -: B' in prompt
+
+    def test_judge_keeps_order_and_splits_by_verdict(self, monkeypatch, tmp_path):
+        from storyforge import api, persistence
+        reply = {'verdicts': [{'n': 2, 'persists': False, 'why': 'staging'},
+                              {'n': 1, 'persists': True, 'why': 'name'}]}
+        monkeypatch.setattr(api, 'invoke_to_file', lambda *a, **k: {
+            'content': [{'type': 'text', 'text': json.dumps(reply)}],
+            'stop_reason': 'end_turn', 'usage': {}})
+        linked = self._found('C changes B', supersedes='old')[0]
+        found = self._found('A', 'B')
+        v = persistence.judge('s1', 'Prose.', [found[0], linked, found[1]], model='m',
+                              log_file=str(tmp_path / 'p.json'))
+        assert [e['statement'] for e in v.kept] == ['A', 'C changes B']
+        assert [(e['statement'], why) for e, why in v.dropped] == [('B', 'staging')]
+        assert (v.asked, v.exempt) == (2, 1)
+
+    def test_nothing_to_ask_makes_no_call(self, monkeypatch, tmp_path):
+        from storyforge import api, persistence
+        monkeypatch.setattr(api, 'invoke_to_file', lambda *a, **k: pytest.fail('called'))
+        v = persistence.judge('s1', 'P', self._found('x', ends=['y']), model='m',
+                              log_file=str(tmp_path / 'p.json'))
+        assert len(v.kept) == 1 and v.asked == 0
+
+    def test_a_cut_off_reply_raises(self, monkeypatch, tmp_path):
+        from storyforge import api, persistence
+        monkeypatch.setattr(api, 'invoke_to_file', lambda *a, **k: {
+            'content': [{'type': 'text', 'text': '{"verdicts": ['}],
+            'stop_reason': 'max_tokens', 'usage': {}})
+        with pytest.raises(persistence.PersistenceError, match='token limit'):
+            persistence.judge('s1', 'P', self._found('x'), model='m',
+                              log_file=str(tmp_path / 'p.json'))

@@ -4,7 +4,10 @@ For one scene's prose, `gate_scene` runs:
 
 1. **Extract** the scene's commitments with phase 4's rubric
    (`extract.build_commitments_prompt`), offered the facts in force entering
-   it and the registry facts recorded for it (`extract.known_for_scene`).
+   it and the registry facts recorded for it (`extract.known_for_scene`),
+   then ask of each whether it lasts beyond the scene
+   (`persistence.judge`): one that doesn't is not proposed (`dropped`,
+   reported).
 2. **Halt** on decision 2's immediate tier: `audit.halting_conditions` on the
    proposed rows (a `fixed` fact superseded or changed). The third trigger,
    a fact extraction flagged low-confidence, is not wired: phase 4's schema
@@ -43,7 +46,7 @@ import copy
 import os
 from dataclasses import dataclass, field
 
-from storyforge import audit, ledger
+from storyforge import audit, ledger, persistence
 from storyforge.checker import CheckError, CheckResult, Dispute, Finding, check_scene
 
 #: The commands whose prose the gate commits (`ledger.COMMITMENT_WRITERS`
@@ -80,6 +83,9 @@ class GateResult:
     committed: bool = False
     #: registry ids whose quote was filled on commit
     quotes_filled: list[str] = field(default_factory=list)
+    #: (statement, why) for each extracted fact the persistence check judged
+    #: not to last beyond the scene: not proposed, so never committed
+    dropped: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def findings(self) -> list[Finding]:
@@ -117,7 +123,8 @@ def _subjects(project_dir: str) -> dict[str, str]:
 
 def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
              order: dict[str, int], introduced_by: str, model: str, log_dir: str,
-             problems: dict[str, list[str]]) -> list[dict[str, str]]:
+             problems: dict[str, list[str]],
+             dropped: list[tuple[str, str]]) -> list[dict[str, str]]:
     from storyforge.api import extract_text, invoke_to_file, is_truncated
     from storyforge.elaborate import get_scene
     from storyforge.enrich import format_registries_for_prompt
@@ -146,7 +153,14 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
         found = parse_commitments_response(extract_text(response), scene_id)
     except (RuntimeError, ValueError) as e:   # RefusalError, an API failure, a bad reply
         raise GateError(f'{scene_id}: extraction failed: {e}') from e
-    return commitment_rows(found, scene_id, prose, rows, known, recorded, subjects,
+    try:
+        verdict = persistence.judge(scene_id, prose, found, model=model,
+                                    log_file=os.path.join(log_dir,
+                                                          f'gate-persistence-{scene_id}.json'))
+    except persistence.PersistenceError as e:
+        raise GateError(str(e)) from e
+    dropped.extend((e['statement'], why) for e, why in verdict.dropped)
+    return commitment_rows(verdict.kept, scene_id, prose, rows, known, recorded, subjects,
                            introduced_by, problems, own_writers=ledger.COMMITMENT_WRITERS,
                            registry_is_plan=True)
 
@@ -270,7 +284,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     result = GateResult(scene_id, problems={k: [] for k in COMMITMENT_PROBLEMS})
     result.proposed = _extract(project_dir, scene_id, prose, rows, order, command,
                                extract_model or select_model('evaluation'), log_dir,
-                               result.problems)
+                               result.problems, result.dropped)
     result.halts = audit.halting_conditions(result.proposed, rows)
     try:
         result.check = check_scene(project_dir, scene_id, prose=prose, model=check_model,
@@ -521,6 +535,11 @@ def report_lines(result: GateResult) -> list[str]:
         if result.check.stale_brief_items:
             lines.append('NOTE (brief items naming a fact that is not binding; not checked, '
                          'fix the brief): ' + _one_line('; '.join(result.check.stale_brief_items)))
+    if result.dropped:
+        lines.append(f'NOTE (not recorded, judged not to last beyond the scene): '
+                     + '; '.join(f'{_one_line(st)} ({_one_line(why)})'
+                                 for st, why in result.dropped[:20])
+                     + (' ...' if len(result.dropped) > 20 else ''))
     if result.committed:
         lines.append(f'COMMITTED: {len(result.proposed)} fact(s)'
                      + (f'; quotes filled: {", ".join(result.quotes_filled)}'

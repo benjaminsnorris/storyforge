@@ -59,7 +59,7 @@ Options:
 - `--phase 1` — Extract skeleton (scenes.csv) only
 - `--phase 2` — Extract intent only (needs phase 1)
 - `--phase 3` — Extract briefs only (needs phases 1-2)
-- `--phase 4` — Extract commitments only (needs phases 1-3)
+- `--phase 4` — Extract commitments only (needs phases 1-3). A second call per scene asks of each fact whether it lasts beyond the scene; one that does not (staging, set dressing, a feeling in the moment) is not recorded, and the log lists it with why
 - `--phase 5` — Describe the book: spine, architecture, themes, motifs, story summary, story architecture, character/world/systems bibles, voice guide, timeline, chapter map (needs phases 1-3; see below)
 - `--force` — Overwrite extracted values (phase 5: regenerate only files it wrote that nobody has edited since)
 - `--expand` — Include expansion analysis (for novella-to-novel work)
