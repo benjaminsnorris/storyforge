@@ -189,7 +189,6 @@ def test_a_naturalness_redraft_the_gate_failed_is_judged(monkeypatch, tmp_path):
 def test_a_redraft_is_gated_and_the_gates_prose_judged(monkeypatch, tmp_path):
     from storyforge import gate
     project = _scene_dir(tmp_path)
-    monkeypatch.setattr(gate, 'leaning_on', lambda p, s: [])
     monkeypatch.setattr('storyforge.common.select_model', lambda t: 'm')
     monkeypatch.setattr('storyforge.common.build_shared_context', lambda p, model='': [])
     monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda *a, **k: 'prompt')
@@ -203,14 +202,6 @@ def test_a_redraft_is_gated_and_the_gates_prose_judged(monkeypatch, tmp_path):
     monkeypatch.setattr(gate, 'gate_and_fix', gate_and_fix)
     assert e8.redraft(project, 's') == 'Fixed prose.'
     assert [(s, c, p.strip()) for s, c, p in seen] == [('s', 'redraft', 'Drafted prose.')]
-
-
-def test_a_redraft_later_facts_lean_on_halts_before_drafting(monkeypatch, tmp_path):
-    from storyforge import gate
-    monkeypatch.setattr(gate, 'leaning_on', lambda p, s: ['later'])
-    monkeypatch.setattr('storyforge.api.invoke', lambda *a, **k: pytest.fail('drafted'))
-    with pytest.raises(e8.PassHalted, match='lean on'):
-        e8.redraft(_scene_dir(tmp_path), 's')
 
 
 def test_a_naturalness_fix_that_rewrites_nothing_is_pass_halted_with_why(monkeypatch):
@@ -587,7 +578,6 @@ def test_old_ids_without_an_id_map_is_empty(tmp_path, monkeypatch):
 
 def test_an_ungated_redraft_is_the_draft_alone(monkeypatch, tmp_path):
     from storyforge import gate
-    monkeypatch.setattr(gate, 'leaning_on', lambda p, s: pytest.fail('checked'))
     monkeypatch.setattr(gate, 'gate_and_fix', lambda *a, **k: pytest.fail('gated'))
     monkeypatch.setattr('storyforge.common.select_model', lambda t: 'm')
     monkeypatch.setattr('storyforge.common.build_shared_context', lambda p, model='': [])

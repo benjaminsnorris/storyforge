@@ -5,7 +5,9 @@ from its brief and the ledger as of that scene, and gates each before the
 next (plan §3.2, `storyforge.gate`): its facts are extracted and checked
 against the book and its brief, fixed once if needed, and committed to the
 ledger only when clean. A scene that still fails is kept, listed in
-`working/gate-pending.csv`, and stops the run. Coaching levels coach and
+`working/gate-pending.csv`, and stops the run. A redraft that passes
+re-checks the later scenes depending on what it changed (Phase 4,
+`gate.recheck_pending`). Coaching levels coach and
 strict write briefs or constraints, not prose, and are not gated; only they
 take `--batch` (every scene at once through the Batch API). Prose is never
 drafted in parallel: on E4, drafting every scene at once (no earlier prose,
@@ -371,7 +373,9 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
     """Gate the scene just written to `scene_file` (fix once, re-check; plan
     §3.2), writing the fixed prose back. Returns (passed, why not). A scene
     that doesn't pass, or that the gate couldn't finish, is listed in
-    `gate.pending` with the first problems; its prose stays."""
+    `gate.pending` with the first problems; its prose stays. On a pass, the
+    later scenes whose facts depend on what it changed are listed for a
+    re-check (the caller runs `run_recheck` once the scene is committed)."""
     from storyforge import gate
     with open(scene_file, encoding='utf-8') as f:
         prose = f.read()
@@ -401,12 +405,62 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
         log(f'  {line}')
     if out.result.passed:
         log(f'  Gate passed: {len(out.result.proposed)} fact(s) added to the ledger.')
+        report_changes(out.result)
+        if out.result.recheck:
+            log(f'  {scene_id} changed {len(out.result.changed)} fact(s) later scenes depend '
+                f'on; listed for a re-check: {", ".join(out.result.recheck)}')
         return True, ''
     problems = [line for line in lines if not line.startswith(('NOTE', 'COMMITTED'))]
     return False, _pend(project_dir, scene_id, command,
                         f'{len(problems)} problem(s) after one fix: '
                         + ' / '.join(problems[:3]) + ('; ...' if len(problems) > 3 else '')
                         + stale)
+
+
+def _drafted(scenes_dir: str, scene_id: str) -> bool:
+    """Whether a scene has prose the run's skip rule keeps (over 200 words)."""
+    path = os.path.join(scenes_dir, f'{scene_id}.md')
+    if not os.path.isfile(path):
+        return False
+    with open(path, encoding='utf-8') as f:
+        return len(f.read().split()) > 200
+
+
+def report_changes(result) -> None:
+    """Log, after a pass, what the scene changed that no re-check can cover:
+    facts whose dependents can't all be traced, later scenes that depend on
+    it but can't be re-checked, and the author's registry links to facts it
+    removed (CLAUDE.md: every path that can't check something says so)."""
+    for fid, why in result.unrelated.items():
+        log(f'  WARNING: {result.scene_id} changed {fid}, whose dependents can\'t all be '
+            f'found ({why}): check the later scenes that mention it with `storyforge check`.')
+    if result.not_rechecked:
+        log(f'  NOTE: later scenes that depend on what {result.scene_id} changed but can\'t be '
+            f're-checked now: {", ".join(result.not_rechecked)}')
+    if result.dangling:
+        log(f'  WARNING: registry facts link to commitments {result.scene_id} no longer makes; '
+            f'fix the links in reference/commitments.csv: {", ".join(result.dangling)}')
+
+
+def run_recheck(project_dir: str, log_dir: str, skip: set[str] | frozenset[str] = frozenset(),
+                spent_before: float = 0.0):
+    """Re-gate the scenes pending a re-check (`gate.recheck_pending`: reading
+    order, report and stop, under the cost threshold counting `spent_before`)
+    and log the outcome. Returns the `gate.Recheck`, or None when nothing was
+    pending. A scene that fails stays listed, and `write`/`revise` won't
+    draft past it."""
+    from storyforge import gate
+    if not gate.recheck_queue(project_dir, skip):
+        return None
+    run = gate.recheck_pending(project_dir, log_dir=log_dir, skip=skip,
+                               spent_before=spent_before)
+    for sid in run.passed:
+        log(f'  Re-check passed: {sid}')
+    if run.failed:
+        log(f'  ERROR: the re-check of {run.failed} did not pass: {run.why}. It stays in '
+            f'{gate_pending_path()}' + (f', and so do {", ".join(run.left)}' if run.left else '')
+            + '; fix it with revise or by hand, then `storyforge check --pending`.')
+    return run
 
 
 def _interactive_problem(scene_file: str, before: str) -> str:
@@ -831,10 +885,11 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
     leave a later scene drafted from a ledger missing an earlier one's facts:
     a bad reply (refused, cut off, unsafe, too short), a scene that doesn't
     pass the gate (committed for the author and listed in ``gate.pending``),
-    an earlier scene still in ``gate.pending``, or a redraft the gate would
-    refuse because later facts lean on the scene's commitments (refused
-    before the API is called). At other coaching levels a bad reply skips
-    only its scene."""
+    or an earlier scene still in ``gate.pending`` (a failed re-check
+    included). After a scene passes and is committed, the later scenes that
+    depend on what it changed are re-checked (``run_recheck``; Phase 4),
+    not those this run redrafts anyway. At other coaching levels a bad reply
+    skips only its scene."""
     drafted_count = 0
     total_words = 0
     failed: list[str] = []
@@ -855,6 +910,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
         model = select_model('drafting')
         system = build_shared_context(project_dir, model=model)
 
+    recheck_spent = 0.0   # what this run's re-checks are forecast to cost so far
     for i, scene_id in enumerate(pending_ids):
         scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
         scene_num = i + 1
@@ -875,16 +931,6 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                 _log_blockers(blocking)
                 stop(i, scene_id, f'{scene_id} (not attempted: an earlier scene did not '
                                   f'pass the gate)')
-                break
-            leaning = gate.leaning_on(project_dir, scene_id)
-            if leaning:
-                log(f'ERROR: Not redrafting {scene_id}: later facts or ends depend on its '
-                    f'commitments ({", ".join(leaning[:5])}), and the gate cannot replace '
-                    f"them until Phase 4's re-check exists (storyforge check refuses it "
-                    f'too). Revise its prose by hand and leave its ledger rows as they are, '
-                    f'or redraft it after the re-check lands.')
-                stop(i, scene_id, f'{scene_id} (later facts or ends depend on its '
-                                  f'commitments; not redrafted)')
                 break
 
         prompt = _build_prompt(scene_id, project_dir, coaching, use_briefs,
@@ -1005,6 +1051,20 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             total_words += wc
         else:
             failed.append(f'{scene_id} (failed verification; see the ERROR above)')
+        if gated and ok:
+            # The scene is committed; now the later scenes that depend on
+            # what it changed (not those this run redrafts anyway)
+            later = {s for s in pending_ids[i + 1:] if force or not _drafted(scenes_dir, s)}
+            run = run_recheck(project_dir, os.path.join(log_dir, 'gate'), later,
+                              spent_before=recheck_spent)
+            if run is not None:
+                recheck_spent = run.spent
+                from storyforge.git import commit_and_push
+                commit_and_push(project_dir, f'Re-check after {scene_id}: '
+                                f'{len(run.passed)} passed'
+                                + (f', {run.failed} did not' if run.failed else ''),
+                                ['reference/', 'working/logs/', 'working/audit-log.csv',
+                                 'working/.audit-snapshot.csv', gate_pending_path()])
 
         log(f'  Time: {mins}m{secs}s')
 

@@ -244,37 +244,6 @@ class TestFailsLoud:
                        extract_model='m', check_model='m')
         assert ledger.load(project_dir) == before
 
-    def test_a_later_fact_leaning_on_a_replaced_commitment_raises(self, project_dir, tmp_path):
-        _gate(project_dir, tmp_path, [_commitment()])
-        rows = ledger.load(project_dir)
-        mine = next(r for r in rows if r['scene_id'] == SCENE and ledger.is_commitment(r))
-        later = dict(mine, id='later-fact', scene_id='act2-sc01', depends_on=mine['id'])
-        ledger.save(project_dir, rows + [later], command='test')
-        with pytest.raises(GateError, match='lean on'):
-            _gate(project_dir, tmp_path, [_commitment()], command='redraft')
-
-    def test_a_replaced_state_a_later_scene_ended_raises(self, project_dir, tmp_path):
-        """Replacing it would drop the later scene's end: the state would read
-        as in force for the rest of the book."""
-        _gate(project_dir, tmp_path, [_commitment()])
-        rows = ledger.load(project_dir)
-        mine = next(r for r in rows if r['scene_id'] == SCENE and ledger.is_commitment(r))
-        mine['resolves'] = 'act2-sc01'
-        ledger.save(project_dir, rows, command='test')
-        with pytest.raises(GateError, match='act2-sc01 ends'):
-            _gate(project_dir, tmp_path, [_commitment()], command='redraft')
-
-    def test_a_state_ended_in_its_own_scene_or_never_does_not_lean(self):
-        rows = [{'id': 'a', 'scene_id': 's1', 'resolves': 's1'},
-                {'id': 'b', 'scene_id': 's1', 'resolves': 'never'},
-                {'id': 'c', 'scene_id': 's1', 'resolves': ''}]
-        assert gate._leaning_on(rows, {'a', 'b', 'c'}) == []
-
-    def test_an_end_at_a_deleted_scene_does_not_lean(self):
-        rows = [{'id': 'a', 'scene_id': 's1', 'resolves': 'gone'}]
-        assert gate._leaning_on(rows, {'a'}, {'s1': 0}) == []
-        assert gate._leaning_on(rows, {'a'}) == ['gone ends → a']
-
     @pytest.mark.parametrize('command', ['commitments', 'hone', ''])
     def test_only_gate_commands(self, project_dir, tmp_path, command):
         with pytest.raises(ValueError, match='command must be'):
@@ -416,3 +385,210 @@ class TestPersistence:
             gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path),
                        extract_model='m', check_model='m')
         assert ledger.load(project_dir) == before
+
+
+class TestRecheck:
+    """Phase 4 (docs/plans/2026-10-31-phase4-safe-revision-design.md §3): a
+    redraft is no longer refused for what leans on it; what it changed lists
+    the later scenes that depend on it, and `recheck_pending` re-gates them."""
+    LATER = 'act2-sc01'
+
+    def _mine(self, project_dir):
+        return [r for r in ledger.load(project_dir)
+                if r['scene_id'] == SCENE and ledger.is_commitment(r)]
+
+    def _add(self, project_dir, **row):
+        rows = ledger.load(project_dir)
+        base = dict(rows[0], **{k: '' for k in rows[0]})
+        base.update(status='binding', origin='prose', mutable='state', introduced_by='draft')
+        base.update(row)
+        ledger.save(project_dir, rows + [base], command='test')
+
+    def _commit_with_dependent(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow')])
+        old = self._mine(project_dir)[0]
+        self._add(project_dir, id='later-fact', scene_id=self.LATER, type='world',
+                  subject='tarrens-hollow', statement='The hollow is empty', supersedes=old['id'])
+        return old
+
+    def test_the_same_fact_keeps_its_id_and_its_later_end(self, project_dir, tmp_path):
+        old = self._commit_with_dependent(project_dir, tmp_path)
+        rows = ledger.load(project_dir)
+        next(r for r in rows if r['id'] == old['id'])['resolves'] = self.LATER
+        ledger.save(project_dir, rows, command='test')
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow')],
+                       command='redraft')
+        assert result.committed
+        mine = self._mine(project_dir)
+        assert [(r['id'], r['resolves']) for r in mine] == [(old['id'], self.LATER)]
+        assert result.changed == [] and result.recheck == []
+        assert gate.pending(project_dir) == {}
+
+    def test_a_dropped_fact_lists_its_dependents_for_a_recheck(self, project_dir, tmp_path):
+        old = self._commit_with_dependent(project_dir, tmp_path)
+        result = _gate(project_dir, tmp_path, [_commitment(
+            subject='tarrens-hollow', statement='The hollow had 300 people')], command='redraft')
+        assert result.committed
+        assert result.changed == [old['id']] and result.recheck == [self.LATER]
+        assert gate.pending(project_dir)[self.LATER]['command'] == 'recheck'
+
+    def test_facts_new_to_the_scene_list_nothing(self, project_dir, tmp_path):
+        self._add(project_dir, id='later-fact', scene_id=self.LATER, type='world',
+                  subject='tarrens-hollow', statement='The hollow is empty')
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow')])
+        assert result.committed and result.changed == [] and result.recheck == []
+
+    def test_an_end_this_scene_no_longer_makes_is_a_change(self, project_dir, tmp_path):
+        self._add(project_dir, id='early-state', scene_id='act1-sc01', subject='dorren-hayle',
+                  type='physical', statement='Dorren is injured', resolves=SCENE)
+        self._add(project_dir, id='later-state', scene_id=self.LATER, subject='dorren-hayle',
+                  type='physical', statement='Dorren limps')
+        result = _gate(project_dir, tmp_path, [_commitment()], command='redraft')
+        assert 'early-state' in result.changed and result.recheck == [self.LATER]
+
+    def test_a_scene_waiting_for_another_reason_keeps_its_reason(self, project_dir, tmp_path):
+        self._commit_with_dependent(project_dir, tmp_path)
+        gate.mark_pending(project_dir, self.LATER, 'draft', 'its own problem')
+        _gate(project_dir, tmp_path, [_commitment(
+            subject='tarrens-hollow', statement='The hollow had 300 people')], command='redraft')
+        assert gate.pending(project_dir)[self.LATER]['reason'] == 'its own problem'
+
+    def test_carried_ids_and_fresh_ids_never_collide(self):
+        old = [{'id': 's--b', 'subject': '', 'type': 'world', 'statement': 'B', 'scene_id': 's'}]
+        proposed = [{'id': 's--b', 'subject': '', 'type': 'world', 'statement': 'A'},
+                    {'id': 's--b-2', 'subject': '', 'type': 'world', 'statement': 'B',
+                     'supersedes': 's--b'}]
+        gate._carry_ids(proposed, old, [], 's')
+        ids = [p['id'] for p in proposed]
+        assert ids[1] == 's--b' and ids[0] not in ('s--b', 's--b-2') and len(set(ids)) == 2
+        assert proposed[1]['supersedes'] == ids[0]   # it meant the first proposed row
+
+    def _recheck(self, project_dir, tmp_path, findings=()):
+        def fake(path, body, **k):
+            if 'tools' in body:
+                return _text({'findings': list(findings), 'kept': []})
+            return _text({'commitments': [_commitment(
+                type='physical', subject='tessa-merrin', statement='Tessa is cold',
+                quote='The edge of the mapped world was not a line on the ground')]})
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+            return gate.recheck_pending(project_dir, log_dir=str(tmp_path / 'rc'),
+                                        extract_model='m', check_model='m')
+
+    def test_a_recheck_that_passes_commits_and_clears(self, project_dir, tmp_path):
+        self._add(project_dir, id='old-later', scene_id=self.LATER, subject='tessa-merrin',
+                  type='physical', statement='Tessa is warm', introduced_by='redraft')
+        gate.mark_pending(project_dir, self.LATER, 'recheck', 're-check: x')
+        run = self._recheck(project_dir, tmp_path)
+        assert run.passed == [self.LATER] and not run.failed
+        assert gate.pending(project_dir) == {}
+        later = [r for r in ledger.load(project_dir) if r['scene_id'] == self.LATER
+                 and ledger.is_commitment(r)]
+        assert [(r['statement'], r['introduced_by']) for r in later] == [
+            ('Tessa is cold', 'redraft')]   # the prose's writer is kept
+
+    def test_a_recheck_that_fails_stops_and_stays_pending(self, project_dir, tmp_path):
+        gate.mark_pending(project_dir, 'new-x1', 'recheck', 're-check: x')
+        gate.mark_pending(project_dir, self.LATER, 'recheck', 're-check: x')
+        bad = {'kind': 'contradiction', 'code': 'TIM', 'scene_quote': 'x',
+               'established_scene': '', 'established_quote': '', 'fact_id': 'nope',
+               'explanation': 'why'}
+        run = self._recheck(project_dir, tmp_path, [bad])
+        assert run.failed == 'new-x1' and run.passed == []
+        assert run.left == [self.LATER]
+        row = gate.pending(project_dir)['new-x1']
+        assert row['command'] == gate.RECHECK_FAILED and 're-check did not pass' in row['reason']
+        # not re-run until the author acts
+        assert gate.recheck_queue(project_dir) == [self.LATER]
+
+    def test_over_the_cost_threshold_nothing_runs(self, project_dir, tmp_path, monkeypatch):
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '0.1')
+        gate.mark_pending(project_dir, self.LATER, 'recheck', 're-check: x')
+        with patch('storyforge.api._api_request', side_effect=AssertionError('spent')):
+            run = gate.recheck_pending(project_dir, log_dir=str(tmp_path))
+        assert run.over_budget and run.left == [self.LATER] and run.passed == []
+
+    def test_only_recheck_rows_are_rechecked_and_skip_is_honoured(self, project_dir):
+        gate.mark_pending(project_dir, 'new-x1', 'draft', 'its own problem')
+        gate.mark_pending(project_dir, self.LATER, 'recheck', 'x')
+        assert gate.recheck_queue(project_dir) == [self.LATER]
+        assert gate.recheck_queue(project_dir, {self.LATER}) == []
+
+
+class TestRecheckReview468:
+    """Fixes from #468's review."""
+    LATER = 'act2-sc01'
+
+    _add = TestRecheck._add
+    _mine = TestRecheck._mine
+
+    def test_a_change_after_the_sixth_word_is_a_change(self, project_dir, tmp_path):
+        """Both statements make the same id (scene + six words): the new fact
+        must not take the old one's id, and the change must list dependents."""
+        _gate(project_dir, tmp_path, [_commitment(
+            subject='tarrens-hollow', statement="Tarren's Hollow had 412 people in spring")])
+        old = self._mine(project_dir)[0]
+        self._add(project_dir, id='later-fact', scene_id=self.LATER, type='world',
+                  subject='', statement='x', supersedes=old['id'])
+        result = _gate(project_dir, tmp_path, [_commitment(
+            subject='tarrens-hollow', statement="Tarren's Hollow had 412 people in autumn")],
+            command='redraft')
+        new = self._mine(project_dir)[0]
+        assert new['id'] != old['id']
+        assert result.changed == [old['id']] and result.recheck == [self.LATER]
+
+    def test_an_end_lists_only_scenes_after_this_one(self, project_dir, tmp_path):
+        self._add(project_dir, id='early-state', scene_id='act1-sc01', subject='dorren-hayle',
+                  type='physical', statement='Dorren is injured', resolves=SCENE)
+        for sid, st in (('act1-sc02', 'Dorren winces'), ('new-x1', 'Dorren limps')):
+            self._add(project_dir, id=f'{sid}-state', scene_id=sid, subject='dorren-hayle',
+                      type='physical', statement=st)
+        result = _gate(project_dir, tmp_path, [_commitment()], command='redraft')
+        assert 'early-state' in result.changed
+        assert result.recheck == ['new-x1']        # not act1-sc02 itself, nothing earlier
+
+    def test_what_cant_be_rechecked_is_said(self, project_dir, tmp_path):
+        from storyforge.elaborate import update_scene
+        old = TestRecheck._commit_with_dependent(self, project_dir, tmp_path)
+        self._add(project_dir, id='plan-link', scene_id='new-x1', type='world',
+                  subject='', statement='y', depends_on=old['id'], introduced_by='hone')
+        update_scene(self.LATER, os.path.join(project_dir, 'reference'), {'status': 'cut'})
+        result = _gate(project_dir, tmp_path, [_commitment(
+            subject='tarrens-hollow', statement='The hollow had 300 people')], command='redraft')
+        assert result.recheck == ['new-x1']       # the registry row's scene
+        assert result.not_rechecked == [f'{self.LATER} (cut or merged)']
+        assert result.dangling == [f'plan-link → {old["id"]}']
+
+    def test_a_gate_error_in_a_recheck_is_listed_failed(self, project_dir, tmp_path, monkeypatch):
+        gate.mark_pending(project_dir, self.LATER, 'recheck', 'x')
+
+        def boom(*a, **k):
+            raise GateError('extraction failed: HTTP 500')
+        monkeypatch.setattr(gate, 'gate_scene', boom)
+        run = gate.recheck_pending(project_dir, log_dir=str(tmp_path))
+        assert run.failed == self.LATER and 'HTTP 500' in run.why
+        assert gate.pending(project_dir)[self.LATER]['command'] == gate.RECHECK_FAILED
+        assert run.spent == gate.RECHECK_COST_PER_SCENE   # paid either way
+
+    def test_the_cascade_moves_forward_and_counts_spend(self, project_dir, tmp_path, monkeypatch):
+        """Each re-gated scene may list later ones; the run goes on in reading
+        order, and the caller's earlier spend counts against the threshold."""
+        gate.mark_pending(project_dir, 'act1-sc02', 'recheck', 'x')
+        seen = []
+
+        def fake(pd, sid, **k):
+            seen.append(sid)
+            gate.clear_pending(pd, sid)
+            if sid == 'act1-sc02':
+                gate.mark_pending(pd, self.LATER, 'recheck', 'listed by act1-sc02')
+            r = gate.GateResult(sid, check=None)
+            r.committed = True
+            return r
+        monkeypatch.setattr(gate, 'gate_scene', fake)
+        monkeypatch.setattr(gate, '_writer', lambda pd, sid: 'draft')
+        run = gate.recheck_pending(project_dir, log_dir=str(tmp_path), spent_before=1.0)
+        assert seen == ['act1-sc02', self.LATER] and run.passed == seen
+        assert run.spent == pytest.approx(1.0 + 2 * gate.RECHECK_COST_PER_SCENE)
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '1.0')
+        gate.mark_pending(project_dir, self.LATER, 'recheck', 'x')
+        run = gate.recheck_pending(project_dir, log_dir=str(tmp_path), spent_before=0.9)
+        assert run.over_budget and seen == ['act1-sc02', self.LATER]

@@ -318,7 +318,7 @@ COMMITMENTS_PASS = 'commitments'
 #: and physical facts are not registry entries: briefs don't reference them
 #: by id, so the views leave them out and view writes leave them as they are.
 #: Any other value, blank included (a hand-added row), is a registry fact.
-COMMITMENT_WRITERS = (COMMITMENTS_PASS, 'draft', 'redraft', 'revise', 'advisor')
+COMMITMENT_WRITERS = (COMMITMENTS_PASS, 'draft', 'redraft', 'revise', 'advisor', 'recheck')
 
 
 def is_commitment(row: dict) -> bool:
@@ -732,10 +732,15 @@ def _ends_elsewhere(row: dict[str, str]) -> str:
     return '' if ends in ('', 'never', (row.get('scene_id') or '').strip()) else ends
 
 
-def _fact_key(row: dict[str, str]) -> tuple[str, str, str, str]:
+def fact_key(row: dict[str, str]) -> tuple[str, str, str]:
+    """Subject, type and statement (case, spacing and end punctuation
+    aside): two rows with the same key state the same fact."""
     statement = ' '.join((row.get('statement') or '').lower().split()).rstrip(' .;')
-    return ((row.get('subject') or '').strip().casefold(), row.get('type') or '', statement,
-            _ends_elsewhere(row))
+    return ((row.get('subject') or '').strip().casefold(), row.get('type') or '', statement)
+
+
+def _fact_key(row: dict[str, str]) -> tuple[str, str, str, str]:
+    return fact_key(row) + (_ends_elsewhere(row),)
 
 
 def changed_facts(old: list[dict[str, str]], new: list[dict[str, str]]) -> list[str]:

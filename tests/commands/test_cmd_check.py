@@ -135,6 +135,114 @@ class TestCheck:
         assert e.value.code == 1
 
 
+class TestPendingAndRecheck:
+    """Phase 4: `--pending`, a re-check row keeps its prose's writer, and a
+    scene that passes re-checks what it listed."""
+
+    def test_pending_checks_every_waiting_scene_in_reading_order(self, project, monkeypatch):
+        project_dir, _ = project
+        gate.mark_pending(project_dir, 'act2-sc01', 'recheck', 'x')
+        gate.mark_pending(project_dir, SCENE, 'draft', 'y')
+        gate.mark_pending(project_dir, 'deleted-scene', 'draft', 'z')
+        seen = []
+
+        def record(project_dir, scene_id, *, command, introduced_by=None, **k):
+            seen.append((scene_id, command, introduced_by))
+            gate.clear_pending(project_dir, scene_id)
+            r = gate.GateResult(scene_id, check=None)
+            r.committed = True
+            return r
+        monkeypatch.setattr(gate, 'gate_scene', record)
+        monkeypatch.setattr(gate, '_writer', lambda pd, sid: 'draft')
+        cmd_check.main(['--pending'])
+        assert seen == [(SCENE, 'advisor', None), ('act2-sc01', 'recheck', 'draft')]
+
+    def test_pending_with_scenes_named_is_an_error(self, project):
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--pending', SCENE])
+        assert e.value.code == 1
+
+    def test_nothing_pending_is_said(self, project, capsys):
+        cmd_check.main(['--pending'])
+        assert 'Nothing is waiting on the gate' in capsys.readouterr().out
+
+    def test_a_failed_recheck_before_the_next_scene_stops_the_run(self, project, monkeypatch):
+        project_dir, _ = project
+        seen = []
+
+        def record(project_dir, scene_id, **k):
+            seen.append(scene_id)
+            r = gate.GateResult(scene_id, check=None)
+            r.committed = True
+            return r
+        monkeypatch.setattr(gate, 'gate_scene', record)
+        monkeypatch.setattr(gate, 'recheck_queue', lambda pd, skip=frozenset(): ['new-x1'])
+        monkeypatch.setattr(gate, 'recheck_pending', lambda pd, **k: gate.Recheck(
+            failed='new-x1', why='a contradiction', left=['new-x1']))
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--scenes', f'{SCENE},act2-sc01'])
+        assert e.value.code == 1 and seen == [SCENE]
+        report = open(os.path.join(project_dir, 'working', 'check-report.md')).read()
+        assert 're-check of new-x1 did not pass' in report and 'Not checked: act2-sc01' in report
+
+
+    def _passing(self, monkeypatch, seen):
+        def record(project_dir, scene_id, **k):
+            seen.append((scene_id, k.get('command')))
+            r = gate.GateResult(scene_id, check=None)
+            r.committed = True
+            return r
+        monkeypatch.setattr(gate, 'gate_scene', record)
+
+    def test_a_failed_recheck_after_the_last_scene_exits_1(self, project, monkeypatch):
+        project_dir, _ = project
+        self._passing(monkeypatch, [])
+        monkeypatch.setattr(gate, 'recheck_queue', lambda pd, skip=frozenset(): ['act2-sc01'])
+        monkeypatch.setattr(gate, 'recheck_pending', lambda pd, **k: gate.Recheck(
+            failed='act2-sc01', why='a contradiction'))
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main([SCENE])
+        assert e.value.code == 1
+
+    def test_a_failed_recheck_after_the_next_scene_does_not_stop_the_run(
+            self, project, monkeypatch):
+        project_dir, _ = project
+        seen = []
+        self._passing(monkeypatch, seen)
+        calls = []
+
+        def queue(pd, skip=frozenset()):
+            return [] if calls else ['act2-sc01']
+
+        def recheck(pd, **k):
+            calls.append(1)
+            return gate.Recheck(failed='act2-sc01', why='x')
+        monkeypatch.setattr(gate, 'recheck_queue', queue)
+        monkeypatch.setattr(gate, 'recheck_pending', recheck)
+        with pytest.raises(SystemExit):
+            cmd_check.main(['--scenes', f'act1-sc01,{SCENE}'])
+        assert [s for s, _ in seen] == ['act1-sc01', SCENE]   # SCENE is before act2-sc01
+
+    def test_over_budget_is_said_as_not_run(self, project, monkeypatch, capsys):
+        project_dir, _ = project
+        self._passing(monkeypatch, [])
+        monkeypatch.setattr(gate, 'recheck_queue', lambda pd, skip=frozenset(): ['new-x1'])
+        monkeypatch.setattr(gate, 'recheck_pending', lambda pd, **k: gate.Recheck(
+            over_budget=True, left=['new-x1'], forecast=200.0))
+        with pytest.raises(SystemExit):
+            cmd_check.main(['--scenes', f'{SCENE},act2-sc01'])
+        out = capsys.readouterr().out
+        assert 'stopped at new-x1, which was not re-checked (over the cost threshold)' in out
+
+    def test_a_failing_recheck_scene_stays_listed_as_a_recheck(self, project, monkeypatch):
+        project_dir, _ = project
+        gate.mark_pending(project_dir, 'act2-sc01', gate.RECHECK_FAILED, 'x')
+        monkeypatch.setattr(gate, '_writer', lambda pd, sid: 'draft')
+        with _api([[BAD]]), pytest.raises(SystemExit):
+            cmd_check.main(['--pending'])
+        assert gate.pending(project_dir)['act2-sc01']['command'] == gate.RECHECK_FAILED
+
+
 class TestFix:
     def test_apply_edits(self):
         assert gate.apply_edits('a b c', [{'find': 'b', 'replace': 'B'},
