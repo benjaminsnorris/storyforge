@@ -14,6 +14,13 @@ getting one fixed bundle.
   contradicts. A quote that isn't in the text it names makes the finding
   `unverified`: kept and returned apart from `findings`, never dropped, so
   the caller reports it.
+- The book's bibles (`REFERENCE_DOCS`) go in the system prompt, whole, the
+  way drafting sees them: a fact that lives only in a bible ("Marie is
+  Claire's sister") can be contradicted, and a finding against one names
+  the file as its `established_scene`. A missing, empty or unfilled
+  template bible is left out (F-130), and the prompt names what is. They
+  are sent uncapped, as drafting's shared context sends them, with their
+  own cache breakpoint; one that can't be read as UTF-8 is a `CheckError`.
 - Fails loud: a refusal, a reply cut off, a reply that isn't the schema, or
   a tool loop that never ends raises `CheckError`. There is no partial result.
 """
@@ -48,6 +55,9 @@ MAX_LEDGER_ROWS = 60
 #: A passage longer than this is cut, around the match, in a search result
 PASSAGE_CHARS = 700
 MAX_TURNS = 24
+#: The reference docs the checker reads whole (the ones drafting's shared
+#: context sends, and E4's judge reads)
+REFERENCE_DOCS = ('character-bible.md', 'world-bible.md', 'systems-bible.md')
 
 SCHEMA = {
     'type': 'object',
@@ -162,11 +172,13 @@ MIN_KEPT_WORDS = 4
 @dataclass
 class Book:
     """What the checker can look at: scene prose in reading order, the scene
-    rows, and the ledger."""
+    rows, the ledger, and the bibles (file name → text, only those with
+    the author's own text)."""
     order: dict[str, int]
     scenes: dict[str, dict[str, str]]
     prose: dict[str, str]
     rows: list[dict[str, str]]
+    reference: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls, project_dir: str, scene_id: str, prose: str | None = None,
@@ -189,13 +201,62 @@ class Book:
             texts[scene_id] = prose
         if not (texts.get(scene_id) or '').strip():
             raise CheckError(f'{scene_id} has no prose to check')
-        return cls(order, scenes, texts, ledger.load(project_dir) if rows is None else rows)
+        return cls(order, scenes, texts, ledger.load(project_dir) if rows is None else rows,
+                   reference_docs(project_dir))
 
     def where(self, sid: str, at: str) -> str:
         if sid not in self.order:
             return 'no scene'
         d = self.order[sid] - self.order[at]
         return 'this scene' if d == 0 else ('earlier' if d < 0 else 'later')
+
+
+def reference_docs(project_dir: str) -> dict[str, str]:
+    """The bibles with the author's text, by file name, in `REFERENCE_DOCS`
+    order. A missing or blank file, or one still identical to its template
+    (`common.is_unfilled_template`), is left out: a template's guidance
+    would read as the book's facts."""
+    from storyforge.common import is_unfilled_template
+    docs = {}
+    for name in REFERENCE_DOCS:
+        path = os.path.join(project_dir, 'reference', name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            # utf-8-sig drops a BOM, as is_unfilled_template does
+            with open(path, encoding='utf-8-sig') as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError) as e:
+            raise CheckError(f'reference/{name} can\'t be read as UTF-8 text ({e}); '
+                             f'the checker needs it') from e
+        if text.strip() and not is_unfilled_template(path):
+            docs[name] = text
+    return docs
+
+
+def _system(book: Book) -> list[dict] | None:
+    """The bibles as the system prompt, or None when there are none. It is
+    the same for every scene, and its own cache breakpoint lets each scene's
+    check read it from cache (the request's automatic breakpoint, at the end,
+    only serves the turns of one scene)."""
+    if not book.reference:
+        return None
+    parts = [f'<reference file="{name}">\n{text.strip()}\n</reference>'
+             for name, text in book.reference.items()]
+    return [{'type': 'text', 'text': "The book's reference material, which every scene "
+             'must agree with:\n\n' + '\n\n'.join(parts),
+             'cache_control': {'type': 'ephemeral'}}]
+
+
+def _reference_note(book: Book) -> str:
+    if not book.reference:
+        return ('The book has no reference material (no character, world or systems '
+                'bible with its own text), so check against the other scenes and the '
+                'ledger only.')
+    return ('The reference material in the system prompt (' + ', '.join(book.reference)
+            + ') also establishes facts: a scene that contradicts it is a contradiction, '
+            'with `established_scene` the file name and `established_quote` its exact '
+            'words.')
 
 
 def _search(book: Book, at: str, args: dict) -> str:
@@ -439,13 +500,13 @@ Title: {s.get('title', '')}; POV: {s.get('pov') or '-'}; location: {s.get('locat
 
 ## What to report
 
-**Contradictions.** Report each place where this scene contradicts something the book establishes elsewhere: in another scene (earlier or later) or in the ledger of recorded facts. Codes: PHY a physical state (injury, possession, where a person or object is), TIM time (dates, ages, elapsed time, time of day, durations), KNO who knows what, REL how people are related or connected, TRT a fixed trait (name, appearance, history, habit), WLD a rule or fact of the world, PRM a promise or threat a character made.
+**Contradictions.** Report each place where this scene contradicts something the book establishes elsewhere: in another scene (earlier or later), in the reference material, or in the ledger of recorded facts. {_reference_note(book)} Codes: PHY a physical state (injury, possession, where a person or object is), TIM time (dates, ages, elapsed time, time of day, durations), KNO who knows what, REL how people are related or connected, TRT a fixed trait (name, appearance, history, habit), WLD a rule or fact of the world, PRM a promise or threat a character made.
 
 Use the tools before you report anything. For every specific claim in the scene that a reader could check (a name, number, age, date, elapsed time, kinship, who knows what, where someone or something is, an injury or possession, what a character promised), search the manuscript or the ledger for where it is set up. Read a scene in full when a passage is not enough.
 
 Report only a real contradiction, both sides quoted:
 - `scene_quote`: the scene's exact words that break it, copied verbatim.
-- `established_scene` and `established_quote`: the other scene's id and its exact words, copied verbatim from a tool result; for a ledger fact with no scene, `established_scene` empty, `fact_id` its id and `established_quote` its statement.
+- `established_scene` and `established_quote`: the other scene's id and its exact words, copied verbatim from a tool result (or a reference file's name and its exact words); for a ledger fact with no scene, `established_scene` empty, `fact_id` its id and `established_quote` its statement.
 - Not a contradiction: a character who lies, misremembers or is mistaken where the text signals it; a change the story shows happening; a vision, dream or story-within-the-story that the narrative frames as such; figurative language; anything you could not find established. When in doubt, leave it out: a false report costs the author more than a miss.
 {promise_rules}
 Return every finding, and an empty list when the scene is clean."""
@@ -489,6 +550,13 @@ def _verify(f: Finding, book: Book, at: str, brief: Brief) -> str:
         return ('' if any(_whole_item(i, f.established_quote)
                           for i in brief.entering[f.fact_id])
                 else f'its established quote is not an item of the brief\'s {f.fact_id}')
+    name = os.path.basename(f.established_scene)
+    if name in book.reference:
+        f.established_scene = name
+        return ('' if _contains(book.reference[name], f.established_quote)
+                else f'its established quote is not in {name}')
+    if name in REFERENCE_DOCS:
+        return f'{name} was not given to the checker (missing, empty or still the template)'
     if f.established_scene:
         if f.established_scene not in book.prose:
             return f'{f.established_scene!r} is not a scene'
@@ -536,7 +604,7 @@ def check_scene(project_dir: str, scene_id: str, *, prose: str | None = None,
         run = converse(build_prompt(book, scene_id, brief.text, disputes),
                        model or select_model('checking'),
                        TOOLS, handlers, max_tokens=8000, max_turns=MAX_TURNS,
-                       label=f'check {scene_id}',
+                       label=f'check {scene_id}', system=_system(book),
                        output_schema=DISPUTE_SCHEMA if disputes else SCHEMA,
                        log_file=log_file)
     except RuntimeError as e:   # RefusalError, ToolLoopError, an API failure
