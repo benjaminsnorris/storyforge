@@ -239,9 +239,39 @@ class TestDraftingPrompts:
         with open(path, 'w') as f:
             f.write(text.replace('|migrated|binding|state|||||migration|fatigue|',
                                  '|migrated|rejected|state|||||migration|fatigue|'))
+        from storyforge.prompts import build_scene_prompt_from_briefs
+        prompt = build_scene_prompt_from_briefs('act1-sc02', project_dir, plugin_dir)
         checklist = self._checklist(project_dir, plugin_dir)
-        assert 'exhausted' not in checklist and checklist.count('- [ ]') == 1
-        assert 'exhaustion-tessa is rejected' in capsys.readouterr().out
+        assert 'exhaust' not in prompt and checklist.count('- [ ]') == 1
+        assert 'physical_state_out: exhaustion-tessa (rejected)' in capsys.readouterr().out
+
+    def test_a_rejected_entering_state_is_not_drafted_from(self, project_dir, plugin_dir,
+                                                          capsys):
+        from storyforge.prompts import build_scene_prompt_from_briefs
+        path = os.path.join(project_dir, 'reference', 'commitments.csv')
+        with open(path) as f:
+            text = f.read()
+        with open(path, 'w') as f:
+            f.write(text.replace('|migrated|binding|state|||||migration|equipment|',
+                                 '|migrated|rejected|state|||||migration|equipment|'))
+        prompt = build_scene_prompt_from_briefs('act2-sc03', project_dir, plugin_dir)
+        assert 'holds the restricted archive key' not in prompt.split('## Task')[0]
+        assert 'archive-key-dorren (rejected)' in capsys.readouterr().out
+
+    def test_a_rejected_knowledge_fact_is_not_in_the_must_know_line(self, project_dir,
+                                                                    plugin_dir):
+        from storyforge.prompts import build_scene_prompt_from_briefs
+        from storyforge.elaborate import get_scene
+        ref = os.path.join(project_dir, 'reference')
+        out = (get_scene('act1-sc01', ref) or {}).get('knowledge_out', '').split(';')[0].strip()
+        assert out
+        rows = ledger.load(project_dir)
+        for r in rows:
+            if r['id'] == out:
+                r['status'] = 'rejected'
+        ledger.save(project_dir, rows, command='test')
+        prompt = build_scene_prompt_from_briefs('act1-sc01', project_dir, plugin_dir)
+        assert out not in prompt
 
     def test_only_full_coaching_gets_the_checklist(self, project_dir, plugin_dir):
         assert self._checklist(project_dir, plugin_dir, 'coach') is None

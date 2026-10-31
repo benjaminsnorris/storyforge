@@ -592,3 +592,50 @@ class TestRecheckReview468:
         gate.mark_pending(project_dir, self.LATER, 'recheck', 'x')
         run = gate.recheck_pending(project_dir, log_dir=str(tmp_path), spent_before=0.9)
         assert run.over_budget and seen == ['act1-sc02', self.LATER]
+
+
+class TestRejected:
+    """Phase 4 §4 (#470's review): a rejected commitment stays; prose that
+    restates it doesn't pass; a revision listed after a rejection lists the
+    scenes that depend on it."""
+    LATER = 'act2-sc01'
+    _add = TestRecheck._add
+    _mine = TestRecheck._mine
+
+    def _reject(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow')])
+        rows = ledger.load(project_dir)
+        mine = next(r for r in rows if r['scene_id'] == SCENE and ledger.is_commitment(r))
+        mine['status'] = 'rejected'
+        ledger.save(project_dir, rows, command='test')
+        return mine['id']
+
+    def test_restating_a_rejected_fact_does_not_pass_and_keeps_the_row(self, project_dir,
+                                                                       tmp_path):
+        rid = self._reject(project_dir, tmp_path)
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow')],
+                       command='redraft')
+        assert not result.passed and not result.committed
+        assert any(f'restates {rid}' in x for x in result.unresolved)
+        assert any('rejected' in x for x in gate.problems_to_fix(result))
+
+    def test_a_revision_keeps_the_rejected_row_and_lists_dependents(self, project_dir,
+                                                                    tmp_path):
+        rid = self._reject(project_dir, tmp_path)
+        self._add(project_dir, id='later-fact', scene_id=self.LATER, type='world',
+                  subject='tarrens-hollow', statement='The hollow is empty')
+        gate.mark_pending(project_dir, SCENE, gate.REVISE_REJECTED, f'x [rejected: {rid}]')
+        result = _gate(project_dir, tmp_path, [_commitment(
+            subject='tarrens-hollow', statement='The hollow had 300 people')], command='redraft')
+        assert result.committed
+        rows = {r['id']: r for r in ledger.load(project_dir)}
+        assert rows[rid]['status'] == 'rejected'                 # the record stays
+        assert rid in result.changed and result.recheck == [self.LATER]
+        assert SCENE not in gate.pending(project_dir)
+
+    def test_a_failed_check_keeps_a_revise_row_and_its_ids(self, project_dir):
+        gate.mark_pending(project_dir, SCENE, gate.REVISE_REJECTED, 'x [rejected: a]')
+        gate.mark_pending(project_dir, SCENE, 'advisor', '2 problem(s)')
+        row = gate.pending(project_dir)[SCENE]
+        assert row['command'] == gate.REVISE_REJECTED and gate.rejected_ids(row) == ['a']
+        assert row['reason'].startswith('2 problem(s)')

@@ -584,11 +584,13 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
     # column resolves against that type's ids only, so a physical state's id
     # never passes as a knowledge fact.
     registries: dict[str, dict] = {}
+    ledger_status: dict[str, str] = {}
     mice_alias: dict[str, str] = {}
     mice_type_map: dict[str, str] = {}
     if project_dir:
         reg_dir = os.path.join(project_dir, 'reference')
         ledger_rows = ledger.load_from(reg_dir)
+        ledger_status = {r['id']: r.get('status', '') for r in ledger_rows}
         for col_schema in COLUMN_SCHEMA.values():
             if col_schema['type'] == 'registry':
                 csv_name = _registry_key(col_schema)
@@ -718,9 +720,27 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
 
                     bad = _check_registry(value, alias_map,
                                           schema.get('array', False))
-                    if not bad:
+                    stale = [] if not schema.get('ledger_type') else [
+                        f'{item} ({ledger_status[alias_map[item.lower()]]})'
+                        for item in ([e.strip() for e in value.split(';') if e.strip()]
+                                     if schema.get('array') else [value.strip()])
+                        # an invalid status is the ledger check's to report
+                        if ledger_status.get(alias_map.get(item.lower(), ''), 'binding')
+                        in ('rejected', 'superseded', 'pending')]
+                    if stale:
+                        # The fact exists but no longer holds (the author
+                        # rejected it, or it was superseded): drafting and
+                        # the checker leave it out, so the brief is stale
+                        failed += 1
+                        errors.append({
+                            'file': filename, 'row': scene_id, 'column': col,
+                            'value': value, 'constraint': 'ledger',
+                            'reason': f'{scene_id} | {col}: names fact(s) that are no '
+                                      f'longer binding: {", ".join(stale)}',
+                        })
+                    if not bad and not stale:
                         passed += 1
-                    else:
+                    elif bad:
                         failed += 1
                         errors.append({
                             'file': filename,
