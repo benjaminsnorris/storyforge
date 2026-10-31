@@ -66,6 +66,11 @@ def parse_args(argv):
                              'is gated (nothing checks it against the book)')
     parser.add_argument('--coaching', choices=['full', 'coach', 'strict'],
                         help='Set coaching level')
+    parser.add_argument('--prior-prose', choices=['window', 'full', 'none'],
+                        help='Earlier prose each scene is drafted with: the preceding scene '
+                             'and the latest scene of each thread it carries (window, the '
+                             'default), the whole manuscript so far (full), or none. '
+                             'Default: storyforge.yaml drafting.prior_prose, else window')
     parser.add_argument('--interactive', '-i', action='store_true',
                         help='Draft with supervision')
     parser.add_argument('--scenes', type=str, default=None,
@@ -208,6 +213,18 @@ def main(argv=None):
 
     # Detect briefs
     use_briefs = _detect_briefs(project_dir)
+    from storyforge.prompts import prior_prose_mode
+    try:
+        prior_prose = prior_prose_mode(project_dir, args.prior_prose)
+    except ValueError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    if write_mode == 'batch':
+        log('Prior prose: none (batch drafts every scene at once)')
+    elif write_mode == 'interactive':
+        log('Prior prose: none (interactive drafting has no system prompt to carry it)')
+    else:
+        log(f'Prior prose: {prior_prose}')
 
     # Main drafting
     drafted_count = 0
@@ -224,7 +241,7 @@ def main(argv=None):
         drafted_count, total_words, failed = _run_direct_mode(
             pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
             coaching, use_briefs, args.force, filter_mode, write_mode,
-            args.dry_run,
+            args.dry_run, prior_prose=prior_prose,
         )
 
     # Session summary
@@ -795,7 +812,7 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
 def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                      metadata_csv, coaching, use_briefs, force, filter_mode,
-                     write_mode, dry_run):
+                     write_mode, dry_run, prior_prose='none'):
     """Run direct/interactive mode. Returns (drafted_count, total_words,
     failed), ``failed`` naming each scene not drafted and why. An API failure
     ends the loop, and that scene and every later one go into ``failed``.
@@ -870,9 +887,23 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             log('Stopping — prompt generation failed.')
             sys.exit(1)
 
+        # Earlier prose follows the shared context in the system prompt (direct
+        # API mode, which is the only mode with a system prompt)
+        from storyforge.prompts import prior_prose_blocks, prior_scenes
+        scene_system = system
+        if system:
+            prior = prior_prose_blocks(scene_id, project_dir, prior_prose)
+            scene_system = list(system) + prior
+            if prior:
+                log(f'Prior prose: {len(prior) - 1} earlier scene(s)')
+
         # Dry-run mode
         if dry_run:
             print(f'===== DRY RUN: {scene_id} =====')
+            earlier = prior_scenes(scene_id, project_dir, prior_prose)
+            if earlier:
+                print(f'(A direct run also sends the prose of {len(earlier)} earlier '
+                      f'scene(s) in the system prompt, {prior_prose}: {", ".join(earlier)})')
             print(prompt)
             print(f'===== END DRY RUN: {scene_id} =====')
             print()
@@ -909,7 +940,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             try:
                 invoke_to_file(prompt, model, scene_log, max_tokens,
                                label=f'drafting {scene_id}',
-                               system=system or None, fallback=True)
+                               system=scene_system or None, fallback=True)
                 exit_code = 0
             except RefusalError:
                 exit_code = 0  # logged to scene_log; the extract below names it

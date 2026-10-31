@@ -64,6 +64,7 @@ def run(ctx):
     notes.append('The gate\'s checker and the judge are both Opus continuity reviews, so '
                  'part of a CP10k drop may be the two agreeing; the human spot-check is '
                  'still owed.')
+    notes.append(f'Prior prose: {e4.prior_prose(project)}.')
     notes.append('Judge stands in for the plan\'s human spot-check (still owed). '
                  'Drafted sequentially and gated, as write does by default; batch mode '
                  'is refused under a cassette.')

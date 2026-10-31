@@ -278,7 +278,13 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
         from storyforge.common import build_shared_context
         system = build_shared_context(project_dir, model=model)
 
-    log(f'  Redrafting {len(scene_ids)} scenes from updated briefs...')
+    from storyforge.prompts import prior_prose_blocks, prior_prose_mode
+    try:
+        prior_prose = prior_prose_mode(project_dir)
+    except ValueError as e:
+        raise RedraftError(f'{len(scene_ids)} scene(s) not re-drafted: {e}') from e
+    log(f'  Redrafting {len(scene_ids)} scenes from updated briefs (prior prose: '
+        f'{prior_prose})...')
     served_before = len(fallback_replies())
     scenes_dir = os.path.join(project_dir, 'scenes')
     failed: list[str] = []
@@ -298,9 +304,11 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
             failed.append(f'{sid} (no prompt)')
             continue
         log_file = os.path.join(log_dir, f'redraft-{sid}.json')
+        scene_system = (list(system) + prior_prose_blocks(sid, project_dir, prior_prose)
+                        if system else system)
         try:
             _invoke_to_file(prompt, model, log_file, max_tokens=16384,
-                            label=f'redraft {sid}', system=system or None,
+                            label=f'redraft {sid}', system=scene_system or None,
                             fallback=True)
         except RefusalError:
             pass  # logged to log_file; the extract below names it
