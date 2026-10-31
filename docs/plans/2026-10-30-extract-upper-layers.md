@@ -1,6 +1,6 @@
 # Extract the upper reference layers (#440, F-130 part 2)
 
-Status (2026-10-30): PR 0 (#442, v1.101.1) and PR 1 (#444, v1.102.0) are merged: the write gate, and steps 5a and 5b. PR 2 (#446, v1.103.0) adds 5c; PR 3 (#447, v1.104.0) adds 5d–5f, run one after another rather than in parallel (`write_described` updates one shared provenance record; three ~1-minute calls don't justify locking). Next is PR 4 (5g and E9). Live on *Carol*, 5a/5b wrote an 8-event spine, 20 anchors, 6 themes and 26 motifs for $0.79 across three runs, and the L3/L4 floors pass; 5a–5c from a clean copy cost $0.44 (5c $0.15) and pass L0–L4; 5a–5f on the E2 *Carol* book (with prose) cost $0.99. Handoff: `docs/plans/2026-10-28-rethink-status.md`, Next steps 2.
+Status (2026-10-30): PR 0 (#442, v1.101.1) and PR 1 (#444, v1.102.0) are merged: the write gate, and steps 5a and 5b. PR 2 (#446, v1.103.0) adds 5c; PR 3 (#447, v1.104.0) adds 5d–5f, run one after another rather than in parallel (`write_described` updates one shared provenance record; three ~1-minute calls don't justify locking). PR 4 (#448, v1.105.0) adds 5g and the E9 replay suite. Next is the hand-off to storyforge-evals. Live on *Carol*, 5a/5b wrote an 8-event spine, 20 anchors, 6 themes and 26 motifs for $0.79 across three runs, and the L3/L4 floors pass; 5a–5c from a clean copy cost $0.44 (5c $0.15) and pass L0–L4; 5a–5f on the E2 *Carol* book (with prose) cost $0.99. Handoff: `docs/plans/2026-10-28-rethink-status.md`, Next steps 2.
 
 ## Goal
 
