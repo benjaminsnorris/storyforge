@@ -550,7 +550,8 @@ def _detect_briefs(project_dir: str) -> bool:
 
 
 def _build_prompt(scene_id: str, project_dir: str, coaching: str,
-                  use_briefs: bool, system_context: bool = False) -> str:
+                  use_briefs: bool, system_context: bool = False,
+                  rewrite: bool = False) -> str:
     """Build the drafting prompt for a scene.
 
     Args:
@@ -560,6 +561,9 @@ def _build_prompt(scene_id: str, project_dir: str, coaching: str,
         use_briefs: Whether to use brief-aware prompts.
         system_context: When True, shared reference material is provided via
             the API system parameter and should not be inlined in the prompt.
+        rewrite: The scene is being redrafted (rethink plan §3.4): its current
+            prose, if it has any, goes in the brief-aware prompt as a voice
+            reference only (`current_prose`).
     """
     from storyforge.common import get_plugin_dir
     plugin_dir = get_plugin_dir()
@@ -570,14 +574,27 @@ def _build_prompt(scene_id: str, project_dir: str, coaching: str,
         scene = get_scene(scene_id, os.path.join(project_dir, 'reference'))
         deps = scene.get('continuity_deps', '') if scene else ''
         dep_scenes = [d.strip() for d in deps.split(';') if d.strip()] if deps else None
+        voice = current_prose(project_dir, scene_id) if rewrite and coaching == 'full' else ''
         return build_scene_prompt_from_briefs(scene_id, project_dir, plugin_dir,
                                               coaching, dep_scenes=dep_scenes,
-                                              system_context=system_context)
+                                              system_context=system_context,
+                                              voice_reference=voice)
     else:
         from storyforge.prompts import build_scene_prompt
         return build_scene_prompt(scene_id, project_dir, coaching,
                                   api_mode=True,
                                   system_context=system_context)
+
+
+def current_prose(project_dir: str, scene_id: str) -> str:
+    """The scene's prose on disk without illustration markers (they are
+    never prose), '' when it has none."""
+    from storyforge.illustrations import strip_markers
+    path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
+    if not os.path.isfile(path):
+        return ''
+    with open(path, encoding='utf-8') as f:
+        return strip_markers(f.read()).strip()
 
 
 def _output_file(project_dir: str, scene_id: str, coaching: str) -> str:
@@ -939,8 +956,10 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                                   f'pass the gate)')
                 break
 
+        # a redraft (`--force` over prose) is a rewrite: the old prose is its
+        # voice reference
         prompt = _build_prompt(scene_id, project_dir, coaching, use_briefs,
-                               system_context=bool(system))
+                               system_context=bool(system), rewrite=True)
         if not prompt:
             log(f'ERROR: Failed to build prompt for scene {scene_id}')
             log('Stopping — prompt generation failed.')

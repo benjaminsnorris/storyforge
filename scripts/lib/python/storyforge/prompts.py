@@ -1544,6 +1544,7 @@ def build_scene_prompt_from_briefs(
     coaching_level: str = 'full',
     dep_scenes: list[str] | None = None,
     system_context: bool = False,
+    voice_reference: str = '',
 ) -> str:
     """Build a drafting prompt from the three-file scene CSV model.
 
@@ -1562,6 +1563,11 @@ def build_scene_prompt_from_briefs(
         system_context: When True, shared reference material (voice guide,
             character bible, AI-tell vocabulary, voice profile) is provided
             via the API ``system`` parameter and should NOT be inlined.
+        voice_reference: The scene's current prose, for a rewrite (rethink
+            plan §3.4, Phase 4 PR 5: rewrites draft from the plan and the
+            binding ledger, the old prose a voice reference only). Shown at
+            ``full`` coaching, after the facts and before the task, with
+            illustration markers already stripped by the caller.
     """
     from .elaborate import get_scene, get_scenes
 
@@ -1745,12 +1751,27 @@ def build_scene_prompt_from_briefs(
 
     states_checklist = _states_checklist(scene, ref_dir)
 
+    rewrite_block = ''
+    rewrite_line = ''
+    if coaching_level == 'full' and voice_reference.strip():
+        rewrite_block = (
+            '## The Current Draft (voice reference only)\n\n'
+            'This scene already has a draft, below, and you are rewriting it. Take its '
+            'voice: the narration\'s register, rhythm and diction, and how the POV '
+            'character thinks and speaks. Take nothing else from it. What happens and '
+            'what is true comes from the brief and the Established Facts above: where '
+            'the draft differs from them, they win. Do not copy its sentences or follow '
+            'its structure.\n\n'
+            f'<current_draft>\n{voice_reference.strip()}\n</current_draft>\n\n')
+        rewrite_line = ('\nThis is a rewrite: the facts come from the brief and the '
+                        'Established Facts, the voice from the current draft.\n')
+
     # Coaching-specific instructions
     if coaching_level == 'full':
         task_block = f"""## Task
 
 Write the complete prose for scene **{scene_id}** ("{scene.get('title', '')}").
-{word_target_line}
+{word_target_line}{rewrite_line}
 
 The brief is your contract. Deliver:
 - The value shift specified ({scene.get('value_shift', '')})
@@ -1844,7 +1865,7 @@ Do NOT add creative interpretation or suggestions."""
 
 {register_line}
 
-{task_block}
+{rewrite_block}{task_block}
 """
 
 

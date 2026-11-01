@@ -302,7 +302,7 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
             failed += [stop] + _not_reached(scene_ids[i:])
             break
         prompt = _build_prompt(sid, project_dir, 'full', use_briefs=True,
-                               system_context=bool(system))
+                               system_context=bool(system), rewrite=True)
         if not prompt:
             log(f'    ERROR: Could not build a prompt for {sid}')
             failed.append(f'{sid} (no prompt)')
@@ -1661,7 +1661,10 @@ class RedraftError(Exception):
 
 
 def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
-    """Re-draft scenes after brief rewrites using brief-aware drafting.
+    """Re-draft scenes after brief rewrites using brief-aware drafting:
+    `write`'s prompt (`cmd_write._build_prompt`) as a rewrite, the old prose
+    its voice reference only (plan §3.4), with the earlier prose in the
+    system prompt as `_redraft_from_briefs` sends it.
 
     Only re-drafts scenes that already have a scene file. A reply that fails
     ``parsing.unsafe_scene_reason`` (truncated, or a collapsed word count) is
@@ -1672,9 +1675,17 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     the gate doesn't pass, which RedraftError names with the scenes not
     reached. Returns number of scenes re-drafted.
     """
-    from storyforge.prompts import build_scene_prompt
+    from storyforge.cmd_write import _build_prompt, _detect_briefs
     from storyforge.common import get_coaching_level, build_shared_context
     from storyforge.parsing import extract_single_scene, unsafe_scene_reason
+    from storyforge.prompts import prior_prose_blocks, prior_prose_mode
+    from storyforge import ledger
+    try:
+        prior_prose = prior_prose_mode(project_dir)
+        if prior_prose != 'none':
+            ledger.scene_order(project_dir)
+    except ValueError as e:
+        raise RedraftError(f'{len(scene_ids)} scene(s) not re-drafted: {e}') from e
 
     scenes_dir = os.path.join(project_dir, 'scenes')
     coaching_level = get_coaching_level(project_dir)
@@ -1702,16 +1713,26 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
         with open(scene_file, encoding='utf-8') as f:
             original_prose = f.read()
         try:
-            prompt = build_scene_prompt(scene_id, project_dir,
-                                        coaching_level=coaching_level, api_mode=True,
-                                        system_context=bool(system))
+            # a rewrite from the fixed brief and the binding ledger, the old
+            # prose its voice reference (plan §3.4), as `_redraft_from_briefs`
+            # and `write --force` draft it, with the earlier prose before it
+            prompt = _build_prompt(scene_id, project_dir, coaching_level,
+                                   use_briefs=_detect_briefs(project_dir),
+                                   system_context=bool(system), rewrite=True)
+            scene_system = (list(system) + prior_prose_blocks(scene_id, project_dir,
+                                                              prior_prose)
+                            if system else system)
         except Exception as e:
             log(f'  ERROR: Could not build prompt for {scene_id}: {e}')
             failed.append(f'{scene_id} (no prompt: {e})')
             continue
+        if not prompt:
+            log(f'  ERROR: Could not build prompt for {scene_id}')
+            failed.append(f'{scene_id} (no prompt)')
+            continue
 
         response = invoke_api(prompt, model, max_tokens=16384,
-                              label=f'redraft {scene_id}', system=system or None,
+                              label=f'redraft {scene_id}', system=scene_system or None,
                               fallback=True)
         if not response:
             log(f'  ERROR: No response for {scene_id} re-draft')

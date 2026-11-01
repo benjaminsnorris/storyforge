@@ -24,7 +24,7 @@ def _redraft(project_dir, ids, reply):
     from storyforge.cmd_revise import _redraft_scenes
     with patch('storyforge.cmd_revise.invoke_api', return_value=reply), \
          patch('storyforge.cmd_revise.select_model', return_value='claude-sonnet-5-5'), \
-         patch('storyforge.prompts.build_scene_prompt', return_value='fake prompt'), \
+         patch('storyforge.cmd_write._build_prompt', return_value='fake prompt'), \
          patch('storyforge.common.get_coaching_level', return_value='full'):
         return _redraft_scenes(project_dir, ids)
 
@@ -49,7 +49,7 @@ def test_safe_scenes_are_written_before_the_error(project_dir):
     from storyforge.cmd_revise import _redraft_scenes
     with patch('storyforge.cmd_revise.invoke_api', side_effect=lambda *a, **k: next(responses)), \
          patch('storyforge.cmd_revise.select_model', return_value='claude-sonnet-5-5'), \
-         patch('storyforge.prompts.build_scene_prompt', return_value='fake prompt'), \
+         patch('storyforge.cmd_write._build_prompt', return_value='fake prompt'), \
          patch('storyforge.common.get_coaching_level', return_value='full'):
         _scene(project_dir, 'b', LONG)
         with pytest.raises(RedraftError, match='1 scene'):
@@ -63,7 +63,7 @@ def test_redraft_or_halt_exits(project_dir):
     _scene(project_dir, 'kept', LONG)
     with patch('storyforge.cmd_revise.invoke_api', return_value='cut off'), \
          patch('storyforge.cmd_revise.select_model', return_value='claude-sonnet-5-5'), \
-         patch('storyforge.prompts.build_scene_prompt', return_value='fake prompt'), \
+         patch('storyforge.cmd_write._build_prompt', return_value='fake prompt'), \
          patch('storyforge.common.get_coaching_level', return_value='full'), \
          pytest.raises(SystemExit):
         _redraft_or_halt(project_dir, ['kept'])
@@ -111,7 +111,7 @@ def test_a_redraft_opts_into_the_refusal_fallback(project_dir):
     _scene(project_dir, 'a', LONG)
     with patch('storyforge.cmd_revise.invoke_api', return_value=LONG + ' New.') as api, \
          patch('storyforge.cmd_revise.select_model', return_value='claude-sonnet-5-5'), \
-         patch('storyforge.prompts.build_scene_prompt', return_value='fake prompt'), \
+         patch('storyforge.cmd_write._build_prompt', return_value='fake prompt'), \
          patch('storyforge.common.get_coaching_level', return_value='full'):
         _redraft_scenes(project_dir, ['a'])
     assert api.call_args.kwargs['fallback'] is True
