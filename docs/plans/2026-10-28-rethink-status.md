@@ -1,8 +1,29 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-31 (late night), at v1.119.0. **Phase 3 is done** and **Phase 4 PRs 1, 2, 3a, 3b, 3c and 4 are done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate). **The re-check-set gate passes (recall 0.92). E8 is at 6 reintroduced (was 7), 5 of them unflagged by the gate:** what is left is the checker's recall, not an ungated pass. Next is **PR 5, rewrite-from-ledger** (E5), and the E8 misses (below). **A fresh session starts here:** read **Latest**, then the Phase 4 design note's "PRs, in order", then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-10-31 (late night), at v1.120.0. **Phase 3 is done** and **Phase 4's five PRs are done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, PR 5 rewrite-from-ledger). Phase 4's criteria: **re-check set recall 0.92 (met); E5 on rewritten scenes 1.3 per scene, ≤ 2.3 (met); E8 at zero (not met: 6 reintroduced, 4 the gate passes)**. Next is the E8 misses (below). **A fresh session starts here:** read **Latest**, then the Phase 4 design note's "PRs, in order", then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
-## Latest: every prose pass through the gate (2026-10-31 late night, Phase 4 PR 4)
+## Latest: rewrite-from-ledger (2026-10-31 late night, Phase 4 PR 5)
+
+**v1.120.0.** Plan §3.4: rewrites draft from the plan and the binding ledger, the old prose a voice reference only.
+- **What changed:** a redraft (`write --force` over prose, revise's `_redraft_from_briefs` and `_redraft_scenes`) sends the scene's prose, illustration markers stripped, in a "Current Draft (voice reference only)" block: take its voice, nothing else; the brief and Established Facts win. The scene's own facts were already in "Established in this scene so far". A fresh draft's prompt is byte-identical (E4 replays).
+- **Fixed on the way:** `_redraft_scenes` (the redraft after revise's upstream brief fix) used the old prompt, with neither the fixed brief's fact columns nor the ledger nor the earlier prose; it now drafts as `_redraft_from_briefs` does.
+- **E5:** the headline is now the rewrite; the old measure (plan and ledger alone) is `ledger_only.*`. A gate at Phase 2's level is added.
+
+| | ledger only (the old E5) | rewrite |
+|---|---|---|
+| mismatches (per scene) | 37 (3.7) | **13 (1.3)**, gate ≤ 2.3 |
+| PHY | 32 | 6 |
+| sentences verbatim from the original | 3.4% | 4.9% |
+
+  The rewrite keeps facts, it doesn't copy (replayed from the recordings: whole sentences of 6+ words).
+- **E8** (all redraft families re-recorded, $28.96): reintroduced **6** (as after #475), the gate stops 2 of them (was 1), so **4 pass it unflagged** (was 5). Moved: governor-026 newly reintroduced (Tam Erdel "seven years old" in a redraft), shared-dark-040 no longer; governor-025 no longer refused. One run: within E8's run-to-run spread (E6).
+  - The 4 unflagged: governor-016 (WLD, Block Fourteen), governor-026 (TRT, Tam's age), thornwall-026 (TRT, the Greenhollow Warden), all `redraft-from-brief`; thornwall-020 (TIM, `revision-plan`).
+- **Spend:** E5 $1.94, E8 $28.96.
+
+**Next, in order:** **E8 to zero**, Phase 4's open criterion: read the 4 unflagged cases' gate logs (does the checker search the established scene; would phase 4 commitments on the pre-pass tree catch them), then decide what to change (the checker, or E8's trees getting commitments). Then the smaller items: a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost; the low-confidence halt; `characters.csv` `pronouns`; E4 over 2–3 runs.
+
+
+## Every prose pass through the gate (2026-10-31 late night, Phase 4 PR 4)
 
 **v1.119.0.** Until now only redraft-from-brief was gated (#456); a polish, craft or naturalness pass wrote its scenes and committed them unchecked.
 - **`revise`:** every prose pass (the main pass loop, API or interactive, and the polish loop's pass; prose written at any coaching level) lists the scenes it rewrote pending ("not gated yet") and commits them, then gates them in reading order (`_gate_pass_scenes`: `write`'s `_gate_drafted_scene`, command `revise`, fix once, re-check), re-checking after each the later scenes it listed. The session stops (exit 1, the pass's scenes and completed status committed) at the first scene the gate doesn't pass or that waits behind a pending scene (a re-check that failed mid-pass), and after a re-check that failed or wasn't run: that scene is listed with the gate's reasons, the pass's later scenes as "revised by pass X but not gated", and scenes awaiting the session's deferred redraft are named. A pass won't start (or spend) behind a pending scene before its first target, or a non-re-check one between its targets. Illustration markers the gate's fix drops are restored (shared with the redraft path). The polish loop's prompt now carries its coaching level (it asked for prose at every level).
@@ -203,7 +224,7 @@ Run 4's 26 contradictions: 12 in scenes the gate failed, 14 in scenes it passed,
   - **Success criteria (plan §5):** E3 recall ≥ 0.85: **met, 0.898** (was 0.286). Export round-trips: **met** (`evals/export_check.py`: 7 of 7 books byte-identical). E5 mismatches below baseline: **met, 64 → 23** (6.4 → 2.3 per scene; v1.97.0). E4 did not get worse (CP10k 16.1 → 14.2, contradictions 35 → 31, 23/23 drafted). E8 unchanged (reintroduced 6, per 10k words 1.74 → 1.69).
   - **Drafting reads the ledger** (v1.97.0): `build_scene_prompt_from_briefs` (write and revise's redraft-from-brief) has an "Established Facts" section from `ledger.drafting_slice`: for the POV, on-stage characters and location, `pronouns` from characters.csv, `fixed` facts before the scene, states entering it (at most `prompts.MAX_STATES_PER_SUBJECT` = 25 each, the rest named), and the scene's own facts ("the brief wins where they differ"). E5 now runs extract phase 4 over its sample first (10 Sonnet calls), so the redraft sees the prose's commitments. **Not like-for-like with the old E5 number:** part of the fall is the redraft being shown facts read off the prose it is judged against, which is the design (a pinned fact should survive a redraft). The character bible is still sent whole: slimming it to fixed facts + voice is author data, left for Ben.
 - **Phase 3 (the gate and sequential loop): done** (v1.114.0; see **Latest**): E4 CP10k 3.1 and 3 broken promises (targets ≤ 7.1, ≤ 3), E2 checker precision 0.81 (≥ 0.8); sequential kept, `--batch` refuses prose.
-- **Phase 4 (safe revision): in progress** (v1.119.0). Design and Ben's decisions: `docs/plans/2026-10-31-phase4-safe-revision-design.md`; its "PRs, in order" is the plan. Done: PR 1 (#466), PR 2 (#468), PR 3a (#470), PR 3b (#473, the eval), PR 3c (#474, the wider graph: recall 0.92), PR 4 (#475, every prose pass through the gate: E8 7 → 6). **Next: PR 5** (rewrite-from-ledger, E5), then the 5 E8 reintroductions the gate passes.
+- **Phase 4 (safe revision): PRs done, E8 open** (v1.120.0). Design and Ben's decisions: `docs/plans/2026-10-31-phase4-safe-revision-design.md`; its "PRs, in order" is the plan. Done: PR 1 (#466), PR 2 (#468), PR 3a (#470), PR 3b (#473, the eval), PR 3c (#474, the wider graph: recall 0.92), PR 4 (#475, every prose pass through the gate: E8 7 → 6), PR 5 (rewrite-from-ledger: E5 rewritten 1.3 per scene). **Next:** the 4 E8 reintroductions the gate passes.
 
 **What exists now, for orientation** (contracts in `docs/agent-reference.md`):
 - **Ledger:** `ledger.load`/`save(…, command=)` (every save appends to `working/audit-log.csv`); typed views `knowledge_view`/`physical_view` (registry rows only, which briefs reference by id); `active_states`, `established_before`, `scene_order`, `drafting_slice` (a scene's share, for the drafting prompt); `LedgerError` / `NotMigratedError`.
@@ -222,7 +243,7 @@ Run 4's 26 contradictions: 12 in scenes the gate failed, 14 in scenes it passed,
 | 5 Phase 1 | done | #359–#405 |
 | 6 Phase 2 | done | #401, #416, #417, #420–#424, #430, #432 |
 | 7 Phase 3 | done | #436, #437, #439, #443, #450, #453–#458, #461–#463 |
-| 8 Phase 4 | PRs 1–4 done; 5 next | #465, #466, #468, #470, #473, #474, #475 |
+| 8 Phase 4 | PRs 1–5 done; E8 open | #465, #466, #468, #470, #473, #474, #475 |
 
 ## Next steps, in order (handoff for a new session)
 
