@@ -49,7 +49,7 @@ def test_flags_are_matched_to_verdicts_and_unlabeled_ones_are_unreviewed(fixture
     out = e7.run(_ctx(tmp_path))
     assert out.metrics['false_positive'] == 1 and out.metrics['deliberate'] == 1
     assert out.metrics['unreviewed'] == 1 and out.metrics['noise'] == 3
-    assert {g.name: g.passed for g in out.gates} == {'unreviewed': False, 'noise': False}
+    assert {g.name: g.passed for g in out.gates} == {'unreviewed': False, 'noise': True}
     assert any('brand new' in n for n in out.notes)
     assert out.by_code == {'PHY': {'false-positive': 1, 'unreviewed': 1}, 'TIM': {'deliberate': 1}}
 
@@ -83,3 +83,30 @@ def test_each_book_reproduces_every_labeled_validate_flag(book, tmp_path):
                        for f in e7.continuity_flags(
                            e7.migrated(ref, str(tmp_path), f'{book}/{run}'))}
     assert raised == set(labels)
+
+
+def test_noise_over_the_ceiling_fails_and_under_it_says_to_lower_it(fixtures, tmp_path, monkeypatch):
+    _book(fixtures, None, ['A|run1|validate:x|s1|PHY|a|false-positive||false-positive\n',
+                           'A|run1|validate:x|s2|PHY|b|false-positive||false-positive\n'])
+    monkeypatch.setattr(e7, 'continuity_flags', lambda ref: [_flag('a'), _flag('b', 's2')])
+    monkeypatch.setattr(e7, 'NOISE_CEILING', 1)
+    out = e7.run(_ctx(tmp_path))
+    assert {g.name: g.passed for g in out.gates} == {'unreviewed': True, 'noise': False}
+    monkeypatch.setattr(e7, 'NOISE_CEILING', 3)
+    out = e7.run(_ctx(tmp_path / 'again'))
+    assert all(g.passed for g in out.gates)
+    assert out.notes[0].startswith('noise 2 is under the ceiling 3: lower NOISE_CEILING to 2')
+
+
+def test_the_ceiling_is_the_replayed_count(tmp_path):
+    """The gate holds noise to the count it has; a change that removes flags
+    lowers the ceiling with it, so the gate never has slack to hide new noise."""
+    out = e7.run(_ctx(tmp_path))
+    assert out.metrics['noise'] == e7.NOISE_CEILING
+    assert all(g.passed for g in out.gates)
+
+
+def test_ci_runs_e7():
+    workflow = (PLUGIN_DIR / '.github' / 'workflows' / 'e7-classics.yml').read_text()
+    assert 'evals/run.py --suite e7-classics' in workflow
+    assert 'pull_request' in workflow

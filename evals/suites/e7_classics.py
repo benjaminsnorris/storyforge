@@ -8,6 +8,14 @@ every flag that is not ``real`` is noise; the target is none. A flag with no
 verdict is ``unreviewed`` — a new kind of noise, or a real find — and needs the
 author before it can be counted either way, so it fails the suite too.
 
+The target is no noise, but the gate is that noise doesn't grow: at most
+``NOISE_CEILING``, today's count (plan Phase 5: "E7 false-positive rate stable
+across releases"). A zero gate failed on every run, so a failing E7 said
+nothing. The ceiling only comes down: a change that removes flags lowers it in
+the same commit (``tests/test_evals_e7.py`` holds it to the replayed count).
+E7 makes no API calls and needs only the standard library, so CI runs it on
+every pull request (``.github/workflows/e7-classics.yml``).
+
 Covers A Christmas Carol's two extraction runs and The Plastic Age's one, and
 the deterministic validator only. ``timeline --check`` flags (8 of Carol's 58
 labeled, 5 of The Plastic Age's 60) need API calls and are not replayed yet;
@@ -24,6 +32,10 @@ from harness import EVALS_DIR, Gate, Suite, SuiteOutput, migrate_tree
 FIXTURES = os.path.join(EVALS_DIR, 'fixtures', 'e7')
 CONTINUITY_CATEGORIES = ('physical_state', 'timeline', 'knowledge')
 VERDICTS = ('real', 'deliberate', 'extraction-error', 'false-positive')
+
+#: Noise the gate allows: the count at v1.122.0 (96 false positives, 2
+#: deliberate, 7 extraction errors). Lower it when a change removes flags.
+NOISE_CEILING = 105
 
 
 def book_snapshots():
@@ -86,13 +98,16 @@ def run(ctx):
         notes.insert(0, f'{book}/{run_name}: {len(flags)} flag(s)')
     total = sum(counts.values())
     noise = total - counts['real']
+    if noise < NOISE_CEILING:
+        notes.insert(0, f'noise {noise} is under the ceiling {NOISE_CEILING}: '
+                        f'lower NOISE_CEILING to {noise}')
     return SuiteOutput(
         metrics={'flags': total, 'noise': noise,
                  **{v.replace('-', '_'): counts[v] for v in VERDICTS},
                  'unreviewed': counts['unreviewed'], 'snapshots': len(snapshots)},
         by_code={code: dict(c) for code, c in by_code.items()},
         gates=[Gate('unreviewed', counts['unreviewed'], '==', 0),
-               Gate('noise', noise, '==', 0)],
+               Gate('noise', noise, '<=', NOISE_CEILING)],
         notes=notes,
     )
 
