@@ -1,5 +1,5 @@
 """Dashboard data: ``load_dashboard_data`` builds ``dashboard_data``, which
-``publish`` sends and ``storyforge visualize`` writes to
+the export bundle carries, ``publish`` sends and ``storyforge visualize`` writes to
 working/dashboard-data.json. Bookshelf renders it (#371); the contract is in
 docs/agent-reference.md ("Dashboard data").
 
@@ -16,10 +16,17 @@ from . import ledger
 from .common import parse_yaml_scalar
 
 
+class DashboardDataError(ValueError):
+    """A file the dashboard reads exists but can't be read; an empty section
+    would tell the reader the book has none of it."""
+
+
 def csv_to_records(csv_file: str) -> list[dict]:
     """Read a pipe-delimited CSV file into a list of dicts.
 
     Header row becomes dict keys. Missing files or empty files return [].
+    A file that exists but can't be read, or isn't UTF-8, raises
+    DashboardDataError.
     Values are always strings, as the dashboard contract requires. They are
     not escaped: escaping belongs to the renderer (Bookshelf).
     """
@@ -30,8 +37,8 @@ def csv_to_records(csv_file: str) -> list[dict]:
         with open(csv_file, newline='', encoding='utf-8') as f:
             raw = f.read().replace('\r\n', '\n').replace('\r', '')
         lines = raw.splitlines()
-    except (OSError, UnicodeDecodeError):
-        return []
+    except (OSError, UnicodeDecodeError) as e:
+        raise DashboardDataError(f'{csv_file} could not be read ({e})') from e
 
     if len(lines) < 2:
         return []
@@ -111,12 +118,13 @@ def _read_yaml_field(project_dir: str, field: str) -> str:
     return ''
 
 
-def _compute_brief_quality(project_dir: str) -> list[dict]:
+def _compute_brief_quality(project_dir: str, strict: bool = False) -> list[dict]:
     """Run brief quality detection and return JSON-safe results.
 
     Returns a list of issue dicts, each with: scene_id, field, issue,
     plus type-specific metrics (beat_count, char_count, etc.).
-    Returns [] if detection fails or data is missing.
+    Returns [] if data is missing. If detection fails, `strict` raises
+    DashboardDataError; otherwise it warns and returns [].
     """
     from storyforge.elaborate import _read_csv_as_map
     from storyforge.hone import detect_brief_issues, detect_gaps
@@ -164,6 +172,8 @@ def _compute_brief_quality(project_dir: str) -> list[dict]:
 
         return results
     except Exception as exc:
+        if strict:
+            raise DashboardDataError(f'brief quality could not be checked ({exc})') from exc
         # An empty list would read as "no brief issues"; say it wasn't checked
         from storyforge.common import log
         log(f'WARNING: brief quality not checked for the dashboard: {exc}')
@@ -177,11 +187,14 @@ def _compute_brief_quality(project_dir: str) -> list[dict]:
 DASHBOARD_SCHEMA_VERSION = 1
 
 
-def load_dashboard_data(project_dir: str) -> dict:
+def load_dashboard_data(project_dir: str, *, strict: bool = False) -> dict:
     """Load the manuscript dashboard's data (``dashboard_data``).
 
     Args:
         project_dir: Path to the novel project root.
+        strict: Raise DashboardDataError when brief quality can't be checked,
+            instead of warning and leaving it empty. The export bundle (and so
+            publish) is strict; an unreadable CSV raises either way.
 
     Returns:
         Dict with ``schema_version``, ``project`` and one list of row dicts
@@ -250,7 +263,7 @@ def load_dashboard_data(project_dir: str) -> dict:
     briefs.sort(key=lambda r: seq_by_id.get(r.get('id', ''), 999))
 
     # Brief quality detection (lightweight, no API calls)
-    brief_quality = _compute_brief_quality(project_dir)
+    brief_quality = _compute_brief_quality(project_dir, strict)
 
     return {
         'schema_version': DASHBOARD_SCHEMA_VERSION,

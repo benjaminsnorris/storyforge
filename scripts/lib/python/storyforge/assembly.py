@@ -1455,16 +1455,22 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
     require_cover_asset(manifest)
     require_asset_count_within_cap(assets)
 
-    # The dashboard travels as data only; Bookshelf renders it (#371). Data
-    # that can't be built stops the publish: sent without it, the book would
-    # quietly lose its dashboard.
+    # The dashboard travels as data only; Bookshelf renders it (#371). It is
+    # the export bundle's `dashboard_data`, so the dashboard Bookshelf reads is
+    # the one `storyforge export` writes (plan Phase 5). Data that can't be
+    # built stops the publish: sent without it, or with a section emptied by
+    # an unreadable file, the book would quietly lose that part.
     if include_dashboard:
+        from storyforge import export, ledger
         try:
-            from storyforge.visualize import load_dashboard_data
-            manifest['dashboard_data'] = load_dashboard_data(project_dir)
+            bundle = export.build_bundle(project_dir, strict_dashboard=True)
+            manifest['dashboard_data'] = bundle['dashboard_data']
+        except ledger.LedgerError as exc:  # names its own fix (storyforge migrate)
+            raise ValueError(f'{exc} (or publish without the dashboard: '
+                             f'--no-dashboard)') from exc
         except Exception as exc:
-            raise ValueError(f'could not build the dashboard data ({exc}). Fix the '
-                             f'CSV it names, or publish without the dashboard: '
+            raise ValueError(f'could not build the dashboard data ({exc}). Fix what '
+                             f'it names, or publish without the dashboard: '
                              f'--no-dashboard') from exc
 
     output_path = os.path.join(project_dir, 'working', 'publish-manifest.json')

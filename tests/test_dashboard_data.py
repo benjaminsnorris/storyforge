@@ -67,6 +67,29 @@ def test_brief_quality_that_cannot_be_checked_says_so(project_dir, monkeypatch, 
     assert 'WARNING: brief quality not checked' in capsys.readouterr().out
 
 
+def test_an_unreadable_csv_raises_not_empty(tmp_path):
+    """SF-1a (#481): a non-UTF-8 file read as [] (no rows) and shipped."""
+    import pytest
+    from storyforge.visualize import DashboardDataError
+    path = tmp_path / 'scenes.csv'
+    path.write_bytes(b'id|title\ns1|\xff\n')
+    with pytest.raises(DashboardDataError, match='scenes.csv could not be read'):
+        csv_to_records(str(path))
+    assert csv_to_records(str(tmp_path / 'missing.csv')) == []
+
+
+def test_strict_brief_quality_raises(project_dir, monkeypatch):
+    import pytest
+    import storyforge.hone as hone
+    from storyforge.visualize import DashboardDataError
+
+    def boom(*a, **kw):
+        raise KeyError('goal')
+    monkeypatch.setattr(hone, 'detect_brief_issues', boom)
+    with pytest.raises(DashboardDataError, match='brief quality could not be checked'):
+        load_dashboard_data(project_dir, strict=True)
+
+
 def test_values_are_not_escaped(tmp_path):
     """csv_to_records replaced < and > with the text \\u003c / \\u003e, which
     reached both renderers as literal text. Escaping is the renderer's job."""

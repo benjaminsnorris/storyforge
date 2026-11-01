@@ -1,0 +1,30 @@
+name: E7 classics regression
+
+# E7 runs the structural validator over frozen extractions of public-domain
+# classics, which have no real errors, and fails when the continuity checks
+# raise a flag the author hasn't judged, stop raising a labeled one, or change
+# the noise count from NOISE_CEILING in evals/suites/e7_classics.py. It makes
+# no API calls and needs only the standard library; --notes names the flags.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e7:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Replay E7
+        run: python evals/run.py --suite e7-classics --notes

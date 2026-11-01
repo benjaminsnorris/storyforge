@@ -174,6 +174,35 @@ class TestGeneratePublishManifest:
         assert 'scenes' in manifest['dashboard_data']
         assert 'project' in manifest['dashboard_data']
 
+    def test_dashboard_data_is_the_export_bundles(self, tmp_path, monkeypatch):
+        """Phase 5: Bookshelf reads the export bundle's dashboard_data, so
+        publish sends that section rather than building its own."""
+        from storyforge import export
+        from storyforge.assembly import generate_publish_manifest
+        proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
+        calls = []
+
+        def bundle(project_dir, strict_dashboard=False):
+            calls.append((project_dir, strict_dashboard))
+            return {'schema_version': export.SCHEMA_VERSION,
+                    'dashboard_data': {'schema_version': 1, 'marker': 'from the bundle'}}
+        monkeypatch.setattr(export, 'build_bundle', bundle)
+        with open(generate_publish_manifest(proj)) as f:
+            manifest = json.load(f)
+        assert manifest['dashboard_data'] == {'schema_version': 1, 'marker': 'from the bundle'}
+        assert calls == [(proj, True)]
+
+    def test_dashboard_data_equals_the_real_bundles_section(self, tmp_path):
+        """T-2 (#481): unmocked, what publish sends is the bundle's section."""
+        from storyforge import export
+        from storyforge.assembly import generate_publish_manifest
+        proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
+        with open(generate_publish_manifest(proj)) as f:
+            sent = json.load(f)['dashboard_data']
+        expected = json.loads(json.dumps(export.build_bundle(proj)['dashboard_data']))
+        sent['project'].pop('generated'), expected['project'].pop('generated')
+        assert sent == expected
+
     def test_excludes_dashboard_data_when_flag_false(self, tmp_path):
         """Manifest omits dashboard_data when include_dashboard=False."""
         from storyforge.assembly import generate_publish_manifest

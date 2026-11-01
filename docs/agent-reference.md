@@ -64,7 +64,7 @@ Scene files (`scenes/{id}.md`) are pure prose — **no frontmatter**. Filename i
 
 ## Dashboard data (`dashboard_data`, schema version 1)
 
-Storyforge defines and sends the dashboard's data; Bookshelf renders it (benjaminsnorris/bookshelf#30; Bookshelf's copy of the contract is `src/lib/dashboard/schema.ts`). `visualize.load_dashboard_data` builds it, `publish` sends it, and `storyforge visualize` writes it to `working/dashboard-data.json`.
+Storyforge defines and sends the dashboard's data; Bookshelf renders it (benjaminsnorris/bookshelf#30; Bookshelf's copy of the contract is `src/lib/dashboard/schema.ts`). `visualize.load_dashboard_data` builds it; `publish` sends the export bundle's copy (`export.build_bundle(..., strict_dashboard=True)`, so data that can't be built stops the publish rather than sending a null), and `storyforge visualize` writes it to `working/dashboard-data.json`. Of the bundle, Bookshelf reads only this section; the rest of what publish sends (title, author, metadata, chapter map, prose and images) is built into the publish manifest from the project's files. A file the dashboard reads that exists but can't be read, or isn't UTF-8, raises `visualize.DashboardDataError` rather than giving an empty section: the bundle's `dashboard_data` is then null with a warning, publish stops, and `storyforge visualize` exits 1. `load_dashboard_data(..., strict=True)`, which the bundle uses, also raises when brief quality can't be checked (visualize warns and leaves it empty).
 
 - `schema_version`: `1` (`visualize.DASHBOARD_SCHEMA_VERSION`). Bookshelf reads a missing one as 1. It is a major version. Adding a list or a CSV column doesn't change it. Renaming or removing a key, or changing a value's type, bumps it, and Bookshelf must support the new version first, since it refuses one it can't draw. `tests/test_dashboard_data.py` pins the keys.
 - `project`: `title`, `genre`, `phase`, `scene_count`, `total_words`, `target_words`, `generated`. All strings.
@@ -86,7 +86,7 @@ A missing CSV gives an empty list.
 
 ## Export bundle (`storyforge export`, schema version 1)
 
-`export.build_bundle(project_dir)` builds one JSON bundle of the book's structured state (plan §3.5); `storyforge export` writes it to `working/export/bundle.json` (`--output PATH`, `--stdout`), as UTF-8 with sorted keys and LF. Storygild and Bookshelf read the bundle and pin its `schema_version`. No API calls. An unmigrated project or a malformed ledger exits 1 (`ledger.LedgerError`). `tests/test_export.py` pins the keys; `evals/export_check.py` exports a copy of each book and checks the round trip.
+`export.build_bundle(project_dir)` builds one JSON bundle of the book's structured state (plan §3.5); `storyforge export` writes it to `working/export/bundle.json` (`--output PATH`, `--stdout`), as UTF-8 with sorted keys and LF. Bookshelf reads the bundle's `dashboard_data` (sent by `publish`) and pins that section's own `schema_version` (Bookshelf's `SUPPORTED_SCHEMA_VERSIONS`), since it reads none of the tables. Storygild, when it is split out (deferred; plan Phase 5), reads the whole bundle and pins its `schema_version`. No API calls. An unmigrated project or a malformed ledger exits 1 (`ledger.LedgerError`). `tests/test_export.py` pins the keys; `evals/export_check.py` exports a copy of each book and checks the round trip.
 
 - `schema_version`: `1` (`export.SCHEMA_VERSION`), a major version. Adding a key, a table or a table kind doesn't change it. Renaming or removing a key, or changing a value's type, bumps it, in the same commit, with the tests.
 - `storyforge_version`: the plugin version that wrote it (`.claude-plugin/plugin.json`).
@@ -101,7 +101,7 @@ A missing CSV gives an empty list.
 | `timeline` | `working/timeline*.csv` (the timeline's stored cues) |
 | `audit` | **provisional**: `working/audit*.csv` and the CSVs under `working/audit/`, as raw rows. Empty until the audit log (`working/audit-log.csv`, another PR) exists; it fills from then with no code change. Other files under `working/audit/` are named in `warnings` |
 
-- `dashboard_data`: `visualize.load_dashboard_data`'s output, unchanged, with its own `schema_version` (see Dashboard data); `null`, with a warning, if it couldn't be built.
+- `dashboard_data`: `visualize.load_dashboard_data(..., strict=True)`'s output, unchanged, with its own `schema_version` (see Dashboard data); `null`, with a warning, if it couldn't be built. A dashboard version bump doesn't bump the bundle's `schema_version`: a consumer of `dashboard_data` pins the inner one.
 - `warnings`: every file the bundle meant to carry and couldn't (unreadable, not UTF-8), and anything a consumer should know about a table. Empty means everything was read.
 
 Left out: scene prose and manuscripts (`assemble` / `produce`) and score history before the latest cycle. **Eval results are not in a book's bundle**, though plan §3.5 lists them: evals measure Storyforge, not the book, and their results belong to the Storyforge repo (`evals/results/`).

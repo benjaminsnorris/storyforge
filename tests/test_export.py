@@ -206,13 +206,46 @@ class TestProblems:
         assert any(w.startswith('reference/themes.csv: not UTF-8') for w in bundle['warnings'])
 
     def test_dashboard_failure_is_named(self, project_dir, monkeypatch):
-        def boom(_):
+        def boom(_, **kw):
             raise ValueError('bad word_count')
         monkeypatch.setattr('storyforge.visualize.load_dashboard_data', boom)
         bundle = export.build_bundle(project_dir)
         assert bundle['dashboard_data'] is None
         assert any('dashboard_data could not be built' in w and 'bad word_count' in w
                    for w in bundle['warnings'])
+
+    def test_strict_dashboard_raises_instead_of_null(self, project_dir, monkeypatch):
+        """publish passes strict_dashboard: a book sent with a null dashboard
+        would quietly lose it."""
+        def boom(_, **kw):
+            raise ValueError('bad word_count')
+        monkeypatch.setattr('storyforge.visualize.load_dashboard_data', boom)
+        with pytest.raises(ValueError, match='bad word_count'):
+            export.build_bundle(project_dir, strict_dashboard=True)
+
+    def test_unreadable_dashboard_file_nulls_the_dashboard_not_a_section(self, project_dir):
+        """SF-1a (#481): a non-UTF-8 briefs file gave dashboard_data with no
+        briefs and a clean brief-quality report."""
+        with open(os.path.join(project_dir, 'reference', 'scene-briefs.csv'), 'ab') as f:
+            f.write(b'\xff\n')
+        bundle = export.build_bundle(project_dir)
+        assert bundle['dashboard_data'] is None
+        assert any('dashboard_data could not be built' in w and 'scene-briefs.csv' in w
+                   for w in bundle['warnings'])
+
+    def test_unchecked_brief_quality_nulls_the_dashboard(self, project_dir, monkeypatch):
+        import storyforge.hone as hone
+
+        def boom(*a, **kw):
+            raise KeyError('goal')
+        monkeypatch.setattr(hone, 'detect_brief_issues', boom)
+        bundle = export.build_bundle(project_dir)
+        assert bundle['dashboard_data'] is None
+        assert any('brief quality could not be checked' in w for w in bundle['warnings'])
+
+    def test_strict_dashboard_is_keyword_only(self, project_dir):
+        with pytest.raises(TypeError):
+            export.build_bundle(project_dir, True)
 
     def test_unmigrated_project_raises(self, project_dir, fixture_dir):
         legacy = os.path.join(os.path.dirname(fixture_dir), 'legacy-registries')
@@ -241,7 +274,7 @@ class TestWrite:
         (tmp_path / 'out').mkdir()
         path = tmp_path / 'out' / 'bundle.json'
         path.write_text('old', encoding='utf-8')
-        def boom(_):
+        def boom(_, **kw):
             raise OSError(28, 'No space left on device')
         monkeypatch.setattr(export, 'dumps', boom)
         with pytest.raises(OSError):

@@ -58,7 +58,7 @@ class TestMain:
         import storyforge.visualize as visualize
         real = visualize.load_dashboard_data
 
-        def noisy(project):
+        def noisy(project, **kw):
             print('a reader that prints')
             return real(project)
         monkeypatch.setattr(visualize, 'load_dashboard_data', noisy)
