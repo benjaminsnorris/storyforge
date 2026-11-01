@@ -423,7 +423,7 @@ class TestCmdPublishAssets:
         from unittest.mock import patch
         proj = _illustrated_project(tmp_path)
 
-        def boom(project_dir):
+        def boom(project_dir, **kw):
             raise ValueError('bad row in scene-briefs.csv')
         with patch('storyforge.visualize.load_dashboard_data', side_effect=boom), \
                 pytest.raises(SystemExit) as exit_info:
@@ -432,6 +432,37 @@ class TestCmdPublishAssets:
         out = capsys.readouterr().out
         assert 'could not build the dashboard data (bad row in scene-briefs.csv)' in out
         assert '--no-dashboard' in out
+
+    def test_an_unreadable_dashboard_file_stops_the_publish(self, tmp_path, capsys):
+        """SF-1a/1b (#481): csv_to_records turned a non-UTF-8 file into an
+        empty list, so the book went out with that section empty. craft-weights
+        is read by the dashboard but not carried in the bundle's tables, so only
+        the dashboard itself can catch it."""
+        proj = _illustrated_project(tmp_path)
+        os.makedirs(os.path.join(proj, 'working'), exist_ok=True)
+        with open(os.path.join(proj, 'working', 'craft-weights.csv'), 'wb') as f:
+            f.write(b'principle|weight\nx|\xff\n')
+        with pytest.raises(SystemExit) as exit_info:
+            self._publish(proj, [])
+        assert exit_info.value.code == 1
+        out = capsys.readouterr().out
+        assert 'could not build the dashboard data' in out and 'craft-weights.csv' in out
+
+    def test_an_unmigrated_ledger_stops_the_publish_with_its_own_fix(self, tmp_path, capsys):
+        """T-1 (#481): the ledger error reaches the author as itself (run
+        storyforge migrate), not as a CSV to fix, and not as a traceback."""
+        import shutil
+        from conftest import FIXTURE_DIR
+        proj = _illustrated_project(tmp_path)
+        shutil.copy(os.path.join(os.path.dirname(str(FIXTURE_DIR)), 'legacy-registries',
+                                 'knowledge.csv'), os.path.join(proj, 'reference'))
+        with pytest.raises(SystemExit) as exit_info:
+            self._publish(proj, [])
+        assert exit_info.value.code == 1
+        out = capsys.readouterr().out
+        assert 'storyforge migrate' in out and '--no-dashboard' in out
+        assert 'could not build the dashboard data' not in out
+        assert 'Traceback' not in out
 
     def test_a_refused_dashboard_explains_what_to_do(self, capsys):
         """SF3: Bookshelf's 400 on dashboard_data named no next step."""

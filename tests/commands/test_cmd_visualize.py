@@ -27,6 +27,16 @@ class TestMain:
         main(argv)
         return os.path.join(project_dir, 'working', 'dashboard-data.json')
 
+    def test_an_unreadable_csv_exits_1_and_writes_nothing(self, mock_api, mock_git, mock_costs,
+                                                          project_dir, monkeypatch, capsys):
+        with open(os.path.join(project_dir, 'reference', 'scene-intent.csv'), 'ab') as f:
+            f.write(b'\xff\n')
+        with pytest.raises(SystemExit) as exit_info:
+            self._run(project_dir, monkeypatch, [])
+        assert exit_info.value.code == 1
+        assert 'scene-intent.csv could not be read' in capsys.readouterr().err
+        assert not os.path.exists(os.path.join(project_dir, 'working', 'dashboard-data.json'))
+
     def test_writes_the_data_publish_sends(self, mock_api, mock_git, mock_costs,
                                            project_dir, monkeypatch, capsys):
         from storyforge.visualize import load_dashboard_data

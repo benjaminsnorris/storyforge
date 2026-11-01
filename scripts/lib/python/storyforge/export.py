@@ -1,9 +1,10 @@
 """The export bundle: one canonical JSON document of a book's structured state.
 
-Plan §3.5. Storygild and Bookshelf read the bundle instead of the project's
-files, and pin `schema_version`. Bookshelf reads its `dashboard_data` (pinned
-at that section's own `schema_version`): `publish` builds the bundle and sends
-that section; the prose and images travel in the publish manifest. The contract is in docs/agent-reference.md
+Plan §3.5. Of the bundle, Bookshelf reads only `dashboard_data`, pinned at
+that section's own `schema_version`: `publish` builds the bundle and sends
+that section. Storygild, once it is split out (deferred; plan Phase 5), reads
+the whole bundle and pins its `schema_version`. The contract is in
+docs/agent-reference.md
 ("Export bundle"); `tests/test_export.py` pins its keys.
 
 What goes in:
@@ -28,8 +29,11 @@ What goes in:
       (`working/audit-log.csv`, another PR) exists; the bundle passes through
       whatever CSVs are there, and names any non-CSV file under
       `working/audit/` in `warnings`.
-- `dashboard_data`: `visualize.load_dashboard_data`'s output, unchanged,
-  with its own `schema_version`.
+- `dashboard_data`: `visualize.load_dashboard_data`'s output (strict: an
+  unreadable file or unchecked brief quality makes it null with a warning,
+  never an empty section), with its own `schema_version`. A dashboard
+  version bump doesn't bump the bundle's; consumers of `dashboard_data` pin
+  the inner one.
 - `project`: title, genre, medium and phase from storyforge.yaml;
   `storyforge_version`: the plugin version that wrote the bundle.
 - `warnings`: every file the bundle meant to carry and couldn't (unreadable,
@@ -247,13 +251,13 @@ def _project(project_dir: str) -> dict[str, str]:
     }
 
 
-def build_bundle(project_dir: str, strict_dashboard: bool = False) -> dict:
+def build_bundle(project_dir: str, *, strict_dashboard: bool = False) -> dict:
     """The export bundle for the project at `project_dir`. No API calls.
 
     `strict_dashboard`: raise when `dashboard_data` can't be built, instead of
-    leaving it null with a warning. `publish` passes it: Bookshelf reads the
-    bundle's `dashboard_data`, and a book published without it would quietly
-    lose its dashboard.
+    leaving it null with a warning. `assembly.generate_publish_manifest`
+    (publish) passes it: Bookshelf reads the bundle's `dashboard_data`, and a
+    book published without it would quietly lose its dashboard.
 
     Raises:
         ledger.NotMigratedError: knowledge.csv or physical-states.csv is still
@@ -268,7 +272,7 @@ def build_bundle(project_dir: str, strict_dashboard: bool = False) -> dict:
 
     from storyforge.visualize import load_dashboard_data
     try:
-        dashboard = load_dashboard_data(project_dir)
+        dashboard = load_dashboard_data(project_dir, strict=True)
     except ledger.LedgerError:
         raise
     except Exception as e:  # named in the bundle, never dropped silently

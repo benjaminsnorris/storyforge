@@ -55,8 +55,12 @@ def main(argv=None):
         print(f'ERROR: reference/scenes.csv not found at {metadata_csv}', file=sys.stderr)
         sys.exit(1)
 
-    from storyforge.visualize import load_dashboard_data
-    data = load_dashboard_data(project_dir)
+    from storyforge.visualize import DashboardDataError, load_dashboard_data
+    try:
+        data = load_dashboard_data(project_dir)
+    except DashboardDataError as e:
+        print(f'ERROR: {e}', file=sys.stderr)
+        sys.exit(1)
     lists = {k: len(v) for k, v in data.items() if isinstance(v, list)}
 
     if args.dry_run:
