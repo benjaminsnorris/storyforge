@@ -449,6 +449,23 @@ class TestReviewFixes:
         report = validate_schema(ref, book)
         assert [e for e in report['errors'] if e['column'] in ('motifs', 'motif_details')] == []
 
+    def test_a_short_scene_is_described_too(self, book, mock_api, mock_git, mock_costs):
+        """F-145: scene_table dropped scenes under the stub floor, so 5b never
+        moved a short scene's descriptions out of motifs and validate failed
+        on it (Quintus: three scenes of 30-47 words; Eighty Days: one of 32)."""
+        from storyforge.elaborate import get_scene, update_scene
+        from storyforge.schema import validate_schema
+        ref = os.path.join(book, 'reference')
+        ids = _scene_ids(book)
+        update_scene(ids[2], ref, {'motifs': 'a lone kite over the moor', 'word_count': '30'})
+        assert ids[2] in _scene_ids(book)
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        assert get_scene(ids[2], ref)['motifs'] == ''
+        assert get_scene(ids[2], ref)['motif_details'] == 'a lone kite over the moor'
+        report = validate_schema(ref, book)
+        assert [e for e in report['errors'] if e['column'] in ('motifs', 'motif_details')] == []
+
     def test_a_forced_rerun_regroups_from_the_details(self, book, mock_api, mock_git,
                                                        mock_costs):
         """After 5b, motifs holds ids; a rerun must group the descriptions,

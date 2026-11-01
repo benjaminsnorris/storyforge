@@ -277,7 +277,10 @@ def write_described(project_dir: str, rel_path: str, content: str, *,
 def scene_table(ref_dir: str) -> list[dict[str, str]]:
     """Every scene phases 1-3 recorded, in reading order, with the columns
     phase 5 reads: scenes.csv joined with scene-intent.csv and the briefs'
-    `motifs` and `motif_details`. Cut and merged scenes are left out (`build_scene_list`)."""
+    `motifs` and `motif_details`. Cut and merged scenes are left out
+    (`build_scene_list`); a short scene is not: it is part of the book, and
+    one left out keeps its motif descriptions in `motifs`, which 5b's
+    taxonomy then fails in validate (F-145)."""
     from .elaborate import _read_csv_as_map
     from .scene_filter import build_scene_list
 
@@ -285,7 +288,7 @@ def scene_table(ref_dir: str) -> list[dict[str, str]]:
     intent = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
     briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
     rows = []
-    for sid in build_scene_list(os.path.join(ref_dir, 'scenes.csv')):
+    for sid in build_scene_list(os.path.join(ref_dir, 'scenes.csv'), min_words=0):
         row = dict(scenes.get(sid, {}))
         for k, v in intent.get(sid, {}).items():
             row.setdefault(k, v)
