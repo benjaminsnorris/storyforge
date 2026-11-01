@@ -561,9 +561,14 @@ def _build_prompt(scene_id: str, project_dir: str, coaching: str,
         use_briefs: Whether to use brief-aware prompts.
         system_context: When True, shared reference material is provided via
             the API system parameter and should not be inlined in the prompt.
-        rewrite: The scene is being redrafted (rethink plan §3.4): its current
-            prose, if it has any, goes in the brief-aware prompt as a voice
-            reference only (`current_prose`).
+        rewrite: Treat a scene that has prose as a rewrite (rethink plan
+            §3.4): at `full` coaching with briefs, its prose on disk
+            (`current_prose`) goes in the prompt as a voice reference only.
+            A scene with no prose, other coaching levels, and the prompt
+            without briefs are unchanged.
+
+    Raises:
+        ValueError: with `rewrite`, the scene's file can't be read.
     """
     from storyforge.common import get_plugin_dir
     plugin_dir = get_plugin_dir()
@@ -588,13 +593,22 @@ def _build_prompt(scene_id: str, project_dir: str, coaching: str,
 
 def current_prose(project_dir: str, scene_id: str) -> str:
     """The scene's prose on disk without illustration markers (they are
-    never prose), '' when it has none."""
+    never prose), '' when it has none (no file, or an empty one).
+
+    Raises:
+        ValueError: the file is there but can't be read (not UTF-8, no
+            permission), naming it: a rewrite must not lose its voice
+            reference unnoticed.
+    """
     from storyforge.illustrations import strip_markers
     path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
     if not os.path.isfile(path):
         return ''
-    with open(path, encoding='utf-8') as f:
-        return strip_markers(f.read()).strip()
+    try:
+        with open(path, encoding='utf-8') as f:
+            return strip_markers(f.read()).strip()
+    except (OSError, UnicodeDecodeError) as e:
+        raise ValueError(f'could not read {path} for the rewrite\'s voice reference: {e}') from e
 
 
 def _output_file(project_dir: str, scene_id: str, coaching: str) -> str:
@@ -776,8 +790,12 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
                 log(f'Scene {scene_id} already has {existing_wc} words, skipping')
                 continue
 
-        prompt = _build_prompt(scene_id, project_dir, coaching, use_briefs,
-                               system_context=bool(system))
+        try:   # as direct mode: prose on disk makes it a rewrite
+            prompt = _build_prompt(scene_id, project_dir, coaching, use_briefs,
+                                   system_context=bool(system), rewrite=True)
+        except ValueError as e:
+            log(f'ERROR: {e}')
+            sys.exit(1)
         if not prompt:
             log(f'ERROR: Failed to build prompt for scene {scene_id}')
             sys.exit(1)
@@ -956,10 +974,16 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                                   f'pass the gate)')
                 break
 
-        # a redraft (`--force` over prose) is a rewrite: the old prose is its
-        # voice reference
-        prompt = _build_prompt(scene_id, project_dir, coaching, use_briefs,
-                               system_context=bool(system), rewrite=True)
+        # Any prose already on disk (`--force`, a scene named alone, or a
+        # stub of 200 words or fewer) makes this a rewrite, that prose its
+        # voice reference; a scene with no prose gets the fresh-draft prompt
+        try:
+            prompt = _build_prompt(scene_id, project_dir, coaching, use_briefs,
+                                   system_context=bool(system), rewrite=True)
+        except ValueError as e:
+            log(f'ERROR: {e}')
+            log('Stopping — prompt generation failed.')
+            sys.exit(1)
         if not prompt:
             log(f'ERROR: Failed to build prompt for scene {scene_id}')
             log('Stopping — prompt generation failed.')

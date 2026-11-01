@@ -1342,7 +1342,8 @@ MAX_STATES_PER_SUBJECT = 25
 
 
 def _established_facts_block(scene_id: str, scene: dict[str, str],
-                             project_dir: str, shown: set[str]) -> str:
+                             project_dir: str, shown: set[str],
+                             rewrite: bool = False) -> str:
     """The ledger's binding facts the scene must agree with: for its POV and
     on-stage characters (pronouns from characters.csv, `fixed` facts, states
     entering the scene) and its location, and those the scene itself has
@@ -1354,6 +1355,9 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
     registries (its facts can't be found), for facts tied to a scene id
     that isn't a scene, and for states left out past
     ``MAX_STATES_PER_SUBJECT`` (the prompt says so too).
+
+    ``rewrite``: the prompt also shows the scene's current draft as a voice
+    reference only, so the scene's own facts are said to hold regardless.
 
     Raises:
         ValueError: if scenes.csv has a scene without a numeric ``seq``
@@ -1446,7 +1450,14 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
         log(f'WARNING: {scene_id}: older states left out of the prompt '
             f'(more than {MAX_STATES_PER_SUBJECT} in force): {", ".join(trimmed)}')
     own = [r for r in found.scene if r['id'] not in shown]
-    if own:
+    if own and rewrite:
+        sections.append('### Already established in this scene\n'
+                        "Recorded from the scene's plan or an earlier draft of it. "
+                        'Keep each of these unless the brief says otherwise: where '
+                        'they differ, the brief wins. They hold even though the '
+                        'current draft below is a voice reference only.\n'
+                        + '\n'.join(line(r) for r in own))
+    elif own:
         sections.append('### Established in this scene so far\n'
                         "From the scene's plan or its current draft. Keep each "
                         'of these unless the brief says otherwise: where they '
@@ -1663,9 +1674,11 @@ def build_scene_prompt_from_briefs(
                 + '\n'.join(state_lines)
             )
 
+    rewriting = coaching_level == 'full' and bool(voice_reference.strip())
     ledger_block = _established_facts_block(
         scene_id, scene, project_dir,
-        shown={s.strip() for s in state_in.split(';') if s.strip()})
+        shown={s.strip() for s in state_in.split(';') if s.strip()},
+        rewrite=rewriting)
 
     # Craft principles
     craft = build_weighted_directive(project_dir)
@@ -1753,18 +1766,21 @@ def build_scene_prompt_from_briefs(
 
     rewrite_block = ''
     rewrite_line = ''
-    if coaching_level == 'full' and voice_reference.strip():
+    if rewriting:
+        # the Established Facts section is there only when the ledger holds
+        # something for the scene
+        facts = 'the brief and the Established Facts above' if ledger_block else 'the brief'
         rewrite_block = (
             '## The Current Draft (voice reference only)\n\n'
             'This scene already has a draft, below, and you are rewriting it. Take its '
             'voice: the narration\'s register, rhythm and diction, and how the POV '
             'character thinks and speaks. Take nothing else from it. What happens and '
-            'what is true comes from the brief and the Established Facts above: where '
-            'the draft differs from them, they win. Do not copy its sentences or follow '
-            'its structure.\n\n'
+            f'what is true comes from {facts}, which win wherever the draft differs. '
+            'Do not copy its sentences or follow its structure.\n\n'
             f'<current_draft>\n{voice_reference.strip()}\n</current_draft>\n\n')
-        rewrite_line = ('\nThis is a rewrite: the facts come from the brief and the '
-                        'Established Facts, the voice from the current draft.\n')
+        rewrite_line = (f'\nThis is a rewrite: the facts come from '
+                        f'{facts.removesuffix(" above")}, the voice from the current '
+                        f'draft.\n')
 
     # Coaching-specific instructions
     if coaching_level == 'full':

@@ -304,16 +304,21 @@ class TestReviseRedraftFromBriefs:
         (_reply('', 'refusal', stop_details={'type': 'refusal', 'category': 'cyber'}),
          'refused the request (cyber)'),
     ])
-    def test_unwritten_redraft_raises_after_committing_the_rest(
+    def test_unwritten_redraft_stops_the_run_and_commits(
             self, mock_api, mock_git, project_dir, monkeypatch, bad, reason):
+        """A scene not redrafted stops the run (PR #476's review): the scenes
+        after it would be drafted with its stale prose among the earlier
+        scenes, as `write` stops at a bad reply."""
         from storyforge.cmd_revise import RedraftError
         old = _scene(project_dir, 'act1-sc01')
-        with pytest.raises(RedraftError, match=re.escape(reason)):
+        old2 = _scene(project_dir, 'act1-sc02')
+        with pytest.raises(RedraftError, match=re.escape(reason)) as e:
             self._run(project_dir, monkeypatch, [bad, _reply(GOOD)])
+        assert 'act1-sc02 (not redrafted: redrafting stops' in str(e.value)
         assert _scene(project_dir, 'act1-sc01') == old
-        assert _scene(project_dir, 'act1-sc02').strip() == GOOD
+        assert _scene(project_dir, 'act1-sc02') == old2
         commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']
-        assert commits == ['Revision: redraft 1 scenes from corrected briefs']
+        assert commits == ['Revision: redraft 0 scenes from corrected briefs']
 
     def test_scene_without_a_prompt_is_a_failure(self, mock_api, mock_git,
                                                   project_dir, monkeypatch):
