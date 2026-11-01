@@ -367,8 +367,9 @@ def _gate_redraft(project_dir: str, scene_id: str, scene_file: str, log_dir: str
 def _restore_gate_markers(project_dir: str, scene_id: str, scene_file: str, original: str,
                           already_lost: list[str] | tuple = ()) -> None:
     """The gate's fix edits the prose with find/replace and knows nothing of
-    illustration markers: restore any it dropped from `original` (the prose
-    it was given), and warn about one it dropped that can't be restored
+    illustration markers: restore any marker in `original` (the prose whose
+    markers must survive: the scene before a redraft, or what a pass wrote)
+    that the gated prose lacks, and warn about one that can't be restored
     (`already_lost`: ones the caller already warned about)."""
     from storyforge.illustrations import preserve_markers
     with open(scene_file, encoding='utf-8') as f:
@@ -386,9 +387,9 @@ def _restore_gate_markers(project_dir: str, scene_id: str, scene_file: str, orig
 
 
 def _pass_scene_ids(project_dir: str, targets: str) -> list[str]:
-    """The scenes a prose pass may rewrite: its targets that are scenes in
-    reading order, or every scene when it names none (a full-scope pass, or
-    targets that are characters or new scenes)."""
+    """The scenes a prose pass may rewrite: its targets that are scenes (in
+    the order named), or every scene in reading order when it names none (a
+    full-scope pass, or targets that are characters or new scenes)."""
     from storyforge import ledger
     order = ledger.scene_order(project_dir)
     named = [t.removeprefix('NEW:') for t in _split_targets(targets)]
@@ -397,11 +398,29 @@ def _pass_scene_ids(project_dir: str, targets: str) -> list[str]:
 
 def _exit_if_pass_blocked(project_dir: str, targets: str) -> None:
     """Exit 1 before a prose pass spends anything when a scene waiting on
-    the gate (`working/gate-pending.csv`) comes before the first scene it
-    may rewrite: its revision would be gated against a ledger without that
-    scene's facts (`write` refuses the same way)."""
-    from storyforge import cmd_write
-    cmd_write._exit_if_gate_pending(project_dir, _pass_scene_ids(project_dir, targets))
+    the gate (`working/gate-pending.csv`) would stop the gating of what it
+    writes: one before its first target (`write`'s rule), or one between
+    its targets that it doesn't rewrite. A scene listed only for a re-check
+    doesn't count there: the re-checks after each gated scene run it."""
+    from storyforge import cmd_write, gate, ledger
+    targets_in_book = _pass_scene_ids(project_dir, targets)
+    cmd_write._exit_if_gate_pending(project_dir, targets_in_book)
+    order = ledger.scene_order(project_dir)
+    try:
+        waiting = gate.pending(project_dir)
+    except gate.GateError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    first = min(order[s] for s in targets_in_book)
+    last = max(order[s] for s in targets_in_book)
+    between = sorted((s for s, row in waiting.items()
+                      if s in order and s not in targets_in_book
+                      and row['command'] != gate.RECHECK and first < order[s] < last),
+                     key=order.get)
+    if between:
+        cmd_write._log_blockers([f'{s}: {waiting[s]["reason"]}' for s in between])
+        log('The pass rewrites scenes after it, and they could not be gated: nothing spent.')
+        sys.exit(1)
 
 
 def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
@@ -413,18 +432,30 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
     scenes depending on what it changed (the rest of this pass's scenes are
     gated by this run, so they are skipped there).
 
-    Stops at the first scene the gate doesn't pass (listed in
-    `working/gate-pending.csv` with its prose kept) or that waits behind an
-    earlier pending scene: the scenes after it would be gated against a
-    ledger missing its facts, so they are listed pending too, as revised but
-    not gated. Returns a line for each scene not passed (empty when all
-    passed); the caller commits and stops the session."""
+    First every rewritten scene is listed pending ("not gated yet") and the
+    prose committed, so an interrupted run leaves each ungated scene listed
+    (design §3: the ledger is consistent after each step); a scene that
+    passes comes off the list.
+
+    Stops at the first scene the gate doesn't pass (listed with the gate's
+    reasons, its prose kept) or that waits behind an earlier pending scene
+    (a re-check that failed mid-pass): the scenes after it would be gated
+    against a ledger missing its facts, so they stay listed as revised but
+    not gated. Returns the lines naming what didn't pass, at most three:
+    that scene, the scenes left ungated, and a re-check that didn't pass or
+    wasn't run (empty when all passed and every re-check did). The caller
+    commits and stops the session."""
     from storyforge import cmd_write, gate
     if not scene_ids:
         return []
     ordered = _reading_order(project_dir, scene_ids)
+    _pend_ungated(project_dir, ordered, pass_name, 'not gated yet', announce=False)
+    from storyforge import git
+    git.commit_and_push(project_dir, f'Revision: {pass_name}, before the gate',
+                        ['scenes/', 'reference/', 'working/'])
     log(f'  Gating {len(ordered)} revised scene(s) in reading order...')
     spent = 0.0   # this run's re-checks, forecast
+    trouble = ''  # a re-check that didn't pass or wasn't run
     scenes_dir = os.path.join(project_dir, 'scenes')
     for i, sid in enumerate(ordered):
         rest = ordered[i + 1:]
@@ -444,35 +475,54 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
         passed, why = cmd_write._gate_drafted_scene(project_dir, sid, scene_file, 'revise',
                                                     log_dir)
         _restore_gate_markers(project_dir, sid, scene_file, original)
-        if not passed:
+        if passed:
+            try:   # the gate's commit cleared it; a stub or a failed update may not have
+                gate.clear_pending(project_dir, sid)
+            except gate.GateError as e:
+                log(f'  WARNING: {sid} passed, but {gate.PENDING_PATH} still lists it as '
+                    f'not gated ({e}); remove its row.')
+        else:
             log(f'  ERROR: the gate did not pass the revision of {sid}: {why}')
             return ([f'{sid} (the gate did not pass it: {why})']
                     + _pend_ungated(project_dir, rest, pass_name, f'the gate stopped at {sid}'))
-        spent = _recheck_after(project_dir, log_dir, set(rest), spent)
-    return []
+        run = cmd_write.run_recheck(project_dir, os.path.join(log_dir, 'gate'), set(rest),
+                                    spent_before=spent)
+        if run is not None:
+            spent = run.spent
+            if run.failed:
+                trouble = (f'{run.failed} (re-checked after {sid} and did not pass: '
+                           f'{run.why}; listed in {gate.PENDING_PATH})')
+            elif run.over_budget:
+                trouble = (f'{", ".join(run.left)} (listed for a re-check after {sid}, not '
+                           f'run: over the cost threshold; `storyforge check --pending`)')
+    return [trouble] if trouble else []
 
 
 def _pend_ungated(project_dir: str, scene_ids: list[str], pass_name: str,
-                  why: str) -> list[str]:
-    """List scenes a pass rewrote but the gate never reached; return the
-    line naming them."""
+                  why: str, announce: bool = True) -> list[str]:
+    """List scenes a pass rewrote but the gate hasn't passed as `revise`
+    rows; return the line naming them (none when `announce` is off)."""
     from storyforge import cmd_write
     if not scene_ids:
         return []
+    state = why if why == 'not gated yet' else f'not gated: {why}'
     for sid in scene_ids:
         cmd_write._pend(project_dir, sid, 'revise',
-                        f'revised by pass {pass_name} but not gated: {why}. Its earlier '
-                        f'version\'s facts are still in the ledger and may no longer match '
-                        f'the prose.')
+                        f'revised by pass {pass_name} but {state}. Its earlier version\'s '
+                        f'facts are still in the ledger and may no longer match the prose.')
+    if not announce:
+        return []
     log(f'  Not gated ({why}): {", ".join(scene_ids)}')
     return [f'{", ".join(scene_ids)} (revised, not gated: {why})']
 
 
-PASS_GATE_ADVICE = (
-    'The revised prose is kept and committed. Each scene named above is listed in '
-    'working/gate-pending.csv: fix the first one\'s prose (or redraft it with '
-    '`storyforge write --force --scenes <id>`), then run `storyforge check --pending`, '
-    'and re-run `storyforge revise` for the passes left.')
+def pass_gate_advice(resume: str) -> str:
+    """What to do after `_gate_pass_scenes` stopped; `resume` is the command
+    that carries on (it differs between the plan's passes and the polish loop)."""
+    return ('The revised prose is kept and committed. Each scene named above is listed in '
+            'working/gate-pending.csv (an ERROR above names any that could not be): fix the '
+            'first one\'s prose (or redraft it with `storyforge write --force --scenes <id>`), '
+            f'run `storyforge check --pending`, then {resume}.')
 
 
 def _reading_order(project_dir: str, scene_ids: list[str]) -> list[str]:
@@ -2021,6 +2071,9 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
     ]
     if config_yaml:
         cmd.extend(['--config', config_yaml])
+    # the loop's coaching level (`--coaching` sets it in the environment):
+    # without it the prompt asks for prose at every level
+    cmd.extend(['--coaching', get_coaching_level(project_dir)])
     if system:
         cmd.append('--system-context')
 
@@ -2065,35 +2118,60 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
         sys.exit(1)
 
     # Phase 4 §5: each scene it wrote goes through the gate, in reading order
-    gate_failures = (_gate_pass_scenes(project_dir, _written, pass_name, log_dir)
-                     if gated else [])
+    # (at any coaching level: prose written is prose gated)
+    gate_failures = _gate_pass_scenes(project_dir, _written, pass_name, log_dir)
 
     # Update word counts
     _update_word_counts_from_dir(project_dir)
 
     # The scenes it did write are committed either way; a pass that skipped
     # some is not marked completed
+    if not skipped:
+        _update_pass_field(plan_rows, 1, 'status', 'completed', csv_plan_file)
     commit_and_push(
         project_dir,
         f'Polish: loop iteration {iteration} — {pass_name}' + fallback_note(served_before),
         ['scenes/', 'reference/', 'working/'],
     )
     if skipped:
+        _log_gate_failures(gate_failures)
         _fail_skipped_scenes(pass_name, skipped, step_log)
-    _update_pass_field(plan_rows, 1, 'status', 'completed', csv_plan_file)
     if gate_failures:
-        _fail_gated_pass(pass_name, gate_failures)
+        _fail_gated_pass(pass_name, gate_failures, POLISH_RESUME)
 
 
-def _fail_gated_pass(pass_name: str, failures: list[str]) -> None:
+#: How each caller of `_fail_gated_pass` carries on once the gate passes
+PLAN_RESUME = 're-run `storyforge revise` for the plan\'s passes left'
+POLISH_RESUME = 're-run `storyforge revise --polish --loop`'
+
+
+def _log_gate_failures(failures: list[str]) -> None:
+    """Name what the gate didn't pass before another error stops the pass."""
+    if failures:
+        log('ERROR: the gate did not pass everything this pass changed:')
+        for line in failures:
+            log(f'  {line}')
+        log(pass_gate_advice('re-run the pass'))
+
+
+def _fail_gated_pass(pass_name: str, failures: list[str], resume: str,
+                     redraft_needed: set[str] | frozenset[str] = frozenset()) -> None:
     """Stop the session after a pass whose revised scenes the gate did not
-    all pass (`_gate_pass_scenes`): the pass is completed and committed, but
-    the next would revise prose the ledger doesn't hold."""
-    log(f'ERROR: Pass \'{pass_name}\' is done, but the gate did not pass all of its '
-        f'revised scenes:')
+    all pass, or whose re-checks did not (`_gate_pass_scenes`): its scenes
+    are committed, but the next pass would revise prose the ledger doesn't
+    hold. `redraft_needed`: scenes whose briefs earlier passes rewrote and
+    that the session would have redrafted at its end; they are named, since
+    a re-run won't remember them."""
+    log(f'ERROR: Pass \'{pass_name}\' wrote its scenes, but not everything it changed '
+        f'passed the gate:')
     for line in failures:
         log(f'  {line}')
-    log(PASS_GATE_ADVICE)
+    log(pass_gate_advice(resume))
+    if redraft_needed:
+        log(f'Not redrafted: {len(redraft_needed)} scene(s) whose briefs this session '
+            f'rewrote still have their old prose: {", ".join(sorted(redraft_needed))}. '
+            f'Once the scenes before them pass the gate, redraft them with '
+            f'`storyforge write --force --coaching full --scenes <ids>`.')
     sys.exit(1)
 
 
@@ -2962,11 +3040,11 @@ Rules:
         # Select model
         pass_model = select_revision_model(pass_name, pass_purpose)
 
-        # Phase 4 §5: a prose pass's scenes go through the gate, so it may
-        # not start behind a scene waiting on it
-        gated = (effective_coaching == 'full'
-                 and fix_location not in ('structural', 'registry'))
-        if gated:
+        # Phase 4 §5: a prose pass's scenes go through the gate, so at full
+        # coaching (the level that writes prose) it may not start behind a
+        # scene waiting on it. Prose written at any level is gated.
+        gated = fix_location not in ('structural', 'registry')
+        if gated and effective_coaching == 'full':
             _exit_if_pass_blocked(project_dir, targets)
         rewritten: list[str] = []   # the scenes this pass rewrote, for the gate
 
@@ -3126,7 +3204,7 @@ Rules:
         head_after = _git(project_dir, 'rev-parse', 'HEAD', check=False).stdout.strip()
         if head_before == head_after:
             log('  No commit from Claude. Creating manual commit...')
-            if effective_coaching in ('coach', 'strict'):
+            if effective_coaching in ('coach', 'strict') and not rewritten:
                 commit_and_push(
                     project_dir,
                     f'{effective_coaching.capitalize()}: {pass_name}',
@@ -3135,7 +3213,7 @@ Rules:
             else:
                 commit_and_push(project_dir,
                                 f'Revision: {pass_name}' + fallback_note(served_before), ['.'])
-        elif gated and rewritten:
+        elif rewritten:
             # the session committed its own prose; the gate's fixes and
             # ledger came after
             commit_and_push(project_dir, f'Revision: gate the scenes of {pass_name}',
@@ -3154,6 +3232,7 @@ Rules:
         _git(project_dir, 'push', check=False)
 
         if skipped_scenes:
+            _log_gate_failures(gate_failures)
             _fail_skipped_scenes(pass_name, skipped_scenes, step_log, owed_saved=True)
 
         # Mark completed (an interactive session writes the scenes itself,
@@ -3161,7 +3240,10 @@ Rules:
         _update_pass_field(plan_rows, pass_num, 'owed', '', csv_plan_file)
         _update_pass_field(plan_rows, pass_num, 'status', 'completed', csv_plan_file)
         if gate_failures:
-            _fail_gated_pass(pass_name, gate_failures)
+            commit_and_push(project_dir, f'Revision: {pass_name} done, stopped at the gate',
+                            [csv_plan_file])
+            _fail_gated_pass(pass_name, gate_failures, PLAN_RESUME,
+                             redraft_needed if defer_redraft else frozenset())
 
         commit_short = _git(project_dir, 'rev-parse', '--short', 'HEAD', check=False).stdout.strip()
         log(f'SUCCESS: Pass {pass_num}/{total_passes} ({pass_name}) -- {minutes}m{secs}s, commit {commit_short}')
