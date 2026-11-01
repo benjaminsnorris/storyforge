@@ -1,15 +1,20 @@
 """E8 revision safety: re-run current passes where past passes wrote errors.
 
 See evals/e8/__init__.py. Gate (Phase 4, redefined 2026-11-01): at most
-`MAX_UNFLAGGED` reintroduced errors reach the book unflagged, i.e. passed by
-the gate. The plan's "zero reintroduced" is out of this checker's reach on
-one run: E8 moves between runs (E6's three runs reintroduced 6, 10 and
-11 of 37; 6 cases moved in or out of reintroduced), and what was left after Phase 4's PRs
-was checker recall (an inference miss, long-context misses), not an
-ungated path. A reintroduction the gate fails is listed for the author and
-revise stops there, so it doesn't count against the gate; `reintroduced`
-is still reported.
+`MAX_UNFLAGGED` reintroduced errors reach the book unflagged: passed by the
+gate, or written by a data pass, which isn't gated. The plan's "zero
+reintroduced" is out of this checker's reach on one run: E8 moves between
+runs (E6's three runs reintroduced 6, 10 and 11; 6 cases moved in or out
+of reintroduced), and what was left after Phase 4's PRs was checker
+recall (an inference miss, a long-context miss, a later scene not
+searched), not an ungated path. A reintroduction in a scene the gate checked and failed is
+listed for the author and revise stops there, so it doesn't count against
+the gate (the listing is per scene: the gate may have failed it for another
+finding); one the gate couldn't finish counts as unflagged, and
+`gate_unfinished` must be zero. `reintroduced` is still reported.
 """
+
+import re
 
 from e1 import load_cases, load_holdout
 from e8 import DATA_FAMILIES, PassHalted, family, judge, prepare, replay, select
@@ -26,7 +31,7 @@ def run(ctx):
     notes = []
     by_code: dict[str, dict[str, float]] = {}
     by_family: dict[str, list[int]] = {}
-    reintroduced = replayed = words = prose_hits = halted = unflagged = 0
+    reintroduced = replayed = words = prose_hits = halted = unflagged = unfinished = 0
     for case in sel.cases:
         try:
             project, scene_id = prepare(case, ctx.work_dir)
@@ -52,8 +57,10 @@ def run(ctx):
         reintroduced += hit
         # a gated prose pass that didn't pass leaves the scene listed for the
         # author (revise stops there); one it passed reaches the book unflagged
-        flagged = not data and _listed_pending(project, scene_id)
+        listing = '' if data else _gate_listing(project, scene_id)
+        flagged = listing == 'failed'
         unflagged += hit and not flagged
+        unfinished += listing == 'unfinished'
         if not data:  # errors per 10k words counts prose only, on both sides
             words += len(output.split())
             prose_hits += hit
@@ -66,6 +73,8 @@ def run(ctx):
         notes.append(f'{case["id"]} ({scene_id}): {verdict["verdict"]}'
                      + (' (wrote nothing; not judged)' if unjudged else '')
                      + (' (the gate did not pass it: listed pending)' if flagged else '')
+                     + (' (the gate could not finish: counted unflagged)'
+                        if listing == 'unfinished' else '')
                      + (f' — "{verdict.get("evidence", "")[:120]}"' if hit else ''))
     # after the loop, which adds the cases prepare() could not replay
     notes[:0] = [f'excluded {len(ids)}: {reason} ({", ".join(ids)})'
@@ -73,7 +82,7 @@ def run(ctx):
     unreplayable = sum(len(v) for k, v in sel.excluded.items() if k.startswith('unreplayable'))
     return SuiteOutput(
         metrics={'replayed': replayed, 'reintroduced': reintroduced,
-                 'reintroduced_unflagged': unflagged,
+                 'reintroduced_unflagged': unflagged, 'gate_unfinished': unfinished,
                  'reintroduction_rate': round(reintroduced / replayed, 3) if replayed else 0.0,
                  'errors_per_10k_words': round(prose_hits / words * 10000, 3) if words else 0.0,
                  'unreplayable': unreplayable, 'halted': halted,
@@ -81,23 +90,42 @@ def run(ctx):
                  **{f'family.{k}.reintroduced': v[1] for k, v in by_family.items()}},
         by_code=by_code,
         gates=[Gate('replayed', replayed, '>=', MIN_REPLAYED),
-               Gate('reintroduced_unflagged', unflagged, '<=', MAX_UNFLAGGED)],
+               Gate('reintroduced_unflagged', unflagged, '<=', MAX_UNFLAGGED),
+               # a gate that can't finish lists the scene too; it must not
+               # pass for one that checked it
+               Gate('gate_unfinished', unfinished, '==', 0)],
         notes=notes,
     )
 
 
-def _listed_pending(project_dir: str, scene_id: str) -> bool:
-    """Whether the replay left `scene_id` in working/gate-pending.csv: the
-    gate didn't pass it (or couldn't finish), so write/revise stop there
-    and the author is told. Every gated family lists it as they do
-    (`e8.gate_as_revise`, and naturalness-upstream through revise's own
-    `_redraft_scenes`); the pre-pass projects predate the file. An
-    unreadable file counts as not listed (write/revise would stop on it)."""
+#: The reasons write/revise (and `e8.gate_as_revise`) list a scene with when
+#: the gate ran and didn't pass it
+_FAILED_REASON = re.compile(r'(the gate did not pass it|\d+ problem\(s\) after one fix)')
+_UNFINISHED_REASON = re.compile(r'the gate (could not finish|failed unexpectedly)')
+
+
+def _gate_listing(project_dir: str, scene_id: str) -> str:
+    """How the replay left `scene_id` in working/gate-pending.csv:
+    'failed' (the gate checked it and didn't pass it: write/revise stop
+    there and the author is told), 'unfinished' (the gate couldn't finish),
+    'other' (listed for another reason: a re-check, a pass's scene not gated
+    yet), or '' (not listed: the gate passed it). Every gated family lists
+    as write/revise do (`e8.gate_as_revise`, and naturalness-upstream through
+    revise's own `_redraft_scenes`); the pre-pass projects predate the file.
+    An unreadable file counts as not listed."""
     from storyforge import gate
     try:
-        return scene_id in gate.pending(project_dir)
+        row = gate.pending(project_dir).get(scene_id)
     except gate.GateError:
-        return False
+        return ''
+    if row is None:
+        return ''
+    if row['command'] in (gate.RECHECK, gate.RECHECK_FAILED):
+        return 'other'
+    reason = row['reason']
+    if _UNFINISHED_REASON.match(reason):
+        return 'unfinished'
+    return 'failed' if _FAILED_REASON.match(reason) else 'other'
 
 
 SUITE = Suite('e8-revision-safety',

@@ -1,8 +1,8 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-11-01, at v1.121.0. **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and is met: 3 reintroduced, 1 passed by the gate**. Next is the Storygild plan (below). **A fresh session starts here:** read **Latest**, then the Phase 4 design note's "PRs, in order", then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-11-01, at v1.121.0. **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and is met: 3 reintroduced, 1 passed by the gate**. Next is the Storygild plan (below). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
-## Latest: the checker's calendar, and E8's gate redefined (2026-11-01)
+## Latest: the checker's calendar, and E8's gate redefined (2026-11-01, #478)
 
 **v1.121.0.** What was left of E8 after #476 (4 reintroduced, all passed by the gate) was the checker's recall, read case by case from free replays:
 
@@ -13,9 +13,9 @@ Last updated 2026-11-01, at v1.121.0. **Phase 3 is done** and **Phase 4 is done*
 | thornwall-025 (TRT) | the four closed Holds named differently from an earlier scene | missed in the story so far, which it had whole |
 | governor-016 (WLD) | stone-cutters on Block Fourteen, where Fifteen is the active site | an inference miss, both facts in front of it |
 
-E8's pre-pass trees have no phase 4 commitments, so `query_ledger` found registry facts only there.
+In all four, E8's pre-pass trees have no phase 4 commitments, so the checker's `query_ledger` found registry facts only (a book written with today's `write` would have the scene facts too).
 - **What changed (`checker.py`):** each scene's `timeline_day` and `time_of_day` (`Book.when`) go in the scene list, the checked scene's header and each story-so-far scene's `when` attribute, and the prompt says to check every elapsed time against them; a finding against the calendar names `scenes.csv` and quotes one calendar line (`Book.calendar`, verified). And a "Later scenes too" instruction: one search per name the scene says something specific about, the name alone. The writer's prompt still carries no calendar (a follow-up; it would re-record E4, E5 and E8's drafting).
-- **E8's gate, redefined (Ben chose options 1, 2 and 4):** `reintroduced_unflagged ≤ 2` (`MAX_UNFLAGGED`, set before the re-record's result from E6's spread: its three runs reintroduced 6, 10 and 11 of 37, 6 cases moving in or out); `reintroduced` is reported, no longer gated. A reintroduction the gate fails is listed for the author and revise stops there.
+- **E8's gate, redefined (Ben chose options 1, 2 and 4):** `reintroduced_unflagged ≤ 2` (`MAX_UNFLAGGED`, a judgement set before the re-record's result: E6's three runs reintroduced 6, 10 and 11, 6 cases moving in or out, but they predate the gate, so the unflagged count's own spread is unmeasured). A scene counts as flagged only when the gate checked it and failed it; one the gate couldn't finish counts as unflagged, and a new gate holds `gate_unfinished` at zero; `reintroduced` is reported, no longer gated. A reintroduction the gate fails is listed for the author and revise stops there.
 
 | | before (#476) | after |
 |---|---|---|
@@ -274,7 +274,7 @@ Run 4's 26 contradictions: 12 in scenes the gate failed, 14 in scenes it passed,
 | 5 Phase 1 | done | #359–#405 |
 | 6 Phase 2 | done | #401, #416, #417, #420–#424, #430, #432 |
 | 7 Phase 3 | done | #436, #437, #439, #443, #450, #453–#458, #461–#463 |
-| 8 Phase 4 | done (E8 redefined 2026-11-01) | #465, #466, #468, #470, #473, #474, #475, #476 |
+| 8 Phase 4 | done (E8 redefined 2026-11-01) | #465, #466, #468, #470, #473, #474, #475, #476, #478 |
 
 ## Next steps, in order (handoff for a new session)
 

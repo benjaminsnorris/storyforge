@@ -723,3 +723,13 @@ class TestRejected:
         row = gate.pending(project_dir)[SCENE]
         assert row['command'] == gate.REVISE_REJECTED and gate.rejected_ids(row) == ['a']
         assert row['reason'].startswith('2 problem(s)')
+
+
+def test_a_calendar_finding_names_the_calendar_in_the_fix_prompt(project_dir, tmp_path):
+    """#478's review: a finding against scenes.csv reads as the calendar."""
+    finding = {**_contradiction(), 'code': 'TIM', 'established_scene': 'scenes.csv',
+               'established_quote': 'act1-sc01: day 1, morning'}
+    result = _gate(project_dir, tmp_path, findings=[finding])
+    assert not result.passed and result.check.unverified == []
+    line = next(x for x in gate.problems_to_fix(result) if 'TIM contradiction' in x)
+    assert 'but the calendar (scenes.csv) establishes "act1-sc01: day 1, morning"' in line

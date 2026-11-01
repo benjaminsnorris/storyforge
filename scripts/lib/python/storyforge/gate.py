@@ -490,9 +490,8 @@ def problems_to_fix(result: GateResult) -> list[str]:
         tag = (f'UNVERIFIED (the check\'s quotes did not hold up: {f.problem}; edit only '
                f'if the scene clearly contradicts the book) ' if unverified else '')
         if f.kind == 'contradiction':
-            where = f.established_scene or 'the ledger'
             lines.append(f'{tag}{f.code} contradiction: the scene says "{f.scene_quote}", '
-                         f'but {where} establishes "{f.established_quote}". {f.explanation}')
+                         f'but {f.source} establishes "{f.established_quote}". {f.explanation}')
         else:
             lines.append(f'{tag}Broken promise ({f.fact_id}): the brief promises '
                          f'"{f.established_quote}". {f.explanation}'

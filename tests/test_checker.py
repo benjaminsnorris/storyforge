@@ -553,7 +553,36 @@ class TestCalendar:
         result, _ = _run(project_dir, [_answer([_finding(
             established_scene='scenes.csv', established_quote=quote)])])
         assert result.findings == []
-        assert 'not a line of the calendar' in result.unverified[0].problem
+        assert "not a dated scene's line in the scene list" in result.unverified[0].problem
+
+    @pytest.mark.parametrize('scene, quote', [
+        ('scenes.csv', '- act1-sc01: The Finest Cartographer (POV Dorren Hayle, '
+                       'Pressure Cartography Office; day 1, morning)'),
+        ('scenes.csv', "act1-sc02: The Missing Village (POV Dorren Hayle, Dorren's private "
+                       'study; day 1, evening)  <- this scene'),
+        ('reference/scenes.csv', 'act1-sc01: day 1, morning'),
+    ])
+    def test_the_scene_list_line_and_the_file_path_verify(self, project_dir, scene, quote):
+        """Recorded checks quoted the whole scene-list line (#478's review)."""
+        result, _ = _run(project_dir, [_answer([_finding(
+            established_scene=scene, established_quote=quote)])])
+        assert result.unverified == []
+        assert result.findings[0].established_scene == 'scenes.csv'
+        assert 'contradicts the calendar (scenes.csv)' in result.findings[0].message()
+
+    def test_the_prompt_example_is_a_line_that_verifies(self, project_dir):
+        _, prompt = self._sent(project_dir)
+        example = prompt.split('copied whole from the scene list (for example `')[1].split('`')[0]
+        assert checker.Book.load(project_dir, SCENE).in_calendar(example)
+
+    def test_an_undated_scene_line_does_not_verify(self, project_dir):
+        from storyforge.elaborate import update_scene
+        import os
+        update_scene('new-x1', os.path.join(project_dir, 'reference'),
+                     {'timeline_day': '', 'time_of_day': ''})
+        book = checker.Book.load(project_dir, SCENE)
+        assert not book.in_calendar(book.index_line('new-x1'))
+        assert book.in_calendar(book.index_line('act1-sc01'))
 
 
 def test_the_prompt_asks_for_one_search_per_name_in_later_scenes(project_dir):
@@ -563,3 +592,70 @@ def test_the_prompt_asks_for_one_search_per_name_in_later_scenes(project_dir):
     prompt = bodies[0]['messages'][0]['content']
     assert '**Later scenes too.**' in prompt
     assert 'one search per name' in prompt
+
+
+class TestCalendarReview478:
+    """#478's review: quote shapes, undated and time-only scenes, time_mode."""
+
+    def _set(self, project_dir, sid, **cols):
+        import os
+        from storyforge.elaborate import update_scene
+        update_scene(sid, os.path.join(project_dir, 'reference'), cols)
+
+    def _prompt(self, project_dir):
+        with patch('storyforge.api._api_request', side_effect=[_answer()]) as api:
+            check_scene(project_dir, SCENE, model='claude-opus-5-5')
+        body = api.call_args[0][1]
+        return ''.join(b['text'] for b in body.get('system', [])), body['messages'][0]['content']
+
+    @pytest.mark.parametrize('quote', ['"act1-sc01: day 1, morning"', "'act1-sc01: day 1, morning.'",
+                                       '`act1-sc01: Day 1, Morning`'])
+    def test_wrapped_or_recased_calendar_lines_verify(self, project_dir, quote):
+        result, _ = _run(project_dir, [_answer([_finding(
+            established_scene='scenes.csv', established_quote=quote)])])
+        assert result.unverified == [] and len(result.findings) == 1
+
+    def test_a_scenes_when_cited_under_its_id_verifies_as_the_calendar(self, project_dir):
+        result, _ = _run(project_dir, [_answer([_finding(
+            established_scene='act1-sc01', established_quote='day 1, morning')])])
+        assert result.unverified == []
+        assert result.findings[0].established_scene == 'scenes.csv'
+
+    def test_another_scenes_when_under_this_id_does_not(self, project_dir):
+        result, _ = _run(project_dir, [_answer([_finding(
+            established_scene='act1-sc01', established_quote='day 2, afternoon')])])
+        assert 'not in act1-sc01' in result.unverified[0].problem
+
+    def test_an_undated_scene_is_shown_a_dated_scenes_line_as_the_example(self, project_dir):
+        self._set(project_dir, SCENE, timeline_day='', time_of_day='')
+        _, prompt = self._prompt(project_dir)
+        assert 'this scene has no day' in prompt
+        example = prompt.split('copied whole from the scene list (for example `')[1].split('`')[0]
+        assert example.startswith('act1-sc01:')
+        assert checker.Book.load(project_dir, SCENE).in_calendar(example)
+        assert f'- {SCENE}: The Missing Village (POV Dorren Hayle, Dorren\'s private study)' in prompt
+
+    def test_a_book_with_times_but_no_days_gets_no_calendar_note(self, project_dir):
+        for sid in checker.Book.load(project_dir, SCENE).order:
+            self._set(project_dir, sid, timeline_day='')
+        _, prompt = self._prompt(project_dir)
+        assert '**The calendar.**' not in prompt
+        assert '(POV Dorren Hayle, Pressure Cartography Office; morning)' in prompt
+
+    def test_day_only_time_only_and_time_mode(self, project_dir):
+        self._set(project_dir, 'act1-sc01', time_of_day='', time_mode='summary')
+        self._set(project_dir, 'new-x1', timeline_day='', time_mode='frame')
+        book = checker.Book.load(project_dir, SCENE)
+        assert book.when('act1-sc01') == 'day 1, a summary: covers a stretch from that day'
+        assert book.when('new-x1') == "afternoon, frame narration: not the story's present"
+        assert book.calendar().splitlines()[0].startswith('act1-sc01: day 1')
+
+    def test_a_time_only_scene_is_not_said_to_be_a_day(self, project_dir):
+        self._set(project_dir, SCENE, timeline_day='')
+        _, prompt = self._prompt(project_dir)
+        assert 'this scene has no day' in prompt and 'this scene is evening' not in prompt
+
+    def test_the_when_attribute_is_escaped(self, project_dir):
+        self._set(project_dir, 'act1-sc01', time_of_day='"late" <night>')
+        system, _ = self._prompt(project_dir)
+        assert 'when="day 1, &quot;late&quot; &lt;night&gt;"' in system
