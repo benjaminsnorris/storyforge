@@ -4,25 +4,29 @@ Last updated 2026-11-01, at v1.124.0. **Phase 3 is done** and **Phase 4 is done*
 
 ## Latest: a second fix round (2026-11-01)
 
-**v1.124.0.** #480 left 8 E8 scenes ending with new errors after the gate's one fix. A free replay of E8 recording each gated scene's first and last verdicts showed why: of 28 gated scenes, 8 passed first time, 10 after the fix, and 10 still failed. Most of the 10 had a fix that half-addressed its finding: He → She with "him" left (thornwall-026), "eight days" → "five", still off the calendar (governor-016), "four winters" → "two", still wrong (thornwall-029).
+**v1.124.0.** #480 left 8 E8 clean replays the gate failed, each ending with new errors after the gate's one fix. A free replay of E8 recording each gated scene's first and last verdicts showed why: of 28 gated scenes, 8 passed first time, 10 after the fix, and 10 still failed (the 8, plus 2 reintroductions the gate flagged). Most of the 10 had a fix that half-addressed its finding: He → She with "him" left (thornwall-026), "eight days" → "five", still off the calendar (governor-016), "four winters" → "two", still wrong (thornwall-029).
 
-**What changed:** `gate.gate_and_fix` fixes and re-gates while the scene fails, at most `FIX_ROUNDS` (2) times. The second fix is sent the first's problems and its edits (`FixRound`, `build_fix_prompt(earlier=)`): keep what an earlier edit fixed; where it put in a value that is still wrong, take the book's value or remove the detail instead of guessing again; where it changed only part of something, change the rest. `GatedScene.rounds` lists the fixes; write's pending reason says "after 2 fixes". Details: `gate`'s row in `docs/agent-reference.md`.
+**What changed** (details: `gate`'s row in `docs/agent-reference.md`):
+- `gate.gate_and_fix` fixes and re-gates while the scene fails, at most `FIX_ROUNDS` (2) times. The second fix is sent the first's problems and its edits (`FixRound`, `build_fix_prompt(earlier=)`): keep what an earlier edit fixed; where it put in a value that is still wrong, take the book's value or remove the detail instead of guessing again; where it changed only part of something, change the rest.
+- **A later round never leaves things worse** (the review): its fix is discarded, keeping the round before it, when it fails (`GateError`), puts back words an earlier fix removed (checked before its gate run, since a lucky pass would commit the first error), or leaves more blocking problems. Each discard is in `GatedScene.notes`, which write logs and names in the pending reason.
+- write logs each round (problems sent, edits), and its pending reason says "after 2 fixes", or that what's left is plan conflicts (the author's).
 
 | | before (#480, one fix) | two fixes |
 |---|---|---|
-| E8 gated scenes failing after the fixes (of 28) | 10 | 7 |
 | E8 clean replays the gate failed | 8 | **4** |
-| E8 errors per 10k words | 2.05 | 1.39 |
+| E8 gated scenes failing after the fixes (of 28) | 10 | 7 (one, governor-026, kept its first fix: the second left 2 problems, not 1) |
 | E8 reintroduced / passed by the gate (≤ 2) | 4 / 2 | 5 / 2 (the same two: shared-dark-040, thornwall-025) |
-| E4 scenes to the first gate failure | 2 | 9 |
-| E4 scenes still failing after the fixes (of 23) | — | 3 (8 fixed) |
-| E4 gate caught / missed / false alarm | 2 / 4 / 1 | 2 / 6 / 1 |
-| E4 CP10k passed scenes | 2.09 | 3.14 |
+| E8 errors per 10k words | 1.11 | 1.39 |
+| E4 scenes to the first gate failure | 9 | 9 |
+| E4 scenes still failing after the fixes (of 23) | 3 (9 fixed) | 4 (10 fixed) |
+| E4 gate caught / missed / false alarm | 2 / 4 / 1 | 2 / 4 / 2 |
+| E4 CP10k passed scenes | 2.09 | 2.17 |
 
-One run each; E4's spread is wider than these changes (two recordings of one code path read 4.36 and 2.09), so read its row as "no worse", not as a change. In E8 the second round passed 3 scenes (governor-013, -018, -024) and finished what the first half-did in others (thornwall-026's remaining pronouns; thornwall-029's "two winters" made "a few winters"; governor-016's other counts). **The 7 that still fail are mostly stopped by a different finding elsewhere in the scene** that the earlier runs didn't raise (thornwall-029's journal handwriting; thornwall-026's saddlebag): the checker surfaces different things each run, so more rounds chase a moving target. One oscillated (thornwall-024: the second fix put back what the first removed, which the calendar contradicts). That is why the cap is 2, not more.
-- **Cost:** a second round is one fix and one gate run, only for a scene still failing after the first (10 of 28 in E8). Spend: $15.77 (`--mode auto`: E8 $6.07, E4 $9.70).
+One run each. **What it bought is E8's clean-but-failed count, 8 → 4:** fewer scenes the author has to fix by hand after a clean revision. E8's error density rose (1.11 → 1.39, with one more reintroduction) and E4 is unchanged within its spread (two recordings of one code path read 4.36 and 2.09), so this does not show fewer errors in the book, only fewer scenes left stopped. In E8 the second round passed 3 scenes (governor-013, -018, -024) and finished what the first half-did in others (thornwall-026's remaining pronouns; thornwall-029's "two winters" made "a few winters"; governor-016's other counts). **The 6 still failing after two fixes are mostly stopped by a different finding elsewhere in the scene** that the earlier runs didn't raise (thornwall-029's journal handwriting; thornwall-026's saddlebag): the checker surfaces different things each run, so more rounds chase a moving target. One oscillated (thornwall-024: the second fix put back words near what the first removed, which the calendar contradicts). Hence the cap of 2.
 
-**Next, in order (Ben, 2026-11-01):** E4 over 2–3 runs (its spread swamps every gate change so far); the calendar in the drafting prompt; a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost; the low-confidence halt; `characters.csv` `pronouns`. The checker's run-to-run variance (a different finding each run) is what now limits the fix, and may be worth its own look.
+- **Cost:** a second round is one fix and one gate run, only for a scene still failing after the first (10 of 28 in E8). Spend: $18.97 (`--mode auto`: E8 $6.07, E4 $9.70, then E4 $3.20 after the review's fallbacks). The first two commits' messages compared E8's errors per 10k words and E4's scenes to the first failure with the old `evals/baseline.json` (2.05 and 2); against #480's run they are 1.11 → 1.39 and 9 → 9, as above.
+
+**Next, in order (Ben, 2026-11-01):** E4 over 2–3 runs (its spread swamps every gate change so far); the checker's run-to-run variance (a different finding each run is what now limits the fix); the calendar in the drafting prompt; a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost; the low-confidence halt; `characters.csv` `pronouns`.
 
 ## Phase 5, shrunk (2026-11-01)
 
