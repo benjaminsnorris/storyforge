@@ -64,7 +64,7 @@ Scene files (`scenes/{id}.md`) are pure prose — **no frontmatter**. Filename i
 
 ## Dashboard data (`dashboard_data`, schema version 1)
 
-Storyforge defines and sends the dashboard's data; Bookshelf renders it (benjaminsnorris/bookshelf#30; Bookshelf's copy of the contract is `src/lib/dashboard/schema.ts`). `visualize.load_dashboard_data` builds it, `publish` sends it, and `storyforge visualize` writes it to `working/dashboard-data.json`.
+Storyforge defines and sends the dashboard's data; Bookshelf renders it (benjaminsnorris/bookshelf#30; Bookshelf's copy of the contract is `src/lib/dashboard/schema.ts`). `visualize.load_dashboard_data` builds it; `publish` sends the export bundle's copy (`export.build_bundle(..., strict_dashboard=True)`, so data that can't be built stops the publish rather than sending a null), and `storyforge visualize` writes it to `working/dashboard-data.json`. This section of the bundle is all Bookshelf reads of the book's structured state; the prose and images travel in the publish manifest.
 
 - `schema_version`: `1` (`visualize.DASHBOARD_SCHEMA_VERSION`). Bookshelf reads a missing one as 1. It is a major version. Adding a list or a CSV column doesn't change it. Renaming or removing a key, or changing a value's type, bumps it, and Bookshelf must support the new version first, since it refuses one it can't draw. `tests/test_dashboard_data.py` pins the keys.
 - `project`: `title`, `genre`, `phase`, `scene_count`, `total_words`, `target_words`, `generated`. All strings.
@@ -86,7 +86,7 @@ A missing CSV gives an empty list.
 
 ## Export bundle (`storyforge export`, schema version 1)
 
-`export.build_bundle(project_dir)` builds one JSON bundle of the book's structured state (plan §3.5); `storyforge export` writes it to `working/export/bundle.json` (`--output PATH`, `--stdout`), as UTF-8 with sorted keys and LF. Storygild and Bookshelf read the bundle and pin its `schema_version`. No API calls. An unmigrated project or a malformed ledger exits 1 (`ledger.LedgerError`). `tests/test_export.py` pins the keys; `evals/export_check.py` exports a copy of each book and checks the round trip.
+`export.build_bundle(project_dir)` builds one JSON bundle of the book's structured state (plan §3.5); `storyforge export` writes it to `working/export/bundle.json` (`--output PATH`, `--stdout`), as UTF-8 with sorted keys and LF. Bookshelf reads the bundle's `dashboard_data` (sent by `publish`) and pins that section's own `schema_version` (Bookshelf's `SUPPORTED_SCHEMA_VERSIONS`), since it reads none of the tables. Storygild, when it is split out (deferred; plan Phase 5), reads the whole bundle and pins its `schema_version`. No API calls. An unmigrated project or a malformed ledger exits 1 (`ledger.LedgerError`). `tests/test_export.py` pins the keys; `evals/export_check.py` exports a copy of each book and checks the round trip.
 
 - `schema_version`: `1` (`export.SCHEMA_VERSION`), a major version. Adding a key, a table or a table kind doesn't change it. Renaming or removing a key, or changing a value's type, bumps it, in the same commit, with the tests.
 - `storyforge_version`: the plugin version that wrote it (`.claude-plugin/plugin.json`).
