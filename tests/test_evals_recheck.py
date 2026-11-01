@@ -181,15 +181,14 @@ def test_recheck_set_lists_now_when_the_establishing_scene_has_no_prose(project_
     assert recheck.recheck_set(project_dir, rows, ['a'], order).scenes == ('act2-sc03',)
 
 
-def test_recheck_set_counts_brief_named_scenes_apart(project_dir, monkeypatch):
-    """After a revision the gate lists the dependents only, not scenes whose
-    brief names the fact, which `_reject_recheck` shows in `later`."""
+def test_recheck_set_counts_brief_named_scenes(project_dir, monkeypatch):
+    """The gate lists the scenes whose brief names a rejected fact after
+    its revision passes, as `_reject_recheck`'s `later` says."""
     from storyforge import audit
     order = ledger.scene_order(project_dir)
     rows = ledger.load(project_dir) + [_fact('a', 'act1-sc01', 'lamp-z')]
     monkeypatch.setattr(audit, 'leaning_scenes', lambda p, ids: {'a': ['act2-sc01']})
-    found = recheck.recheck_set(project_dir, rows, ['a'], order)
-    assert found.scenes == () and found.brief_only == ('act2-sc01',)
+    assert recheck.recheck_set(project_dir, rows, ['a'], order).scenes == ('act2-sc01',)
 
 
 def test_recheck_set_reports_a_fact_it_cant_trace(project_dir):

@@ -347,10 +347,15 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     result.changed += sorted(ended_before ^ ledger.ended_by(new, scene_id))
     result.changed += [i for i in revised_rejection if i not in result.changed]
     if result.changed:
-        found = ledger.dependents(old_rows + new, result.changed, order)
+        found = ledger.dependents(old_rows + new, result.changed, order,
+                                  names=ledger.subject_names(project_dir))
         result.unrelated = found.unrelated
+        # a rejected fact's re-check also reaches the scenes whose brief
+        # names it, as `audit --mark rejected` said it would (design §4)
+        briefs = audit.leaning_scenes(project_dir, revised_rejection) if revised_rejection else {}
         # only what follows the scene can depend on how the scene changed
-        later = [s for s in found.scenes if order[s] > order[scene_id]]
+        later = sorted({s for s in found.scenes + [b for v in briefs.values() for b in v]
+                        if s in order and order[s] > order[scene_id]}, key=order.get)
         gone = _gone_scenes(project_dir)
         result.recheck = [s for s in later if s not in gone and _has_prose(project_dir, s)]
         result.not_rechecked = [f'{s} ({"cut or merged" if s in gone else "no prose yet"})'

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import csv
 import os
+import re
 import threading
 from dataclasses import dataclass, field
 
@@ -676,23 +677,74 @@ class Dependents:
     unrelated: dict[str, str] = field(default_factory=dict)
 
 
+def subject_names(project_dir: str) -> dict[str, set[str]]:
+    """Subject id (casefolded) → the names and aliases `characters.csv` and
+    `locations.csv` give it (lowercased), for `dependents`' mention match.
+    A subject not in either registry is still matched by its id."""
+    from storyforge.enrich import load_alias_map
+    names: dict[str, set[str]] = {}
+    for registry in ('characters.csv', 'locations.csv'):
+        aliases = load_alias_map(os.path.join(project_dir, 'reference', registry))
+        for alias, canonical in aliases.items():
+            names.setdefault(canonical.casefold(), set()).add(alias.lower())
+    return names
+
+
+_MIN_PHRASE = 3
+
+
+def _phrases(subject: str, names: dict[str, set[str]]) -> set[str]:
+    """How a statement can name `subject`: its id with spaces for hyphens
+    and its registry names, each without a leading "the"; a phrase shorter
+    than three letters is too loose to match on."""
+    out = set()
+    for p in {subject.replace('-', ' ')} | names.get(subject, set()):
+        p = ' '.join(p.lower().split())
+        if p.startswith('the '):
+            p = p[4:]
+        if len(p) >= _MIN_PHRASE:
+            out.add(p)
+    return out
+
+
+def _mentions(statement: str, subject: str, names: dict[str, set[str]],
+              cache: dict[str, re.Pattern | None]) -> bool:
+    """Whether `statement` names `subject` (casefolded id) as a whole word."""
+    if not subject:
+        return False
+    if subject not in cache:
+        phrases = sorted(_phrases(subject, names), key=len, reverse=True)
+        cache[subject] = (re.compile(r'\b(?:' + '|'.join(re.escape(p) for p in phrases)
+                                     + r')\b') if phrases else None)
+    pattern = cache[subject]
+    return bool(pattern and pattern.search(' '.join((statement or '').lower().split())))
+
+
 def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
-               order: dict[str, int]) -> Dependents:
+               order: dict[str, int], *, names: dict[str, set[str]] | None = None) -> Dependents:
     """The scenes after each of `fact_ids` whose binding facts depend on it,
     in reading order: the re-check set when those facts change (design §1,
     derived from the ledger, decided by Ben 2026-10-31).
 
     A binding fact in a later scene depends on fact F when it
     - supersedes F or names it in `depends_on`, or
-    - is about the same `subject` (non-blank, any case) in the same `type`,
-      or, for a knowledge fact, its subject is one of F's `known_by`;
+    - is about the same `subject` (non-blank, any case), in any type, or,
+      for a knowledge fact, its subject is one of F's `known_by`, or
+    - names F's subject in its statement, or F's statement names its
+      subject (by id, or by a registry name or alias in `names`, from
+      `subject_names`; without `names` only ids match), or
+    - when F has no subject (and, for knowledge, no `known_by`): is of
+      F's type. F is then in `.unrelated` still, since a type is a guess
+      at what it is about;
     and the scene F's `resolves` names (the scene that ends it) depends on F.
     "Later" is after F's scene; a fact with no scene (backstory) is before
     every scene. Over-includes by design: a needless check costs a call, a
-    missed scene is a silent hole, so a fact whose dependents can't be told
-    is in `.unrelated` with the reason. Removed facts must be in `rows`
-    (pass the old rows with the new ones). A scene may have no prose yet:
-    the caller skips those."""
+    missed scene is a silent hole (the re-check-set eval, #473, measured
+    the misses the narrower rule of #466 made). Removed facts must be in
+    `rows` (pass the old rows with the new ones). A scene may have no prose
+    yet: the caller skips those."""
+    names = names or {}
+    cache: dict[str, re.Pattern | None] = {}
     wanted = set(fact_ids)
     out = Dependents()
     targets = [r for r in rows if r.get('id') in wanted]
@@ -708,19 +760,25 @@ def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
         ends = (f.get('resolves') or '').strip()
         if ends in order and order[ends] > after:
             scenes.add(ends)
-        keys = {(f.get('subject') or '').strip().casefold()} - {''}
+        subject = (f.get('subject') or '').strip().casefold()
+        keys = {subject} - {''}
         if f.get('type') == 'knowledge':
             keys |= {k.casefold() for k in _split(f.get('known_by', ''))}
         if not keys:
-            out.unrelated[f['id']] = 'no subject (only facts linked to it are found)'
+            out.unrelated[f['id']] = (f'no subject: every later scene with a '
+                                      f'{f.get("type") or "typeless"} fact is listed')
         for r in rows:
             rs = (r.get('scene_id') or '').strip()
             if r is f or r.get('status') != 'binding' or rs not in order or order[rs] <= after:
                 continue
-            linked = f['id'] in _split(r.get('supersedes', '')) + _split(r.get('depends_on', ''))
-            same = (r.get('subject') or '').strip().casefold() in keys and (
-                r.get('type') == f.get('type') or f.get('type') == 'knowledge')
-            if linked or same:
+            if rs in scenes:
+                continue
+            theirs = (r.get('subject') or '').strip().casefold()
+            if (f['id'] in _split(r.get('supersedes', '')) + _split(r.get('depends_on', ''))
+                    or theirs in keys
+                    or (not keys and r.get('type') == f.get('type'))
+                    or _mentions(r.get('statement', ''), subject, names, cache)
+                    or _mentions(f.get('statement', ''), theirs, names, cache)):
                 scenes.add(rs)
     out.scenes = sorted(scenes, key=order.get)
     return out

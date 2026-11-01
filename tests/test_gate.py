@@ -633,6 +633,19 @@ class TestRejected:
         assert rid in result.changed and result.recheck == [self.LATER]
         assert SCENE not in gate.pending(project_dir)
 
+    def test_a_revision_also_lists_the_scenes_whose_brief_names_the_rejected_fact(
+            self, project_dir, tmp_path, monkeypatch):
+        """`audit --mark rejected` says these are listed once the revision
+        passes; before #473's follow-up the gate listed dependents only."""
+        rid = self._reject(project_dir, tmp_path)
+        monkeypatch.setattr(gate.audit, 'leaning_scenes',
+                            lambda p, ids: {i: ['new-x1', 'act1-sc01'] for i in ids})
+        gate.mark_pending(project_dir, SCENE, gate.REVISE_REJECTED, f'x [rejected: {rid}]')
+        result = _gate(project_dir, tmp_path, [_commitment(
+            subject='tarrens-hollow', statement='The hollow had 300 people')], command='redraft')
+        assert result.committed
+        assert 'new-x1' in result.recheck and 'act1-sc01' not in result.recheck   # later only
+
     def test_a_failed_check_keeps_a_revise_row_and_its_ids(self, project_dir):
         gate.mark_pending(project_dir, SCENE, gate.REVISE_REJECTED, 'x [rejected: a]')
         gate.mark_pending(project_dir, SCENE, 'advisor', '2 problem(s)')

@@ -38,10 +38,8 @@ are prose in different scenes, of a tree with ``reference/scenes.csv``:
    lists, without writing) on those rows gives the scenes actually
    re-checked: those listed now (no prose to revise), or, when the
    establishing scene has prose, the ones its revision lists once it passes
-   the gate. That second list is ``ledger.dependents`` alone (``gate``
-   lists the dependents of the changed facts, not the scenes whose briefs
-   name them, which ``_reject_recheck``'s ``later`` adds; the notes count
-   those). A hit is a contradicting scene in the set. Only ``captured``
+   the gate (its dependents and the scenes whose brief names it, which the
+   gate lists too since PR 3c). A hit is a contradicting scene in the set. Only ``captured``
    counts toward ``recall``; ``partial`` is in ``recall_with_partial``.
 
 **Precision.** The set is only as wide as the ledger: commitments exist for
@@ -298,9 +296,6 @@ class RecheckSet:
     scenes: tuple[str, ...]
     #: fact id: why its dependents can't all be traced
     unrelated: tuple[str, ...]
-    #: scenes `_reject_recheck` shows as listed after the revision only
-    #: because a brief names the fact (the gate doesn't list them)
-    brief_only: tuple[str, ...]
     #: candidates it doesn't list, each with why (cut, no prose, waiting)
     not_listed: tuple[str, ...]
 
@@ -308,20 +303,13 @@ class RecheckSet:
 def recheck_set(project_dir: str, rows: list[dict], fact_ids: list[str],
                 order: dict[str, int]) -> RecheckSet:
     """What rejecting ``fact_ids`` gets re-checked: listed now, or, when the
-    establishing scene has prose, by its revision's gate pass (the
-    dependents alone; see the module doc)."""
-    from storyforge import cmd_audit, ledger
+    establishing scene has prose, by its revision's gate pass."""
+    from storyforge import cmd_audit
     found = cmd_audit._reject_recheck(project_dir, rows, fact_ids)
-    scenes, brief_only = set(), set()
-    for fid, info in found.items():
-        scenes |= set(info['recheck'])
-        deps = set(ledger.dependents(rows, [fid], order).scenes)
-        scenes |= set(info['later']) & deps
-        brief_only |= set(info['later']) - deps
+    scenes = {s for info in found.values() for s in info['recheck'] + info['later']}
     return RecheckSet(
         tuple(sorted(scenes, key=order.get)),
         tuple(f'{fid}: {info["unrelated"]}' for fid, info in found.items() if info['unrelated']),
-        tuple(sorted(brief_only - scenes, key=order.get)),
         tuple(n for info in found.values() for n in info['not_listed']))
 
 

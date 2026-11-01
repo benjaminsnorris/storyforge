@@ -182,7 +182,8 @@ class TestMark:
         result = _json(capsys, '--mark', 'rejected', 'backstory')
         info = result['recheck']['backstory']
         assert not info['revise'] and info['scene'] == ''
-        assert info['recheck'] == ['act2-sc01']
+        # every later scene with a Kael fact, in any type (#473 follow-up)
+        assert 'act2-sc01' in info['recheck']
         from storyforge import gate
         assert gate.pending(project)['act2-sc01']['command'] == gate.RECHECK
 
@@ -198,7 +199,7 @@ class TestMark:
             _fact('later-trait', 'act2-sc01', 'trait', 'kael-maren', 'fixed')], command='test')
         gate.mark_pending(project, 'act2-sc01', 'draft', 'its own problem')
         result = _json(capsys, '--mark', 'rejected', 'backstory')
-        assert result['recheck']['backstory']['recheck'] == []
+        assert 'act2-sc01' not in result['recheck']['backstory']['recheck']
         assert 'act2-sc01 (already waiting on the gate: draft)' in \
             result['recheck']['backstory']['not_listed']
         assert gate.pending(project)['act2-sc01']['reason'] == 'its own problem'

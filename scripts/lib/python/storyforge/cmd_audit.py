@@ -338,9 +338,10 @@ def _reject_recheck(project_dir: str, rows: list[dict], fact_ids: list[str]) -> 
     waiting = gate.pending(project_dir)
     gone = gate._gone_scenes(project_dir)
     by_id = {r['id']: r for r in rows}
+    names = ledger.subject_names(project_dir)
     out = {}
     for fid in fact_ids:
-        one = ledger.dependents(rows, [fid], order)
+        one = ledger.dependents(rows, [fid], order, names=names)
         scene = (by_id.get(fid, {}).get('scene_id') or '').strip()
         revise = bool(scene) and scene in order and scene not in gone \
             and gate._has_prose(project_dir, scene)
