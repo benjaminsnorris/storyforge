@@ -1,8 +1,28 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-31 (night), at v1.118.0. **Phase 3 is done** and **Phase 4 PRs 1, 2, 3a, 3b and 3c are merged** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph). **The re-check-set gate passes: recall 0.92** (was 0.72). Next is **PR 4, every prose pass through the gate** (E8 to zero). **A fresh session starts here:** read **Latest**, then the Phase 4 design note's "PRs, in order", then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-10-31 (late night), at v1.119.0. **Phase 3 is done** and **Phase 4 PRs 1, 2, 3a, 3b, 3c and 4 are done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, PR 4 every prose pass through the gate). **The re-check-set gate passes (recall 0.92). E8 is at 6 reintroduced (was 7), 5 of them unflagged by the gate:** what is left is the checker's recall, not an ungated pass. Next is **PR 5, rewrite-from-ledger** (E5), and the E8 misses (below). **A fresh session starts here:** read **Latest**, then the Phase 4 design note's "PRs, in order", then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
-## Latest: the graph widened, the re-check-set gate passes (2026-10-31 night, storyforge-df)
+## Latest: every prose pass through the gate (2026-10-31 late night, Phase 4 PR 4)
+
+**v1.119.0.** Until now only redraft-from-brief was gated (#456); a polish, craft or naturalness pass wrote its scenes and committed them unchecked.
+- **`revise`:** every prose pass at `full` coaching (the main pass loop, API or interactive, and the polish loop's pass) gates the scenes it rewrote in reading order (`_gate_pass_scenes`: `write`'s `_gate_drafted_scene`, command `revise`, fix once, re-check), re-checking after each the later scenes it listed. The first scene the gate doesn't pass stops the session: the pass is completed and committed, and that scene and the pass's later scenes are listed in `working/gate-pending.csv`. A pass won't start (or spend) behind a pending scene before its first target. Illustration markers the gate's fix drops are restored (shared with the redraft path).
+- **E8:** `revision-plan` replays through the gate too (recorded `--mode auto`, $5.66). New metric `reintroduced_unflagged`: a reintroduction the gate passed (one it didn't pass is listed for the author, and revise stops there).
+
+| | before | after |
+|---|---|---|
+| reintroduced (gate 0) | 7 | **6** |
+| `revision-plan` reintroduced | 2 of 7 | 1 of 7 (thornwall-030 now consistent) |
+| reintroduced the gate passed (`reintroduced_unflagged`) | — | 5 |
+| errors per 10k words | 2.05 | 1.76 |
+
+- **The 6 left:** shared-dark-040 (`naturalness-upstream`, TIM) is flagged: the gate didn't pass it. The 5 unflagged are the checker's recall:
+  - `redraft-from-brief`, gated since #456: governor-016 (WLD, Block Fourteen vs Fifteen), governor-018 and -024 (TRT, ages and names in a casualty list, established in `haddons-reckoning`), thornwall-026 (TRT, the Greenhollow Warden);
+  - `revision-plan`: thornwall-020 (TIM, "a week" against Day 5 → Day 19 arithmetic).
+  - The pre-pass books have no phase 4 commitments, so the checker has only the prose and the bibles; E4's judge also finds day/hour arithmetic the checker misses (Phase 3 notes).
+
+**Next, in order:** **PR 5**, rewrite-from-ledger (E5). Then the E8 misses: read the 5 unflagged cases' gate logs (does the checker search the established scene; would phase 4 commitments on the pre-pass tree catch them), then the smaller items: a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost; the low-confidence halt; `characters.csv` `pronouns`; E4 over 2–3 runs.
+
+## The graph widened, the re-check-set gate passes (2026-10-31 night, storyforge-df)
 
 **#474 (v1.118.0), Phase 4 PR 3c.** Ben accepted the cost of a wider set (2026-10-31).
 - **What changed in `ledger.dependents`:** a later fact depends on fact F also when
