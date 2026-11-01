@@ -1,8 +1,40 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-31 (late night), at v1.120.0. **Phase 3 is done** and **Phase 4's five PRs are done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger). Phase 4's criteria: **re-check set recall 0.92 (met); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8 at zero (not met: 4 reintroduced, all passed by the gate)**. Next is the E8 misses (below). **A fresh session starts here:** read **Latest**, then the Phase 4 design note's "PRs, in order", then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-11-01, at v1.121.0. **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and is met: 3 reintroduced, 2 passed by the gate**. Next is the Storygild plan (below). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
-## Latest: rewrite-from-ledger (2026-10-31 late night, Phase 4 PR 5, #476)
+## Latest: the checker's calendar, and E8's gate redefined (2026-11-01, #478)
+
+**v1.121.0.** What was left of E8 after #476 (4 reintroduced, all passed by the gate) was the checker's recall, read case by case from free replays:
+
+| case | what the checker missed | why |
+|---|---|---|
+| thornwall-020 (TIM) | "Ten days" from Day 5 to the scene's Day 19 | it was never given the calendar (`timeline_day` reached no part of its prompt) |
+| thornwall-026 (TRT) | the Greenhollow Warden "shook her hand", against two **later** scenes | later scenes reach it only by search; its re-check searched another Warden's name |
+| thornwall-025 (TRT) | the four closed Holds named differently from an earlier scene | missed in the story so far, which it had whole |
+| governor-016 (WLD) | stone-cutters on Block Fourteen, where Fifteen is the active site | an inference miss, both facts in front of it |
+
+In all four, E8's pre-pass trees have no phase 4 commitments, so the checker's `query_ledger` found registry facts only (a book written with today's `write` would have the scene facts too).
+- **What changed (`checker.py`):** each scene's `timeline_day` and `time_of_day` (`Book.when`) go in the scene list, the checked scene's header and each story-so-far scene's `when` attribute, and the prompt says to check every elapsed time against them; a finding against the calendar names `scenes.csv` and quotes one calendar line (`Book.calendar`, verified). And a "Later scenes too" instruction: one search per name the scene says something specific about, the name alone. The writer's prompt still carries no calendar (a follow-up; it would re-record E4, E5 and E8's drafting).
+- **E8's gate, redefined (Ben chose options 1, 2 and 4):** `reintroduced_unflagged ≤ 2` (`MAX_UNFLAGGED`, a judgement set before the re-record's result: E6's three runs reintroduced 6, 10 and 11, 6 cases moving in or out, but they predate the gate, so the unflagged count's own spread is unmeasured). A scene counts as flagged only when the gate checked it and failed it; one the gate couldn't finish counts as unflagged, and a new gate holds `gate_unfinished` at zero; `reintroduced` is reported, no longer gated. A reintroduction the gate fails is listed for the author and revise stops there.
+
+Recorded twice: once as first written, and again after the review's fixes (calendar quotes as the scene list shows them, `time_mode`, the example line, E8's stricter "flagged"). The committed recordings are the second.
+
+| | before (#476) | first version | final (committed) |
+|---|---|---|---|
+| E8 reintroduced | 4 | 3 | **3** |
+| E8 passed by the gate (`reintroduced_unflagged`, ≤ 2) | 4 | 1 | **2** (governor-016; shared-dark-040, "eleven nights") |
+| E8 replays the gate failed that the judge found clean | 9 | 14 | 14 |
+| E2-carol-checker precision / code-match recall | 0.81 / 0.70 | 0.91 / 0.78 | **0.77 / 0.65**; a second run 0.83 / 0.68 |
+| E4 gate caught / missed / false alarms | 1 / 6 / 2 | 3 / 4 / 4 | 3 / 5 / 2 |
+| E4 CP10k passed scenes | 3.06 | 3.71 | 3.42 (the drafts are new each run) |
+
+  How to read it: thornwall-020 is consistent in both recordings; thornwall-026 was passed in the first and failed by the gate in the final; which cases reintroduce moves between runs (shared-dark-040 is new). E2-carol-checker's two runs on the final prompt sit at main's level, so the first version's 0.91 / 0.78 was most likely noise; the calendar adds no measured recall on Carol (whose errors are mostly not day arithmetic). The real cost is false alarms: E8's gate fails 14 replays the judge found clean (9 before), each of which stops a revise for the author.
+- **Spend:** $86.45: the first version $40.27 (E2-carol-checker $5.71, E4 $14.49, E8 $20.07), the final $40.18 (E2-carol-checker $5.98, E4 $13.62, E8 $20.58), a second E2-carol-checker run $6.00 (not committed). `--mode auto`, so recorded calls replayed. The unused recordings in those cassette folders were left, as earlier re-records left them.
+
+**Next, in order (Ben, 2026-10-31):** a design note for Phase 5's Storygild split (plan only). Then the smaller items: the gate's false alarms (E8 14); the calendar in the drafting prompt; a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost; the low-confidence halt; `characters.csv` `pronouns`; E4 over 2–3 runs.
+
+
+## Rewrite-from-ledger (2026-10-31 late night, Phase 4 PR 5, #476)
 
 **v1.120.0.** Plan §3.4: rewrites draft from the plan and the binding ledger, the old prose a voice reference only.
 - **What changed:** at `full` coaching with briefs, any prose already on disk makes a draft a rewrite (`write` over prose: `--force`, a scene named alone, or a stub of 200 words or fewer; revise's `_redraft_from_briefs` and `_redraft_scenes`): the prose, illustration markers stripped, goes in a "Current Draft (voice reference only)" block: take its voice, nothing else; the brief and the Established Facts (when the ledger has any for the scene) win. The scene's own facts, already in the prompt, read "Already established in this scene ... they hold even though the current draft below is a voice reference only" in a rewrite. A fresh draft's prompt is byte-identical (E4 replays).
@@ -224,7 +256,7 @@ Run 4's 26 contradictions: 12 in scenes the gate failed, 14 in scenes it passed,
   - **Success criteria (plan §5):** E3 recall ≥ 0.85: **met, 0.898** (was 0.286). Export round-trips: **met** (`evals/export_check.py`: 7 of 7 books byte-identical). E5 mismatches below baseline: **met, 64 → 23** (6.4 → 2.3 per scene; v1.97.0). E4 did not get worse (CP10k 16.1 → 14.2, contradictions 35 → 31, 23/23 drafted). E8 unchanged (reintroduced 6, per 10k words 1.74 → 1.69).
   - **Drafting reads the ledger** (v1.97.0): `build_scene_prompt_from_briefs` (write and revise's redraft-from-brief) has an "Established Facts" section from `ledger.drafting_slice`: for the POV, on-stage characters and location, `pronouns` from characters.csv, `fixed` facts before the scene, states entering it (at most `prompts.MAX_STATES_PER_SUBJECT` = 25 each, the rest named), and the scene's own facts ("the brief wins where they differ"). E5 now runs extract phase 4 over its sample first (10 Sonnet calls), so the redraft sees the prose's commitments. **Not like-for-like with the old E5 number:** part of the fall is the redraft being shown facts read off the prose it is judged against, which is the design (a pinned fact should survive a redraft). The character bible is still sent whole: slimming it to fixed facts + voice is author data, left for Ben.
 - **Phase 3 (the gate and sequential loop): done** (v1.114.0; see **Latest**): E4 CP10k 3.1 and 3 broken promises (targets ≤ 7.1, ≤ 3), E2 checker precision 0.81 (≥ 0.8); sequential kept, `--batch` refuses prose.
-- **Phase 4 (safe revision): PRs done, E8 open** (v1.120.0). Design and Ben's decisions: `docs/plans/2026-10-31-phase4-safe-revision-design.md`; its "PRs, in order" is the plan. Done: PR 1 (#466), PR 2 (#468), PR 3a (#470), PR 3b (#473, the eval), PR 3c (#474, the wider graph: recall 0.92), PR 4 (#475, every prose pass through the gate: E8 7 → 6), PR 5 (#476, rewrite-from-ledger: E5 rewritten 1.2 per scene). **Next:** the 4 E8 reintroductions the gate passes, then the Storygild plan.
+- **Phase 4 (safe revision): done** (v1.121.0). Design and Ben's decisions: `docs/plans/2026-10-31-phase4-safe-revision-design.md`; its "PRs, in order" is the plan. Done: PR 1 (#466), PR 2 (#468), PR 3a (#470), PR 3b (#473, the eval), PR 3c (#474, the wider graph: recall 0.92), PR 4 (#475, every prose pass through the gate: E8 7 → 6), PR 5 (#476, rewrite-from-ledger: E5 rewritten 1.2 per scene), then the checker's calendar and later-scene search with E8's gate redefined (at most 2 passed by the gate; 3 reintroduced, 2 passed). **Next:** the Storygild plan.
 
 **What exists now, for orientation** (contracts in `docs/agent-reference.md`):
 - **Ledger:** `ledger.load`/`save(…, command=)` (every save appends to `working/audit-log.csv`); typed views `knowledge_view`/`physical_view` (registry rows only, which briefs reference by id); `active_states`, `established_before`, `scene_order`, `drafting_slice` (a scene's share, for the drafting prompt); `LedgerError` / `NotMigratedError`.
@@ -243,7 +275,7 @@ Run 4's 26 contradictions: 12 in scenes the gate failed, 14 in scenes it passed,
 | 5 Phase 1 | done | #359–#405 |
 | 6 Phase 2 | done | #401, #416, #417, #420–#424, #430, #432 |
 | 7 Phase 3 | done | #436, #437, #439, #443, #450, #453–#458, #461–#463 |
-| 8 Phase 4 | PRs 1–5 done; E8 open | #465, #466, #468, #470, #473, #474, #475, #476 |
+| 8 Phase 4 | done (E8 redefined 2026-11-01) | #465, #466, #468, #470, #473, #474, #475, #476, #478 |
 
 ## Next steps, in order (handoff for a new session)
 
@@ -251,7 +283,7 @@ Run 4's 26 contradictions: 12 in scenes the gate failed, 14 in scenes it passed,
 
 **Before starting:**
 - **Environment:** use `~/.venvs/storyforge` (Python 3.12, has pytest). Put it first on `PATH` for the suite, because three `test_illustrate_cmd.py` tests shell out to `python3`, which is 3.9 here. The book repos under `~/Developer` are read-only unless Ben says otherwise: work on copies.
-- **Checks:** `PATH=~/.venvs/storyforge/bin:$PATH python -m pytest tests/` (5 to 10 minutes; 7,854 tests at v1.102.0; where the venv is missing, `python3 -m pytest tests/ --no-cov -p no:cacheprovider` runs in about a minute). A stale, gitignored `tests/fixtures/test-project/working/dashboard.html` in a checkout fails `test_score_runs_no_dashboard_step` and `test_renders_no_html_and_commits_nothing`; move it aside and `python evals/run.py` (6 to 10 minutes, replay, no key). Main replays every suite with no errors. The gates that fail are E2 (all three), E7 noise, E8 reintroduced and E9's full-floor and ladder gates (Carol's L5 scene layer, a finding for evals); E4, E5 and E9's phase-5 gates pass (E3: see the open follow-up below).
+- **Checks:** `PATH=~/.venvs/storyforge/bin:$PATH python -m pytest tests/` (5 to 10 minutes; 7,854 tests at v1.102.0; where the venv is missing, `python3 -m pytest tests/ --no-cov -p no:cacheprovider` runs in about a minute). A stale, gitignored `tests/fixtures/test-project/working/dashboard.html` in a checkout fails `test_score_runs_no_dashboard_step` and `test_renders_no_html_and_commits_nothing`; move it aside and `python evals/run.py` (6 to 10 minutes, replay, no key). Main replays every suite with no errors. The gates that fail are E2 (all four; E2-carol-checker on PHY, TIM, REL, TRT recall and precision in the committed run, as it failed TIM, REL and TRT on main), E7 noise and E9's full-floor and ladder gates (Carol's L5 scene layer, a finding for evals); E4, E5 and E9's phase-5 gates pass (E3: see the open follow-up below).
 - **Coordination:** other sessions open Storyforge PRs and claim versions; on 2026-10-30 that was evals-b5 and evals-9a (the F-numbers are storyforge-evals' `FINDINGS.md`, which is in `~/Developer/evals`). Find live ones with ListAgents, agree a version by SendMessage before merging, and say when you touch `cmd_extract.py`, `ledger.py` or `cmd_validate.py`. Eval-only and test-only PRs bump nothing. Never touch `~/Developer/evals` or other sessions' worktrees.
 - **Process:** one PR per step, on branch `storyforge/{name}-{timestamp}`. Work in a scratchpad worktree when a suite is running in the main checkout: switching branches under a running suite breaks it. Get one to three general reviewers covering correctness, silent failures, tests and comments. Fix every verified finding before merging (Ben's standing instruction this session), and list them in a PR comment.
 - **Spending:** re-records don't need asking (Ben, 2026-10-30: "just do it"); estimate from the `if live` figures or `evals/e8/cli.py plan` and report what was spent.

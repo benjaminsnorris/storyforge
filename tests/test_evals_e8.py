@@ -304,6 +304,11 @@ def test_reintroductions_the_gate_listed_are_flagged_not_unflagged(monkeypatch, 
     assert out.metrics['reintroduced_unflagged'] == 2   # p-2 and the data case
     assert any(n.startswith('p-1 (s): reintroduced (the gate did not pass it: listed pending)')
                for n in out.notes)
+    gates = {g.name: g for g in out.gates}
+    assert 'reintroduced' not in gates    # reported, not gated (2026-11-01)
+    assert (gates['reintroduced_unflagged'].op, gates['reintroduced_unflagged'].threshold) == (
+        '<=', suite.MAX_UNFLAGGED)
+    assert gates['reintroduced_unflagged'].passed     # 2 is within the gate
 
 
 def test_a_naturalness_fix_that_rewrites_nothing_is_pass_halted_with_why(monkeypatch):
@@ -687,3 +692,41 @@ def test_an_ungated_redraft_is_the_draft_alone(monkeypatch, tmp_path):
     monkeypatch.setattr('storyforge.api.invoke', lambda *a, **k: {
         'content': [{'type': 'text', 'text': 'Drafted prose.'}]})
     assert e8.redraft(_scene_dir(tmp_path), 's', gated=False).strip() == 'Drafted prose.'
+
+
+@pytest.mark.parametrize('command, reason, listing', [
+    ('revise', 'the gate did not pass it', 'failed'),
+    ('redraft', '2 problem(s) after one fix: TIM contradiction ...', 'failed'),
+    ('revise', 'the gate could not finish: the check was cut off', 'unfinished'),
+    ('revise', 'the gate failed unexpectedly (OSError: disk)', 'unfinished'),
+    ('recheck', 'changed facts it depends on', 'other'),
+    ('revise', 'revised by pass polish but not gated', 'other'),
+])
+def test_only_a_gate_that_checked_and_failed_flags_a_scene(tmp_path, command, reason, listing):
+    """#478's review: a gate that couldn't finish, or a re-check listing,
+    must not count a reintroduction as flagged."""
+    import importlib
+    from storyforge import gate
+    suite = importlib.import_module('suites.e8_revision_safety')
+    assert suite._gate_listing(str(tmp_path), 's') == ''
+    gate.mark_pending(str(tmp_path), 's', command, reason)
+    assert suite._gate_listing(str(tmp_path), 's') == listing
+
+
+def test_a_gate_that_could_not_finish_fails_e8(monkeypatch, tmp_path):
+    import importlib
+    from storyforge import gate
+    suite = importlib.import_module('suites.e8_revision_safety')
+    monkeypatch.setattr(suite, 'select', lambda c, h: e8.Selection(cases=[_tool_case(id='p-1')]))
+    monkeypatch.setattr(suite, 'prepare', lambda c, w: (str(tmp_path), 's'))
+
+    def replay(case, project, sid):
+        gate.mark_pending(project, sid, 'revise', 'the gate could not finish: boom')
+        return 'prose'
+    monkeypatch.setattr(suite, 'replay', replay)
+    monkeypatch.setattr(suite, 'judge', lambda c, t: {'verdict': 'reintroduced', 'evidence': ''})
+    out = suite.run(type('Ctx', (), {'work_dir': str(tmp_path)})())
+    gates = {g.name: g for g in out.gates}
+    assert out.metrics['reintroduced_unflagged'] == 1 and out.metrics['gate_unfinished'] == 1
+    assert not gates['gate_unfinished'].passed and gates['reintroduced_unflagged'].passed
+    assert 'p-1 (s): reintroduced (the gate could not finish: counted unflagged)' in out.notes[0]
