@@ -254,7 +254,7 @@ class TestReview443:
         main(['--force', '--scenes', 'act1-sc01'])
         assert calls == [('act1-sc01', 'redraft')]
         # 2026-11-01: what was already there doesn't stop the redraft
-        assert BEFORES['act1-sc01'] == 'A few words of an old version.'
+        assert BEFORES['act1-sc01'].scenes['act1-sc01'] == 'A few words of an old version.'
 
     def test_a_new_scene_has_nothing_before(self, setup, monkeypatch):
         path = os.path.join(setup, 'scenes', 'act1-sc01.md')
@@ -263,7 +263,20 @@ class TestReview443:
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
         _gate(monkeypatch, {'act1-sc01': True})
         main(['--scenes', 'act1-sc01'])
-        assert BEFORES['act1-sc01'] is None
+        assert 'act1-sc01' not in BEFORES['act1-sc01'].scenes
+
+    def test_a_scene_the_gate_failed_is_no_baseline_for_its_retry(self, setup, monkeypatch):
+        """#480's review (CR-1): the failed prose is on disk and listed
+        pending; redrafting it must not pass its errors as inherited."""
+        path = os.path.join(setup, 'scenes', 'act1-sc01.md')
+        with open(path, 'w') as f:
+            f.write('The failed draft.')
+        gate.mark_pending(setup, 'act1-sc01', 'draft', '1 problem(s) after one fix: x')
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        _gate(monkeypatch, {'act1-sc01': True})
+        main(['--force', '--scenes', 'act1-sc01'])
+        assert 'act1-sc01' not in BEFORES['act1-sc01'].scenes
+        assert 'waiting on the gate' in BEFORES['act1-sc01'].left_out['act1-sc01']
 
     def test_a_gate_failure_is_in_the_commit_message_and_the_task_stays_open(
             self, setup, monkeypatch, mock_git):
@@ -347,7 +360,11 @@ class TestReviseRedraftsAreGated:
             drafted.append(os.path.basename(log_file)[len('redraft-'):-len('.json')])
         monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda sid, *a, **k: sid)
         monkeypatch.setattr('storyforge.api.invoke_to_file', invoke)
-        monkeypatch.setattr(cmd_write, '_extract_scene_from_response', lambda *a: '')
+        def extract(log_file, scene_file):   # the reply is written, as the real one does
+            with open(scene_file, 'w') as f:
+                f.write('A new redraft.')
+            return ''
+        monkeypatch.setattr(cmd_write, '_extract_scene_from_response', extract)
         monkeypatch.setattr(cmd_revise, 'commit_and_push', lambda *a, **k: True)
         self.befores = {}
 
@@ -367,14 +384,18 @@ class TestReviseRedraftsAreGated:
         return drafted, gated, error
 
     def test_each_redraft_is_gated_in_reading_order(self, project_dir, monkeypatch):
+        old = {}
+        for sid in ('act1-sc01', 'act1-sc02', 'act2-sc01'):
+            with open(os.path.join(project_dir, 'scenes', f'{sid}.md')) as f:
+                old[sid] = f.read()
         drafted, gated, error = self._redraft(project_dir, monkeypatch,
                                               ['act2-sc01', 'act1-sc02', 'act1-sc01'])
         assert drafted == ['act1-sc01', 'act1-sc02', 'act2-sc01']
         assert gated == [(s, 'redraft') for s in drafted]
         assert error is None
-        for sid in drafted:   # the reply isn't written in this test: the file is as before
-            with open(os.path.join(project_dir, 'scenes', f'{sid}.md')) as f:
-                assert self.befores[sid] == f.read()
+        # #480's review: the baseline is the book before the run, not the new prose
+        assert all(self.befores[sid].scenes[sid] == old[sid] != 'A new redraft.'
+                   for sid in drafted)
 
     def test_a_scene_the_gate_does_not_pass_stops_the_run(self, project_dir, monkeypatch):
         drafted, _, error = self._redraft(project_dir, monkeypatch,
@@ -408,7 +429,7 @@ class TestReviseRedraftsAreGated:
         with pytest.raises(cmd_revise.RedraftError, match='act1-sc02 \\(not redrafted'):
             cmd_revise._redraft_scenes(project_dir, ['act1-sc02', 'act1-sc01'])
         assert gated == ['act1-sc01']
-        assert befores == {'act1-sc01': old}   # the scene before the redraft
+        assert befores['act1-sc01'].scenes['act1-sc01'] == old   # the scene before the redraft
 
     def test_the_hone_fix_redraft_skips_the_rest_of_its_run_in_the_recheck(
             self, project_dir, monkeypatch):
@@ -502,3 +523,30 @@ def test_a_marker_the_gates_fix_drops_is_restored(project_dir, monkeypatch):
     assert cmd_revise._redraft_scenes(project_dir, ['act1-sc01']) == 1
     with open(scene) as f:
         assert marker in f.read()
+
+
+class TestPendingReason480:
+    """#480's review: what the pending reason counts and says."""
+
+    def _gated(self, project_dir, monkeypatch, first):
+        from storyforge import cmd_write
+        path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        monkeypatch.setattr(gate, 'gate_and_fix',
+                            lambda *a, **k: gate.GatedScene('prose', first, first))
+        passed, why = cmd_write._gate_drafted_scene(project_dir, 'act1-sc01', path, 'revise',
+                                                    str(project_dir))
+        return passed, why
+
+    def test_an_inherited_finding_is_not_counted_as_a_problem(self, project_dir, monkeypatch):
+        old = Finding('contradiction', 'TIM', 'old words here', 'act1-sc02', 'e', '', 'why')
+        r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD, old]))
+        r.inherited = [old]
+        passed, why = self._gated(project_dir, monkeypatch, r)
+        assert not passed and why.startswith('1 problem(s) after one fix')
+
+    def test_plan_conflicts_alone_are_not_fixed_and_say_so(self, project_dir, monkeypatch):
+        r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
+        r.plan_conflicts = [BAD]
+        passed, why = self._gated(project_dir, monkeypatch, r)
+        assert not passed and why.startswith('1 problem(s) not fixed (plan conflicts')
+        assert 'PLAN CONFLICT' in why

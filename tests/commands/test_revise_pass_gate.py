@@ -71,12 +71,14 @@ def _gate_pass(project_dir, ids):
 
 class TestGatePassScenes:
 
-    def test_each_scene_gets_its_own_prose_before_the_pass(self, project_dir, monkeypatch):
+    def test_every_scene_gets_the_passs_one_baseline(self, project_dir, monkeypatch):
         _scenes(project_dir, 'act1-sc01', 'act1-sc02')
         _stub_gate(monkeypatch)
+        snap = gate.Snapshot(scenes={'act1-sc01': 'old one'})
         cmd_revise._gate_pass_scenes(project_dir, ['act1-sc01', 'act1-sc02'], 'polish',
-                                     str(project_dir), before={'act1-sc01': 'old one'})
-        assert BEFORES == {'act1-sc01': 'old one', 'act1-sc02': None}
+                                     str(project_dir), before=snap)
+        assert set(BEFORES) == {'act1-sc01', 'act1-sc02'}
+        assert all(b is snap for b in BEFORES.values())
 
     def test_each_scene_is_gated_in_reading_order_as_revise(self, project_dir, monkeypatch):
         _scenes(project_dir, 'act1-sc01', 'act1-sc02', 'act2-sc01')
@@ -303,7 +305,10 @@ class TestMainPassLoopIsGated:
                 old[sid] = f.read()
         mock_api.set_response('=== SCENE: act1-sc01 === ...')
         self._run(project_dir, monkeypatch)
-        assert BEFORES == old
+        assert set(BEFORES) == set(old)
+        snaps = list(BEFORES.values())
+        assert snaps[0] is snaps[1]   # one baseline, taken before the pass
+        assert {sid: snaps[0].scenes[sid] for sid in old} == old
 
     def test_a_scene_the_gate_fails_stops_the_session_after_committing(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
@@ -404,8 +409,14 @@ class TestInteractivePass:
 
     def test_the_scenes_the_session_rewrote_are_gated(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        with open(os.path.join(project_dir, 'scenes', 'act1-sc02.md')) as f:
+            old = f.read()
         gated, _ = self._run(project_dir, monkeypatch, ['act1-sc02'])
         assert gated == [('act1-sc02', 'revise')]
+        # #480's review: the baseline is the scene before the session wrote it
+        with open(os.path.join(project_dir, 'scenes', 'act1-sc02.md')) as f:
+            assert f.read() != old
+        assert BEFORES['act1-sc02'].scenes['act1-sc02'] == old
 
     def test_when_the_session_committed_the_gates_work_gets_its_own_commit(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
@@ -435,7 +446,8 @@ class TestPolishLoopPassIsGated:
             old = f.read()
         _stub_gate(monkeypatch)
         self._run(project_dir, monkeypatch)
-        assert BEFORES == {'act1-sc01': old} and 'The rain kept on.' not in old
+        assert BEFORES['act1-sc01'].scenes['act1-sc01'] == old
+        assert 'The rain kept on.' not in old
 
     def test_a_scene_the_gate_fails_stops_the_loop_after_committing(
             self, project_dir, monkeypatch, capsys):

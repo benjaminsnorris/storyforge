@@ -23,7 +23,10 @@ For one scene's prose, `gate_scene` runs:
 4. **Commit** only when nothing halted, extraction left nothing unresolved
    (`UNRESOLVED`: a quote not in the scene, a `supersedes` or `ends` that
    names nothing it can apply to), and the check found nothing, verified or
-   not: the
+   not, other than contradictions already in the book before the pass
+   (`gate_scene(before=)`: `inherited`, reported as `ALREADY IN THE SCENE`
+   and kept in working/gate-reported.csv; the commitments stating them are
+   held back): the
    scene's commitments replace its earlier ones (`introduced_by` = the
    command that wrote the prose), each registry fact the prose was found to
    establish gets its blank quote filled (`ledger.fill_quote`), and the
@@ -36,7 +39,7 @@ For one scene's prose, `gate_scene` runs:
 
 **Fix** (plan §3.2 step 3) is the caller's: a result that didn't pass names
 what to fix. The caller must also report `result.problems`' report-only
-kinds (`REPORTED`) on a pass: they don't make the ledger wrong, but the
+kinds (`REPORTED`) and `result.inherited` on a pass (`report_lines` has both): they don't make the ledger wrong, but the
 author should know. The design is `docs/plans/2026-10-30-gate-ledger-design.md`.
 
 Fails loud: a step that can't finish raises `GateError`, and nothing is
@@ -73,6 +76,12 @@ class GateError(RuntimeError):
     """A gate step couldn't finish; nothing was written. From `gate_and_fix`,
     `.first` is the first gate run when there was one."""
     first: 'GateResult | None' = None
+
+
+def _among(f: Finding, findings: list[Finding]) -> bool:
+    """Whether `f` is one of `findings`, by identity: `Finding` compares
+    by value, and the classified lists hold the check's own objects."""
+    return any(f is g for g in findings)
 
 
 @dataclass
@@ -113,22 +122,33 @@ class GateResult:
     #: names a commitment this version removed (`row → id`): a re-check
     #: replaces only commitments, so the author must fix the link
     dangling: list[str] = field(default_factory=list)
-    #: contradictions whose words were already in the scene before the pass
-    #: that wrote this prose (`gate_scene(before=)`): the author's to fix,
-    #: reported but not blocking the commit, and never sent to the fix
+    #: verified contradictions that were in the book before the pass that
+    #: wrote this prose (`_classify`): the author's to fix, reported (and
+    #: kept in working/gate-reported.csv on commit) but not blocking, and
+    #: never sent to the fix. A subset of `check.findings`, set once
     inherited: list[Finding] = field(default_factory=list)
-    #: contradictions in words the scene's brief itself promises
-    #: (`checker.PROMISE_FIELDS`): the brief and the book disagree, so no
-    #: prose edit can deliver one without breaking the other. They block,
-    #: and go to the author rather than the fix
+    #: verified contradictions in the brief's own scripted words
+    #: (`_brief_phrases`, `_is_plan_conflict`): the brief and the book
+    #: disagree, so no prose edit can deliver one without breaking the
+    #: other. They block, and go to the author rather than the fix. A subset
+    #: of `findings`, disjoint from `inherited`
     plan_conflicts: list[Finding] = field(default_factory=list)
+    #: on commit: (statement, inherited finding) for each extracted
+    #: commitment stating an inherited contradiction, not recorded
+    #: (`_hold_back`)
+    held_back: list[tuple[str, Finding]] = field(default_factory=list)
 
     @property
     def findings(self) -> list[Finding]:
         """The check's verified findings, less `inherited`."""
         if not self.check:
             return []
-        return [f for f in self.check.findings if not any(f is g for g in self.inherited)]
+        return [f for f in self.check.findings if not _among(f, self.inherited)]
+
+    @property
+    def fixable(self) -> list[Finding]:
+        """`findings` less `plan_conflicts`: the verified ones the fix is for."""
+        return [f for f in self.findings if not _among(f, self.plan_conflicts)]
 
     @property
     def unverified(self) -> list[Finding]:
@@ -240,13 +260,35 @@ def _words(text: str) -> str:
     return ' ' + ' '.join(re.findall(r'\w+', text.lower())) + ' '
 
 
+def _count(words: str) -> int:
+    return len(words.split())
+
+
+#: A quote matched against the scene before the pass needs this many words
+#: in all, and each part (split at an ellipsis) `_MIN_PART_WORDS`: a short
+#: one ("twelve", "the barn") turns up in old prose by accident (#480's review)
+_MIN_QUOTE_WORDS = 4
+_MIN_PART_WORDS = 3
+
+
 def _quoted_in(quote: str, text: str) -> bool:
-    """Whether every part of `quote` (split at an ellipsis, as quotes are
-    verified) is in `text`, ignoring case, punctuation and spacing."""
-    words = _words(text)
+    """Whether `quote` is in `text`, ignoring case, punctuation and spacing:
+    its parts (split at an ellipsis, as quotes are verified) in order, each
+    of `_MIN_PART_WORDS` words or more and `_MIN_QUOTE_WORDS` in all. A
+    shorter quote is never found: the safe answer, since a found quote
+    makes a finding inherited."""
     parts = [_words(p) for p in re.split(r'\.\.\.|…', quote)]
     parts = [p for p in parts if p.strip()]
-    return bool(parts) and all(p in words for p in parts)
+    if (not parts or sum(_count(p) for p in parts) < _MIN_QUOTE_WORDS
+            or any(_count(p) < _MIN_PART_WORDS for p in parts)):
+        return False
+    words, at = _words(text), 0
+    for p in parts:
+        found = words.find(p, at)
+        if found < 0:
+            return False
+        at = found + len(p) - 1   # the next part may start at this one's closing space
+    return True
 
 
 #: The fewest words a brief's own words must have to count as the source of
@@ -259,7 +301,8 @@ def _brief_phrases(project_dir: str, scene_id: str) -> list[str]:
     phrases: each quoted span of an item, and a `key_dialogue` item that
     quotes nothing whole. An unquoted action or outcome is a paraphrase,
     not words the prose must use, so it isn't one. Phrases under
-    `_MIN_BRIEF_WORDS` words are left out."""
+    `_MIN_BRIEF_WORDS` words are left out. A scene with no brief row
+    scripts nothing."""
     from storyforge.checker import PROMISE_FIELDS, _split_cell
     from storyforge.elaborate import get_scene
     scene = get_scene(scene_id, os.path.join(project_dir, 'reference')) or {}
@@ -271,29 +314,166 @@ def _brief_phrases(project_dir: str, scene_id: str) -> list[str]:
                 phrases += [a or b for a, b in quoted]
             elif col == 'key_dialogue':
                 phrases.append(item)
-    return [p for p in phrases if len(_words(p).split()) >= _MIN_BRIEF_WORDS]
+    return [p for p in phrases if _count(_words(p)) >= _MIN_BRIEF_WORDS]
 
 
-def _classify(result: GateResult, project_dir: str, before: str | None) -> None:
-    """Sort the check's verified contradictions into `inherited` (their
-    words were in `before`, the scene before this pass) and
-    `plan_conflicts` (their words are the brief's own). Inherited comes
-    first: an error the pass didn't make doesn't stop it, whatever its
-    source. Broken promises and unverified findings are neither."""
+def _is_plan_conflict(quote: str, phrases: list[str]) -> bool:
+    """Whether a contradiction's `quote` is the brief's own words: the
+    quote lies within a scripted phrase, or a scripted phrase makes up at
+    least half of it (a short scripted line inside a long quote whose error
+    is elsewhere is not one). A quote under `_MIN_BRIEF_WORDS` words is
+    never one."""
+    q = _words(quote)
+    n = _count(q)
+    if n < _MIN_BRIEF_WORDS:
+        return False
+    return any(q in p or (p in q and 2 * _count(p) >= n) for p in map(_words, phrases))
+
+
+# ============================================================================
+# The book before a pass: what an error already there is (Ben, 2026-11-01)
+# ============================================================================
+
+@dataclass
+class Snapshot:
+    """The book before a pass (`snapshot`): the baseline against which the
+    gate tells an error the pass made from one already there (`inherited`)."""
+    #: scene id → prose, for the scenes whose prose is a baseline: readable,
+    #: and not waiting on the gate
+    scenes: dict[str, str] = field(default_factory=dict)
+    #: reference file name → sha1 of its bytes (None: two files share the name)
+    files: dict[str, str | None] = field(default_factory=dict)
+    #: scene id → why it isn't in `scenes`
+    left_out: dict[str, str] = field(default_factory=dict)
+
+
+def _sha1(path: str) -> str | None:
+    import hashlib
+    try:
+        with open(path, 'rb') as f:
+            return hashlib.sha1(f.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def snapshot(project_dir: str) -> Snapshot:
+    """The book as it is now, taken before a command writes prose and
+    passed to the gate as `before=`. Take it once per run: a scene the run
+    rewrites before another is gated then counts as changed.
+
+    A scene listed in working/gate-pending.csv is left out (#480's review):
+    its prose didn't pass the gate or wasn't checked, so a retry that keeps
+    its error must not pass it as inherited. With the list unreadable every
+    scene is left out. A scene that isn't UTF-8 is left out too."""
+    snap = Snapshot()
+    try:
+        waiting = pending(project_dir)
+    except GateError as e:
+        waiting, unreadable = None, str(e)
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    names = sorted(os.listdir(scenes_dir)) if os.path.isdir(scenes_dir) else []
+    for name in names:
+        if not name.endswith('.md'):
+            continue
+        sid = name[:-3]
+        if waiting is None:
+            snap.left_out[sid] = f'the pending list is unreadable: {unreadable}'
+            continue
+        if sid in waiting:
+            snap.left_out[sid] = f'waiting on the gate ({waiting[sid]["command"]})'
+            continue
+        try:
+            with open(os.path.join(scenes_dir, name), encoding='utf-8') as f:
+                snap.scenes[sid] = f.read()
+        except (OSError, UnicodeDecodeError) as e:
+            snap.left_out[sid] = f'unreadable ({type(e).__name__})'
+    ref_dir = os.path.join(project_dir, 'reference')
+    for root, _, files in os.walk(ref_dir):
+        for name in files:
+            digest = _sha1(os.path.join(root, name))
+            snap.files[name] = None if name in snap.files else digest
+    return snap
+
+
+def _unchanged_since(project_dir: str, snap: Snapshot, source: str, scene_id: str,
+                     established_quote: str) -> bool:
+    """Whether the established side of a contradiction is as it was in
+    `snap` (#480's review: a contradiction is new when either side changed).
+    A scene other than this one: its file is unchanged. This scene: the
+    established quote was in it. A reference file or the calendar: its
+    bytes are unchanged. The ledger, or anything unknown: no."""
+    source = (source or '').strip()
+    if not source:
+        return False
+    if source == scene_id:
+        return _quoted_in(established_quote, snap.scenes.get(scene_id, ''))
+    if source in snap.scenes:
+        try:
+            with open(os.path.join(project_dir, 'scenes', f'{source}.md'),
+                      encoding='utf-8') as f:
+                return f.read() == snap.scenes[source]
+        except (OSError, UnicodeDecodeError):
+            return False
+    old = snap.files.get(source)
+    if old is None:
+        return False
+    found = [os.path.join(root, source) for root, _, files
+             in os.walk(os.path.join(project_dir, 'reference')) if source in files]
+    return len(found) == 1 and _sha1(found[0]) == old
+
+
+def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
+              reported: list[dict[str, str]]) -> None:
+    """Sort the check's verified contradictions into `inherited` and
+    `plan_conflicts` (each set anew).
+
+    Inherited: the error was in the book before this pass. Either its
+    words (`_quoted_in`) were in the scene in `before` and its established
+    side is unchanged since (`_unchanged_since`), or the author was already
+    told of it (`reported`: the same source and quote, from
+    working/gate-reported.csv). Inherited comes first: an error the pass
+    didn't make doesn't stop it, whatever its source.
+
+    Plan conflict: its words are the brief's own (`_is_plan_conflict`).
+
+    Broken promises and unverified findings are neither."""
+    result.inherited, result.plan_conflicts = [], []
     if not result.check:
         return
+    old = before.scenes.get(result.scene_id) if before else None
+    known = {(r['source'], _words(r['quote'])) for r in reported}
     phrases = None
     for f in result.check.findings:
         if f.kind != 'contradiction' or not f.scene_quote.strip():
             continue
-        if before is not None and _quoted_in(f.scene_quote, before):
+        if ((f.established_scene or '', _words(f.scene_quote)) in known
+                or (old is not None and _quoted_in(f.scene_quote, old)
+                    and _unchanged_since(project_dir, before, f.established_scene,
+                                         result.scene_id, f.established_quote))):
             result.inherited.append(f)
             continue
         if phrases is None:
-            phrases = [_words(p) for p in _brief_phrases(project_dir, result.scene_id)]
-        quote = _words(f.scene_quote)
-        if any(p in quote or quote in p for p in phrases):
+            phrases = _brief_phrases(project_dir, result.scene_id)
+        if _is_plan_conflict(f.scene_quote, phrases):
             result.plan_conflicts.append(f)
+
+
+def _hold_back(result: GateResult) -> None:
+    """Take out of `proposed` each commitment stating an inherited
+    contradiction (its quote and the finding's overlap), so the ledger never
+    records a fact the check showed contradicts the book (#480's review).
+    They go to `held_back`, reported."""
+    keep = []
+    for row in result.proposed:
+        quote = _words(row.get('quote') or '')
+        hit = next((f for f in result.inherited if _count(quote) >= _MIN_BRIEF_WORDS
+                    and (quote in _words(f.scene_quote) or _words(f.scene_quote) in quote)),
+                   None)
+        if hit is None:
+            keep.append(row)
+        else:
+            result.held_back.append((row.get('statement', ''), hit))
+    result.proposed = keep
 
 
 def has_commitments(project_dir: str, scene_id: str) -> bool:
@@ -306,7 +486,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                log_dir: str, extract_model: str | None = None,
                check_model: str | None = None,
                introduced_by: str | None = None,
-               before: str | None = None) -> GateResult:
+               before: Snapshot | None = None) -> GateResult:
     """Extract, halt, check and (if all clear) commit `scene_id`'s prose:
     `prose`, or the scene file when None. `command` is the command that
     wrote the prose (one of `GATE_COMMANDS`), recorded as the new rows'
@@ -319,11 +499,15 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     sets one there. `introduced_by` (default `command`) is what the new rows
     record; a re-check keeps the prose's writer.
 
-    `before` is the scene's prose before the pass that wrote `prose` (None:
-    a new scene, a re-check, or advisor mode). A contradiction whose words
-    were already in it is `inherited`: reported, not blocking (Ben,
-    2026-11-01: a pass doesn't stop on an error it didn't make). A
-    contradiction in the brief's own words is a `plan_conflict`.
+    `before` is the book before the pass that wrote `prose` (`snapshot`;
+    None: a new scene, a re-check, or advisor mode). A contradiction that
+    was already there is `inherited`: reported, not blocking (Ben,
+    2026-11-01: a pass doesn't stop on an error it didn't make), and so is
+    one already in working/gate-reported.csv, whatever the command; the
+    commitments stating one aren't recorded (`held_back`). On commit the
+    scene's rows in that file are replaced by this run's inherited
+    findings. A contradiction in the brief's own words is a
+    `plan_conflict` (`_classify`).
 
     On commit (Phase 4, `docs/plans/2026-10-31-phase4-safe-revision-design.md`):
     a new commitment stating the same fact as an earlier one of the scene
@@ -363,6 +547,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
         # read before the model calls: a commit needs both
         names, name_notes = ledger.subject_names(project_dir)
         revised_rejection = rejected_ids(pending(project_dir).get(scene_id))
+        already_reported = reported(project_dir).get(scene_id, [])
     except (ledger.LedgerError, ValueError, OSError, UnicodeDecodeError) as e:
         raise GateError(f'{scene_id}: {e}') from e
     loaded = copy.deepcopy(rows)
@@ -409,7 +594,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
         error = GateError(str(e))
         error.run = getattr(e, 'run', None)
         raise error from e
-    _classify(result, project_dir, before)
+    _classify(result, project_dir, before, already_reported)
     if not result.passed:
         return result
 
@@ -421,6 +606,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                             f'scene was being gated; nothing written, gate it again')
     except ledger.LedgerError as e:
         raise GateError(f'{scene_id}: {e}') from e
+    _hold_back(result)
     _carry_ids(result.proposed, old_rows, rows, scene_id)
     new = rows + result.proposed
     for rid, quote in result.check.kept:
@@ -454,6 +640,12 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                            for ref in ledger._split(r.get(col, '')) if ref in removed]
     ledger.save(project_dir, new, command=command)
     result.committed = True
+    try:
+        record_reported(project_dir, scene_id, command, result.inherited)
+    except GateError as e:   # the ledger is written; the findings were logged
+        from storyforge.common import log
+        log(f'WARNING: {scene_id} passed, but {REPORTED_PATH} could not be updated: {e}. '
+            f'Its contradictions already in the scene are only in this log.')
     try:
         clear_pending(project_dir, scene_id)
         waiting = pending(project_dir)
@@ -569,9 +761,7 @@ def problems_to_fix(result: GateResult) -> list[str]:
         lines.append(f'UNVERIFIED (extraction thinks the scene changes this; the check gave no '
                      f'ruling; edit only if the scene clearly contradicts it): the plan records '
                      f'"{d.statement}", and the scene says "{d.claim}".')
-    conflicts = result.plan_conflicts
-    for f, unverified in ([(f, False) for f in result.findings
-                           if not any(f is c for c in conflicts)]
+    for f, unverified in ([(f, False) for f in result.fixable]
                           + [(f, True) for f in result.unverified]):
         tag = (f'UNVERIFIED (the check\'s quotes did not hold up: {f.problem}; edit only '
                f'if the scene clearly contradicts the book) ' if unverified else '')
@@ -682,16 +872,17 @@ class GatedScene:
 def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                  log_dir: str, extract_model: str | None = None,
                  check_model: str | None = None, fix_model: str | None = None,
-                 before: str | None = None) -> GatedScene:
+                 before: Snapshot | None = None) -> GatedScene:
     """Gate `prose`; if it doesn't pass, fix it once and gate the fixed prose
     (plan §3.2 step 3).
 
     - A first run that fails only on extraction problems (nothing for the fix)
       is re-gated without an edit: extraction runs again.
-    - A first run whose only other problems are plan conflicts is not
-      re-gated or fixed: they are the author's (the brief disagrees with the
-      book), and a re-roll that missed one would pass prose that has it.
-    - `before` (the scene before the pass) goes to both runs
+    - A first run with plan conflicts and nothing for the fix (extraction
+      problems or not) is neither fixed nor re-gated: they are the
+      author's (the brief disagrees with the book), and a re-roll that
+      missed one would pass prose that has it.
+    - `before` (the book before the pass, `snapshot`) goes to both runs
       (`gate_scene`): an inherited contradiction doesn't block either.
     - A fix that changes nothing (every problem judged a false alarm) is not
       re-gated: the first verdict stands, and a re-roll of the same prose
@@ -754,7 +945,7 @@ def report_lines(result: GateResult) -> list[str]:
     for item in result.unresolved:
         lines.append(f'EXTRACTION: {_one_line(item)}')
     for f in result.findings:
-        if any(f is c for c in result.plan_conflicts):
+        if _among(f, result.plan_conflicts):
             lines.append(f'PLAN CONFLICT (the brief\'s own words contradict the book; fix the '
                          f'brief or {f.source}): {_one_line(f.message())}')
         else:
@@ -766,8 +957,12 @@ def report_lines(result: GateResult) -> list[str]:
                      f'("{_one_line(d.statement)}"): "{_one_line(d.claim)}"; the check gave '
                      f'no ruling')
     for f in result.inherited:
-        lines.append(f'ALREADY IN THE SCENE (before this pass; not blocking, the author\'s to '
-                     f'fix): {_one_line(f.message())}')
+        lines.append(f'ALREADY IN THE SCENE (before this pass, or reported before; not '
+                     f'blocking, the author\'s to fix; listed in {REPORTED_PATH} on commit): '
+                     f'{_one_line(f.message())}')
+    if result.held_back:
+        lines.append('NOTE (not recorded: states a contradiction already in the scene): '
+                     + '; '.join(_one_line(st) for st, _ in result.held_back))
     if result.check:
         for d in result.check.cleared:
             lines.append(f'NOTE (plan fact kept, link not applied; the check found no '
@@ -878,6 +1073,71 @@ def clear_pending(project_dir: str, scene_id: str) -> None:
     rows = pending(project_dir)
     if rows.pop(scene_id, None) is not None:
         _write_pending(project_dir, rows)
+
+
+# ============================================================================
+# Errors already in the book: working/gate-reported.csv
+# ============================================================================
+
+#: The contradictions a gate run found already in the book (`inherited`)
+#: and let through, one row each, so the author has them after the run's
+#: log scrolls by. Not a block: `write` and `revise` go on past them. A
+#: scene's rows are replaced each time it commits; a gate run of the scene
+#: that finds one of them again (same source and quote, any command) counts
+#: it inherited.
+REPORTED_PATH = 'working/gate-reported.csv'
+_REPORTED_COLUMNS = ['scene_id', 'command', 'source', 'quote', 'finding']
+
+
+def reported(project_dir: str) -> dict[str, list[dict[str, str]]]:
+    """Scene id → its rows in `REPORTED_PATH`.
+
+    Raises:
+        GateError: the file is malformed or unreadable.
+    """
+    path = os.path.join(project_dir, REPORTED_PATH)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding='utf-8') as f:
+            lines = [line.rstrip('\n') for line in f if line.strip()]
+    except (OSError, UnicodeDecodeError) as e:
+        raise GateError(f'{REPORTED_PATH}: {e}') from e
+    if not lines or lines[0].split('|') != _REPORTED_COLUMNS:
+        raise GateError(f'{REPORTED_PATH}: the header must be {"|".join(_REPORTED_COLUMNS)}')
+    out: dict[str, list[dict[str, str]]] = {}
+    for line in lines[1:]:
+        cells = line.split('|')
+        if len(cells) != len(_REPORTED_COLUMNS):
+            raise GateError(f'{REPORTED_PATH}: a row with {len(cells)} cells: {line[:80]!r}')
+        row = dict(zip(_REPORTED_COLUMNS, cells))
+        out.setdefault(row['scene_id'], []).append(row)
+    return out
+
+
+def record_reported(project_dir: str, scene_id: str, command: str,
+                    findings: list[Finding]) -> None:
+    """Replace `scene_id`'s rows in `REPORTED_PATH` with `findings`
+    (none: its rows go). The file goes when it has no rows."""
+    from storyforge.common import csv_safe
+    rows = reported(project_dir)
+    rows.pop(scene_id, None)
+    if findings:
+        rows[scene_id] = [{'scene_id': scene_id, 'command': command,
+                           'source': csv_safe(f.established_scene or ''),
+                           'quote': csv_safe(_one_line(f.scene_quote)),
+                           'finding': csv_safe(_one_line(f.message()))} for f in findings]
+    path = os.path.join(project_dir, REPORTED_PATH)
+    if not rows:
+        if os.path.isfile(path):
+            os.remove(path)
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        f.write('|'.join(_REPORTED_COLUMNS) + '\n')
+        for sid in sorted(rows):
+            for row in rows[sid]:
+                f.write('|'.join(row[c] for c in _REPORTED_COLUMNS) + '\n')
 
 
 # ============================================================================

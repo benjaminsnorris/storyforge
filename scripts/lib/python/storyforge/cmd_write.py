@@ -369,16 +369,16 @@ def _log_blockers(blocking: list[str]) -> None:
 
 
 def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, command: str,
-                        log_dir: str, before: str | None = None) -> tuple[bool, str]:
+                        log_dir: str, before=None) -> tuple[bool, str]:
     """Gate the scene just written to `scene_file` (fix once, re-check; plan
     §3.2), writing the fixed prose back. Returns (passed, why not). A scene
     that doesn't pass, or that the gate couldn't finish, is listed in
     `gate.pending` with the first problems; its prose stays. On a pass, the
     later scenes whose facts depend on what it changed are listed for a
     re-check (the caller runs `run_recheck` once the scene is committed).
-    `before` is the scene's prose before this command wrote it (None for a
-    new scene): a contradiction already in it is reported, not blocking
-    (`gate.gate_scene`)."""
+    `before` is the book before this run (`gate.snapshot`, taken once per
+    run; None: nothing counts as already there): a contradiction already in
+    it is reported, not blocking (`gate.gate_scene`)."""
     from storyforge import gate
     with open(scene_file, encoding='utf-8') as f:
         prose = f.read()
@@ -417,8 +417,12 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
                 f'on; listed for a re-check: {", ".join(out.result.recheck)}')
         return True, ''
     problems = gate.blocking_lines(lines)
+    # plan conflicts alone aren't sent to the fix (`gate.gate_and_fix`)
+    tried = ('not fixed (plan conflicts: the author\'s)'
+             if out.first.plan_conflicts and not gate.problems_to_fix(out.first)
+             else 'after one fix')
     return False, _pend(project_dir, scene_id, command,
-                        f'{len(problems)} problem(s) after one fix: '
+                        f'{len(problems)} problem(s) {tried}: '
                         + ' / '.join(problems[:3]) + ('; ...' if len(problems) > 3 else '')
                         + stale)
 
@@ -955,6 +959,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
         system = build_shared_context(project_dir, model=model)
 
     recheck_spent = 0.0   # what this run's re-checks are forecast to cost so far
+    # the book before this run, once: what the gate counts as already there
+    baseline = gate.snapshot(project_dir) if gated else None
     for i, scene_id in enumerate(pending_ids):
         scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
         scene_num = i + 1
@@ -1084,7 +1090,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
         gate_problem = ''
         if gated:
             _, gate_problem = _gate_drafted_scene(project_dir, scene_id, scene_file,
-                                                  command, log_dir, before=before or None)
+                                                  command, log_dir, before=baseline)
 
         # The prose is committed either way: a scene the gate stopped is kept
         # for the author and listed in gate.pending
