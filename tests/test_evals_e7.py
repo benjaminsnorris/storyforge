@@ -49,7 +49,9 @@ def test_flags_are_matched_to_verdicts_and_unlabeled_ones_are_unreviewed(fixture
     out = e7.run(_ctx(tmp_path))
     assert out.metrics['false_positive'] == 1 and out.metrics['deliberate'] == 1
     assert out.metrics['unreviewed'] == 1 and out.metrics['noise'] == 3
-    assert {g.name: g.passed for g in out.gates} == {'unreviewed': False, 'noise': True}
+    gates = {g.name: g.passed for g in out.gates}
+    assert gates == {'unreviewed': False, 'missing_labels': True, 'duplicate_flags': True,
+                     'noise': False}
     assert any('brand new' in n for n in out.notes)
     assert out.by_code == {'PHY': {'false-positive': 1, 'unreviewed': 1}, 'TIM': {'deliberate': 1}}
 
@@ -57,6 +59,7 @@ def test_flags_are_matched_to_verdicts_and_unlabeled_ones_are_unreviewed(fixture
 def test_a_real_find_is_not_noise(fixtures, tmp_path, monkeypatch):
     _book(fixtures, None, ['A|run1|validate:x|s1|PHY|a real one|real||real\n'])
     monkeypatch.setattr(e7, 'continuity_flags', lambda ref: [_flag('a real one')])
+    monkeypatch.setattr(e7, 'NOISE_CEILING', 0)
     out = e7.run(_ctx(tmp_path))
     assert out.metrics['real'] == 1 and out.metrics['noise'] == 0
     assert all(g.passed for g in out.gates)
@@ -85,17 +88,53 @@ def test_each_book_reproduces_every_labeled_validate_flag(book, tmp_path):
     assert raised == set(labels)
 
 
-def test_noise_over_the_ceiling_fails_and_under_it_says_to_lower_it(fixtures, tmp_path, monkeypatch):
+def _two_labeled(fixtures):
     _book(fixtures, None, ['A|run1|validate:x|s1|PHY|a|false-positive||false-positive\n',
                            'A|run1|validate:x|s2|PHY|b|false-positive||false-positive\n'])
+
+
+def test_noise_must_equal_the_ceiling_both_ways(fixtures, tmp_path, monkeypatch):
+    """CR-2: a `<=` gate left slack after a fix that later new noise filled."""
+    _two_labeled(fixtures)
     monkeypatch.setattr(e7, 'continuity_flags', lambda ref: [_flag('a'), _flag('b', 's2')])
     monkeypatch.setattr(e7, 'NOISE_CEILING', 1)
     out = e7.run(_ctx(tmp_path))
-    assert {g.name: g.passed for g in out.gates} == {'unreviewed': True, 'noise': False}
+    assert {g.name: g.passed for g in out.gates}['noise'] is False
+    assert 'new noise' in out.notes[0]
     monkeypatch.setattr(e7, 'NOISE_CEILING', 3)
     out = e7.run(_ctx(tmp_path / 'again'))
-    assert all(g.passed for g in out.gates)
-    assert out.notes[0].startswith('noise 2 is under the ceiling 3: lower NOISE_CEILING to 2')
+    assert {g.name: g.passed for g in out.gates}['noise'] is False
+    assert out.notes[0] == 'noise 2, NOISE_CEILING 3: lower NOISE_CEILING to 2'
+    monkeypatch.setattr(e7, 'NOISE_CEILING', 2)
+    assert all(g.passed for g in e7.run(_ctx(tmp_path / 'third')).gates)
+
+
+def test_flags_that_vanish_fail_rather_than_pass_as_less_noise(fixtures, tmp_path, monkeypatch):
+    """SF-2a/2b: a check that stops raising (a renamed category, a lost
+    snapshot) read as less noise, and its stale label could match later."""
+    _two_labeled(fixtures)
+    monkeypatch.setattr(e7, 'continuity_flags', lambda ref: [_flag('a')])
+    monkeypatch.setattr(e7, 'NOISE_CEILING', 1)
+    out = e7.run(_ctx(tmp_path))
+    assert out.metrics['missing_labels'] == 1
+    assert {g.name: g.passed for g in out.gates}['missing_labels'] is False
+    assert any(n.startswith('labeled but not raised book/run1/s2: b') for n in out.notes)
+
+
+def test_a_flag_raised_twice_fails(fixtures, tmp_path, monkeypatch):
+    _two_labeled(fixtures)
+    monkeypatch.setattr(e7, 'continuity_flags',
+                        lambda ref: [_flag('a'), _flag('a'), _flag('b', 's2')])
+    monkeypatch.setattr(e7, 'NOISE_CEILING', 3)
+    out = e7.run(_ctx(tmp_path))
+    assert out.metrics['duplicate_flags'] == 1
+    assert {g.name: g.passed for g in out.gates}['duplicate_flags'] is False
+
+
+def test_the_ceiling_never_rises_unseen():
+    """T-4: lowering the ceiling is routine; raising it accepts new noise, so
+    it takes this second edit too."""
+    assert e7.NOISE_CEILING <= 105
 
 
 def test_the_ceiling_is_the_replayed_count(tmp_path):
@@ -106,7 +145,22 @@ def test_the_ceiling_is_the_replayed_count(tmp_path):
     assert all(g.passed for g in out.gates)
 
 
-def test_ci_runs_e7():
+def test_ci_runs_e7_with_its_notes():
     workflow = (PLUGIN_DIR / '.github' / 'workflows' / 'e7-classics.yml').read_text()
-    assert 'evals/run.py --suite e7-classics' in workflow
+    assert 'evals/run.py --suite e7-classics --notes' in workflow
     assert 'pull_request' in workflow
+
+
+def test_e7_replays_with_the_standard_library_only(tmp_path):
+    """T-5: CI installs nothing; -I -S drops site-packages and the user's env,
+    so a third-party import on the validator's path fails here, not in CI."""
+    import os
+    import subprocess
+    env = {k: v for k, v in os.environ.items()
+           if k not in ('ANTHROPIC_API_KEY', 'PYTHONPATH')}
+    proc = subprocess.run(
+        [sys.executable, '-I', '-S', 'evals/run.py', '--suite', 'e7-classics', '--notes',
+         '--results-file', str(tmp_path / 'r.json'), '--baseline-file', str(tmp_path / 'none.json')],
+        cwd=PLUGIN_DIR, env=env, capture_output=True, text=True, timeout=300)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert 'note: christmas-carol/run1:' in proc.stdout

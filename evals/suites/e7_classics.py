@@ -8,13 +8,17 @@ every flag that is not ``real`` is noise; the target is none. A flag with no
 verdict is ``unreviewed`` — a new kind of noise, or a real find — and needs the
 author before it can be counted either way, so it fails the suite too.
 
-The target is no noise, but the gate is that noise doesn't grow: at most
-``NOISE_CEILING``, today's count (plan Phase 5: "E7 false-positive rate stable
-across releases"). A zero gate failed on every run, so a failing E7 said
-nothing. The ceiling only comes down: a change that removes flags lowers it in
-the same commit (``tests/test_evals_e7.py`` holds it to the replayed count).
-E7 makes no API calls and needs only the standard library, so CI runs it on
-every pull request (``.github/workflows/e7-classics.yml``).
+The target is no noise, but the gate is that noise doesn't change unseen
+(plan Phase 5: "E7 false-positive rate stable across releases"); a zero gate
+failed on every run, so a failing E7 said nothing. Noise must equal
+``NOISE_CEILING``: a change that removes flags fails until it lowers the
+ceiling (and drops their labels) in the same commit, so the ceiling never has
+slack to hide new noise. Every labeled flag must still be raised, exactly once
+(``missing_labels``, ``duplicate_flags``), so flags that vanish (a renamed
+category, a lost snapshot) fail rather than pass as less noise, and a dropped
+flag's stale label can't later match a regression. E7 makes no API calls and
+needs only the standard library, so CI runs it on every pull request
+(``.github/workflows/e7-classics.yml``, with ``--notes`` to name the flags).
 
 Covers A Christmas Carol's two extraction runs and The Plastic Age's one, and
 the deterministic validator only. ``timeline --check`` flags (8 of Carol's 58
@@ -33,8 +37,9 @@ FIXTURES = os.path.join(EVALS_DIR, 'fixtures', 'e7')
 CONTINUITY_CATEGORIES = ('physical_state', 'timeline', 'knowledge')
 VERDICTS = ('real', 'deliberate', 'extraction-error', 'false-positive')
 
-#: Noise the gate allows: the count at v1.122.0 (96 false positives, 2
-#: deliberate, 7 extraction errors). Lower it when a change removes flags.
+#: The noise the gate expects: today's replayed count. Lower it when a change
+#: removes flags; raising it means accepting new noise (tests/test_evals_e7.py
+#: pins its highest value, so that takes a second, visible edit).
 NOISE_CEILING = 105
 
 
@@ -82,11 +87,14 @@ def run(ctx):
     snapshots = list(book_snapshots())
     if not snapshots:
         raise RuntimeError(f'no snapshots under {FIXTURES}')
+    raised: dict[str, Counter] = {}
     for book, run_name, ref in snapshots:
         labels = load_labels(book)
         flags = continuity_flags(migrated(ref, ctx.work_dir, f'{book}/{run_name}'))
         for flag in flags:
-            label = labels.get((run_name, flag.get('scene_id', ''), flag['message']))
+            key = (run_name, flag.get('scene_id', ''), flag['message'])
+            raised.setdefault(book, Counter())[key] += 1
+            label = labels.get(key)
             verdict = label['ben_verdict'] if label else 'unreviewed'
             counts[verdict] += 1
             code = label['code'] if label else ('PHY' if flag['category'] == 'physical_state'
@@ -96,18 +104,35 @@ def run(ctx):
             if not label:
                 notes.append(f'unreviewed {book}/{run_name}: {flag["message"][:160]}')
         notes.insert(0, f'{book}/{run_name}: {len(flags)} flag(s)')
+    # Every labeled flag raised, once: a flag that vanishes must not pass as
+    # less noise, and its stale label must not later match a regression.
+    missing = duplicates = 0
+    for book in sorted({b for b, _, _ in snapshots}):
+        seen = raised.get(book, Counter())
+        for key in sorted(set(load_labels(book)) - set(seen)):
+            missing += 1
+            notes.append(f'labeled but not raised {book}/{key[0]}/{key[1]}: {key[2][:160]} '
+                         f'(drop its row from flags.csv if the change meant to remove it)')
+        for key, n in sorted(seen.items()):
+            if n > 1:
+                duplicates += n - 1
+                notes.append(f'raised {n} times {book}/{key[0]}/{key[1]}: {key[2][:160]}')
     total = sum(counts.values())
     noise = total - counts['real']
-    if noise < NOISE_CEILING:
-        notes.insert(0, f'noise {noise} is under the ceiling {NOISE_CEILING}: '
-                        f'lower NOISE_CEILING to {noise}')
+    if noise != NOISE_CEILING:
+        notes.insert(0, f'noise {noise}, NOISE_CEILING {NOISE_CEILING}: '
+                        + (f'lower NOISE_CEILING to {noise}' if noise < NOISE_CEILING
+                           else 'new noise; label it, or fix the check that raised it'))
     return SuiteOutput(
         metrics={'flags': total, 'noise': noise,
                  **{v.replace('-', '_'): counts[v] for v in VERDICTS},
-                 'unreviewed': counts['unreviewed'], 'snapshots': len(snapshots)},
+                 'unreviewed': counts['unreviewed'], 'snapshots': len(snapshots),
+                 'missing_labels': missing, 'duplicate_flags': duplicates},
         by_code={code: dict(c) for code, c in by_code.items()},
         gates=[Gate('unreviewed', counts['unreviewed'], '==', 0),
-               Gate('noise', noise, '<=', NOISE_CEILING)],
+               Gate('missing_labels', missing, '==', 0),
+               Gate('duplicate_flags', duplicates, '==', 0),
+               Gate('noise', noise, '==', NOISE_CEILING)],
         notes=notes,
     )
 

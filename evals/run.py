@@ -37,6 +37,8 @@ def parse_args(argv):
     parser.add_argument('--mode', choices=('replay', 'record', 'auto'), default='replay')
     parser.add_argument('--baseline', action='store_true', help='Write evals/baseline.json')
     parser.add_argument('--list', action='store_true', help='List suites and exit')
+    parser.add_argument('--notes', action='store_true',
+                        help="Print each suite's notes (CI uses it to name what failed)")
     parser.add_argument('--suites-dir', default=SUITES_DIR, help=argparse.SUPPRESS)
     parser.add_argument('--cassettes-dir', default=CASSETTES_DIR, help=argparse.SUPPRESS)
     parser.add_argument('--results-file', default=RESULTS_FILE, help=argparse.SUPPRESS)
@@ -51,7 +53,7 @@ def _write_json(path: str, data: dict) -> None:
         f.write('\n')
 
 
-def _summary(report: dict, deltas: dict | None) -> str:
+def _summary(report: dict, deltas: dict | None, notes: bool = False) -> str:
     lines = [f"{report['suite_count']} suite(s), mode={report['mode']}, "
              f"status={report['status'].upper()}, storyforge {report['storyforge_version']} "
              f"@ {report['git_sha'][:10]}{' (dirty)' if report['git_dirty'] else ''}"]
@@ -69,6 +71,8 @@ def _summary(report: dict, deltas: dict | None) -> str:
         for g in r['gates']:
             mark = 'ok  ' if g['passed'] else 'FAIL'
             lines.append(f"      {mark} {g['name']}: {g['actual']} {g['op']} {g['threshold']}")
+        if notes:
+            lines.extend(f"      note: {n}" for n in r['notes'])
         for name, row in (deltas or {}).get(r['suite'], {}).items():
             if row['delta'] not in (None, 0):
                 lines.append(f"      {name}: {row['baseline']} -> {row['current']} "
@@ -122,7 +126,7 @@ def _main(args) -> int:
         deltas = compare(report, baseline)
         report['baseline_comparison'] = deltas
     _write_json(args.results_file, report)
-    print(_summary(report, deltas))
+    print(_summary(report, deltas, notes=args.notes))
     print(f'Report: {args.results_file}')
 
     if args.baseline:
