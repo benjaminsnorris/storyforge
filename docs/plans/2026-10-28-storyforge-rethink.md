@@ -74,7 +74,7 @@ Changing a scene re-runs the gate for it, then for every scene whose commitments
 
 - Core gains an `export` command that emits one canonical JSON bundle of the book's structured state: scenes, intent, briefs, registries, `commitments.csv`, diagnostics results, timeline, eval results, and audit entries. The bundle carries a `schema_version`. It changes in the same commit as any schema change and is covered by tests.
 - **Bookshelf** (bennorris.com) renders dashboards from the bundle. Core does not know Bookshelf exists. If a renderer already lives in Bookshelf, it switches to the bundle; if it lives in the plugin today, it moves out.
-- **Storygild** is a separate plugin for illustration, covers, graphic-novel packaging, press kits, and script packages. It reads the export bundle and pins a `schema_version`. Manuscript export and `produce` stay in core because a novel-writing tool must produce a novel.
+- **Storygild** (the move is deferred, Ben 2026-11-01; see Phase 5) is a separate plugin for illustration, covers, graphic-novel packaging, press kits, and script packages. It reads the export bundle and pins a `schema_version`. Manuscript export and `produce` stay in core because a novel-writing tool must produce a novel.
 
 ## 4. Evals (built before any change)
 
@@ -203,10 +203,10 @@ Revision passes that wrote errors in shared-dark (E1 `tool-introduced` cases; E8
 - Dependency graph from `depends_on`; re-check set after any edit; rewrite-from-ledger command; reject-fact flow in the audit.
 - Success: E5 on rewritten scenes ≤ Phase 2 level; a rejected fact produces the correct re-check set on E1 cases; **E8 errors-introduced-per-pass is zero on the labeled set** (this is the gate that matters most, given the survey). *Redefined 2026-11-01 (Ben): at most 2 reintroductions the gate passes per run, since E8 moves between runs (E6: 6, 10 and 11 reintroduced) and what remained was checker recall; see the status doc.*
 
-### Phase 5 — Health and Storygild
+### Phase 5 — Health and the export boundary (the Storygild move deferred)
 - Classics regression (E7) in CI. Pin the export bundle's `schema_version` and make Bookshelf read the bundle, so the production tools have one documented boundary with the core. Cut `CLAUDE.md` to what an agent needs today; move bug history to `docs/history.md`.
 - Success: E7 false-positive rate stable across releases; Bookshelf reads only the bundle, against a pinned `schema_version`; `CLAUDE.md` length down materially.
-- **The Storygild move is deferred (Ben, 2026-11-01).** Moving illustration, covers, graphic novels, press kits and script packages into a separate plugin would mean refactoring about 40 core files (graphic-novel or panel logic appears in 39, illustration in 32) for features that work and that no eval covers. That code is quiet: 20 of 831 commits since August touched it. The move doesn't help the rethink's goal of consistent books, and no one installs Storygild separately. Do it when the production code starts slowing core changes, or when someone wants Storygild without Storyforge; the bundle boundary above makes it mechanical then. The gate's false alarms come before Phase 5.
+- **The Storygild move is deferred (Ben, 2026-11-01).** Moving illustration, covers, graphic novels, press kits and script packages into a separate plugin would mean refactoring about 56 core files (graphic-novel or panel logic appears in 39, illustration in 32) for features that work and that no eval covers. That code is quiet: 20 of 610 commits since August touched it (merges excluded). The move doesn't help the rethink's goal of consistent books, and no one installs Storygild separately. Do it when the production code starts slowing core changes, or when someone wants Storygild without Storyforge; the bundle boundary above makes it mechanical then.
 
 ## 6. Decisions
 
@@ -241,7 +241,7 @@ Revision passes that wrote errors in shared-dark (E1 `tool-introduced` cases; E8
 
 Calibration examples for the prompt: "Desta is Corvin's neighbor and friend" is a commitment (it broke in the roundtrip test). "Corvin left a note," what it said, and who found it are commitments. "The surveyor's hands are shaking" is not. From A Christmas Carol: "Scrooge's nephew is Fred and his dead sister was Fan" is three commitments; "the fog came pouring in at every chink" is none.
 
-**6. Scope split.** Separate plugin, named **Storygild**, reading the core export bundle at a pinned `schema_version`. Dashboard rendering lives in Bookshelf, not in either plugin.
+**6. Scope split.** (Deferred 2026-11-01; see Phase 5.) Separate plugin, named **Storygild**, reading the core export bundle at a pinned `schema_version`. Dashboard rendering lives in Bookshelf, not in either plugin.
 
 **7. E4 test text (decided by the survey's ranking, pending Ben's veto).** shared-dark, Act 1: it is full novel length, its labels are the author's own, and E1, E4, and E8 then share a world. lantern-folk is the fallback when a cheap, fast E4 run is needed during development (15 scenes, 20k words).
 
@@ -264,4 +264,4 @@ Each chunk is independently verifiable. Do them in order.
 6. `commitments.csv` schema (with `introduced_by`), `pronouns` on `characters.csv`, rubric prompt, migration script (with round-trip test; handle lantern-folk's `fact` column and missing physical-states, and understory's header whitespace), derived state, audit log and digest, `export` with `schema_version`. Verify: E3, E5, export round-trip across all eight repos.
 7. Gate pipeline, sequential loop, tiered audit surfacing, context-size experiment. Verify: E4, E6, experiment report.
 8. Dependency graph, re-check set, rewrite-from-ledger, reject flow; every revision pass runs through the gate. Verify: E5, E1 re-check cases, E8 at zero.
-9. Storygild extraction into its own plugin; Bookshelf consumes the export bundle; `CLAUDE.md` slim. Verify: E7 unchanged, line counts, Storygild runs on a pinned schema.
+9. (The Storygild extraction is deferred, 2026-11-01; see Phase 5.) Storygild extraction into its own plugin; Bookshelf consumes the export bundle; `CLAUDE.md` slim. Verify: E7 unchanged, line counts, Storygild runs on a pinned schema.
