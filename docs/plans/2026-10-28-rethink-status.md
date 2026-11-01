@@ -10,28 +10,30 @@ Last updated 2026-11-01, at v1.122.0. **Phase 3 is done** and **Phase 4 is done*
 - **6 were already in the scene before the pass**, word for word ("Day 12" against the calendar's day 10). In 2 scenes they were the only findings: revise stopped on an error the pass didn't make.
 - **The one fix didn't converge** in any of the 14: it cleared the first findings and made new ones (Tam's age seven → nine, Sera Holdt renamed Wenna Marsh, a scripted line changed). In 3, the brief's own scripted line contradicted the book, which no prose edit can fix.
 
-**What changed (Ben, 2026-11-01: items 1–4):**
+**What changed (Ben, 2026-11-01: items 1–4; the details are `gate`'s row in `docs/agent-reference.md`):**
 
-1. **E8 reports what the gate found** on its gated replays (`e8.gate_counts`, left by `gate_as_revise`): `clean_gate_failed`, `gate_new`, `gate_plan_conflicts`, `gate_inherited`, `gate_extraction`, and per case a `[gate: ...]` note. The naturalness-upstream family gates through revise itself and isn't counted.
-2. **Inherited contradictions don't block** (`gate_scene(before=)`): write passes the scene as it was (`--force`), revise's redrafts the scene before the redraft, its prose passes every scene before the pass (`cmd_revise._scene_texts`). A verified contradiction whose quote was already there is `inherited`: reported as `ALREADY IN THE SCENE`, never sent to the fix, and the scene commits. A re-check and `storyforge check` pass no `before`, so everything counts there.
-3. **Plan conflicts go to the author:** a contradiction in the brief's own words (quoted spans of `outcome` / `key_actions` / `key_dialogue`, and whole `key_dialogue` items, 3+ words) is a `plan_conflict`: it blocks (`PLAN CONFLICT`: fix the brief or the book), isn't sent to the fix, and a first run with nothing else isn't fixed or re-gated. Detection is verbatim only: a paraphrased action ("finds the boy's shoes" against a dead girl) isn't caught as one.
-4. **The fix prompt:** take the book's value, or drop the detail; never invent a specific; don't rename people or move events; and the brief lines the scene has are listed as words to keep.
+1. **E8 reports what the gate found** on its gated replays (`e8.gate_counts`): `clean_gate_failed`, `gate_new` (what the fix is sent), `gate_plan_conflicts`, `gate_extraction`, `gate_inherited`, `gate_counts_missing`, and a `[gate: ...]` note per case.
+2. **Errors already in the book don't block.** write, revise's redrafts and its prose passes take `gate.snapshot` once per run, before writing, and pass it as `before=`. A verified contradiction is `inherited` when its quote (4+ words, each ellipsis part 3+, in order) was in the scene's snapshot and its established side is unchanged since (that scene's file, or the reference file's bytes; never the ledger), or when `working/gate-reported.csv` already has it. It is reported (`ALREADY IN THE SCENE`), not sent to the fix, and kept in `gate-reported.csv`; the commitments stating it are held back from the ledger. A scene waiting on the gate is no baseline, so a retry can't pass the gate's own error as inherited.
+3. **Plan conflicts go to the author:** a contradiction in the brief's own words (quoted spans of the promise fields, unquoted `key_dialogue` items whole; the quote inside a scripted phrase, or a phrase at least half the quote) blocks as `PLAN CONFLICT`, isn't sent to the fix, and a first run with nothing else for the fix isn't fixed or re-gated. Verbatim only: a paraphrased action ("finds the boy's shoes" against a dead girl) isn't one.
+4. **The fix prompt:** take the book's value, or drop the detail; never invent a specific; don't rename people or move events; the brief lines the scene has are listed as words to keep.
 
-| | #478 | 2–3 (E8 auto, $1.71) | 4 (final) |
-|---|---|---|---|
-| E8 reintroduced | 3 | 3 | 4 (thornwall-025 back: #478's long-context miss) |
-| E8 passed by the gate (≤ 2) | 2 | 2 | **2** (shared-dark-040; thornwall-025). governor-016 now failed by the gate |
-| E8 clean replays the gate failed | 14 | 10 | **8** |
-| E8 gate's last run: new / plan conflict / already in the scene | — | 16 / 0 / 8 | 13 / 2 / 8 |
-| E4 gate caught / missed / false alarms | 3 / 5 / 2 | — | 3 / 7 / 1 |
-| E4 CP10k passed scenes | 3.42 | — | 4.36 (the drafts are new each run) |
+The 5-agent review found the first version too loose (a retry laundered the gate's own error; short quotes matched; the established side wasn't checked; the contradicted fact was committed; inherited findings were only in the log; a re-check would then fail on them and blame another scene); all fixed before merge, and re-recorded.
 
-One run each. E8's clean-but-failed count fell 14 → 8, about half from not blocking on inherited errors and half from the fix prompt, but the 8 left are still real new errors, not false alarms. E4's draft-then-gate numbers moved the wrong way on this run (CP10k passed 3.42 → 4.36); E4 has moved that much between runs before, so measure it over 2–3 runs before reading it.
-- **Spend:** $22.81 (E8 $1.71 then $7.30, E4 $13.80), `--mode auto`. The corpus suites (e2-corpus-drift, e2-corpus-validate) couldn't replay here: the disk was full. They don't use the gate's fix.
+| | #478 | 2–3 (E8 auto) | 4 | final, after the review |
+|---|---|---|---|---|
+| E8 reintroduced | 3 | 3 | 4 | **4** (thornwall-025 back: #478's long-context miss) |
+| E8 passed by the gate (≤ 2) | 2 | 2 | 2 | **2** (shared-dark-040; thornwall-025). governor-016 now failed by the gate |
+| E8 clean replays the gate failed | 14 | 10 | 8 | **8** |
+| E8 gate's last run: new / plan conflict / already in the book | — | 16 / 0 / 8 | 13 / 2 / 8 | 13 / 1 / 8 |
+| E4 gate caught / missed / false alarms | 3 / 5 / 2 | — | 3 / 7 / 1 | 2 / 4 / 1 |
+| E4 CP10k passed scenes | 3.42 | — | 4.36 | 2.09 |
 
-**Next, in order (Ben, 2026-11-01):** Phase 5, shrunk: pin the export bundle's `schema_version` and make Bookshelf read it, and E7 in CI (fix its noise gate first). The Storygild move is deferred (the plan's Phase 5 says why). Then the smaller items: whether the fix should get a second round (8 E8 scenes still end with new errors after one); E4 over 2–3 runs (now also for the fix prompt); the calendar in the drafting prompt; a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost; the low-confidence halt; `characters.csv` `pronouns`.
+One run each. E8's clean-but-failed count fell 14 → 8: 14 → 10 from not blocking on inherited errors and not fixing plan conflicts, 10 → 8 from the fix prompt (variance not separated out). The 8 left are real new errors the replay wrote, not false alarms. E4's two recordings of the same code path read 4.36 and 2.09: its run-to-run spread is wider than any change here, so measure it over 2–3 runs before reading it.
+- **Spend:** $38.51, all `--mode auto`: E8 $1.71, $7.30 and $1.71; E4 $13.80 and $13.99.
 
-## the checker's calendar, and E8's gate redefined (2026-11-01, #478)
+**Next, in order (Ben, 2026-11-01):** Phase 5, shrunk: pin the export bundle's `schema_version` and make Bookshelf read it, and E7 in CI (fix its noise gate first). The Storygild move is deferred (the plan's Phase 5 says why). Then the smaller items: whether the fix should get a second round (8 E8 scenes still end with new errors after one); E4 over 2–3 runs; the calendar in the drafting prompt; a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost; the low-confidence halt; `characters.csv` `pronouns`.
+
+## The checker's calendar, and E8's gate redefined (2026-11-01, #478)
 
 **v1.121.0.** What was left of E8 after #476 (4 reintroduced, all passed by the gate) was the checker's recall, read case by case from free replays:
 
@@ -60,7 +62,7 @@ Recorded twice: once as first written, and again after the review's fixes (calen
   How to read it: thornwall-020 is consistent in both recordings; thornwall-026 was passed in the first and failed by the gate in the final; which cases reintroduce moves between runs (shared-dark-040 is new). E2-carol-checker's two runs on the final prompt sit at main's level, so the first version's 0.91 / 0.78 was most likely noise; the calendar adds no measured recall on Carol (whose errors are mostly not day arithmetic). The real cost is false alarms: E8's gate fails 14 replays the judge found clean (9 before), each of which stops a revise for the author.
 - **Spend:** $86.45: the first version $40.27 (E2-carol-checker $5.71, E4 $14.49, E8 $20.07), the final $40.18 (E2-carol-checker $5.98, E4 $13.62, E8 $20.58), a second E2-carol-checker run $6.00 (not committed). `--mode auto`, so recorded calls replayed. The unused recordings in those cassette folders were left, as earlier re-records left them.
 
-**Next, in order (Ben, 2026-11-01):** the gate's false alarms (E8 14). Then Phase 5, shrunk: pin the export bundle's `schema_version` and make Bookshelf read it, and E7 in CI (fix its noise gate first). The Storygild move is deferred until the production code slows core changes or someone wants it separately (the plan's Phase 5 says why). Then the smaller items: the calendar in the drafting prompt; a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost; the low-confidence halt; `characters.csv` `pronouns`; E4 over 2–3 runs.
+**Next, in order (Ben, 2026-11-01):** the gate's "false alarms" (E8 14; done in #480: mostly real errors, not false alarms). Then Phase 5, shrunk: pin the export bundle's `schema_version` and make Bookshelf read it, and E7 in CI (fix its noise gate first). The Storygild move is deferred until the production code slows core changes or someone wants it separately (the plan's Phase 5 says why). Then the smaller items: the calendar in the drafting prompt; a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost; the low-confidence halt; `characters.csv` `pronouns`; E4 over 2–3 runs.
 
 
 ## Rewrite-from-ledger (2026-10-31 late night, Phase 4 PR 5, #476)
