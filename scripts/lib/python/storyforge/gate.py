@@ -585,17 +585,27 @@ def problems_to_fix(result: GateResult) -> list[str]:
     return lines
 
 
-def build_fix_prompt(scene_id: str, prose: str, problems: list[str]) -> str:
+def build_fix_prompt(scene_id: str, prose: str, problems: list[str],
+                     protected: list[str] | tuple = ()) -> str:
+    """The fix's prompt. `protected`: the brief's own words in the scene
+    (`_brief_phrases`), which an edit must leave as they are."""
     listing = '\n'.join(f'{n}. {p}' for n, p in enumerate(problems, start=1))
+    keep = ''
+    if protected:
+        keep = ('\n## Lines the brief scripts\n\nThe scene must keep these words exactly; '
+                'no edit may change or remove them:\n\n'
+                + '\n'.join(f'- "{p}"' for p in protected) + '\n')
     return f"""A continuity check found these problems in scene {scene_id}. Fix each with the smallest edit to the scene's prose that resolves it.
 
 ## Problems
 
 {listing}
-
+{keep}
 ## Rules
 
 - Change the scene so it agrees with what the book established; never assume the established fact is the one that is wrong. A problem marked UNVERIFIED may be the check's mistake: edit for it only if the scene clearly contradicts the book.
+- Take the book's value, never a new one. When a name, number, age, date, duration, place or relationship is wrong, use the one the problem quotes from the book. If the problem doesn't say what the right value is, remove the detail or make it vague ("years ago", "a neighbour") instead of choosing another: any new specific you invent is one more thing that can contradict the book.
+- Fix the scene's words, not the book's people: don't rename a character, change who someone is, or move an event to make a contradiction go away.
 - A broken promise: add or change the fewest words that deliver it, in the scene's voice, where it fits the action.
 - Each edit replaces `find`, words copied exactly from the scene that occur in it once, with `replace`. Keep `find` short: the sentence or clause that changes. Edits must not overlap.
 - Change nothing else: no polishing, no other improvements. `problem` is the number of the problem the edit fixes.
@@ -634,7 +644,7 @@ def apply_edits(prose: str, edits: list[dict]) -> str:
 
 
 def fix_scene(scene_id: str, prose: str, result: GateResult, *, log_dir: str,
-              model: str | None = None) -> str:
+              model: str | None = None, protected: list[str] | tuple = ()) -> str:
     """The scene with targeted edits for `result`'s problems (one model call).
 
     Raises:
@@ -649,7 +659,7 @@ def fix_scene(scene_id: str, prose: str, result: GateResult, *, log_dir: str,
         return prose
     log_file = os.path.join(log_dir, f'gate-fix-{scene_id}.json')
     try:
-        response = invoke_to_file(build_fix_prompt(scene_id, prose, problems),
+        response = invoke_to_file(build_fix_prompt(scene_id, prose, problems, protected),
                                   model or select_model('revision'), log_file, 8000,
                                   output_schema=FIX_SCHEMA, label=f'fix {scene_id}')
         if is_truncated(response):
@@ -704,7 +714,10 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     if first.plan_conflicts and not problems_to_fix(first):
         return GatedScene(prose, first, first)
     try:
-        fixed = fix_scene(scene_id, prose, first, log_dir=log_dir, model=fix_model)
+        # the brief's own words the scene has: the fix must keep them
+        protected = [p for p in _brief_phrases(project_dir, scene_id) if _quoted_in(p, prose)]
+        fixed = fix_scene(scene_id, prose, first, log_dir=log_dir, model=fix_model,
+                          protected=protected)
         if problems_to_fix(first) and fixed == prose:
             return GatedScene(prose, first, first)
         again = gate_scene(project_dir, scene_id, command=command, prose=fixed,

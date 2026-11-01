@@ -852,3 +852,38 @@ def test_an_unquoted_action_is_not_the_briefs_words(project_dir):
     """act1-sc02's key_actions ("Discovers missing village") paraphrase; a
     scene saying so isn't in conflict with the plan."""
     assert all('village' not in p for p in gate._brief_phrases(project_dir, SCENE))
+
+
+class TestFixConverges:
+    """2026-11-01: in all 14 of E8's failed clean replays the one fix
+    cleared the first findings and made new ones (Tam's age seven → nine,
+    Sera Holdt renamed Wenna Marsh, a scripted line changed)."""
+
+    def test_the_rules_say_take_the_books_value_or_drop_the_detail(self):
+        prompt = gate.build_fix_prompt('s', 'Prose.', ['TIM contradiction: ...'])
+        assert "Take the book's value, never a new one." in prompt
+        assert 'remove the detail or make it vague' in prompt
+        assert "don't rename a character" in prompt
+        assert 'Lines the brief scripts' not in prompt   # none to keep
+
+    def test_the_briefs_lines_are_listed_to_keep(self):
+        prompt = gate.build_fix_prompt('s', 'Prose.', ['x'], ['Vasht. Six days ago.'])
+        assert '## Lines the brief scripts' in prompt
+        assert '- "Vasht. Six days ago."' in prompt
+
+    def test_gate_and_fix_protects_the_brief_lines_the_scene_has(self, project_dir, monkeypatch,
+                                                                 tmp_path):
+        from storyforge.checker import CheckResult, Finding
+        bad = Finding('contradiction', 'TIM', 'q', 'act1-sc01', 'e', '', 'why')
+        first = gate.GateResult(SCENE, check=CheckResult(SCENE, findings=[bad]))
+        monkeypatch.setattr(gate, 'gate_scene', lambda *a, **k: first)
+        seen = []
+        monkeypatch.setattr(gate, 'fix_scene', lambda *a, **k: seen.append(k['protected']) or a[1])
+        prose = '"It was there forty years ago. It isn\'t there now. There is no note."'
+        gate.gate_and_fix(project_dir, SCENE, command='revise', prose=prose,
+                          log_dir=str(tmp_path))
+        assert seen == [["It was there forty years ago. It isn't there now. There is no note."]]
+        seen.clear()   # a line the scene doesn't have isn't sent: nothing to keep
+        gate.gate_and_fix(project_dir, SCENE, command='revise', prose='Other words.',
+                          log_dir=str(tmp_path))
+        assert seen == [[]]
