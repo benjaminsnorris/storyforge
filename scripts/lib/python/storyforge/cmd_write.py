@@ -380,7 +380,7 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
     with open(scene_file, encoding='utf-8') as f:
         prose = f.read()
     stale = (' Its earlier version\'s facts are still in the ledger and no longer '
-             'match the prose.' if command == 'redraft' else '')
+             'match the prose.' if command in ('redraft', 'revise') else '')
     log(f'Gating scene {scene_id}...')
     try:
         out = gate.gate_and_fix(project_dir, scene_id, command=command, prose=prose,
