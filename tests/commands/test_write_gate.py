@@ -544,6 +544,18 @@ class TestPendingReason480:
         passed, why = self._gated(project_dir, monkeypatch, r)
         assert not passed and why.startswith('1 problem(s) after one fix')
 
+    def test_two_fix_rounds_say_so(self, project_dir, monkeypatch, capsys):
+        from storyforge import cmd_write
+        r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
+        rounds = [gate.FixRound(['a'], []), gate.FixRound(['b'], [])]
+        monkeypatch.setattr(gate, 'gate_and_fix', lambda *a, **k: gate.GatedScene(
+            'prose', r, r, fixed=True, rounds=rounds))
+        path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        passed, why = cmd_write._gate_drafted_scene(project_dir, 'act1-sc01', path, 'revise',
+                                                    str(project_dir))
+        assert not passed and why.startswith('1 problem(s) after 2 fixes')
+        assert '(2 fix rounds)' in capsys.readouterr().out
+
     def test_plan_conflicts_alone_are_not_fixed_and_say_so(self, project_dir, monkeypatch):
         r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
         r.plan_conflicts = [BAD]

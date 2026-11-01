@@ -775,22 +775,51 @@ def problems_to_fix(result: GateResult) -> list[str]:
     return lines
 
 
+#: How many times `gate_and_fix` fixes a scene that still fails. A second
+#: round sees what the first changed: one fix often moves a wrong value to
+#: another wrong one ("eight days" to "five") or fixes half a pronoun.
+FIX_ROUNDS = 2
+
+
+@dataclass
+class FixRound:
+    """One fix `gate_and_fix` made: the problems it was sent and its edits."""
+    problems: list[str]
+    edits: list[dict]
+
+
 def build_fix_prompt(scene_id: str, prose: str, problems: list[str],
-                     protected: list[str] | tuple = ()) -> str:
+                     protected: list[str] | tuple = (),
+                     earlier: list[FixRound] | tuple = ()) -> str:
     """The fix's prompt. `protected`: the brief's own words in the scene
-    (`_brief_phrases`), which an edit must leave as they are."""
+    (`_brief_phrases`), which an edit must leave as they are. `earlier`: the
+    fixes already made to this prose, which the check still failed."""
     listing = '\n'.join(f'{n}. {p}' for n, p in enumerate(problems, start=1))
     keep = ''
     if protected:
         keep = ('\n## Lines the brief scripts\n\nThe scene must keep these words exactly; '
                 'no edit may change or remove them:\n\n'
                 + '\n'.join(f'- "{p}"' for p in protected) + '\n')
+    tried = ''
+    if earlier:
+        parts = []
+        for r in earlier:
+            parts.append('Problems sent:\n' + '\n'.join(f'- {p}' for p in r.problems))
+            parts.append('Edits made:\n' + ('\n'.join(
+                f'- "{e.get("find", "")}" became "{e.get("replace", "")}"' for e in r.edits)
+                or '- none'))
+        tried = ('\n## Earlier fixes\n\nThe scene below already has these edits, and the '
+                 'check still found the problems above. Keep what an earlier edit fixed. '
+                 'Where an earlier edit put in a value that is still wrong, don\'t guess '
+                 'again: take the value the problem quotes from the book, or remove the '
+                 'detail. Where it changed only part of something (one pronoun of several, '
+                 'one mention of a name), change the rest.\n\n' + '\n\n'.join(parts) + '\n')
     return f"""A continuity check found these problems in scene {scene_id}. Fix each with the smallest edit to the scene's prose that resolves it.
 
 ## Problems
 
 {listing}
-{keep}
+{keep}{tried}
 ## Rules
 
 - Change the scene so it agrees with what the book established; never assume the established fact is the one that is wrong. A problem marked UNVERIFIED may be the check's mistake: edit for it only if the scene clearly contradicts the book.
@@ -834,8 +863,12 @@ def apply_edits(prose: str, edits: list[dict]) -> str:
 
 
 def fix_scene(scene_id: str, prose: str, result: GateResult, *, log_dir: str,
-              model: str | None = None, protected: list[str] | tuple = ()) -> str:
+              model: str | None = None, protected: list[str] | tuple = (),
+              earlier: list[FixRound] | tuple = (),
+              edits_out: list | None = None) -> str:
     """The scene with targeted edits for `result`'s problems (one model call).
+    `earlier`: the fixes already made (`build_fix_prompt`). The edits applied
+    are appended to `edits_out` when it is given.
 
     Raises:
         GateError: the call failed, the reply was cut off or not the schema,
@@ -849,7 +882,8 @@ def fix_scene(scene_id: str, prose: str, result: GateResult, *, log_dir: str,
         return prose
     log_file = os.path.join(log_dir, f'gate-fix-{scene_id}.json')
     try:
-        response = invoke_to_file(build_fix_prompt(scene_id, prose, problems, protected),
+        response = invoke_to_file(build_fix_prompt(scene_id, prose, problems, protected,
+                                                   earlier),
                                   model or select_model('revision'), log_file, 8000,
                                   output_schema=FIX_SCHEMA, label=f'fix {scene_id}')
         if is_truncated(response):
@@ -857,7 +891,10 @@ def fix_scene(scene_id: str, prose: str, result: GateResult, *, log_dir: str,
         edits = json.loads(extract_text(response))['edits']
     except (RuntimeError, ValueError, KeyError, TypeError) as e:
         raise GateError(f'{scene_id}: the fix failed: {e}') from e
-    return apply_edits(prose, edits)
+    fixed = apply_edits(prose, edits)
+    if edits_out is not None:
+        edits_out.extend(edits)
+    return fixed
 
 
 @dataclass
@@ -866,59 +903,74 @@ class GatedScene:
     prose: str
     result: GateResult          # the last gate run (the re-check when there was one)
     first: GateResult           # the first gate run
-    fixed: bool = False         # whether the fix changed the prose
+    fixed: bool = False         # whether the fixes changed the prose
+    rounds: list[FixRound] = field(default_factory=list)  # the fixes that changed it
 
 
 def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                  log_dir: str, extract_model: str | None = None,
                  check_model: str | None = None, fix_model: str | None = None,
                  before: Snapshot | None = None) -> GatedScene:
-    """Gate `prose`; if it doesn't pass, fix it once and gate the fixed prose
-    (plan §3.2 step 3).
+    """Gate `prose`; while it doesn't pass, fix it and gate the fixed prose,
+    at most `FIX_ROUNDS` times (plan §3.2 step 3). Each fix after the first is
+    sent the earlier rounds' problems and edits (`build_fix_prompt`).
 
     - A first run that fails only on extraction problems (nothing for the fix)
-      is re-gated without an edit: extraction runs again.
-    - A first run with plan conflicts and nothing for the fix (extraction
-      problems or not) is neither fixed nor re-gated: they are the
-      author's (the brief disagrees with the book), and a re-roll that
-      missed one would pass prose that has it.
-    - `before` (the book before the pass, `snapshot`) goes to both runs
-      (`gate_scene`): an inherited contradiction doesn't block either.
+      is re-gated without an edit: extraction runs again. That re-gate counts
+      as a round; a later run with nothing for the fix stops.
+    - A run with plan conflicts and nothing for the fix (extraction problems
+      or not) is neither fixed nor re-gated: they are the author's (the brief
+      disagrees with the book), and a re-roll that missed one would pass
+      prose that has it.
+    - `before` (the book before the pass, `snapshot`) goes to every run
+      (`gate_scene`): an inherited contradiction doesn't block any of them.
     - A fix that changes nothing (every problem judged a false alarm) is not
-      re-gated: the first verdict stands, and a re-roll of the same prose
+      re-gated: the last verdict stands, and a re-roll of the same prose
       won't overturn it.
+    - The prose kept is the last gated: a fix that didn't pass is still the
+      prose its findings are about.
 
     The caller must write `.prose` to the scene file at once, whether or not
     `.result.passed`: when it passed, the ledger was already committed with
     quotes from that prose.
 
     Raises:
-        GateError: from either gate run or the fix; it carries the first run
-            as `.first` (None when the first run itself failed), so its
-            findings can still be reported.
+        GateError: from any gate run or fix; it carries the first run as
+            `.first` (None when the first run itself failed), so its findings
+            can still be reported.
     """
     os.makedirs(log_dir, exist_ok=True)
     first = gate_scene(project_dir, scene_id, command=command, prose=prose, log_dir=log_dir,
                        extract_model=extract_model, check_model=check_model, before=before)
-    if first.passed:
-        return GatedScene(prose, first, first)
-    if first.plan_conflicts and not problems_to_fix(first):
-        return GatedScene(prose, first, first)
+    current, result, rounds, run_dir = prose, first, [], log_dir
     try:
-        # the brief's own words the scene has: the fix must keep them
-        protected = [p for p in _brief_phrases(project_dir, scene_id) if _quoted_in(p, prose)]
-        fixed = fix_scene(scene_id, prose, first, log_dir=log_dir, model=fix_model,
-                          protected=protected)
-        if problems_to_fix(first) and fixed == prose:
-            return GatedScene(prose, first, first)
-        again = gate_scene(project_dir, scene_id, command=command, prose=fixed,
-                           log_dir=os.path.join(log_dir, 'recheck'),
-                           extract_model=extract_model, check_model=check_model,
-                           before=before)
+        for n in range(1, FIX_ROUNDS + 1):
+            if result.passed:
+                break
+            to_fix = problems_to_fix(result)
+            if not to_fix and (result.plan_conflicts or n > 1):
+                break
+            # the brief's own words the scene has: the fix must keep them
+            protected = [p for p in _brief_phrases(project_dir, scene_id)
+                         if _quoted_in(p, current)]
+            edits: list = []
+            fixed = fix_scene(scene_id, current, result, log_dir=run_dir,
+                              model=fix_model, protected=protected, earlier=rounds,
+                              edits_out=edits)
+            if to_fix and fixed == current:
+                break
+            if fixed != current:
+                rounds.append(FixRound(to_fix, edits))
+            # each fix's log beside the run it read: logs, logs/recheck, logs/recheck-2
+            run_dir = os.path.join(log_dir, 'recheck' if n == 1 else f'recheck-{n}')
+            result = gate_scene(project_dir, scene_id, command=command, prose=fixed,
+                                log_dir=run_dir, extract_model=extract_model,
+                                check_model=check_model, before=before)
+            current = fixed
     except GateError as e:
         e.first = first
         raise
-    return GatedScene(fixed, again, first, fixed=fixed != prose)
+    return GatedScene(current, result, first, fixed=current != prose, rounds=rounds)
 
 
 def _one_line(text: str) -> str:

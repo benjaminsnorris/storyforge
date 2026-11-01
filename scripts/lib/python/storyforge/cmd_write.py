@@ -405,7 +405,8 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
     if out.fixed:
         with open(scene_file, 'w', encoding='utf-8') as f:
             f.write(out.prose)
-        log(f'  The gate fixed {len(gate.problems_to_fix(out.first))} problem(s) and re-checked.')
+        log(f'  The gate fixed {len(gate.problems_to_fix(out.first))} problem(s) and re-checked'
+            + (f' ({len(out.rounds)} fix rounds).' if len(out.rounds) > 1 else '.'))
     lines = gate.report_lines(out.result)
     for line in lines:
         log(f'  {line}')
@@ -420,7 +421,8 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
     # plan conflicts alone aren't sent to the fix (`gate.gate_and_fix`)
     tried = ('not fixed (plan conflicts: the author\'s)'
              if out.first.plan_conflicts and not gate.problems_to_fix(out.first)
-             else 'after one fix')
+             else 'after one fix' if len(out.rounds) <= 1
+             else f'after {len(out.rounds)} fixes')
     return False, _pend(project_dir, scene_id, command,
                         f'{len(problems)} problem(s) {tried}: '
                         + ' / '.join(problems[:3]) + ('; ...' if len(problems) > 3 else '')

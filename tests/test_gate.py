@@ -1002,6 +1002,80 @@ class TestGateAndFixRoutes:
         assert out.fixed and calls == ['old', 'old']
 
 
+class TestSecondFixRound:
+    """2026-11-01: of E8's 28 gated replays, 10 still failed after the one
+    fix, most because it half-fixed the finding (He → She with "him" left;
+    "eight days" → "five", still off the calendar)."""
+
+    def _result(self, tag=None):
+        from storyforge.checker import CheckResult, Finding
+        findings = [Finding('contradiction', 'TIM', tag, 'act1-sc01', 'e', '', 'why')] if tag else []
+        return gate.GateResult(SCENE, check=CheckResult(SCENE, findings=findings))
+
+    def _run(self, monkeypatch, tmp_path, runs, fixes):
+        runs, fixes = iter(runs), iter(fixes)
+        dirs, seen = [], []
+        monkeypatch.setattr(gate, 'gate_scene',
+                            lambda *a, **k: dirs.append(k['log_dir']) or next(runs))
+
+        def fix(scene, prose, result, **k):
+            seen.append((prose, list(k['earlier'])))
+            new, edits = next(fixes)
+            k['edits_out'].extend(edits)
+            return new
+        monkeypatch.setattr(gate, 'fix_scene', fix)
+        out = gate.gate_and_fix('p', SCENE, command='revise', prose='v0',
+                                log_dir=str(tmp_path))
+        return out, dirs, seen
+
+    def test_a_second_round_sees_the_first_and_can_pass(self, monkeypatch, tmp_path):
+        e1 = [{'find': 'eight days', 'replace': 'five days', 'problem': 1}]
+        e2 = [{'find': 'five days', 'replace': 'three days', 'problem': 1}]
+        out, dirs, seen = self._run(monkeypatch, tmp_path,
+                                    [self._result('eight'), self._result('five'), self._result()],
+                                    [('v1', e1), ('v2', e2)])
+        assert out.result.passed and out.prose == 'v2' and out.fixed
+        assert [r.edits for r in out.rounds] == [e1, e2]
+        assert seen[0] == ('v0', []) and seen[1][0] == 'v1'
+        assert seen[1][1][0].edits == e1 and 'eight' in seen[1][1][0].problems[0]
+        assert dirs == [str(tmp_path), str(tmp_path / 'recheck'), str(tmp_path / 'recheck-2')]
+
+    def test_it_stops_after_fix_rounds(self, monkeypatch, tmp_path):
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), self._result('b'), self._result('c')],
+                                 [('v1', []), ('v2', [])])
+        assert gate.FIX_ROUNDS == 2 and len(dirs) == 3 and len(out.rounds) == 2
+        assert not out.result.passed and out.prose == 'v2'
+
+    def test_a_round_that_passes_stops(self, monkeypatch, tmp_path):
+        out, dirs, _ = self._run(monkeypatch, tmp_path, [self._result('a'), self._result()],
+                                 [('v1', [])])
+        assert out.result.passed and len(dirs) == 2 and len(out.rounds) == 1
+
+    def test_a_second_fix_with_no_edits_keeps_the_first_fixs_verdict(self, monkeypatch, tmp_path):
+        second = self._result('b')
+        out, dirs, _ = self._run(monkeypatch, tmp_path, [self._result('a'), second],
+                                 [('v1', []), ('v1', [])])
+        assert out.result is second and out.prose == 'v1' and len(dirs) == 2
+
+    def test_plan_conflicts_left_after_a_fix_stop_it(self, monkeypatch, tmp_path):
+        second = self._result('b')
+        second.plan_conflicts = list(second.findings)
+        out, dirs, seen = self._run(monkeypatch, tmp_path, [self._result('a'), second],
+                                    [('v1', [])])
+        assert out.result is second and len(seen) == 1 and len(dirs) == 2
+
+    def test_the_prompt_names_the_earlier_edits(self):
+        earlier = [gate.FixRound(['TIM contradiction: eight days'],
+                                 [{'find': 'eight days', 'replace': 'five days'}])]
+        prompt = gate.build_fix_prompt('s', 'Prose.', ['TIM contradiction: five days'],
+                                       earlier=earlier)
+        assert '## Earlier fixes' in prompt
+        assert '- "eight days" became "five days"' in prompt
+        assert "don't guess again" in prompt and 'change the rest' in prompt
+        assert '## Earlier fixes' not in gate.build_fix_prompt('s', 'Prose.', ['x'])
+
+
 def test_an_unquoted_action_is_not_the_briefs_words(project_dir):
     """act1-sc02's key_actions ("Discovers missing village") paraphrase; a
     scene saying so isn't in conflict with the plan."""
