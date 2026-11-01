@@ -29,7 +29,15 @@ the book it sees.
   the prompt says only some are shown). A reader checks a scene against
   what they have just read, and E4's judge does; searching alone missed
   most of the slips against earlier prose (E4 run 8 caught 2 of 9). Later
-  scenes are found with the tools.
+  scenes are found with the tools, and the prompt asks for one search per
+  name the scene says something specific about: E8's thornwall-026 passed
+  because its re-check searched one Warden's name and not the other's.
+- The calendar: each scene's `timeline_day` and `time_of_day` from
+  scenes.csv go in the scene list, the scene's header and each story-so-far
+  scene's `when`, so an elapsed time can be checked against the days (E8's
+  thornwall-020, "Ten days" from day 5 to day 19, passed without them). A
+  finding against it names `scenes.csv` as its `established_scene` and
+  quotes a calendar line (`Book.calendar`).
 - Caching: the bibles and the last earlier scene each carry a 5-minute
   breakpoint (the API takes no longer one after a shorter one, and
   drafting's are 5 minutes), so a check within five minutes of the last
@@ -139,8 +147,9 @@ class Finding:
     kind: str                 # one of KINDS
     code: str                 # one of CODES
     scene_quote: str          # the scene's words that break it
-    established_scene: str    # where the broken fact is set up ('' for a ledger
-                              # fact with no scene, or a brief promise)
+    established_scene: str    # where the broken fact is set up: a scene id, a
+                              # bible's file name, 'scenes.csv' (the calendar),
+                              # or '' for a ledger fact with no scene or a brief promise
     established_quote: str
     fact_id: str              # ledger id, or the brief field of a promise
     explanation: str
@@ -238,6 +247,20 @@ class Book:
         return cls(order, scenes, texts, ledger.load(project_dir) if rows is None else rows,
                    reference_docs(project_dir), earlier, len(earlier) == len(every))
 
+    def when(self, sid: str) -> str:
+        """The scene's place in the story's calendar, as scenes.csv gives it
+        (`timeline_day`, `time_of_day`): 'day 19, evening', or '' when it has
+        neither."""
+        s = self.scenes.get(sid, {})
+        day, time = (s.get('timeline_day') or '').strip(), (s.get('time_of_day') or '').strip()
+        return ', '.join(filter(None, [f'day {day}' if day else '', time]))
+
+    def calendar(self) -> str:
+        """Every dated scene's calendar line, `{id}: {when}`, in reading
+        order: what a `scenes.csv` finding's quote must come from."""
+        return '\n'.join(f'{sid}: {self.when(sid)}' for sid in sorted(self.order, key=self.order.get)
+                         if self.when(sid))
+
     def where(self, sid: str, at: str) -> str:
         if sid not in self.order:
             return 'no scene'
@@ -286,10 +309,31 @@ def _system(book: Book) -> list[dict] | None:
         blocks.append({'type': 'text', 'text': (
             '=== THE STORY SO FAR ===\n\nThe prose of the scenes before the one being '
             'checked, in reading order. The scene must agree with what they establish.')})
-        blocks += [{'type': 'text', 'text': f'<scene id="{sid}">\n{book.prose[sid].strip()}\n</scene>'}
-                   for sid in book.earlier]
+        blocks += [{'type': 'text', 'text': f'<scene id="{sid}"{_when_attr(book, sid)}>\n'
+                    f'{book.prose[sid].strip()}\n</scene>'} for sid in book.earlier]
         blocks[-1]['cache_control'] = {'type': 'ephemeral'}
     return blocks or None
+
+
+def _when_attr(book: Book, sid: str) -> str:
+    when = book.when(sid)
+    return f' when="{when}"' if when else ''
+
+
+def _calendar_note(book: Book, at: str) -> str:
+    """How to check time against the calendar; '' when no scene is dated."""
+    if not book.calendar():
+        return ''
+    here = book.when(at)
+    return ('\n\n**The calendar.** The scene list gives each dated scene\'s day in the '
+            'story\'s calendar (from scenes.csv)' + (f'; this scene is {here}' if here else
+            '; this scene has no day') + '. Check every elapsed time, day count, date or '
+            'age the scene states ("a week ago", "ten days since", "on day five") against '
+            'it and against the days the other scenes give for the events it counts from. '
+            'An interval that does not fit the calendar is a TIM contradiction: '
+            '`established_scene` `scenes.csv` and `established_quote` the calendar line '
+            'it breaks, copied from the scene list (for example `' + at + ': '
+            + (here or 'day 3') + '`), or the other scene\'s words when they give the day.')
 
 
 def _reference_note(book: Book) -> str:
@@ -326,6 +370,17 @@ def _how_to_look(book: Book) -> str:
             f'check {claims}: compare each with what the story so far says about it. Use the '
             'tools for what it doesn\'t show: later scenes, any scene not shown there, the '
             'ledger.')
+
+
+def _later_note(book: Book) -> str:
+    """Later scenes reach the checker only through the tools: for each name
+    the scene says something specific about, one search."""
+    return ('**Later scenes too.** A scene must also agree with the scenes after it, and '
+            'those reach you only through the tools. Before you answer, list the people, '
+            'places, groups and objects this scene says something specific about (who they '
+            'are, what they did, how many, where they were) and search the manuscript for '
+            'each by its name alone (`Greenhollow`, not `Greenhollow Warden signed`): one '
+            'search per name, reading the later hits as closely as the earlier ones.')
 
 
 def _search(book: Book, at: str, args: dict) -> str:
@@ -471,8 +526,9 @@ def _scene_index(book: Book, at: str) -> str:
     for sid in sorted(book.order, key=book.order.get):
         s = book.scenes.get(sid, {})
         mark = '  <- this scene' if sid == at else ''
+        when = book.when(sid)
         lines.append(f'- {sid}: {s.get("title", "")} (POV {s.get("pov") or "-"}, '
-                     f'{s.get("location") or "-"}){mark}')
+                     f'{s.get("location") or "-"}' + (f'; {when}' if when else '') + f'){mark}')
     return '\n'.join(lines)
 
 
@@ -576,7 +632,7 @@ def build_prompt(book: Book, at: str, brief_text: str,
 
 ## Scene being checked: {at}
 
-Title: {s.get('title', '')}; POV: {s.get('pov') or '-'}; location: {s.get('location') or '-'}
+Title: {s.get('title', '')}; POV: {s.get('pov') or '-'}; location: {s.get('location') or '-'}{'; ' + book.when(at) if book.when(at) else ''}
 
 {book.prose[at]}
 {brief_text}{_disputes_text(disputes or [])}
@@ -586,9 +642,11 @@ Title: {s.get('title', '')}; POV: {s.get('pov') or '-'}; location: {s.get('locat
 
 ## What to report
 
-**Contradictions.** Report each place where this scene contradicts something the book establishes elsewhere: in another scene (earlier or later), in the reference material, or in the ledger of recorded facts. {_reference_note(book)} Codes: PHY a physical state (injury, possession, where a person or object is), TIM time (dates, ages, elapsed time, time of day, durations), KNO who knows what, REL how people are related or connected, TRT a fixed trait (name, appearance, history, habit), WLD a rule or fact of the world, PRM a promise or threat a character made.
+**Contradictions.** Report each place where this scene contradicts something the book establishes elsewhere: in another scene (earlier or later), in the reference material, or in the ledger of recorded facts. {_reference_note(book)} Codes: PHY a physical state (injury, possession, where a person or object is), TIM time (dates, ages, elapsed time, time of day, durations), KNO who knows what, REL how people are related or connected, TRT a fixed trait (name, appearance, history, habit), WLD a rule or fact of the world, PRM a promise or threat a character made.{_calendar_note(book, at)}
 
 {_how_to_look(book)}
+
+{_later_note(book)}
 
 Report only a real contradiction, both sides quoted:
 - `scene_quote`: the scene's exact words that break it, copied verbatim.
@@ -636,6 +694,10 @@ def _verify(f: Finding, book: Book, at: str, brief: Brief) -> str:
         return ('' if any(_whole_item(i, f.established_quote)
                           for i in brief.entering[f.fact_id])
                 else f'its established quote is not an item of the brief\'s {f.fact_id}')
+    if f.established_scene == 'scenes.csv':
+        lines = [normalize(x) for x in book.calendar().splitlines()]
+        return ('' if normalize(f.established_quote).strip(' .`') in lines
+                else 'its established quote is not a line of the calendar in the scene list')
     name = os.path.basename(f.established_scene)
     if name in book.reference:
         f.established_scene = name

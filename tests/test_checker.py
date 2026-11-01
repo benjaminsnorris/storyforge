@@ -432,7 +432,7 @@ class TestStorySoFar:
     def test_the_scene_checked_and_later_ones_are_not_sent(self, project_dir):
         system, _ = self._system(project_dir, 'act1-sc02')
         text = ''.join(b['text'] for b in system)
-        assert '<scene id="act1-sc01">' in text
+        assert '<scene id="act1-sc01"' in text
         assert 'id="act1-sc02"' not in text and 'id="new-x1"' not in text
 
     def test_the_first_scene_gets_no_story_and_the_search_instruction(self, project_dir):
@@ -508,3 +508,58 @@ class TestStorySoFar:
         assert 'no scene' in tool_reply
         assert result.findings == []
         assert "'act1-sc02' is not a scene" in result.unverified[0].problem
+
+
+class TestCalendar:
+    """The checker sees each scene's day from scenes.csv (E8's thornwall-020:
+    "Ten days" from day 5 to day 19 passed the gate with no calendar)."""
+
+    def _sent(self, project_dir, scene=SCENE):
+        with patch('storyforge.api._api_request', side_effect=[_answer()]) as api:
+            check_scene(project_dir, scene, model='claude-opus-5-5')
+        body = api.call_args[0][1]
+        return ''.join(b['text'] for b in body.get('system', [])), body['messages'][0]['content']
+
+    def test_the_scene_list_header_and_story_so_far_carry_the_day(self, project_dir):
+        system, prompt = self._sent(project_dir)
+        assert '- act1-sc01: The Finest Cartographer (POV Dorren Hayle, Pressure Cartography Office; day 1, morning)' in prompt
+        assert '- new-x1: ' in prompt and 'day 2, afternoon)' in prompt
+        assert "location: Dorren's private study; day 1, evening" in prompt
+        assert 'this scene is day 1, evening' in prompt
+        assert '<scene id="act1-sc01" when="day 1, morning">' in system
+
+    def test_an_undated_book_gets_no_calendar_note(self, project_dir):
+        import csv, os
+        path = os.path.join(project_dir, 'reference', 'scenes.csv')
+        with open(path, newline='') as f:
+            rows = list(csv.DictReader(f, delimiter='|'))
+        for r in rows:
+            r['timeline_day'] = r['time_of_day'] = ''
+        with open(path, 'w', newline='') as f:
+            w = csv.DictWriter(f, fieldnames=list(rows[0]), delimiter='|', lineterminator='\n')
+            w.writeheader()
+            w.writerows(rows)
+        system, prompt = self._sent(project_dir)
+        assert '**The calendar.**' not in prompt
+        assert '; day' not in prompt and 'when="' not in system
+
+    def test_a_finding_against_a_calendar_line_verifies(self, project_dir):
+        result, _ = _run(project_dir, [_answer([_finding(
+            established_scene='scenes.csv', established_quote='act1-sc01: day 1, morning')])])
+        assert len(result.findings) == 1 and result.unverified == []
+
+    @pytest.mark.parametrize('quote', ['act1-sc01: day 4, morning', 'day 1', 'act1-sc01'])
+    def test_a_quote_that_is_not_a_calendar_line_is_unverified(self, project_dir, quote):
+        result, _ = _run(project_dir, [_answer([_finding(
+            established_scene='scenes.csv', established_quote=quote)])])
+        assert result.findings == []
+        assert 'not a line of the calendar' in result.unverified[0].problem
+
+
+def test_the_prompt_asks_for_one_search_per_name_in_later_scenes(project_dir):
+    """E8's thornwall-026: a later scene contradicted the redraft, and the
+    re-check searched another Warden's name."""
+    _, bodies = _run(project_dir, [_answer()])
+    prompt = bodies[0]['messages'][0]['content']
+    assert '**Later scenes too.**' in prompt
+    assert 'one search per name' in prompt
