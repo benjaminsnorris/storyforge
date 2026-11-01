@@ -304,6 +304,10 @@ def test_reintroductions_the_gate_listed_are_flagged_not_unflagged(monkeypatch, 
     assert out.metrics['reintroduced_unflagged'] == 2   # p-2 and the data case
     assert any(n.startswith('p-1 (s): reintroduced (the gate did not pass it: listed pending)')
                for n in out.notes)
+    gates = {g.name: g for g in out.gates}
+    assert 'reintroduced' not in gates    # reported, not gated (2026-11-01)
+    assert (gates['reintroduced_unflagged'].op, gates['reintroduced_unflagged'].threshold) == (
+        '<=', suite.MAX_UNFLAGGED)
 
 
 def test_a_naturalness_fix_that_rewrites_nothing_is_pass_halted_with_why(monkeypatch):
