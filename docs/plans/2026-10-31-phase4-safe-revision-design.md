@@ -71,6 +71,7 @@ A re-gate is about one extraction (Sonnet), one persistence call and one check (
    - **3c:** widen `dependents`: same subject in any type; a blank subject falls back to later scenes with a fact of its type; a mention match through registry names and aliases. Replayed: 0.76 with the first rule, 0.84 with the first two; ceiling 0.92.
    - **Done (#474, v1.118.0):** all three rules; recall **0.92**, set 35% of later scenes (a floor); the gate also lists a rejected fact's brief scenes after its revision.
 4. Prose passes through the gate (§5); E8.
+   - **Done (#475, v1.119.0):** every prose pass `revise` runs (main loop, API or interactive; the polish loop's pass) gates its scenes in reading order, re-checks after each, and stops at the first the gate doesn't pass, or after a re-check that didn't pass (the pass's scenes are listed pending before the gate runs, and come off as they pass). E8 7 → **6** reintroduced (`revision-plan` 2 → 1); 5 of the 6 passed the gate (`reintroduced_unflagged`; every gated replay lists what the gate didn't pass, `e8.gate_as_revise`), 4 of them `redraft-from-brief`, gated since #456: what is left is the checker's recall, not an ungated path.
 5. Rewrite-from-ledger (§6); E5.
 
 ## Decisions (Ben, 2026-10-31: each as recommended)
