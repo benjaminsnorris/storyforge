@@ -113,10 +113,22 @@ class GateResult:
     #: names a commitment this version removed (`row → id`): a re-check
     #: replaces only commitments, so the author must fix the link
     dangling: list[str] = field(default_factory=list)
+    #: contradictions whose words were already in the scene before the pass
+    #: that wrote this prose (`gate_scene(before=)`): the author's to fix,
+    #: reported but not blocking the commit, and never sent to the fix
+    inherited: list[Finding] = field(default_factory=list)
+    #: contradictions in words the scene's brief itself promises
+    #: (`checker.PROMISE_FIELDS`): the brief and the book disagree, so no
+    #: prose edit can deliver one without breaking the other. They block,
+    #: and go to the author rather than the fix
+    plan_conflicts: list[Finding] = field(default_factory=list)
 
     @property
     def findings(self) -> list[Finding]:
-        return self.check.findings if self.check else []
+        """The check's verified findings, less `inherited`."""
+        if not self.check:
+            return []
+        return [f for f in self.check.findings if not any(f is g for g in self.inherited)]
 
     @property
     def unverified(self) -> list[Finding]:
@@ -222,6 +234,68 @@ def _statement(rows: list[dict[str, str]], rid: str) -> str:
     return next((r.get('statement', '') for r in rows if r.get('id') == rid), '')
 
 
+def _words(text: str) -> str:
+    """`text` as lowercase words, one space apart, padded: a phrase is
+    in it when `_words(phrase)` is a substring."""
+    return ' ' + ' '.join(re.findall(r'\w+', text.lower())) + ' '
+
+
+def _quoted_in(quote: str, text: str) -> bool:
+    """Whether every part of `quote` (split at an ellipsis, as quotes are
+    verified) is in `text`, ignoring case, punctuation and spacing."""
+    words = _words(text)
+    parts = [_words(p) for p in re.split(r'\.\.\.|…', quote)]
+    parts = [p for p in parts if p.strip()]
+    return bool(parts) and all(p in words for p in parts)
+
+
+#: The fewest words a brief's own words must have to count as the source of
+#: a contradiction: shorter ones ("Yes.") match by accident
+_MIN_BRIEF_WORDS = 3
+
+
+def _brief_phrases(project_dir: str, scene_id: str) -> list[str]:
+    """The words the scene's brief scripts (`checker.PROMISE_FIELDS`), as
+    phrases: each quoted span of an item, and a `key_dialogue` item that
+    quotes nothing whole. An unquoted action or outcome is a paraphrase,
+    not words the prose must use, so it isn't one. Phrases under
+    `_MIN_BRIEF_WORDS` words are left out."""
+    from storyforge.checker import PROMISE_FIELDS, _split_cell
+    from storyforge.elaborate import get_scene
+    scene = get_scene(scene_id, os.path.join(project_dir, 'reference')) or {}
+    phrases = []
+    for col in PROMISE_FIELDS:
+        for item in _split_cell(scene.get(col) or ''):
+            quoted = re.findall(r'"([^"]+)"|“([^”]+)”', item)
+            if quoted:
+                phrases += [a or b for a, b in quoted]
+            elif col == 'key_dialogue':
+                phrases.append(item)
+    return [p for p in phrases if len(_words(p).split()) >= _MIN_BRIEF_WORDS]
+
+
+def _classify(result: GateResult, project_dir: str, before: str | None) -> None:
+    """Sort the check's verified contradictions into `inherited` (their
+    words were in `before`, the scene before this pass) and
+    `plan_conflicts` (their words are the brief's own). Inherited comes
+    first: an error the pass didn't make doesn't stop it, whatever its
+    source. Broken promises and unverified findings are neither."""
+    if not result.check:
+        return
+    phrases = None
+    for f in result.check.findings:
+        if f.kind != 'contradiction' or not f.scene_quote.strip():
+            continue
+        if before is not None and _quoted_in(f.scene_quote, before):
+            result.inherited.append(f)
+            continue
+        if phrases is None:
+            phrases = [_words(p) for p in _brief_phrases(project_dir, result.scene_id)]
+        quote = _words(f.scene_quote)
+        if any(p in quote or quote in p for p in phrases):
+            result.plan_conflicts.append(f)
+
+
 def has_commitments(project_dir: str, scene_id: str) -> bool:
     """Whether the ledger holds commitments from `scene_id`'s prose."""
     return any(ledger.is_commitment(r) and (r.get('scene_id') or '').strip() == scene_id
@@ -231,7 +305,8 @@ def has_commitments(project_dir: str, scene_id: str) -> bool:
 def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | None = None,
                log_dir: str, extract_model: str | None = None,
                check_model: str | None = None,
-               introduced_by: str | None = None) -> GateResult:
+               introduced_by: str | None = None,
+               before: str | None = None) -> GateResult:
     """Extract, halt, check and (if all clear) commit `scene_id`'s prose:
     `prose`, or the scene file when None. `command` is the command that
     wrote the prose (one of `GATE_COMMANDS`), recorded as the new rows'
@@ -243,6 +318,12 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     A `resolves` it set on a registry state isn't touched: the gate never
     sets one there. `introduced_by` (default `command`) is what the new rows
     record; a re-check keeps the prose's writer.
+
+    `before` is the scene's prose before the pass that wrote `prose` (None:
+    a new scene, a re-check, or advisor mode). A contradiction whose words
+    were already in it is `inherited`: reported, not blocking (Ben,
+    2026-11-01: a pass doesn't stop on an error it didn't make). A
+    contradiction in the brief's own words is a `plan_conflict`.
 
     On commit (Phase 4, `docs/plans/2026-10-31-phase4-safe-revision-design.md`):
     a new commitment stating the same fact as an earlier one of the scene
@@ -328,6 +409,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
         error = GateError(str(e))
         error.run = getattr(e, 'run', None)
         raise error from e
+    _classify(result, project_dir, before)
     if not result.passed:
         return result
 
@@ -470,7 +552,9 @@ def problems_to_fix(result: GateResult) -> list[str]:
     words that set the fact), contradictions and broken promises, and
     unverified findings, marked as such with why their quotes failed. An
     extraction problem isn't a prose problem, so it isn't here: the re-check
-    extracts again."""
+    extracts again. Neither is a plan conflict (the brief's own words: an
+    edit would break the promise) or an inherited contradiction (the
+    author's, from before the pass)."""
     proposed = {r['id']: r for r in result.proposed}
     lines = []
     for h in result.halts:
@@ -485,7 +569,9 @@ def problems_to_fix(result: GateResult) -> list[str]:
         lines.append(f'UNVERIFIED (extraction thinks the scene changes this; the check gave no '
                      f'ruling; edit only if the scene clearly contradicts it): the plan records '
                      f'"{d.statement}", and the scene says "{d.claim}".')
-    for f, unverified in ([(f, False) for f in result.findings]
+    conflicts = result.plan_conflicts
+    for f, unverified in ([(f, False) for f in result.findings
+                           if not any(f is c for c in conflicts)]
                           + [(f, True) for f in result.unverified]):
         tag = (f'UNVERIFIED (the check\'s quotes did not hold up: {f.problem}; edit only '
                f'if the scene clearly contradicts the book) ' if unverified else '')
@@ -585,12 +671,18 @@ class GatedScene:
 
 def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                  log_dir: str, extract_model: str | None = None,
-                 check_model: str | None = None, fix_model: str | None = None) -> GatedScene:
+                 check_model: str | None = None, fix_model: str | None = None,
+                 before: str | None = None) -> GatedScene:
     """Gate `prose`; if it doesn't pass, fix it once and gate the fixed prose
     (plan §3.2 step 3).
 
     - A first run that fails only on extraction problems (nothing for the fix)
       is re-gated without an edit: extraction runs again.
+    - A first run whose only other problems are plan conflicts is not
+      re-gated or fixed: they are the author's (the brief disagrees with the
+      book), and a re-roll that missed one would pass prose that has it.
+    - `before` (the scene before the pass) goes to both runs
+      (`gate_scene`): an inherited contradiction doesn't block either.
     - A fix that changes nothing (every problem judged a false alarm) is not
       re-gated: the first verdict stands, and a re-roll of the same prose
       won't overturn it.
@@ -606,8 +698,10 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     """
     os.makedirs(log_dir, exist_ok=True)
     first = gate_scene(project_dir, scene_id, command=command, prose=prose, log_dir=log_dir,
-                       extract_model=extract_model, check_model=check_model)
+                       extract_model=extract_model, check_model=check_model, before=before)
     if first.passed:
+        return GatedScene(prose, first, first)
+    if first.plan_conflicts and not problems_to_fix(first):
         return GatedScene(prose, first, first)
     try:
         fixed = fix_scene(scene_id, prose, first, log_dir=log_dir, model=fix_model)
@@ -615,7 +709,8 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             return GatedScene(prose, first, first)
         again = gate_scene(project_dir, scene_id, command=command, prose=fixed,
                            log_dir=os.path.join(log_dir, 'recheck'),
-                           extract_model=extract_model, check_model=check_model)
+                           extract_model=extract_model, check_model=check_model,
+                           before=before)
     except GateError as e:
         e.first = first
         raise
@@ -624,6 +719,16 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
 
 def _one_line(text: str) -> str:
     return ' '.join(str(text).split())
+
+
+#: `report_lines`' prefixes for what is reported either way, not what
+#: stopped the commit
+_NOT_BLOCKING = ('NOTE', 'COMMITTED', 'ALREADY IN THE SCENE')
+
+
+def blocking_lines(lines: list[str]) -> list[str]:
+    """The `report_lines` that name what stopped the commit."""
+    return [line for line in lines if not line.startswith(_NOT_BLOCKING)]
 
 
 def report_lines(result: GateResult) -> list[str]:
@@ -636,13 +741,20 @@ def report_lines(result: GateResult) -> list[str]:
     for item in result.unresolved:
         lines.append(f'EXTRACTION: {_one_line(item)}')
     for f in result.findings:
-        lines.append(f'{f.kind.upper()}: {_one_line(f.message())}')
+        if any(f is c for c in result.plan_conflicts):
+            lines.append(f'PLAN CONFLICT (the brief\'s own words contradict the book; fix the '
+                         f'brief or {f.source}): {_one_line(f.message())}')
+        else:
+            lines.append(f'{f.kind.upper()}: {_one_line(f.message())}')
     for f in result.unverified:
         lines.append(f'UNVERIFIED ({f.problem}): {_one_line(f.message())}')
     for d in result.unruled:
         lines.append(f'UNRULED: the scene may change the plan\'s {d.fact_id} '
                      f'("{_one_line(d.statement)}"): "{_one_line(d.claim)}"; the check gave '
                      f'no ruling')
+    for f in result.inherited:
+        lines.append(f'ALREADY IN THE SCENE (before this pass; not blocking, the author\'s to '
+                     f'fix): {_one_line(f.message())}')
     if result.check:
         for d in result.check.cleared:
             lines.append(f'NOTE (plan fact kept, link not applied; the check found no '
@@ -853,7 +965,7 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
             run.failed, run.why, run.left = sid, why, recheck_queue(project_dir, skip)
             return run
         if not result.passed:
-            lines = [x for x in report_lines(result) if not x.startswith(('NOTE', 'COMMITTED'))]
+            lines = blocking_lines(report_lines(result))
             mark_pending(project_dir, sid, RECHECK_FAILED,
                          f're-check did not pass: {len(lines)} problem(s): '
                          + '; '.join(_one_line(x) for x in lines[:3]))

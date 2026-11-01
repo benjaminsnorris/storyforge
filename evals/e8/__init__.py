@@ -370,27 +370,68 @@ def redraft(project_dir: str, scene_id: str, gated: bool = True, rewrite: bool =
     prose = clean_scene_content(extract_single_scene(text) or text)
     if not gated:
         return prose
-    with open(os.path.join(project_dir, 'scenes', f'{scene_id}.md'), 'w',
-              encoding='utf-8') as f:
+    path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
+    before = _read(path) if os.path.isfile(path) else None
+    with open(path, 'w', encoding='utf-8') as f:
         f.write(prose)
-    return gate_as_revise(project_dir, scene_id, 'redraft', prose)
+    return gate_as_revise(project_dir, scene_id, 'redraft', prose, before=before)
 
 
-def gate_as_revise(project_dir: str, scene_id: str, command: str, prose: str) -> str:
+#: Where `gate_as_revise` leaves what the gate's last run found, by kind
+#: (`gate_counts`), for the suite
+GATE_COUNTS = os.path.join('working', 'e8-gate-counts.json')
+
+
+def gate_counts(result) -> dict[str, int]:
+    """What a `gate.GateResult` found, by kind: `new` (prose problems the
+    fix is for: contradictions and broken promises, verified or not, halts,
+    unruled disputes, rejected facts restated), `plan_conflicts` (the
+    brief's own words contradict the book), `extraction` (unresolved
+    extraction problems) and `inherited` (contradictions already in the
+    scene before the pass: reported, not blocking)."""
+    conflicts = len(result.plan_conflicts)
+    return {'new': (len(result.findings) - conflicts + len(result.unverified)
+                    + len(result.halts) + len(result.unruled)
+                    + len(result.problems.get('rejected', []))),
+            'plan_conflicts': conflicts,
+            'extraction': len([u for u in result.unresolved
+                               if not u.startswith('rejected')]),
+            'inherited': len(result.inherited)}
+
+
+def read_gate_counts(project_dir: str) -> dict[str, int] | None:
+    """`gate_counts` of the replay's last gate run, or None when it
+    didn't run or couldn't finish."""
+    path = os.path.join(project_dir, GATE_COUNTS)
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def gate_as_revise(project_dir: str, scene_id: str, command: str, prose: str,
+                   before: str | None = None) -> str:
     """Gate `prose` as write and revise do (`gate.gate_and_fix`: fix once,
     re-check) and return the prose they keep, passed or not. A scene the
     gate didn't pass, or couldn't finish, is listed in
     working/gate-pending.csv as they list it (the suite reads that list to
     tell a reintroduction the author is told about from one the gate
-    passed). Only `GateError` is caught: a bug errors the suite rather than
-    being judged as gated prose, and a cassette miss errors it anyway."""
+    passed), and what the gate's last run found is left at `GATE_COUNTS`.
+    `before` is the scene before the pass, as revise passes it. Only
+    `GateError` is caught: a bug errors the suite rather than being judged
+    as gated prose, and a cassette miss errors it anyway."""
     from storyforge import gate
     try:
         out = gate.gate_and_fix(project_dir, scene_id, command=command, prose=prose,
-                                log_dir=os.path.join(project_dir, 'working', 'logs', 'gate'))
+                                log_dir=os.path.join(project_dir, 'working', 'logs', 'gate'),
+                                before=before)
     except gate.GateError as e:
         gate.mark_pending(project_dir, scene_id, command, f'the gate could not finish: {e}')
         return prose
+    counts_file = os.path.join(project_dir, GATE_COUNTS)
+    os.makedirs(os.path.dirname(counts_file), exist_ok=True)
+    with open(counts_file, 'w', encoding='utf-8') as f:
+        json.dump(gate_counts(out.result), f)
     if not out.result.passed:
         gate.mark_pending(project_dir, scene_id, command, 'the gate did not pass it')
     return out.prose
@@ -464,7 +505,7 @@ def revision_pass(project_dir: str, scene_id: str, row: dict) -> str:
         raise RuntimeError(f'pass {name!r} returned no revision of {scene_id}')
     if get_coaching_level(project_dir) != 'full':
         return after
-    return gate_as_revise(project_dir, scene_id, 'revise', after)
+    return gate_as_revise(project_dir, scene_id, 'revise', after, before=before)
 
 
 class PassHalted(Exception):

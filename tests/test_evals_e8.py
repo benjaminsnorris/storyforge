@@ -194,15 +194,17 @@ def test_a_redraft_is_gated_and_the_gates_prose_judged(monkeypatch, tmp_path):
     monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda *a, **k: 'prompt')
     monkeypatch.setattr('storyforge.api.invoke', lambda *a, **k: {
         'content': [{'type': 'text', 'text': 'Drafted prose.'}]})
-    seen = []
+    seen, befores = [], []
 
-    def gate_and_fix(p, sid, *, command, prose, log_dir):
+    def gate_and_fix(p, sid, *, command, prose, log_dir, before=None):
         seen.append((sid, command, prose))
+        befores.append(before)
         return gate.GatedScene('Fixed prose.', _gate_result(True), _gate_result(False),
                                fixed=True)
     monkeypatch.setattr(gate, 'gate_and_fix', gate_and_fix)
     assert e8.redraft(project, 's') == 'Fixed prose.'
     assert [(s, c, p.strip()) for s, c, p in seen] == [('s', 'redraft', 'Drafted prose.')]
+    assert befores == ['old prose']      # the scene before the redraft, as revise passes it
     assert gate.pending(project) == {}   # it passed: nothing listed
 
 
@@ -227,6 +229,29 @@ class TestGateAsRevise:
             'Fixed.', _gate_result(False), _gate_result(False), fixed=True))
         assert e8.gate_as_revise(project, 's', 'revise', 'Prose.') == 'Fixed.'
         assert gate.pending(project)['s']['command'] == 'revise'
+        assert e8.read_gate_counts(project) == {'new': 1, 'plan_conflicts': 0,
+                                                'extraction': 0, 'inherited': 0}
+
+    def test_gate_counts_sort_what_the_gate_found(self):
+        from storyforge.checker import Finding
+        r = _gate_result(False)
+        conflict = Finding('contradiction', 'TRT', 'q', 'y', 'z', '', 'why')
+        old = Finding('contradiction', 'TIM', 'o', 'y', 'z', '', 'why')
+        r.check.findings += [conflict, old]
+        r.plan_conflicts, r.inherited = [conflict], [old]
+        r.problems = {'quote': ['s: x'], 'rejected': ['s: restates y']}
+        assert e8.gate_counts(r) == {'new': 2, 'plan_conflicts': 1, 'extraction': 1,
+                                     'inherited': 1}
+
+    def test_no_counts_when_the_gate_could_not_finish(self, monkeypatch, tmp_path):
+        from storyforge import gate
+
+        def fail(*a, **k):
+            raise gate.GateError('extraction failed')
+        project = _scene_dir(tmp_path)
+        monkeypatch.setattr(gate, 'gate_and_fix', fail)
+        e8.gate_as_revise(project, 's', 'redraft', 'Prose.')
+        assert e8.read_gate_counts(project) is None
 
     def test_a_gate_that_cannot_finish_keeps_the_prose_listed(self, monkeypatch, tmp_path):
         from storyforge import gate
@@ -263,13 +288,13 @@ class TestGateAsRevise:
         monkeypatch.setattr('storyforge.parsing.extract_scenes_from_response', write)
         seen = []
         monkeypatch.setattr(gate, 'gate_and_fix', lambda p, sid, *, command, prose, **k: (
-            seen.append(command) or gate.GatedScene('Fixed.', _gate_result(True),
+            seen.append(command) or seen.append(k.get('before')) or gate.GatedScene('Fixed.', _gate_result(True),
                                                     _gate_result(True))))
         return e8.revision_pass(project, 's', {'name': 'polish'}), seen
 
     def test_a_revision_pass_is_gated_at_full(self, monkeypatch, tmp_path):
         out, seen = self._revision_pass(monkeypatch, tmp_path, 'full')
-        assert out == 'Fixed.' and seen == ['revise']
+        assert out == 'Fixed.' and seen == ['revise', 'old prose']
 
     def test_a_revision_pass_is_not_gated_below_full(self, monkeypatch, tmp_path):
         out, seen = self._revision_pass(monkeypatch, tmp_path, 'coach')
@@ -299,6 +324,7 @@ def test_reintroductions_the_gate_listed_are_flagged_not_unflagged(monkeypatch, 
     monkeypatch.setattr(suite, 'prepare', prepare)
     monkeypatch.setattr(suite, 'replay', replay)
     monkeypatch.setattr(suite, 'judge', lambda c, t: {'verdict': 'reintroduced', 'evidence': ''})
+    monkeypatch.setattr(suite, 'read_gate_counts', lambda p: None)
     out = suite.run(type('Ctx', (), {'work_dir': str(tmp_path)})())
     assert out.metrics['reintroduced'] == 3
     assert out.metrics['reintroduced_unflagged'] == 2   # p-2 and the data case
@@ -730,3 +756,38 @@ def test_a_gate_that_could_not_finish_fails_e8(monkeypatch, tmp_path):
     assert out.metrics['reintroduced_unflagged'] == 1 and out.metrics['gate_unfinished'] == 1
     assert not gates['gate_unfinished'].passed and gates['reintroduced_unflagged'].passed
     assert 'p-1 (s): reintroduced (the gate could not finish: counted unflagged)' in out.notes[0]
+
+
+def test_clean_replays_the_gate_failed_are_counted_with_what_it_found(monkeypatch, tmp_path):
+    """2026-11-01: #478's 14 "false alarms" were mostly real errors the
+    replay made; the suite reports what the gate found instead of a bare
+    count."""
+    import importlib
+    from storyforge import gate
+    suite = importlib.import_module('suites.e8_revision_safety')
+    cases = [_tool_case(id='p-1'), _tool_case(id='p-2')]
+    monkeypatch.setattr(suite, 'select', lambda c, h: e8.Selection(cases=cases))
+
+    def prepare(case, work_dir):
+        d = tmp_path / case['id']
+        d.mkdir()
+        return str(d), 's'
+
+    def replay(case, project, sid):
+        if case['id'] == 'p-1':
+            gate.mark_pending(project, sid, 'revise', 'the gate did not pass it')
+        return 'prose'
+    counts = {'p-1': {'new': 2, 'plan_conflicts': 1, 'extraction': 0, 'inherited': 1},
+              'p-2': {'new': 0, 'plan_conflicts': 0, 'extraction': 0, 'inherited': 3}}
+    monkeypatch.setattr(suite, 'prepare', prepare)
+    monkeypatch.setattr(suite, 'replay', replay)
+    monkeypatch.setattr(suite, 'read_gate_counts', lambda p: counts[os.path.basename(p)])
+    monkeypatch.setattr(suite, 'judge', lambda c, t: {'verdict': 'not_present', 'evidence': ''})
+    out = suite.run(type('Ctx', (), {'work_dir': str(tmp_path)})())
+    assert out.metrics['clean_gate_failed'] == 1
+    assert (out.metrics['gate_new'], out.metrics['gate_plan_conflicts'],
+            out.metrics['gate_inherited']) == (2, 1, 4)
+    assert any(n.startswith('p-1 (s): not_present (the gate did not pass it: listed pending) '
+                            '[gate: 2 new, 1 plan conflict, 1 already in the scene]')
+               for n in out.notes)
+    assert any(n == 'p-2 (s): not_present [gate: 3 already in the scene]' for n in out.notes)

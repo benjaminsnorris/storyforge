@@ -32,15 +32,21 @@ def _no_git(monkeypatch):
     return commits
 
 
+#: what the stubbed gate was given as each scene's prose before the pass
+BEFORES: dict = {}
+
+
 def _stub_gate(monkeypatch, fails=(), recheck=None):
     """`_gate_drafted_scene` passes every scene but `fails` (which it lists
     pending, as the real one does). `recheck(project_dir, skip)` runs as the
     re-check and returns its `gate.Recheck` (default: nothing pending).
     Returns the (scene, command) calls and the re-check skip sets."""
     gated, skips = [], []
+    BEFORES.clear()
 
-    def fake(pd, sid, scene_file, command, log_dir):
+    def fake(pd, sid, scene_file, command, log_dir, before=None):
         gated.append((sid, command))
+        BEFORES[sid] = before
         if sid in fails:
             return False, cmd_write._pend(pd, sid, command, 'a contradiction')
         return True, ''
@@ -65,6 +71,13 @@ def _gate_pass(project_dir, ids):
 
 class TestGatePassScenes:
 
+    def test_each_scene_gets_its_own_prose_before_the_pass(self, project_dir, monkeypatch):
+        _scenes(project_dir, 'act1-sc01', 'act1-sc02')
+        _stub_gate(monkeypatch)
+        cmd_revise._gate_pass_scenes(project_dir, ['act1-sc01', 'act1-sc02'], 'polish',
+                                     str(project_dir), before={'act1-sc01': 'old one'})
+        assert BEFORES == {'act1-sc01': 'old one', 'act1-sc02': None}
+
     def test_each_scene_is_gated_in_reading_order_as_revise(self, project_dir, monkeypatch):
         _scenes(project_dir, 'act1-sc01', 'act1-sc02', 'act2-sc01')
         gated, skips = _stub_gate(monkeypatch)
@@ -81,7 +94,7 @@ class TestGatePassScenes:
         _scenes(project_dir, 'act1-sc01', 'act1-sc02')
         seen = []
 
-        def fake(pd, sid, *a):
+        def fake(pd, sid, *a, **k):
             seen.append(sorted(gate.pending(pd)))
             raise KeyboardInterrupt
         monkeypatch.setattr(cmd_write, '_gate_drafted_scene', fake)
@@ -175,7 +188,7 @@ class TestMarkers:
             f.write(f'Revised prose.\n\n{self.MARKER}\n')
         monkeypatch.setattr('storyforge.illustrations.preserve_markers', restore)
 
-        def fix_drops_marker(pd, sid, scene_file, command, log_dir):
+        def fix_drops_marker(pd, sid, scene_file, command, log_dir, before=None):
             with open(scene_file) as f:
                 text = f.read()
             with open(scene_file, 'w') as f:
@@ -279,6 +292,18 @@ class TestMainPassLoopIsGated:
         gated = self._run(project_dir, monkeypatch)
         assert gated == [('act1-sc01', 'revise'), ('act1-sc02', 'revise')]
         assert _read_csv_plan(plan_file)[0]['status'] == 'completed'
+
+    def test_the_gate_gets_each_scene_as_it_was_before_the_pass(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """2026-11-01: a contradiction already in the scene doesn't stop a pass."""
+        _run_pass_setup(project_dir, monkeypatch, 'craft')
+        old = {}
+        for sid in ('act1-sc01', 'act1-sc02'):
+            with open(os.path.join(project_dir, 'scenes', f'{sid}.md')) as f:
+                old[sid] = f.read()
+        mock_api.set_response('=== SCENE: act1-sc01 === ...')
+        self._run(project_dir, monkeypatch)
+        assert BEFORES == old
 
     def test_a_scene_the_gate_fails_stops_the_session_after_committing(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
@@ -404,6 +429,13 @@ class TestPolishLoopPassIsGated:
         rows, _, _ = self._run(project_dir, monkeypatch)
         assert gated == [('act1-sc01', 'revise')]
         assert rows[0]['status'] == 'completed'
+
+    def test_the_gate_gets_the_scene_as_it_was_before_the_pass(self, project_dir, monkeypatch):
+        with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md')) as f:
+            old = f.read()
+        _stub_gate(monkeypatch)
+        self._run(project_dir, monkeypatch)
+        assert BEFORES == {'act1-sc01': old} and 'The rain kept on.' not in old
 
     def test_a_scene_the_gate_fails_stops_the_loop_after_committing(
             self, project_dir, monkeypatch, capsys):

@@ -12,12 +12,23 @@ listed for the author and revise stops there, so it doesn't count against
 the gate (the listing is per scene: the gate may have failed it for another
 finding); one the gate couldn't finish counts as unflagged, and
 `gate_unfinished` must be zero. `reintroduced` is still reported.
+
+`clean_gate_failed` counts the replays the judge found clean (the case's
+error not reintroduced) that the gate didn't pass. They are not false
+alarms by default: the judge looks only for the case's error, and most of
+the first 14 (#478's recording) were other real errors the replay made
+(2026-11-01). `gate_new` / `gate_plan_conflicts` / `gate_inherited` sum
+what the gate's last run found over the gated replays (`e8.gate_counts`;
+the naturalness-upstream family gates through revise itself and isn't
+counted): `gate_inherited` is what was already in the scene before the
+pass, reported but not blocking.
 """
 
 import re
 
 from e1 import load_cases, load_holdout
-from e8 import DATA_FAMILIES, PassHalted, family, judge, prepare, replay, select
+from e8 import (DATA_FAMILIES, PassHalted, family, judge, prepare, read_gate_counts, replay,
+                select)
 from harness import Gate, Suite, SuiteOutput
 
 MIN_REPLAYED = 15  # below this the rate is too noisy to gate on
@@ -32,6 +43,8 @@ def run(ctx):
     by_code: dict[str, dict[str, float]] = {}
     by_family: dict[str, list[int]] = {}
     reintroduced = replayed = words = prose_hits = halted = unflagged = unfinished = 0
+    clean_failed = 0
+    found = {'new': 0, 'plan_conflicts': 0, 'extraction': 0, 'inherited': 0}
     for case in sel.cases:
         try:
             project, scene_id = prepare(case, ctx.work_dir)
@@ -61,6 +74,10 @@ def run(ctx):
         flagged = listing == 'failed'
         unflagged += hit and not flagged
         unfinished += listing == 'unfinished'
+        clean_failed += flagged and not hit
+        counts = None if data else read_gate_counts(project)
+        for k in found:
+            found[k] += (counts or {}).get(k, 0)
         if not data:  # errors per 10k words counts prose only, on both sides
             words += len(output.split())
             prose_hits += hit
@@ -73,6 +90,8 @@ def run(ctx):
         notes.append(f'{case["id"]} ({scene_id}): {verdict["verdict"]}'
                      + (' (wrote nothing; not judged)' if unjudged else '')
                      + (' (the gate did not pass it: listed pending)' if flagged else '')
+                     + (f' [gate: {_counts_note(counts)}]' if counts and any(counts.values())
+                        else '')
                      + (' (the gate could not finish: counted unflagged)'
                         if listing == 'unfinished' else '')
                      + (f' — "{verdict.get("evidence", "")[:120]}"' if hit else ''))
@@ -83,6 +102,8 @@ def run(ctx):
     return SuiteOutput(
         metrics={'replayed': replayed, 'reintroduced': reintroduced,
                  'reintroduced_unflagged': unflagged, 'gate_unfinished': unfinished,
+                 'clean_gate_failed': clean_failed,
+                 **{f'gate_{k}': v for k, v in found.items()},
                  'reintroduction_rate': round(reintroduced / replayed, 3) if replayed else 0.0,
                  'errors_per_10k_words': round(prose_hits / words * 10000, 3) if words else 0.0,
                  'unreplayable': unreplayable, 'halted': halted,
@@ -96,6 +117,12 @@ def run(ctx):
                Gate('gate_unfinished', unfinished, '==', 0)],
         notes=notes,
     )
+
+
+def _counts_note(counts: dict[str, int]) -> str:
+    names = {'new': 'new', 'plan_conflicts': 'plan conflict', 'extraction': 'extraction',
+             'inherited': 'already in the scene'}
+    return ', '.join(f'{v} {names[k]}' for k, v in counts.items() if v)
 
 
 #: The reasons write/revise (and `e8.gate_as_revise`) list a scene with when

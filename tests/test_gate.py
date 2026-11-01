@@ -733,3 +733,122 @@ def test_a_calendar_finding_names_the_calendar_in_the_fix_prompt(project_dir, tm
     assert not result.passed and result.check.unverified == []
     line = next(x for x in gate.problems_to_fix(result) if 'TIM contradiction' in x)
     assert 'but the calendar (scenes.csv) establishes "act1-sc01: day 1, morning"' in line
+
+
+class TestInheritedAndPlanConflicts:
+    """2026-11-01: E8's 14 "false alarms" were real. Six findings were
+    already in the scene before the pass, and some came from the brief's
+    own words. The first kind is reported and doesn't block; the second
+    blocks and goes to the author, not the fix."""
+
+    def test_a_contradiction_already_in_the_scene_does_not_block(self, project_dir, tmp_path):
+        before = f'Old prose. The map said {HERE}, plainly.'
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+                       command='revise', before=before)
+        assert result.passed and result.committed
+        assert [f.code for f in result.inherited] == ['TIM'] and result.findings == []
+        lines = gate.report_lines(result)
+        assert any(x.startswith('ALREADY IN THE SCENE') and 'TIM' in x for x in lines)
+        assert gate.blocking_lines(lines) == []
+        assert gate.problems_to_fix(result) == []
+
+    def test_without_the_scene_before_it_still_blocks(self, project_dir, tmp_path):
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()])
+        assert not result.passed and result.inherited == []
+
+    def test_one_the_pass_wrote_still_blocks(self, project_dir, tmp_path):
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+                       command='revise', before='Different words entirely.')
+        assert not result.passed and result.inherited == []
+
+    def test_a_broken_promise_is_never_inherited(self, project_dir, tmp_path):
+        promise = {**_contradiction(), 'kind': 'broken_promise', 'code': 'PRM'}
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[promise],
+                       command='revise', before=HERE)
+        assert not result.passed and result.inherited == []
+
+    def test_a_contradiction_in_the_briefs_own_words_is_a_plan_conflict(
+            self, project_dir, tmp_path):
+        quote = 'It was there forty years ago. It isn\'t there now.'   # act1-sc02's key_dialogue
+        finding = {**_contradiction(), 'scene_quote': quote}
+        with open(os.path.join(project_dir, 'scenes', f'{SCENE}.md'), 'a') as f:
+            f.write(f'\n\n"{quote} There is no note."\n')
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[finding])
+        assert not result.passed
+        assert [f.scene_quote for f in result.plan_conflicts] == [quote]
+        assert gate.problems_to_fix(result) == []
+        line = next(x for x in gate.report_lines(result) if 'TIM' in x)
+        assert line.startswith('PLAN CONFLICT') and 'fix the brief or act1-sc01' in line
+        assert gate.blocking_lines([line]) == [line]
+
+    def test_inherited_wins_over_plan_conflict(self, project_dir, tmp_path):
+        quote = 'It was there forty years ago.'
+        finding = {**_contradiction(), 'scene_quote': quote}
+        with open(os.path.join(project_dir, 'scenes', f'{SCENE}.md'), 'a') as f:
+            f.write(f'\n\n"{quote}"\n')
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[finding],
+                       command='revise', before=f'"{quote}"')
+        assert result.passed and result.plan_conflicts == [] and len(result.inherited) == 1
+
+    def test_a_short_brief_phrase_is_not_a_source(self, project_dir):
+        import csv
+        path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+        with open(path, newline='') as f:
+            rows = list(csv.DictReader(f, delimiter='|'))
+        for r in rows:
+            if r['id'] == SCENE:
+                r['key_dialogue'] = '"No."; "It was there forty years ago."'
+        with open(path, 'w', newline='') as f:
+            w = csv.DictWriter(f, fieldnames=list(rows[0]), delimiter='|', lineterminator='\n')
+            w.writeheader()
+            w.writerows(rows)
+        assert gate._brief_phrases(project_dir, SCENE) == ['It was there forty years ago.']
+
+
+class TestQuotedIn:
+    @pytest.mark.parametrize('quote, text, expected', [
+        ('Ten days.', 'He said: "ten  days" and left.', True),
+        ('in', 'often', False),                       # whole words only
+        ('Day 12... the junction', 'On Day 12 there, the junction failed', True),
+        ('Day 12... the gasket', 'On Day 12 there, the junction failed', False),
+        ('', 'anything', False),
+    ])
+    def test_matching(self, quote, text, expected):
+        assert gate._quoted_in(quote, text) is expected
+
+
+class TestGateAndFixRoutes:
+    def _result(self, *, inherited=(), conflict=False, other=False):
+        from storyforge.checker import CheckResult, Finding
+        f = Finding('contradiction', 'TIM', 'q', 'act1-sc01', 'e', '', 'why')
+        g = Finding('contradiction', 'TRT', 'r', 'act1-sc01', 'e', '', 'why')
+        findings = ([f] if conflict else []) + ([g] if other else []) + list(inherited)
+        r = gate.GateResult(SCENE, check=CheckResult(SCENE, findings=findings))
+        r.inherited = list(inherited)
+        r.plan_conflicts = [f] if conflict else []
+        return r
+
+    def test_only_plan_conflicts_are_neither_fixed_nor_regated(self, monkeypatch, tmp_path):
+        calls = []
+        first = self._result(conflict=True)
+        monkeypatch.setattr(gate, 'gate_scene', lambda *a, **k: calls.append(k['before']) or first)
+        monkeypatch.setattr(gate, 'fix_scene', lambda *a, **k: pytest.fail('fixed'))
+        out = gate.gate_and_fix('p', SCENE, command='revise', prose='x',
+                                log_dir=str(tmp_path), before='old')
+        assert out.result is first and not out.fixed and calls == ['old']
+
+    def test_before_reaches_the_regate(self, monkeypatch, tmp_path):
+        calls = []
+        runs = iter([self._result(other=True), self._result()])
+        monkeypatch.setattr(gate, 'gate_scene',
+                            lambda *a, **k: calls.append(k['before']) or next(runs))
+        monkeypatch.setattr(gate, 'fix_scene', lambda *a, **k: 'y')
+        out = gate.gate_and_fix('p', SCENE, command='revise', prose='x',
+                                log_dir=str(tmp_path), before='old')
+        assert out.fixed and calls == ['old', 'old']
+
+
+def test_an_unquoted_action_is_not_the_briefs_words(project_dir):
+    """act1-sc02's key_actions ("Discovers missing village") paraphrase; a
+    scene saying so isn't in conflict with the plan."""
+    assert all('village' not in p for p in gate._brief_phrases(project_dir, SCENE))
