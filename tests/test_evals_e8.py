@@ -204,7 +204,8 @@ def test_a_redraft_is_gated_and_the_gates_prose_judged(monkeypatch, tmp_path):
     monkeypatch.setattr(gate, 'gate_and_fix', gate_and_fix)
     assert e8.redraft(project, 's') == 'Fixed prose.'
     assert [(s, c, p.strip()) for s, c, p in seen] == [('s', 'redraft', 'Drafted prose.')]
-    assert befores == ['old prose']      # the scene before the redraft, as revise passes it
+    # the book before the redraft, as revise takes it (#480's review)
+    assert [b.scenes['s'] for b in befores] == ['old prose']
     assert gate.pending(project) == {}   # it passed: nothing listed
 
 
@@ -233,6 +234,7 @@ class TestGateAsRevise:
                                                 'extraction': 0, 'inherited': 0}
 
     def test_gate_counts_sort_what_the_gate_found(self):
+        from storyforge import gate
         from storyforge.checker import Finding
         r = _gate_result(False)
         conflict = Finding('contradiction', 'TRT', 'q', 'y', 'z', '', 'why')
@@ -240,8 +242,10 @@ class TestGateAsRevise:
         r.check.findings += [conflict, old]
         r.plan_conflicts, r.inherited = [conflict], [old]
         r.problems = {'quote': ['s: x'], 'rejected': ['s: restates y']}
-        assert e8.gate_counts(r) == {'new': 2, 'plan_conflicts': 1, 'extraction': 1,
-                                     'inherited': 1}
+        counts = e8.gate_counts(r)
+        assert counts == {'new': 2, 'plan_conflicts': 1, 'extraction': 1, 'inherited': 1}
+        assert counts['new'] == len(gate.problems_to_fix(r))   # what the fix is sent
+        assert tuple(counts) == e8.GATE_COUNT_KEYS
 
     def test_no_counts_when_the_gate_could_not_finish(self, monkeypatch, tmp_path):
         from storyforge import gate
@@ -294,7 +298,8 @@ class TestGateAsRevise:
 
     def test_a_revision_pass_is_gated_at_full(self, monkeypatch, tmp_path):
         out, seen = self._revision_pass(monkeypatch, tmp_path, 'full')
-        assert out == 'Fixed.' and seen == ['revise', 'old prose']
+        assert out == 'Fixed.' and seen[0] == 'revise'
+        assert seen[1].scenes['s'] == 'old prose'   # the book before the pass wrote
 
     def test_a_revision_pass_is_not_gated_below_full(self, monkeypatch, tmp_path):
         out, seen = self._revision_pass(monkeypatch, tmp_path, 'coach')
@@ -788,6 +793,37 @@ def test_clean_replays_the_gate_failed_are_counted_with_what_it_found(monkeypatc
     assert (out.metrics['gate_new'], out.metrics['gate_plan_conflicts'],
             out.metrics['gate_inherited']) == (2, 1, 4)
     assert any(n.startswith('p-1 (s): not_present (the gate did not pass it: listed pending) '
-                            '[gate: 2 new, 1 plan conflict, 1 already in the scene]')
+                            '[gate: 2 new, 1 plan conflict, 1 already in the book]')
                for n in out.notes)
-    assert any(n == 'p-2 (s): not_present [gate: 3 already in the scene]' for n in out.notes)
+    assert any(n == 'p-2 (s): not_present [gate: 3 already in the book]' for n in out.notes)
+    assert out.metrics['gate_counts_missing'] == 0
+
+
+def test_a_prose_replay_with_no_gate_counts_says_so(monkeypatch, tmp_path):
+    """#480's review (SF-11): "the gate found nothing" and "not collected"
+    must read differently."""
+    import importlib
+    suite = importlib.import_module('suites.e8_revision_safety')
+    monkeypatch.setattr(suite, 'select', lambda c, h: e8.Selection(cases=[_tool_case(id='p-1')]))
+    monkeypatch.setattr(suite, 'prepare', lambda c, w: (str(tmp_path), 's'))
+    monkeypatch.setattr(suite, 'replay', lambda c, p, s: 'prose')
+    monkeypatch.setattr(suite, 'read_gate_counts', lambda p: None)
+    monkeypatch.setattr(suite, 'judge', lambda c, t: {'verdict': 'not_present', 'evidence': ''})
+    out = suite.run(type('Ctx', (), {'work_dir': str(tmp_path)})())
+    assert out.metrics['gate_counts_missing'] == 1
+    assert 'p-1 (s): not_present [gate counts not collected]' in out.notes
+
+
+def test_an_earlier_runs_counts_are_never_read(monkeypatch, tmp_path):
+    """#480's review: a gate that can't finish leaves no counts, not stale ones."""
+    from storyforge import gate
+    project = _scene_dir(tmp_path)
+    os.makedirs(os.path.join(project, 'working'))
+    with open(os.path.join(project, e8.GATE_COUNTS), 'w') as f:
+        f.write('{"new": 9}')
+
+    def fail(*a, **k):
+        raise gate.GateError('extraction failed')
+    monkeypatch.setattr(gate, 'gate_and_fix', fail)
+    e8.gate_as_revise(project, 's', 'redraft', 'Prose.')
+    assert e8.read_gate_counts(project) is None

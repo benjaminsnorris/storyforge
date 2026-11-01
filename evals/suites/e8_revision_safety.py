@@ -14,21 +14,23 @@ finding); one the gate couldn't finish counts as unflagged, and
 `gate_unfinished` must be zero. `reintroduced` is still reported.
 
 `clean_gate_failed` counts the replays the judge found clean (the case's
-error not reintroduced) that the gate didn't pass. They are not false
-alarms by default: the judge looks only for the case's error, and most of
-the first 14 (#478's recording) were other real errors the replay made
-(2026-11-01). `gate_new` / `gate_plan_conflicts` / `gate_inherited` sum
-what the gate's last run found over the gated replays (`e8.gate_counts`;
-the naturalness-upstream family gates through revise itself and isn't
-counted): `gate_inherited` is what was already in the scene before the
-pass, reported but not blocking.
+error not reintroduced) that the gate checked and failed (one it couldn't
+finish isn't counted). They are not false alarms by default: the judge
+looks only for the case's error, and most of the first 14 (#478's
+recording) were other real errors the replay made (2026-11-01).
+`gate_new` / `gate_plan_conflicts` / `gate_extraction` / `gate_inherited`
+sum what the gate's last run found over the gated replays
+(`e8.gate_counts`): `gate_inherited` is what was already in the book
+before the pass, reported but not blocking. A prose replay with no counts
+(the naturalness-upstream family gates through revise itself; a gate that
+couldn't finish) is noted and counted in `gate_counts_missing`.
 """
 
 import re
 
 from e1 import load_cases, load_holdout
-from e8 import (DATA_FAMILIES, PassHalted, family, judge, prepare, read_gate_counts, replay,
-                select)
+from e8 import (DATA_FAMILIES, GATE_COUNT_KEYS, PassHalted, family, judge, prepare,
+                read_gate_counts, replay, select)
 from harness import Gate, Suite, SuiteOutput
 
 MIN_REPLAYED = 15  # below this the rate is too noisy to gate on
@@ -43,8 +45,8 @@ def run(ctx):
     by_code: dict[str, dict[str, float]] = {}
     by_family: dict[str, list[int]] = {}
     reintroduced = replayed = words = prose_hits = halted = unflagged = unfinished = 0
-    clean_failed = 0
-    found = {'new': 0, 'plan_conflicts': 0, 'extraction': 0, 'inherited': 0}
+    clean_failed = uncounted = 0
+    found = dict.fromkeys(GATE_COUNT_KEYS, 0)
     for case in sel.cases:
         try:
             project, scene_id = prepare(case, ctx.work_dir)
@@ -78,6 +80,10 @@ def run(ctx):
         counts = None if data else read_gate_counts(project)
         for k in found:
             found[k] += (counts or {}).get(k, 0)
+        # a prose replay the gate ran on but that left no counts (a family
+        # gated through revise itself, a gate that couldn't finish)
+        missing = not data and counts is None
+        uncounted += missing
         if not data:  # errors per 10k words counts prose only, on both sides
             words += len(output.split())
             prose_hits += hit
@@ -92,6 +98,8 @@ def run(ctx):
                      + (' (the gate did not pass it: listed pending)' if flagged else '')
                      + (f' [gate: {_counts_note(counts)}]' if counts and any(counts.values())
                         else '')
+                     + (' [gate counts not collected]'
+                        if missing and listing != 'unfinished' else '')
                      + (' (the gate could not finish: counted unflagged)'
                         if listing == 'unfinished' else '')
                      + (f' — "{verdict.get("evidence", "")[:120]}"' if hit else ''))
@@ -102,7 +110,7 @@ def run(ctx):
     return SuiteOutput(
         metrics={'replayed': replayed, 'reintroduced': reintroduced,
                  'reintroduced_unflagged': unflagged, 'gate_unfinished': unfinished,
-                 'clean_gate_failed': clean_failed,
+                 'clean_gate_failed': clean_failed, 'gate_counts_missing': uncounted,
                  **{f'gate_{k}': v for k, v in found.items()},
                  'reintroduction_rate': round(reintroduced / replayed, 3) if replayed else 0.0,
                  'errors_per_10k_words': round(prose_hits / words * 10000, 3) if words else 0.0,
@@ -121,13 +129,13 @@ def run(ctx):
 
 def _counts_note(counts: dict[str, int]) -> str:
     names = {'new': 'new', 'plan_conflicts': 'plan conflict', 'extraction': 'extraction',
-             'inherited': 'already in the scene'}
-    return ', '.join(f'{v} {names[k]}' for k, v in counts.items() if v)
+             'inherited': 'already in the book'}
+    return ', '.join(f'{v} {names.get(k, k)}' for k, v in counts.items() if v)
 
 
 #: The reasons write/revise (and `e8.gate_as_revise`) list a scene with when
 #: the gate ran and didn't pass it
-_FAILED_REASON = re.compile(r'(the gate did not pass it|\d+ problem\(s\) after one fix)')
+_FAILED_REASON = re.compile(r'(the gate did not pass it|\d+ problem\(s\) (after one fix|not fixed))')
 _UNFINISHED_REASON = re.compile(r'the gate (could not finish|failed unexpectedly)')
 
 
