@@ -449,6 +449,23 @@ class TestReviewFixes:
         report = validate_schema(ref, book)
         assert [e for e in report['errors'] if e['column'] in ('motifs', 'motif_details')] == []
 
+    def test_a_short_scene_is_described_too(self, book, mock_api, mock_git, mock_costs):
+        """F-145: scene_table dropped scenes under the stub floor, so 5b never
+        moved a short scene's descriptions out of motifs and validate failed
+        on it (Quintus: three scenes of 30-47 words; Eighty Days: one of 32)."""
+        from storyforge.elaborate import get_scene, update_scene
+        from storyforge.schema import validate_schema
+        ref = os.path.join(book, 'reference')
+        ids = _scene_ids(book)
+        update_scene(ids[2], ref, {'motifs': 'a lone kite over the moor', 'word_count': '30'})
+        assert ids[2] in _scene_ids(book)
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        assert get_scene(ids[2], ref)['motifs'] == ''
+        assert get_scene(ids[2], ref)['motif_details'] == 'a lone kite over the moor'
+        report = validate_schema(ref, book)
+        assert [e for e in report['errors'] if e['column'] in ('motifs', 'motif_details')] == []
+
     def test_a_forced_rerun_regroups_from_the_details(self, book, mock_api, mock_git,
                                                        mock_costs):
         """After 5b, motifs holds ids; a rerun must group the descriptions,
@@ -1241,7 +1258,6 @@ class TestCharacters:
         (lambda r, ids: r['characters'][0].update(id='nobody'),
          "characters names 'nobody', which is not one of the ids given"),
         (lambda r, ids: r['characters'][0].update(tier='secondary'), 'so is primary'),
-        (lambda r, ids: r['characters'][0].update(voice=''), '.voice is empty'),
         (lambda r, ids: r['characters'][-1].update(role=''), '.role is empty'),
         (lambda r, ids: r['relationships'].append({'a': ids[0], 'b': ids[0], 'nature': 'x'}),
          'must name two different character ids'),
@@ -1256,6 +1272,32 @@ class TestCharacters:
             parse_characters(json.dumps(reply), chars)
         assert any(expected in p for p in e.value.problems)
 
+
+    def test_a_primary_voice_is_required_when_the_evidence_has_lines(self, book):
+        import dataclasses
+        from storyforge.extract_describe import ReplyProblems, parse_characters
+        _, chars, _, _ = _evidence(book)
+        chars[0] = dataclasses.replace(chars[0], lines=['The map is wrong, and I know it,'])
+        reply = json.loads(_characters_reply(book))
+        reply['characters'][0]['voice'] = ''
+        with pytest.raises(ReplyProblems) as e:
+            parse_characters(json.dumps(reply), chars)
+        assert f'{chars[0].id}.voice is empty' in e.value.problems
+
+    def test_a_primary_voice_may_be_empty_with_no_lines(self, book):
+        """F-144: the prompt says to leave a field empty when the text doesn't
+        show it; with no lines sampled (Way's verse speeches match no speech
+        tag) an empty voice is the honest answer, and phase 5 died on it."""
+        from storyforge.extract_describe import (UNSHOWN, parse_characters,
+                                                 render_character_bible)
+        _, chars, _, _ = _evidence(book)
+        assert chars[0].pov_scenes and not chars[0].lines
+        reply = json.loads(_characters_reply(book))
+        reply['characters'][0]['voice'] = ''
+        data = parse_characters(json.dumps(reply), chars)
+        doc = render_character_bible(data, chars, 'Book', '')
+        assert f'**Voice Fingerprint:**\n- {UNSHOWN}' in doc
+        assert f'**{chars[0].name}:** {UNSHOWN}' in doc
 
 class TestWorld:
     """Step 5e."""

@@ -277,7 +277,10 @@ def write_described(project_dir: str, rel_path: str, content: str, *,
 def scene_table(ref_dir: str) -> list[dict[str, str]]:
     """Every scene phases 1-3 recorded, in reading order, with the columns
     phase 5 reads: scenes.csv joined with scene-intent.csv and the briefs'
-    `motifs` and `motif_details`. Cut and merged scenes are left out (`build_scene_list`)."""
+    `motifs` and `motif_details`. Cut and merged scenes are left out
+    (`build_scene_list`); a short scene is not: it is part of the book, and
+    one left out keeps its motif descriptions in `motifs`, which 5b's
+    taxonomy then fails in validate (F-145)."""
     from .elaborate import _read_csv_as_map
     from .scene_filter import build_scene_list
 
@@ -285,7 +288,7 @@ def scene_table(ref_dir: str) -> list[dict[str, str]]:
     intent = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
     briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
     rows = []
-    for sid in build_scene_list(os.path.join(ref_dir, 'scenes.csv')):
+    for sid in build_scene_list(os.path.join(ref_dir, 'scenes.csv'), min_words=0):
         row = dict(scenes.get(sid, {}))
         for k, v in intent.get(sid, {}).items():
             row.setdefault(k, v)
@@ -1705,11 +1708,15 @@ def parse_characters(response: str, chars: list[CharacterEvidence]) -> dict:
     voice, arc start or arc end for a primary one; a `left_open` item that
     reads as an instruction; a relationship naming an unknown id, one
     character twice, or with no nature; and a POV entry missing, unknown,
-    repeated or with an empty `gives`."""
+    repeated or with an empty `gives`. A primary character's voice may be
+    empty when the evidence has no lines for them: the prompt says to leave
+    a field empty when the text doesn't show it, and with no lines it
+    doesn't (Way's verse speeches match no speech tag, F-144)."""
     from .extract import _json_answer
     data = _clean_reply(_json_answer(response, CHARACTERS_SCHEMA))
     ids = [c.id for c in chars]
     pov = {c.id for c in chars if c.pov_scenes}
+    has_lines = {c.id for c in chars if c.lines}
     problems: list[str] = []
     described = _ids_once(data['characters'], 'id', ids, 'characters', problems)
     left = [i for i in ids if i not in {c['id'] for c in described}]
@@ -1719,7 +1726,8 @@ def parse_characters(response: str, chars: list[CharacterEvidence]) -> dict:
     for c in described:
         if c['id'] in pov and c['tier'] != 'primary':
             problems.append(f'{c["id"]} has a point of view, so is primary')
-        need = ('role',) + (('voice', 'arc_start', 'arc_end') if c['tier'] == 'primary' else ())
+        voice = ('voice',) if c['id'] in has_lines else ()
+        need = ('role',) + ((*voice, 'arc_start', 'arc_end') if c['tier'] == 'primary' else ())
         problems += [f'{c["id"]}.{k} is empty' for k in need if not c[k]]
         problems += _imperatives(c['left_open'], f'{c["id"]}.left_open')
     for r in data['relationships']:
@@ -1768,7 +1776,7 @@ def render_character_bible(reply: dict, chars: list[CharacterEvidence], title: s
                         f'- **Want:** {_shown(c["want"])}', f'- **Need:** {_shown(c["need"])}',
                         f'- **Wound:** {_shown(c["wound"])}', f'- **Lie:** {_shown(c["lie"])}',
                         f'- **Flaw-as-Strength:** {_shown(c["flaw_as_strength"])}', '',
-                        '**Voice Fingerprint:**', f'- {c["voice"]}', '']
+                        '**Voice Fingerprint:**', f'- {_shown(c["voice"])}', '']
                 if e.lines:
                     out += ['**Lines tagged with their name:**',
                             *[f'- "{line}"' for line in e.lines[:3]], '']
@@ -1787,7 +1795,7 @@ def render_character_bible(reply: dict, chars: list[CharacterEvidence], title: s
     out += [f'- **{name[r["a"]]}** and **{name[r["b"]]}**: {r["nature"]}'
             for r in reply['relationships']] or ['- (none described)']
     out += ['', '---', '', '## Character Voice Notes', '']
-    out += [f'**{name[c["id"]]}:** {c["voice"]}' + '\n'
+    out += [f'**{name[c["id"]]}:** {_shown(c["voice"])}' + '\n'
             for c in reply['characters'] if c['tier'] == 'primary']
     out += ['---', '', '## POV Decisions', '']
     out += [f'- **{name[p["id"]]}:** {ev[p["id"]].pov_scenes} scene(s). {p["gives"]}'
