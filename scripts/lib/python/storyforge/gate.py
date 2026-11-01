@@ -105,6 +105,10 @@ class GateResult:
     #: on commit: later scenes depending on `changed` that can't be re-checked
     #: (`scene (why)`: no prose yet, cut or merged), for the caller to report
     not_rechecked: list[str] = field(default_factory=list)
+    #: on commit: what narrowed the dependents' name match
+    #: (`ledger.subject_names`' notes: a missing registry, no id column),
+    #: for the caller to report
+    name_notes: list[str] = field(default_factory=list)
     #: on commit: registry rows (the author's) whose `supersedes`/`depends_on`
     #: names a commitment this version removed (`row → id`): a re-check
     #: replaces only commitments, so the author must fix the link
@@ -275,7 +279,10 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     try:
         rows = ledger.load(project_dir)
         order = ledger.scene_order(project_dir)
-    except (ledger.LedgerError, ValueError) as e:
+        # read before the model calls: a commit needs both
+        names, name_notes = ledger.subject_names(project_dir)
+        revised_rejection = rejected_ids(pending(project_dir).get(scene_id))
+    except (ledger.LedgerError, ValueError, OSError, UnicodeDecodeError) as e:
         raise GateError(f'{scene_id}: {e}') from e
     loaded = copy.deepcopy(rows)
     if scene_id not in order:
@@ -333,10 +340,6 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     except ledger.LedgerError as e:
         raise GateError(f'{scene_id}: {e}') from e
     _carry_ids(result.proposed, old_rows, rows, scene_id)
-    try:   # a scene revised after the author rejected its facts (design §4)
-        revised_rejection = rejected_ids(pending(project_dir).get(scene_id))
-    except GateError:
-        revised_rejection = []   # clear_pending below reports the bad file
     new = rows + result.proposed
     for rid, quote in result.check.kept:
         if ledger.fill_quote(new, rid, quote):
@@ -347,19 +350,22 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     result.changed += sorted(ended_before ^ ledger.ended_by(new, scene_id))
     result.changed += [i for i in revised_rejection if i not in result.changed]
     if result.changed:
-        found = ledger.dependents(old_rows + new, result.changed, order,
-                                  names=ledger.subject_names(project_dir))
+        found = ledger.dependents(old_rows + new, result.changed, order, names=names)
         result.unrelated = found.unrelated
+        result.name_notes = name_notes
         # a rejected fact's re-check also reaches the scenes whose brief
-        # names it, as `audit --mark rejected` said it would (design §4)
+        # names it, as `audit --mark rejected` tells the author it will
         briefs = audit.leaning_scenes(project_dir, revised_rejection) if revised_rejection else {}
+        named = {b for v in briefs.values() for b in v}
         # only what follows the scene can depend on how the scene changed
-        later = sorted({s for s in found.scenes + [b for v in briefs.values() for b in v]
+        later = sorted({s for s in set(found.scenes) | named
                         if s in order and order[s] > order[scene_id]}, key=order.get)
         gone = _gone_scenes(project_dir)
         result.recheck = [s for s in later if s not in gone and _has_prose(project_dir, s)]
         result.not_rechecked = [f'{s} ({"cut or merged" if s in gone else "no prose yet"})'
                                 for s in later if s not in result.recheck]
+        result.not_rechecked += [f'{s} (its brief names a rejected fact, but it is not in '
+                                 f'scenes.csv)' for s in sorted(named - set(order))]
         removed = set(result.changed) - {r['id'] for r in result.proposed}
         result.dangling = [f'{r["id"]} → {ref}' for r in rows if not ledger.is_commitment(r)
                            for col in ('supersedes', 'depends_on')

@@ -434,6 +434,9 @@ def report_changes(result) -> None:
     for fid, why in result.unrelated.items():
         log(f'  WARNING: {result.scene_id} changed {fid}, whose dependents can\'t all be '
             f'found ({why}): check the later scenes that mention it with `storyforge check`.')
+    for note in getattr(result, 'name_notes', []):
+        log(f'  WARNING: the scenes depending on what {result.scene_id} changed were matched '
+            f'on fewer names: {note}')
     if result.not_rechecked:
         log(f'  NOTE: later scenes that depend on what {result.scene_id} changed but can\'t be '
             f're-checked now: {", ".join(result.not_rechecked)}')

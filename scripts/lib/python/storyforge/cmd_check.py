@@ -227,6 +227,8 @@ def _recheck_after(project_dir: str, result, log_dir: str, skip: set[str], spent
              for fid, why in result.unrelated.items()]
     lines += [f'- depends on {result.scene_id} but can\'t be re-checked now: {x}'
               for x in result.not_rechecked]
+    lines += [f'- dependents of {result.scene_id} matched on fewer names: {x}'
+              for x in result.name_notes]
     lines += [f'- registry link to a commitment {result.scene_id} no longer makes: {x}'
               for x in result.dangling]
     if run is None:
