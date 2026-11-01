@@ -204,8 +204,9 @@ Revision passes that wrote errors in shared-dark (E1 `tool-introduced` cases; E8
 - Success: E5 on rewritten scenes ≤ Phase 2 level; a rejected fact produces the correct re-check set on E1 cases; **E8 errors-introduced-per-pass is zero on the labeled set** (this is the gate that matters most, given the survey). *Redefined 2026-11-01 (Ben): at most 2 reintroductions the gate passes per run, since E8 moves between runs (E6: 6, 10 and 11 reintroduced) and what remained was checker recall; see the status doc.*
 
 ### Phase 5 — Health and Storygild
-- Classics regression (E7) in CI. Move illustration, covers, graphic novels, press kits, and script packages into the Storygild plugin reading the export bundle. Cut `CLAUDE.md` to what an agent needs today; move bug history to `docs/history.md`.
-- Success: core line count and `CLAUDE.md` length down materially; E7 false-positive rate stable across releases; Storygild runs against a pinned `schema_version`.
+- Classics regression (E7) in CI. Pin the export bundle's `schema_version` and make Bookshelf read the bundle, so the production tools have one documented boundary with the core. Cut `CLAUDE.md` to what an agent needs today; move bug history to `docs/history.md`.
+- Success: E7 false-positive rate stable across releases; Bookshelf reads only the bundle, against a pinned `schema_version`; `CLAUDE.md` length down materially.
+- **The Storygild move is deferred (Ben, 2026-11-01).** Moving illustration, covers, graphic novels, press kits and script packages into a separate plugin would mean refactoring about 40 core files (graphic-novel or panel logic appears in 39, illustration in 32) for features that work and that no eval covers. That code is quiet: 20 of 831 commits since August touched it. The move doesn't help the rethink's goal of consistent books, and no one installs Storygild separately. Do it when the production code starts slowing core changes, or when someone wants Storygild without Storyforge; the bundle boundary above makes it mechanical then. The gate's false alarms come before Phase 5.
 
 ## 6. Decisions
 
