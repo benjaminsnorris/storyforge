@@ -135,7 +135,7 @@ def _counts_note(counts: dict[str, int]) -> str:
 
 #: The reasons write/revise (and `e8.gate_as_revise`) list a scene with when
 #: the gate ran and didn't pass it
-_FAILED_REASON = re.compile(r'(the gate did not pass it|\d+ problem\(s\) (after one fix|not fixed))')
+_FAILED_REASON = re.compile(r'(the gate did not pass it|\d+ problem\(s\) (after (one fix|\d+ fixes)|not fixed))')
 _UNFINISHED_REASON = re.compile(r'the gate (could not finish|failed unexpectedly)')
 
 

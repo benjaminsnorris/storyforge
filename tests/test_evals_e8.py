@@ -728,6 +728,7 @@ def test_an_ungated_redraft_is_the_draft_alone(monkeypatch, tmp_path):
 @pytest.mark.parametrize('command, reason, listing', [
     ('revise', 'the gate did not pass it', 'failed'),
     ('redraft', '2 problem(s) after one fix: TIM contradiction ...', 'failed'),
+    ('redraft', '2 problem(s) after 2 fixes: TIM contradiction ...', 'failed'),
     ('revise', 'the gate could not finish: the check was cut off', 'unfinished'),
     ('revise', 'the gate failed unexpectedly (OSError: disk)', 'unfinished'),
     ('recheck', 'changed facts it depends on', 'other'),

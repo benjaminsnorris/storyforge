@@ -1002,6 +1002,172 @@ class TestGateAndFixRoutes:
         assert out.fixed and calls == ['old', 'old']
 
 
+class TestSecondFixRound:
+    """2026-11-01: of E8's 28 gated replays, 10 still failed after the one
+    fix, most because it half-fixed the finding (He → She with "him" left;
+    "eight days" → "five", still off the calendar)."""
+
+    def _result(self, *tags, extraction=False):
+        from storyforge.checker import CheckResult, Finding
+        findings = [Finding('contradiction', 'TIM', t, 'act1-sc01', 'e', '', 'why')
+                    for t in tags]
+        r = gate.GateResult(SCENE, check=CheckResult(SCENE, findings=findings))
+        if extraction:
+            r.problems = {gate.UNRESOLVED[0]: ['x']}
+        return r
+
+    def _run(self, monkeypatch, tmp_path, runs, fixes):
+        """`runs`: gate results (or a GateError to raise) in turn; `fixes`:
+        (new prose, edits) or a GateError, in turn."""
+        runs, fixes = iter(runs), iter(fixes)
+        dirs, seen = [], []
+        self.fix_dirs = []
+
+        def gate_run(*a, **k):
+            dirs.append(k['log_dir'])
+            r = next(runs)
+            if isinstance(r, Exception):
+                raise r
+            return r
+        monkeypatch.setattr(gate, 'gate_scene', gate_run)
+
+        def fix(scene, prose, result, **k):
+            seen.append((prose, list(k['earlier'])))
+            self.fix_dirs.append(k['log_dir'])
+            if not gate.problems_to_fix(result):   # as fix_scene: no call
+                return prose
+            nxt = next(fixes)
+            if isinstance(nxt, Exception):
+                raise nxt
+            new, edits = nxt
+            k['edits_out'].extend(edits)
+            return new
+        monkeypatch.setattr(gate, 'fix_scene', fix)
+        out = gate.gate_and_fix('p', SCENE, command='revise', prose='v0',
+                                log_dir=str(tmp_path))
+        return out, dirs, seen
+
+    def test_a_second_round_sees_the_first_and_can_pass(self, monkeypatch, tmp_path):
+        e1 = [{'find': 'eight days', 'replace': 'five days', 'problem': 1}]
+        e2 = [{'find': 'five days', 'replace': 'three days', 'problem': 1}]
+        out, dirs, seen = self._run(monkeypatch, tmp_path,
+                                    [self._result('eight'), self._result('five'), self._result()],
+                                    [('v1', e1), ('v2', e2)])
+        assert out.result.passed and out.prose == 'v2' and out.fixed
+        assert [r.edits for r in out.rounds] == [e1, e2]
+        assert seen[0] == ('v0', []) and seen[1][0] == 'v1'
+        assert seen[1][1][0].edits == e1 and 'eight' in seen[1][1][0].problems[0]
+        assert dirs == [str(tmp_path), str(tmp_path / 'recheck'), str(tmp_path / 'recheck-2')]
+        assert self.fix_dirs == [str(tmp_path), str(tmp_path / 'recheck')]   # beside its run
+
+    def test_it_stops_after_fix_rounds(self, monkeypatch, tmp_path):
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), self._result('b'), self._result('c')],
+                                 [('v1', []), ('v2', [])])
+        assert gate.FIX_ROUNDS == 2 and len(dirs) == 3 and len(out.rounds) == 2
+        assert not out.result.passed and out.prose == 'v2'
+
+    def test_a_round_that_passes_stops(self, monkeypatch, tmp_path):
+        out, dirs, _ = self._run(monkeypatch, tmp_path, [self._result('a'), self._result()],
+                                 [('v1', [])])
+        assert out.result.passed and len(dirs) == 2 and len(out.rounds) == 1
+
+    def test_a_second_fix_with_no_edits_keeps_the_first_fixs_verdict(self, monkeypatch, tmp_path):
+        second = self._result('b')
+        out, dirs, _ = self._run(monkeypatch, tmp_path, [self._result('a'), second],
+                                 [('v1', []), ('v1', [])])
+        assert out.result is second and out.prose == 'v1' and len(dirs) == 2
+
+    def test_plan_conflicts_left_after_a_fix_stop_it(self, monkeypatch, tmp_path):
+        second = self._result('b')
+        second.plan_conflicts = list(second.findings)
+        out, dirs, seen = self._run(monkeypatch, tmp_path, [self._result('a'), second],
+                                    [('v1', [])])
+        assert out.result is second and len(seen) == 1 and len(dirs) == 2
+
+    # #482's review: a later round never leaves things worse than the one before
+
+    def test_a_failing_second_fix_keeps_round_ones_prose(self, monkeypatch, tmp_path):
+        """SF-1: a round-2 GateError threw away a better round-1 scene."""
+        r1 = self._result('b')
+        out, dirs, _ = self._run(monkeypatch, tmp_path, [self._result('a'), r1],
+                                 [('v1', [{'find': 'a', 'replace': 'b'}]),
+                                  gate.GateError('occurs 0 times')])
+        assert out.prose == 'v1' and out.result is r1 and len(out.rounds) == 1
+        assert out.notes == ['fix round 2 failed (occurs 0 times); kept the prose and '
+                             'verdict before it']
+
+    def test_a_failing_second_check_keeps_round_ones_prose(self, monkeypatch, tmp_path):
+        r1 = self._result('b')
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), r1, gate.GateError('cut off')],
+                                 [('v1', []), ('v2', [])])
+        assert out.prose == 'v1' and out.result is r1 and len(dirs) == 3
+        assert out.notes[0].startswith('the check after fix round 2 failed (cut off)')
+
+    def test_a_first_round_error_still_carries_the_first_run(self, monkeypatch, tmp_path):
+        first = self._result('a')
+        with pytest.raises(gate.GateError) as e:
+            self._run(monkeypatch, tmp_path, [first, gate.GateError('cut off')], [('v1', [])])
+        assert e.value.first is first
+
+    def test_a_second_fix_that_puts_back_removed_words_is_not_gated(self, monkeypatch,
+                                                                    tmp_path):
+        """SF-2: an undo checked by a lucky pass would commit the first error."""
+        r1 = self._result('b')
+        out, dirs, _ = self._run(
+            monkeypatch, tmp_path, [self._result('a'), r1],
+            [('It took five days.', [{'find': 'eight days', 'replace': 'five days'}]),
+             ('It took eight days.', [{'find': 'five days', 'replace': 'eight days'}])])
+        assert len(dirs) == 2   # the undo was never gated, so never committed
+        assert out.prose == 'It took five days.' and out.result is r1
+        assert 'put back words an earlier fix removed ("eight days")' in out.notes[0]
+
+    def test_a_second_fix_that_leaves_more_problems_is_discarded(self, monkeypatch, tmp_path):
+        """SF-3: round 2's prose was kept even when it was worse."""
+        r1 = self._result('b')
+        out, _, _ = self._run(monkeypatch, tmp_path,
+                              [self._result('a'), r1, self._result('c', 'd', 'e')],
+                              [('v1', []), ('v2', [])])
+        assert out.prose == 'v1' and out.result is r1 and len(out.rounds) == 1
+        assert out.notes[0].startswith('fix round 2 left 3 problem(s), more than the 1')
+
+    def test_extraction_only_then_a_fix(self, monkeypatch, tmp_path):
+        """T-1: the re-gate counts as round 1; round 2's fix reads the re-gate."""
+        out, dirs, seen = self._run(
+            monkeypatch, tmp_path,
+            [self._result(extraction=True), self._result('a'), self._result('b')],
+            [('v1', [{'find': 'x', 'replace': 'y'}])])
+        assert dirs == [str(tmp_path), str(tmp_path / 'recheck'), str(tmp_path / 'recheck-2')]
+        assert self.fix_dirs == [str(tmp_path), str(tmp_path / 'recheck')]
+        assert seen[1] == ('v0', [])
+        assert len(out.rounds) == 1 and out.fixed and not out.result.passed
+
+    def test_extraction_only_twice_stops(self, monkeypatch, tmp_path):
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result(extraction=True), self._result(extraction=True)],
+                                 [])
+        assert len(dirs) == 2 and out.rounds == [] and not out.fixed
+
+    def test_the_round_cap_is_fix_rounds(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(gate, 'FIX_ROUNDS', 3)
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), self._result('b'), self._result('c'),
+                                  self._result('d')],
+                                 [('v1', []), ('v2', []), ('v3', [])])
+        assert len(dirs) == 4 and len(out.rounds) == 3
+
+    def test_the_prompt_names_the_earlier_edits(self):
+        earlier = [gate.FixRound(['TIM contradiction: eight days'],
+                                 [{'find': 'eight days', 'replace': 'five days'}])]
+        prompt = gate.build_fix_prompt('s', 'Prose.', ['TIM contradiction: five days'],
+                                       earlier=earlier)
+        assert '## Earlier fixes' in prompt
+        assert '- "eight days" became "five days"' in prompt
+        assert "don't guess again" in prompt and 'change the rest' in prompt
+        assert '## Earlier fixes' not in gate.build_fix_prompt('s', 'Prose.', ['x'])
+
+
 def test_an_unquoted_action_is_not_the_briefs_words(project_dir):
     """act1-sc02's key_actions ("Discovers missing village") paraphrase; a
     scene saying so isn't in conflict with the plan."""

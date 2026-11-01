@@ -136,8 +136,9 @@ def draft(project_dir: str, scene_ids: list[str], gated: dict | None = None,
     ``write`` would refuse to save; no recorded draft has been cut off.
 
     With ``gated`` (a dict to fill), each draft goes through ``write``'s gate
-    (``gate.gate_and_fix``: extract, check, fix once, re-check, commit to the
-    ledger when clean) before the next scene's prompt is built, and
+    (``gate.gate_and_fix``: extract, check, fix and re-check up to
+    ``gate.FIX_ROUNDS`` times, commit to the ledger when clean) before the
+    next scene's prompt is built, and
     ``gated[scene_id]`` is its ``GatedScene``. Unlike ``write``, a scene that
     still fails doesn't stop E4: the fixed prose is judged and the next scene
     drafted (``write`` would stop and wait for the author), and the count is

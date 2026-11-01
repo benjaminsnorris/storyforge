@@ -544,6 +544,52 @@ class TestPendingReason480:
         passed, why = self._gated(project_dir, monkeypatch, r)
         assert not passed and why.startswith('1 problem(s) after one fix')
 
+    def _out(self, project_dir, monkeypatch, out):
+        from storyforge import cmd_write
+        monkeypatch.setattr(gate, 'gate_and_fix', lambda *a, **k: out)
+        path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        return cmd_write._gate_drafted_scene(project_dir, 'act1-sc01', path, 'revise',
+                                             str(project_dir))
+
+    def test_two_fix_rounds_say_so(self, project_dir, monkeypatch, capsys):
+        r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
+        rounds = [gate.FixRound(['a', 'b'], [{}]), gate.FixRound(['c'], [{}, {}])]
+        passed, why = self._out(project_dir, monkeypatch,
+                                gate.GatedScene('prose', r, r, fixed=True, rounds=rounds))
+        assert not passed and why.startswith('1 problem(s) after 2 fixes')
+        out = capsys.readouterr().out
+        assert 'Fix round 1: 2 problem(s) sent, 1 edit(s); re-checked.' in out
+        assert 'Fix round 2: 1 problem(s) sent, 2 edit(s); re-checked.' in out
+
+    def test_an_extraction_regate_then_a_fix_logs_what_was_sent(self, project_dir, monkeypatch,
+                                                                capsys):
+        """#482's review: this route logged "The gate fixed 0 problem(s)"."""
+        first = gate.GateResult('act1-sc01')
+        first.problems = {gate.UNRESOLVED[0]: ['x']}
+        r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
+        self._out(project_dir, monkeypatch, gate.GatedScene(
+            'prose', r, first, fixed=True, rounds=[gate.FixRound(['p1', 'p2'], [{}])]))
+        out = capsys.readouterr().out
+        assert 'Fix round 1: 2 problem(s) sent' in out and 'fixed 0' not in out
+
+    def test_a_discarded_round_is_logged_and_named(self, project_dir, monkeypatch, capsys):
+        r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
+        passed, why = self._out(project_dir, monkeypatch, gate.GatedScene(
+            'prose', r, r, fixed=True, rounds=[gate.FixRound(['a'], [])],
+            notes=['fix round 2 failed (x); kept the prose and verdict before it']))
+        assert 'NOTE: fix round 2 failed (x)' in capsys.readouterr().out
+        assert why.startswith('1 problem(s) after one fix (a later fix was discarded')
+
+    def test_plan_conflicts_left_after_a_fix_are_the_authors(self, project_dir, monkeypatch):
+        """SF-5 (#482): a fix whose re-check left only plan conflicts said
+        "after one fix", pointing at the prose."""
+        first = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
+        r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
+        r.plan_conflicts = [BAD]
+        passed, why = self._out(project_dir, monkeypatch, gate.GatedScene(
+            'prose', r, first, fixed=True, rounds=[gate.FixRound(['a'], [])]))
+        assert why.startswith('1 problem(s) after one fix (what is left is plan conflicts')
+
     def test_plan_conflicts_alone_are_not_fixed_and_say_so(self, project_dir, monkeypatch):
         r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
         r.plan_conflicts = [BAD]

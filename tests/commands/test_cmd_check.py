@@ -307,6 +307,44 @@ class TestFix:
                               check_model='m', fix_model='m')
         assert e.value.first.findings[0].code == 'TIM'
 
+    def test_two_rounds_through_the_real_fix(self, tmp_path):
+        """T-2 (#482): the second fix's prompt carries the first's edits, and the
+        edits reach the rounds, through the real fix_scene and prompt."""
+        from storyforge.checker import CheckResult, Finding
+        bad = lambda q: gate.GateResult(SCENE, check=CheckResult(SCENE, findings=[
+            Finding('contradiction', 'TIM', q, 'act1-sc01', 'e', '', 'why')]))
+        runs = iter([bad('eight days'), bad('five days'), gate.GateResult(SCENE)])
+        replies = iter([[{'problem': 1, 'find': 'eight days', 'replace': 'five days'}],
+                        [{'problem': 1, 'find': 'five days', 'replace': 'three days'}]])
+        prompts = []
+
+        def fake(path, body, **k):
+            prompts.append(body['messages'][0]['content'] if isinstance(
+                body['messages'][0]['content'], str)
+                else body['messages'][0]['content'][0]['text'])
+            return _text({'edits': next(replies)})
+        with patch.object(gate, 'gate_scene', lambda *a, **k: next(runs)), \
+                patch.object(gate, '_brief_phrases', lambda *a: []), \
+                patch('storyforge.api._api_request', side_effect=fake):
+            out = gate.gate_and_fix('p', SCENE, command='draft', prose='It took eight days.',
+                                    log_dir=str(tmp_path), fix_model='m')
+        assert out.result.passed and out.prose == 'It took three days.'
+        assert '## Earlier fixes' not in prompts[0]
+        assert '- "eight days" became "five days"' in prompts[1]
+        assert out.rounds[0].edits == [{'problem': 1, 'find': 'eight days',
+                                        'replace': 'five days'}]
+
+    def test_a_fix_that_cannot_apply_records_no_edits(self, tmp_path):
+        from storyforge.checker import CheckResult, Finding
+        result = gate.GateResult(SCENE, check=CheckResult(SCENE, findings=[Finding(**BAD)]))
+        edits = []
+        with patch('storyforge.api._api_request', return_value=_text(
+                {'edits': [{'problem': 1, 'find': 'not there', 'replace': 'x'}]})), \
+                pytest.raises(gate.GateError, match='occurs 0 times'):
+            gate.fix_scene(SCENE, 'prose', result, log_dir=str(tmp_path), model='m',
+                           edits_out=edits)
+        assert edits == []
+
     @pytest.mark.parametrize('reply', [
         {'stop_reason': 'max_tokens', 'content': [{'type': 'text', 'text': '{}'}], 'usage': {}},
         _text('not json'),

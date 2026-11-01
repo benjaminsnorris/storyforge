@@ -363,8 +363,9 @@ def _recheck_after(project_dir: str, log_dir: str, skip: set[str], spent: float)
 def _gate_redraft(project_dir: str, scene_id: str, scene_file: str, log_dir: str,
                   before=None) -> str:
     """Gate the redraft just written to `scene_file` as `write` gates a
-    draft (`cmd_write._gate_drafted_scene`: fix once, re-check; the fixed
-    prose is written back, the scene's facts replace its earlier ones in the
+    draft (`cmd_write._gate_drafted_scene`: fix and re-check up to
+    `gate.FIX_ROUNDS` times; the fixed prose is written back, the scene's
+    facts replace its earlier ones in the
     ledger on a pass, and the later scenes depending on what it changed are
     listed for a re-check, which the caller runs). Returns '' when it
     passed, else why not; the scene is then listed in `gate.pending` with
@@ -439,8 +440,9 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
                       log_dir: str, before=None) -> list[str]:
     """Gate each scene a prose pass rewrote, in reading order, as revise's
     redrafts are (Phase 4 §5, `docs/plans/2026-10-31-phase4-safe-revision-design.md`):
-    fix once and re-check, the fixed prose written back, the scene's facts
-    replacing its earlier ones on a pass, then the re-check of the later
+    fixed and re-checked up to `gate.FIX_ROUNDS` times, the fixed prose
+    written back, the scene's facts replacing its earlier ones on a pass, then
+    the re-check of the later
     scenes depending on what it changed (the rest of this pass's scenes are
     gated by this run, so they are skipped there). `before` is the book
     before the pass (`gate.snapshot`): a contradiction already there is
