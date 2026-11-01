@@ -2,16 +2,26 @@
 
 A scene redrafted from its brief and the book's reference material should
 agree with the original on every fact a reader would notice. Each fact the
-redraft changes is something the plan and ledger failed to pin down — a
-ledger gap. E5 redrafts a fixed sample with today's redraft-from-brief pass
+plan-and-ledger redraft (``ledger_only``) changes is something the plan and
+ledger failed to pin down — a ledger gap; one the rewrite changes is a fact
+neither the ledger nor the voice reference kept. E5 redrafts a fixed sample with today's redraft-from-brief pass
 (the same call as E8's) and an Opus judge lists every fact the redraft
 contradicts, by error code. Omissions are not mismatches: a redraft may leave
 a detail out, it may not change it.
 
+**Two redrafts per scene** (Phase 4 PR 5): the headline is the rewrite as
+write and revise run it, with the original prose as a voice reference only
+(rethink plan §3.4; the plan's Phase 4 criterion: E5 on rewritten scenes at
+or below the Phase 2 level, ``PHASE2_PER_SCENE``). ``ledger_only`` redrafts
+from the plan and ledger alone, the suite's earlier measure: each mismatch
+there is a fact the plan and ledger don't pin down.
+
 The sample is the first ``SAMPLE`` drafted scenes of Act 1 of shared-dark at a
 pinned commit — the book decision 7 picked for E4, so E1, E4, E5 and E8 share a
-world. The metric is a trend (plan: "should fall as the ledger improves"), so
-the only gate is coverage.
+world. The ledger-only number is a trend (plan: "should fall as the ledger
+improves"), gated only against regressing (``LEDGER_ONLY_PER_SCENE``); the
+rewrite is gated at the Phase 2 level (``PHASE2_PER_SCENE``), Phase 4's
+criterion; and coverage.
 
 **The ledger the redraft reads.** The pinned tree predates the ledger, so its
 registries are migrated (``harness.migrate_tree``), and then extract phase 4
@@ -45,6 +55,15 @@ REPO = 'shared-dark'
 # 0eaa3867, was after it).
 COMMIT = '5e9bdf39'
 SAMPLE = 10
+# E5 at the end of Phase 2 (v1.97.0): 23 mismatches over the 10 scenes, from
+# the plan and ledger alone. Phase 4's criterion holds rewritten scenes to it;
+# the rewrite also sees the original as its voice reference, so the two are
+# not like-for-like (the plan asks for exactly this comparison).
+PHASE2_PER_SCENE = 2.3
+# The plan-and-ledger redraft when the rewrite was added (v1.120.0): a
+# non-regression gate, so the rewrite's voice reference can't hide a ledger
+# that got worse
+LEDGER_ONLY_PER_SCENE = 3.7
 FACT_CODES = ('PHY', 'TIM', 'KNO', 'REL', 'TRT', 'WLD')
 
 JUDGE_PROMPT = """Compare two versions of the same scene of a novel: the author's original, and a redraft written from the scene's plan.
@@ -144,11 +163,13 @@ def commit_prose(project_dir: str, scenes: list[str]) -> None:
                                f'see {log_dir}') from None
 
 
-def roundtrip(project_dir: str, scene_id: str) -> tuple[str, list[dict]]:
-    """Redraft one scene from its brief and judge it against the original."""
+def roundtrip(project_dir: str, scene_id: str, rewrite: bool = True) -> tuple[str, list[dict]]:
+    """Redraft one scene from its brief and judge it against the original.
+    `rewrite`: as write and revise redraft it, the original its voice
+    reference only (plan §3.4); without, from the plan and ledger alone."""
     with open(os.path.join(project_dir, 'scenes', f'{scene_id}.md'), encoding='utf-8') as f:
         original = f.read()
-    # The draft alone: E5 measures what the redraft changes, not the gate
-    # (which, after phase 4, refuses a scene later facts lean on)
-    redrafted = redraft(project_dir, scene_id, gated=False)
+    # The draft alone: E5 measures what the redraft changes, not the gate.
+    # Nothing is written, so the next roundtrip reads the original too.
+    redrafted = redraft(project_dir, scene_id, gated=False, rewrite=rewrite)
     return redrafted, judge(original, redrafted, scene_id)

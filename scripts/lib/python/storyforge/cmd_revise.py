@@ -301,12 +301,17 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
         if stop:
             failed += [stop] + _not_reached(scene_ids[i:])
             break
-        prompt = _build_prompt(sid, project_dir, 'full', use_briefs=True,
-                               system_context=bool(system))
+        try:
+            prompt = _build_prompt(sid, project_dir, 'full', use_briefs=True,
+                                   system_context=bool(system), rewrite=True)
+        except ValueError as e:   # its prose can't be read for the voice reference
+            prompt, why = '', str(e)
+        else:
+            why = 'no prompt'
         if not prompt:
-            log(f'    ERROR: Could not build a prompt for {sid}')
-            failed.append(f'{sid} (no prompt)')
-            continue
+            log(f'    ERROR: Could not build a prompt for {sid}: {why}')
+            failed += [f'{sid} ({why})'] + _not_reached(scene_ids[i:])
+            break
         log_file = os.path.join(log_dir, f'redraft-{sid}.json')
         scene_system = (list(system) + prior_prose_blocks(sid, project_dir, prior_prose)
                         if system else system)
@@ -321,7 +326,10 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
         if reason:
             reason = reason.rstrip('.')
             log(f'    ERROR: Not writing the re-draft of {sid}: {reason}')
-            failed.append(f'{sid} ({reason})')
+            # the scenes after it would be drafted with its stale prose among
+            # the earlier scenes, as `write` stops at a bad reply
+            failed += [f'{sid} ({reason})'] + _not_reached(scene_ids[i:])
+            break
         else:
             written += 1
             why = _gate_redraft(project_dir, sid, scene_file, log_dir)
@@ -1661,23 +1669,47 @@ class RedraftError(Exception):
 
 
 def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
-    """Re-draft scenes after brief rewrites using brief-aware drafting.
+    """Re-draft scenes after brief rewrites using brief-aware drafting:
+    `write`'s prompt (`cmd_write._build_prompt`) as a rewrite, the old prose
+    its voice reference only (plan §3.4), with the earlier prose in the
+    system prompt as `_redraft_from_briefs` sends it. Only at `full`
+    coaching and with briefs: otherwise RedraftError before anything is
+    spent.
 
     Only re-drafts scenes that already have a scene file. A reply that fails
     ``parsing.unsafe_scene_reason`` (truncated, or a collapsed word count) is
-    never written. Every scene that could not be re-drafted is collected and
-    RedraftError is raised after the rest are written, since its rewritten
-    brief and its prose now disagree. Scenes go in reading order and each
-    redraft is gated (``_gate_redraft``); redrafting stops at the first one
-    the gate doesn't pass, which RedraftError names with the scenes not
-    reached. Returns number of scenes re-drafted.
+    never written. Scenes go in reading order and each redraft is gated
+    (``_gate_redraft``); redrafting stops at the first scene it couldn't
+    redraft (no prompt, no reply, an unsafe reply) or the gate doesn't pass,
+    and RedraftError names it with the scenes not reached, since its
+    rewritten brief and its prose now disagree. Returns number of scenes
+    re-drafted.
     """
-    from storyforge.prompts import build_scene_prompt
+    from storyforge.cmd_write import _build_prompt, _detect_briefs
     from storyforge.common import get_coaching_level, build_shared_context
     from storyforge.parsing import extract_single_scene, unsafe_scene_reason
+    from storyforge.prompts import prior_prose_blocks, prior_prose_mode
+    from storyforge import ledger
+    # Checked before anything is spent: a reply at coach or strict is a
+    # guide, not prose, and would be written over the scene; without briefs
+    # there is no plan to rewrite from
+    coaching_level = get_coaching_level(project_dir)
+    if coaching_level != 'full':
+        raise RedraftError(f'{len(scene_ids)} scene(s) not re-drafted: coaching is '
+                           f'{coaching_level}, which writes no prose: '
+                           f'{", ".join(scene_ids)}')
+    if not _detect_briefs(project_dir):
+        raise RedraftError(f'{len(scene_ids)} scene(s) not re-drafted: '
+                           f'reference/scene-briefs.csv has no briefs to rewrite from')
+    try:
+        prior_prose = prior_prose_mode(project_dir)
+        if prior_prose != 'none':
+            ledger.scene_order(project_dir)
+    except ValueError as e:
+        raise RedraftError(f'{len(scene_ids)} scene(s) not re-drafted: {e}') from e
+    log(f'  Redrafting {len(scene_ids)} scene(s) as rewrites (prior prose: {prior_prose})')
 
     scenes_dir = os.path.join(project_dir, 'scenes')
-    coaching_level = get_coaching_level(project_dir)
     model = select_model('creative')
     count = 0
     failed: list[str] = []
@@ -1702,29 +1734,43 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
         with open(scene_file, encoding='utf-8') as f:
             original_prose = f.read()
         try:
-            prompt = build_scene_prompt(scene_id, project_dir,
-                                        coaching_level=coaching_level, api_mode=True,
-                                        system_context=bool(system))
-        except Exception as e:
-            log(f'  ERROR: Could not build prompt for {scene_id}: {e}')
-            failed.append(f'{scene_id} (no prompt: {e})')
-            continue
+            # a rewrite from the fixed brief and the binding ledger, the old
+            # prose its voice reference (plan §3.4), as `_redraft_from_briefs`
+            # and `write --force` draft it, with the earlier prose before it
+            prompt = _build_prompt(scene_id, project_dir, coaching_level, use_briefs=True,
+                                   system_context=bool(system), rewrite=True)
+        except ValueError as e:   # a brief or its prose that can't be read
+            prompt, why = '', f'no prompt: {e}'
+        else:
+            why = 'no prompt'
+        try:
+            scene_system = (list(system) + prior_prose_blocks(scene_id, project_dir,
+                                                              prior_prose)
+                            if system else system)
+        except (OSError, UnicodeDecodeError, ValueError) as e:
+            prompt, why = '', f'could not read the earlier prose: {e}'
+        # Each failure stops the run: the scenes after it would be drafted
+        # with its stale prose among the earlier scenes, as `write` stops
+        if not prompt:
+            log(f'  ERROR: Could not build a prompt for {scene_id}: {why}')
+            failed += [f'{scene_id} ({why})'] + _not_reached(scene_ids[i:])
+            break
 
         response = invoke_api(prompt, model, max_tokens=16384,
-                              label=f'redraft {scene_id}', system=system or None,
+                              label=f'redraft {scene_id}', system=scene_system or None,
                               fallback=True)
         if not response:
             log(f'  ERROR: No response for {scene_id} re-draft')
-            failed.append(f'{scene_id} (no response)')
-            continue
+            failed += [f'{scene_id} (no response)'] + _not_reached(scene_ids[i:])
+            break
 
         extracted = extract_single_scene(response)
         revised = extracted if extracted else response
         reason = unsafe_scene_reason(revised, original_prose)
         if reason:
             log(f'  ERROR: Not writing the re-draft of {scene_id}: {reason}')
-            failed.append(f'{scene_id} ({reason})')
-            continue
+            failed += [f'{scene_id} ({reason})'] + _not_reached(scene_ids[i:])
+            break
 
         # A model has no reason to reproduce an illustration marker, and losing
         # one silently costs the author an illustration that nothing downstream
@@ -2521,6 +2567,14 @@ def main(argv=None):
     from storyforge.ledger import exit_if_not_migrated, exit_if_unordered
     exit_if_not_migrated(project_dir)  # the registries live in the ledger
     exit_if_unordered(project_dir)  # drafting reads the ledger as of each scene
+    # A redraft reads drafting.prior_prose; a bad value found there would
+    # stop it after the brief rewrites before it were paid for and saved
+    from storyforge.prompts import prior_prose_mode
+    try:
+        prior_prose_mode(project_dir)
+    except ValueError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
 
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)

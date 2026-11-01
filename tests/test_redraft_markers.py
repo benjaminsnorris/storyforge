@@ -30,7 +30,7 @@ def test_redraft_strips_scene_markers(project_dir):
 
     with patch('storyforge.cmd_revise.invoke_api', return_value=api_response), \
          patch('storyforge.cmd_revise.select_model', return_value='claude-sonnet-4-6'), \
-         patch('storyforge.prompts.build_scene_prompt', return_value='fake prompt'), \
+         patch('storyforge.cmd_write._build_prompt', return_value='fake prompt'), \
          patch('storyforge.common.get_coaching_level', return_value='full'):
         count = _redraft_scenes(project_dir, ['test-scene'])
 
@@ -61,7 +61,7 @@ def test_redraft_preserves_clean_response(project_dir):
 
     with patch('storyforge.cmd_revise.invoke_api', return_value=clean_response), \
          patch('storyforge.cmd_revise.select_model', return_value='claude-sonnet-4-6'), \
-         patch('storyforge.prompts.build_scene_prompt', return_value='fake prompt'), \
+         patch('storyforge.cmd_write._build_prompt', return_value='fake prompt'), \
          patch('storyforge.common.get_coaching_level', return_value='full'):
         count = _redraft_scenes(project_dir, ['clean-scene'])
 

@@ -12,12 +12,14 @@ Only pass families that current Storyforge can re-run in-process are
 replayed; every other case is reported as excluded with its reason, never
 dropped silently. Holdout cases are excluded. Families:
 
-- ``redraft-from-brief``: ``cmd_write._build_prompt`` with briefs, the path
-  ``storyforge write`` and ``revise``'s ``_redraft_from_briefs`` take, without
-  their refusal fallback (E8 measures the requested model), then their gate
-  (``gate.gate_and_fix``: fix once, re-check); the prose judged is what the
-  gate leaves, passed or not, as both keep it. A scene whose commitments
-  later facts lean on halts before drafting, as both refuse it. Their
+- ``redraft-from-brief``: ``cmd_write._build_prompt`` with briefs as a rewrite
+  (the scene's prose a voice reference only, plan §3.4), the path
+  ``storyforge write --force`` and ``revise``'s ``_redraft_from_briefs`` take,
+  without their refusal fallback (E8 measures the requested model), then
+  their gate (``gate.gate_and_fix``: fix once, re-check); the prose judged is
+  what the gate leaves, passed or not, as both keep it. Their refusal of a
+  scene behind one waiting on the gate (``cmd_revise._leaning``,
+  ``cmd_write._gate_blockers``) is not applied: a pre-pass tree has none. Their
   cut-off guard is not applied here: a refusal halts, a cut-off reply would
   be replayed as a revision.
 - ``naturalness-upstream``: ``cmd_revise._fix_upstream_briefs`` then
@@ -332,13 +334,15 @@ def parse_verdict(text: str) -> dict:
     return verdict
 
 
-def redraft(project_dir: str, scene_id: str, gated: bool = True) -> str:
+def redraft(project_dir: str, scene_id: str, gated: bool = True, rewrite: bool = True) -> str:
     """Run the current redraft-from-brief pass on one scene; return the new
     prose. With `gated` (E8), as write and revise run it: through the gate.
     The re-check of later scenes that follows a pass in write and revise
     (Phase 4) only reports, never changes this scene, so E8 doesn't run it.
     Without (E5, which measures what the redraft itself changes), the draft
-    alone."""
+    alone. With `rewrite` (write and revise), the scene's current prose is
+    its voice reference; without, it drafts from the plan and ledger alone
+    (E5's ledger-gap measure)."""
     from storyforge.api import RefusalError, extract_text, invoke
     from storyforge.cmd_write import _build_prompt
     from storyforge.common import build_shared_context, select_model
@@ -348,7 +352,7 @@ def redraft(project_dir: str, scene_id: str, gated: bool = True) -> str:
     model = select_model('creative')
     system = build_shared_context(project_dir, model=model)
     prompt = _build_prompt(scene_id, project_dir, 'full', use_briefs=True,
-                           system_context=bool(system))
+                           system_context=bool(system), rewrite=rewrite)
     if not prompt:
         raise RuntimeError(f'could not build a redraft prompt for {scene_id}')
     from storyforge.prompts import prior_prose_blocks, prior_prose_mode

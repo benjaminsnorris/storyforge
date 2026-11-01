@@ -49,7 +49,7 @@ def main(argv=None) -> int:
                 continue
             system = build_shared_context(project, model=model)
             prompt = _build_prompt(scene_id, project, 'full', use_briefs=True,
-                                   system_context=bool(system))
+                                   system_context=bool(system), rewrite=True)
             in_tokens = (len(prompt) + len(json.dumps(system or []))) // 4
             usd = (calculate_cost(model, in_tokens, REDRAFT_OUTPUT_TOKENS)
                    + calculate_cost(model_for_tier('opus'), in_tokens // 8, JUDGE_OUTPUT_TOKENS))

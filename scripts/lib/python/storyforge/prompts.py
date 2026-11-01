@@ -1342,7 +1342,8 @@ MAX_STATES_PER_SUBJECT = 25
 
 
 def _established_facts_block(scene_id: str, scene: dict[str, str],
-                             project_dir: str, shown: set[str]) -> str:
+                             project_dir: str, shown: set[str],
+                             rewrite: bool = False) -> str:
     """The ledger's binding facts the scene must agree with: for its POV and
     on-stage characters (pronouns from characters.csv, `fixed` facts, states
     entering the scene) and its location, and those the scene itself has
@@ -1354,6 +1355,9 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
     registries (its facts can't be found), for facts tied to a scene id
     that isn't a scene, and for states left out past
     ``MAX_STATES_PER_SUBJECT`` (the prompt says so too).
+
+    ``rewrite``: the prompt also shows the scene's current draft as a voice
+    reference only, so the scene's own facts are said to hold regardless.
 
     Raises:
         ValueError: if scenes.csv has a scene without a numeric ``seq``
@@ -1446,7 +1450,14 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
         log(f'WARNING: {scene_id}: older states left out of the prompt '
             f'(more than {MAX_STATES_PER_SUBJECT} in force): {", ".join(trimmed)}')
     own = [r for r in found.scene if r['id'] not in shown]
-    if own:
+    if own and rewrite:
+        sections.append('### Already established in this scene\n'
+                        "Recorded from the scene's plan or an earlier draft of it. "
+                        'Keep each of these unless the brief says otherwise: where '
+                        'they differ, the brief wins. They hold even though the '
+                        'current draft below is a voice reference only.\n'
+                        + '\n'.join(line(r) for r in own))
+    elif own:
         sections.append('### Established in this scene so far\n'
                         "From the scene's plan or its current draft. Keep each "
                         'of these unless the brief says otherwise: where they '
@@ -1544,6 +1555,7 @@ def build_scene_prompt_from_briefs(
     coaching_level: str = 'full',
     dep_scenes: list[str] | None = None,
     system_context: bool = False,
+    voice_reference: str = '',
 ) -> str:
     """Build a drafting prompt from the three-file scene CSV model.
 
@@ -1562,6 +1574,11 @@ def build_scene_prompt_from_briefs(
         system_context: When True, shared reference material (voice guide,
             character bible, AI-tell vocabulary, voice profile) is provided
             via the API ``system`` parameter and should NOT be inlined.
+        voice_reference: The scene's current prose, for a rewrite (rethink
+            plan §3.4, Phase 4 PR 5: rewrites draft from the plan and the
+            binding ledger, the old prose a voice reference only). Shown at
+            ``full`` coaching, after the facts and before the task, with
+            illustration markers already stripped by the caller.
     """
     from .elaborate import get_scene, get_scenes
 
@@ -1657,9 +1674,11 @@ def build_scene_prompt_from_briefs(
                 + '\n'.join(state_lines)
             )
 
+    rewriting = coaching_level == 'full' and bool(voice_reference.strip())
     ledger_block = _established_facts_block(
         scene_id, scene, project_dir,
-        shown={s.strip() for s in state_in.split(';') if s.strip()})
+        shown={s.strip() for s in state_in.split(';') if s.strip()},
+        rewrite=rewriting)
 
     # Craft principles
     craft = build_weighted_directive(project_dir)
@@ -1745,12 +1764,30 @@ def build_scene_prompt_from_briefs(
 
     states_checklist = _states_checklist(scene, ref_dir)
 
+    rewrite_block = ''
+    rewrite_line = ''
+    if rewriting:
+        # the Established Facts section is there only when the ledger holds
+        # something for the scene
+        facts = 'the brief and the Established Facts above' if ledger_block else 'the brief'
+        rewrite_block = (
+            '## The Current Draft (voice reference only)\n\n'
+            'This scene already has a draft, below, and you are rewriting it. Take its '
+            'voice: the narration\'s register, rhythm and diction, and how the POV '
+            'character thinks and speaks. Take nothing else from it. What happens and '
+            f'what is true comes from {facts}, which win wherever the draft differs. '
+            'Do not copy its sentences or follow its structure.\n\n'
+            f'<current_draft>\n{voice_reference.strip()}\n</current_draft>\n\n')
+        rewrite_line = (f'\nThis is a rewrite: the facts come from '
+                        f'{facts.removesuffix(" above")}, the voice from the current '
+                        f'draft.\n')
+
     # Coaching-specific instructions
     if coaching_level == 'full':
         task_block = f"""## Task
 
 Write the complete prose for scene **{scene_id}** ("{scene.get('title', '')}").
-{word_target_line}
+{word_target_line}{rewrite_line}
 
 The brief is your contract. Deliver:
 - The value shift specified ({scene.get('value_shift', '')})
@@ -1844,7 +1881,7 @@ Do NOT add creative interpretation or suggestions."""
 
 {register_line}
 
-{task_block}
+{rewrite_block}{task_block}
 """
 
 

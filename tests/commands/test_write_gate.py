@@ -370,7 +370,7 @@ class TestReviseRedraftsAreGated:
     def test_the_hone_fix_redraft_is_gated_and_stops_too(self, project_dir, monkeypatch):
         from storyforge import cmd_revise, cmd_write
         gated = []
-        monkeypatch.setattr('storyforge.prompts.build_scene_prompt', lambda sid, *a, **k: sid)
+        monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda sid, *a, **k: sid)
         monkeypatch.setattr('storyforge.common.build_shared_context', lambda *a, **k: [])
         monkeypatch.setattr(cmd_revise, 'invoke_api', lambda *a, **k: 'New prose. ' * 300)
         monkeypatch.setattr('storyforge.parsing.unsafe_scene_reason', lambda *a: '')
@@ -385,7 +385,7 @@ class TestReviseRedraftsAreGated:
     def test_the_hone_fix_redraft_skips_the_rest_of_its_run_in_the_recheck(
             self, project_dir, monkeypatch):
         from storyforge import cmd_revise, cmd_write
-        monkeypatch.setattr('storyforge.prompts.build_scene_prompt', lambda sid, *a, **k: sid)
+        monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda sid, *a, **k: sid)
         monkeypatch.setattr('storyforge.common.build_shared_context', lambda *a, **k: [])
         monkeypatch.setattr(cmd_revise, 'invoke_api', lambda *a, **k: 'New prose. ' * 300)
         monkeypatch.setattr('storyforge.parsing.unsafe_scene_reason', lambda *a: '')
@@ -452,7 +452,7 @@ def test_a_marker_the_gates_fix_drops_is_restored(project_dir, monkeypatch):
     scene = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
     with open(scene, 'w') as f:
         f.write(f'Old prose.\n\n{marker}\n')
-    monkeypatch.setattr('storyforge.prompts.build_scene_prompt', lambda sid, *a, **k: sid)
+    monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda sid, *a, **k: sid)
     monkeypatch.setattr('storyforge.common.build_shared_context', lambda *a, **k: [])
     monkeypatch.setattr(cmd_revise, 'invoke_api', lambda *a, **k: 'New prose. ' * 300)
     monkeypatch.setattr('storyforge.parsing.unsafe_scene_reason', lambda *a: '')
