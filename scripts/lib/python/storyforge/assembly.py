@@ -1455,13 +1455,16 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
     require_cover_asset(manifest)
     require_asset_count_within_cap(assets)
 
-    # The dashboard travels as data only; Bookshelf renders it (#371). Data
-    # that can't be built stops the publish: sent without it, the book would
-    # quietly lose its dashboard.
+    # The dashboard travels as data only; Bookshelf renders it (#371). It is
+    # the export bundle's `dashboard_data`, so what Bookshelf reads comes
+    # through the one boundary the production tools share (plan Phase 5).
+    # Data that can't be built stops the publish: sent without it, the book
+    # would quietly lose its dashboard.
     if include_dashboard:
+        from storyforge import export
         try:
-            from storyforge.visualize import load_dashboard_data
-            manifest['dashboard_data'] = load_dashboard_data(project_dir)
+            bundle = export.build_bundle(project_dir, strict_dashboard=True)
+            manifest['dashboard_data'] = bundle['dashboard_data']
         except Exception as exc:
             raise ValueError(f'could not build the dashboard data ({exc}). Fix the '
                              f'CSV it names, or publish without the dashboard: '

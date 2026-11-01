@@ -214,6 +214,15 @@ class TestProblems:
         assert any('dashboard_data could not be built' in w and 'bad word_count' in w
                    for w in bundle['warnings'])
 
+    def test_strict_dashboard_raises_instead_of_null(self, project_dir, monkeypatch):
+        """publish passes strict_dashboard: a book sent with a null dashboard
+        would quietly lose it."""
+        def boom(_):
+            raise ValueError('bad word_count')
+        monkeypatch.setattr('storyforge.visualize.load_dashboard_data', boom)
+        with pytest.raises(ValueError, match='bad word_count'):
+            export.build_bundle(project_dir, strict_dashboard=True)
+
     def test_unmigrated_project_raises(self, project_dir, fixture_dir):
         legacy = os.path.join(os.path.dirname(fixture_dir), 'legacy-registries')
         shutil.copy(os.path.join(legacy, 'knowledge.csv'),

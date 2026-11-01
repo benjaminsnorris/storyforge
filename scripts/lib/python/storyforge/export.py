@@ -1,7 +1,9 @@
 """The export bundle: one canonical JSON document of a book's structured state.
 
 Plan §3.5. Storygild and Bookshelf read the bundle instead of the project's
-files, and pin `schema_version`. The contract is in docs/agent-reference.md
+files, and pin `schema_version`. Bookshelf reads its `dashboard_data` (pinned
+at that section's own `schema_version`): `publish` builds the bundle and sends
+that section; the prose and images travel in the publish manifest. The contract is in docs/agent-reference.md
 ("Export bundle"); `tests/test_export.py` pins its keys.
 
 What goes in:
@@ -245,13 +247,19 @@ def _project(project_dir: str) -> dict[str, str]:
     }
 
 
-def build_bundle(project_dir: str) -> dict:
+def build_bundle(project_dir: str, strict_dashboard: bool = False) -> dict:
     """The export bundle for the project at `project_dir`. No API calls.
+
+    `strict_dashboard`: raise when `dashboard_data` can't be built, instead of
+    leaving it null with a warning. `publish` passes it: Bookshelf reads the
+    bundle's `dashboard_data`, and a book published without it would quietly
+    lose its dashboard.
 
     Raises:
         ledger.NotMigratedError: knowledge.csv or physical-states.csv is still
             in reference/ (run `storyforge migrate`).
         ledger.LedgerError: commitments.csv can't be read as it is.
+        Exception: whatever stopped `dashboard_data`, with `strict_dashboard`.
     """
     ledger.load(project_dir)  # refuse an unmigrated or malformed ledger first
     warnings: list[str] = []
@@ -264,6 +272,8 @@ def build_bundle(project_dir: str) -> dict:
     except ledger.LedgerError:
         raise
     except Exception as e:  # named in the bundle, never dropped silently
+        if strict_dashboard:
+            raise
         warnings.append(f'dashboard_data could not be built ({type(e).__name__}: '
                         f'{e}); it is null in the bundle')
         dashboard = None
