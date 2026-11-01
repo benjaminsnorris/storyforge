@@ -369,14 +369,27 @@ def redraft(project_dir: str, scene_id: str, gated: bool = True) -> str:
     with open(os.path.join(project_dir, 'scenes', f'{scene_id}.md'), 'w',
               encoding='utf-8') as f:
         f.write(prose)
+    return gate_as_revise(project_dir, scene_id, 'redraft', prose)
+
+
+def gate_as_revise(project_dir: str, scene_id: str, command: str, prose: str) -> str:
+    """Gate `prose` as write and revise do (`gate.gate_and_fix`: fix once,
+    re-check) and return the prose they keep, passed or not. A scene the
+    gate didn't pass, or couldn't finish, is listed in
+    working/gate-pending.csv as they list it (the suite reads that list to
+    tell a reintroduction the author is told about from one the gate
+    passed). Only `GateError` is caught: a bug errors the suite rather than
+    being judged as gated prose, and a cassette miss errors it anyway."""
+    from storyforge import gate
     try:
-        return gate.gate_and_fix(project_dir, scene_id, command='redraft', prose=prose,
-                                 log_dir=os.path.join(project_dir, 'working', 'logs',
-                                                      'gate')).prose
-    except Exception:  # noqa: BLE001 - as write and revise: a gate that can't
-        # finish (GateError, a bug, an I/O failure) leaves the unchecked prose,
-        # listed pending; a cassette miss still errors the suite (its log)
+        out = gate.gate_and_fix(project_dir, scene_id, command=command, prose=prose,
+                                log_dir=os.path.join(project_dir, 'working', 'logs', 'gate'))
+    except gate.GateError as e:
+        gate.mark_pending(project_dir, scene_id, command, f'the gate could not finish: {e}')
         return prose
+    if not out.result.passed:
+        gate.mark_pending(project_dir, scene_id, command, 'the gate did not pass it')
+    return out.prose
 
 
 def judge(case: dict, scene_text: str) -> dict:
@@ -447,15 +460,7 @@ def revision_pass(project_dir: str, scene_id: str, row: dict) -> str:
         raise RuntimeError(f'pass {name!r} returned no revision of {scene_id}')
     if get_coaching_level(project_dir) != 'full':
         return after
-    from storyforge import gate
-    try:
-        return gate.gate_and_fix(project_dir, scene_id, command='revise', prose=after,
-                                 log_dir=os.path.join(project_dir, 'working', 'logs',
-                                                      'gate')).prose
-    except Exception:  # noqa: BLE001 - as revise: a gate that can't finish
-        # leaves the unchecked prose, listed pending; a cassette miss still
-        # errors the suite (its log)
-        return after
+    return gate_as_revise(project_dir, scene_id, 'revise', after)
 
 
 class PassHalted(Exception):

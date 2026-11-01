@@ -77,8 +77,11 @@ def run(ctx):
 
 def _listed_pending(project_dir: str, scene_id: str) -> bool:
     """Whether the replay left `scene_id` in working/gate-pending.csv: the
-    gate didn't pass it (or couldn't finish), so revise stopped there and
-    the author is told. (The pre-pass projects predate the file.)"""
+    gate didn't pass it (or couldn't finish), so write/revise stop there
+    and the author is told. Every gated family lists it as they do
+    (`e8.gate_as_revise`, and naturalness-upstream through revise's own
+    `_redraft_scenes`); the pre-pass projects predate the file. An
+    unreadable file counts as not listed (write/revise would stop on it)."""
     from storyforge import gate
     try:
         return scene_id in gate.pending(project_dir)

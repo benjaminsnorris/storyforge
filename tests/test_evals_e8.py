@@ -198,10 +198,112 @@ def test_a_redraft_is_gated_and_the_gates_prose_judged(monkeypatch, tmp_path):
 
     def gate_and_fix(p, sid, *, command, prose, log_dir):
         seen.append((sid, command, prose))
-        return gate.GatedScene('Fixed prose.', None, None, fixed=True)
+        return gate.GatedScene('Fixed prose.', _gate_result(True), _gate_result(False),
+                               fixed=True)
     monkeypatch.setattr(gate, 'gate_and_fix', gate_and_fix)
     assert e8.redraft(project, 's') == 'Fixed prose.'
     assert [(s, c, p.strip()) for s, c, p in seen] == [('s', 'redraft', 'Drafted prose.')]
+    assert gate.pending(project) == {}   # it passed: nothing listed
+
+
+def _gate_result(passed):
+    from storyforge import gate
+    from storyforge.checker import CheckResult, Finding
+    bad = Finding('contradiction', 'TIM', 'x', 'y', 'z', '', 'why')
+    r = gate.GateResult('s', check=CheckResult('s', findings=[] if passed else [bad]))
+    r.committed = passed
+    return r
+
+
+class TestGateAsRevise:
+    """E8's gated replays list what the gate didn't pass, as write and
+    revise do, so the suite can tell it from what the gate passed (PR #475's
+    review: `reintroduced_unflagged` was blind to two of three families)."""
+
+    def test_a_scene_the_gate_does_not_pass_is_listed(self, monkeypatch, tmp_path):
+        from storyforge import gate
+        project = _scene_dir(tmp_path)
+        monkeypatch.setattr(gate, 'gate_and_fix', lambda p, sid, **k: gate.GatedScene(
+            'Fixed.', _gate_result(False), _gate_result(False), fixed=True))
+        assert e8.gate_as_revise(project, 's', 'revise', 'Prose.') == 'Fixed.'
+        assert gate.pending(project)['s']['command'] == 'revise'
+
+    def test_a_gate_that_cannot_finish_keeps_the_prose_listed(self, monkeypatch, tmp_path):
+        from storyforge import gate
+
+        def fail(*a, **k):
+            raise gate.GateError('extraction failed')
+        project = _scene_dir(tmp_path)
+        monkeypatch.setattr(gate, 'gate_and_fix', fail)
+        assert e8.gate_as_revise(project, 's', 'redraft', 'Prose.') == 'Prose.'
+        assert 'extraction failed' in gate.pending(project)['s']['reason']
+
+    def test_a_bug_in_the_gate_errors_the_suite(self, monkeypatch, tmp_path):
+        from storyforge import gate
+
+        def bug(*a, **k):
+            raise KeyError('id')
+        monkeypatch.setattr(gate, 'gate_and_fix', bug)
+        with pytest.raises(KeyError):
+            e8.gate_as_revise(_scene_dir(tmp_path), 's', 'revise', 'Prose.')
+
+    def _revision_pass(self, monkeypatch, tmp_path, coaching):
+        from storyforge import gate
+        project = _scene_dir(tmp_path)
+        monkeypatch.setattr('storyforge.common.select_revision_model', lambda *a: 'm')
+        monkeypatch.setattr('storyforge.common.build_shared_context', lambda *a, **k: [])
+        monkeypatch.setattr('storyforge.common.get_coaching_level', lambda p: coaching)
+        monkeypatch.setattr('storyforge.revision.build_revision_prompt', lambda *a, **k: 'p')
+        monkeypatch.setattr('storyforge.api.invoke', lambda *a, **k: {
+            'content': [{'type': 'text', 'text': 'x'}]})
+
+        def write(text, scenes_dir):
+            with open(os.path.join(scenes_dir, 's.md'), 'w') as f:
+                f.write('Revised prose.')
+        monkeypatch.setattr('storyforge.parsing.extract_scenes_from_response', write)
+        seen = []
+        monkeypatch.setattr(gate, 'gate_and_fix', lambda p, sid, *, command, prose, **k: (
+            seen.append(command) or gate.GatedScene('Fixed.', _gate_result(True),
+                                                    _gate_result(True))))
+        return e8.revision_pass(project, 's', {'name': 'polish'}), seen
+
+    def test_a_revision_pass_is_gated_at_full(self, monkeypatch, tmp_path):
+        out, seen = self._revision_pass(monkeypatch, tmp_path, 'full')
+        assert out == 'Fixed.' and seen == ['revise']
+
+    def test_a_revision_pass_is_not_gated_below_full(self, monkeypatch, tmp_path):
+        out, seen = self._revision_pass(monkeypatch, tmp_path, 'coach')
+        assert out == 'Revised prose.' and seen == []
+
+
+def test_reintroductions_the_gate_listed_are_flagged_not_unflagged(monkeypatch, tmp_path):
+    import importlib
+    from storyforge import gate
+    suite = importlib.import_module('suites.e8_revision_safety')
+    data = _tool_case(id='d-1', introduced_by={'kind': 'tool', 'pass': 'illustrate --state',
+                                               'commit': 'a'})
+    cases = [_tool_case(id='p-1'), _tool_case(id='p-2'), data]
+    monkeypatch.setattr(suite, 'select', lambda c, h: e8.Selection(cases=cases))
+    dirs = {}
+
+    def prepare(case, work_dir):
+        d = tmp_path / case['id']
+        d.mkdir()
+        dirs[case['id']] = str(d)
+        return str(d), 's'
+
+    def replay(case, project, sid):
+        if case['id'] in ('p-1', 'd-1'):   # a data case is never flagged
+            gate.mark_pending(project, sid, 'revise', 'the gate did not pass it')
+        return 'prose'
+    monkeypatch.setattr(suite, 'prepare', prepare)
+    monkeypatch.setattr(suite, 'replay', replay)
+    monkeypatch.setattr(suite, 'judge', lambda c, t: {'verdict': 'reintroduced', 'evidence': ''})
+    out = suite.run(type('Ctx', (), {'work_dir': str(tmp_path)})())
+    assert out.metrics['reintroduced'] == 3
+    assert out.metrics['reintroduced_unflagged'] == 2   # p-2 and the data case
+    assert any(n.startswith('p-1 (s): reintroduced (the gate did not pass it: listed pending)')
+               for n in out.notes)
 
 
 def test_a_naturalness_fix_that_rewrites_nothing_is_pass_halted_with_why(monkeypatch):
