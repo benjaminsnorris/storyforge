@@ -32,7 +32,7 @@ the book it sees.
   scenes are found with the tools, and the prompt asks for one search per
   name the scene says something specific about: E8's thornwall-026 passed
   because its re-check searched one Warden's name and not the other's (and
-  still passed with the instruction; see the status doc).
+  its outcome with the instruction varies by run; see the status doc).
 - The calendar: each scene's `timeline_day` and `time_of_day` from
   scenes.csv go in the scene list, the scene's header and each story-so-far
   scene's `when`, so an elapsed time can be checked against the days (E8's
