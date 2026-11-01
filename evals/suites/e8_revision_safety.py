@@ -3,8 +3,8 @@
 See evals/e8/__init__.py. Gate (Phase 4, redefined 2026-11-01): at most
 `MAX_UNFLAGGED` reintroduced errors reach the book unflagged, i.e. passed by
 the gate. The plan's "zero reintroduced" is out of this checker's reach on
-one run: E8 moves by about two cases between runs (E6: 4 of 37 cases
-changed outcome over three runs), and what was left after Phase 4's PRs
+one run: E8 moves between runs (E6's three runs reintroduced 6, 10 and
+11 of 37; 6 cases moved in or out of reintroduced), and what was left after Phase 4's PRs
 was checker recall (an inference miss, long-context misses), not an
 ungated path. A reintroduction the gate fails is listed for the author and
 revise stops there, so it doesn't count against the gate; `reintroduced`
@@ -16,7 +16,8 @@ from e8 import DATA_FAMILIES, PassHalted, family, judge, prepare, replay, select
 from harness import Gate, Suite, SuiteOutput
 
 MIN_REPLAYED = 15  # below this the rate is too noisy to gate on
-#: E8's run-to-run spread (E6), set before the calendar re-record's result
+#: A judgement, set before the calendar re-record's result: E6's runs predate
+#: the gate, so the spread of the unflagged count itself is unmeasured
 MAX_UNFLAGGED = 2
 
 

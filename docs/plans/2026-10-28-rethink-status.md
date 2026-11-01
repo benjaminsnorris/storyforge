@@ -15,7 +15,7 @@ Last updated 2026-11-01, at v1.121.0. **Phase 3 is done** and **Phase 4 is done*
 
 E8's pre-pass trees have no phase 4 commitments, so `query_ledger` found registry facts only there.
 - **What changed (`checker.py`):** each scene's `timeline_day` and `time_of_day` (`Book.when`) go in the scene list, the checked scene's header and each story-so-far scene's `when` attribute, and the prompt says to check every elapsed time against them; a finding against the calendar names `scenes.csv` and quotes one calendar line (`Book.calendar`, verified). And a "Later scenes too" instruction: one search per name the scene says something specific about, the name alone. The writer's prompt still carries no calendar (a follow-up; it would re-record E4, E5 and E8's drafting).
-- **E8's gate, redefined (Ben chose options 1, 2 and 4):** `reintroduced_unflagged ≤ 2` (`MAX_UNFLAGGED`, set before the re-record's result from E6's spread: 4 of 37 cases changed outcome over three runs); `reintroduced` is reported, no longer gated. A reintroduction the gate fails is listed for the author and revise stops there.
+- **E8's gate, redefined (Ben chose options 1, 2 and 4):** `reintroduced_unflagged ≤ 2` (`MAX_UNFLAGGED`, set before the re-record's result from E6's spread: its three runs reintroduced 6, 10 and 11 of 37, 6 cases moving in or out); `reintroduced` is reported, no longer gated. A reintroduction the gate fails is listed for the author and revise stops there.
 
 | | before (#476) | after |
 |---|---|---|
