@@ -17,7 +17,9 @@ dropped silently. Holdout cases are excluded. Families:
   ``storyforge write --force`` and ``revise``'s ``_redraft_from_briefs`` take,
   without their refusal fallback (E8 measures the requested model), then
   their gate (``gate.gate_and_fix``: fix once, re-check); the prose judged is
-  what the gate leaves, passed or not, as both keep it. Their
+  what the gate leaves, passed or not, as both keep it. Their refusal of a
+  scene behind one waiting on the gate (``cmd_revise._leaning``,
+  ``cmd_write._gate_blockers``) is not applied: a pre-pass tree has none. Their
   cut-off guard is not applied here: a refusal halts, a cut-off reply would
   be replayed as a revision.
 - ``naturalness-upstream``: ``cmd_revise._fix_upstream_briefs`` then
