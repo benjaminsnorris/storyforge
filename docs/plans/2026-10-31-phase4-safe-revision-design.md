@@ -12,16 +12,21 @@ Date: 2026-10-31. Rethink plan §3.4 and §5 Phase 4; status doc Next steps item
 - **`depends_on` is never written.** The column exists (plan §3.1), but no extraction, gate or hone path fills it. The only links between facts are `supersedes` (a later state replaces an earlier one) and `resolves` (where a state ends, set on the earlier row by a later scene's `ends`).
 - **A redraft is refused when a later fact leans on the scene** (`gate._leaning_on`: a later row's `supersedes` or `depends_on` names one of the scene's commitments). That is the block E5 hit and the one phase 4 on the seven books would create everywhere: once every scene has commitments, almost every mid-book redraft is refused.
 - **A later scene's `ends` on this scene's state is lost on a redraft.** The `resolves` the later scene set lives on the row the redraft replaces; the new row has none, so the state reads as in force for the rest of the book. Today this can't happen only because the leaning check refuses first (`resolves` isn't in `_leaning_on`, so it can: a gap to close with this work).
-- **Rejected facts are still used.** `audit --mark rejected` sets `status`, but the typed views don't filter on it, so drafting and hone keep reading them (status doc, open follow-ups). `audit.leaning_scenes` lists the scenes whose brief names a rejected registry fact; nothing re-checks them.
+- **Rejected facts are still used.** `audit --mark rejected` sets `status`, but the typed views don't filter on it, so drafting and hone keep reading them (status doc, open follow-ups). `audit.leaning_scenes` lists the scenes whose brief names a rejected registry fact; nothing re-checks them. (State at v1.113.0; since #470 and #474 the reject flow and the gate list them.)
 - **Prose passes other than redraft are ungated** (polish, naturalness, continuity-audit): E8's reintroductions come from these families as well as redraft-from-brief.
 
 ## Proposal
 
 ### 1. The graph is derived, not extracted
 
-A scene **depends on** an earlier fact when one of its binding facts links to it (`supersedes`, or the earlier row's `resolves` names this scene), or when one of its binding facts has the same `subject` and `type` as the earlier fact (the scene says something about the same person or thing in the same respect). Computed from the ledger on demand (`ledger.dependents(rows, fact_ids, order)` → later scene ids in reading order); nothing new is stored.
+A scene **depends on** an earlier fact when one of its binding facts links to it (`supersedes`, `depends_on`, or the earlier row's `resolves` names this scene), or (as widened in PR 3c, #474, after the `recheck-set` eval found the first rule's misses) when one of its binding facts
+- has the same `subject`, in any type (for a knowledge fact, a subject in its `known_by`);
+- names the earlier fact's subject in its statement, or has a subject the earlier statement names (by id, or by a registry name or alias, `ledger.subject_names`; case, hyphens and spacing aside, whole words);
+- or, when the earlier fact has no subject, is of its type (reported as `unrelated` still: a type is a guess).
 
-Why not have extraction fill `depends_on`: it is a prompt change to phase 4 and the gate (re-records E3, E4, E5, E8), it asks the extraction model for a judgement it would make inconsistently (which earlier facts a sentence "relies on"), and a missed link is a silent hole in the re-check set. The subject/type overlap over-includes, which costs checks but never skips a scene that could break. `depends_on` stays in the schema for hand-written links (an author can name one) and is honoured by the same function.
+Computed from the ledger on demand (`ledger.dependents(rows, fact_ids, order, names=)` → later scene ids in reading order); nothing new is stored. The first version matched the same `subject` and `type` only: recall 0.72 on the eval, 0.92 with the wider rule.
+
+Why not have extraction fill `depends_on`: it is a prompt change to phase 4 and the gate (re-records E3, E4, E5, E8), it asks the extraction model for a judgement it would make inconsistently (which earlier facts a sentence "relies on"), and a missed link is a silent hole in the re-check set. The derived overlap over-includes, which costs checks; the eval measures what it still misses (two of 25: an extraction gap and a dropped promise, outside any graph). `depends_on` stays in the schema for hand-written links (an author can name one) and is honoured by the same function.
 
 ### 2. What changed
 
@@ -41,7 +46,7 @@ For the changed facts, take the dependents in reading order and **re-gate each l
 
 `storyforge audit --mark rejected <id>`:
 - the typed views and `extract.known_for_scene` leave non-binding rows out (the open follow-up), so nothing drafts from a rejected fact;
-- the fact's dependents (§1) are listed pending with "re-check: {id} rejected", and `storyforge check --pending` re-gates them in reading order (§3, advisor mode: reports, never edits).
+- the fact's dependents (§1), and the scenes whose brief names it (`audit.leaning_scenes`; listed by the gate too after the revision, since #474), are listed pending with "re-check: {id} rejected", and `storyforge check --pending` re-gates them in reading order (§3, advisor mode: reports, never edits).
 - **Built in PR 3a (#470), after its review:** re-checking dependents while the rejected fact's own scene still states it would re-record the fact from that prose or fail the scenes that are right, so the order is: the fact's scene (when it has prose) is listed `revise-rejected` for the author; when its revision passes the gate, the rejected ids count as changed and the dependents are listed for a re-check. A fact with no prose to revise has its dependents listed now. The gate keeps a rejected commitment through a redraft and won't pass prose restating it. Drafting takes non-binding facts out of the brief's fact columns; `validate` reports a brief naming one. **Not done:** the typed views still include non-binding rows, because writers (hone, extract 3b/3c, enrich) read a view and write it back, and a view without a rejected row would delete it; brief-building prompts (extract, hone) still offer rejected knowledge ids; scoring and visualization read the full view. A re-gate of a later scene clears a `resolves` it had set, rejected rows included (its extraction sets them again).
 - Measured on E1 cases: each case's established fact, rejected, must yield a re-check set that contains the scene where the error was introduced.
 

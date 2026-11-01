@@ -7,7 +7,7 @@ Last updated 2026-10-31 (night), at v1.118.0. **Phase 3 is done** and **Phase 4 
 **#474 (v1.118.0), Phase 4 PR 3c.** Ben accepted the cost of a wider set (2026-10-31).
 - **What changed in `ledger.dependents`:** a later fact depends on fact F also when
   - it has F's subject, in any type;
-  - its statement names F's subject, or F's statement names its subject. Matching is by id or by a registry name or alias (`ledger.subject_names`: characters, locations; whole words; at least 3 letters; a leading "the" dropped);
+  - its statement names F's subject, or F's statement names its subject. Matching is by id or by a registry name or alias (`ledger.subject_names`: characters, locations; case folded, hyphens as spaces, whole words; at least 3 characters; a leading "the" dropped). A missing registry or one with no id column is reported, and the gate reads names and the pending list before its model calls;
   - F has no subject and it is of F's type. F stays in `unrelated`, so `audit` still warns.
 - **The gate:** after the revision of a rejected fact, the gate also lists the scenes whose brief names it, as `audit --mark rejected` says it will (the gap #473's review found in #470).
 - **`recheck-set`** (replayed, no new recording):
@@ -34,7 +34,7 @@ Last updated 2026-10-31 (night), at v1.118.0. **Phase 3 is done** and **Phase 4 
 - **How:**
   - Extract phase 4 runs once per tree over a subset: each case's establishing and contradicting scenes, plus up to 2 controls between the establishing scene and the first contradicting one (the scenes next to each side).
   - An Opus judge picks the ledger rows recording the fact.
-  - `cmd_audit._reject_recheck` gives what is re-checked: the scenes listed now, or the dependents the revision lists. Scenes listed only because a brief names the fact are left out: after a revision the gate lists dependents only. This is a gap in #470's flow, to close in 3c; `audit` shows them as "listed once it passes".
+  - `cmd_audit._reject_recheck` gives what is re-checked: the scenes listed now, or the dependents the revision lists. Scenes listed only because a brief names the fact are left out: after a revision the gate lists dependents only. This was a gap in #470's flow, closed in #474; `audit` shows them as "listed once it passes".
 - **Cost:** $6.61 spent recording ($6.92 at list price), 2.3 MB of recordings.
 - **Excluded:** 11 cases whose "established" side reads *after* the contradiction (the author kept the later version; a re-check runs forward). The others: 40 trees predate scenes.csv, 25 holdout, 24 contradicted only in the establishing scene, 3 no prose established span.
 
@@ -60,11 +60,11 @@ Last updated 2026-10-31 (night), at v1.118.0. **Phase 3 is done** and **Phase 4 
 
 | Rule | Recall | Set share | Controls included |
 |---|---|---|---|
-| today: same subject and type, or a link (knowledge facts: any type, and `known_by`) | 0.72 | 0.19 | 0.40 |
+| #473's rule: same subject and type, or a link (knowledge facts: any type, and `known_by`) | 0.72 | 0.19 | 0.40 |
 | same subject, any type | 0.76 | 0.21 | 0.49 |
 | + a blank-subject fact → every later scene with a fact of its type | 0.84 | 0.25 | 0.64 |
 
-The two cross-subject misses need a mention match: a later row whose statement names the fact's subject, or whose subject the fact's statement names, by registry name or alias. If it catches both (not yet simulated), recall would reach 23/25 = 0.92. The other two are extraction gaps or absences, outside any graph.
+The two cross-subject misses need a mention match: a later row whose statement names the fact's subject, or whose subject the fact's statement names, by registry name or alias. If it catches both, recall would reach 23/25 = 0.92 (it did: #474). The other two are extraction gaps or absences, outside any graph.
 
 **Next, in order:**
 1. **PR 3c, widen `ledger.dependents`:**

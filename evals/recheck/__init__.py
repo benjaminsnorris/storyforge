@@ -39,8 +39,9 @@ are prose in different scenes, of a tree with ``reference/scenes.csv``:
    re-checked: those listed now (no prose to revise), or, when the
    establishing scene has prose, the ones its revision lists once it passes
    the gate (its dependents and the scenes whose brief names it, which the
-   gate lists too since PR 3c). A hit is a contradicting scene in the set. Only ``captured``
-   counts toward ``recall``; ``partial`` is in ``recall_with_partial``.
+   gate lists too since #474). A hit is a contradicting scene in the set.
+   Only ``captured`` counts toward ``recall``; ``partial`` is in
+   ``recall_with_partial``.
 
 **Precision.** The set is only as wide as the ledger: commitments exist for
 the extracted subset alone (registry facts cover the whole book), so the
