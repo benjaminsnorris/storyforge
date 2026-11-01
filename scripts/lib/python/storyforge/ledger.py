@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import csv
 import os
+import re
 import threading
 from dataclasses import dataclass, field
 
@@ -671,28 +672,106 @@ class Dependents:
     #: the later scenes to re-check, in reading order
     scenes: list[str] = field(default_factory=list)
     #: fact id → why its dependents can't all be found: not in the rows
-    #: given, its scene isn't in the book, or a blank subject with no link
-    #: (the caller must say so, or re-check every later scene)
+    #: given, its scene isn't in the book, or no subject (its scenes are
+    #: then a guess by type, already in `scenes`): the caller reports it
     unrelated: dict[str, str] = field(default_factory=dict)
 
 
+NAME_REGISTRIES = ('characters.csv', 'locations.csv')
+
+
+def subject_names(project_dir: str) -> tuple[dict[str, set[str]], list[str]]:
+    """Subject id (normalized) → the names and aliases `characters.csv` and
+    `locations.csv` give it (normalized), for `dependents`' mention match,
+    and what can't be read, for the caller to report: a registry that is
+    missing or has no `id` column only narrows the match to ids. A subject
+    not in either registry is matched by its id alone.
+
+    Raises:
+        OSError, UnicodeDecodeError: a registry that exists but can't be read.
+    """
+    names: dict[str, set[str]] = {}
+    notes = []
+    for registry in NAME_REGISTRIES:
+        header, rows = _read_rows(os.path.join(project_dir, 'reference', registry))
+        if not header:
+            notes.append(f'reference/{registry} is missing or empty: its names and aliases '
+                         f'are not matched, only subject ids')
+            continue
+        if 'id' not in header:
+            notes.append(f'reference/{registry} has no id column: its names and aliases '
+                         f'are not matched, only subject ids')
+            continue
+        for row in rows:
+            rid = _norm(row.get('id', ''))
+            if rid:
+                names.setdefault(rid, set()).update(
+                    _norm(n) for n in [row.get('name', '')] + _split(row.get('aliases', ''))
+                    if _norm(n))
+    return names, notes
+
+
+_MIN_PHRASE = 3
+
+
+def _norm(text: str) -> str:
+    """Case folded, hyphens as spaces, spacing collapsed: how statements,
+    ids and names are compared."""
+    return ' '.join((text or '').casefold().replace('-', ' ').split())
+
+
+def _phrases(subject: str, names: dict[str, set[str]]) -> set[str]:
+    """How a statement can name `subject` (normalized): its id and its
+    registry names, each without a leading "the"; a phrase shorter than
+    three characters is too loose to match on."""
+    out = set()
+    for p in {subject} | names.get(subject, set()):
+        if p.startswith('the '):
+            p = p[4:]
+        if len(p) >= _MIN_PHRASE:
+            out.add(p)
+    return out
+
+
+def _mentions(statement: str, subject: str, names: dict[str, set[str]],
+              cache: dict[str, re.Pattern | None]) -> bool:
+    """Whether `statement` names `subject` (normalized) as a whole word."""
+    if not subject:
+        return False
+    if subject not in cache:
+        phrases = sorted(_phrases(subject, names), key=len, reverse=True)
+        # (?<!\w)…(?!\w), not \b: a name may begin or end with punctuation
+        cache[subject] = (re.compile(r'(?<!\w)(?:' + '|'.join(re.escape(p) for p in phrases)
+                                     + r')(?!\w)') if phrases else None)
+    pattern = cache[subject]
+    return bool(pattern and pattern.search(_norm(statement)))
+
+
 def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
-               order: dict[str, int]) -> Dependents:
+               order: dict[str, int], *, names: dict[str, set[str]]) -> Dependents:
     """The scenes after each of `fact_ids` whose binding facts depend on it,
     in reading order: the re-check set when those facts change (design §1,
     derived from the ledger, decided by Ben 2026-10-31).
 
     A binding fact in a later scene depends on fact F when it
     - supersedes F or names it in `depends_on`, or
-    - is about the same `subject` (non-blank, any case) in the same `type`,
-      or, for a knowledge fact, its subject is one of F's `known_by`;
+    - is about the same `subject` (non-blank, any case), in any type, or,
+      for a knowledge fact, its subject is one of F's `known_by`, or
+    - names F's subject in its statement, or F's statement names its
+      subject (by id, or by a registry name or alias in `names`, from
+      `subject_names`; `{}` matches ids only; case, hyphens and spacing
+      aside, as whole words), or
+    - when F has no subject (and, for knowledge, no `known_by`): is of
+      F's type. F is then in `.unrelated` still, since a type is a guess
+      at what it is about;
     and the scene F's `resolves` names (the scene that ends it) depends on F.
     "Later" is after F's scene; a fact with no scene (backstory) is before
     every scene. Over-includes by design: a needless check costs a call, a
-    missed scene is a silent hole, so a fact whose dependents can't be told
-    is in `.unrelated` with the reason. Removed facts must be in `rows`
-    (pass the old rows with the new ones). A scene may have no prose yet:
-    the caller skips those."""
+    missed scene is a silent hole (the re-check-set eval, #473, measured
+    the misses the narrower rule of #466 made). Removed facts must be in
+    `rows` (pass the old rows with the new ones). A scene may have no prose
+    yet: the caller skips those."""
+    cache: dict[str, re.Pattern | None] = {}
     wanted = set(fact_ids)
     out = Dependents()
     targets = [r for r in rows if r.get('id') in wanted]
@@ -708,19 +787,26 @@ def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
         ends = (f.get('resolves') or '').strip()
         if ends in order and order[ends] > after:
             scenes.add(ends)
+        subject = _norm(f.get('subject', ''))
         keys = {(f.get('subject') or '').strip().casefold()} - {''}
         if f.get('type') == 'knowledge':
             keys |= {k.casefold() for k in _split(f.get('known_by', ''))}
         if not keys:
-            out.unrelated[f['id']] = 'no subject (only facts linked to it are found)'
+            out.unrelated[f['id']] = (f'no subject: every later scene with a binding '
+                                      f'{f.get("type") or "typeless"} fact is taken '
+                                      f'as depending on it')
         for r in rows:
             rs = (r.get('scene_id') or '').strip()
             if r is f or r.get('status') != 'binding' or rs not in order or order[rs] <= after:
                 continue
-            linked = f['id'] in _split(r.get('supersedes', '')) + _split(r.get('depends_on', ''))
-            same = (r.get('subject') or '').strip().casefold() in keys and (
-                r.get('type') == f.get('type') or f.get('type') == 'knowledge')
-            if linked or same:
+            if rs in scenes:
+                continue
+            if (f['id'] in _split(r.get('supersedes', '')) + _split(r.get('depends_on', ''))
+                    or (r.get('subject') or '').strip().casefold() in keys
+                    or (not keys and r.get('type') == f.get('type'))
+                    or _mentions(r.get('statement', ''), subject, names, cache)
+                    or _mentions(f.get('statement', ''), _norm(r.get('subject', '')),
+                                 names, cache)):
                 scenes.add(rs)
     out.scenes = sorted(scenes, key=order.get)
     return out

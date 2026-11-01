@@ -1,15 +1,40 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-10-31 (night), at v1.117.0. **Phase 3 is done** and **Phase 4 PRs 1, 2, 3a and 3b are merged** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval). **The eval fails its gate: recall 0.72 against 0.9.** Its misses point at the graph's matching rule, so next is **PR 3c, widening `ledger.dependents`** (see **Latest**). **A fresh session starts here:** read **Latest**, then the Phase 4 design note's "PRs, in order", then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-10-31 (night), at v1.118.0. **Phase 3 is done** and **Phase 4 PRs 1, 2, 3a, 3b and 3c are merged** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph). **The re-check-set gate passes: recall 0.92** (was 0.72). Next is **PR 4, every prose pass through the gate** (E8 to zero). **A fresh session starts here:** read **Latest**, then the Phase 4 design note's "PRs, in order", then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
-## Latest: the re-check-set eval (2026-10-31 night, storyforge-df)
+## Latest: the graph widened, the re-check-set gate passes (2026-10-31 night, storyforge-df)
+
+**#474 (v1.118.0), Phase 4 PR 3c.** Ben accepted the cost of a wider set (2026-10-31).
+- **What changed in `ledger.dependents`:** a later fact depends on fact F also when
+  - it has F's subject, in any type;
+  - its statement names F's subject, or F's statement names its subject. Matching is by id or by a registry name or alias (`ledger.subject_names`: characters, locations; case folded, hyphens as spaces, whole words; at least 3 characters; a leading "the" dropped). A missing registry or one with no id column is reported, and the gate reads names and the pending list before its model calls;
+  - F has no subject and it is of F's type. F stays in `unrelated`, so `audit` still warns.
+- **The gate:** after the revision of a rejected fact, the gate also lists the scenes whose brief names it, as `audit --mark rejected` says it will (the gap #473's review found in #470).
+- **`recheck-set`** (replayed, no new recording):
+
+| | before (#473) | after |
+|---|---|---|
+| recall (gate 0.9) | 0.72 | **0.92** (23/25) |
+| set size; share of later scenes | 2.96; 0.19 | 8.72; 0.35 |
+| control inclusion | 0.40 | 0.89 |
+
+- **Each half of the mention match catches one case of its own:** either half alone gives 0.88; neither gives 0.84.
+- **The remaining 2 misses are outside any graph:**
+  - shared-dark-035: the later scene's extraction doesn't record Rook's whereabouts.
+  - lantern-folk-027: a dropped promise.
+- **Cost:** the share is a floor (only the subset has commitments). On a book with phase 4 run everywhere, expect a mid-book rejection or redraft to re-check a third or more of the later scenes, at about $0.40–0.60 each. The forecast and threshold guard each run.
+- **Every eval suite replays with no miss.** E8 is unchanged (7 reintroduced, as on main).
+
+**Next, in order:** **PR 4**, every prose pass through the gate, then the re-check (E8 to zero); **PR 5**, rewrite-from-ledger (E5). Smaller: a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost (now the wider set); the low-confidence halt; `characters.csv` `pronouns`; E4 over 2–3 runs.
+
+## The re-check-set eval (2026-10-31 night, storyforge-df)
 
 **#473 (eval-only), suite `recheck-set` (`evals/recheck`):**
 - **What it measures:** for each E1 prose case whose established side is earlier than its contradicting side, in a tree with `scenes.csv` (27 cases, 18 trees), rejecting the established fact must get the contradicting scene re-checked. 38 cases in 18 trees pass `select`; 27 cases in 14 trees are measured.
 - **How:**
   - Extract phase 4 runs once per tree over a subset: each case's establishing and contradicting scenes, plus up to 2 controls between the establishing scene and the first contradicting one (the scenes next to each side).
   - An Opus judge picks the ledger rows recording the fact.
-  - `cmd_audit._reject_recheck` gives what is re-checked: the scenes listed now, or the dependents the revision lists. Scenes listed only because a brief names the fact are left out: after a revision the gate lists dependents only. This is a gap in #470's flow, to close in 3c; `audit` shows them as "listed once it passes".
+  - `cmd_audit._reject_recheck` gives what is re-checked: the scenes listed now, or the dependents the revision lists. Scenes listed only because a brief names the fact are left out: after a revision the gate lists dependents only. This was a gap in #470's flow, closed in #474; `audit` shows them as "listed once it passes".
 - **Cost:** $6.61 spent recording ($6.92 at list price), 2.3 MB of recordings.
 - **Excluded:** 11 cases whose "established" side reads *after* the contradiction (the author kept the later version; a re-check runs forward). The others: 40 trees predate scenes.csv, 25 holdout, 24 contradicted only in the establishing scene, 3 no prose established span.
 
@@ -35,11 +60,11 @@ Last updated 2026-10-31 (night), at v1.117.0. **Phase 3 is done** and **Phase 4 
 
 | Rule | Recall | Set share | Controls included |
 |---|---|---|---|
-| today: same subject and type, or a link (knowledge facts: any type, and `known_by`) | 0.72 | 0.19 | 0.40 |
+| #473's rule: same subject and type, or a link (knowledge facts: any type, and `known_by`) | 0.72 | 0.19 | 0.40 |
 | same subject, any type | 0.76 | 0.21 | 0.49 |
 | + a blank-subject fact → every later scene with a fact of its type | 0.84 | 0.25 | 0.64 |
 
-The two cross-subject misses need a mention match: a later row whose statement names the fact's subject, or whose subject the fact's statement names, by registry name or alias. If it catches both (not yet simulated), recall would reach 23/25 = 0.92. The other two are extraction gaps or absences, outside any graph.
+The two cross-subject misses need a mention match: a later row whose statement names the fact's subject, or whose subject the fact's statement names, by registry name or alias. If it catches both, recall would reach 23/25 = 0.92 (it did: #474). The other two are extraction gaps or absences, outside any graph.
 
 **Next, in order:**
 1. **PR 3c, widen `ledger.dependents`:**
@@ -158,7 +183,7 @@ Run 4's 26 contradictions: 12 in scenes the gate failed, 14 in scenes it passed,
   - **Success criteria (plan §5):** E3 recall ≥ 0.85: **met, 0.898** (was 0.286). Export round-trips: **met** (`evals/export_check.py`: 7 of 7 books byte-identical). E5 mismatches below baseline: **met, 64 → 23** (6.4 → 2.3 per scene; v1.97.0). E4 did not get worse (CP10k 16.1 → 14.2, contradictions 35 → 31, 23/23 drafted). E8 unchanged (reintroduced 6, per 10k words 1.74 → 1.69).
   - **Drafting reads the ledger** (v1.97.0): `build_scene_prompt_from_briefs` (write and revise's redraft-from-brief) has an "Established Facts" section from `ledger.drafting_slice`: for the POV, on-stage characters and location, `pronouns` from characters.csv, `fixed` facts before the scene, states entering it (at most `prompts.MAX_STATES_PER_SUBJECT` = 25 each, the rest named), and the scene's own facts ("the brief wins where they differ"). E5 now runs extract phase 4 over its sample first (10 Sonnet calls), so the redraft sees the prose's commitments. **Not like-for-like with the old E5 number:** part of the fall is the redraft being shown facts read off the prose it is judged against, which is the design (a pinned fact should survive a redraft). The character bible is still sent whole: slimming it to fixed facts + voice is author data, left for Ben.
 - **Phase 3 (the gate and sequential loop): done** (v1.114.0; see **Latest**): E4 CP10k 3.1 and 3 broken promises (targets ≤ 7.1, ≤ 3), E2 checker precision 0.81 (≥ 0.8); sequential kept, `--batch` refuses prose.
-- **Phase 4 (safe revision): in progress** (v1.117.0). Design and Ben's decisions: `docs/plans/2026-10-31-phase4-safe-revision-design.md`; its "PRs, in order" is the plan. Done: PR 1 (#466), PR 2 (#468), PR 3a (#470), PR 3b (#473, the eval: recall 0.72). **Next: PR 3c, widening the graph** (see **Latest**), then PR 4 (every prose pass through the gate, E8 to zero), PR 5 (rewrite-from-ledger, E5).
+- **Phase 4 (safe revision): in progress** (v1.118.0). Design and Ben's decisions: `docs/plans/2026-10-31-phase4-safe-revision-design.md`; its "PRs, in order" is the plan. Done: PR 1 (#466), PR 2 (#468), PR 3a (#470), PR 3b (#473, the eval), PR 3c (#474, the wider graph: recall 0.92). **Next: PR 4** (every prose pass through the gate, E8 to zero), PR 5 (rewrite-from-ledger, E5).
 
 **What exists now, for orientation** (contracts in `docs/agent-reference.md`):
 - **Ledger:** `ledger.load`/`save(…, command=)` (every save appends to `working/audit-log.csv`); typed views `knowledge_view`/`physical_view` (registry rows only, which briefs reference by id); `active_states`, `established_before`, `scene_order`, `drafting_slice` (a scene's share, for the drafting prompt); `LedgerError` / `NotMigratedError`.
@@ -177,7 +202,7 @@ Run 4's 26 contradictions: 12 in scenes the gate failed, 14 in scenes it passed,
 | 5 Phase 1 | done | #359–#405 |
 | 6 Phase 2 | done | #401, #416, #417, #420–#424, #430, #432 |
 | 7 Phase 3 | done | #436, #437, #439, #443, #450, #453–#458, #461–#463 |
-| 8 Phase 4 | PRs 1, 2, 3a, 3b done; 3c (graph), 4, 5 next | #465, #466, #468, #470, #473 |
+| 8 Phase 4 | PRs 1–3c done; 4, 5 next | #465, #466, #468, #470, #473, #474 |
 
 ## Next steps, in order (handoff for a new session)
 

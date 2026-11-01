@@ -307,10 +307,13 @@ def _run(args, emit):
             for note in info['not_listed']:
                 lines.append(f'    not listed: {note}')
             if info['unrelated']:
-                lines.append(f'    WARNING: the scenes depending on it can\'t all be found '
-                             f'({info["unrelated"]}): check the scenes that mention it')
+                lines.append(f'    WARNING: the scenes depending on it can\'t all be traced '
+                             f'({info["unrelated"]}): the list is a guess; check the scenes '
+                             f'that mention it')
             elif not (info['recheck'] or info['later'] or info['not_listed']):
                 lines.append('    no later scene depends on it')
+            for note in info['name_notes']:
+                lines.append(f'    WARNING: matched on fewer names: {note}')
         emit('\n'.join(lines))
     if not committed:
         _fail(f'the marks are written to reference/{ledger.LEDGER_FILE} and '
@@ -338,9 +341,10 @@ def _reject_recheck(project_dir: str, rows: list[dict], fact_ids: list[str]) -> 
     waiting = gate.pending(project_dir)
     gone = gate._gone_scenes(project_dir)
     by_id = {r['id']: r for r in rows}
+    names, name_notes = ledger.subject_names(project_dir)
     out = {}
     for fid in fact_ids:
-        one = ledger.dependents(rows, [fid], order)
+        one = ledger.dependents(rows, [fid], order, names=names)
         scene = (by_id.get(fid, {}).get('scene_id') or '').strip()
         revise = bool(scene) and scene in order and scene not in gone \
             and gate._has_prose(project_dir, scene)
@@ -348,7 +352,9 @@ def _reject_recheck(project_dir: str, rows: list[dict], fact_ids: list[str]) -> 
         candidates = sorted({s for s in set(one.scenes) | set(briefs.get(fid, []))
                              if order.get(s, -1) > after}, key=order.get)
         info = {'scene': scene, 'revise': revise, 'recheck': [], 'later': [],
-                'not_listed': [], 'unrelated': one.unrelated.get(fid, '')}
+                'not_listed': [f'{s} (its brief names it, but it is not in scenes.csv)'
+                               for s in sorted(set(briefs.get(fid, [])) - set(order))],
+                'unrelated': one.unrelated.get(fid, ''), 'name_notes': name_notes}
         for sid in candidates:
             if sid in gone:
                 info['not_listed'].append(f'{sid} (cut or merged)')

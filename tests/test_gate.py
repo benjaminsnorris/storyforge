@@ -424,6 +424,33 @@ class TestRecheck:
         assert result.changed == [] and result.recheck == []
         assert gate.pending(project_dir) == {}
 
+    def test_a_dependent_found_only_by_a_registry_alias_is_listed(self, project_dir, tmp_path):
+        """The gate passes the registry names (#474): "Hayle" is an alias of
+        dorren-hayle, and nothing else ties the later fact to it."""
+        _gate(project_dir, tmp_path, [_commitment(subject='dorren-hayle', type='physical',
+                                                  statement='Dorren has a limp')])
+        self._add(project_dir, id='later-fact', scene_id=self.LATER, type='knowledge',
+                  subject='tessa-merrin', statement='Tessa saw Hayle walk without help')
+        result = _gate(project_dir, tmp_path, [_commitment(
+            subject='dorren-hayle', type='physical', statement='Dorren walks well')],
+            command='redraft')
+        assert self.LATER in result.recheck and result.name_notes == []
+
+    def test_a_missing_registry_is_reported(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow')])
+        os.remove(os.path.join(project_dir, 'reference', 'locations.csv'))
+        result = _gate(project_dir, tmp_path, [_commitment(
+            subject='tarrens-hollow', statement='The hollow had 300 people')], command='redraft')
+        assert result.changed and any('locations.csv' in n for n in result.name_notes)
+
+    def test_an_unreadable_registry_stops_before_the_model_calls(self, project_dir, tmp_path):
+        with open(os.path.join(project_dir, 'reference', 'characters.csv'), 'wb') as f:
+            f.write(b'id|name\n\xff\xfe|x\n')
+        with patch('storyforge.api._api_request', side_effect=AssertionError('called')):
+            with pytest.raises(GateError):
+                gate_scene(project_dir, SCENE, command='draft',
+                           log_dir=str(tmp_path / 'logs'), extract_model='m', check_model='m')
+
     def test_a_dropped_fact_lists_its_dependents_for_a_recheck(self, project_dir, tmp_path):
         old = self._commit_with_dependent(project_dir, tmp_path)
         result = _gate(project_dir, tmp_path, [_commitment(
@@ -632,6 +659,63 @@ class TestRejected:
         assert rows[rid]['status'] == 'rejected'                 # the record stays
         assert rid in result.changed and result.recheck == [self.LATER]
         assert SCENE not in gate.pending(project_dir)
+
+    def test_a_revision_also_lists_the_scenes_whose_brief_names_the_rejected_fact(
+            self, project_dir, tmp_path, monkeypatch):
+        """`audit --mark rejected` says these are listed once the revision
+        passes; before #473's follow-up the gate listed dependents only."""
+        rid = self._reject(project_dir, tmp_path)
+        monkeypatch.setattr(gate.audit, 'leaning_scenes',
+                            lambda p, ids: {i: ['new-x1', 'act1-sc01'] for i in ids})
+        gate.mark_pending(project_dir, SCENE, gate.REVISE_REJECTED, f'x [rejected: {rid}]')
+        result = _gate(project_dir, tmp_path, [_commitment(
+            subject='tarrens-hollow', statement='The hollow had 300 people')], command='redraft')
+        assert result.committed
+        assert 'new-x1' in result.recheck and 'act1-sc01' not in result.recheck   # later only
+
+    def test_the_gate_lists_what_audit_said_it_would(self, project_dir, tmp_path):
+        """`audit --mark rejected` shows the scenes listed once the revision
+        passes (dependents and briefs naming the fact); the gate lists the
+        same ones. A real brief row, no stub."""
+        from storyforge import cmd_audit
+        rid = self._reject(project_dir, tmp_path)
+        path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(text.replace('new-x1|||||||', f'new-x1||||||{rid}|', 1))
+        promised = cmd_audit._reject_recheck(project_dir, ledger.load(project_dir), [rid])
+        assert 'new-x1' in promised[rid]['later']
+        gate.mark_pending(project_dir, SCENE, gate.REVISE_REJECTED, f'x [rejected: {rid}]')
+        result = _gate(project_dir, tmp_path, [_commitment(
+            subject='tarrens-hollow', statement='The hollow had 300 people')], command='redraft')
+        assert result.recheck == promised[rid]['later']
+        assert all(gate.pending(project_dir)[s]['command'] == gate.RECHECK
+                   for s in result.recheck)
+
+    def test_a_brief_scene_not_in_the_book_is_said(self, project_dir, tmp_path, monkeypatch):
+        rid = self._reject(project_dir, tmp_path)
+        monkeypatch.setattr(gate.audit, 'leaning_scenes', lambda p, ids: {rid: ['ghost-scene']})
+        gate.mark_pending(project_dir, SCENE, gate.REVISE_REJECTED, f'x [rejected: {rid}]')
+        result = _gate(project_dir, tmp_path, [_commitment(
+            subject='tarrens-hollow', statement='The hollow had 300 people')], command='redraft')
+        assert result.committed
+        assert any(x.startswith('ghost-scene (') and 'not in scenes.csv' in x
+                   for x in result.not_rechecked)
+
+    def test_a_bad_pending_file_stops_before_the_model_calls(self, project_dir, tmp_path):
+        """It used to be read after the check and taken as empty, losing a
+        rejection's re-check (#474 review)."""
+        self._reject(project_dir, tmp_path)
+        before = ledger.load(project_dir)
+        os.makedirs(os.path.join(project_dir, 'working'), exist_ok=True)
+        with open(os.path.join(project_dir, gate.PENDING_PATH), 'w') as f:
+            f.write('not|the|header\n')
+        with patch('storyforge.api._api_request', side_effect=AssertionError('called')):
+            with pytest.raises(GateError, match='header'):
+                gate_scene(project_dir, SCENE, command='redraft',
+                           log_dir=str(tmp_path / 'logs'), extract_model='m', check_model='m')
+        assert ledger.load(project_dir) == before
 
     def test_a_failed_check_keeps_a_revise_row_and_its_ids(self, project_dir):
         gate.mark_pending(project_dir, SCENE, gate.REVISE_REJECTED, 'x [rejected: a]')

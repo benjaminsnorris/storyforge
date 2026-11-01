@@ -578,8 +578,9 @@ def mark(rows: list[dict[str, str]], ids: list[str], verdict: str, *,
 
 def leaning_scenes(project_dir: str, ids: list[str]) -> dict[str, list[str]]:
     """fact id → scenes whose brief names it in knowledge_in/out or
-    physical_state_in/out. What a rejected fact's scenes are until Phase 4's
-    dependency graph (`depends_on`) exists."""
+    physical_state_in/out: the scenes a brief ties to the fact. The reject
+    flow (`cmd_audit`) and the gate, after a rejected fact's revision, list
+    them with `ledger.dependents`."""
     _, briefs = _read(project_dir, 'scene-briefs.csv')
     wanted = set(ids)
     out: dict[str, list[str]] = {i: [] for i in ids}

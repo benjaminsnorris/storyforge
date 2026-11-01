@@ -182,8 +182,11 @@ class TestMark:
         result = _json(capsys, '--mark', 'rejected', 'backstory')
         info = result['recheck']['backstory']
         assert not info['revise'] and info['scene'] == ''
-        assert info['recheck'] == ['act2-sc01']
+        # every scene with a Kael fact in any type or naming Kael (#474):
+        # act1-sc01's registry facts name him, new-x1 has his cloak
+        assert info['recheck'] == ['act1-sc01', 'new-x1', 'act2-sc01']
         from storyforge import gate
+        assert set(gate.pending(project)) == {'act1-sc01', 'new-x1', 'act2-sc01'}
         assert gate.pending(project)['act2-sc01']['command'] == gate.RECHECK
 
     def test_a_dry_run_lists_nothing_pending(self, project, capsys):
@@ -198,10 +201,33 @@ class TestMark:
             _fact('later-trait', 'act2-sc01', 'trait', 'kael-maren', 'fixed')], command='test')
         gate.mark_pending(project, 'act2-sc01', 'draft', 'its own problem')
         result = _json(capsys, '--mark', 'rejected', 'backstory')
-        assert result['recheck']['backstory']['recheck'] == []
+        assert result['recheck']['backstory']['recheck'] == ['act1-sc01', 'new-x1']
         assert 'act2-sc01 (already waiting on the gate: draft)' in \
             result['recheck']['backstory']['not_listed']
         assert gate.pending(project)['act2-sc01']['reason'] == 'its own problem'
+
+    def test_a_dependent_found_only_by_a_registry_alias_is_listed(self, project, capsys):
+        """`_reject_recheck` passes the registry names (#474): "Hayle" is an
+        alias of dorren-hayle; nothing else ties the later fact to it."""
+        ledger.save(project, ledger.load(project) + [
+            _fact('dorren-past', '', 'physical', 'dorren-hayle'),
+            _fact('seen', 'act2-sc01', 'knowledge', 'tessa-merrin',
+                  statement='Tessa saw Hayle limp')], command='test')
+        result = _json(capsys, '--mark', 'rejected', 'dorren-past')
+        assert 'act2-sc01' in result['recheck']['dorren-past']['recheck']
+
+    def test_a_brief_scene_not_in_the_book_is_said(self, project, capsys, monkeypatch):
+        monkeypatch.setattr(audit, 'leaning_scenes', lambda p, ids: {'backstory': ['ghost']})
+        result = _json(capsys, '--mark', 'rejected', 'backstory')
+        assert any(n.startswith('ghost (') and 'not in scenes.csv' in n
+                   for n in result['recheck']['backstory']['not_listed'])
+
+    def test_a_missing_registry_is_warned(self, project, capsys):
+        import os
+        os.remove(os.path.join(project, 'reference', 'locations.csv'))
+        cmd_audit.main(['--mark', 'rejected', 'backstory'])
+        out = capsys.readouterr().out
+        assert 'matched on fewer names' in out and 'locations.csv' in out
 
     def test_a_second_rejection_in_a_scene_adds_its_id(self, project, capsys):
         from storyforge import gate

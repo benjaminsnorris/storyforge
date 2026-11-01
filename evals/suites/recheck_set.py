@@ -77,8 +77,7 @@ def run(ctx):
             hits[verdict['verdict']] += hit
             unrelated_cases += bool(found.unrelated)
             extra = ''.join(f'; {label}: {"; ".join(vals)}' for label, vals in (
-                ('unrelated', found.unrelated), ('brief-only, not re-checked', found.brief_only),
-                ('not listed', found.not_listed)) if vals)
+                ('unrelated', found.unrelated), ('not listed', found.not_listed)) if vals)
             notes.append(f'{where}: {verdict["verdict"]} {";".join(verdict["ids"])}, '
                          f'{"HIT" if hit else "MISS"}, set {len(found.scenes)}{extra}')
     measured = sum(verdicts.values())
@@ -107,7 +106,7 @@ def run(ctx):
         notes=[f'excluded {len(ids)}: {reason}' for reason, ids in sorted(excluded.items())]
         + notes
         + ['recall: of the cases judged captured, the share whose re-check set holds a '
-           'contradicting scene (the scenes the reject flow lists now, or the dependents its '
+           'contradicting scene (the scenes the reject flow lists now, or the ones its '
            'revision lists). Commitments exist only for the extracted subset (each case\'s '
            'establishing and contradicting scenes and up to 2 controls), and phase 4 is '
            'offered the subset\'s facts only, so set_fraction_mean is a floor; '
