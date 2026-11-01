@@ -32,15 +32,21 @@ def _no_git(monkeypatch):
     return commits
 
 
+#: what the stubbed gate was given as each scene's prose before the pass
+BEFORES: dict = {}
+
+
 def _stub_gate(monkeypatch, fails=(), recheck=None):
     """`_gate_drafted_scene` passes every scene but `fails` (which it lists
     pending, as the real one does). `recheck(project_dir, skip)` runs as the
     re-check and returns its `gate.Recheck` (default: nothing pending).
     Returns the (scene, command) calls and the re-check skip sets."""
     gated, skips = [], []
+    BEFORES.clear()
 
-    def fake(pd, sid, scene_file, command, log_dir):
+    def fake(pd, sid, scene_file, command, log_dir, before=None):
         gated.append((sid, command))
+        BEFORES[sid] = before
         if sid in fails:
             return False, cmd_write._pend(pd, sid, command, 'a contradiction')
         return True, ''
@@ -65,6 +71,15 @@ def _gate_pass(project_dir, ids):
 
 class TestGatePassScenes:
 
+    def test_every_scene_gets_the_passs_one_baseline(self, project_dir, monkeypatch):
+        _scenes(project_dir, 'act1-sc01', 'act1-sc02')
+        _stub_gate(monkeypatch)
+        snap = gate.Snapshot(scenes={'act1-sc01': 'old one'})
+        cmd_revise._gate_pass_scenes(project_dir, ['act1-sc01', 'act1-sc02'], 'polish',
+                                     str(project_dir), before=snap)
+        assert set(BEFORES) == {'act1-sc01', 'act1-sc02'}
+        assert all(b is snap for b in BEFORES.values())
+
     def test_each_scene_is_gated_in_reading_order_as_revise(self, project_dir, monkeypatch):
         _scenes(project_dir, 'act1-sc01', 'act1-sc02', 'act2-sc01')
         gated, skips = _stub_gate(monkeypatch)
@@ -81,7 +96,7 @@ class TestGatePassScenes:
         _scenes(project_dir, 'act1-sc01', 'act1-sc02')
         seen = []
 
-        def fake(pd, sid, *a):
+        def fake(pd, sid, *a, **k):
             seen.append(sorted(gate.pending(pd)))
             raise KeyboardInterrupt
         monkeypatch.setattr(cmd_write, '_gate_drafted_scene', fake)
@@ -175,7 +190,7 @@ class TestMarkers:
             f.write(f'Revised prose.\n\n{self.MARKER}\n')
         monkeypatch.setattr('storyforge.illustrations.preserve_markers', restore)
 
-        def fix_drops_marker(pd, sid, scene_file, command, log_dir):
+        def fix_drops_marker(pd, sid, scene_file, command, log_dir, before=None):
             with open(scene_file) as f:
                 text = f.read()
             with open(scene_file, 'w') as f:
@@ -280,6 +295,21 @@ class TestMainPassLoopIsGated:
         assert gated == [('act1-sc01', 'revise'), ('act1-sc02', 'revise')]
         assert _read_csv_plan(plan_file)[0]['status'] == 'completed'
 
+    def test_the_gate_gets_each_scene_as_it_was_before_the_pass(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """2026-11-01: a contradiction already in the scene doesn't stop a pass."""
+        _run_pass_setup(project_dir, monkeypatch, 'craft')
+        old = {}
+        for sid in ('act1-sc01', 'act1-sc02'):
+            with open(os.path.join(project_dir, 'scenes', f'{sid}.md')) as f:
+                old[sid] = f.read()
+        mock_api.set_response('=== SCENE: act1-sc01 === ...')
+        self._run(project_dir, monkeypatch)
+        assert set(BEFORES) == set(old)
+        snaps = list(BEFORES.values())
+        assert snaps[0] is snaps[1]   # one baseline, taken before the pass
+        assert {sid: snaps[0].scenes[sid] for sid in old} == old
+
     def test_a_scene_the_gate_fails_stops_the_session_after_committing(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
         plan_file = _run_pass_setup(project_dir, monkeypatch, 'craft')
@@ -379,8 +409,14 @@ class TestInteractivePass:
 
     def test_the_scenes_the_session_rewrote_are_gated(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        with open(os.path.join(project_dir, 'scenes', 'act1-sc02.md')) as f:
+            old = f.read()
         gated, _ = self._run(project_dir, monkeypatch, ['act1-sc02'])
         assert gated == [('act1-sc02', 'revise')]
+        # #480's review: the baseline is the scene before the session wrote it
+        with open(os.path.join(project_dir, 'scenes', 'act1-sc02.md')) as f:
+            assert f.read() != old
+        assert BEFORES['act1-sc02'].scenes['act1-sc02'] == old
 
     def test_when_the_session_committed_the_gates_work_gets_its_own_commit(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
@@ -404,6 +440,14 @@ class TestPolishLoopPassIsGated:
         rows, _, _ = self._run(project_dir, monkeypatch)
         assert gated == [('act1-sc01', 'revise')]
         assert rows[0]['status'] == 'completed'
+
+    def test_the_gate_gets_the_scene_as_it_was_before_the_pass(self, project_dir, monkeypatch):
+        with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md')) as f:
+            old = f.read()
+        _stub_gate(monkeypatch)
+        self._run(project_dir, monkeypatch)
+        assert BEFORES['act1-sc01'].scenes['act1-sc01'] == old
+        assert 'The rain kept on.' not in old
 
     def test_a_scene_the_gate_fails_stops_the_loop_after_committing(
             self, project_dir, monkeypatch, capsys):

@@ -733,3 +733,329 @@ def test_a_calendar_finding_names_the_calendar_in_the_fix_prompt(project_dir, tm
     assert not result.passed and result.check.unverified == []
     line = next(x for x in gate.problems_to_fix(result) if 'TIM contradiction' in x)
     assert 'but the calendar (scenes.csv) establishes "act1-sc01: day 1, morning"' in line
+
+
+class TestInheritedAndPlanConflicts:
+    """2026-11-01: E8's 14 "false alarms" were real. Six findings were
+    already in the scene before the pass, and some came from the brief's
+    own words. The first kind is reported and doesn't block; the second
+    blocks and goes to the author, not the fix."""
+
+    def test_a_contradiction_already_in_the_book_does_not_block(self, project_dir, tmp_path):
+        snap = _snap(project_dir, f'Old prose. The map said {HERE}, plainly.')
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+                       command='revise', before=snap)
+        assert result.passed and result.committed
+        assert [f.code for f in result.inherited] == ['TIM'] and result.findings == []
+        lines = gate.report_lines(result)
+        assert any(x.startswith('ALREADY IN THE SCENE') and 'TIM' in x for x in lines)
+        assert gate.blocking_lines(lines) == []
+        assert gate.problems_to_fix(result) == []
+
+    def test_without_a_baseline_it_still_blocks(self, project_dir, tmp_path):
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()])
+        assert not result.passed and result.inherited == []
+
+    def test_one_the_pass_wrote_still_blocks(self, project_dir, tmp_path):
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+                       command='revise', before=_snap(project_dir, 'Different words entirely.'))
+        assert not result.passed and result.inherited == []
+
+    def test_a_broken_promise_is_never_inherited(self, project_dir, tmp_path):
+        promise = {**_contradiction(), 'kind': 'broken_promise', 'code': 'PRM'}
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[promise],
+                       command='revise', before=_snap(project_dir, HERE))
+        assert not result.passed and result.inherited == []
+
+    def test_a_contradiction_in_the_briefs_own_words_is_a_plan_conflict(
+            self, project_dir, tmp_path):
+        quote = 'It was there forty years ago. It isn\'t there now.'   # act1-sc02's key_dialogue
+        finding = {**_contradiction(), 'scene_quote': quote}
+        with open(os.path.join(project_dir, 'scenes', f'{SCENE}.md'), 'a') as f:
+            f.write(f'\n\n"{quote} There is no note."\n')
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[finding])
+        assert not result.passed
+        assert [f.scene_quote for f in result.plan_conflicts] == [quote]
+        assert gate.problems_to_fix(result) == []
+        line = next(x for x in gate.report_lines(result) if 'TIM' in x)
+        assert line.startswith('PLAN CONFLICT') and 'fix the brief or act1-sc01' in line
+        assert gate.blocking_lines([line]) == [line]
+
+    def test_inherited_wins_over_plan_conflict(self, project_dir, tmp_path):
+        quote = 'It was there forty years ago.'
+        finding = {**_contradiction(), 'scene_quote': quote}
+        with open(os.path.join(project_dir, 'scenes', f'{SCENE}.md'), 'a') as f:
+            f.write(f'\n\n"{quote}"\n')
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[finding],
+                       command='revise', before=_snap(project_dir, f'"{quote}"'))
+        assert result.passed and result.plan_conflicts == [] and len(result.inherited) == 1
+
+    def test_a_short_brief_phrase_is_not_a_source(self, project_dir):
+        _set_dialogue(project_dir, '"No."; "It was there forty years ago."')
+        assert gate._brief_phrases(project_dir, SCENE) == ['It was there forty years ago.']
+
+
+def _snap(project_dir, old_scene=None):
+    """The book as it is (`gate.snapshot`), with SCENE's prose before the
+    pass set to `old_scene` (None: as on disk)."""
+    snap = gate.snapshot(project_dir)
+    if old_scene is not None:
+        snap.scenes[SCENE] = old_scene
+    return snap
+
+
+def _set_dialogue(project_dir, value):
+    import csv
+    path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    with open(path, newline='') as f:
+        rows = list(csv.DictReader(f, delimiter='|'))
+    for r in rows:
+        if r['id'] == SCENE:
+            r['key_dialogue'] = value
+    with open(path, 'w', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0]), delimiter='|', lineterminator='\n')
+        w.writeheader()
+        w.writerows(rows)
+
+
+class TestReview480:
+    """#480's review: what may count as inherited, and what happens to it."""
+
+    def test_a_scene_waiting_on_the_gate_is_no_baseline(self, project_dir, tmp_path):
+        """CR-1/SF-1: a retry that keeps the error the gate failed must not
+        pass it as inherited."""
+        gate.mark_pending(project_dir, SCENE, 'revise', '1 problem(s) after one fix: TIM')
+        snap = gate.snapshot(project_dir)
+        assert SCENE not in snap.scenes and 'waiting on the gate' in snap.left_out[SCENE]
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+                       command='revise', before=snap)
+        assert not result.passed and result.inherited == []
+
+    def test_an_unreadable_pending_list_trusts_no_scene(self, project_dir):
+        path = os.path.join(project_dir, gate.PENDING_PATH)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            f.write('bad header\n')
+        snap = gate.snapshot(project_dir)
+        assert snap.scenes == {} and all('unreadable' in v for v in snap.left_out.values())
+
+    def test_a_scene_that_is_not_utf8_is_left_out_not_a_crash(self, project_dir):
+        """SF-6: one cp1252 scene no longer stops every pass."""
+        with open(os.path.join(project_dir, 'scenes', 'act2-sc01.md'), 'wb') as f:
+            f.write('caf\xe9'.encode('cp1252'))
+        snap = gate.snapshot(project_dir)
+        assert 'act2-sc01' not in snap.scenes and 'UnicodeDecodeError' in snap.left_out['act2-sc01']
+
+    def test_a_changed_established_scene_makes_it_new(self, project_dir, tmp_path):
+        """CR-3: the scene's words are old, but the other side changed in
+        this run, so the contradiction is new."""
+        snap = _snap(project_dir, HERE)
+        snap.scenes['act1-sc01'] = 'An earlier version of the established scene.'
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+                       command='revise', before=snap)
+        assert not result.passed and result.inherited == []
+
+    def test_a_changed_reference_file_makes_it_new(self, project_dir, tmp_path):
+        snap = _snap(project_dir, HERE)
+        finding = {**_contradiction(), 'established_scene': 'scenes.csv',
+                   'established_quote': 'act1-sc01: day 1, morning'}
+        snap.files['scenes.csv'] = 'not the current hash'
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[finding],
+                       command='revise', before=snap)
+        assert result.inherited == []
+
+    def test_an_unchanged_reference_file_keeps_it_inherited(self, project_dir, tmp_path):
+        finding = {**_contradiction(), 'established_scene': 'scenes.csv',
+                   'established_quote': 'act1-sc01: day 1, morning'}
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[finding],
+                       command='revise', before=_snap(project_dir, HERE))
+        assert len(result.inherited) == 1
+
+    def test_one_against_the_ledger_is_never_inherited(self, project_dir, tmp_path):
+        finding = {**_contradiction(), 'established_scene': ''}
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[finding],
+                       command='revise', before=_snap(project_dir, HERE))
+        assert result.inherited == []
+
+    def test_the_commitment_stating_it_is_held_back_and_reported(self, project_dir, tmp_path):
+        """CR-4/SF-4: the ledger never records a fact the check showed
+        contradicts the book."""
+        other = _commitment(statement='The vellum was new', quote='She returned to the new map')
+        result = _gate(project_dir, tmp_path, [_commitment(), other],
+                       findings=[_contradiction()], command='revise',
+                       before=_snap(project_dir, HERE))
+        assert result.committed
+        mine = [r['statement'] for r in ledger.load(project_dir)
+                if r['scene_id'] == SCENE and ledger.is_commitment(r)]
+        assert mine == ['The vellum was new']
+        assert [st for st, _ in result.held_back] == ["Tarren's Hollow had 412 people"]
+        assert any(x.startswith('NOTE (not recorded: states a contradiction')
+                   for x in gate.report_lines(result))
+
+    def test_it_is_kept_in_the_reported_file_until_the_scene_is_clean(self, project_dir,
+                                                                       tmp_path):
+        """SF-2: not only in the log."""
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+              command='revise', before=_snap(project_dir, HERE))
+        rows = gate.reported(project_dir)[SCENE]
+        assert [(r['command'], r['source'], r['quote']) for r in rows] == [
+            ('revise', 'act1-sc01', HERE)]
+        _gate(project_dir, tmp_path, [_commitment()], command='revise')
+        assert gate.reported(project_dir) == {}
+        assert not os.path.exists(os.path.join(project_dir, gate.REPORTED_PATH))
+
+    def test_a_recheck_does_not_fail_on_one_already_reported(self, project_dir, tmp_path):
+        """SF-3: a later re-check (no baseline) finds the same error and
+        doesn't blame the scene that triggered it."""
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+              command='revise', before=_snap(project_dir, HERE))
+        again = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+                      command='recheck')
+        assert again.passed and len(again.inherited) == 1
+
+    def test_a_different_error_in_a_reported_scene_still_blocks(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+              command='revise', before=_snap(project_dir, HERE))
+        other = {**_contradiction(), 'established_scene': 'act2-sc01'}
+        again = _gate(project_dir, tmp_path, [_commitment()], findings=[other],
+                      command='recheck')
+        assert not again.passed
+
+    def test_a_short_quote_is_never_inherited(self, project_dir, tmp_path):
+        """CR-2: "four hundred" is in any old prose about the village."""
+        finding = {**_contradiction(), 'scene_quote': 'four hundred'}
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[finding],
+                       command='revise', before=_snap(project_dir, HERE))
+        assert result.inherited == []
+
+    def test_a_short_quote_inside_a_brief_line_is_not_a_plan_conflict(self, project_dir,
+                                                                       tmp_path):
+        """CR-5: 'forty years' is in the scripted line, but the error is the
+        prose's to fix."""
+        assert not gate._is_plan_conflict('forty years', [
+            "It was there forty years ago. It isn't there now. There is no note."])
+
+    def test_a_short_brief_line_inside_a_long_quote_is_not_a_plan_conflict(self):
+        """SF-8: the error ("three moons") is outside the scripted words."""
+        assert not gate._is_plan_conflict(
+            '"I\'ll see you at dawn," she said, as the three moons rose over the ridge',
+            ["I'll see you at dawn"])
+        assert gate._is_plan_conflict('"I\'ll see you at dawn," she said',
+                                      ["I'll see you at dawn"])
+
+    def test_curly_quotes_count_as_scripted(self, project_dir):
+        _set_dialogue(project_dir, 'She says \u201cWe leave before the bells.\u201d')
+        assert gate._brief_phrases(project_dir, SCENE) == ['We leave before the bells.']
+
+    def test_unverified_findings_are_never_inherited(self, project_dir, tmp_path):
+        """Their quotes didn't hold up, so what they quote can't be trusted
+        to match the old prose: they block and go to the fix."""
+        bad = {**_contradiction(), 'scene_quote': HERE + ' and more that is not in it'}
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[bad],
+                       command='revise', before=_snap(project_dir, HERE))
+        assert not result.passed and result.inherited == [] and result.unverified
+
+
+class TestQuotedIn:
+    @pytest.mark.parametrize('quote, text, expected', [
+        ('Ten days to the pass.', 'He said: "ten  days to the pass" and left.', True),
+        ('Ten days.', 'He said: "ten days" and left.', False),          # too short
+        ('in the', 'often in the end', False),
+        ('On Day 12 there... the junction failed', 'On Day 12 there, the junction failed', True),
+        ('the junction failed... On Day 12 there', 'On Day 12 there, the junction failed',
+         False),                                                       # out of order
+        ('Sam... was twelve', 'Sam ran. She was twelve.', False),       # a part too short
+        ('', 'anything', False),
+    ])
+    def test_matching(self, quote, text, expected):
+        assert gate._quoted_in(quote, text) is expected
+
+
+class TestGateAndFixRoutes:
+    def _result(self, *, inherited=(), conflict=False, other=False):
+        from storyforge.checker import CheckResult, Finding
+        f = Finding('contradiction', 'TIM', 'q', 'act1-sc01', 'e', '', 'why')
+        g = Finding('contradiction', 'TRT', 'r', 'act1-sc01', 'e', '', 'why')
+        findings = ([f] if conflict else []) + ([g] if other else []) + list(inherited)
+        r = gate.GateResult(SCENE, check=CheckResult(SCENE, findings=findings))
+        r.inherited = list(inherited)
+        r.plan_conflicts = [f] if conflict else []
+        return r
+
+    def test_only_plan_conflicts_are_neither_fixed_nor_regated(self, monkeypatch, tmp_path):
+        calls = []
+        first = self._result(conflict=True)
+        monkeypatch.setattr(gate, 'gate_scene', lambda *a, **k: calls.append(k['before']) or first)
+        monkeypatch.setattr(gate, 'fix_scene', lambda *a, **k: pytest.fail('fixed'))
+        out = gate.gate_and_fix('p', SCENE, command='revise', prose='x',
+                                log_dir=str(tmp_path), before='old')
+        assert out.result is first and not out.fixed and calls == ['old']
+
+    def test_before_reaches_the_regate(self, monkeypatch, tmp_path):
+        calls = []
+        runs = iter([self._result(other=True), self._result()])
+        monkeypatch.setattr(gate, 'gate_scene',
+                            lambda *a, **k: calls.append(k['before']) or next(runs))
+        monkeypatch.setattr(gate, 'fix_scene', lambda *a, **k: 'y')
+        out = gate.gate_and_fix('p', SCENE, command='revise', prose='x',
+                                log_dir=str(tmp_path), before='old')
+        assert out.fixed and calls == ['old', 'old']
+
+
+def test_an_unquoted_action_is_not_the_briefs_words(project_dir):
+    """act1-sc02's key_actions ("Discovers missing village") paraphrase; a
+    scene saying so isn't in conflict with the plan."""
+    assert all('village' not in p for p in gate._brief_phrases(project_dir, SCENE))
+
+
+class TestFixConverges:
+    """2026-11-01: in all 14 of E8's failed clean replays the one fix
+    cleared the first findings and made new ones (Tam's age seven → nine,
+    Sera Holdt renamed Wenna Marsh, a scripted line changed)."""
+
+    def test_the_rules_say_take_the_books_value_or_drop_the_detail(self):
+        prompt = gate.build_fix_prompt('s', 'Prose.', ['TIM contradiction: ...'])
+        assert "Take the book's value, never a new one." in prompt
+        assert 'remove the detail or make it vague' in prompt
+        assert "don't rename a character" in prompt
+        assert 'Lines the brief scripts' not in prompt   # none to keep
+
+    def test_the_briefs_lines_are_listed_to_keep(self):
+        prompt = gate.build_fix_prompt('s', 'Prose.', ['x'], ['Vasht. Six days ago.'])
+        assert '## Lines the brief scripts' in prompt
+        assert '- "Vasht. Six days ago."' in prompt
+
+    def test_gate_and_fix_protects_the_brief_lines_the_scene_has(self, project_dir, monkeypatch,
+                                                                 tmp_path):
+        from storyforge.checker import CheckResult, Finding
+        bad = Finding('contradiction', 'TIM', 'q', 'act1-sc01', 'e', '', 'why')
+        first = gate.GateResult(SCENE, check=CheckResult(SCENE, findings=[bad]))
+        monkeypatch.setattr(gate, 'gate_scene', lambda *a, **k: first)
+        seen = []
+        monkeypatch.setattr(gate, 'fix_scene', lambda *a, **k: seen.append(k['protected']) or a[1])
+        prose = '"It was there forty years ago. It isn\'t there now. There is no note."'
+        gate.gate_and_fix(project_dir, SCENE, command='revise', prose=prose,
+                          log_dir=str(tmp_path))
+        assert seen == [["It was there forty years ago. It isn't there now. There is no note."]]
+        seen.clear()   # a line the scene doesn't have isn't sent: nothing to keep
+        gate.gate_and_fix(project_dir, SCENE, command='revise', prose='Other words.',
+                          log_dir=str(tmp_path))
+        assert seen == [[]]
+
+
+def test_a_recheck_is_gated_with_no_baseline(project_dir, tmp_path, monkeypatch):
+    """#480's review: a re-check runs because another scene changed, not this
+    one's words; a baseline would make every finding inherited."""
+    gate.mark_pending(project_dir, SCENE, 'recheck', 'x')
+    kwargs = []
+
+    def fake(pd, sid, **k):
+        kwargs.append(k)
+        gate.clear_pending(pd, sid)
+        r = gate.GateResult(sid, check=None)
+        r.committed = True
+        return r
+    monkeypatch.setattr(gate, 'gate_scene', fake)
+    monkeypatch.setattr(gate, '_writer', lambda pd, sid: 'draft')
+    gate.recheck_pending(project_dir, log_dir=str(tmp_path))
+    assert kwargs and all(k.get('before') is None for k in kwargs)

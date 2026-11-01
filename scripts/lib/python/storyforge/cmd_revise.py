@@ -295,6 +295,8 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
     written = 0
 
     scene_ids = _reading_order(project_dir, scene_ids)
+    from storyforge import gate
+    baseline = gate.snapshot(project_dir)   # the book before this run
     for i, sid in enumerate(scene_ids, 1):
         log(f'    [{i}/{len(scene_ids)}] Redrafting: {sid}')
         stop = _leaning(project_dir, sid)
@@ -332,7 +334,7 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
             break
         else:
             written += 1
-            why = _gate_redraft(project_dir, sid, scene_file, log_dir)
+            why = _gate_redraft(project_dir, sid, scene_file, log_dir, before=baseline)
             if why:
                 failed += _stopped_at(sid, why, scene_ids[i:])
                 break
@@ -358,17 +360,19 @@ def _recheck_after(project_dir: str, log_dir: str, skip: set[str], spent: float)
     return run.spent if run is not None else spent
 
 
-def _gate_redraft(project_dir: str, scene_id: str, scene_file: str, log_dir: str) -> str:
+def _gate_redraft(project_dir: str, scene_id: str, scene_file: str, log_dir: str,
+                  before=None) -> str:
     """Gate the redraft just written to `scene_file` as `write` gates a
     draft (`cmd_write._gate_drafted_scene`: fix once, re-check; the fixed
     prose is written back, the scene's facts replace its earlier ones in the
     ledger on a pass, and the later scenes depending on what it changed are
     listed for a re-check, which the caller runs). Returns '' when it
     passed, else why not; the scene is then listed in `gate.pending` with
-    its prose kept."""
+    its prose kept. `before` is the book before the run (`gate.snapshot`):
+    a contradiction already in it is reported, not blocking."""
     from storyforge import cmd_write
     passed, why = cmd_write._gate_drafted_scene(project_dir, scene_id, scene_file,
-                                                'redraft', log_dir)
+                                                'redraft', log_dir, before=before)
     return '' if passed else why
 
 
@@ -432,13 +436,15 @@ def _exit_if_pass_blocked(project_dir: str, targets: str) -> None:
 
 
 def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
-                      log_dir: str) -> list[str]:
+                      log_dir: str, before=None) -> list[str]:
     """Gate each scene a prose pass rewrote, in reading order, as revise's
     redrafts are (Phase 4 §5, `docs/plans/2026-10-31-phase4-safe-revision-design.md`):
     fix once and re-check, the fixed prose written back, the scene's facts
     replacing its earlier ones on a pass, then the re-check of the later
     scenes depending on what it changed (the rest of this pass's scenes are
-    gated by this run, so they are skipped there).
+    gated by this run, so they are skipped there). `before` is the book
+    before the pass (`gate.snapshot`): a contradiction already there is
+    reported, not blocking.
 
     First every rewritten scene is listed pending ("not gated yet") and the
     prose committed, so an interrupted run leaves each ungated scene listed
@@ -481,7 +487,7 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
         with open(scene_file, encoding='utf-8') as f:
             original = f.read()
         passed, why = cmd_write._gate_drafted_scene(project_dir, sid, scene_file, 'revise',
-                                                    log_dir)
+                                                    log_dir, before=before)
         _restore_gate_markers(project_dir, sid, scene_file, original)
         if passed:
             try:   # the gate's commit cleared it; a stub or a failed update may not have
@@ -1720,6 +1726,8 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     log_dir = os.path.join(project_dir, 'working', 'logs')
     spent = 0.0   # this run's re-checks, forecast
     scene_ids = _reading_order(project_dir, scene_ids)
+    from storyforge import gate
+    baseline = gate.snapshot(project_dir)   # the book before this run
     for i, scene_id in enumerate(scene_ids, 1):
         scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
         if not os.path.isfile(scene_file):
@@ -1791,7 +1799,7 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
             f.write(preserved['text'])
         count += 1
         log(f'  Re-drafted {scene_id}')
-        why = _gate_redraft(project_dir, scene_id, scene_file, log_dir)
+        why = _gate_redraft(project_dir, scene_id, scene_file, log_dir, before=baseline)
         _restore_gate_markers(project_dir, scene_id, scene_file, original_prose,
                               preserved['lost'])
         if why:
@@ -2140,6 +2148,8 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
     if gated:
         _exit_if_pass_blocked(project_dir, targets_field)
 
+    from storyforge import gate
+    gate_baseline = gate.snapshot(project_dir)   # prose written at any level is gated
     log(f'  Invoking API (model: {pass_model})...')
     try:
         invoke_to_file(prompt, pass_model, step_log,
@@ -2165,7 +2175,8 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
 
     # Phase 4 §5: each scene it wrote goes through the gate, in reading order
     # (at any coaching level: prose written is prose gated)
-    gate_failures = _gate_pass_scenes(project_dir, _written, pass_name, log_dir)
+    gate_failures = _gate_pass_scenes(project_dir, _written, pass_name, log_dir,
+                                      before=gate_baseline)
 
     # Update word counts
     _update_word_counts_from_dir(project_dir)
@@ -3100,6 +3111,9 @@ Rules:
         gated = fix_location not in ('structural', 'registry')
         if gated and effective_coaching == 'full':
             _exit_if_pass_blocked(project_dir, targets)
+        # the book before the pass: what its gate counts as already there
+        from storyforge import gate as _gate
+        gate_baseline = _gate.snapshot(project_dir) if gated else None
         rewritten: list[str] = []   # the scenes this pass rewrote, for the gate
 
         if args.interactive:
@@ -3212,7 +3226,8 @@ Rules:
 
         # Phase 4 §5: each scene it rewrote goes through the gate, in reading
         # order, then the re-check of the later scenes depending on it
-        gate_failures = (_gate_pass_scenes(project_dir, rewritten, pass_name, log_dir)
+        gate_failures = (_gate_pass_scenes(project_dir, rewritten, pass_name, log_dir,
+                                           before=gate_baseline)
                          if gated else [])
 
         # Update word counts

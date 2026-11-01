@@ -370,27 +370,72 @@ def redraft(project_dir: str, scene_id: str, gated: bool = True, rewrite: bool =
     prose = clean_scene_content(extract_single_scene(text) or text)
     if not gated:
         return prose
+    before = gate.snapshot(project_dir)   # as revise takes it, before the prose is written
     with open(os.path.join(project_dir, 'scenes', f'{scene_id}.md'), 'w',
               encoding='utf-8') as f:
         f.write(prose)
-    return gate_as_revise(project_dir, scene_id, 'redraft', prose)
+    return gate_as_revise(project_dir, scene_id, 'redraft', prose, before=before)
 
 
-def gate_as_revise(project_dir: str, scene_id: str, command: str, prose: str) -> str:
+#: Where `gate_as_revise` leaves what the gate's last run found, by kind
+#: (`gate_counts`), for the suite
+GATE_COUNTS = os.path.join('working', 'e8-gate-counts.json')
+#: `gate_counts`' keys, in report order
+GATE_COUNT_KEYS = ('new', 'plan_conflicts', 'extraction', 'inherited')
+
+
+def gate_counts(result) -> dict[str, int]:
+    """What a `gate.GateResult` found, by kind (`GATE_COUNT_KEYS`): `new`
+    (what the fix is for, `gate.problems_to_fix`: contradictions and broken
+    promises, verified or not, halts, unruled disputes, rejected facts
+    restated), `plan_conflicts` (the brief's own words contradict the
+    book), `extraction` (unresolved extraction problems, less the rejected
+    facts already in `new`) and `inherited` (in the book before the pass:
+    reported, not blocking)."""
+    from storyforge import gate
+    return {'new': len(gate.problems_to_fix(result)),
+            'plan_conflicts': len(result.plan_conflicts),
+            'extraction': sum(len(result.problems.get(k, [])) for k in gate.UNRESOLVED
+                              if k != 'rejected'),
+            'inherited': len(result.inherited)}
+
+
+def read_gate_counts(project_dir: str) -> dict[str, int] | None:
+    """`gate_counts` of the replay's last gate run, or None when it
+    didn't run or couldn't finish."""
+    path = os.path.join(project_dir, GATE_COUNTS)
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def gate_as_revise(project_dir: str, scene_id: str, command: str, prose: str,
+                   before=None) -> str:
     """Gate `prose` as write and revise do (`gate.gate_and_fix`: fix once,
     re-check) and return the prose they keep, passed or not. A scene the
     gate didn't pass, or couldn't finish, is listed in
     working/gate-pending.csv as they list it (the suite reads that list to
     tell a reintroduction the author is told about from one the gate
-    passed). Only `GateError` is caught: a bug errors the suite rather than
-    being judged as gated prose, and a cassette miss errors it anyway."""
+    passed), and what the gate's last run found is left at `GATE_COUNTS`.
+    `before` is the book before the pass (`gate.snapshot`), as revise
+    passes it. Only
+    `GateError` is caught: a bug errors the suite rather than being judged
+    as gated prose, and a cassette miss errors it anyway."""
     from storyforge import gate
+    counts_file = os.path.join(project_dir, GATE_COUNTS)
+    if os.path.isfile(counts_file):   # never an earlier run's counts
+        os.remove(counts_file)
     try:
         out = gate.gate_and_fix(project_dir, scene_id, command=command, prose=prose,
-                                log_dir=os.path.join(project_dir, 'working', 'logs', 'gate'))
+                                log_dir=os.path.join(project_dir, 'working', 'logs', 'gate'),
+                                before=before)
     except gate.GateError as e:
         gate.mark_pending(project_dir, scene_id, command, f'the gate could not finish: {e}')
         return prose
+    os.makedirs(os.path.dirname(counts_file), exist_ok=True)
+    with open(counts_file, 'w', encoding='utf-8') as f:
+        json.dump(gate_counts(out.result), f)
     if not out.result.passed:
         gate.mark_pending(project_dir, scene_id, command, 'the gate did not pass it')
     return out.prose
@@ -457,6 +502,8 @@ def revision_pass(project_dir: str, scene_id: str, row: dict) -> str:
     response = invoke(prompt, model, max_tokens=max_output_tokens(model),
                       label=f'e8 pass {name}', timeout=REVISION_TIMEOUT, system=system or None)
     scenes_dir = os.path.join(project_dir, 'scenes')
+    from storyforge import gate
+    baseline = gate.snapshot(project_dir)   # as revise takes it, before the pass writes
     before = _read(os.path.join(scenes_dir, f'{scene_id}.md'))
     extract_scenes_from_response(extract_text(response), scenes_dir)
     after = _read(os.path.join(scenes_dir, f'{scene_id}.md'))
@@ -464,7 +511,7 @@ def revision_pass(project_dir: str, scene_id: str, row: dict) -> str:
         raise RuntimeError(f'pass {name!r} returned no revision of {scene_id}')
     if get_coaching_level(project_dir) != 'full':
         return after
-    return gate_as_revise(project_dir, scene_id, 'revise', after)
+    return gate_as_revise(project_dir, scene_id, 'revise', after, before=baseline)
 
 
 class PassHalted(Exception):
