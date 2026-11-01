@@ -1,8 +1,30 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-11-01, at v1.123.0. **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and is met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-11-01, at v1.124.0. **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and is met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). The gate now fixes a failing scene up to twice (v1.124.0; see Latest). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
-## Latest: Phase 5, shrunk (2026-11-01)
+## Latest: a second fix round (2026-11-01)
+
+**v1.124.0.** #480 left 8 E8 scenes ending with new errors after the gate's one fix. A free replay of E8 recording each gated scene's first and last verdicts showed why: of 28 gated scenes, 8 passed first time, 10 after the fix, and 10 still failed. Most of the 10 had a fix that half-addressed its finding: He → She with "him" left (thornwall-026), "eight days" → "five", still off the calendar (governor-016), "four winters" → "two", still wrong (thornwall-029).
+
+**What changed:** `gate.gate_and_fix` fixes and re-gates while the scene fails, at most `FIX_ROUNDS` (2) times. The second fix is sent the first's problems and its edits (`FixRound`, `build_fix_prompt(earlier=)`): keep what an earlier edit fixed; where it put in a value that is still wrong, take the book's value or remove the detail instead of guessing again; where it changed only part of something, change the rest. `GatedScene.rounds` lists the fixes; write's pending reason says "after 2 fixes". Details: `gate`'s row in `docs/agent-reference.md`.
+
+| | before (#480, one fix) | two fixes |
+|---|---|---|
+| E8 gated scenes failing after the fixes (of 28) | 10 | 7 |
+| E8 clean replays the gate failed | 8 | **4** |
+| E8 errors per 10k words | 2.05 | 1.39 |
+| E8 reintroduced / passed by the gate (≤ 2) | 4 / 2 | 5 / 2 (the same two: shared-dark-040, thornwall-025) |
+| E4 scenes to the first gate failure | 2 | 9 |
+| E4 scenes still failing after the fixes (of 23) | — | 3 (8 fixed) |
+| E4 gate caught / missed / false alarm | 2 / 4 / 1 | 2 / 6 / 1 |
+| E4 CP10k passed scenes | 2.09 | 3.14 |
+
+One run each; E4's spread is wider than these changes (two recordings of one code path read 4.36 and 2.09), so read its row as "no worse", not as a change. In E8 the second round passed 3 scenes (governor-013, -018, -024) and finished what the first half-did in others (thornwall-026's remaining pronouns; thornwall-029's "two winters" made "a few winters"; governor-016's other counts). **The 7 that still fail are mostly stopped by a different finding elsewhere in the scene** that the earlier runs didn't raise (thornwall-029's journal handwriting; thornwall-026's saddlebag): the checker surfaces different things each run, so more rounds chase a moving target. One oscillated (thornwall-024: the second fix put back what the first removed, which the calendar contradicts). That is why the cap is 2, not more.
+- **Cost:** a second round is one fix and one gate run, only for a scene still failing after the first (10 of 28 in E8). Spend: $15.77 (`--mode auto`: E8 $6.07, E4 $9.70).
+
+**Next, in order (Ben, 2026-11-01):** E4 over 2–3 runs (its spread swamps every gate change so far); the calendar in the drafting prompt; a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost; the low-confidence halt; `characters.csv` `pronouns`. The checker's run-to-run variance (a different finding each run) is what now limits the fix, and may be worth its own look.
+
+## Phase 5, shrunk (2026-11-01)
 
 **v1.123.0.** Phase 5 as Ben shrank it: the export boundary and E7 in CI. The Storygild move stays deferred.
 
@@ -16,7 +38,7 @@ Last updated 2026-11-01, at v1.123.0. **Phase 3 is done** and **Phase 4 is done*
 - **A silent failure fixed on the way (the review).** An unreadable or non-UTF-8 CSV the dashboard reads gave an empty section (no briefs, and a clean brief-quality report), and publish sent it. It now raises `visualize.DashboardDataError`: the bundle's `dashboard_data` is null with a warning, publish stops, and `storyforge visualize` exits 1. Brief quality that can't be checked does the same in the bundle and in publish (visualize still warns). A ledger error in publish now reads as itself (run `storyforge migrate`), not "fix the CSV".
 - **`CLAUDE.md`** is 30 lines (the bug history moved to `docs/history.md` earlier), so the plan's "length down materially" is met.
 
-**Next, in order (Ben, 2026-11-01):** the smaller items: whether the fix should get a second round (8 E8 scenes still end with new errors after one); E4 over 2–3 runs; the calendar in the drafting prompt; a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost; the low-confidence halt; `characters.csv` `pronouns`. The Storygild move waits until the production code slows core changes or someone wants it separately.
+**Next, in order (Ben, 2026-11-01):** the smaller items: whether the fix should get a second round (8 E8 scenes still end with new errors after one; done in v1.124.0); E4 over 2–3 runs; the calendar in the drafting prompt; a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost; the low-confidence halt; `characters.csv` `pronouns`. The Storygild move waits until the production code slows core changes or someone wants it separately.
 
 ## What the gate stops on (2026-11-01, #480)
 
