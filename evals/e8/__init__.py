@@ -16,8 +16,9 @@ dropped silently. Holdout cases are excluded. Families:
   (the scene's prose a voice reference only, plan §3.4), the path
   ``storyforge write --force`` and ``revise``'s ``_redraft_from_briefs`` take,
   without their refusal fallback (E8 measures the requested model), then
-  their gate (``gate.gate_and_fix``: fix once, re-check); the prose judged is
-  what the gate leaves, passed or not, as both keep it. Their refusal of a
+  their gate (``gate.gate_and_fix``: fix and re-check up to
+  ``gate.FIX_ROUNDS`` times); the prose judged is what the gate leaves, passed
+  or not, as both keep it. Their refusal of a
   scene behind one waiting on the gate (``cmd_revise._leaning``,
   ``cmd_write._gate_blockers``) is not applied: a pre-pass tree has none. Their
   cut-off guard is not applied here: a refusal halts, a cut-off reply would
@@ -412,8 +413,8 @@ def read_gate_counts(project_dir: str) -> dict[str, int] | None:
 
 def gate_as_revise(project_dir: str, scene_id: str, command: str, prose: str,
                    before=None) -> str:
-    """Gate `prose` as write and revise do (`gate.gate_and_fix`: fix once,
-    re-check) and return the prose they keep, passed or not. A scene the
+    """Gate `prose` as write and revise do (`gate.gate_and_fix`: fix and re-check up to
+    ``gate.FIX_ROUNDS`` times) and return the prose they keep, passed or not. A scene the
     gate didn't pass, or couldn't finish, is listed in
     working/gate-pending.csv as they list it (the suite reads that list to
     tell a reintroduction the author is told about from one the gate
@@ -477,8 +478,8 @@ def _pass_block(row: dict) -> str:
 def revision_pass(project_dir: str, scene_id: str, row: dict) -> str:
     """Run one named prose pass the way ``cmd_revise.main`` does (without the
     refusal fallback) and, at ``full`` coaching, through its gate (Phase 4
-    §5, ``cmd_revise._gate_pass_scenes``: ``gate.gate_and_fix``, fix once,
-    re-check); return the new prose of ``scene_id``, what the gate leaves,
+    §5, ``cmd_revise._gate_pass_scenes``: ``gate.gate_and_fix``, fix and re-check up to
+    ``gate.FIX_ROUNDS`` times); return the new prose of ``scene_id``, what the gate leaves,
     passed or not, as revise keeps it. The re-check of later scenes only
     reports, as for redrafts."""
     from storyforge.api import extract_text, invoke, max_output_tokens, REVISION_TIMEOUT

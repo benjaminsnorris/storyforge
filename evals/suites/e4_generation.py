@@ -55,7 +55,7 @@ def run(ctx):
     gate_fixed = [s for s, g in gated.items() if g.fixed]
     if not parallel:
         notes.append(f'gate: {len(gated)} scene(s) gated, {len(gate_fixed)} fixed, '
-                     f'{len(gate_failed)} still failing after the fix (write would stop at '
+                     f'{len(gate_failed)} still failing after the fixes (write would stop at '
                      f'the first; E4 drafts on): {", ".join(gate_failed) or "none"}')
     for sid in gate_failed:
         notes += [f'  {sid}: {line[:200]}' for line in gate_lines(gated[sid].result)]

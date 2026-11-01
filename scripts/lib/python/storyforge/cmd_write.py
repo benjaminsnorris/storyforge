@@ -3,8 +3,8 @@
 Drafts scenes one at a time in reading order (rethink plan §3.3), each
 from its brief and the ledger as of that scene, and gates each before the
 next (plan §3.2, `storyforge.gate`): its facts are extracted and checked
-against the book and its brief, fixed once if needed, and committed to the
-ledger only when clean. A scene that still fails is kept, listed in
+against the book and its brief, fixed if needed (up to `gate.FIX_ROUNDS`
+times), and committed to the ledger only when clean. A scene that still fails is kept, listed in
 `working/gate-pending.csv`, and stops the run. A redraft that passes
 re-checks the later scenes depending on what it changed (Phase 4,
 `gate.recheck_pending`). Coaching levels coach and
@@ -370,8 +370,9 @@ def _log_blockers(blocking: list[str]) -> None:
 
 def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, command: str,
                         log_dir: str, before=None) -> tuple[bool, str]:
-    """Gate the scene just written to `scene_file` (fix once, re-check; plan
-    §3.2), writing the fixed prose back. Returns (passed, why not). A scene
+    """Gate the scene just written to `scene_file` (fix and re-check, up to
+    `gate.FIX_ROUNDS` times; plan §3.2), writing the fixed prose back. Returns
+    (passed, why not). A scene
     that doesn't pass, or that the gate couldn't finish, is listed in
     `gate.pending` with the first problems; its prose stays. On a pass, the
     later scenes whose facts depend on what it changed are listed for a
@@ -405,8 +406,11 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
     if out.fixed:
         with open(scene_file, 'w', encoding='utf-8') as f:
             f.write(out.prose)
-        log(f'  The gate fixed {len(gate.problems_to_fix(out.first))} problem(s) and re-checked'
-            + (f' ({len(out.rounds)} fix rounds).' if len(out.rounds) > 1 else '.'))
+    for n, r in enumerate(out.rounds, start=1):
+        log(f'  Fix round {n}: {len(r.problems)} problem(s) sent, {len(r.edits)} edit(s); '
+            f're-checked.')
+    for note in out.notes:
+        log(f'  NOTE: {note}')
     lines = gate.report_lines(out.result)
     for line in lines:
         log(f'  {line}')
@@ -419,10 +423,14 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
         return True, ''
     problems = gate.blocking_lines(lines)
     # plan conflicts alone aren't sent to the fix (`gate.gate_and_fix`)
+    fixes = 'one fix' if len(out.rounds) <= 1 else f'{len(out.rounds)} fixes'
+    left_to_author = out.result.plan_conflicts and not gate.problems_to_fix(out.result)
     tried = ('not fixed (plan conflicts: the author\'s)'
              if out.first.plan_conflicts and not gate.problems_to_fix(out.first)
-             else 'after one fix' if len(out.rounds) <= 1
-             else f'after {len(out.rounds)} fixes')
+             else f'after {fixes} (what is left is plan conflicts: the author\'s)'
+             if left_to_author else f'after {fixes}')
+    if out.notes:
+        tried += f' (a later fix was discarded: {len(out.notes)} note(s) in the log)'
     return False, _pend(project_dir, scene_id, command,
                         f'{len(problems)} problem(s) {tried}: '
                         + ' / '.join(problems[:3]) + ('; ...' if len(problems) > 3 else '')
@@ -930,8 +938,9 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
     safety.
 
     At coaching ``full`` the run is gated (plan §3.2-3.3; Ben, 2026-10-30):
-    each scene is gated after it is written (fix once, re-check), and the
-    loop stops, listing the rest as not attempted, at anything that would
+    each scene is gated after it is written (fix and re-check, up to
+    `gate.FIX_ROUNDS` times), and the loop stops, listing the rest as not
+    attempted, at anything that would
     leave a later scene drafted from a ledger missing an earlier one's facts:
     a bad reply (refused, cut off, unsafe, too short), a scene that doesn't
     pass the gate (committed for the author and listed in ``gate.pending``),
