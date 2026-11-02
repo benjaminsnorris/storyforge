@@ -21,9 +21,9 @@ For one scene's prose, `gate_scene` runs:
 3. **Check** the scene against the book and its brief (`checker.check_scene`):
    contradictions and broken promises, by code. `GATE_READINGS` (2)
    independent readings, their union: each reading misses real errors
-   another finds. Measured (E8, E4, 2026-11-01): fewer errors passed, not
-   fewer scenes stopped; a re-check after the fix still finds things
-   neither first reading did.
+   another finds. Measured (E8, E4, 2026-11-01): stricter, not more
+   convergent (a re-check after the fix still finds things neither first
+   reading did), and no gain yet in E4's errors committed.
 4. **Commit** only when nothing halted, extraction left nothing unresolved
    (`UNRESOLVED`: a quote not in the scene, a `supersedes` or `ends` that
    names nothing it can apply to), and the check found nothing, verified or
