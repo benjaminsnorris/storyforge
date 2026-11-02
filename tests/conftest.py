@@ -76,8 +76,24 @@ def _gate_passes_in_write(request, monkeypatch):
     monkeypatch.setattr(cmd_write, '_gate_drafted_scene', lambda *a, **k: (True, ''))
 
 
+@pytest.fixture(autouse=True)
+def _one_gate_reading(request, monkeypatch):
+    """The gate checks each scene `GATE_READINGS` times (its own copy,
+    `gate.GATE_READINGS`, which is what this patches). Tests of the gate's
+    logic queue one checker reply per check, so the gate takes one reading
+    here unless a test is marked `gate_readings` (the readings themselves
+    are tested in test_checker.py and test_gate.py).
+    `gate.RECHECK_COST_PER_SCENE` keeps its two-reading value."""
+    if request.node.get_closest_marker('gate_readings'):
+        return
+    import storyforge.gate as gate
+    monkeypatch.setattr(gate, 'GATE_READINGS', 1)
+
+
 def pytest_configure(config):
     config.addinivalue_line('markers', 'real_gate: run write\'s gate instead of the pass stub')
+    config.addinivalue_line('markers', 'gate_readings: the gate takes gate.GATE_READINGS '
+                                       'readings, not one')
 
 
 @pytest.fixture
