@@ -688,6 +688,37 @@ class TestMainDirect:
         assert len(commit_calls) >= 1
 
 
+class TestSourceFidelityInAFullRun:
+    """#477: a full run checks an adaptation's prose against its source, and
+    a project with no source block gets no such pass."""
+
+    def _run(self, mock_api, project_dir, monkeypatch, calls):
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        mock_api.set_response_fn(_every_part(TestMainDirect()._scoring_response()))
+        monkeypatch.setattr('storyforge.source_fidelity.run',
+                            lambda *a, **k: calls.append((a, k)) or ([], {}, {}))
+        main(['--direct', '--scenes', 'act1-sc01'])
+
+    def test_no_source_block_no_pass(self, mock_api, mock_git, mock_costs,
+                                     project_dir, monkeypatch):
+        calls = []
+        self._run(mock_api, project_dir, monkeypatch, calls)
+        assert calls == []
+        assert not any('Source Fidelity' in str(c) for c in mock_api.calls)
+
+    def test_adaptation_gets_a_prose_pass(self, mock_api, mock_git, mock_costs,
+                                          project_dir, monkeypatch):
+        with open(os.path.join(project_dir, 'storyforge.yaml'), 'a') as f:
+            f.write('\nsource:\n  projects:\n    - slug: src\n      path: ../src\n')
+        calls = []
+        self._run(mock_api, project_dir, monkeypatch, calls)
+        assert len(calls) == 1
+        (proj, scene_ids, target), _kw = calls[0]
+        assert (scene_ids, target) == (['act1-sc01'], 'prose')
+
+
 # ============================================================================
 # main — batch mode
 # ============================================================================
