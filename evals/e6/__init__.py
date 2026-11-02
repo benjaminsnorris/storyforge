@@ -91,6 +91,28 @@ def summarize(reports: dict[str, dict]) -> dict:
     return out
 
 
+def merge(old: dict, new: dict) -> dict:
+    """``old`` (a spread file) with ``new``'s suites in place of its own:
+    each suite replayed in ``new`` replaces its spread, its errored entry and
+    its ``git_sha``; the others are kept as they were. A spread file from
+    before ``git_sha`` was per suite (one ``{run: sha}`` for every suite)
+    has that sha spread to each of its suites, so nothing is lost."""
+    if old.get('runs') != new['runs']:
+        raise ValueError(f'its runs are {old.get("runs")}, not {new["runs"]}')
+    replayed = set(new['git_sha'])
+    sha = old.get('git_sha', {})
+    if sha and all(isinstance(v, str) for v in sha.values()):   # the older format
+        sha = {s: dict(sha) for s in set(old['suites']) | set(old['errored'])}
+    out = {'runs': new['runs'],
+           'suites': {s: m for s, m in old['suites'].items() if s not in replayed},
+           'errored': {s: w for s, w in old['errored'].items() if s not in replayed},
+           'git_sha': {s: v for s, v in sha.items() if s not in replayed}}
+    out['suites'].update(new['suites'])
+    out['errored'].update(new['errored'])
+    out['git_sha'].update(new['git_sha'])
+    return out
+
+
 _ROUNDING = 5e-4
 
 
