@@ -1,8 +1,45 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-11-01, at v1.124.0. **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and is met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). The gate now fixes a failing scene up to twice (v1.124.0; see Latest). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-11-01, at v1.125.0. **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and is met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). The gate now fixes a failing scene up to twice (v1.124.0) and reads each scene twice (v1.125.0; see Latest). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
-## Latest: a second fix round (2026-11-01)
+## Latest: E4 over three runs, and two checker readings (2026-11-01)
+
+**v1.125.0.** Ben's next two items: E4 over 2–3 runs, and the checker's run-to-run variance.
+
+**E4's spread.** E6's E4 runs 2 and 3 are re-recorded on #482's gate (d3536986, one checker reading; $28.71), beside run 1, #482's own recording. `evals/consistency.py --suite e4-generation` replays them and merges E4 into `evals/e6/spread.json` (`git_sha` is now per suite). Across the three runs:
+
+| E4, same code | run 1 | run 2 | run 3 | range |
+|---|---|---|---|---|
+| CP10k in the gate's passed scenes | 2.17 | 1.70 | 4.13 | 2.44 |
+| CP10k, every drafted scene | 3.62 | 4.00 | 4.00 | 0.38 |
+| gate caught / missed / false alarm | 2 / 4 / 2 | 4 / 3 / 1 | 1 / 6 / 2 | 3 / 3 / 1 |
+| fixed / still failing after the fixes | 10 / 4 | 8 / 5 | 8 / 3 | 2 / 2 |
+| scenes to the first gate failure | 9 | 9 | 11 | 2 |
+
+**Every E4 claim from #480 and #482 is within noise** (the claims are in `consistency.CLAIMS`; the older one, CP10k 18.2 → 16.1 at v1.84.2, is retired: E4's spread is now of different code, on a different scale): CP10k in passed scenes 3.42 → 2.09 (#480) and 2.09 → 2.17 (#482) against a range of 2.44; gate missed, fixed and still failing by 1 against ranges of 2–3. A single E4 run can show only a change of more than about 2.4 in CP10k in passed scenes; CP10k over every drafted scene is steadier (0.38).
+
+**The checker's variance is mostly missed recall.** Of the findings still blocking scenes after the fixes in E8, 6 of 14 (one fix) and 4 of 7 (two fixes) quoted prose the first check had already read and passed: the re-check found something the first check missed, and the fix could no longer reach it. A probe ($13.86, scratch) read each of E8's 28 gated scenes a second time: 33 of the first reading's 41 findings recurred in the second, which made 48 (the second missed about a fifth of the first's, the first about a third of the second's; matched on the scene's words), and the two agreed on pass or fail in 26 of 28. The second alone found real errors: Sarel Davan made a woman (governor-023), the dead girl's shoes made a boy's (governor-025), the old woman renamed Devra Erdel (governor-026), and shared-dark-040's "eleven nights", the error the gate had passed in #480 and #482. No false alarm stood out among what one reading found and the other didn't.
+
+**What changed:** the gate reads each scene twice (`checker.GATE_READINGS`, `check_scene(readings=)`) and blocks on the union (`merge_readings`: findings are compared only across readings; one both made, same code and source with both quotes overlapping by 4+ words, is kept once, with the longer scene quote; a dispute either reports is a finding; each finding names its reading, and the report tags one past the first). The readings run one after the other, so the second reads the bibles and story so far from the first's cache. A reading that fails fails the check. Everything through the gate takes two (write, revise, `check`, re-checks, whose forecast `RECHECK_COST_PER_SCENE` is now $0.95); only E2-carol-checker, which calls the checker directly, takes one. The 5-agent review found the first merge lost problems (two in one sentence collapsed, even within one reading; a dispute a reading ruled on came out cleared; an empty promised item matched any); fixed before merge, with no recording change.
+
+| | one reading (#482) | two readings |
+|---|---|---|
+| E8 reintroduced / passed by the gate | 5 / 2 | 3 / 0 (shared-dark-040 and thornwall-025 came out consistent this run, so 0 is not the gate's doing) |
+| E8 errors per 10k words | 1.39 | 0.84 (E6 range on older code: 1.22) |
+| E8 gated scenes: passed first time / after the fixes / still failing (of 28) | 8 / 13 / 7 | 6 / 14 / 8 |
+| E8 clean replays the gate failed | 4 | 5 |
+| E8 findings still blocking that the first check had passed (with a quoted scene line; counting plan conflicts, 4 of 7 and 5 of 10) | 4 | 3 |
+| E4 CP10k in the gate's passed scenes | 2.17 / 1.70 / 4.13 | 0.58 (one run) |
+| E4 gate caught / missed / false alarm | 2–4 / 3–6 / 1–2 | 3 / 1 / 2 |
+| E4 fixed / still failing | 8–10 / 3–5 | 10 / 5 |
+
+**How to read it:** two readings make the gate stricter, not more convergent. It fails more scenes the first time and leaves as many stopped after the fixes, and a re-check still finds things neither first reading did (3 in E8). What it may buy is fewer errors committed, and that is one run, not a measured gain: E4's one two-reading run is below all three one-reading runs on CP10k in passed scenes, and the gate missed 1 against 3–6. But its drafts were also cleaner before the gate (CP10k over every drafted scene 2.25 against 3.62–4.00, a range of 0.38; contradictions 5 against 8–9), so part of the drop is the drafts, not the gate. E4 with two readings over 2–3 runs would settle it (about $30).
+
+- **Cost:** a second reading was about $0.35 a check in E8 (56 for $19.69), most of it cache writes ($14.62): reading 1 mostly replayed from the recordings, so the cache was cold. Live, the second reading reads the prefix reading 1 wrote, so it should cost less; a live `write` will measure it. Roughly +$0.35 per gated scene that passes first time and +$0.70 for one fixed once, at most. Spend: $83.65 (E4 runs 2–3 $28.71, the probe $13.86, E8 $25.59, E4 $15.49), plus a few calls of a first E4 start stopped after seconds when a `git stash` restored the old run-2/3 recordings under it.
+
+**Next, in order:** E4 with two readings over 2–3 runs, if the gain needs confirming before the next gate change; the calendar in the drafting prompt; a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost (now with two readings); the low-confidence halt; `characters.csv` `pronouns`.
+
+## A second fix round (2026-11-01)
 
 **v1.124.0.** #480 left 8 E8 clean replays the gate failed, each ending with new errors after the gate's one fix. A free replay of E8 recording each gated scene's first and last verdicts showed why: of 28 gated scenes, 8 passed first time, 10 after the fix, and 10 still failed (the 8, plus 2 reintroductions the gate flagged). Most of the 10 had a fix that half-addressed its finding: He → She with "him" left (thornwall-026), "eight days" → "five", still off the calendar (governor-016), "four winters" → "two", still wrong (thornwall-029).
 

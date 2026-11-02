@@ -19,7 +19,11 @@ For one scene's prose, `gate_scene` runs:
    it goes to the checker as a dispute to rule on (a contradiction, or
    cleared), and one it doesn't rule on blocks the commit.
 3. **Check** the scene against the book and its brief (`checker.check_scene`):
-   contradictions and broken promises, by code.
+   contradictions and broken promises, by code. `GATE_READINGS` (2)
+   independent readings, their union: each reading misses real errors
+   another finds. Measured (E8, E4, 2026-11-01): fewer errors passed, not
+   fewer scenes stopped; a re-check after the fix still finds things
+   neither first reading did.
 4. **Commit** only when nothing halted, extraction left nothing unresolved
    (`UNRESOLVED`: a quote not in the scene, a `supersedes` or `ends` that
    names nothing it can apply to), and the check found nothing, verified or
@@ -56,7 +60,8 @@ import re
 from dataclasses import dataclass, field
 
 from storyforge import audit, ledger, persistence
-from storyforge.checker import CheckError, CheckResult, Dispute, Finding, check_scene
+from storyforge.checker import (GATE_READINGS, CheckError, CheckResult, Dispute, Finding,
+                               check_scene)
 
 #: The commands whose prose the gate commits (`ledger.COMMITMENT_WRITERS`
 #: without the extract pass)
@@ -589,7 +594,8 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     try:
         result.check = check_scene(project_dir, scene_id, prose=prose, model=check_model,
                                    log_file=os.path.join(log_dir, f'gate-check-{scene_id}.json'),
-                                   rows=rows, disputes=_disputes(result, rows))
+                                   rows=rows, disputes=_disputes(result, rows),
+                                   readings=GATE_READINGS)
     except CheckError as e:
         error = GateError(str(e))
         error.run = getattr(e, 'run', None)
@@ -1038,6 +1044,12 @@ def blocking_lines(lines: list[str]) -> list[str]:
     return [line for line in lines if not line.startswith(_NOT_BLOCKING)]
 
 
+def _from_reading(f: Finding) -> str:
+    """Which reading made `f`, past the first (its exchange is in
+    gate-check-<scene>.rN.json, beside the first reading's log)."""
+    return f' [reading {f.reading}]' if f.reading > 1 else ''
+
+
 def report_lines(result: GateResult) -> list[str]:
     """The gate's verdict on a scene as one-line strings (log lines, list
     items): everything that stopped the commit, then what is reported
@@ -1050,11 +1062,12 @@ def report_lines(result: GateResult) -> list[str]:
     for f in result.findings:
         if _among(f, result.plan_conflicts):
             lines.append(f'PLAN CONFLICT (the brief\'s own words contradict the book; fix the '
-                         f'brief or {f.source}): {_one_line(f.message())}')
+                         f'brief or {f.source}){_from_reading(f)}: {_one_line(f.message())}')
         else:
-            lines.append(f'{f.kind.upper()}: {_one_line(f.message())}')
+            lines.append(f'{f.kind.upper()}{_from_reading(f)}: {_one_line(f.message())}')
     for f in result.unverified:
-        lines.append(f'UNVERIFIED ({f.problem}): {_one_line(f.message())}')
+        lines.append(f'UNVERIFIED ({f.problem}){_from_reading(f)}: '
+                     f'{_one_line(f.message())}')
     for d in result.unruled:
         lines.append(f'UNRULED: the scene may change the plan\'s {d.fact_id} '
                      f'("{_one_line(d.statement)}"): "{_one_line(d.claim)}"; the check gave '
@@ -1248,9 +1261,11 @@ def record_reported(project_dir: str, scene_id: str, command: str,
 # ============================================================================
 
 #: What one re-gated scene is forecast to cost: an extraction and a
-#: persistence call (Sonnet) and a check (Opus, the story so far cached).
-#: E4's gate ran about $0.35-0.45 a scene on shared-dark; rounded up.
-RECHECK_COST_PER_SCENE = 0.6
+#: persistence call (Sonnet) and `GATE_READINGS` checks (Opus, the story so
+#: far cached). E4's one-reading gate ran about $0.35-0.45 a scene on
+#: shared-dark, and a second reading about $0.35 more against a cold cache
+#: (E8, 2026-11-01); rounded up.
+RECHECK_COST_PER_SCENE = 0.6 + 0.35 * (GATE_READINGS - 1)
 
 
 #: A pending row's command for a scene listed for a re-check, and for one

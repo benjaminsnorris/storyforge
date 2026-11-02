@@ -68,9 +68,15 @@ the paid suites, beside the default ones (run 1).
 `python3 evals/consistency.py` replays all three and writes the per-metric
 spread to `evals/e6/spread.json` (and each E8 case's outcome per run to
 `evals/e6/e8-cases.json`). Like any recording they replay only while the
-requests match, so a prompt change since they were recorded (v1.87.1,
-3c01088d) is a miss; they are not re-recorded on every change (see
-`evals/e6/__init__.py`). Results and reading are in the status doc.
+requests match, so a prompt change since they were recorded is a miss;
+they are not re-recorded on every change (see `evals/e6/__init__.py`).
+`--suite NAME` replays one suite and replaces only its entries in
+`spread.json`, whose `git_sha` is per suite, the commit each was replayed
+at. E4's three runs are of #482's gate (one checker reading): replay them
+from a worktree at d3536986, since run 1 has since been re-recorded with two
+readings and a replay at a later commit misses (`--suite` then leaves the
+file as it was). The other suites' runs 2 and 3 were recorded at v1.87.1
+(3c01088d). Results and reading are in the status doc.
 
 ## Model-tier comparisons
 
