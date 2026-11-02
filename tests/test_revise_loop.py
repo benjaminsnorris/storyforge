@@ -471,6 +471,52 @@ class TestPolishLoopOrchestration:
         assert calls['deterministic'] == 1
         assert calls['lightweight'] == 1
 
+    def _patch_loop(self, monkeypatch, diag):
+        def fake_deterministic(proj, scene_ids):
+            cycle_dir = os.path.join(proj, 'working', 'scores', 'cycle-1')
+            os.makedirs(cycle_dir, exist_ok=True)
+            return cycle_dir, diag
+        monkeypatch.setattr('storyforge.cmd_revise._run_deterministic_score', fake_deterministic)
+        for name, fn in (('create_branch', lambda *a: None),
+                         ('ensure_branch_pushed', lambda *a: None),
+                         ('commit_and_push', lambda *a, **kw: None),
+                         ('create_draft_pr', lambda title, body, pd, work_type='': ''),
+                         ('get_pr_body', lambda pd, pr: ''),
+                         ('set_pr_body', lambda pd, pr, b: None),
+                         ('add_pr_comment', lambda pd, pr, body: None)):
+            monkeypatch.setattr(f'storyforge.cmd_revise.{name}', fn)
+
+    def test_source_drift_is_fixed_before_convergence(self, tmp_path, monkeypatch):
+        """#477 review (SF-4/T-1): clean craft scores don't skip source drift."""
+        from storyforge.cmd_revise import _run_polish_loop
+        project_dir = self._setup_project(tmp_path)
+        self._patch_loop(monkeypatch, self._make_diag(high=0, medium=0))
+        drift = {'s01': ['brief outcome: the source ends no-but']}
+        monkeypatch.setattr('storyforge.cmd_revise._source_drift_scenes',
+                            lambda p, quiet=False: drift)
+        fixed_calls = []
+
+        def fake_fix(proj, scenes):
+            fixed_calls.append(scenes)
+            drift.clear()          # the redraft changes the brief: no longer drift
+            return scenes, {}
+        monkeypatch.setattr('storyforge.cmd_revise._fix_and_redraft', fake_fix)
+        _run_polish_loop(project_dir, 3, None, skip_final_score=True)
+        assert fixed_calls == [['s01']]
+
+    def test_a_brief_root_cause_alone_still_converges(self, tmp_path, monkeypatch):
+        """Without a source, clean craft scores converge as before."""
+        from storyforge.cmd_revise import _run_polish_loop
+        project_dir = self._setup_project(tmp_path)
+        diag = [{'principle': 'x', 'scale': 'scene', 'avg_score': '4', 'worst_items': 's01',
+                 'delta_from_last': '', 'priority': 'low', 'root_cause': 'brief'}]
+        self._patch_loop(monkeypatch, diag)
+        fixed_calls = []
+        monkeypatch.setattr('storyforge.cmd_revise._fix_and_redraft',
+                            lambda p, s: fixed_calls.append(s) or ([], {}))
+        _run_polish_loop(project_dir, 3, None, skip_final_score=True)
+        assert fixed_calls == []
+
     def test_skip_final_score_skips_phase2(self, tmp_path, monkeypatch):
         """--skip-final-score should prevent _run_lightweight_score from being called."""
         from storyforge.cmd_revise import _run_polish_loop

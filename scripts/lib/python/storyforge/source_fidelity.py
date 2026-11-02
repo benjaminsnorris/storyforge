@@ -1,8 +1,8 @@
 """Source fidelity: an adaptation's briefs or prose against its source (#477).
 
 The same shape as brief fidelity (`scoring.build_fidelity_prompt`), with the
-source scenes on the left-hand side: one Sonnet call per mapped scene
-compares the scene's brief, or its prose, with the source scenes it adapts
+source scenes on the left-hand side: one call per mapped scene (score uses
+the evaluation tier, Sonnet) compares the scene's brief, or its prose, with the source scenes it adapts
 (`reference/source-map.csv`) on `ELEMENTS`, lists every departure and tags it
 `deliberate` (the map row's treatment or note, or a version rule under
 `source.rules`, authorizes it) or `drift` (nothing does). Elements are scored
@@ -13,7 +13,8 @@ Output, in the score cycle's directory: `source-fidelity.csv`
 merged by (scene, target) so a briefs run and a prose run share a cycle.
 `target_hash` records what was scored; `latest_drift` only returns drift
 whose brief or prose hasn't changed since, which is what revise's upstream
-fix reads (so a fixed brief isn't fixed again on stale scores).
+fix reads (so a fixed brief isn't fixed again on stale scores). `mode` is
+the revise hook's business: in `free` mode drift is reported, not fixed.
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ RATIONALE_COLUMNS = ['id', 'target', 'element', 'tag', 'evidence', 'authority']
 # The brief fields a brief target shows (knowledge_out with its statements)
 _BRIEF_FIELDS = ('goal', 'conflict', 'outcome', 'crisis', 'decision', 'key_actions',
                  'key_dialogue', 'knowledge_out')
-# The source fields compared (plus the scene's summary for orientation)
+# The source fields compared (plus summary, pov and on_stage for orientation)
 _SOURCE_FIELDS = ('goal', 'outcome', 'key_actions', 'key_dialogue', 'knowledge_out')
 
 
@@ -46,13 +47,20 @@ class SourceFidelityError(Exception):
     """A reply that can't be used: refused, cut off, or not in the format."""
 
 
-@dataclass
+@dataclass(frozen=True)
 class Result:
     scene_id: str
     target: str
     target_hash: str
     scores: dict[str, int]
     departures: list[dict[str, str]] = field(default_factory=list)
+
+    def __post_init__(self):
+        if self.target not in TARGETS:
+            raise ValueError(f'target {self.target!r}')
+        if set(self.scores) != set(ELEMENTS) or not all(
+                isinstance(v, int) and 1 <= v <= 5 for v in self.scores.values()):
+            raise ValueError(f'{self.scene_id}: scores must be 1-5 for exactly {ELEMENTS}')
 
     @property
     def overall(self) -> float:
@@ -116,16 +124,15 @@ def target_hash(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]
 
 
-def _source_side(project_dir: str, refs: list[tuple[str, str]]) -> str:
+def _source_side(project_dir: str, refs: list[tuple[str, str]], tables=None) -> str:
+    from storyforge.prompts_source import _Tables
+    t = tables or _Tables(project_dir)
     blocks = []
     for slug, sid in refs:
-        scene = next((r for r in source.source_scenes(project_dir, slug) if r.get('id') == sid), {})
-        brief = next((r for r in source.read_table(project_dir, slug, 'scene-briefs.csv')
-                      if r.get('id') == sid), {})
-        intent = next((r for r in source.read_table(project_dir, slug, 'scene-intent.csv')
-                       if r.get('id') == sid), {})
-        facts = {r.get('id', ''): r.get('statement', '')
-                 for r in source.read_table(project_dir, slug, 'commitments.csv')}
+        scene = t.row(slug, 'scenes.csv', sid)
+        brief = t.row(slug, 'scene-briefs.csv', sid)
+        intent = t.row(slug, 'scene-intent.csv', sid)
+        facts = {k: r.get('statement', '') for k, r in t.table(slug, 'commitments.csv').items()}
         lines = [f'### {slug}:{sid}' + (f': {scene["title"]}' if scene.get('title') else '')]
         summary = scene.get('summary', '') or intent.get('function', '')
         for key, val in (('summary', summary), ('pov', scene.get('pov', '')),
@@ -148,30 +155,37 @@ def _source_side(project_dir: str, refs: list[tuple[str, str]]) -> str:
 # Prompt
 # ============================================================================
 
-@dataclass
+@dataclass(frozen=True)
 class Plan:
-    """What one scene's check needs, or why it can't be checked."""
+    """What one scene's check needs, or why it can't be checked: exactly one
+    of `prompt` (with its `target_hash`) and `skip`."""
     scene_id: str
     prompt: str = ''
     target_hash: str = ''
     skip: str = ''        # why there is no prompt ('' when there is one)
+    broken: bool = False  # the skip means the data is wrong, not that there's nothing to do
+
+    def __post_init__(self):
+        if bool(self.prompt) == bool(self.skip) or bool(self.prompt) != bool(self.target_hash):
+            raise ValueError(f'{self.scene_id}: a Plan has a prompt and its hash, or a skip')
 
 
 def plan_scene(project_dir: str, scene_id: str, target: str, plugin_dir: str,
                cfg: source.SourceConfig, map_rows: dict[str, dict],
-               rules: str, tables: dict | None = None) -> Plan:
+               rules: str, tables: dict | None = None,
+               cat: dict | None = None, source_tables=None) -> Plan:
     if target not in TARGETS:
         raise ValueError(f'target must be one of {TARGETS}')
     row = map_rows.get(scene_id)
     if row is None:
-        return Plan(scene_id, skip='not in the source map')
+        return Plan(scene_id, skip='not in the source map (run validate)', broken=True)
     if row.get('treatment') == 'invent':
         return Plan(scene_id, skip='invented (no source scene)')
-    cat = source.catalogue(project_dir, cfg)
+    cat = cat if cat is not None else source.catalogue(project_dir, cfg)
     refs = [source.resolve_source_id(r, cat) for r in source.split_ids(row.get('source_scenes', ''))]
     if not refs or any(r is None for r in refs):
         return Plan(scene_id, skip='its source scenes are not in the imported source '
-                                   '(run validate)')
+                                   '(run validate)', broken=True)
     text = target_text(project_dir, scene_id, target, tables)
     if text is None:
         return Plan(scene_id, skip='no brief' if target == 'brief' else 'no prose')
@@ -182,7 +196,7 @@ def plan_scene(project_dir: str, scene_id: str, target: str, plugin_dir: str,
         template = f.read()
     kind = 'brief' if target == 'brief' else 'prose'
     prompt = (template
-              .replace('{SOURCE_DATA}', _source_side(project_dir, refs))
+              .replace('{SOURCE_DATA}', _source_side(project_dir, refs, source_tables))
               .replace('{TREATMENT}', row.get('treatment', ''))
               .replace('{NOTE}', row.get('note', '') or '(none)')
               .replace('{MODE}', cfg.mode)
@@ -205,6 +219,7 @@ def parse_response(response: str, scene_id: str, target: str, hash_: str) -> Res
     scores: dict[str, int] = {}
     departures: list[dict[str, str]] = []
     problems: list[str] = []
+    score_rows = 0
     section = None
     for line in response.splitlines():
         s = line.strip().strip('`')
@@ -219,7 +234,14 @@ def parse_response(response: str, scene_id: str, target: str, hash_: str) -> Res
         parts = [p.strip() for p in s.split('|')]
         if parts[0] == 'id' or section is None:
             continue
+        if parts[0] != scene_id:
+            problems.append(f'a row for {parts[0]!r}, not {scene_id}')
+            continue
         if section == 'scores':
+            score_rows += 1
+            if score_rows > 1:
+                problems.append('more than one SCORES row')
+                continue
             if len(parts) != len(ELEMENTS) + 1:
                 problems.append(f'a SCORES row with {len(parts)} cells')
                 continue
@@ -229,11 +251,11 @@ def parse_response(response: str, scene_id: str, target: str, hash_: str) -> Res
                 else:
                     problems.append(f'{el} score {val!r} is not 1-5')
         else:
-            if len(parts) < 5:
-                problems.append(f'a DEPARTURES row with {len(parts)} cells')
+            if len(parts) != 5:
+                # a | inside the text would cut the evidence short
+                problems.append(f'a DEPARTURES row with {len(parts)} cells, not 5')
                 continue
-            element, tag, evidence = parts[1], parts[2].lower(), parts[3]
-            authority = '|'.join(parts[4:]).strip()
+            element, tag, evidence, authority = parts[1], parts[2].lower(), parts[3], parts[4]
             if element not in ELEMENTS:
                 problems.append(f'departure element {element!r}')
             elif tag not in TAGS:
@@ -242,6 +264,9 @@ def parse_response(response: str, scene_id: str, target: str, hash_: str) -> Res
                 problems.append(f'a {tag} departure on {element} that says nothing')
             elif tag == 'deliberate' and authority.lower() in ('', 'none'):
                 problems.append(f'a deliberate departure on {element} with no authority')
+            elif tag == 'drift' and authority.lower() not in ('', 'none'):
+                problems.append(f'a drift departure on {element} that names an authority '
+                                f'({authority}): deliberate or drift?')
             else:
                 departures.append({'element': element, 'tag': tag, 'evidence': evidence,
                                    'authority': authority if tag == 'deliberate' else 'none'})
@@ -257,15 +282,27 @@ def parse_response(response: str, scene_id: str, target: str, hash_: str) -> Res
 # Files
 # ============================================================================
 
-def _read(path: str) -> list[dict[str, str]]:
+def _read(path: str, columns: list[str]) -> list[dict[str, str]]:
+    """A results file's rows ([] when there is none). Raises SourceError for
+    one that can't be read, has another header, or a row with the wrong
+    number of cells: drift read from it would be wrong."""
     if not os.path.isfile(path):
         return []
-    with open(path, encoding='utf-8') as f:
-        lines = [l for l in f.read().splitlines() if l.strip()]
+    try:
+        with open(path, encoding='utf-8') as f:
+            lines = [l for l in f.read().splitlines() if l.strip()]
+    except (OSError, UnicodeDecodeError) as e:
+        raise source.SourceError(f'{path} could not be read ({e})') from e
     if not lines:
         return []
-    header = lines[0].split('|')
-    return [dict(zip(header, l.split('|'))) for l in lines[1:]]
+    if lines[0].split('|') != columns:
+        raise source.SourceError(f'{path}: the header must be {"|".join(columns)}; '
+                                 f're-run score --source-fidelity')
+    rows = [l.split('|') for l in lines[1:]]
+    bad = [n for n, r in enumerate(rows, 2) if len(r) != len(columns)]
+    if bad:
+        raise source.SourceError(f'{path} line {bad[0]}: wrong number of cells')
+    return [dict(zip(columns, r)) for r in rows]
 
 
 def _write(path: str, columns: list[str], rows: list[dict[str, str]]) -> None:
@@ -282,8 +319,10 @@ def write_results(results: list[Result], out_dir: str) -> None:
     done = {(r.scene_id, r.target) for r in results}
     scores_path = os.path.join(out_dir, SCORES_FILE)
     rat_path = os.path.join(out_dir, RATIONALE_FILE)
-    scores = [r for r in _read(scores_path) if (r.get('id'), r.get('target')) not in done]
-    rats = [r for r in _read(rat_path) if (r.get('id'), r.get('target')) not in done]
+    scores = [r for r in _read(scores_path, SCORE_COLUMNS)
+              if (r.get('id'), r.get('target')) not in done]
+    rats = [r for r in _read(rat_path, RATIONALE_COLUMNS)
+            if (r.get('id'), r.get('target')) not in done]
     for res in results:
         row = {'id': res.scene_id, 'target': res.target, 'target_hash': res.target_hash,
                'overall': res.overall, 'drift': res.count('drift'),
@@ -307,31 +346,52 @@ def _cycles(project_dir: str) -> list[str]:
     return [p for _, p in sorted(found, reverse=True)]
 
 
-def latest_drift(project_dir: str) -> dict[str, list[str]]:
-    """{scene id: its drift departures as one-line descriptions} from each
-    scene's newest source-fidelity result per target, only where the brief or
-    prose scored is unchanged since (its hash matches). {} for a project
-    without a source block."""
+@dataclass
+class DriftState:
+    """What the newest source-fidelity results say, per scene and target."""
+    drift: dict[str, list[str]] = field(default_factory=dict)  # scene -> drift lines
+    stale: list[str] = field(default_factory=list)    # scored on a brief/prose since changed
+    checked: int = 0                                   # (scene, target) results read
+
+
+def drift_state(project_dir: str) -> DriftState:
+    """Drift from each scene's newest source-fidelity result per target, only
+    where the brief or prose scored is unchanged since (its hash matches);
+    results scored on something since changed are listed `stale`. An empty
+    state for a project without a source block. Raises SourceError for a
+    results file that can't be read (see `_read`)."""
+    state = DriftState()
     if source.read_config(project_dir) is None:
-        return {}
+        return state
     tables = _project_tables(project_dir)
     seen: set[tuple[str, str]] = set()
-    drift: dict[str, list[str]] = {}
     for cycle in _cycles(project_dir):
-        rats = _read(os.path.join(cycle, RATIONALE_FILE))
-        for row in _read(os.path.join(cycle, SCORES_FILE)):
-            key = (row.get('id', ''), row.get('target', ''))
+        rats = _read(os.path.join(cycle, RATIONALE_FILE), RATIONALE_COLUMNS)
+        for row in _read(os.path.join(cycle, SCORES_FILE), SCORE_COLUMNS):
+            key = (row['id'], row['target'])
             if key in seen or key[1] not in TARGETS:
                 continue
             seen.add(key)
+            state.checked += 1
             current = target_text(project_dir, key[0], key[1], tables)
-            if current is None or target_hash(current) != row.get('target_hash'):
-                continue   # changed since it was scored: the result is stale
-            for r in rats:
-                if (r.get('id'), r.get('target')) == key and r.get('tag') == 'drift':
-                    drift.setdefault(key[0], []).append(
-                        f'{key[1]} {r.get("element", "")}: {r.get("evidence", "")}')
-    return drift
+            if current is None or target_hash(current) != row['target_hash']:
+                state.stale.append(f'{key[0]} ({key[1]})')
+                continue
+            lines = [f'{key[1]} {r["element"]}: {r["evidence"]}' for r in rats
+                     if (r['id'], r['target']) == key and r['tag'] == 'drift']
+            if str(len(lines)) != row['drift']:
+                raise source.SourceError(
+                    f'{os.path.join(cycle, SCORES_FILE)}: {key[0]} ({key[1]}) counts '
+                    f'{row["drift"]} drift but {RATIONALE_FILE} lists {len(lines)}')
+            if lines:
+                state.drift.setdefault(key[0], []).extend(lines)
+    return state
+
+
+def latest_drift(project_dir: str) -> dict[str, list[str]]:
+    """{scene id: its current drift departures as one-line descriptions}
+    (`drift_state(...).drift`)."""
+    return drift_state(project_dir).drift
 
 
 # ============================================================================
@@ -344,9 +404,11 @@ def run(project_dir: str, scene_ids: list[str], target: str, *, plugin_dir: str,
     """Check each mapped scene; write the results into `out_dir`.
 
     Returns (results, skipped, failed): `skipped` is scene -> why it had
-    nothing to check (invented, no brief, not mapped), `failed` is scene ->
-    why a check that ran gave no result. Raises SourceError for a source
-    block, map or rules file that can't be used.
+    nothing to check (invented, no brief or prose), `failed` is scene -> why
+    there is no result: a check that ran and failed, or a scene whose map
+    data is broken (not mapped, source scenes not found). Raises SourceError
+    for a source block, map or rules file that can't be used, or a source
+    not imported.
     """
     from storyforge.api import (
         calculate_cost_from_usage, extract_text, extract_usage, invoke_to_file, stop_problem,
@@ -365,9 +427,15 @@ def run(project_dir: str, scene_ids: list[str], target: str, *, plugin_dir: str,
     rules = source.read_rules(project_dir, cfg)
     tables = _project_tables(project_dir)
 
-    plans = {sid: plan_scene(project_dir, sid, target, plugin_dir, cfg, map_rows, rules, tables)
+    from storyforge.prompts_source import _Tables
+    source.require_imported(project_dir, cfg)
+    cat = source.catalogue(project_dir, cfg)
+    src_tables = _Tables(project_dir)
+    plans = {sid: plan_scene(project_dir, sid, target, plugin_dir, cfg, map_rows, rules,
+                             tables, cat, src_tables)
              for sid in scene_ids}
-    skipped = {sid: p.skip for sid, p in plans.items() if p.skip}
+    skipped = {sid: p.skip for sid, p in plans.items() if p.skip and not p.broken}
+    broken = {sid: p.skip for sid, p in plans.items() if p.broken}
     todo = [sid for sid, p in plans.items() if not p.skip]
     os.makedirs(log_dir, exist_ok=True)
 
@@ -391,7 +459,7 @@ def run(project_dir: str, scene_ids: list[str], target: str, *, plugin_dir: str,
     outcomes = run_parallel(todo, check, max_workers=parallel,
                             label=f'source fidelity ({target})')
     results: list[Result] = []
-    failed: dict[str, str] = {}
+    failed: dict[str, str] = dict(broken)
     for sid in todo:
         out = outcomes.get(sid)
         if isinstance(out, Result):

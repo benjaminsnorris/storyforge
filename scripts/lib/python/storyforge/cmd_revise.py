@@ -1463,13 +1463,10 @@ def _detect_upstream_scenes(project_dir: str, diag_rows: list[dict]) -> list[str
 
     Returns sorted list of scene IDs where root_cause is 'brief' and score is low.
     Scene IDs are drawn from the worst_items field of matching diagnosis rows.
-    An adaptation's scenes with source drift (`source_fidelity.latest_drift`:
-    unauthorized departures from the source, on a brief or prose unchanged
-    since it was scored) are upstream too (#477); without a `source:` block
-    there are none.
+    An adaptation's scenes with source drift are upstream too (#477; see
+    `_source_drift_scenes`); without a `source:` block there are none.
     """
-    from storyforge.source_fidelity import latest_drift
-    upstream = set(latest_drift(project_dir))
+    upstream = set(_source_drift_scenes(project_dir))
     for row in diag_rows:
         if row.get('root_cause') != 'brief':
             continue
@@ -1483,6 +1480,34 @@ def _detect_upstream_scenes(project_dir: str, diag_rows: list[dict]) -> list[str
     return sorted(upstream)
 
 
+def _source_drift_scenes(project_dir: str, quiet: bool = False) -> dict[str, list[str]]:
+    """An adaptation's scenes to fix toward the source: drift
+    (`source_fidelity.drift_state`) on a brief or prose unchanged since it was
+    scored. Says what it can't see: no results yet, and results scored on a
+    brief or prose since changed. In `free` mode drift is listed for the
+    author and nothing is returned: free mode doesn't undo departures."""
+    from storyforge import source
+    from storyforge.source_fidelity import drift_state
+    cfg = source.read_config(project_dir)
+    if cfg is None:
+        return {}
+    state = drift_state(project_dir)
+    if quiet:
+        return {} if cfg.mode == 'free' else state.drift
+    if not state.checked:
+        log('  Source fidelity: no results yet, so source drift is not checked; run '
+            '`storyforge score --source-fidelity briefs` (or a full score for the prose)')
+    elif state.stale:
+        log(f'  Source fidelity: {len(state.stale)} result(s) scored on a brief or prose '
+            f'changed since, not used: {", ".join(state.stale[:10])}'
+            + (' ...' if len(state.stale) > 10 else '') + '; re-run score --source-fidelity')
+    if state.drift and cfg.mode == 'free':
+        log(f'  Source drift in {len(state.drift)} scene(s), left as it is (mode: free): '
+            f'{", ".join(sorted(state.drift))}')
+        return {}
+    return state.drift
+
+
 _PROSE_CONTEXT_WORDS = 6000  # of the scene's prose shown to the brief fix
 
 
@@ -1490,7 +1515,9 @@ _PROSE_CONTEXT_WORDS = 6000  # of the scene's prose shown to the brief fix
 # name (an earlier fix may have invented it).
 _BRIEF_FIX_FIELDS = ('goal', 'conflict', 'crisis', 'decision')
 # What a source-drift fix rewrites (#477): drift is in events, outcomes and
-# lines as well as in the dramatic four
+# lines as well as in the dramatic four. Drift in on_stage or knowledge_out
+# is shown to the fix but those are not rewritten here (they belong to the
+# intent and the ledger); the fix can only bring the events back.
 _SOURCE_FIX_FIELDS = ('goal', 'conflict', 'outcome', 'crisis', 'decision',
                       'key_actions', 'key_dialogue')
 
@@ -1534,22 +1561,40 @@ def _parse_brief_fix(response: str,
     return fields
 
 
+class _SourceFixContext:
+    """What every drift fix of one run needs, read once before the loop."""
+
+    def __init__(self, project_dir: str):
+        from storyforge import source
+        from storyforge.prompts_source import _Tables
+        self.cfg = source.read_config(project_dir)
+        source.require_imported(project_dir, self.cfg)
+        self.rows = source.map_rows_by_scene(source.read_source_map(project_dir) or [])
+        self.cat = source.catalogue(project_dir, self.cfg)
+        self.rules = source.read_rules(project_dir, self.cfg) or '(none)'
+        self.tables = _Tables(project_dir)
+
+
 def _source_drift_fix(project_dir: str, scene_id: str, scene: dict, intent: dict,
-                      brief: dict, prose: str | None,
-                      drift: list[str]) -> tuple[str, str]:
+                      brief: dict, prose: str | None, drift: list[str],
+                      ctx: _SourceFixContext) -> tuple[str, str] | str:
     """The brief fix for a scene that drifted from its source (#477): the
-    prompt, and the source text the rewrite may also draw names from."""
+    prompt and the source text the rewrite may also draw names from, or why
+    there is none (its map row or source scenes are gone)."""
     from storyforge import source
     from storyforge.prompts_source import source_scene_block
 
-    cfg = source.read_config(project_dir)
-    row = source.map_rows_by_scene(source.read_source_map(project_dir) or []).get(scene_id, {})
-    cat = source.catalogue(project_dir, cfg)
-    refs = [h for h in (source.resolve_source_id(r, cat)
-                        for r in source.split_ids(row.get('source_scenes', ''))) if h]
-    source_text = '\n\n'.join(source_scene_block(project_dir, slug, sid, prose=False)
+    row = ctx.rows.get(scene_id)
+    if row is None:
+        return 'no row in the source map any more (run validate, then score)'
+    refs = [source.resolve_source_id(r, ctx.cat)
+            for r in source.split_ids(row.get('source_scenes', ''))]
+    if not refs or None in refs:
+        return 'its source scenes are not in the imported source (run validate)'
+    source_text = '\n\n'.join(source_scene_block(project_dir, slug, sid, prose=False,
+                                                  tables=ctx.tables)
                                for slug, sid in refs)
-    rules = source.read_rules(project_dir, cfg) or '(none)'
+    rules = ctx.rules
     current = '\n'.join(f'{k.upper()}: {brief.get(k, "")}' for k in _SOURCE_FIX_FIELDS)
     drift_lines = '\n'.join(f'- {d}' for d in drift)
     reply_format = '\n'.join(f'{k.upper()}: [rewritten {k}]' for k in _SOURCE_FIX_FIELDS)
@@ -1595,7 +1640,12 @@ def _fix_upstream_briefs(project_dir: str,
     scene's own characters, place, plan and prose. A rewrite is rejected with
     a WARNING, and the brief left as it was, when it lacks one of the four
     fields or names a capitalized word found nowhere in the reference files,
-    this scene's prose or the brief fields the fix keeps. Returns the ids of
+    this scene's prose or the brief fields the fix keeps. An adaptation's
+    scene with source drift (`_source_drift_scenes`) gets the source-drift fix
+    instead: shown the drift, its source scenes and the version rules, it
+    rewrites `_SOURCE_FIX_FIELDS`, may also name what its source scenes name,
+    and is refused on an outcome outside `schema.VALID_OUTCOMES` or when its
+    map row or source scenes are gone. Returns the ids of
     the scenes whose briefs were rewritten (only those need a redraft) and,
     for each scene left unchanged, why.
     """
@@ -1613,8 +1663,8 @@ def _fix_upstream_briefs(project_dir: str,
     known_text = reference_text(project_dir)
     rewritten: list[str] = []
     skipped: dict[str, str] = {}
-    from storyforge.source_fidelity import latest_drift
-    drift = latest_drift(project_dir)   # {} without a source block
+    drift = _source_drift_scenes(project_dir)   # {} without a source block
+    ctx = _SourceFixContext(project_dir) if drift else None
 
     for scene_id in scene_ids:
         brief = briefs_map.get(scene_id, {})
@@ -1676,9 +1726,17 @@ DECISION: [rewritten decision]"""
         fix_fields = _BRIEF_FIX_FIELDS
         extra_known = ''
         if scene_id in drift:
-            prompt, extra_known = _source_drift_fix(project_dir, scene_id, scene, intent,
-                                                    brief, prose, drift[scene_id])
+            fix = _source_drift_fix(project_dir, scene_id, scene, intent, brief, prose,
+                                    drift[scene_id], ctx)
+            if isinstance(fix, str):
+                skipped[scene_id] = fix
+                log(f'  WARNING: Not fixing the source drift of {scene_id}: {fix}. '
+                    f'Its brief is unchanged.')
+                continue
+            prompt, extra_known = fix
             fix_fields = _SOURCE_FIX_FIELDS
+            log(f'  {scene_id}: fixing its source drift (this replaces the '
+                f'dramatic-opposition fix: the source sets the opposition)')
 
         model = select_model('creative')
         log(f'  Fixing upstream brief: {scene_id}')
@@ -1987,18 +2045,26 @@ def _run_polish_loop(project_dir: str, max_loops: int,
     brief_fix_skipped: dict[str, str] = {}
 
     for iteration in range(1, max_loops + 1):
-        # Convergence check: no actionable issues
-        if summary['high_count'] == 0 and summary['medium_count'] == 0:
-            log('  No high or medium priority issues — converged')
-            _update_pr_body_iteration(project_dir, pr_number, iteration, summary,
-                                      converged=True)
-            break
-
-        # Check for upstream causes before craft polish
-        # A scene whose brief fix was turned down is not sent again: the
-        # same request would cost the same and likely meet the same fate.
+        # Check for upstream causes before craft polish, and before the
+        # convergence check: an adaptation's source drift is no craft score
+        # (#477). A scene whose brief fix was turned down is not sent again:
+        # the same request would cost the same and likely meet the same fate.
         upstream_scenes = [s for s in _detect_upstream_scenes(project_dir, latest_diag)
                            if s not in brief_fix_skipped]
+
+        # Convergence check: no actionable issues. With no craft issues left,
+        # only source drift is still fixed (as before, a diagnosis' brief
+        # root cause alone doesn't hold the loop open)
+        craft_converged = summary['high_count'] == 0 and summary['medium_count'] == 0
+        if craft_converged:
+            drift = _source_drift_scenes(project_dir, quiet=True)
+            upstream_scenes = [s for s in upstream_scenes if s in drift]
+            if not upstream_scenes:
+                log('  No high or medium priority issues — converged')
+                _update_pr_body_iteration(project_dir, pr_number, iteration, summary,
+                                          converged=True)
+                break
+
         if upstream_scenes:
             log(f'  Upstream issues in {len(upstream_scenes)} scenes — fixing briefs first')
             fixed, skipped = _fix_and_redraft(project_dir, upstream_scenes)
@@ -2007,6 +2073,12 @@ def _run_polish_loop(project_dir: str, max_loops: int,
                 commit_and_push(project_dir,
                                 f'Polish: upstream brief fixes for {len(fixed)} scenes',
                                 ['reference/', 'scenes/', 'working/'])
+
+        if craft_converged:
+            log('  No high or medium priority issues; source drift fixed — converged')
+            _update_pr_body_iteration(project_dir, pr_number, iteration, summary,
+                                      converged=True)
+            break
 
         # Generate targeted plan from diagnosis and execute
         log(f'\n=== Iteration {iteration}/{max_loops}: Polish (Sonnet) ===')

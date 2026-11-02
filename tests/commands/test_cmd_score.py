@@ -712,6 +712,11 @@ class TestSourceFidelityInAFullRun:
                                           project_dir, monkeypatch):
         with open(os.path.join(project_dir, 'storyforge.yaml'), 'a') as f:
             f.write('\nsource:\n  projects:\n    - slug: src\n      path: ../src\n')
+        imported = os.path.join(project_dir, 'reference', 'source', 'src')
+        os.makedirs(imported)
+        for name, text in (('scenes.csv', 'id|seq\n'), ('source-bible.md', '# Source\n')):
+            with open(os.path.join(imported, name), 'w') as f:
+                f.write(text)
         calls = []
         self._run(mock_api, project_dir, monkeypatch, calls)
         assert len(calls) == 1
