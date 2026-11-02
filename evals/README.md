@@ -71,10 +71,12 @@ spread to `evals/e6/spread.json` (and each E8 case's outcome per run to
 requests match, so a prompt change since they were recorded is a miss;
 they are not re-recorded on every change (see `evals/e6/__init__.py`).
 `--suite NAME` replays one suite and replaces only its entries in
-`spread.json`, whose `git_sha` is per suite: E4's runs 2 and 3 are of
-d3536986 (#482's gate, one checker reading; replay them from a worktree
-at that commit), the other suites' of v1.87.1 (3c01088d). Results and
-reading are in the status doc.
+`spread.json`, whose `git_sha` is per suite, the commit each was replayed
+at. E4's three runs are of #482's gate (one checker reading): replay them
+from a worktree at d3536986, since run 1 has since been re-recorded with two
+readings and a replay at a later commit misses (`--suite` then leaves the
+file as it was). The other suites' runs 2 and 3 were recorded at v1.87.1
+(3c01088d). Results and reading are in the status doc.
 
 ## Model-tier comparisons
 
