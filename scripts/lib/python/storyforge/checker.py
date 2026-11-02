@@ -282,15 +282,8 @@ class Book:
         """The scene's place in the story's calendar, as scenes.csv gives it
         (`timeline_day`, `time_of_day`): 'day 19, evening', or '' when it has
         neither."""
-        s = self.scenes.get(sid, {})
-        day, time = (s.get('timeline_day') or '').strip(), (s.get('time_of_day') or '').strip()
-        if not (day or time):
-            return ''
-        mode = (s.get('time_mode') or '').strip().lower()
-        how = {'summary': 'a summary: covers a stretch from that day',
-               'frame': "frame narration: not the story's present",
-               'vision': "a vision: not the story's present"}.get(mode, '')
-        return ', '.join(filter(None, [f'day {day}' if day else '', time, how]))
+        from storyforge.prompts import scene_when
+        return scene_when(self.scenes.get(sid, {}))
 
     def calendar(self) -> str:
         """The calendar line, `{id}: {when}`, of every scene with a day or a

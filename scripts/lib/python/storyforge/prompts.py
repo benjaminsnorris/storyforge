@@ -1540,6 +1540,51 @@ def _states_checklist(scene: dict, ref_dir: str) -> str:
             + '\n'.join(lines))
 
 
+def scene_when(scene: dict[str, str]) -> str:
+    """A scene row's place in the story's calendar, as scenes.csv gives it
+    (`timeline_day`, `time_of_day`, `time_mode`): 'day 19, evening', or ''
+    when it has neither. The checker's calendar (`checker.Book.when`) and
+    the drafting prompt's both read it, so the two agree word for word."""
+    day = (scene.get('timeline_day') or '').strip()
+    time = (scene.get('time_of_day') or '').strip()
+    if not (day or time):
+        return ''
+    mode = (scene.get('time_mode') or '').strip().lower()
+    how = {'summary': 'a summary: covers a stretch from that day',
+           'frame': "frame narration: not the story's present",
+           'vision': "a vision: not the story's present"}.get(mode, '')
+    return ', '.join(filter(None, [f'day {day}' if day else '', time, how]))
+
+
+def _calendar_block(scene_id: str, project_dir: str) -> str:
+    """The drafting prompt's calendar: every dated scene's `{id}: {when}` in
+    reading order (cut and merged scenes left out), this scene marked, and
+    what to do with it. The checker has had it since #478 and stops on an
+    elapsed time that breaks it; the writer, without it, guessed spans ("ten
+    days" from day 5 to day 19). '' when no scene has a `timeline_day` (times
+    of day alone give no days to count), as the checker's note is."""
+    from . import ledger
+    from .elaborate import _read_csv_as_map
+    scenes = _read_csv_as_map(os.path.join(project_dir, 'reference', 'scenes.csv'))
+    order = ledger.scene_order(project_dir)
+    live = [sid for sid in sorted(order, key=order.get) if sid == scene_id or
+            (scenes.get(sid, {}).get('status') or '').strip().lower() not in _GONE]
+    if not any((scenes.get(sid, {}).get('timeline_day') or '').strip() for sid in live):
+        return ''
+    lines = [f'{sid}: {scene_when(scenes.get(sid, {}))}' + ('  <- this scene' if sid == scene_id else '')
+             for sid in live if scene_when(scenes.get(sid, {}))]
+    here = scene_when(scenes.get(scene_id, {}))
+    return ('## The Calendar\n\n'
+            "Each dated scene's day in the story's calendar (scenes.csv), in reading order"
+            + (f'; this scene is {here}' if here else '; this scene has no day') + '. '
+            'Every elapsed time, day count or date the scene states ("a week ago", '
+            '"ten days since", "three nights out") must fit these days and the days of the '
+            'scenes whose events it counts from. Where the brief doesn\'t need a span, don\'t '
+            'name one: a vaguer phrase is better than a number that breaks the calendar. A '
+            "summary scene's day is where its stretch starts; a frame or vision scene is not "
+            "the story's present.\n\n" + '\n'.join(lines))
+
+
 def _character_names(ref_dir: str) -> dict[str, str]:
     """characters.csv id → name, for showing a state's subject."""
     from .elaborate import _read_csv
@@ -1679,6 +1724,7 @@ def build_scene_prompt_from_briefs(
         scene_id, scene, project_dir,
         shown={s.strip() for s in state_in.split(';') if s.strip()},
         rewrite=rewriting)
+    calendar_block = _calendar_block(scene_id, project_dir)
 
     # Craft principles
     craft = build_weighted_directive(project_dir)
@@ -1868,6 +1914,8 @@ Do NOT add creative interpretation or suggestions."""
 {state_block}
 
 {ledger_block}
+
+{calendar_block}
 
 {voice_guide}
 
