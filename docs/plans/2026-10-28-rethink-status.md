@@ -1,8 +1,31 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-11-01, at v1.125.0. **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and is met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). The gate now fixes a failing scene up to twice (v1.124.0) and reads each scene twice (v1.125.0; see Latest). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-11-01, at v1.126.0. **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and is met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). The gate now fixes a failing scene up to twice (v1.124.0) and reads each scene twice (v1.125.0; see Latest). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
-## Latest: E4 over three runs, and two checker readings (2026-11-01)
+## Latest: the calendar in the drafting prompt (2026-11-01)
+
+**v1.126.0.** The first of the smaller items. Since #478 the checker sees each scene's `timeline_day` / `time_of_day` and stops on an elapsed time that breaks them; the writer didn't, so it guessed spans the gate then had to catch.
+
+**What changed:** `build_scene_prompt_from_briefs` (write, revise's redrafts, E4, E5, E8) has a "The Calendar" section after the Established Facts: every live scene's `{id}: {when}` in reading order, earlier and later, this scene marked, from `prompts.scene_when`, which `checker.Book.when` now calls, so the writer and the checker read the same lines. Elapsed times must fit it; where the brief doesn't need a span, none is named (a vaguer phrase beats a number that breaks the calendar). Left out when no scene has a `timeline_day`, as the checker's note is.
+
+| | main (v1.125.0) | the calendar |
+|---|---|---|
+| E4 TIM contradictions the judge found, every drafted scene | 5 | **2** (one is `plan`'s brief-scripted "Saturday night", a plan conflict in both) |
+| E4 contradictions / CP10k, every drafted scene | 7 / 3.09 | **4 / 1.75** (E6 range on one-reading code: 3.62–4.00) |
+| E4 CP10k in the gate's passed scenes | 1.72 | 1.63 (range 1.70–4.13) |
+| E4 gate caught / missed / false alarm | 3 / 3 / 2 | 1 / 3 / 3 (fewer errors to catch) |
+| E5 mismatches per scene | 1.2 | 1.2 |
+| E8 reintroduced (TIM) | 3 (0) | 3 (0) |
+| E8 passed by the gate (`reintroduced_unflagged`, ≤ 2) | 1 | **3: gate fails** |
+| E8 errors per 10k words | 0.84 | 0.83 |
+
+**How to read it:** the calendar does what it was for. E4's day-arithmetic errors fell from 5 to 2 before the gate, and every-drafted-scene CP10k, E4's steadier number (range 0.38), is below every earlier run. **E8's gate fails** (3 > 2), on errors that aren't time: governor-016 (WLD, stone-cutters on Block Fourteen; reintroduced in all three E6 runs and a known checker inference miss since #478), thornwall-025 (TRT, the Holds' names; 2 of 3 E6 runs), and lantern-folk-020 (TRT, old Tallow at the south root; consistent in all three E6 runs, so new here). All three are `redraft-from-brief`, so they were redrafted with the new prompt, but none is a calendar fact; this reads as which-cases-reintroduce noise (the unflagged count's spread is unmeasured), not something the calendar caused. Not merged on that: whether to accept it, re-record E8, or measure the unflagged count's spread is Ben's call.
+
+- **Spend:** $67.86 (`--mode auto`: E4 $19.98, E5 $3.23, E8 $44.65).
+
+**Next, in order:** Ben's decision on E8's gate for this PR. Then a live `write --force` on a mid-book scene of a shared-dark copy for the re-check's real cost (two readings); the low-confidence halt; `characters.csv` `pronouns`.
+
+## E4 over three runs, and two checker readings (2026-11-01)
 
 **v1.125.0.** Ben's next two items: E4 over 2–3 runs, and the checker's run-to-run variance.
 
