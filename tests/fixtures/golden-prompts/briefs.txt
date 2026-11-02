@@ -1,0 +1,94 @@
+You are writing the drafting contracts for a novel — the scene-level briefs that define exactly what happens in each scene, in enough detail that scenes can be drafted independently and still cohere.
+
+## Project
+
+**Title:** The Cartographer's Silence
+**Genre:** fantasy / secondary world
+**Logline:** A cartographer discovers her maps are erasing people from existence.
+**Target word count:** 90000
+
+
+## Current State
+
+### scenes.csv
+```
+id|seq|title|part|act|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+act1-sc01|1|The Finest Cartographer|1|1|Dorren Hayle|Pressure Cartography Office|1|morning|2 hours|character|briefed|0|2500
+act1-sc02|2|The Missing Village|1|1|Dorren Hayle|Dorren's private study|1|evening|1 hour|plot|briefed|0|3000
+new-x1|3|The Archivist's Warning|1|1|Kael Maren|The Deep Archive|2|afternoon|30 minutes|revelation|mapped|0|1500
+act2-sc01|4|Into the Blank|2|2|Tessa Merrin|The Uncharted Reaches|3|morning|4 hours|world|architecture|0|2800
+act2-sc02|5|First Collapse|2|2|Tessa Merrin|Eastern Ridge|3|afternoon|1 hour|action|spine|0|2000
+act2-sc03|6|The Warning Ignored|2|2|Dorren Hayle|Council Chamber|4|evening|2 hours|confrontation|briefed|0|2200
+```
+
+### scene-intent.csv
+```
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
+act1-sc01|Establishes Dorren as institutional gatekeeper who notices anomalies but chooses protocol over investigation|action|Controlled competence to buried unease|truth|+/-|revelation|Dorren Hayle;Tessa Merrin;Pell|Dorren Hayle;Tessa Merrin|+inquiry:map-anomaly
+act1-sc02|Dorren discovers a village has vanished from the pressure maps|sequel|Routine giving way to dread|safety|-/--|revelation|Dorren Hayle|Dorren Hayle|
+new-x1|Kael warns about archive inconsistencies pointing to systematic erasure|action|Scholarly calm to urgent alarm|truth|-/+|action|Kael Maren;Dorren Hayle|Kael Maren;Dorren Hayle|+inquiry:archive-erasure
+act2-sc01|First exploration of the eastern damage reveals the subsidence is not natural|action|Professional detachment to visceral shock|safety|+/--|action|Tessa Merrin;Pell|Tessa Merrin;Pell|+milieu:uncharted-reaches
+act2-sc02|The ground gives way — Tessa barely escapes as the ridge collapses|action|Determination to terror|life|-/+|action|Tessa Merrin|Tessa Merrin|-milieu:uncharted-reaches
+act2-sc03|Dorren presents evidence to the council; they dismiss it as procedural noise|sequel|Resolve to bitter resignation|justice|+/-|revelation|Dorren Hayle;Council Members;Kael Maren|Dorren Hayle;Council Members|-inquiry:archive-erasure;-inquiry:map-anomaly
+```
+
+### scene-briefs.csv (existing)
+```
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|subtext|continuity_deps|has_overflow|physical_state_in|physical_state_out
+act1-sc01|Complete the quarterly pressure audit on schedule|Anomalous readings in eastern sector don't match any known pattern|no-and|Report the anomaly and risk protocol review, or file it as instrument error and stay on schedule|Files as instrument error but keeps a private note||map-anomaly-exists|Reviews maps;Finds anomaly;Consults Tessa;Files as error;Makes private note|"The eastern readings are within acceptable variance";Dorren privately: "Acceptable is not the same as explained"|competence;unease;self-doubt;resolve|maps/cartography;acceptable-variance|||false||
+act1-sc02|Understand the anomaly by cross-referencing historical archives|The village that should appear on the 40-year map is simply absent — no record of removal|no-and|Accept the archive is incomplete and move on, or pursue an explanation that has no institutional support|Decides to pursue quietly, outside protocol|map-anomaly-exists|village-vanished;archive-erasure|Cross-references maps;Discovers missing village;Searches removal logs;Finds nothing|"It was there forty years ago. It isn't there now. There is no note."|routine;confusion;dread;determination|depth/descent;maps/cartography||act1-sc01|false||archive-key-dorren;exhaustion-tessa
+new-x1|||||||||||||||archive-key-dorren|archive-key-dorren
+act2-sc03|Convince the council that the eastern anomalies require investigation|Council members see the anomaly as Dorren's procedural fixation, not evidence of erasure|no|Accept the council's dismissal and work within channels, or go outside the institution entirely|Goes outside — shares findings with Kael privately after the meeting|village-vanished;archive-erasure|council-dismisses-evidence|Presents evidence;Council dismisses;Dorren argues;Is overruled;Meets Kael after|Council: "We appreciate your diligence, Cartographer.";Dorren to Kael: "They won't look."|resolve;frustration;bitter-resignation;quiet-defiance|governance-as-weight;blindness/seeing||act1-sc02;new-x1|false|archive-key-dorren;exhaustion-tessa|archive-key-dorren
+```
+
+
+REGISTRIES
+
+## Instructions
+
+For each scene that needs a brief, define the complete drafting contract:
+
+- **goal**: The POV character's concrete objective entering the scene (Swain)
+- **conflict**: What specifically opposes the goal
+- **outcome**: How the scene ends — yes (gets the goal) / no (fails) / yes-but (gets the goal, with a new complication or cost) / no-and (fails, and things get worse) / no-but (fails, but something genuinely goes their way) (Bickham's scene disasters, plus no-but from Kowal's try/fail cycles)
+- **crisis**: The dilemma — best bad choice or irreconcilable goods (Story Grid)
+- **decision**: What the character actively chooses
+- **knowledge_in**: Semicolon-separated ids of STRUCTURALLY USEFUL facts the POV character knows entering. Facts are knowledge fact ids (kebab-case, 2-5 words); reuse an existing id for a fact already established, and give a genuinely new fact a new id. Only include facts that gate this scene's decisions — identity reveals, motive/intent reveals, capability/constraints, state changes, stakes/threats, relationship shifts. Omit ordinary plot details.
+- **knowledge_out**: knowledge_in plus 0-2 NEW structurally useful facts learned during this scene. A fact is useful only if a character who knows it would make a different decision than one who doesn't, or a future scene requires it. Most scenes add 0-1 new facts.
+- **physical_state_in**: Semicolon-separated state IDs that on-stage characters carry INTO this scene. Use EXACT IDs from prior scenes' physical_state_out. Only track states that affect capability, appearance, or equipment — injuries, items gained/lost, abilities changed, visible changes, fatigue. Not temporary emotions or scene-local conditions.
+- **physical_state_out**: physical_state_in plus 0-2 NEW states acquired during this scene, minus any states that resolve during this scene.
+- **key_actions**: Semicolon-separated concrete things that happen
+- **key_dialogue**: Specific lines or exchanges that must appear in the prose
+- **emotions**: Semicolon-separated emotional beats in sequence
+- **motifs**: Semicolon-separated recurring images/symbols deployed
+- **subtext**: ONE sentence, max 150 characters. The gap between what a character says/does and what they mean. Format: "X says A but means B; don't state B" or "The tension is Z; show through [behavior], never name it." NOT a paragraph. NOT multiple clauses chained with semicolons. If no meaningful subtext, leave empty.
+- **continuity_deps**: Semicolon-separated scene IDs this scene depends on (for parallel drafting)
+- **has_overflow**: false (unless you indicate a scene needs extended brief)
+
+### Output Format
+
+```briefs-csv
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|subtext|continuity_deps|has_overflow|physical_state_in|physical_state_out
+(one row per scene being briefed)
+```
+
+Also update scenes.csv status to "briefed" for all briefed scenes:
+
+```scenes-csv-update
+id|status
+(one row per scene, status = briefed)
+```
+
+### Rules
+
+- knowledge_in uses the same fact ids as prior scenes' knowledge_out, never sentences — validation will check this
+- Target 0-2 new knowledge facts per scene. Most scenes should add 0-1. A full novel should have 50-120 total facts, not 500+
+- continuity_deps should list the minimum set of scenes whose knowledge_out this scene needs
+- physical_state_in must reference IDs established in prior scenes' physical_state_out
+- Target 0-2 state changes per scene. A full novel should have 15-40 total state entries.
+- States persist until explicitly resolved — do not silently drop them
+- continuity_deps should also list scenes whose physical_state_out this scene needs
+- Every scene must have goal/conflict/outcome filled
+- Key dialogue should sound like the character, not the author
+- Scenes with no continuity_deps can be drafted in parallel — maximize these
+- The crisis must be a genuine dilemma (two bad choices or two good choices that conflict), not "do the obvious thing or don't"

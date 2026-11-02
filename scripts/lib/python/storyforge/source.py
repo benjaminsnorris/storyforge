@@ -6,14 +6,17 @@ expansion, a rewrite. This module holds everything deterministic about that:
 
 - `read_config`: the `source:` block (`SourceConfig`), or None without one.
 - `load_name_map` / `NameMap`: the retelling's names
-  (`source_id|target_id|source_name|target_name`). Ids, names and aliases
-  are mapped by id; every text field gets whole-word, case-sensitive name
-  replacement, longest name first. A row with an empty `source_id` is a
-  text-only form (Ilius -> Ilium, "son of Saturn").
+  (`source_id|target_id|source_name|target_name`). Registry ids and the
+  `_ID_COLUMNS` are mapped by id (a token that is a name, in a project that
+  keeps names there, by name), and a registry row's `name` comes from its
+  `target_name`; every other cell, aliases included, gets whole-word,
+  case-sensitive name replacement, longest name first. A row with an empty
+  `source_id` is a text-only form (Ilius -> Ilium, "son of Saturn").
 - `import_source`: copies a source project's scene CSVs, registries, ledger,
   structural CSVs and bibles into `reference/source/<slug>/` with the map
   applied, copies its prose (`scenes/*.md`) byte for byte, and writes
-  `source-bible.md`. It writes nothing outside `reference/source/<slug>/`.
+  `source-bible.md`. It writes nothing outside `reference/source/` (the new
+  copy is staged in a sibling directory, then swapped in).
 - `read_source_map` / `check_coverage`: `reference/source-map.csv`, which the
   map stage writes, and validate's coverage check of it.
 
@@ -63,7 +66,8 @@ IMPORTED_DOCS = (
 
 # Columns holding registry ids (characters and locations), mapped by id.
 # Every other column gets name replacement, which is case-sensitive, so the
-# lowercase ids in the remaining id columns are never touched.
+# lowercase ids in the remaining id columns are left alone as long as every
+# source_name has a capital (load_name_map refuses one that doesn't).
 _ID_COLUMNS = frozenset({'pov', 'location', 'characters', 'on_stage',
                          'subject', 'known_by'})
 _REGISTRIES = ('characters.csv', 'locations.csv')
@@ -101,13 +105,29 @@ class SourceConfig:
         raise SourceError(f'no source project with slug {slug!r} '
                           f'(storyforge.yaml lists: {", ".join(self.slugs())})')
 
+    def __post_init__(self):
+        if self.mode not in MODES:
+            raise SourceError(f'storyforge.yaml: source.mode is {self.mode!r}; '
+                              f'use one of {", ".join(MODES)}')
+        if not self.projects:
+            raise SourceError('storyforge.yaml: the `source:` block lists no '
+                              '`projects` (each `- slug: ...` with a `path: ...`)')
+        slugs = [p.slug for p in self.projects]
+        for slug in slugs:
+            if not _SLUG_RE.match(slug):
+                raise SourceError(f'storyforge.yaml: source slug {slug!r} must be '
+                                  f'lowercase letters, digits and hyphens')
+            if slugs.count(slug) > 1:
+                raise SourceError(f'storyforge.yaml: source slug {slug!r} is listed twice')
+
     def map_path(self, project: SourceProject) -> str:
         return project.name_map or self.name_map
 
     @property
-    def blocking(self) -> str:
-        """The severity of a coverage gap under this mode."""
-        return 'blocking' if self.mode == 'faithful' else 'advisory'
+    def gap_severity(self) -> str:
+        """The severity of a coverage gap (a source scene unaccounted for, or
+        cut with no reason) under this mode."""
+        return {'faithful': 'blocking', 'free': 'advisory'}[self.mode]
 
 
 _SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]*$')
@@ -179,34 +199,20 @@ def read_config(project_dir: str) -> SourceConfig | None:
     block = _source_block(project_dir)
     if block is None:
         return None
-    items = _parse_projects(block)
-    if not items:
-        raise SourceError('storyforge.yaml: the `source:` block lists no '
-                          '`projects` (each `- slug: ...` with a `path: ...`)')
     projects = []
-    seen = set()
-    for n, item in enumerate(items, 1):
+    for n, item in enumerate(_parse_projects(block), 1):
         slug = item.get('slug', '').strip()
         path = item.get('path', '').strip()
         if not slug or not path:
             raise SourceError(f'storyforge.yaml: source project {n} needs both '
                               f'`slug` and `path`')
-        if not _SLUG_RE.match(slug):
-            raise SourceError(f'storyforge.yaml: source slug {slug!r} must be '
-                              f'lowercase letters, digits and hyphens')
-        if slug in seen:
-            raise SourceError(f'storyforge.yaml: source slug {slug!r} is listed twice')
-        seen.add(slug)
         projects.append(SourceProject(slug, path, item.get('name_map', '').strip()))
     keys = _direct_keys(block)
-    mode = keys.get('mode') or DEFAULT_MODE
-    if mode not in MODES:
-        raise SourceError(f'storyforge.yaml: source.mode is {mode!r}; '
-                          f'use one of {", ".join(MODES)}')
+    # SourceConfig checks the projects, the slugs and the mode
     return SourceConfig(
         projects=tuple(projects),
         name_map=keys.get('name_map', ''),
-        mode=mode,
+        mode=keys.get('mode') or DEFAULT_MODE,
         rules=keys.get('rules', ''),
     )
 
@@ -280,8 +286,11 @@ def _heading_slug(heading: str) -> str:
 # The name map
 # ============================================================================
 
-@dataclass
+@dataclass(frozen=True)
 class NameMap:
+    """A loaded name map. Frozen, and its pattern is built once here, so it
+    can never disagree with `replacements`; `load_name_map` builds the dicts
+    and constructs it once."""
     ids: dict[str, str] = field(default_factory=dict)            # source_id -> target_id
     id_names: dict[str, str] = field(default_factory=dict)       # source_id -> target_name
     replacements: dict[str, str] = field(default_factory=dict)   # source_name -> target_name
@@ -289,31 +298,55 @@ class NameMap:
     path: str = ''
 
     def __post_init__(self):
-        self._pattern = None
+        changed = sorted(((s, t) for s, t in self.replacements.items() if s != t),
+                         key=lambda p: (-len(p[0]), p[0]))
+        object.__setattr__(self, '_changed', tuple(changed))
+        object.__setattr__(self, '_lookup', dict(changed))
+        pattern = None
+        if changed:
+            alternation = '|'.join(re.escape(s) for s, _ in changed)
+            pattern = re.compile(rf'(?<!\w)(?:{alternation})(?!\w)')
+        object.__setattr__(self, '_pattern', pattern)
 
     def changed(self) -> list[tuple[str, str]]:
         """The names the map changes, longest first."""
-        return sorted(((s, t) for s, t in self.replacements.items() if s != t),
-                      key=lambda p: (-len(p[0]), p[0]))
+        return list(self._changed)
 
     def apply_text(self, text: str) -> str:
         """Replace each source name with its target name: whole words,
         case-sensitive, longest first (one pass, so a replacement is never
         replaced again)."""
-        changed = self.changed()
-        if not changed or not text:
+        if self._pattern is None or not text:
             return text
-        if self._pattern is None:
-            alternation = '|'.join(re.escape(s) for s, _ in changed)
-            self._pattern = re.compile(rf'(?<!\w)(?:{alternation})(?!\w)')
-        return self._pattern.sub(lambda m: self.replacements[m.group(0)], text)
+        return self._pattern.sub(lambda m: self._lookup[m.group(0)], text)
 
-    def map_ids(self, cell: str) -> str:
-        """Map each `;`-separated id in a cell; ids the map lacks stay."""
-        if not cell or not self.ids:
+    def map_token(self, token: str) -> str | None:
+        """An id-column token's new value: by id, else (a project that keeps
+        names in these columns) by name; None when the map knows neither."""
+        if token in self.ids:
+            return self.ids[token]
+        if token in self.replacements:
+            return self.replacements[token]
+        return None
+
+    def map_ids(self, cell: str, unknown: set[str] | None = None) -> str:
+        """Map each `;`-separated token in an id cell; a token the map lacks
+        stays, and is added to `unknown` when given."""
+        if not cell:
             return cell
-        return ';'.join(self.ids.get(tok.strip(), tok.strip()) if tok.strip() else tok
-                        for tok in cell.split(';'))
+        out = []
+        for tok in cell.split(';'):
+            t = tok.strip()
+            if not t:
+                out.append(tok)
+                continue
+            mapped = self.map_token(t)
+            if mapped is None:
+                if unknown is not None:
+                    unknown.add(t)
+                mapped = t
+            out.append(mapped)
+        return ';'.join(out)
 
 
 EMPTY_MAP = NameMap()
@@ -322,8 +355,9 @@ EMPTY_MAP = NameMap()
 def load_name_map(path: str) -> NameMap:
     """Read a name map. Raises SourceError for a header that isn't exactly
     `NAME_MAP_COLUMNS`, a row with the wrong cell count, a registry row
-    without a target id or name, a source id given two targets, or a
-    text-only row (empty `source_id`) without both names.
+    without a target id or name, a source id given two targets, a text-only
+    row (empty `source_id`) without both names, or a source name with no
+    capital letter (it could match an id inside text).
 
     A source name given two different target names (two people who share a
     name in the source but not in the retelling) can't be replaced in text;
@@ -338,7 +372,8 @@ def load_name_map(path: str) -> NameMap:
     if not lines or lines[0].split('|') != NAME_MAP_COLUMNS:
         raise SourceError(f'name map {path}: the header must be '
                           f'{"|".join(NAME_MAP_COLUMNS)}')
-    nm = NameMap(path=path)
+    ids: dict[str, str] = {}
+    id_names: dict[str, str] = {}
     targets_of: dict[str, set[str]] = {}
     for n, line in enumerate(lines[1:], 2):
         cells = line.split('|')
@@ -350,22 +385,22 @@ def load_name_map(path: str) -> NameMap:
             if not tid or not tname:
                 raise SourceError(f'name map {path} line {n}: {sid} needs a '
                                   f'target_id and a target_name')
-            if sid in nm.ids and nm.ids[sid] != tid:
+            if sid in ids and ids[sid] != tid:
                 raise SourceError(f'name map {path} line {n}: {sid} maps to both '
-                                  f'{nm.ids[sid]} and {tid}')
-            nm.ids[sid] = tid
-            nm.id_names[sid] = tname
+                                  f'{ids[sid]} and {tid}')
+            ids[sid] = tid
+            id_names[sid] = tname
         elif not sname or not tname:
             raise SourceError(f'name map {path} line {n}: a text-only row (no '
                               f'source_id) needs a source_name and a target_name')
         if sname:
+            if sname == sname.lower():
+                raise SourceError(f'name map {path} line {n}: source_name {sname!r} '
+                                  f'has no capital letter')
             targets_of.setdefault(sname, set()).add(tname)
-    for sname, targets in targets_of.items():
-        if len(targets) == 1:
-            nm.replacements[sname] = next(iter(targets))
-        else:
-            nm.ambiguous[sname] = sorted(targets)
-    return nm
+    replacements = {s: next(iter(t)) for s, t in targets_of.items() if len(t) == 1}
+    ambiguous = {s: sorted(t) for s, t in targets_of.items() if len(t) > 1}
+    return NameMap(ids, id_names, replacements, ambiguous, path)
 
 
 # ============================================================================
@@ -377,7 +412,7 @@ class ImportResult:
     slug: str
     source_path: str
     dest: str
-    files: list[str] = field(default_factory=list)       # relative to dest
+    files: dict[str, bytes] = field(default_factory=dict)   # relative to dest -> content
     missing: list[str] = field(default_factory=list)     # source files not there
     prose_files: int = 0
     notes: list[str] = field(default_factory=list)       # things the author should know
@@ -400,8 +435,19 @@ def _read_rows(path: str) -> tuple[list[str], list[list[str]], str]:
     return header, rows, problem
 
 
+def _read_source_csv(slug: str, path: str, label: str) -> tuple[list[str], list[list[str]]]:
+    """A source CSV, or SourceError naming it when it can't be read or is malformed."""
+    try:
+        header, rows, problem = _read_rows(path)
+    except (OSError, UnicodeDecodeError) as e:
+        raise SourceError(f'source {slug}: {label} could not be read ({e})') from e
+    if problem and problem != 'empty':
+        raise SourceError(f'source {slug}: {label}: {problem}')
+    return header, rows
+
+
 def _map_csv(name: str, header: list[str], rows: list[list[str]],
-             nm: NameMap) -> list[list[str]]:
+             nm: NameMap, unknown: dict[str, set[str]]) -> list[list[str]]:
     out = []
     id_idx = header.index('id') if 'id' in header else None
     name_idx = header.index('name') if 'name' in header else None
@@ -409,10 +455,8 @@ def _map_csv(name: str, header: list[str], rows: list[list[str]],
         new = []
         source_id = row[id_idx].strip() if id_idx is not None else ''
         for col, cell in zip(header, row):
-            if name in _REGISTRIES and col == 'id':
-                new.append(nm.map_ids(cell))
-            elif col in _ID_COLUMNS:
-                new.append(nm.map_ids(cell))
+            if (name in _REGISTRIES and col == 'id') or col in _ID_COLUMNS:
+                new.append(nm.map_ids(cell, unknown.setdefault(f'{name}:{col}', set())))
             else:
                 new.append(nm.apply_text(cell))
         if (name in _REGISTRIES and name_idx is not None
@@ -427,39 +471,61 @@ def _render_csv(header: list[str], rows: list[list[str]]) -> str:
     return '\n'.join('|'.join(r) for r in [header] + rows) + '\n'
 
 
-def map_gaps(src_ref: str, nm: NameMap) -> list[str]:
+def map_gaps(slug: str, src_ref: str, nm: NameMap) -> list[str]:
     """Registry ids (characters, locations) the map has no row for. Every
     registry entry needs one, even an unchanged name: a missing row is a gap,
-    not a pass-through."""
+    not a pass-through. Raises SourceError for a registry that can't be read
+    or has no `id` column."""
     gaps = []
     for reg in _REGISTRIES:
         path = os.path.join(src_ref, reg)
         if not os.path.isfile(path):
             continue
-        header, rows, _ = _read_rows(path)
+        header, rows = _read_source_csv(slug, path, f'reference/{reg}')
         if 'id' not in header:
-            continue
+            raise SourceError(f'source {slug}: reference/{reg} has no id column')
         i = header.index('id')
-        gaps += [f'{reg}:{r[i]}' for r in rows
-                 if i < len(r) and r[i].strip() and r[i].strip() not in nm.ids]
+        gaps += [f'{reg}:{r[i]}' for r in rows if r[i].strip() and r[i].strip() not in nm.ids]
     return gaps
+
+
+def _inside(path: str, directory: str) -> bool:
+    path, directory = os.path.realpath(path), os.path.realpath(directory)
+    return path == directory or path.startswith(directory + os.sep)
 
 
 def import_source(project_dir: str, cfg: SourceConfig, slug: str,
                   dry_run: bool = False) -> ImportResult:
-    """Copy one source project into `reference/source/<slug>/`, replacing
-    what was there. Nothing outside that directory is written. Raises
-    SourceError (before writing anything) when the source isn't a Storyforge
-    project, a file it should copy is unreadable or malformed, or the name
-    map can't be used or lacks a registry entry."""
+    """Build one source's copy for `reference/source/<slug>/` and, unless
+    `dry_run`, swap it in (`write_import`). Raises SourceError, before
+    anything is written, when the source isn't a Storyforge project, a file
+    it should copy is unreadable or malformed, the name map can't be used or
+    lacks a registry entry, or the map or rules file lives inside the
+    directory the import replaces."""
+    result = plan_import(project_dir, cfg, slug)
+    if not dry_run:
+        write_import(result)
+    return result
+
+
+def plan_import(project_dir: str, cfg: SourceConfig, slug: str) -> ImportResult:
+    """Everything `import_source` would write, in memory; nothing is written."""
     proj = cfg.project(slug)
     src = resolve(project_dir, proj.path)
     src_ref = os.path.join(src, 'reference')
+    dest = source_dir(project_dir, slug)
     if os.path.realpath(src) == os.path.realpath(project_dir):
         raise SourceError(f'source {slug}: the path is this project itself')
     if not os.path.isfile(os.path.join(src_ref, 'scenes.csv')):
         raise SourceError(f'source {slug}: {src} has no reference/scenes.csv; '
                           f'is it a Storyforge project?')
+    # The import replaces dest wholesale: an author's file there would be deleted
+    for label, rel in (('name map', cfg.map_path(proj)),
+                       ('rules', cfg.rules.partition('#')[0])):
+        if rel and _inside(resolve(project_dir, rel), dest):
+            raise SourceError(f'source {slug}: the {label} {rel} is inside '
+                              f'reference/source/{slug}/, which every import replaces; '
+                              f'keep it elsewhere (e.g. reference/source/name-map.csv)')
 
     map_rel = cfg.map_path(proj)
     nm = EMPTY_MAP
@@ -468,7 +534,7 @@ def import_source(project_dir: str, cfg: SourceConfig, slug: str,
         if not os.path.isfile(map_path):
             raise SourceError(f'source {slug}: name map {map_rel} not found')
         nm = load_name_map(map_path)
-        gaps = map_gaps(src_ref, nm)
+        gaps = map_gaps(slug, src_ref, nm)
         if gaps:
             shown = ', '.join(gaps[:12]) + (f' and {len(gaps) - 12} more'
                                             if len(gaps) > 12 else '')
@@ -476,7 +542,6 @@ def import_source(project_dir: str, cfg: SourceConfig, slug: str,
                               f'{len(gaps)} registry entr{"y" if len(gaps) == 1 else "ies"} '
                               f'({shown}); add a row for each, even an unchanged name')
 
-    dest = source_dir(project_dir, slug)
     result = ImportResult(slug, src, dest)
     if nm.ambiguous:
         result.notes.append(
@@ -486,20 +551,24 @@ def import_source(project_dir: str, cfg: SourceConfig, slug: str,
     # Everything is built in memory first, so an error writes nothing
     files: dict[str, bytes] = {}
     tables: dict[str, tuple[list[str], list[list[str]]]] = {}
+    unknown: dict[str, set[str]] = {}
     for name in IMPORTED_CSVS:
         path = os.path.join(src_ref, name)
         if not os.path.isfile(path):
             result.missing.append(f'reference/{name}')
             continue
-        try:
-            header, rows, problem = _read_rows(path)
-        except (OSError, UnicodeDecodeError) as e:
-            raise SourceError(f'source {slug}: reference/{name} could not be read ({e})') from e
-        if problem:
-            raise SourceError(f'source {slug}: reference/{name}: {problem}')
-        rows = _map_csv(name, header, rows, nm)
+        header, rows = _read_source_csv(slug, path, f'reference/{name}')
+        rows = _map_csv(name, header, rows, nm, unknown)
         tables[name] = (header, rows)
         files[name] = _render_csv(header, rows).encode('utf-8')
+    if nm is not EMPTY_MAP:
+        unmapped = {k: v for k, v in unknown.items() if v}
+        if unmapped:
+            result.notes.append(
+                'ids or names the name map lacks, left as written: '
+                + '; '.join(f'{k} ({", ".join(sorted(v)[:8])}'
+                            + (f' and {len(v) - 8} more' if len(v) > 8 else '') + ')'
+                            for k, v in sorted(unmapped.items())))
     for name in IMPORTED_DOCS:
         path = os.path.join(src_ref, name)
         if not os.path.isfile(path) or is_unfilled_template(path):
@@ -513,17 +582,23 @@ def import_source(project_dir: str, cfg: SourceConfig, slug: str,
     if os.path.isdir(scenes_src):
         for fn in sorted(os.listdir(scenes_src)):
             if fn.endswith('.md'):
-                with open(os.path.join(scenes_src, fn), 'rb') as f:
-                    files[f'scenes/{fn}'] = f.read()   # the translator's text, as written
+                try:
+                    with open(os.path.join(scenes_src, fn), 'rb') as f:
+                        files[f'scenes/{fn}'] = f.read()   # the source's text, as written
+                except OSError as e:
+                    raise SourceError(f'source {slug}: scenes/{fn} could not be read ({e})') from e
                 result.prose_files += 1
     files[SOURCE_BIBLE] = build_source_bible(slug, tables, nm).encode('utf-8')
 
-    result.files = sorted(files)
+    result.files = files
     result.changed = _differs(dest, files)
-    if dry_run or not result.changed:
-        return result
-    _replace_dir(dest, files)
     return result
+
+
+def write_import(result: ImportResult) -> None:
+    """Swap a planned import in (only when it changes something)."""
+    if result.changed:
+        _replace_dir(result.dest, result.files)
 
 
 def _differs(dest: str, files: dict[str, bytes]) -> bool:
@@ -535,9 +610,12 @@ def _differs(dest: str, files: dict[str, bytes]) -> bool:
     if on_disk != set(files):
         return True
     for rel, data in files.items():
-        with open(os.path.join(dest, rel), 'rb') as f:
-            if f.read() != data:
-                return True
+        try:
+            with open(os.path.join(dest, rel), 'rb') as f:
+                if f.read() != data:
+                    return True
+        except OSError:
+            return True   # unreadable: rewrite it
     return False
 
 
@@ -691,12 +769,15 @@ def build_source_bible(slug: str, tables: dict, nm: NameMap = EMPTY_MAP) -> str:
 # ============================================================================
 
 def read_table(project_dir: str, slug: str, name: str) -> list[dict[str, str]]:
-    """An imported CSV as dicts ([] when it isn't there)."""
+    """An imported CSV as dicts ([] when it isn't there). Raises SourceError
+    when it can't be read or a row has the wrong number of cells: the import
+    writes well-formed files, so either means a hand edit to re-import over."""
     path = os.path.join(source_dir(project_dir, slug), name)
     if not os.path.isfile(path):
         return []
-    header, rows, _ = _read_rows(path)
-    return [dict(zip(header, r + [''] * (len(header) - len(r)))) for r in rows]
+    header, rows = _read_source_csv(
+        slug, path, f'reference/source/{slug}/{name} (re-run `storyforge source import`)')
+    return [dict(zip(header, r)) for r in rows]
 
 
 def source_scenes(project_dir: str, slug: str) -> list[dict[str, str]]:
@@ -717,18 +798,30 @@ def source_prose(project_dir: str, slug: str, scene_id: str) -> str | None:
         return None
 
 
+def require_imported(project_dir: str, cfg: SourceConfig) -> None:
+    """Raise SourceError naming every source not imported yet: a prompt built
+    without it would say the novel adapts a source and show none of it."""
+    missing = [s for s in cfg.slugs() if not is_imported(project_dir, s)]
+    if missing:
+        raise SourceError(f'source {", ".join(missing)} '
+                          f'{"is" if len(missing) == 1 else "are"} not imported: '
+                          f'run `storyforge source import`')
+
+
 def source_bibles(project_dir: str, cfg: SourceConfig) -> list[tuple[str, str]]:
-    """[(label, text)] of each imported source's bible, in yaml order."""
+    """[(label, text)] of each source's bible, in yaml order. Raises
+    SourceError for a source not imported, or a bible missing or unreadable."""
+    require_imported(project_dir, cfg)
     out = []
     for slug in cfg.slugs():
         path = os.path.join(source_dir(project_dir, slug), SOURCE_BIBLE)
         try:
             with open(path, encoding='utf-8') as f:
                 text = f.read().strip()
-        except FileNotFoundError:
-            continue
-        if text:
-            out.append((f'Source Bible ({slug})', text))
+        except (OSError, UnicodeDecodeError) as e:
+            raise SourceError(f'reference/source/{slug}/{SOURCE_BIBLE} could not be read '
+                              f'({e}); re-run `storyforge source import`') from e
+        out.append((f'Source Bible ({slug})', text))
     return out
 
 
@@ -803,22 +896,61 @@ def _day(row: dict | None) -> float | None:
         return None
 
 
+def finding(severity: str, message: str, scene_id: str = '') -> dict:
+    """A source finding in validate's shape (the keys `elaborate._check`
+    findings carry, so a report mixing them reads either)."""
+    if severity not in ('blocking', 'advisory'):
+        raise ValueError(f'severity {severity!r}')
+    return {'severity': severity, 'scene_id': scene_id, 'message': message,
+            'check': 'source', 'category': 'source', 'passed': False}
+
+
+# Scene statuses that take a scene out of the book (as elsewhere: chapter
+# map freshness, schema); such a scene adapts nothing
+INACTIVE_STATUSES = frozenset({'cut', 'merged', 'archived'})
+
+
+def active_scenes(project_dir: str) -> list[dict[str, str]]:
+    """The project's scenes in reading order, without cut/merged/archived."""
+    from storyforge.elaborate import _read_csv
+    rows = _read_csv(os.path.join(project_dir, 'reference', 'scenes.csv'))
+    return sorted((r for r in rows if r.get('id')
+                   and r.get('status', '').strip() not in INACTIVE_STATUSES), key=_seq)
+
+
 def check_coverage(project_dir: str, cfg: SourceConfig) -> dict:
     """Validate's source check. Returns {'findings': [...], 'lines': [...],
-    'checked': bool}. Each finding is {'severity', 'scene_id', 'message'} in
-    validate's shape; `lines` are the coverage lines ("Source odyssey: 170
-    scenes, ..."). What can't be checked is said as an advisory finding."""
+    'checked': bool}, findings made by `finding`; `lines` are the coverage
+    lines ("Source odyssey: 170 scenes, ..."). Coverage gaps (a source scene
+    unaccounted for, or cut with no reason) take the mode's severity; a
+    malformed or dangling row, an unknown id, a scene with no row, a source
+    not imported, and an unusable map always block. A missing map and a
+    reorder the source's timeline can't check are advisory."""
     findings: list[dict] = []
     lines: list[str] = []
 
     def add(severity, message, scene_id=''):
-        findings.append({'severity': severity, 'scene_id': scene_id,
-                         'message': message, 'check': 'source'})
+        findings.append(finding(severity, message, scene_id))
 
     missing = [s for s in cfg.slugs() if not is_imported(project_dir, s)]
     for slug in missing:
         add('blocking', f'source {slug} is not imported: run `storyforge source import`')
-    cat = {s: c for s, c in catalogue(project_dir, cfg).items() if s not in missing}
+    cat = {}
+    for slug in cfg.slugs():
+        if slug in missing:
+            continue
+        try:
+            rows_ = source_scenes(project_dir, slug)
+        except SourceError as e:
+            add('blocking', str(e))
+            continue
+        ids = [r.get('id', '').strip() for r in rows_]
+        if '' in ids:
+            add('blocking', f'source {slug}: {ids.count("")} scene(s) with no id')
+        dupes = sorted({i for i in ids if i and ids.count(i) > 1})
+        if dupes:
+            add('blocking', f'source {slug}: duplicate scene ids {", ".join(dupes)}')
+        cat[slug] = {r['id']: r for r in rows_ if r.get('id')}
 
     try:
         rows = read_source_map(project_dir)
@@ -831,16 +963,17 @@ def check_coverage(project_dir: str, cfg: SourceConfig) -> dict:
         return {'findings': findings, 'lines': lines, 'checked': False}
 
     from storyforge.elaborate import _read_csv
-    scenes = sorted(_read_csv(os.path.join(project_dir, 'reference', 'scenes.csv')),
-                    key=_seq)
-    scene_ids = [s.get('id', '') for s in scenes if s.get('id')]
-    gap = cfg.blocking
+    scenes = active_scenes(project_dir)
+    scene_ids = [s['id'] for s in scenes]
+    inactive = {r['id'] for r in _read_csv(os.path.join(project_dir, 'reference', 'scenes.csv'))
+                if r.get('id') and r.get('status', '').strip() in INACTIVE_STATUSES}
+    gap = cfg.gap_severity
 
     covered: dict[tuple[str, str], list[dict]] = {}
     mapped_scenes = set()
-    for n, r in enumerate(rows, 2):
-        sid, treatment, note = r.get('scene_id', ''), r.get('treatment', ''), r.get('note', '')
-        where = sid or f'{SOURCE_MAP} line {n}'
+    for n, r in enumerate(rows, 1):
+        sid, treatment = r.get('scene_id', ''), r.get('treatment', '')
+        where = sid or f'{SOURCE_MAP} row {n}'
         if treatment not in TREATMENTS:
             add('blocking', f'treatment {treatment!r} is not one of {", ".join(TREATMENTS)}',
                 where)
@@ -848,8 +981,8 @@ def check_coverage(project_dir: str, cfg: SourceConfig) -> dict:
         refs = split_ids(r.get('source_scenes', ''))
         if treatment == 'cut':
             if sid:
-                add('blocking', 'a cut row has an empty scene_id (the source scene '
-                                'is in source_scenes)', where)
+                add('blocking', 'a cut row must have an empty scene_id (the source '
+                                'scene goes in source_scenes)', where)
             if not refs:
                 add('blocking', 'a cut row names no source scene', where)
         else:
@@ -859,6 +992,12 @@ def check_coverage(project_dir: str, cfg: SourceConfig) -> dict:
             if sid in mapped_scenes:
                 add('blocking', 'more than one row in the source map', sid)
             mapped_scenes.add(sid)
+            if sid in inactive:
+                # A cut or merged scene adapts nothing: its source scenes
+                # need another home or a cut row
+                add('advisory', 'is cut or merged in scenes.csv; its source map row '
+                                'covers nothing', sid)
+                continue
             if sid not in scene_ids:
                 add('blocking', 'in the source map but not in scenes.csv', sid)
             if not refs and treatment != 'invent':
@@ -871,9 +1010,15 @@ def check_coverage(project_dir: str, cfg: SourceConfig) -> dict:
             hit = resolve_source_id(ref, cat)
             if hit is None:
                 where_found = [s for s, c in cat.items() if ref in c]
-                why = (f'is in more than one source ({", ".join(where_found)}); '
-                       f'write it as slug:id' if len(where_found) > 1
-                       else 'is not a scene of the source')
+                slug = ref.split(':', 1)[0] if ':' in ref else ''
+                if len(where_found) > 1:
+                    why = (f'is in more than one source ({", ".join(where_found)}); '
+                           f'write it as slug:id')
+                elif slug and slug not in cat:
+                    why = f'names a source ({slug}) that isn\'t imported or configured'
+                else:
+                    why = 'is not a scene of the source'
+
                 add('blocking', f'source scene {ref} {why}', where)
                 continue
             covered.setdefault(hit, []).append(r)
@@ -891,6 +1036,8 @@ def check_coverage(project_dir: str, cfg: SourceConfig) -> dict:
             uses = covered.get((slug, src_id), [])
             kept = [u for u in uses if u.get('treatment') != 'cut']
             cuts = [u for u in uses if u.get('treatment') == 'cut']
+            if kept and cuts:
+                add('blocking', f'source scene {slug}:{src_id} is both adapted and cut')
             if kept:
                 counts['mapped'] += 1
                 if any(u.get('treatment') == 'compress' for u in kept):
@@ -923,25 +1070,34 @@ def check_coverage(project_dir: str, cfg: SourceConfig) -> dict:
 def _check_reorders(rows, scenes, cat, add) -> None:
     """In faithful mode, a `reorder` that crosses a source timeline anchor (its
     source day is earlier than a scene before it, or later than one after it,
-    in the adaptation's order) needs a note saying why."""
+    in the adaptation's order) needs a note saying why. Days are compared
+    only within one source: two books' calendars are unrelated. A reorder
+    whose source scenes carry no day can't be checked, and is said."""
     by_scene = map_rows_by_scene(rows)
-    seq_days: list[tuple[str, float | None]] = []
+    # Per scene, in reading order: {slug: its earliest source day}
+    seq_days: list[tuple[str, dict[str, float]]] = []
     for s in scenes:
         r = by_scene.get(s.get('id', ''))
-        days = []
+        days: dict[str, float] = {}
         for ref in split_ids((r or {}).get('source_scenes', '')):
             hit = resolve_source_id(ref, cat)
             d = _day(cat[hit[0]][hit[1]]) if hit else None
             if d is not None:
-                days.append(d)
-        seq_days.append((s.get('id', ''), min(days) if days else None))
-    for i, (sid, day) in enumerate(seq_days):
+                days[hit[0]] = min(d, days.get(hit[0], d))
+        seq_days.append((s.get('id', ''), days))
+    for i, (sid, days) in enumerate(seq_days):
         r = by_scene.get(sid)
-        if not r or r.get('treatment') != 'reorder' or day is None:
+        if not r or r.get('treatment') != 'reorder':
             continue
-        before = [d for _, d in seq_days[:i] if d is not None]
-        after = [d for _, d in seq_days[i + 1:] if d is not None]
-        crosses = (before and day < max(before)) or (after and day > min(after))
-        if crosses and not r.get('note', '').strip():
-            add('blocking', f'reordered across the source\'s timeline (source day '
-                            f'{day:g}) with no note saying why', sid)
+        if not days:
+            add('advisory', 'a reorder not checked against the source\'s timeline: '
+                            'its source scenes carry no timeline_day', sid)
+            continue
+        for slug, day in days.items():
+            before = [d[slug] for _, d in seq_days[:i] if slug in d]
+            after = [d[slug] for _, d in seq_days[i + 1:] if slug in d]
+            crosses = (before and day < max(before)) or (after and day > min(after))
+            if crosses and not r.get('note', '').strip():
+                add('blocking', f'reordered across the source\'s timeline ({slug} day '
+                                f'{day:g}) with no note saying why', sid)
+                break

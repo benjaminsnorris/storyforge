@@ -1613,6 +1613,12 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     from storyforge import source as source_mod
     try:
         source_cfg = source_mod.read_config(project_dir)
+        if source_cfg is not None:
+            if medium == 'graphic-novel':
+                raise source_mod.SourceError(
+                    'adaptations (a `source:` block) are not supported for '
+                    'graphic-novel projects yet')
+            source_mod.require_imported(project_dir, source_cfg)
     except source_mod.SourceError as e:
         log(f'ERROR: {e}')
         sys.exit(1)
@@ -1794,7 +1800,9 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         alias_maps = load_registry_alias_maps(project_dir)
         blocks = parse_stage_response(response)
         written = []
-        if (stage == 'map' and source_cfg is not None
+        # (an interactive session writes reference/source-map.csv itself;
+        # the coverage check below reads the file)
+        if (stage == 'map' and source_cfg is not None and not interactive
                 and 'source-map-csv' not in blocks):
             source_map_problem = ('the map reply has no source-map-csv block; '
                                   'reference/source-map.csv is unchanged')
@@ -1877,17 +1885,27 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
 
             elif label == 'source-map-csv':
                 # The adaptation's map (#477): the whole map, every time
-                rows = csv_block_to_rows(content)
-                header = [h.strip() for h in content.strip().split('\n', 1)[0].split('|')]
+                lines_ = [l.strip() for l in content.strip().split('\n') if l.strip()]
+                header = [h.strip() for h in (lines_[0] if lines_ else '').split('|')]
+                bad = [n for n, l in enumerate(lines_[1:], 2)
+                       if len(l.split('|')) != len(source_mod.SOURCE_MAP_COLUMNS)]
                 if header != source_mod.SOURCE_MAP_COLUMNS:
                     source_map_problem = (
                         f'the reply\'s source-map-csv header is {"|".join(header)}, not '
-                        f'{"|".join(source_mod.SOURCE_MAP_COLUMNS)}; '
-                        f'reference/source-map.csv is unchanged')
-                    log(f'ERROR: {source_map_problem}')
-                elif rows:
+                        f'{"|".join(source_mod.SOURCE_MAP_COLUMNS)}')
+                elif len(lines_) < 2:
+                    source_map_problem = 'the reply\'s source-map-csv block has no rows'
+                elif bad:
+                    source_map_problem = (
+                        f'the reply\'s source-map-csv block has {len(bad)} row(s) with '
+                        f'the wrong number of cells (line {bad[0]} of the block)')
+                else:
+                    rows = csv_block_to_rows(content)
                     source_mod.write_source_map(project_dir, rows)
                     written.append(f'source-map.csv ({len(rows)} rows)')
+                if source_map_problem:
+                    source_map_problem += '; reference/source-map.csv is unchanged'
+                    log(f'ERROR: {source_map_problem}')
 
             elif label in ('story-architecture', 'character-bible', 'world-bible', 'voice-guide'):
                 filename = label + '.md'

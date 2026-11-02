@@ -54,17 +54,21 @@ def main(argv=None):
         return _status(project_dir, cfg)
 
     slugs = [args.slug] if args.slug else cfg.slugs()
+    # Every source is built before any is written, so a failure on the
+    # second source leaves the first as it was
     results = []
     for slug in slugs:
         try:
-            r = source.import_source(project_dir, cfg, slug, dry_run=args.dry_run)
+            results.append(source.plan_import(project_dir, cfg, slug))
         except source.SourceError as e:
             log(f'ERROR: {e}')
-            log('Nothing was written for this source.')
+            log('Nothing was written.')
             return 1
-        results.append(r)
+    for r in results:
+        if not args.dry_run:
+            source.write_import(r)
         verb = ('would change' if args.dry_run else 'updated') if r.changed else 'unchanged'
-        log(f'Source {slug} ({r.source_path}): {verb}; reference/source/{slug}/ holds '
+        log(f'Source {r.slug} ({r.source_path}): {verb}; reference/source/{r.slug}/ holds '
             f'{len(r.files)} files, {r.prose_files} of them scene prose')
         if r.missing:
             log(f'  Not in the source, so not copied: {", ".join(r.missing)}')

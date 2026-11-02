@@ -1,8 +1,9 @@
 """The source-aware additions to the elaboration prompts (#477).
 
-Each function returns '' for a project with no `source:` block, and the
-prompt builders add nothing in that case, so their prompts stay byte for byte
-what they were. With a block, they give the spine the source's events to
+Each `*_section` function returns '' (and `bibles_text` []) for a project
+with no `source:` block, and the prompt builders add nothing in that case, so
+their prompts stay byte for byte what they were. With a block, a source not
+imported yet raises SourceError before any prompt is built. With a block, they give the spine the source's events to
 select from, the architecture its cast and POV distribution, the map every
 source scene to account for in `reference/source-map.csv`, and the briefs
 each scene's source briefs and the source prose itself.
@@ -13,6 +14,7 @@ from __future__ import annotations
 import os
 
 from storyforge import source
+from storyforge.common import log
 
 # Source prose a briefs prompt may carry, in words. Past it, a scene's source
 # prose is left out and the prompt says which; its source brief stays.
@@ -23,15 +25,20 @@ _BRIEF_FIELDS = ('goal', 'conflict', 'outcome', 'crisis', 'decision',
 
 
 def _cfg(project_dir: str) -> source.SourceConfig | None:
-    return source.read_config(project_dir)
+    """The source block, or None; raises SourceError when a source isn't
+    imported (a prompt would promise a source and show none of it)."""
+    cfg = source.read_config(project_dir)
+    if cfg is not None:
+        source.require_imported(project_dir, cfg)
+    return cfg
 
 
 def _header(cfg: source.SourceConfig) -> str:
     names = ', '.join(f'`{s}`' for s in cfg.slugs())
     how = ('**faithful**: every source event appears in the novel unless the version '
            'rules or a stated reason cut it' if cfg.mode == 'faithful'
-           else '**free**: the source is a starting point; departures are allowed and '
-                'cuts need a reason')
+           else '**free**: the source is a starting point; follow it where the plan '
+                'does, and give a reason for each source scene left out')
     return (f'This novel adapts a source ({names}); its events, cast and places are in '
             f'the Source Bible. Mode: {how}.')
 
@@ -42,8 +49,9 @@ def rules_block(project_dir: str, cfg: source.SourceConfig) -> str:
 
 
 def bibles_text(project_dir: str) -> list[tuple[str, str]]:
-    """[(label, text)] of the source bibles, or [] with no source block."""
-    cfg = _cfg(project_dir)
+    """[(label, text)] of the source bibles, or [] with no source block.
+    Raises SourceError for a source not imported or a bible unreadable."""
+    cfg = source.read_config(project_dir)
     return source.source_bibles(project_dir, cfg) if cfg else []
 
 
@@ -163,8 +171,12 @@ scene_id|source_scenes|treatment|note
 def _scenes_to_brief(project_dir: str, scene_ids: list[str] | None) -> list[str]:
     from storyforge.elaborate import _read_csv
     ref = os.path.join(project_dir, 'reference')
-    scenes = sorted(_read_csv(os.path.join(ref, 'scenes.csv')), key=source._seq)
+    scenes = source.active_scenes(project_dir)
     if scene_ids:
+        known = {s.get('id') for s in scenes}
+        unknown = [s for s in scene_ids if s not in known]
+        if unknown:
+            log(f'WARNING: not scenes in scenes.csv, so not briefed: {", ".join(unknown)}')
         wanted = set(scene_ids)
         return [s['id'] for s in scenes if s.get('id') in wanted]
     briefed = {r.get('id', '') for r in _read_csv(os.path.join(ref, 'scene-briefs.csv'))
@@ -263,6 +275,7 @@ def briefs_section(project_dir: str, scene_ids: list[str] | None) -> str:
     budget = SOURCE_PROSE_MAX_WORDS
     no_prose: list[str] = []
     unmapped: list[str] = []
+    unresolved: list[str] = []
     blocks = []
     for sid in targets:
         row = by_scene.get(sid)
@@ -274,12 +287,16 @@ def briefs_section(project_dir: str, scene_ids: list[str] | None) -> str:
         if row.get('note'):
             head += f' ({row["note"]})'
         if not refs:
-            blocks.append(f'{head}\n\nAn invented scene: no source scene.')
+            blocks.append(f'{head}\n\n' + ('An invented scene: no source scene.'
+                                             if row.get('treatment') == 'invent'
+                                             else 'No source scene given.'))
             continue
         body = [head]
-        for hit in refs:
+        for ref, hit in zip(source.split_ids(row.get('source_scenes', '')), refs):
             if hit is None:
-                continue   # validate names the unknown id
+                unresolved.append(f'{sid} ({ref})')
+                body.append(f'#### Source scene {ref}: not found in the imported source')
+                continue
             words = len((source.source_prose(project_dir, *hit) or '').split())
             show = words <= budget
             if show:
@@ -289,6 +306,20 @@ def briefs_section(project_dir: str, scene_ids: list[str] | None) -> str:
             body.append(source_scene_block(project_dir, hit[0], hit[1], prose=show,
                                             tables=tables))
         blocks.append('\n\n'.join(body))
+    # Said to the author as well as to the model
+    if not rows:
+        log('WARNING: no reference/source-map.csv yet: the briefs prompt has no source '
+            'scenes, only the Source Bible')
+    if unmapped:
+        log(f'WARNING: not in the source map, briefed without source scenes: '
+            f'{", ".join(unmapped)}')
+    if unresolved:
+        log(f'WARNING: source scenes not found in the imported source (run validate): '
+            f'{", ".join(unresolved)}')
+    if no_prose:
+        log(f'WARNING: source prose left out of the briefs prompt (over '
+            f'{SOURCE_PROSE_MAX_WORDS:,} words): {", ".join(no_prose)}; brief fewer '
+            f'scenes at a time with --scene')
     if not rows:
         parts.append('There is no source map yet (reference/source-map.csv), so no scene '
                      'is matched to its source scenes; brief from the Source Bible.')

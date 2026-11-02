@@ -86,6 +86,58 @@ def test_a_wrong_header_leaves_the_map_alone(adapted, mock_api, capsys):
     assert source.read_source_map(adapted) == []
 
 
+def test_a_header_only_block_keeps_the_old_map_and_fails(adapted, mock_api, capsys):
+    """SF-3: the old map would otherwise pass coverage against new scenes."""
+    old = 'scene_id|source_scenes|treatment|note\nolympus-council-meets|gods-debate|dramatize|\n'
+    _write(adapted, {'reference/source-map.csv': old})
+    _run(mock_api, SCENES_BLOCK + '```source-map-csv\nscene_id|source_scenes|treatment|note\n```\n')
+    out = capsys.readouterr().out
+    assert 'source-map-csv block has no rows' in out and 'PASSED' not in out
+    assert open(source.source_map_path(adapted)).read() == old
+
+
+def test_a_row_with_the_wrong_cell_count_keeps_the_old_map(adapted, mock_api, capsys):
+    """SF-13: a | in a note would shift every cell after it."""
+    old = 'scene_id|source_scenes|treatment|note\nolympus-council-meets|gods-debate|dramatize|\n'
+    _write(adapted, {'reference/source-map.csv': old})
+    _run(mock_api, SCENES_BLOCK + FULL_MAP.replace('two days in one', 'two | days'))
+    assert 'wrong number of cells' in capsys.readouterr().out
+    assert open(source.source_map_path(adapted)).read() == old
+
+
+def test_a_blocking_gap_holds_the_phase(adapted, mock_api):
+    _run(mock_api, SCENES_BLOCK + FULL_MAP.replace('|ship-sails|cut|told in a line\n', ''))
+    assert 'phase: scene-map' in open(os.path.join(adapted, 'storyforge.yaml')).read()
+
+
+def test_interactive_session_is_not_told_its_block_is_missing(adapted, mock_api, monkeypatch,
+                                                              capsys):
+    """CR-3: the session writes the map itself; coverage reads the file."""
+    _write(adapted, {'reference/source-map.csv':
+                     'scene_id|source_scenes|treatment|note\n' + FULL_MAP.split('\n', 2)[2]
+                     .replace('```\n', '')})
+
+    def session(cmd, stdout=None, **kw):
+        stdout.write('{"type": "result", "result": "Mapped."}\n')
+        stdout.close()
+        return type('P', (), {'wait': lambda s: None, 'returncode': 0})()
+    monkeypatch.setattr('storyforge.cmd_elaborate.subprocess.Popen', session)
+    try:
+        main(['--stage', 'map', '--interactive'])
+    except SystemExit:
+        pass
+    assert 'no source-map-csv block' not in capsys.readouterr().out
+
+
+def test_not_imported_stops_before_any_spend(adapted, mock_api, capsys):
+    """SF-2/CR-4."""
+    import shutil
+    shutil.rmtree(os.path.join(adapted, 'reference', 'source', 'odyssey'))
+    assert _run(mock_api, SCENES_BLOCK + FULL_MAP) == 1
+    assert 'not imported' in capsys.readouterr().out
+    assert not mock_api.calls_for('invoke_to_file')
+
+
 def test_map_prompt_without_source_is_unchanged(project_dir, mock_api, mock_git, mock_costs,
                                                 monkeypatch, capsys):
     monkeypatch.setattr('storyforge.cmd_elaborate.detect_project_root', lambda: project_dir)

@@ -59,6 +59,22 @@ class TestWithoutSource:
             assert 'Source' not in prompt
             assert 'source-map' not in prompt
 
+    @pytest.mark.parametrize('name, build', [
+        ('spine', lambda p: pe.build_spine_prompt(p, PLUGIN, 'seed', system_context=True)),
+        ('architecture', lambda p: pe.build_architecture_prompt(p, PLUGIN, 'REGISTRIES',
+                                                                 system_context=True)),
+        ('map', lambda p: pe.build_map_prompt(p, PLUGIN, 'REGISTRIES', system_context=True)),
+        ('briefs', lambda p: pe.build_briefs_prompt(p, PLUGIN, None, 'REGISTRIES',
+                                                    system_context=True)),
+        ('existing-refs', lambda p: pe._existing_refs(p)),
+    ])
+    def test_byte_identical_to_main(self, project_dir, name, build):
+        """T-7: generated from main's builders on the fixture project before
+        #477. A deliberate prompt change regenerates these files."""
+        golden = os.path.join(PLUGIN, 'tests', 'fixtures', 'golden-prompts', f'{name}.txt')
+        with open(golden, encoding='utf-8', newline='') as f:
+            assert build(project_dir) == f.read()
+
     def test_shared_context_has_no_source_bible(self, project_dir):
         labels = [b['text'].split('\n', 1)[0] for b in
                   common.build_shared_context(project_dir, 'claude-opus-5-5')]
@@ -134,6 +150,31 @@ class TestWithSource:
         os.remove(source.source_map_path(adapted))
         p = pe.build_briefs_prompt(adapted, PLUGIN, system_context=True)
         assert 'There is no source map yet' in p
+
+    def test_not_imported_stops_every_prompt(self, adapted):
+        """SF-2/CR-4: a prompt would promise a source and show none of it."""
+        import shutil
+        shutil.rmtree(os.path.join(adapted, 'reference', 'source', 'odyssey'))
+        for build in (lambda: pe.build_spine_prompt(adapted, PLUGIN, 's', system_context=True),
+                      lambda: pe.build_map_prompt(adapted, PLUGIN, system_context=True),
+                      lambda: common.build_shared_context(adapted, 'claude-opus-5-5')):
+            with pytest.raises(source.SourceError, match='not imported'):
+                build()
+
+    def test_briefs_warn_the_author(self, adapted, monkeypatch, capsys):
+        """SF-6: what the prompt leaves out is logged, and a source scene that
+        can't be found is named in the prompt rather than skipped."""
+        monkeypatch.setattr(prompts_source, 'SOURCE_PROSE_MAX_WORDS', 8)
+        _write(adapted, {'reference/source-map.csv': (
+            'scene_id|source_scenes|treatment|note\n'
+            'olympus-council-meets|gods-debate;no-such-scene|dramatize|\n'
+            'athena-at-the-door|minerva-visits;assembly-called|compress|two days in one\n')})
+        p = pe.build_briefs_prompt(adapted, PLUGIN, system_context=True)
+        out = capsys.readouterr().out
+        assert '#### Source scene no-such-scene: not found in the imported source' in p
+        assert 'source scenes not found in the imported source' in out
+        assert 'not in the source map, briefed without source scenes: telemachus-sails' in out
+        assert 'source prose left out' in out
 
     def test_missing_rules_section_stops(self, adapted):
         _write(adapted, {'storyforge.yaml': YAML.format(

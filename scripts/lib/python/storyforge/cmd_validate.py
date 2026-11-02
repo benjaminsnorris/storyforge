@@ -110,8 +110,7 @@ def main(argv=None):
         source_cfg = source_mod.read_config(project_dir)
     except source_mod.SourceError as e:
         source_cfg = None
-        source_result = {'findings': [{'severity': 'blocking', 'scene_id': '',
-                                       'message': str(e), 'check': 'source'}],
+        source_result = {'findings': [source_mod.finding('blocking', str(e))],
                          'lines': [], 'checked': False, 'mode': ''}
     if source_cfg is not None:
         source_result = source_mod.check_coverage(project_dir, source_cfg)
@@ -137,10 +136,13 @@ def main(argv=None):
         'flashbacks': flashbacks,
         'illustrations': illus_result,
         'canon': canon_result,
-        'source': source_result,
         'scores': structural_scores,
         'scores_previous': scores_previous,
     }
+    if source_result is not None:
+        # Only an adaptation's report has the key: --json for every other
+        # project is unchanged
+        combined['source'] = source_result
 
     if args.json_output:
         print(json.dumps(combined))

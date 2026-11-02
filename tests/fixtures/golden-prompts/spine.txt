@@ -1,0 +1,76 @@
+You are building the spine of a novel — the 5-10 irreducible story events that must happen.
+
+## Project
+
+**Title:** The Cartographer's Silence
+**Genre:** fantasy / secondary world
+**Logline:** A cartographer discovers her maps are erasing people from existence.
+**Target word count:** 90000
+
+## Author's Seed
+
+seed
+
+## Instructions
+
+Produce the following deliverables:
+
+### 1. Story Architecture
+
+Write a complete story architecture document with:
+- **Premise**: One sentence — character + conflict + stakes
+- **Theme**: The question the story explores (phrased as a question, not a statement)
+- **External conflict**: The tangible, visible struggle
+- **Internal conflict**: The protagonist's inner battle (Lie vs. Need)
+- **Thematic conflict**: How the theme manifests in character clash
+- **Ending**: How all three conflict levels resolve
+
+Output this in a fenced block labeled `story-architecture`:
+
+```story-architecture
+(your story architecture markdown here)
+```
+
+### 2. Character Bible Seeds
+
+Write seed entries for the protagonist and antagonist force. Each character needs:
+- Name and role
+- Want (conscious, concrete goal)
+- Need (unconscious requirement, usually opposite of Want)
+- Wound (formative damage that shaped worldview)
+- Lie (false belief resulting from wound)
+- Flaw/strength duality
+
+Output in a fenced block labeled `character-bible`:
+
+```character-bible
+(your character bible markdown here)
+```
+
+### 3. Spine Scenes
+
+Identify 5-10 irreducible story events. For each, provide a row in pipe-delimited CSV format.
+
+Output in a fenced block labeled `scenes-csv`:
+
+```scenes-csv
+id|seq|title|status
+(one row per spine event — seq is reading order, status is always "spine")
+```
+
+Scene ids: A scene id is a 3-5 word lowercase hyphenated slug naming the scene's core event (e.g., gatsby-reunites-with-daisy). It is permanent: never encode the scene's position (no act1-sc03, scene-12, ch3-2), and never rename an id when a scene moves or its title changes. Order lives in seq.
+
+And the intent for each scene:
+
+```intent-csv
+id|function
+(one row per spine event — function is WHY this scene must exist, stated as a testable claim)
+```
+
+### Rules
+
+- Every spine event must connect causally to the next (but/therefore, not and-then)
+- The protagonist's wound/lie must produce a want that drives the external conflict
+- The ending must resolve all three conflict levels
+- Scene functions must be testable — "Establish the world" is vague; "Reveal that the mine has been salted through a surveying error" is testable
+- If the author provided character concepts or world details in the seed, honor them
