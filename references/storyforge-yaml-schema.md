@@ -15,6 +15,7 @@ This document defines the complete schema for the `storyforge.yaml` file that li
 | `phase` | Current workflow phase of the project |
 | `production` | Formatting, metadata, and output settings for manuscript assembly |
 | `parts` | Optional book parts (physical divisions with title pages) for multi-part books. Structural acts live in `scenes.csv` `act`, not here |
+| `source` | Optional. The Storyforge project(s) this one adapts: a retelling, an expansion, a rewrite of an earlier draft |
 
 ---
 
@@ -210,6 +211,47 @@ parts:
   - title: "Part Three: The Reckoning"
     chapters: [10, 11, 12]
 ```
+
+## `source`
+
+Optional. Declares that this project adapts another Storyforge project (an extracted book, an earlier draft, another book of the series). A project without the block behaves exactly as one did before it existed: no source prompt text, no source findings in `validate`, no source-fidelity pass in `score`. Graphic-novel projects don't use it yet.
+
+| Field | Type | Required | Description | Default | Example |
+|-------|------|----------|-------------|---------|---------|
+| `projects` | list | required | One entry per source: `slug` (lowercase letters, digits, hyphens; names `reference/source/<slug>/`), `path` (the source project, relative to this one or absolute), and optionally its own `name_map` | — | see below |
+| `name_map` | path | optional | `source_id\|target_id\|source_name\|target_name`: the names the adaptation uses. A per-project `name_map` overrides it. Several projects can share one file | none (names unchanged) | `reference/source/name-map.csv` |
+| `mode` | enum | optional | `faithful`: a source scene missing from the source map, or cut with no reason, blocks `validate`, and a `reorder` across the source's timeline needs a note. `free`: those are advisory | `faithful` | `free` |
+| `rules` | path | optional | Where the version rules are (what this version softens, cuts or keeps): a file, or one section of it as `file.md#heading-slug`. Source fidelity reads it to tell a deliberate departure from drift | none | `reference/key-decisions.md#version-rules` |
+
+```yaml
+source:
+  projects:
+    - slug: iliad
+      path: ../iliad
+  name_map: reference/source/name-map.csv
+  mode: faithful
+  rules: reference/key-decisions.md#version-rules
+```
+
+Two projects can import the same source and differ only in `mode` and key decisions; both can point `name_map` at one shared file.
+
+### The name map
+
+Every character and location in the source's registries needs a row, even an unchanged name; `source import` stops and lists the ones that lack one. The import maps ids (registry ids, and the `pov`, `location`, `characters`, `on_stage`, `subject` and `known_by` columns) by `source_id`, sets each registry row's `name` from its `target_name`, and replaces names in every other cell (briefs, intents, summaries, commitments' `statement` and `quote`, aliases): whole words, case-sensitive, longest first. A row with an empty `source_id` is a text-only form, such as `|Ilium|Ilius|Ilium` or `|Cronus|Saturn|Cronus`. Two people who share a source name share a `target_name` and differ by `target_id`; a source name given two different target names can't be replaced in text, so it stays as written and the import says so. Source prose (`scenes/*.md`) is copied as written: it is the evidence for source fidelity, and the briefs prompt lists the map's changed names so the source's names don't reach the new prose.
+
+### What uses it
+
+| Command | What it does with the source |
+|---|---|
+| `source import` | Copies `scenes.csv`, `scene-intent.csv`, `scene-briefs.csv`, `characters.csv`, `locations.csv`, `values.csv`, `mice-threads.csv`, `commitments.csv`, `spine.csv`, `architecture.csv`, the extracted bibles and `scenes/*.md` into `reference/source/<slug>/`, applies the name map, and writes `source-bible.md` (the events in reading order with outcomes and value shifts, the cast, places, threads and timeline). Writes only under `reference/source/<slug>/`; a re-run replaces it and changes nothing else. The source's ledger is context, never merged into this project's |
+| `elaborate` | The source bible joins the reference materials. Spine: the source's events to select and reframe. Architecture: the source's cast and POV distribution. Map: every source scene, which the reply must account for in `reference/source-map.csv`. Briefs: each scene's source briefs and source prose |
+| `validate` | Source coverage (see `reference/source-map.csv`) |
+| `score` | `source-fidelity.csv`: the briefs or prose against the source scenes, each departure tagged `deliberate` or `drift` |
+| `revise` | Scenes with drift get their briefs fixed toward the source before a redraft |
+
+### `reference/source-map.csv`
+
+`scene_id|source_scenes|treatment|note`, one row per adaptation scene, plus one `cut` row per source scene left out (empty `scene_id`, the source scene in `source_scenes`, the reason in `note`). `source_scenes` is `;`-separated source scene ids, written `slug:id` when two sources share an id. Treatments: `dramatize`, `compress`, `expand`, `pov-shift`, `reorder`, `invent` (no source scene), `cut`.
 
 ---
 
