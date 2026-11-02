@@ -214,13 +214,13 @@ parts:
 
 ## `source`
 
-Optional. Declares that this project adapts another Storyforge project (an extracted book, an earlier draft, another book of the series). A project without the block behaves exactly as one did before it existed: no source prompt text, no source findings in `validate`, no source-fidelity pass in `score`. Graphic-novel projects don't use it yet.
+Optional. Declares that this project adapts another Storyforge project (an extracted book, an earlier draft, another book of the series). A project without the block behaves exactly as one did before it existed: no source prompt text, no source findings (or `source` key) in `validate`, no source-fidelity pass in `score`. Graphic-novel projects can't use it yet (`elaborate` refuses). Every command that builds a prompt stops until each source is imported.
 
 | Field | Type | Required | Description | Default | Example |
 |-------|------|----------|-------------|---------|---------|
 | `projects` | list | required | One entry per source: `slug` (lowercase letters, digits, hyphens; names `reference/source/<slug>/`), `path` (the source project, relative to this one or absolute), and optionally its own `name_map` | — | see below |
 | `name_map` | path | optional | `source_id\|target_id\|source_name\|target_name`: the names the adaptation uses. A per-project `name_map` overrides it. Several projects can share one file | none (names unchanged) | `reference/source/name-map.csv` |
-| `mode` | enum | optional | `faithful`: a source scene missing from the source map, or cut with no reason, blocks `validate`, and a `reorder` across the source's timeline needs a note. `free`: those are advisory | `faithful` | `free` |
+| `mode` | enum | optional | `faithful`: a source scene missing from the source map, or cut with no reason, blocks `validate`; a `reorder` across the source's timeline needs a note; `revise` fixes source drift. `free`: a missing or unreasoned source scene is advisory, reorders aren't checked, and drift is reported but left as it is. Malformed map rows, unknown ids and scenes with no row block in both | `faithful` | `free` |
 | `rules` | path | optional | Where the version rules are (what this version softens, cuts or keeps): a file, or one section of it as `file.md#heading-slug`. Source fidelity reads it to tell a deliberate departure from drift | none | `reference/key-decisions.md#version-rules` |
 
 ```yaml
@@ -237,17 +237,17 @@ Two projects can import the same source and differ only in `mode` and key decisi
 
 ### The name map
 
-Every character and location in the source's registries needs a row, even an unchanged name; `source import` stops and lists the ones that lack one. The import maps ids (registry ids, and the `pov`, `location`, `characters`, `on_stage`, `subject` and `known_by` columns) by `source_id`, sets each registry row's `name` from its `target_name`, and replaces names in every other cell (briefs, intents, summaries, commitments' `statement` and `quote`, aliases): whole words, case-sensitive, longest first. A row with an empty `source_id` is a text-only form, such as `|Ilium|Ilius|Ilium` or `|Cronus|Saturn|Cronus`. Two people who share a source name share a `target_name` and differ by `target_id`; a source name given two different target names can't be replaced in text, so it stays as written and the import says so. Source prose (`scenes/*.md`) is copied as written: it is the evidence for source fidelity, and the briefs prompt lists the map's changed names so the source's names don't reach the new prose.
+Every character and location in the source's registries needs a row, even an unchanged name; `source import` stops and lists the ones that lack one. The import maps ids (registry ids, and the `pov`, `location`, `characters`, `on_stage`, `subject` and `known_by` columns) by `source_id`, sets each registry row's `name` from its `target_name`, and replaces names in every other cell (briefs, intents, summaries, commitments' `statement` and `quote`, aliases): whole words, case-sensitive, longest first. A row with an empty `source_id` is a text-only form, such as `||Ilius|Ilium` or `||Saturn|Cronus`. A `source_name` needs a capital letter. In the id columns, a token that is a name rather than an id (a project that keeps names there) is mapped by name; one the map knows neither way is left as written and listed by the import. Two people who share a source name share a `target_name` and differ by `target_id`; a source name given two different target names can't be replaced in text, so it stays as written and the import says so. Source prose (`scenes/*.md`) is copied as written: it is the evidence for source fidelity, and the briefs prompt lists the map's changed names so the source's names don't reach the new prose.
 
 ### What uses it
 
 | Command | What it does with the source |
 |---|---|
-| `source import` | Copies `scenes.csv`, `scene-intent.csv`, `scene-briefs.csv`, `characters.csv`, `locations.csv`, `values.csv`, `mice-threads.csv`, `commitments.csv`, `spine.csv`, `architecture.csv`, the extracted bibles and `scenes/*.md` into `reference/source/<slug>/`, applies the name map, and writes `source-bible.md` (the events in reading order with outcomes and value shifts, the cast, places, threads and timeline). Writes only under `reference/source/<slug>/`; a re-run replaces it and changes nothing else. The source's ledger is context, never merged into this project's |
+| `source import` | Copies `scenes.csv`, `scene-intent.csv`, `scene-briefs.csv`, `characters.csv`, `locations.csv`, `values.csv`, `mice-threads.csv`, `commitments.csv`, `spine.csv`, `architecture.csv`, the reference docs (story summary and architecture, character, world and systems bibles, timeline; a template copy is skipped) and `scenes/*.md` into `reference/source/<slug>/`, applies the name map, and writes `source-bible.md` (the events in reading order with outcomes and value shifts, the cast, places, threads and timeline). It replaces `reference/source/<slug>/` wholesale (staged beside it, then swapped in), so keep nothing of your own there: a name map or rules file inside it is refused. A re-run that changes nothing writes nothing; with several sources, every one is built before any is written. The source's ledger is context, never merged into this project's |
 | `elaborate` | The source bible joins the reference materials. Spine: the source's events to select and reframe. Architecture: the source's cast and POV distribution. Map: every source scene, which the reply must account for in `reference/source-map.csv`. Briefs: each scene's source briefs and source prose |
 | `validate` | Source coverage (see `reference/source-map.csv`) |
 | `score` | `source-fidelity.csv`: the briefs or prose against the source scenes, each departure tagged `deliberate` or `drift` |
-| `revise` | Scenes with drift get their briefs fixed toward the source before a redraft |
+| `revise` | In `--naturalness` and `--polish --loop` (before the loop's convergence check), faithful-mode scenes with drift on a brief or prose unchanged since it was scored get their briefs fixed toward the source, then redrafted. Results scored on something since changed, and no results at all, are said |
 
 ### `reference/source-map.csv`
 
