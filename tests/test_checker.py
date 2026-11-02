@@ -659,3 +659,120 @@ class TestCalendarReview478:
         self._set(project_dir, 'act1-sc01', time_of_day='"late" <night>')
         system, _ = self._prompt(project_dir)
         assert 'when="day 1, &quot;late&quot; &lt;night&gt;"' in system
+
+
+# Words in act1-sc02 besides HERE
+HERE2 = 'Blank parchment. Not even a contour line.'
+
+
+class TestReadings:
+    """Two readings of one scene find different things (E8, 2026-11-01:
+    33 of 41 findings shared); the gate takes their union."""
+
+    def test_each_reading_is_its_own_request_and_the_union_is_returned(self, project_dir):
+        result, bodies = _run(project_dir, [_answer([_finding()]),
+                                            _answer([_finding(scene_quote=HERE2)])],
+                              readings=2)
+        assert [f.scene_quote for f in result.findings] == [HERE, HERE2]
+        assert result.readings == 2
+        first, second = (b['messages'][0]['content'] for b in bodies)
+        assert 'Reading 2' not in first and 'Reading 2: an independent check' in second
+        assert first != second   # recordings are keyed by the request
+
+    def test_one_reading_sends_what_it_always_sent(self, project_dir):
+        _, bodies = _run(project_dir, [_answer()])
+        assert 'Reading' not in bodies[0]['messages'][0]['content']
+
+    def test_a_finding_both_readings_make_is_kept_once(self, project_dir):
+        shorter = 'four hundred and twelve at last census'
+        result, _ = _run(project_dir, [_answer([_finding()]),
+                                       _answer([_finding(scene_quote=shorter)])],
+                         readings=2)
+        assert [f.scene_quote for f in result.findings] == [HERE]
+
+    def test_the_same_words_against_another_source_are_two_findings(self, project_dir):
+        result, _ = _run(project_dir, [
+            _answer([_finding()]),
+            _answer([_finding(established_scene='', fact_id='village-vanished',
+                              established_quote='x')])], readings=2)
+        assert len(result.findings) == 2
+
+    def test_unverified_in_one_and_verified_in_the_other_is_a_finding(self, project_dir):
+        result, _ = _run(project_dir, [
+            _answer([_finding(established_quote='words act1-sc01 never says')]),
+            _answer([_finding()])], readings=2)
+        assert len(result.findings) == 1 and result.unverified == []
+
+    def test_unverified_findings_of_both_readings_are_kept(self, project_dir):
+        result, _ = _run(project_dir, [
+            _answer([_finding(scene_quote='words the scene never says')]),
+            _answer([_finding(scene_quote='other words it never says')])], readings=2)
+        assert len(result.unverified) == 2
+
+    def test_a_reading_that_fails_fails_the_check(self, project_dir):
+        cut = dict(_answer(), stop_reason='max_tokens')
+        with pytest.raises(CheckError, match=r'reading 2.*cut off'):
+            _run(project_dir, [_answer([_finding()]), cut], readings=2)
+
+    def test_the_second_reading_logs_beside_the_first(self, project_dir, tmp_path):
+        log = tmp_path / 'gate-check-x.json'
+        _run(project_dir, [_answer(), _answer()], readings=2, log_file=str(log))
+        assert log.exists() and (tmp_path / 'gate-check-x.r2.json').exists()
+
+    def test_readings_below_one_are_refused(self, project_dir):
+        with pytest.raises(ValueError, match='at least 1'):
+            _run(project_dir, [], readings=0)
+
+    def test_kept_facts_are_unioned_by_id(self, project_dir):
+        reading = [{'fact_id': 'village-vanished', 'quote': HERE}]
+        result, _ = _run(project_dir, [_answer(kept=reading), _answer(kept=reading)],
+                         readings=2)
+        assert result.kept == [('village-vanished', HERE)]
+
+
+def _promise(fact_id, item):
+    return checker.Finding('broken-promise', 'PRM', '', '', item, fact_id, 'why')
+
+
+def _contra(quote, source='s1', fact_id=''):
+    return checker.Finding('contradiction', 'TIM', quote, source, 'x', fact_id, 'why')
+
+
+class TestMergeReadings:
+    def _merge(self, *readings, disputes=None):
+        results = []
+        for findings, cleared in readings:
+            r = checker.CheckResult('s', findings=list(findings))
+            r.cleared = [d for d in disputes or [] if d.fact_id in cleared]
+            results.append(r)
+        return checker.merge_readings(results, disputes)
+
+    def test_a_dispute_any_reading_reports_is_a_finding(self):
+        d = checker.Dispute('fact-1', 'stated', 'claimed')
+        out = self._merge(([], {'fact-1'}), ([_contra('q', '', 'fact-1')], set()),
+                          disputes=[d])
+        assert out.cleared == [] and out.unruled == [] and len(out.findings) == 1
+
+    def test_a_dispute_one_reading_clears_and_none_reports_is_cleared(self):
+        d = checker.Dispute('fact-1', 'stated', 'claimed')
+        out = self._merge(([], set()), ([], {'fact-1'}), disputes=[d])
+        assert out.cleared == [d] and out.unruled == []
+
+    def test_a_dispute_no_reading_rules_on_is_unruled(self):
+        d = checker.Dispute('fact-1', 'stated', 'claimed')
+        out = self._merge(([], set()), ([], set()), disputes=[d])
+        assert out.unruled == [d]
+
+    def test_one_broken_promise_reported_twice_is_one(self):
+        out = self._merge(([_promise('outcome', 'the map is burned')], set()),
+                          ([_promise('outcome', 'The map is burned.')], set()))
+        assert len(out.findings) == 1
+
+    def test_two_items_of_one_field_are_two_broken_promises(self):
+        out = self._merge(([_promise('key_actions', 'she burns the map')], set()),
+                          ([_promise('key_actions', 'she leaves the study')], set()))
+        assert len(out.findings) == 2
+
+    def test_one_reading_is_returned_as_it_is(self):
+        r = checker.CheckResult('s', findings=[_contra('q')])
+        assert checker.merge_readings([r]) is r

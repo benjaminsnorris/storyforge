@@ -49,8 +49,18 @@ the book it sees.
   the scene list and its tool results. A book near the cap can overflow
   the model's context, which is an API error (`CheckError`), not a
   silent cut.
+- Readings (`check_scene(readings=)`): two checks of the same prose agree
+  on about 80% of their findings, and each finds real errors the other
+  misses (E8's gated scenes, 2026-11-01: 33 of 41 shared; the second alone
+  found a dead girl's shoes made a boy's and the "eleven nights" the gate
+  had passed). The gate asks for `GATE_READINGS` and takes the union
+  (`merge_readings`). They run one after the other, so the second reads
+  the bibles and the story so far from the first's cache. Each reading
+  after the first says which it is, so it is its own request (the
+  recordings are keyed by the request).
 - Fails loud: a refusal, a reply cut off, a reply that isn't the schema, or
-  a tool loop that never ends raises `CheckError`. There is no partial result.
+  a tool loop that never ends raises `CheckError`. There is no partial
+  result: a reading that fails fails the check.
 """
 
 from __future__ import annotations
@@ -178,6 +188,8 @@ class Finding:
 @dataclass
 class CheckResult:
     scene_id: str
+    #: how many independent readings this result is the union of
+    readings: int = 1
     findings: list[Finding] = field(default_factory=list)
     unverified: list[Finding] = field(default_factory=list)
     #: (registry fact id, establishing quote) for each brief fact the prose
@@ -655,8 +667,13 @@ def _disputes_text(disputes: list[Dispute]) -> str:
             'its id in `cleared`.\n\n' + lines + '\n')
 
 
+def _reading_note(reading: int) -> str:
+    return ('' if reading <= 1 else
+            f'\n\n(Reading {reading}: an independent check of this scene; read it afresh.)')
+
+
 def build_prompt(book: Book, at: str, brief_text: str,
-                 disputes: list[Dispute] | None = None) -> str:
+                 disputes: list[Dispute] | None = None, reading: int = 1) -> str:
     s = book.scenes.get(at, {})
     promise_rules = '' if "## The brief's promises" not in brief_text else (
         "\n**Broken promises.** Each item under \"The brief's promises\" is a promise. "
@@ -695,7 +712,7 @@ Report only a real contradiction, both sides quoted:
 - `established_scene` and `established_quote`: the other scene's id and its exact words, copied verbatim from the story so far or a tool result (or a reference file's name and its exact words, or `{CALENDAR}` and a calendar line); for a ledger fact with no scene, `established_scene` empty, `fact_id` its id and `established_quote` its statement.
 - Not a contradiction: a character who lies, misremembers or is mistaken where the text signals it; a change the story shows happening; a vision, dream or story-within-the-story that the narrative frames as such; figurative language; anything you could not find established. When in doubt, leave it out: a false report costs the author more than a miss.
 {promise_rules}
-Return every finding, and an empty list when the scene is clean."""
+Return every finding, and an empty list when the scene is clean.{_reading_note(reading)}"""
 
 
 # ============================================================================
@@ -769,49 +786,72 @@ def _whole_item(item: str, quote: str) -> bool:
     return bool(quote.strip()) and normalize(item).strip(' .;') == normalize(quote).strip(' .;')
 
 
+#: readings the gate takes of each scene (`check_scene(readings=)`)
+GATE_READINGS = 2
+
+
 def check_scene(project_dir: str, scene_id: str, *, prose: str | None = None,
                 promises: bool = True, model: str | None = None,
                 log_file: str = '', rows: list[dict[str, str]] | None = None,
-                disputes: list[Dispute] | None = None) -> CheckResult:
+                disputes: list[Dispute] | None = None, readings: int = 1) -> CheckResult:
     """Check `scene_id` (its file, or `prose` in its place) against the rest
     of the book; with `promises`, against its brief too. `rows` replaces the
     ledger on disk. `disputes` are registry facts extraction says the scene
     changes: each must come back as a contradiction or `cleared`, else it is
-    `unruled`.
+    `unruled`. `readings` independent checks are made, one after the other,
+    and their union returned (`merge_readings`); reading n > 1 logs to
+    `log_file` with `.rN` before its extension.
 
     Raises:
-        CheckError: the scene can't be checked, or the check didn't finish
+        CheckError: the scene can't be checked, or a check didn't finish
             (refusal, an API failure, a reply cut off or off-schema, too many
             tool turns). It carries the exchange so far as `.run` when there
             was one.
     """
-    from storyforge.common import select_model
+    if readings < 1:
+        raise ValueError(f'readings must be at least 1, not {readings}')
     book = Book.load(project_dir, scene_id, prose, rows)
     brief = _brief(book, project_dir, scene_id) if promises else Brief()
+    results = []
+    for n in range(1, readings + 1):
+        log = log_file
+        if n > 1 and log_file:
+            stem, ext = os.path.splitext(log_file)
+            log = f'{stem}.r{n}{ext}'
+        results.append(_check_once(book, brief, project_dir, scene_id, model=model,
+                                   log_file=log, disputes=disputes, reading=n))
+    return merge_readings(results, disputes)
+
+
+def _check_once(book: Book, brief: Brief, project_dir: str, scene_id: str, *,
+                model: str | None, log_file: str, disputes: list[Dispute] | None,
+                reading: int) -> CheckResult:
+    from storyforge.common import select_model
     handlers = {
         'search_manuscript': lambda a: _search(book, scene_id, a),
         'read_scene': lambda a: _read_scene(book, scene_id, a),
         'query_ledger': lambda a: _query_ledger(book, scene_id, a),
     }
+    where = f'{scene_id}' + (f' (reading {reading})' if reading > 1 else '')
     try:
-        run = converse(build_prompt(book, scene_id, brief.text, disputes),
+        run = converse(build_prompt(book, scene_id, brief.text, disputes, reading),
                        model or select_model('checking'),
                        TOOLS, handlers, max_tokens=8000, max_turns=MAX_TURNS,
-                       label=f'check {scene_id}', system=_system(book),
+                       label=f'check {where}', system=_system(book),
                        output_schema=DISPUTE_SCHEMA if disputes else SCHEMA,
                        log_file=log_file)
     except RuntimeError as e:   # RefusalError, ToolLoopError, an API failure
-        error = CheckError(f'{scene_id}: {e}')
+        error = CheckError(f'{where}: {e}')
         error.run = getattr(e, 'run', None)
         raise error from e
     if is_truncated(run.response):
-        raise CheckError(f'{scene_id}: the checker\'s reply was cut off at max_tokens')
+        raise CheckError(f'{where}: the checker\'s reply was cut off at max_tokens')
     try:
         data = json.loads(extract_text(run.response))
         items, kept = data['findings'], data['kept']
         cleared = set(data['cleared']) if disputes else set()
     except (ValueError, KeyError, TypeError) as e:
-        raise CheckError(f'{scene_id}: the checker\'s reply is not the schema ({e})') from e
+        raise CheckError(f'{where}: the checker\'s reply is not the schema ({e})') from e
 
     result = CheckResult(scene_id, run=run, unknown_brief_items=brief.unknown,
                          stale_brief_items=brief.stale)
@@ -837,3 +877,58 @@ def check_scene(project_dir: str, scene_id: str, *, prose: str | None = None,
             continue            # ruled a contradiction: a finding
         (result.cleared if d.fact_id in cleared else result.unruled).append(d)
     return result
+
+
+def _same_finding(a: Finding, b: Finding) -> bool:
+    """Whether two readings' findings are one problem: the same kind, and
+    for a contradiction the same scene words (one quote inside the other)
+    against the same source; for a broken promise, the same promise (its
+    id or brief field, and one promised item inside the other)."""
+    if a.kind != b.kind:
+        return False
+    if a.kind == 'broken-promise':
+        ea, eb = normalize(a.established_quote).strip(), normalize(b.established_quote).strip()
+        return a.fact_id == b.fact_id and (ea in eb or eb in ea)
+    qa, qb = normalize(a.scene_quote).strip(), normalize(b.scene_quote).strip()
+    if not qa or not qb or not (qa in qb or qb in qa):
+        return False
+    return (a.established_scene == b.established_scene
+            and (a.established_scene or a.fact_id == b.fact_id))
+
+
+def merge_readings(results: list[CheckResult],
+                   disputes: list[Dispute] | None = None) -> CheckResult:
+    """The union of independent readings of one scene. A finding (verified
+    or not) another reading already made (`_same_finding`) is kept once,
+    the first reading's; one verified in any reading isn't also kept
+    unverified. A `kept` fact keeps its first quote. A dispute any reading
+    reported is a finding, else `cleared` when any reading cleared it, else
+    `unruled`. `run` is the first reading's."""
+    first = results[0]
+    if len(results) == 1:
+        return first
+    out = CheckResult(first.scene_id, readings=len(results), run=first.run,
+                      unknown_brief_items=first.unknown_brief_items,
+                      stale_brief_items=first.stale_brief_items)
+    for r in results:
+        for f in r.findings:
+            if not any(_same_finding(f, g) for g in out.findings):
+                out.findings.append(f)
+    for r in results:
+        for f in r.unverified:
+            if not any(_same_finding(f, g) for g in out.findings + out.unverified):
+                out.unverified.append(f)
+    for r in results:
+        for rid, quote in r.kept:
+            if rid not in {k for k, _ in out.kept}:
+                out.kept.append((rid, quote))
+        for item in r.kept_unverified:
+            if item not in out.kept_unverified:
+                out.kept_unverified.append(item)
+    reported = {f.fact_id for f in out.findings + out.unverified}
+    cleared = {d.fact_id for r in results for d in r.cleared}
+    for d in disputes or []:
+        if d.fact_id in reported:
+            continue
+        (out.cleared if d.fact_id in cleared else out.unruled).append(d)
+    return out

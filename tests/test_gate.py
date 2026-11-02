@@ -1225,3 +1225,46 @@ def test_a_recheck_is_gated_with_no_baseline(project_dir, tmp_path, monkeypatch)
     monkeypatch.setattr(gate, '_writer', lambda pd, sid: 'draft')
     gate.recheck_pending(project_dir, log_dir=str(tmp_path))
     assert kwargs and all(k.get('before') is None for k in kwargs)
+
+
+@pytest.mark.gate_readings
+class TestTwoReadings:
+    """The gate reads each scene `GATE_READINGS` times and blocks on the
+    union: a finding only the second reading makes still stops the commit."""
+
+    def _gate(self, project_dir, tmp_path, by_reading):
+        checks = []
+
+        def fake(path, body, **k):
+            if 'tools' in body:
+                prompt = body['messages'][0]['content']
+                n = 2 if 'Reading 2:' in prompt else 1
+                checks.append(n)
+                return _text({'findings': by_reading.get(n, []), 'kept': []})
+            return _text({'commitments': [_commitment()]})
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+            result = gate_scene(project_dir, SCENE, command='draft',
+                                log_dir=str(tmp_path / 'logs'), extract_model='m',
+                                check_model='m')
+        return result, checks
+
+    def test_the_gate_takes_two_readings(self, project_dir, tmp_path):
+        from storyforge import gate
+        assert gate.GATE_READINGS == 2
+        result, checks = self._gate(project_dir, tmp_path, {})
+        assert checks == [1, 2] and result.check.readings == 2
+        assert result.passed and result.committed
+        assert (tmp_path / 'logs' / f'gate-check-{SCENE}.r2.json').exists()
+
+    def test_a_finding_only_the_second_reading_makes_blocks(self, project_dir, tmp_path):
+        result, _ = self._gate(project_dir, tmp_path, {2: [_contradiction()]})
+        assert not result.passed and not result.committed
+        assert [f.scene_quote for f in result.findings] == [HERE]
+        assert not any(r['scene_id'] == SCENE and ledger.is_commitment(r)
+                       for r in ledger.load(project_dir))
+
+    def test_one_finding_both_readings_make_is_sent_once(self, project_dir, tmp_path):
+        from storyforge import gate
+        result, _ = self._gate(project_dir, tmp_path,
+                               {1: [_contradiction()], 2: [_contradiction()]})
+        assert len(gate.problems_to_fix(result)) == 1

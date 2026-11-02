@@ -19,7 +19,11 @@ For one scene's prose, `gate_scene` runs:
    it goes to the checker as a dispute to rule on (a contradiction, or
    cleared), and one it doesn't rule on blocks the commit.
 3. **Check** the scene against the book and its brief (`checker.check_scene`):
-   contradictions and broken promises, by code.
+   contradictions and broken promises, by code. `GATE_READINGS` (2)
+   independent readings, their union: one reading misses about a fifth of
+   what another finds, and a finding the first check missed would otherwise
+   surface only on a re-check after the fix, blocking a scene the fix can
+   no longer reach.
 4. **Commit** only when nothing halted, extraction left nothing unresolved
    (`UNRESOLVED`: a quote not in the scene, a `supersedes` or `ends` that
    names nothing it can apply to), and the check found nothing, verified or
@@ -56,7 +60,8 @@ import re
 from dataclasses import dataclass, field
 
 from storyforge import audit, ledger, persistence
-from storyforge.checker import CheckError, CheckResult, Dispute, Finding, check_scene
+from storyforge.checker import (GATE_READINGS, CheckError, CheckResult, Dispute, Finding,
+                               check_scene)
 
 #: The commands whose prose the gate commits (`ledger.COMMITMENT_WRITERS`
 #: without the extract pass)
@@ -589,7 +594,8 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     try:
         result.check = check_scene(project_dir, scene_id, prose=prose, model=check_model,
                                    log_file=os.path.join(log_dir, f'gate-check-{scene_id}.json'),
-                                   rows=rows, disputes=_disputes(result, rows))
+                                   rows=rows, disputes=_disputes(result, rows),
+                                   readings=GATE_READINGS)
     except CheckError as e:
         error = GateError(str(e))
         error.run = getattr(e, 'run', None)
