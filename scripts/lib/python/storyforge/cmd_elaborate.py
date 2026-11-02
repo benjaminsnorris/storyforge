@@ -92,7 +92,9 @@ def parse_args(argv):
                             'to a single page (by page_id)')
     scope.add_argument('--scene', type=str, default=None,
                        help='Limit a per-page stage (page-architecture, prompts) '
-                            'to every page of one scene (by scene_id)')
+                            'to every page of one scene (by scene_id); for a '
+                            'novel\'s briefs stage, brief only these scenes '
+                            '(comma-separated ids)')
     parser.add_argument('--force', action='store_true',
                         help='Overwrite existing page-architecture / image-workflow sections')
     args = parser.parse_args(argv)
@@ -1607,6 +1609,15 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
 
     registries = format_registries_for_prompt(project_dir)
 
+    # An adaptation (#477): a block that can't be read stops here, before any spend
+    from storyforge import source as source_mod
+    try:
+        source_cfg = source_mod.read_config(project_dir)
+    except source_mod.SourceError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    source_map_problem = ''
+
     # Build shared context once for all stage API calls (prompt caching)
     stage_model = select_model('drafting')  # Opus for creative work
     system = build_shared_context(project_dir, model=stage_model)
@@ -1647,7 +1658,10 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
             # written scene-briefs.csv. Jump straight to validation.
             prompt = ''  # sentinel — not used for API call below
         else:
-            prompt = build_briefs_prompt(project_dir, plugin_dir, registries_text=registries,
+            brief_scope = [s.strip() for s in (getattr(args, 'scene', None) or '').split(',')
+                           if s.strip()] or None
+            prompt = build_briefs_prompt(project_dir, plugin_dir, scene_ids=brief_scope,
+                                         registries_text=registries,
                                          system_context=has_system)
     else:
         log(f'ERROR: Unknown stage: {stage}')
@@ -1780,6 +1794,11 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         alias_maps = load_registry_alias_maps(project_dir)
         blocks = parse_stage_response(response)
         written = []
+        if (stage == 'map' and source_cfg is not None
+                and 'source-map-csv' not in blocks):
+            source_map_problem = ('the map reply has no source-map-csv block; '
+                                  'reference/source-map.csv is unchanged')
+            log(f'ERROR: {source_map_problem}')
 
         # Apply CSV blocks
         for label, content in blocks.items():
@@ -1856,6 +1875,20 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     _write_csv(path, ordered, _FILE_MAP['scenes.csv'])
                     written.append(f'scenes.csv status updates ({len(rows)} rows)')
 
+            elif label == 'source-map-csv':
+                # The adaptation's map (#477): the whole map, every time
+                rows = csv_block_to_rows(content)
+                header = [h.strip() for h in content.strip().split('\n', 1)[0].split('|')]
+                if header != source_mod.SOURCE_MAP_COLUMNS:
+                    source_map_problem = (
+                        f'the reply\'s source-map-csv header is {"|".join(header)}, not '
+                        f'{"|".join(source_mod.SOURCE_MAP_COLUMNS)}; '
+                        f'reference/source-map.csv is unchanged')
+                    log(f'ERROR: {source_map_problem}')
+                elif rows:
+                    source_mod.write_source_map(project_dir, rows)
+                    written.append(f'source-map.csv ({len(rows)} rows)')
+
             elif label in ('story-architecture', 'character-bible', 'world-bible', 'voice-guide'):
                 filename = label + '.md'
                 path = os.path.join(ref_dir, filename)
@@ -1883,6 +1916,18 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     # ========================================================================
     log('Running validation...')
     report = validate_structure(ref_dir)
+    if source_cfg is not None and stage in ('map', 'briefs'):
+        # Source coverage (#477), in the stage's report; a blocking gap holds
+        # the phase like any other blocking failure
+        coverage = source_mod.check_coverage(project_dir, source_cfg)
+        for line in coverage['lines']:
+            log(line)
+        report['failures'].extend(coverage['findings'])
+        if source_map_problem:
+            report['failures'].append({'severity': 'blocking', 'scene_id': '',
+                                       'message': source_map_problem})
+        if any(f.get('severity', 'blocking') == 'blocking' for f in report['failures']):
+            report['passed'] = False
     validate_passed = report['passed']
     validate_failures = len(report['failures'])
 
