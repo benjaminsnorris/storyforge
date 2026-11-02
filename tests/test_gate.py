@@ -1232,7 +1232,7 @@ class TestTwoReadings:
     """The gate reads each scene `GATE_READINGS` times and blocks on the
     union: a finding only the second reading makes still stops the commit."""
 
-    def _gate(self, project_dir, tmp_path, by_reading):
+    def _gate(self, project_dir, tmp_path, by_reading, **kw):
         checks = []
 
         def fake(path, body, **k):
@@ -1243,9 +1243,9 @@ class TestTwoReadings:
                 return _text({'findings': by_reading.get(n, []), 'kept': []})
             return _text({'commitments': [_commitment()]})
         with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
-            result = gate_scene(project_dir, SCENE, command='draft',
+            result = gate_scene(project_dir, SCENE, command=kw.pop('command', 'draft'),
                                 log_dir=str(tmp_path / 'logs'), extract_model='m',
-                                check_model='m')
+                                check_model='m', **kw)
         return result, checks
 
     def test_the_gate_takes_two_readings(self, project_dir, tmp_path):
@@ -1268,3 +1268,58 @@ class TestTwoReadings:
         result, _ = self._gate(project_dir, tmp_path,
                                {1: [_contradiction()], 2: [_contradiction()]})
         assert len(gate.problems_to_fix(result)) == 1
+
+    def test_the_report_names_the_reading_past_the_first(self, project_dir, tmp_path):
+        """#483 review SF-9: its exchange is in gate-check-<scene>.r2.json."""
+        result, _ = self._gate(project_dir, tmp_path, {2: [_contradiction()]})
+        lines = gate_blocking(result)
+        assert len(lines) == 1 and lines[0].startswith('CONTRADICTION [reading 2]:')
+
+    def test_a_second_readings_finding_already_in_the_scene_does_not_block(
+            self, project_dir, tmp_path):
+        """_classify reads the union: a reading-2 finding is inherited too."""
+        result, _ = self._gate(project_dir, tmp_path, {2: [_contradiction()]},
+                               command='revise',
+                               before=_snap(project_dir, f'Old prose. The map said {HERE}.'))
+        assert result.passed and [f.reading for f in result.inherited] == [2]
+
+    def test_the_recheck_forecast_prices_every_reading(self):
+        """#483 review SF-6: a re-check is GATE_READINGS checks."""
+        from storyforge import gate
+        assert gate.RECHECK_COST_PER_SCENE == pytest.approx(0.95)
+
+
+def gate_blocking(result):
+    from storyforge import gate
+    return gate.blocking_lines(gate.report_lines(result))
+
+
+@pytest.mark.gate_readings
+def test_a_finding_only_the_second_reading_makes_is_fixed_and_rechecked(project_dir, tmp_path):
+    """#483 review T-5: gate_and_fix with two readings. Reading 2 alone
+    finds the slip; it goes to the fix, and the re-check (two readings
+    again) passes the fixed prose."""
+    with open(os.path.join(project_dir, 'scenes', f'{SCENE}.md'), encoding='utf-8') as f:
+        prose = f.read()
+    assert HERE in prose
+    calls = []
+
+    def fake(path, body, **k):
+        prompt = body['messages'][0]['content']
+        if 'tools' in body:
+            n = 2 if 'Reading 2:' in prompt else 1
+            calls.append(('check', n))
+            found = [_contradiction()] if n == 2 and HERE in prompt else []
+            return _text({'findings': found, 'kept': []})
+        if 'edits' in json.dumps(body.get('output_config', {})):
+            calls.append(('fix',))
+            return _text({'edits': [{'problem': 1, 'find': HERE,
+                                     'replace': 'a village of some size'}]})
+        return _text({'commitments': [_commitment(
+            statement='The map is blank there', quote='Blank parchment. Not even a contour line.')]})
+    with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+        out = gate.gate_and_fix(project_dir, SCENE, command='revise', prose=prose,
+                                log_dir=str(tmp_path / 'logs'))
+    assert calls == [('check', 1), ('check', 2), ('fix',), ('check', 1), ('check', 2)]
+    assert out.fixed and out.result.passed and HERE not in out.prose
+    assert [f.reading for f in out.first.findings] == [2]

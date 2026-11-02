@@ -49,12 +49,13 @@ the book it sees.
   the scene list and its tool results. A book near the cap can overflow
   the model's context, which is an API error (`CheckError`), not a
   silent cut.
-- Readings (`check_scene(readings=)`): two checks of the same prose agree
-  on about 80% of their findings, and each finds real errors the other
-  misses (E8's gated scenes, 2026-11-01: 33 of 41 shared; the second alone
-  found a dead girl's shoes made a boy's and the "eleven nights" the gate
-  had passed). The gate asks for `GATE_READINGS` and takes the union
-  (`merge_readings`). They run one after the other, so the second reads
+- Readings (`check_scene(readings=)`): two checks of the same prose find
+  different things (E8's gated scenes, 2026-11-01: 33 of the first
+  reading's 41 findings recurred in the second, which made 48; each missed
+  real errors the other found, the second alone a dead girl's shoes made a
+  boy's and the "eleven nights" the gate had passed). The gate asks for
+  `GATE_READINGS` and takes the union (`merge_readings`); each finding
+  names its `reading`. They run one after the other, so the second reads
   the bibles and the story so far from the first's cache. Each reading
   after the first says which it is, so it is its own request (the
   recordings are keyed by the request).
@@ -170,6 +171,9 @@ class Finding:
     fact_id: str              # ledger id, or the brief field of a promise
     explanation: str
     problem: str = ''         # why it is unverified ('' when verified)
+    #: which of the check's readings made it (`check_scene(readings=)`);
+    #: its exchange is in that reading's log
+    reading: int = 1
 
     @property
     def source(self) -> str:
@@ -189,6 +193,7 @@ class Finding:
 class CheckResult:
     scene_id: str
     #: how many independent readings this result is the union of
+    #: (`merge_readings`)
     readings: int = 1
     findings: list[Finding] = field(default_factory=list)
     unverified: list[Finding] = field(default_factory=list)
@@ -209,6 +214,7 @@ class CheckResult:
     #: disputes it neither reported as a contradiction nor cleared: they
     #: block the commit like an unverified finding
     unruled: list[Dispute] = field(default_factory=list)
+    #: the first reading's exchange (a later reading's is in its own log)
     run: ToolRun | None = None
 
 
@@ -803,10 +809,11 @@ def check_scene(project_dir: str, scene_id: str, *, prose: str | None = None,
     `log_file` with `.rN` before its extension.
 
     Raises:
-        CheckError: the scene can't be checked, or a check didn't finish
+        CheckError: the scene can't be checked, or a reading didn't finish
             (refusal, an API failure, a reply cut off or off-schema, too many
-            tool turns). It carries the exchange so far as `.run` when there
-            was one.
+            tool turns); the readings already made are discarded. It carries
+            the failed reading's exchange so far as `.run` when there was one.
+        ValueError: `readings` is below 1.
     """
     if readings < 1:
         raise ValueError(f'readings must be at least 1, not {readings}')
@@ -860,6 +867,7 @@ def _check_once(book: Book, brief: Brief, project_dir: str, scene_id: str, *,
                        ('kind', 'code', 'scene_quote', 'established_scene',
                         'established_quote', 'fact_id', 'explanation')})
         f.problem = _verify(f, book, scene_id, brief)
+        f.reading = reading
         (result.unverified if f.problem else result.findings).append(f)
     for k in kept:
         rid, quote = (k.get('fact_id') or '').strip(), (k.get('quote') or '').strip()
@@ -871,64 +879,119 @@ def _check_once(book: Book, brief: Brief, project_dir: str, scene_id: str, *,
             result.kept_unverified.append((rid, quote, f'fewer than {MIN_KEPT_WORDS} words'))
         else:
             result.kept.append((rid, quote))
-    reported = {f.fact_id for f in result.findings + result.unverified}
-    for d in disputes or []:
-        if d.fact_id in reported:
-            continue            # ruled a contradiction: a finding
-        (result.cleared if d.fact_id in cleared else result.unruled).append(d)
+    _rule_disputes(result, disputes,
+                   {f.fact_id for f in result.findings + result.unverified}, cleared)
     return result
 
 
+def _words_of(text: str) -> str:
+    return ' '.join(re.findall(r"\w+", normalize(text).lower()))
+
+
+def _overlap(x: str, y: str) -> bool:
+    """Whether one quote is inside the other, word for word, the shorter
+    `MIN_KEPT_WORDS`+ words (a word or two is in everything)."""
+    wx, wy = _words_of(x), _words_of(y)
+    short, long_ = sorted((wx, wy), key=len)
+    return len(short.split()) >= MIN_KEPT_WORDS and f' {short} ' in f' {long_} '
+
+
+#: brief fields whose promises are items in words: one field holds several
+_FIELD_PROMISES = frozenset(PROMISE_FIELDS) | frozenset(REGISTRY_PROMISE_FIELDS)
+
+
 def _same_finding(a: Finding, b: Finding) -> bool:
-    """Whether two readings' findings are one problem: the same kind, and
-    for a contradiction the same scene words (one quote inside the other)
-    against the same source; for a broken promise, the same promise (its
-    id or brief field, and one promised item inside the other)."""
-    if a.kind != b.kind:
+    """Whether two readings' findings are one problem. A contradiction: the
+    same code, the same source (scene, file or calendar; with none, the
+    same ledger fact or brief field), and both quotes overlapping
+    (`_overlap`), so two problems in one sentence, or two calendar lines,
+    stay two. A broken promise: the same registry id, or for a brief field
+    (several items each) the same item, word for word. When in doubt, two:
+    a duplicate costs a line, a merge loses a problem."""
+    if a.kind != b.kind or a.code != b.code:
         return False
     if a.kind == 'broken-promise':
-        ea, eb = normalize(a.established_quote).strip(), normalize(b.established_quote).strip()
-        return a.fact_id == b.fact_id and (ea in eb or eb in ea)
-    qa, qb = normalize(a.scene_quote).strip(), normalize(b.scene_quote).strip()
-    if not qa or not qb or not (qa in qb or qb in qa):
+        if a.fact_id != b.fact_id:
+            return False
+        if a.fact_id not in _FIELD_PROMISES:
+            return True
+        ea = _words_of(a.established_quote)
+        return bool(ea) and ea == _words_of(b.established_quote)
+    if a.established_scene != b.established_scene:
         return False
-    return (a.established_scene == b.established_scene
-            and (a.established_scene or a.fact_id == b.fact_id))
+    if not a.established_scene and a.fact_id != b.fact_id:
+        return False
+    return (_overlap(a.scene_quote, b.scene_quote)
+            and _overlap(a.established_quote, b.established_quote))
+
+
+def _rule_disputes(out: CheckResult, disputes: list[Dispute] | None,
+                   reported: set[str], cleared: set[str]) -> None:
+    for d in disputes or []:
+        if d.fact_id in reported:
+            continue            # ruled a contradiction: a finding
+        (out.cleared if d.fact_id in cleared else out.unruled).append(d)
 
 
 def merge_readings(results: list[CheckResult],
                    disputes: list[Dispute] | None = None) -> CheckResult:
-    """The union of independent readings of one scene. A finding (verified
-    or not) another reading already made (`_same_finding`) is kept once,
-    the first reading's; one verified in any reading isn't also kept
-    unverified. A `kept` fact keeps its first quote. A dispute any reading
-    reported is a finding, else `cleared` when any reading cleared it, else
-    `unruled`. `run` is the first reading's."""
+    """The union of independent readings of one scene.
+
+    Reading 1's findings are all kept, as it made them. A later reading's
+    finding that an earlier reading already made (`_same_finding`) is one
+    problem, kept once: the version with the longer scene quote, since
+    `gate._classify` reads that quote for "already in the scene" and a
+    fragment of a changed sentence could match the old one. Findings are
+    never compared within a reading. An unverified finding is dropped only
+    when an earlier reading made the same one, verified or not; one
+    verified in a later reading replaces the earlier unverified one.
+
+    `kept` keeps each fact's first quote; a fact kept (verified) in any
+    reading is not also listed in `kept_unverified`, which keeps one entry
+    per fact. A dispute any reading reported (verified or not, before
+    de-duplication) is a finding, else `cleared` when any reading cleared
+    it, else `unruled`. `run` is the first reading's; `readings` counts
+    every reading merged.
+
+    Raises:
+        ValueError: no results, or results of different scenes.
+    """
+    if not results:
+        raise ValueError('merge_readings needs at least one reading')
     first = results[0]
+    if any(r.scene_id != first.scene_id for r in results):
+        raise ValueError(f'readings of different scenes: '
+                         f'{sorted({r.scene_id for r in results})}')
     if len(results) == 1:
         return first
-    out = CheckResult(first.scene_id, readings=len(results), run=first.run,
-                      unknown_brief_items=first.unknown_brief_items,
+    out = CheckResult(first.scene_id, readings=sum(r.readings for r in results),
+                      run=first.run, unknown_brief_items=first.unknown_brief_items,
                       stale_brief_items=first.stale_brief_items)
-    for r in results:
+    out.findings, out.unverified = list(first.findings), list(first.unverified)
+    for r in results[1:]:
+        earlier_found, earlier_unverified = list(out.findings), list(out.unverified)
         for f in r.findings:
-            if not any(_same_finding(f, g) for g in out.findings):
-                out.findings.append(f)
-    for r in results:
+            same = next((g for g in earlier_found if _same_finding(f, g)), None)
+            if same is not None:
+                if len(_words_of(f.scene_quote)) > len(_words_of(same.scene_quote)):
+                    out.findings[out.findings.index(same)] = f
+                continue
+            was = next((g for g in earlier_unverified if _same_finding(f, g)), None)
+            if was is not None:
+                out.unverified.remove(was)
+            out.findings.append(f)
         for f in r.unverified:
-            if not any(_same_finding(f, g) for g in out.findings + out.unverified):
+            if not any(_same_finding(f, g) for g in earlier_found + earlier_unverified):
                 out.unverified.append(f)
     for r in results:
         for rid, quote in r.kept:
             if rid not in {k for k, _ in out.kept}:
                 out.kept.append((rid, quote))
+    kept_ids = {k for k, _ in out.kept}
+    for r in results:
         for item in r.kept_unverified:
-            if item not in out.kept_unverified:
+            if item[0] not in kept_ids | {k for k, *_ in out.kept_unverified}:
                 out.kept_unverified.append(item)
-    reported = {f.fact_id for f in out.findings + out.unverified}
-    cleared = {d.fact_id for r in results for d in r.cleared}
-    for d in disputes or []:
-        if d.fact_id in reported:
-            continue
-        (out.cleared if d.fact_id in cleared else out.unruled).append(d)
+    reported = {f.fact_id for r in results for f in r.findings + r.unverified}
+    _rule_disputes(out, disputes, reported, {d.fact_id for r in results for d in r.cleared})
     return out

@@ -698,10 +698,12 @@ class TestReadings:
         assert len(result.findings) == 2
 
     def test_unverified_in_one_and_verified_in_the_other_is_a_finding(self, project_dir):
+        overrun = HERE + ', every one of them gone'   # not in the scene: unverified
         result, _ = _run(project_dir, [
-            _answer([_finding(established_quote='words act1-sc01 never says')]),
+            _answer([_finding(scene_quote=overrun)]),
             _answer([_finding()])], readings=2)
-        assert len(result.findings) == 1 and result.unverified == []
+        assert [f.scene_quote for f in result.findings] == [HERE]
+        assert result.unverified == []
 
     def test_unverified_findings_of_both_readings_are_kept(self, project_dir):
         result, _ = _run(project_dir, [
@@ -776,3 +778,144 @@ class TestMergeReadings:
     def test_one_reading_is_returned_as_it_is(self):
         r = checker.CheckResult('s', findings=[_contra('q')])
         assert checker.merge_readings([r]) is r
+
+
+def _c(quote, est='she was ten years old that spring', source='s1', code='TIM', fact_id='',
+       reading=1, problem=''):
+    return checker.Finding('contradiction', code, quote, source, est, fact_id, 'why',
+                           problem=problem, reading=reading)
+
+
+SENTENCE = 'She was twelve that winter, with her brother Tam still alive'
+
+
+class TestMergeReview483:
+    """#483 review: the union must never lose a problem a reading made."""
+
+    def test_two_problems_one_reading_makes_in_one_sentence_stay_two(self):
+        """CR-1 / SF-1 / TD-2 / T-1: never compared within a reading."""
+        one = checker.CheckResult('s', findings=[
+            _c(SENTENCE), _c(SENTENCE, est='Tam died in the first winter of the war',
+                             code='PHY')])
+        out = checker.merge_readings([one, checker.CheckResult('s')])
+        assert len(out.findings) == 2
+
+    def test_the_same_words_against_another_established_quote_are_two(self):
+        """SF-2: overlapping scene words, same source, different facts."""
+        out = checker.merge_readings([
+            checker.CheckResult('s', findings=[_c(SENTENCE)]),
+            checker.CheckResult('s', findings=[_c(SENTENCE, est='her brother Tam was buried '
+                                                                 'in the spring', reading=2)])])
+        assert len(out.findings) == 2
+
+    def test_two_calendar_lines_against_one_sentence_are_two(self):
+        """SF-2: every calendar finding cites scenes.csv."""
+        out = checker.merge_readings([
+            checker.CheckResult('s', findings=[_c(SENTENCE, source=checker.CALENDAR,
+                                                  est='s3 | day 4 | morning')]),
+            checker.CheckResult('s', findings=[_c(SENTENCE, source=checker.CALENDAR,
+                                                  est='s7 | day 19 | night', reading=2)])])
+        assert len(out.findings) == 2
+
+    def test_a_short_quote_inside_a_long_one_is_not_the_same_problem(self):
+        """SF-2: a word or two is in everything."""
+        out = checker.merge_readings([
+            checker.CheckResult('s', findings=[_c(SENTENCE)]),
+            checker.CheckResult('s', findings=[_c('Tam', reading=2)])])
+        assert len(out.findings) == 2
+
+    def test_a_different_code_is_a_different_problem(self):
+        out = checker.merge_readings([
+            checker.CheckResult('s', findings=[_c(SENTENCE)]),
+            checker.CheckResult('s', findings=[_c(SENTENCE, code='TRT', reading=2)])])
+        assert len(out.findings) == 2
+
+    def test_the_longer_scene_quote_is_kept(self):
+        """T-3: _classify reads the kept quote for 'already in the scene'."""
+        short = 'with her brother Tam still alive'
+        out = checker.merge_readings([
+            checker.CheckResult('s', findings=[_c(short)]),
+            checker.CheckResult('s', findings=[_c(SENTENCE, reading=2)])])
+        assert [f.scene_quote for f in out.findings] == [SENTENCE]
+        assert out.findings[0].reading == 2
+
+    def test_one_item_of_a_field_does_not_swallow_another(self):
+        """SF-3: brief-field items match whole, word for word."""
+        out = checker.merge_readings([
+            checker.CheckResult('s', findings=[_promise('key_actions',
+                                                        'she burns the map; she leaves the study')]),
+            checker.CheckResult('s', findings=[_promise('key_actions', 'she leaves the study')])])
+        assert len(out.findings) == 2
+
+    def test_an_empty_promised_item_matches_nothing(self):
+        """SF-3: '' is inside every string."""
+        out = checker.merge_readings([
+            checker.CheckResult('s', findings=[_promise('key_actions', 'she burns the map')]),
+            checker.CheckResult('s', unverified=[_promise('key_actions', '')])])
+        assert len(out.findings) == 1 and len(out.unverified) == 1
+
+    def test_one_registry_promise_reported_in_other_words_is_one(self):
+        out = checker.merge_readings([
+            checker.CheckResult('s', findings=[_promise('village-vanished', 'the village vanished')]),
+            checker.CheckResult('s', findings=[_promise('village-vanished', 'Hollow is gone')])])
+        assert len(out.findings) == 1
+
+    def test_a_dispute_a_deduplicated_finding_reported_is_still_a_finding(self):
+        """CR-2 / SF-5: ruled from every reading, before de-duplication."""
+        d = checker.Dispute('fact-1', 'stated', 'claimed')
+        r1 = checker.CheckResult('s', findings=[_c(SENTENCE)])
+        r1.cleared = [d]
+        r2 = checker.CheckResult('s', findings=[_c(SENTENCE, fact_id='fact-1', reading=2)])
+        out = checker.merge_readings([r1, r2], [d])
+        assert out.cleared == [] and out.unruled == []
+
+    def test_a_dispute_ruled_only_unverified_is_not_cleared(self):
+        d = checker.Dispute('fact-1', 'stated', 'claimed')
+        r1 = checker.CheckResult('s')
+        r1.cleared = [d]
+        r2 = checker.CheckResult('s', unverified=[_c('x', source='', fact_id='fact-1',
+                                                     problem='p', reading=2)])
+        out = checker.merge_readings([r1, r2], [d])
+        assert out.cleared == [] and len(out.unverified) == 1
+
+    def test_a_fact_kept_in_one_reading_is_not_also_unverified(self):
+        """T-2: the report would say a filled quote wasn't filled."""
+        r1 = checker.CheckResult('s', kept=[('fact-a', 'the words')])
+        r2 = checker.CheckResult('s', kept_unverified=[('fact-a', 'other', 'not in the scene'),
+                                                       ('fact-b', 'x', 'why'),
+                                                       ('fact-b', 'y', 'why')])
+        out = checker.merge_readings([r1, r2])
+        assert out.kept == [('fact-a', 'the words')]
+        assert out.kept_unverified == [('fact-b', 'x', 'why')]
+
+    def test_an_unverified_finding_unlike_a_verified_one_is_kept(self):
+        """SF-4."""
+        out = checker.merge_readings([
+            checker.CheckResult('s', findings=[_c(SENTENCE)]),
+            checker.CheckResult('s', unverified=[_c('her brother Tam walked with a limp',
+                                                    est='Tam never limped a day', reading=2,
+                                                    problem='p')])])
+        assert len(out.unverified) == 1
+
+    def test_readings_count_every_reading_merged(self):
+        """TD-1."""
+        two = checker.merge_readings([checker.CheckResult('s'), checker.CheckResult('s')])
+        assert checker.merge_readings([two, checker.CheckResult('s')]).readings == 3
+
+    def test_no_readings_or_mixed_scenes_are_refused(self):
+        with pytest.raises(ValueError, match='at least one'):
+            checker.merge_readings([])
+        with pytest.raises(ValueError, match='different scenes'):
+            checker.merge_readings([checker.CheckResult('a'), checker.CheckResult('b')])
+
+    def test_each_finding_names_its_reading(self, project_dir):
+        """SF-9: a finding from reading 2 is in gate-check-*.r2.json."""
+        result, _ = _run(project_dir, [_answer([_finding()]),
+                                       _answer([_finding(scene_quote=HERE2)])], readings=2)
+        assert [f.reading for f in result.findings] == [1, 2]
+
+    def test_a_failed_second_reading_names_itself(self, project_dir):
+        cut = dict(_answer(), stop_reason='max_tokens')
+        with pytest.raises(CheckError) as e:
+            _run(project_dir, [_answer(), cut], readings=2)
+        assert 'reading 2' in str(e.value)
