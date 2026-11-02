@@ -9,8 +9,10 @@
 Run 1 is ``fixtures/cassettes``; runs 2 and 3 are ``fixtures/e6/run2`` and
 ``run3``. See ``evals/e6`` for why this is not a default suite.
 Also writes evals/e6/e8-cases.json: each E8 case's outcome per run (when
-E8 was replayed). ``git_sha`` in spread.json is per suite, per run: a suite
-re-recorded alone (``--suite``) is a later commit than the rest.
+E8 was replayed). ``git_sha`` in spread.json is per suite, per run: the
+commit each suite was replayed at. With ``--suite``, a replayed suite that
+errored leaves the file as it was (a good spread isn't replaced by a miss),
+and the exit code reflects only the suites replayed.
 Exit code: 0 every run replayed, 2 a suite errored in some run (1 from an
 uncaught crash).
 """
@@ -47,8 +49,6 @@ CLAIMS = (
      'v1.80.0 re-record on new models: recall 0.16 -> 0.10 (8 -> 5 of 51)'),
     ('e2-corpus-drift', 'precision', 0.10,
      'v1.80.0 re-record on new models: precision 0.30 -> 0.40'),
-    ('e4-generation', 'cp10k', 2.1,
-     're-pin to 5e9bdf39: CP10k 18.2 -> 16.1 (v1.84.2)'),
     ('e8-revision-safety', 'reintroduced', 1,
      'E8 gaps: reintroduced 5 -> 6 (#383; one new case, thornwall-020)'),
     ('e4-generation', 'cp10k_passed', 3.42 - 2.09,
@@ -101,7 +101,13 @@ def main(argv=None) -> int:
     summary = e6.summarize(reports)
     summary['git_sha'] = {s.name: {run: r['git_sha'] for run, r in reports.items()}
                           for s in suites}
+    replayed_errors = dict(summary['errored'])
     if args.suite:
+        if replayed_errors:
+            print(_summary({**summary, 'claims': []}))
+            print(f'ERROR: {", ".join(sorted(replayed_errors))} errored; '
+                  f'{args.spread_file} left as it was', file=sys.stderr)
+            return 2
         try:
             with open(args.spread_file) as f:
                 summary = e6.merge(json.load(f), summary)
@@ -120,7 +126,7 @@ def main(argv=None) -> int:
             f.write('\n')
     print(_summary(summary))
     print(f'Spread: {args.spread_file}')
-    return 2 if summary['errored'] else 0
+    return 2 if replayed_errors else 0
 
 
 def _summary(summary: dict) -> str:

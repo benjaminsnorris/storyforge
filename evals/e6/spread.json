@@ -49,14 +49,6 @@
       "within_noise": true
     },
     {
-      "claim": "re-pin to 5e9bdf39: CP10k 18.2 -> 16.1 (v1.84.2)",
-      "claimed_delta": 2.1,
-      "metric": "cp10k",
-      "range": 1.89,
-      "suite": "e4-generation",
-      "within_noise": false
-    },
-    {
       "claim": "E8 gaps: reintroduced 5 -> 6 (#383; one new case, thornwall-020)",
       "claimed_delta": 1,
       "metric": "reintroduced",

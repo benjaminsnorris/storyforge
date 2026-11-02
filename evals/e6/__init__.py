@@ -7,8 +7,10 @@ E3's recall moves and tier comparison and E8's reintroduction counts were all
 single runs read "inside noise until E6".
 
 Run 1 is the default recordings (``fixtures/cassettes/``). Runs 2 and 3 are
-independent live recordings of the same code under ``fixtures/e6/run2`` and
-``run3``. Each run's recordings replay for free, so the spread can be
+independent live recordings under ``fixtures/e6/run2`` and ``run3``, of the
+code run 1 had when they were made; run 1 moves on with every re-record, so
+a run-2/3 recording replays only from a checkout of its commit (spread.json's
+``git_sha`` names it, per suite). Each run's recordings replay for free, so the spread can be
 recomputed without spending; ``evals/consistency.py`` does that.
 
 **Not a default suite.** The extra runs are a snapshot of one commit's
@@ -93,23 +95,28 @@ def summarize(reports: dict[str, dict]) -> dict:
 
 def merge(old: dict, new: dict) -> dict:
     """``old`` (a spread file) with ``new``'s suites in place of its own:
-    each suite replayed in ``new`` replaces its spread, its errored entry and
-    its ``git_sha``; the others are kept as they were. A spread file from
-    before ``git_sha`` was per suite (one ``{run: sha}`` for every suite)
-    has that sha spread to each of its suites, so nothing is lost."""
+    each suite ``new`` replayed (spread or errored) replaces its spread, its
+    errored entry and its ``git_sha``; the others are kept as they were.
+
+    Raises:
+        ValueError: ``old`` is not a spread file of the same runs with a
+            per-suite ``git_sha`` (``{suite: {run: sha}}``).
+    """
+    if not isinstance(old, dict):
+        raise ValueError('it is not a JSON object')
     if old.get('runs') != new['runs']:
         raise ValueError(f'its runs are {old.get("runs")}, not {new["runs"]}')
-    replayed = set(new['git_sha'])
-    sha = old.get('git_sha', {})
-    if sha and all(isinstance(v, str) for v in sha.values()):   # the older format
-        sha = {s: dict(sha) for s in set(old['suites']) | set(old['errored'])}
+    sha = old.get('git_sha')
+    if not isinstance(sha, dict) or any(not isinstance(v, dict) for v in sha.values()):
+        raise ValueError('its git_sha is not per suite ({suite: {run: sha}})')
+    replayed = set(new['suites']) | set(new['errored'])
     out = {'runs': new['runs'],
            'suites': {s: m for s, m in old['suites'].items() if s not in replayed},
            'errored': {s: w for s, w in old['errored'].items() if s not in replayed},
            'git_sha': {s: v for s, v in sha.items() if s not in replayed}}
     out['suites'].update(new['suites'])
     out['errored'].update(new['errored'])
-    out['git_sha'].update(new['git_sha'])
+    out['git_sha'].update({s: v for s, v in new['git_sha'].items() if s in replayed})
     return out
 
 
