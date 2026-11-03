@@ -106,7 +106,9 @@ def main(argv=None):
             sys.exit(1)
 
     title = read_yaml_field('project.title', project_dir) or 'Untitled'
-    model = select_model('synthesis')
+    # diagnose calls no model: choosing one lists the API's models, which
+    # needs a key, so a read-only check on a machine without one crashed
+    model = '' if args.diagnose else select_model('synthesis')
 
     log('============================================')
     log('Storyforge Hone')
