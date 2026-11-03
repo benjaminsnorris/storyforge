@@ -113,11 +113,12 @@ def _read_csv(path: str) -> list[dict[str, str]]:
 
     Strips ``\\r`` from all field values and header names so that CRLF line
     endings (and stray ``\\r`` characters embedded by awk-based CSV edits)
-    never propagate into downstream code.
+    never propagate into downstream code, and a byte-order mark (a
+    spreadsheet export's) so the first column is still `id`.
     """
     if not os.path.exists(path):
         return []
-    with open(path, newline='', encoding='utf-8') as f:
+    with open(path, newline='', encoding='utf-8-sig') as f:
         raw = f.read().replace('\r\n', '\n').replace('\r', '')
     reader = csv.DictReader(raw.splitlines(), delimiter=DELIMITER)
     rows = [{k: (v if v is not None else '') for k, v in row.items()}
@@ -1148,41 +1149,55 @@ def validate_structure(ref_dir: str) -> dict:
     }
 
 
-#: What characters.csv's `pronouns` may hold, alone or as the first of a
-#: slash form (`she/her`): the drafting prompt shows it to the writer as
-#: written (`prompts._established_facts_block`)
-VALID_PRONOUNS = ('he', 'she', 'they', 'it')
-
-
 def _validate_pronouns(ref_dir: str, checks: list[dict]) -> None:
-    """characters.csv's `pronouns`: a value outside `VALID_PRONOUNS` blocks
-    (the writer would be told it); no column, or a character with none, is
-    advisory (the writer then guesses, and a wrong gender is one of the
-    commonest errors the gate catches)."""
+    """characters.csv's `pronouns` (category `characters`): a value
+    `schema.pronoun_key` rejects blocks (the drafting prompt would drop it);
+    no column, or a character with none, is advisory (the writer then
+    guesses, and a wrong gender is one of the commonest errors the gate
+    catches). A file that can't be read blocks; no file, or rows with no
+    `id`, is advisory: nothing could be checked."""
+    from .schema import VALID_PRONOUNS, pronoun_key
+    allowed = ', '.join(sorted(VALID_PRONOUNS))
     path = os.path.join(ref_dir, 'characters.csv')
     if not os.path.isfile(path):
-        return
-    rows = _read_csv(path)
-    with open(path, encoding='utf-8') as f:
-        header = f.readline().rstrip('\r\n').split('|')
-    if 'pronouns' not in header:
         checks.append(_check(
-            'registry', 'character-pronouns', False,
-            "characters.csv has no pronouns column: the drafting prompt can't say "
-            "who is he or she, so the writer guesses",
+            'characters', 'character-pronouns-column', False,
+            "No characters.csv: no character's pronouns can be checked or given to the writer",
             severity='advisory'))
         return
-    bad = sorted(f"{r['id']} ({r['pronouns']!r})" for r in rows
-                 if (r.get('id') or '').strip() and (r.get('pronouns') or '').strip()
-                 and r['pronouns'].strip().lower().split('/')[0].strip() not in VALID_PRONOUNS)
+    try:
+        with open(path, encoding='utf-8-sig', newline='') as f:
+            first = f.readline()
+        rows = _read_csv(path)
+    except (OSError, UnicodeDecodeError) as e:
+        checks.append(_check(
+            'characters', 'character-pronouns-column', False,
+            f"characters.csv can't be read ({e}): pronouns not checked"))
+        return
+    header = [h.strip() for h in first.rstrip('\r\n').split(DELIMITER)]
+    if 'pronouns' not in header:
+        checks.append(_check(
+            'characters', 'character-pronouns-column', False,
+            f"characters.csv has no pronouns column: add one ({allowed}, or a slash form "
+            f"such as she/her) so the drafting prompt can tell the writer each character's",
+            severity='advisory'))
+        return
+    named = [r for r in rows if (r.get('id') or '').strip()]
+    if not named:
+        checks.append(_check(
+            'characters', 'character-pronouns-values', False,
+            "characters.csv has no row with an id: pronouns not checked",
+            severity='advisory'))
+        return
+    bad = sorted(f"{r['id'].strip()} ({r['pronouns']!r})" for r in named
+                 if pronoun_key(r.get('pronouns', '')) is None)
     checks.append(_check(
-        'registry', 'character-pronouns-values', not bad,
-        f"characters.csv pronouns not one of {', '.join(VALID_PRONOUNS)}: {', '.join(bad)}"
-        if bad else "Every character's pronouns are valid"))
-    empty = sorted(r['id'].strip() for r in rows
-                   if (r.get('id') or '').strip() and not (r.get('pronouns') or '').strip())
+        'characters', 'character-pronouns-values', not bad,
+        f"characters.csv pronouns not {allowed} or a slash form of one (she/her): "
+        f"{', '.join(bad)}" if bad else "Every character's pronouns are valid"))
+    empty = sorted(r['id'].strip() for r in named if pronoun_key(r.get('pronouns', '')) == '')
     checks.append(_check(
-        'registry', 'character-pronouns-missing', not empty,
+        'characters', 'character-pronouns-missing', not empty,
         f"Characters with no pronouns (the writer guesses): {', '.join(empty)}"
         if empty else "Every character has pronouns",
         severity='advisory'))

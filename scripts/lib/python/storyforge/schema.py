@@ -22,6 +22,31 @@ VALID_TYPES = frozenset({
 
 VALID_TIME_MODES = frozenset({'scene', 'summary', 'frame', 'vision'})
 
+#: characters.csv `pronouns`: a subject pronoun alone (`she`), or a slash
+#: form of that pronoun's own forms (`she/her`, `they/them/theirs`). The
+#: drafting prompt shows the value as written (`pronoun_key` decides whether
+#: it is shown at all), and validate checks it the same way.
+PRONOUN_FORMS = {
+    'he': frozenset({'he', 'him', 'his', 'himself'}),
+    'she': frozenset({'she', 'her', 'hers', 'herself'}),
+    'they': frozenset({'they', 'them', 'their', 'theirs', 'themselves', 'themself'}),
+    'it': frozenset({'it', 'its', 'itself'}),
+}
+VALID_PRONOUNS = frozenset(PRONOUN_FORMS)
+
+
+def pronoun_key(value: str) -> str | None:
+    """The subject pronoun a characters.csv `pronouns` cell names: '' for an
+    empty cell, None for one that isn't a `PRONOUN_FORMS` form (case and
+    spacing aside: ' She / Her ' is 'she'; 'she/him' and 'xe' are None)."""
+    parts = [p.strip().lower() for p in (value or '').split('/')]
+    if parts == ['']:
+        return ''
+    key = parts[0]
+    if key not in PRONOUN_FORMS or not all(p in PRONOUN_FORMS[key] for p in parts):
+        return None
+    return key
+
 #: The real times of day: what a prompt offers as a time, and the only
 #: values `stated_time` passes through as one
 TIMES_OF_DAY = frozenset({
