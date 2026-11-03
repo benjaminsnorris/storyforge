@@ -221,7 +221,7 @@ def _read_csv_header_and_rows(csv_file: str) -> tuple[list[str], list[list[str]]
     Strips ``\\r`` so CRLF line endings and stray carriage returns embedded
     by awk-based CSV edits never propagate into field values.
     """
-    with open(csv_file, newline='', encoding='utf-8') as f:
+    with open(csv_file, newline='', encoding='utf-8-sig') as f:
         raw = f.read().replace('\r\n', '\n').replace('\r', '')
     lines = [l for l in raw.splitlines() if l.strip()]
 
@@ -1350,7 +1350,8 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
     entering the scene) and its location, and those the scene itself has
     already established (``ledger.drafting_slice``). Facts in ``shown`` (the
     brief's ``physical_state_in``, listed above it) are left out. Empty when
-    the ledger holds nothing for the scene.
+    neither the ledger nor characters.csv's ``pronouns`` has anything for
+    the scene (an empty ledger still gives the pronouns).
 
     Logs a WARNING for a POV, on-stage or location name that isn't in the
     registries (its facts can't be found), for facts tied to a scene id
@@ -1368,21 +1369,26 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
     from .common import log
     from .elaborate import _read_csv
     from .enrich import load_alias_map
+    from .schema import pronoun_key
 
     ref_dir = os.path.join(project_dir, 'reference')
     rows = ledger.load_from(ref_dir)
-    if not rows:
+    char_rows = _read_csv(os.path.join(ref_dir, 'characters.csv'))
+    has_pronouns = any('pronouns' in r for r in char_rows)
+    # an empty ledger still has the characters' pronouns to give (a book
+    # whose ledger isn't built yet: the pronouns are the commonest fact the
+    # gate catches a draft getting wrong)
+    if not rows and not any((r.get('pronouns') or '').strip() for r in char_rows):
         return ''
     order = ledger.scene_order(project_dir)
     if scene_id not in order:
         log(f'WARNING: {scene_id} is not in scenes.csv; its drafting prompt '
-            'has no established facts from the ledger')
+            'has no established facts or pronouns')
         return ''
 
     char_ids = load_alias_map(os.path.join(ref_dir, 'characters.csv'))
     place_ids = load_alias_map(os.path.join(ref_dir, 'locations.csv'))
-    characters = {r['id'].strip(): r for r in _read_csv(os.path.join(ref_dir, 'characters.csv'))
-                  if (r.get('id') or '').strip()}
+    characters = {r['id'].strip(): r for r in char_rows if (r.get('id') or '').strip()}
     places = {r['id'].strip(): r for r in _read_csv(os.path.join(ref_dir, 'locations.csv'))
               if (r.get('id') or '').strip()}
 
@@ -1401,7 +1407,7 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
         unknown.append(location)
     if unknown:
         log(f'WARNING: {scene_id}: not in characters.csv or locations.csv, so '
-            f'the ledger has no facts for them in the prompt: {", ".join(unknown)}')
+            f'the prompt has no pronouns or ledger facts for them: {", ".join(unknown)}')
     found = ledger.drafting_slice(rows, scene_id, order,
                                   subjects + ([place] if place else []))
     if found.unplaced:
@@ -1423,11 +1429,20 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
 
     sections = []
     trimmed = []
+    no_pronouns: list[str] = []
     for sid in subjects + ([place] if place else []):
         is_place = sid == place
         row = places.get(sid, {}) if is_place else characters.get(sid, {})
         heading = (row.get('name') or sid).strip()
         pronouns = '' if is_place else (row.get('pronouns') or '').strip()
+        if pronouns and pronoun_key(pronouns) is None:
+            # validate blocks it; the writer is never told an unreadable value
+            log(f'WARNING: {scene_id}: {heading}\'s pronouns in characters.csv '
+                f'({pronouns!r}) are not a pronoun storyforge knows; left out of the '
+                f'prompt (see `storyforge validate`)')
+            pronouns = ''
+        if not is_place and has_pronouns and not pronouns:
+            no_pronouns.append(heading)
         fixed = found.fixed.get(sid, [])
         states = [r for r in found.states.get(sid, []) if r['id'] not in shown]
         if not (fixed or states or pronouns):
@@ -1464,6 +1479,9 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
                         'of these unless the brief says otherwise: where they '
                         'differ, the brief wins.\n'
                         + '\n'.join(line(r) for r in own))
+    if no_pronouns:
+        log(f'WARNING: {scene_id}: no pronouns in characters.csv for '
+            f'{", ".join(no_pronouns)}; the writer guesses theirs')
     if not sections:
         return ''
     return ('## Established Facts\n\n'
