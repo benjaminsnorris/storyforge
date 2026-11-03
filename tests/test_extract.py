@@ -443,12 +443,16 @@ class TestEnumAnswersReduced:
         assert r['time_of_day'] == 'evening'
 
     def test_skeleton_time_of_day_unstated(self):
-        """#488: a text with no time of day is recorded as unstated, never
-        left blank (blank is "not filled in yet"); a stray "unknown" too."""
+        """#488: "unstated" (the text gives no time) is kept; a stray
+        "unknown" is left blank like every other field's, never turned into
+        unstated (SF-4: that would assert a reading the model didn't make)."""
         from storyforge.extract import build_skeleton_prompt, parse_skeleton_response
-        for answer in ('unstated', 'unknown', 'Unknown'):
+        for answer in ('unstated', 'Unstated'):
             r = parse_skeleton_response(_reply('SKELETON_SCHEMA', time_of_day=answer), 's1')
             assert r['time_of_day'] == 'unstated', answer
+        for answer in ('unknown', 'Unknown'):
+            r = parse_skeleton_response(_reply('SKELETON_SCHEMA', time_of_day=answer), 's1')
+            assert 'time_of_day' not in r, answer
         prompt = build_skeleton_prompt('s1', 'Prose.', {})
         assert '"unstated" when the text doesn\'t say' in prompt
 

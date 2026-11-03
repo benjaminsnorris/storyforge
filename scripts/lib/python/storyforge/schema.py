@@ -22,14 +22,21 @@ VALID_TYPES = frozenset({
 
 VALID_TIME_MODES = frozenset({'scene', 'summary', 'frame', 'vision'})
 
+#: The real times of day: what a prompt offers as a time, and the only
+#: values `stated_time` passes through as one
+TIMES_OF_DAY = frozenset({
+    'morning', 'afternoon', 'evening', 'night', 'dawn', 'dusk',
+})
+
 #: A time of day the scene's text doesn't give: checked and left open, not
-#: forgotten (a blank is "not filled in yet"). It is no time, so every
-#: place that shows a time shows it as none (`stated_time`) (#488).
+#: forgotten (a blank is "not filled in yet") (#488). It is no time: the
+#: calendar lines (`prompts.scene_when`), the timeline description and
+#: assignment prompt, and story-power's scene map show it as none through
+#: `stated_time`; a prompt that pastes scenes.csv rows whole shows the word.
 UNSTATED_TIME = 'unstated'
 
-VALID_TIMES = frozenset({
-    'morning', 'afternoon', 'evening', 'night', 'dawn', 'dusk', UNSTATED_TIME,
-})
+#: The values `time_of_day` accepts
+VALID_TIMES = TIMES_OF_DAY | {UNSTATED_TIME}
 
 
 def stated_time(value: str | None) -> str:

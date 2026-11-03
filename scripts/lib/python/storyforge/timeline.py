@@ -22,7 +22,7 @@ import os
 import re
 
 from .common import log
-from .elaborate import OFF_PRESENT_MODES
+from .elaborate import OFF_PRESENT_MODES, time_mode
 from .enrich import update_csv_field
 from .schema import stated_time
 from .scenes import match_scene_id
@@ -966,7 +966,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     for row in scenes:
         sid = row.get('id', '')
         day = _int(row.get('timeline_day'))
-        mode = (row.get('time_mode') or 'scene').strip() or 'scene'
+        mode = time_mode(row)
         cue = cues.get(sid, {})
         relation = cue.get('relation', '')
         if mode in OFF_PRESENT_MODES:

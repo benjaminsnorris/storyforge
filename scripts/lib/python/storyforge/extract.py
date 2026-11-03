@@ -294,7 +294,6 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
     come from the manuscript's part headings (scenes-setup), never from the
     model.
     """
-    from .schema import UNSTATED_TIME
     data = _json_answer(response, SKELETON_SCHEMA)
     result = {'id': scene_id}
     for key in _SKELETON_FIELDS:
@@ -302,8 +301,6 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
         if isinstance(answer, list):  # an "unknown" place is no place
             answer = [v for v in answer if str(v).strip().lower() != 'unknown']
         value = _text(answer, ';')
-        if key == 'time_of_day' and value.lower() == 'unknown':
-            value = UNSTATED_TIME  # the schema offers no "unknown"; a stray one means the same
         if value and value.lower() != 'unknown':
             result[key] = value
     date = skeleton_cues(response)['date']
@@ -1173,7 +1170,7 @@ def analyze_expansion_opportunities(ref_dir: str) -> list[dict]:
 
     Returns a list of opportunity dicts with type, scene_id, description, priority.
     """
-    from .elaborate import _read_csv_as_map, OFF_PRESENT_MODES
+    from .elaborate import _read_csv_as_map, OFF_PRESENT_MODES, time_mode
 
     scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
     intent_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
@@ -1221,7 +1218,7 @@ def analyze_expansion_opportunities(ref_dir: str) -> list[dict]:
     prev_day = None
     prev_id = None
     for sid in sorted_ids:
-        if (scenes_map[sid].get('time_mode') or '').strip() in OFF_PRESENT_MODES:
+        if time_mode(scenes_map[sid]) in OFF_PRESENT_MODES:
             continue
         day_str = scenes_map[sid].get('timeline_day', '').strip()
         if not day_str:
@@ -1273,7 +1270,7 @@ def cleanup_timeline(ref_dir: str) -> list[dict]:
 
     Returns a list of fixes applied: [{scene_id, field, old_value, new_value}]
     """
-    from .elaborate import _read_csv_as_map, _write_csv, _FILE_MAP, OFF_PRESENT_MODES
+    from .elaborate import _read_csv_as_map, _write_csv, _FILE_MAP, OFF_PRESENT_MODES, time_mode
 
     scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
     sorted_ids = sorted(scenes_map.keys(),
@@ -1285,7 +1282,7 @@ def cleanup_timeline(ref_dir: str) -> list[dict]:
     days = []
     present = None
     for sid in sorted_ids:
-        if (scenes_map[sid].get('time_mode') or '').strip() in OFF_PRESENT_MODES:
+        if time_mode(scenes_map[sid]) in OFF_PRESENT_MODES:
             days.append((sid, None, False))
             continue
         try:

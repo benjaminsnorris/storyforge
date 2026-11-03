@@ -52,10 +52,6 @@ VALID_TYPES = frozenset({
     'plot', 'revelation', 'transition', 'world',
 })
 
-#: Valid time_of_day values
-VALID_TIMES = frozenset({
-    'morning', 'afternoon', 'evening', 'night', 'dawn', 'dusk',
-})
 
 #: Maps response label to dict key
 _LABEL_TO_KEY = {
@@ -702,6 +698,7 @@ def validate_time_of_day(value: str) -> str:
     Returns:
         Cleaned value if valid, empty string otherwise.
     """
+    from .schema import VALID_TIMES  # schema imports enrich at load time
     if not value:
         return ''
     cleaned = value.strip().lower()
@@ -944,7 +941,7 @@ def _field_instruction(field: str) -> str:
         ),
         'time_of_day': (
             'TIME_OF_DAY: <one of: morning, afternoon, evening, night, '
-            'dawn, dusk>'
+            'dawn, dusk; or unstated when the text gives none (never a guess)>'
         ),
         'duration': (
             'DURATION: <approximate in-story duration, e.g., "2 hours", '

@@ -12,13 +12,13 @@ import shutil
 
 import pytest
 
+from storyforge.schema import VALID_TIMES  # enrich's own copy is gone (#488)
 from storyforge.enrich import (
     METADATA_FIELDS,
     INTENT_FIELDS,
     BRIEFS_FIELDS,
     ALL_FIELDS,
     VALID_TYPES,
-    VALID_TIMES,
     VALID_MICE_TYPES,
     parse_enrich_response,
     load_alias_map,

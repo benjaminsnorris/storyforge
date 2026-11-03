@@ -460,20 +460,21 @@ def score_scene_map(project_dir: str) -> dict:
         severity='high',
     ))
 
-    # Required operational columns at the map level. A frame scene
-    # (time_mode=frame: narration from after the story, looking back) has
-    # no clock of its own, so it needs no time_of_day or duration, and its
-    # narrator has no body to put on stage (#488).
+    # Required operational columns at the map level. A clockless scene
+    # (elaborate.CLOCKLESS_MODES: frame narration, told from after the
+    # story) is asked for no CLOCK_FIELDS, and its narrator, who has no
+    # body, need not be on stage; validate's completeness check exempts the
+    # same fields (#488). The exempt scenes are named in a check of their own.
+    from storyforge.elaborate import CLOCK_FIELDS, CLOCKLESS_MODES, time_mode
     required = ['location', 'timeline_day', 'time_of_day', 'duration']
-    frame_exempt = {'time_of_day', 'duration'}
 
-    def _is_frame(r: dict) -> bool:
-        return r.get('time_mode', '').strip().lower() == 'frame'
+    def _clockless(r: dict) -> bool:
+        return time_mode(r) in CLOCKLESS_MODES
 
     missing_any = []
     for r in map_rows:
         empty = [c for c in required if not r.get(c, '').strip()
-                 and not (_is_frame(r) and c in frame_exempt)]
+                 and not (_clockless(r) and c in CLOCK_FIELDS)]
         if empty:
             missing_any.append((r.get('id', '?'), empty))
     checks.append(_check(
@@ -495,7 +496,7 @@ def score_scene_map(project_dir: str) -> dict:
         sid = r.get('id', '?')
         pov = r.get('pov', '').strip()
         on_stage = intent_by_id.get(sid, {}).get('on_stage', '').strip()
-        if not pov or _is_frame(r):
+        if not pov or _clockless(r):
             continue
         if not on_stage:
             unpopulated_pov.append(sid)
@@ -519,6 +520,18 @@ def score_scene_map(project_dir: str) -> dict:
             False,
             (f'{len(unpopulated_pov)} scene(s) have a POV but on_stage is '
              f'empty (the POV check will run once on_stage is populated)'),
+            severity='low',
+        ))
+
+    clockless = [r.get('id', '?') for r in map_rows if _clockless(r)]
+    if clockless:
+        # Passing, so it never lowers the rung; it says what wasn't asked
+        checks.append(_check(
+            'frame scenes exempt from time_of_day, duration and POV on stage',
+            True,
+            (f'{len(clockless)} scene(s) with time_mode '
+             f'{"/".join(sorted(CLOCKLESS_MODES))}: ' + ', '.join(clockless[:5])
+             + ('…' if len(clockless) > 5 else '')),
             severity='low',
         ))
 
