@@ -98,3 +98,27 @@ class TestShortScenes:
         import inspect
         from storyforge import cmd_timeline
         assert 'build_scene_list(metadata_csv, min_words=1)' in inspect.getsource(cmd_timeline)
+
+
+class TestScenesInStoryOrder:
+    """storyforge-evals: `write --scenes c,a,b` drafted in the order typed, so
+    the round trip on Quintus VIII gated later scenes before earlier ones (their
+    prior prose and the ledger out of order). A list of scenes runs in seq order."""
+
+    def _csv(self, tmp_path):
+        path = tmp_path / 'scenes.csv'
+        path.write_text('id|seq|status|word_count\n'
+                        'first|1|drafted|900\nsecond|2|drafted|900\nthird|3|drafted|900\n')
+        return str(path)
+
+    def test_scenes_follow_seq_not_the_order_given(self, tmp_path):
+        from storyforge.scene_filter import build_scene_list, apply_scene_filter
+        csv = self._csv(tmp_path)
+        ids = build_scene_list(csv)
+        assert apply_scene_filter(csv, ids, 'scenes', 'third,first,second') == ['first', 'second', 'third']
+
+    def test_a_scene_named_twice_runs_once(self, tmp_path):
+        from storyforge.scene_filter import build_scene_list, apply_scene_filter
+        csv = self._csv(tmp_path)
+        ids = build_scene_list(csv)
+        assert apply_scene_filter(csv, ids, 'scenes', 'second, first,second') == ['first', 'second']
