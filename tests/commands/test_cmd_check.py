@@ -385,3 +385,48 @@ class TestFix:
         problems = gate.problems_to_fix(result)
         assert len(problems) == 1 and HERE in problems[0]
         assert '1. TIM contradiction' in gate.build_fix_prompt(SCENE, 'prose', problems)
+
+
+class TestAccept:
+    """`check --accept` (Ben, 2026-11-02): the author accepts the
+    contradictions that stopped a scene, and `--pending` then passes it."""
+
+    def test_accept_then_pending_passes(self, project, capsys):
+        project_dir, commits = project
+        with _api([[BAD]]), pytest.raises(SystemExit):
+            cmd_check.main([SCENE])
+        assert f'storyforge check --accept {SCENE}' in capsys.readouterr().out
+        commits.clear()
+        cmd_check.main(['--accept', SCENE])
+        msg, paths = commits[-1]
+        assert msg == f'Check: accept 1 contradiction(s) in {SCENE}'
+        assert set(paths) == {gate.REPORTED_PATH, gate.BLOCKED_PATH, gate.PENDING_PATH}
+        assert gate.reported(project_dir)[SCENE][0]['command'] == gate.ACCEPTED
+        with _api([[BAD]]):
+            cmd_check.main(['--pending'])
+        assert SCENE not in gate.pending(project_dir)
+        report = open(os.path.join(project_dir, 'working', 'check-report.md')).read()
+        assert f'## {SCENE}: passed' in report and 'ALREADY IN THE SCENE' in report
+
+    def test_nothing_recorded_is_an_error_and_accepts_nothing(self, project):
+        project_dir, commits = project
+        with _api([[BAD]]), pytest.raises(SystemExit):
+            cmd_check.main([SCENE])
+        commits.clear()
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--accept', f'{SCENE},act2-sc01'])
+        assert e.value.code == 1 and commits == []
+        assert gate.reported(project_dir) == {} and SCENE in gate.blocked(project_dir)
+
+    def test_it_takes_no_other_selection(self, project):
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--accept', SCENE, '--pending'])
+        assert e.value.code == 1
+
+    def test_a_failed_commit_exits_1(self, project, monkeypatch):
+        with _api([[BAD]]), pytest.raises(SystemExit):
+            cmd_check.main([SCENE])
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **k: False)
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--accept', SCENE])
+        assert e.value.code == 1

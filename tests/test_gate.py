@@ -1323,3 +1323,103 @@ def test_a_finding_only_the_second_reading_makes_is_fixed_and_rechecked(project_
     assert calls == [('check', 1), ('check', 2), ('fix',), ('check', 1), ('check', 2)]
     assert out.fixed and out.result.passed and HERE not in out.prose
     assert [f.reading for f in out.first.findings] == [2]
+
+
+class TestAccepted:
+    """Ben, 2026-11-02: a stop on an error in the book is the author's to fix
+    or accept. A failing gate records its contradictions (`BLOCKED_PATH`);
+    `accept_blocked` moves them to `REPORTED_PATH` as accepted, so later
+    runs report them instead of stopping."""
+
+    def test_a_failing_gate_records_its_contradictions_and_a_pass_clears_them(
+            self, project_dir, tmp_path):
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+                       command='recheck')
+        assert not result.passed
+        rows = gate.blocked(project_dir)[SCENE]
+        assert [(r['command'], r['source'], r['quote']) for r in rows] == [
+            ('recheck', 'act1-sc01', HERE)]
+        assert _gate(project_dir, tmp_path, [_commitment()], command='recheck').committed
+        assert gate.blocked(project_dir) == {}
+        assert not os.path.exists(os.path.join(project_dir, gate.BLOCKED_PATH))
+
+    def test_only_verified_contradictions_are_recorded(self, project_dir, tmp_path):
+        from storyforge.elaborate import get_scene
+        outcome = get_scene(SCENE, f'{project_dir}/reference')['outcome']
+        promise = {'kind': 'broken-promise', 'code': 'PRM', 'scene_quote': '',
+                   'established_scene': '', 'fact_id': 'outcome', 'explanation': 'w',
+                   'established_quote': outcome}
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[promise],
+                       command='recheck')
+        assert not result.passed and gate.blocked(project_dir) == {}
+
+    def test_accepting_moves_them_and_lists_a_failed_recheck_again(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+              command='recheck')
+        gate.mark_pending(project_dir, SCENE, gate.RECHECK_FAILED, 'x')
+        rows = gate.accept_blocked(project_dir, SCENE)
+        assert [r['quote'] for r in rows] == [HERE]
+        assert [(r['command'], r['quote']) for r in gate.reported(project_dir)[SCENE]] == [
+            (gate.ACCEPTED, HERE)]
+        assert gate.blocked(project_dir) == {}
+        assert gate.pending(project_dir)[SCENE]['command'] == gate.RECHECK
+
+    def test_nothing_recorded_accepts_nothing(self, project_dir):
+        gate.mark_pending(project_dir, SCENE, gate.RECHECK_FAILED, 'x')
+        assert gate.accept_blocked(project_dir, SCENE) == []
+        assert gate.pending(project_dir)[SCENE]['command'] == gate.RECHECK_FAILED
+        assert gate.reported(project_dir) == {}
+
+    def test_an_accepted_error_is_reported_not_blocking_and_stays(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+              command='recheck')
+        gate.accept_blocked(project_dir, SCENE)
+        again = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+                      command='recheck')
+        assert again.passed and len(again.inherited) == 1
+        assert [(r['command'], r['quote']) for r in gate.reported(project_dir)[SCENE]] == [
+            (gate.ACCEPTED, HERE)]   # not duplicated by the run that found it again
+
+    def test_a_run_that_does_not_raise_it_keeps_it(self, project_dir, tmp_path):
+        """The checker's findings vary run to run: an accepted error a run
+        happens not to raise must not block again later."""
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+              command='recheck')
+        gate.accept_blocked(project_dir, SCENE)
+        assert _gate(project_dir, tmp_path, [_commitment()], command='recheck').committed
+        assert gate.reported(project_dir)[SCENE][0]['command'] == gate.ACCEPTED
+        later = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+                      command='recheck')
+        assert later.passed
+
+    def test_it_goes_when_its_words_leave_the_scene(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+              command='recheck')
+        gate.accept_blocked(project_dir, SCENE)
+        path = os.path.join(project_dir, 'scenes', f'{SCENE}.md')
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(text.replace(HERE, 'a village nobody had counted in years'))
+        new = _commitment(statement='Nobody had counted the village',
+                          quote='a village nobody had counted in years')
+        assert _gate(project_dir, tmp_path, [new], command='draft').committed
+        assert gate.reported(project_dir) == {}
+
+    def test_a_different_error_still_blocks(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+              command='recheck')
+        gate.accept_blocked(project_dir, SCENE)
+        other = {**_contradiction(), 'established_scene': 'act2-sc01'}
+        assert not _gate(project_dir, tmp_path, [_commitment()], findings=[other],
+                         command='recheck').passed
+
+    def test_an_unwritable_blocked_file_is_said_and_the_verdict_stands(
+            self, project_dir, tmp_path, capsys):
+        os.makedirs(os.path.join(project_dir, 'working'), exist_ok=True)
+        with open(os.path.join(project_dir, gate.BLOCKED_PATH), 'w') as f:
+            f.write('not|the|header\n')
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[_contradiction()],
+                       command='recheck')
+        assert not result.passed
+        assert f'{gate.BLOCKED_PATH} could not be updated' in capsys.readouterr().out

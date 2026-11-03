@@ -6,6 +6,7 @@ Usage:
     storyforge check --scenes a,b,c
     storyforge check --act 2
     storyforge check --pending                 # every scene waiting on the gate
+    storyforge check --accept act1-sc03        # accept what stopped it, then --pending
 
 For prose the author wrote (rethink plan §3.2, "in advisor mode, step 3
 becomes a report"): each scene, in reading order, goes through the gate
@@ -30,6 +31,15 @@ and they are re-checked after it, in reading order, under the cost threshold
 (`gate.recheck_pending`); scenes later in this run are checked by the run
 itself. `--pending` checks every scene in `working/gate-pending.csv`; one
 listed for a re-check keeps the command that wrote its prose.
+
+A stop is the author's to fix or accept (Ben, 2026-11-02). `--accept SCENES`
+accepts the verified contradictions that stopped each scene's last gate run
+(`working/gate-blocked.csv`, `gate.accept_blocked`): they move to
+`working/gate-reported.csv` as accepted, so later gate runs report them
+instead of stopping, and a failed re-check is listed for a re-check again.
+No model call; it commits, and `--pending` then checks the scenes. Only
+contradictions can be accepted: broken promises, unverified quotes,
+extraction problems and halts still have to be fixed.
 """
 
 from __future__ import annotations
@@ -55,6 +65,9 @@ def parse_args(argv):
     parser.add_argument('--from-seq', help='From sequence number (N or N-M range)')
     parser.add_argument('--pending', action='store_true',
                         help='Every scene waiting on the gate (working/gate-pending.csv)')
+    parser.add_argument('--accept', metavar='SCENES',
+                        help='Comma-separated scene IDs: accept the contradictions that '
+                             'stopped each one\'s last gate run (no model call)')
     return parser.parse_args(argv)
 
 
@@ -75,6 +88,12 @@ def main(argv=None):
     from storyforge.git import commit_and_push, create_branch
     ledger.exit_if_not_migrated(project_dir)
     ledger.exit_if_unordered(project_dir)
+    if args.accept:
+        if args.positional or args.scenes or args.act or args.from_seq or args.pending:
+            log('ERROR: --accept takes its own scene list; name no others with it.')
+            sys.exit(1)
+        _accept(project_dir, [s.strip() for s in args.accept.split(',') if s.strip()])
+        return
     if not (args.positional or args.scenes or args.act or args.from_seq or args.pending):
         log('ERROR: name the scenes to check (an id, a range, --scenes, --act, --from-seq '
             'or --pending).')
@@ -208,7 +227,8 @@ def main(argv=None):
         sys.exit(1)
     if stopped_at:
         log(f'ERROR: stopped at {stopped_at}, which {stop_why}; {passed} of '
-            f'{len(scene_ids)} scene(s) passed. Edit it and check it again.')
+            f'{len(scene_ids)} scene(s) passed. Edit it and check it again, or accept its '
+            f'contradictions: `storyforge check --accept {stopped_at}`.')
         sys.exit(1)
     if recheck_trouble:
         log(f'ERROR: {passed} of {len(scene_ids)} scene(s) passed, but the {recheck_trouble}; '
@@ -240,6 +260,50 @@ def _recheck_after(project_dir: str, result, log_dir: str, skip: set[str], spent
         lines.append(f'- re-check of {len(run.left)} scene(s) not run: forecast '
                      f'${run.forecast:.2f} is over the cost threshold (listed pending)')
     return [f'### Re-check after {result.scene_id}', ''] + lines + [''], run
+
+
+def _accept(project_dir: str, scene_ids: list[str]) -> None:
+    """`--accept`: accept each scene's recorded contradictions and commit.
+    A scene with nothing recorded is an error (nothing is accepted for any
+    scene), so a typo can't pass silently."""
+    from storyforge import gate
+    from storyforge.git import commit_and_push, create_branch
+    if not scene_ids:
+        log('ERROR: --accept needs scene ids.')
+        sys.exit(1)
+    try:
+        recorded = gate.blocked(project_dir)
+    except gate.GateError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    missing = [s for s in scene_ids if not recorded.get(s)]
+    if missing:
+        log(f'ERROR: nothing to accept for {", ".join(missing)}: {gate.BLOCKED_PATH} has no '
+            f'contradiction that stopped it (only a scene whose last gate run stopped on a '
+            f'verified contradiction can be accepted; check it first, or fix what stopped '
+            f'it). Nothing accepted.')
+        sys.exit(1)
+    if not create_branch('check', project_dir):
+        log('ERROR: could not create or find a branch to work on; nothing accepted.')
+        sys.exit(1)
+    total = 0
+    for sid in scene_ids:
+        try:
+            rows = gate.accept_blocked(project_dir, sid)
+        except gate.GateError as e:
+            log(f'ERROR: {sid}: {e}')
+            sys.exit(1)
+        total += len(rows)
+        log(f'{sid}: accepted {len(rows)} contradiction(s):')
+        for r in rows:
+            log(f'  {r["finding"]}')
+    if not commit_and_push(project_dir, f'Check: accept {total} contradiction(s) in '
+                           f'{", ".join(scene_ids)}',
+                           [gate.REPORTED_PATH, gate.BLOCKED_PATH, gate.PENDING_PATH]):
+        log('ERROR: the commit failed: the files are written but not committed.')
+        sys.exit(1)
+    log(f'Accepted; they are reported from now on, not blocking. Check the scene(s) again: '
+        f'`storyforge check --pending` (a scene that also had other problems stops on those).')
 
 
 def _named(args) -> list[str]:
