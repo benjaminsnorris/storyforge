@@ -79,7 +79,7 @@ def _evidence(project_dir):
     from storyforge import extract_describe as d
     scenes = d.scene_table(os.path.join(project_dir, 'reference'))
     title, _ = d._book_title(project_dir)
-    return (scenes, d.character_evidence(project_dir, scenes)[0],
+    return (scenes, d.character_evidence(project_dir, scenes, profile={})[0],
             d.world_evidence(project_dir, scenes, title)[0],
             d.voice_evidence(project_dir, scenes, title)[0])
 
@@ -1217,7 +1217,7 @@ class TestCharacters:
         _write_scene(book, 'act1-sc01', 'The office was cold.\n\n"The map is wrong, and '
                      'I know it," said Dorren, folding it.\n\n"Nonsense," Pell said.\n')
         scenes = scene_table(os.path.join(book, 'reference'))
-        chars, notes, _ = character_evidence(book, scenes)
+        chars, notes, _ = character_evidence(book, scenes, profile={})
         assert [c.id for c in chars] == ['dorren-hayle', 'tessa-merrin', 'kael-maren', 'pell']
         dorren = next(c for c in chars if c.id == cid)
         assert dorren.facts == ['trait: Dorren is left-handed ("her left hand")']  # fixed, binding
@@ -1228,7 +1228,7 @@ class TestCharacters:
         from storyforge.extract_describe import character_evidence, scene_table
         with open(os.path.join(book, 'reference', 'knowledge.csv'), 'w') as f:
             f.write('id|name|aliases|category|origin\n')
-        chars, notes, _ = character_evidence(book, scene_table(os.path.join(book, 'reference')))
+        chars, notes, _ = character_evidence(book, scene_table(os.path.join(book, 'reference')), profile={})
         assert chars and all(c.facts == [] for c in chars)
         assert any('the ledger is not migrated' in n for n in notes)
 
@@ -1237,7 +1237,8 @@ class TestCharacters:
         from storyforge.elaborate import update_scene
         monkeypatch.setattr(d, 'MAX_CHARACTERS', 1)
         update_scene('act1-sc02', os.path.join(book, 'reference'), {'on_stage': 'Nobody Known'})
-        chars, notes, _ = d.character_evidence(book, d.scene_table(os.path.join(book, 'reference')))
+        chars, notes, _ = d.character_evidence(book, d.scene_table(os.path.join(book, 'reference')),
+                                             profile={})
         assert len(chars) == 1
         assert any('are left out of the character bible' in n for n in notes)
         assert any('match no character in characters.csv' in n and 'Nobody Known' in n
@@ -1440,7 +1441,7 @@ def test_a_supporting_character_outranks_minor_ones(book, monkeypatch):
     update_scene('act1-sc02', ref, {'on_stage': 'Dorren Hayle;Maid;Tim'})
     update_scene('act2-sc02', ref, {'on_stage': 'Tessa Merrin;Maid'})
     monkeypatch.setattr(d, 'MAX_CHARACTERS', 6)
-    chars, _, _ = d.character_evidence(book, d.scene_table(ref))
+    chars, _, _ = d.character_evidence(book, d.scene_table(ref), profile={})
     ids = [c.id for c in chars]
     assert 'tim' in ids and ids.index('tim') < ids.index('maid')
 
@@ -1478,7 +1479,7 @@ class TestBiblesReviewFixes:
 
     def test_absent_scenes_are_named(self, book):
         from storyforge.extract_describe import character_evidence
-        _, notes, _ = character_evidence(book, self._ev(book))
+        _, notes, _ = character_evidence(book, self._ev(book), profile={})
         assert any('2 of 6 scene(s) have no prose in scenes/ (absent or blank): '
                    'act2-sc02, act2-sc03' in n for n in notes)
 
@@ -1506,7 +1507,7 @@ class TestBiblesReviewFixes:
         with open(os.path.join(book, 'reference', 'characters.csv'), 'wb') as f:
             f.write(content)
         with pytest.raises(DescribeFailed, match=expected):
-            character_evidence(book, self._ev(book))
+            character_evidence(book, self._ev(book), profile={})
 
     def test_an_absent_registry_is_named_and_5e_skips_with_no_places(
             self, book, mock_api, mock_git, mock_costs, capsys):
@@ -1619,11 +1620,11 @@ class TestBiblesReviewFixes:
         monkeypatch.setattr(d, 'MAX_FACTS_PER_CHARACTER', 1)
         _add_facts(book, ('dorren-hayle', 'trait', 'fixed', 'binding', 'A', ''),
                    ('dorren-hayle', 'trait', 'fixed', 'binding', 'B', ''))
-        _, notes, _ = d.character_evidence(book, self._ev(book))
+        _, notes, _ = d.character_evidence(book, self._ev(book), profile={})
         assert any('have more than 1 established facts' in n and 'dorren-hayle' in n
                    for n in notes)
         os.remove(os.path.join(book, 'reference', 'commitments.csv'))
-        _, notes, sources = d.character_evidence(book, self._ev(book))
+        _, notes, sources = d.character_evidence(book, self._ev(book), profile={})
         assert 'reference/commitments.csv is absent, so the bibles use no established facts' \
             in notes
         assert 'commitments' not in sources
@@ -1633,7 +1634,7 @@ class TestBiblesReviewFixes:
         from storyforge.extract_describe import character_evidence
         with open(os.path.join(book, 'reference', 'commitments.csv'), 'w') as f:
             f.write('nope|header\nx|y\n')
-        chars, notes, _ = character_evidence(book, self._ev(book))
+        chars, notes, _ = character_evidence(book, self._ev(book), profile={})
         assert any(n.startswith('the ledger could not be read (') for n in notes)
         assert all(c.facts == [] for c in chars)
 
@@ -1689,12 +1690,16 @@ class TestBiblesReviewFixes:
 
     @pytest.mark.parametrize('line,kept', [
         ('one two three', False), ('one two three four', True),
-        ('x' * 294 + ' a b c', True), ('x' * 295 + ' a b c', False),
+        ('x' * 294 + ' a b c', True), ('x' * 295 + ' a b c', True),
     ])
     def test_speech_length_limits(self, line, kept):
-        """T-15."""
+        """T-15; a speech past 300 characters is now sampled by its opening."""
         from storyforge.extract_describe import _speech
-        assert (_speech(f'"{line}" said Dorren.', ['Dorren']) != []) is kept
+        got = _speech(f'"{line}" said Dorren.', ['Dorren'])
+        assert (got != []) is kept
+        assert not got or len(got[0]) <= 300
+        if got:
+            assert got[0].endswith(' \u2026') is (len(line) > 300)
 
     @pytest.mark.parametrize('text,kept', [
         ('"Four words right here," said Dorren.', True),
@@ -2161,3 +2166,254 @@ def test_e9_snapshot_skips_only_the_projects_own_working(tmp_path):
     (project / 'reference' / 'working-notes' / 'a.md').write_text('a')
     (project / 'working' / 'log.json').write_text('{}')
     assert set(_snapshot(str(project))) == {os.path.join('reference', 'working-notes', 'a.md')}
+
+
+class TestSpeechAttribution:
+    """F-130 hand-off / F-144: the speech sampler found no lines for many of
+    the evals books' speakers (Carol's speaking Ghosts and Marley, Gatsby's
+    Nick and Tom, 15 of Quintus's 16), so 5d described their voices without
+    evidence."""
+
+    def test_a_long_speech_is_sampled_by_its_opening(self):
+        """Quintus: almost every speech ran past 300 characters and was
+        dropped."""
+        from storyforge.extract_describe import _MAX_LINE_CHARS, _speech
+        speech = 'Hear me, Argives, now. ' + 'The ships burn and the wall is down. ' * 12
+        [line] = _speech(f'Then spake Menelaus: "{speech}"', ['Menelaus'])
+        assert len(line) <= _MAX_LINE_CHARS and line.endswith(' \u2026')
+        assert line.startswith('Hear me, Argives, now.')
+        assert line[:-2].endswith('down.')   # cut at a sentence end
+
+    def test_a_long_sentence_is_cut_at_a_word(self):
+        from storyforge.extract_describe import _MAX_LINE_CHARS, _sample_line
+        line = _sample_line('word ' * 100)
+        assert len(line) <= _MAX_LINE_CHARS and line == ('word ' * 59).strip() + ' \u2026'
+
+    def test_a_lowercase_alias_matches_the_capitalized_name(self):
+        """Gatsby: characters.csv's alias was "tom", so "said Tom" matched
+        nothing."""
+        from storyforge.extract_describe import _speech
+        assert _speech('"She is a nice girl," said Tom.', ['Tom Buchanan', 'tom'])
+        assert not _speech('"She is a nice girl," said tom.', ['tom'])
+
+    @pytest.mark.parametrize('text,kept', [
+        ('Then spake Menelaus: "Four words right here."', True),
+        ('And Menelaus lamented:\n\n"Four words right here."', True),
+        ('And Menelaus\nlamented: "Four words right here."', True),   # wrapped
+        ('Then to Achilles spake Menelaus: "Four words right here."', True),   # a tag
+        # The lead-in path proper (no "VERB NAME" or "NAME VERB" tag)
+        ('Then Menelaus wept and lamented: "Four words right here."', True),
+        ('Then Menelaus lamented to Achilles: "Four words right here."', True),
+        ('Then Achilles lamented unto Menelaus: "Four words right here."', False),
+        ('Then he wept and spake to her son Menelaus: "Four words right here."', False),
+        ('Then the herald spake unto Agamemnon and Menelaus: "Four words right here."',
+         False),
+        # Precision over recall: a speaker after a preposition is dropped too
+        ('Then to Achilles Menelaus wept and lamented: "Four words right here."', False),
+        # CR-2: verbs whose object is the one spoken to
+        ('Then Achilles bespake Menelaus: "Four words right here."', False),
+        ('Then the goddess hailed Menelaus: "Four words right here."', False),
+        ('Then he upbraided Menelaus: "Four words right here."', False),
+        ('Then he addressed Menelaus: "Four words right here."', False),
+        # Live on Quintus: Apollo's speech went to Achilles, the one spoken to
+        ('Then the great God cried, So to turn back from war Menelaus awed '
+         'By the voice divine: "Four words right here."', False),
+        ('Then spake Menelaus to Achilles: "Four words right here."', True),
+        ('Then spake Achilles to Menelaus: "Four words right here."', False),
+        # "Menelaus spake:" against the quote is a speech tag; both speak
+        ('Then Achilles and Menelaus spake: "Four words right here."', True),
+        ('Then Achilles and Menelaus, weeping, spake: "Four words right here."', False),
+        ('So kissed he Menelaus\' head, and cried: "Four words right here."', False),
+        # CR-5: the possessive in the last phrase, which the comma hid above
+        ('So kissed he Menelaus\' head and cried: "Four words right here."', False),
+        ('Then Menelaus\u2019 squire lamented: "Four words right here."', False),
+        # The lead-in stops at the quote before it
+        ('"Menelaus weeps for them" lamented he: "Four words right here."', False),
+        ('He looked at Menelaus: "Four words right here."', False),
+        ('Then spake Menelaus. "Four words right here."', False),
+    ])
+    def test_an_epic_lead_in(self, text, kept):
+        from storyforge.extract_describe import _speech
+        assert bool(_speech(text, ['Menelaus'], ['Achilles'])) is kept
+
+    def test_a_tag_after_a_quote_stays_in_its_paragraph(self):
+        """Live on the Odyssey: Ulysses's question went to Minerva, whose
+        "Minerva answered," began the next paragraph."""
+        from storyforge.extract_describe import _speech
+        text = ('"But why," said Ulysses, "did you not tell him, for you knew?"\n\n'
+                'Minerva answered, "Never mind about him, I sent him."')
+        assert _speech(text, ['Minerva']) == ['Never mind about him, I sent him.']
+        assert _speech(text, ['Ulysses']) == ['did you not tell him, for you knew?']
+
+    def _book(self, book, characters, scene, on_stage, text):
+        from storyforge.elaborate import update_scene
+        ref = os.path.join(book, 'reference')
+        with open(os.path.join(ref, 'characters.csv'), 'a') as f:
+            f.write(characters)
+        update_scene(scene, ref, {'on_stage': on_stage})
+        with open(os.path.join(book, 'scenes', f'{scene}.md'), 'w') as f:
+            f.write(text)
+        from storyforge.extract_describe import scene_table
+        return scene_table(ref)
+
+    def _lines(self, chars):
+        return {c.id: c.lines for c in chars}
+
+    def test_a_shared_word_is_the_one_character_on_stage(self, book):
+        """Carol: "said the Ghost" named no one, because three Ghosts share
+        the word; in a scene only one of them is there."""
+        from storyforge.extract_describe import character_evidence
+        ghosts = ('ghost-past|Ghost of Christmas Past||supporting|\n'
+                  'ghost-present|Ghost of Christmas Present||supporting|\n')
+        scenes = self._book(book, ghosts, 'act1-sc02', 'Dorren Hayle;Ghost of Christmas Past',
+                            '"I told you these were shadows," said the Ghost.')
+        lines = self._lines(character_evidence(book, scenes, profile={})[0])
+        assert lines['ghost-past'] == ['I told you these were shadows,']
+        assert 'ghost-present' not in lines
+
+    def test_a_shared_word_with_both_on_stage_is_no_ones(self, book):
+        from storyforge.extract_describe import character_evidence
+        ghosts = ('ghost-past|Ghost of Christmas Past||supporting|\n'
+                  'ghost-present|Ghost of Christmas Present||supporting|\n')
+        scenes = self._book(book, ghosts, 'act1-sc02',
+                            'Dorren Hayle;Ghost of Christmas Past;Ghost of Christmas Present',
+                            '"I told you these were shadows," said the Ghost.')
+        lines = self._lines(character_evidence(book, scenes, profile={})[0])
+        assert lines['ghost-past'] == lines['ghost-present'] == []
+
+    @pytest.mark.parametrize('mode,kept', [
+        ('first-person', True), ('First person, retrospective', True),
+        ('third-omniscient', False), ('', False),
+    ])
+    def test_i_is_the_first_person_narrator(self, book, mode, kept):
+        """Gatsby: Nick narrates ("I said") and had no lines."""
+        from storyforge.extract_describe import character_evidence
+        scenes = self._book(book, '', 'act1-sc02', 'Dorren Hayle;Tessa Merrin',
+                            '"Is she from New York?" I asked. "Not today," said Tessa.')
+        lines = self._lines(character_evidence(book, scenes, profile={'narrative_mode': mode})[0])
+        assert (lines['dorren-hayle'] == ['Is she from New York?']) is kept
+        assert lines['tessa-merrin'] == []   # "Not today," is under four words
+
+    @pytest.mark.parametrize('text,names,kept', [
+        # CR-1: a name with an accented capital (main matched it)
+        ('"Go back to the ships, friend," said \u00c9mile.', ['\u00c9mile'], True),
+        ('"Go back to the ships, friend," said \u00c9mile.', ['\u00e9mile'], True),
+        # CR-5: a bare-apostrophe possessive names someone else
+        ('"Go back to the ships, friend," said Achilles\' son.', ['Achilles'], False),
+        # CR-2: "told" names the one spoken to
+        ('Daisy told Tom, "You are being a brute today."', ['Tom'], False),
+        # CR-4: a title before another name is that name's
+        ('"Go back to the ships, friend," said Captain Harville.', ['Captain'], False),
+        ('"Go back to the ships, friend," said Captain Harville.',
+         ['Captain Harville', 'Captain'], True),
+        # SF-7: wrapped prose keeps its tags (main kept them)
+        ('"Bah, humbug, I say it," said\nScrooge.', ['Scrooge'], True),
+        ('"Bah, humbug, I say it,"\nsaid Scrooge.', ['Scrooge'], True),
+        ('"Bah, humbug, I say it."\n\nScrooge said, "No."', ['Scrooge'], False),
+        ('"Four words right here." the Ghost said.', ['Ghost'], True),
+        # Blank names never match
+        ('"Four words right here," said Dorren.', [''], False),
+        ('"Four words right here," said Dorren.', ['', ' '], False),
+    ])
+    def test_names_in_tags(self, text, names, kept):
+        from storyforge.extract_describe import _speech
+        assert bool(_speech(text, names)) is kept
+
+    def test_a_blank_rival_blocks_nothing(self):
+        """TD: one blank name in `others` matched before every word."""
+        from storyforge.extract_describe import _speech
+        text = 'And Nestor wept and lamented: "Four words right here."'
+        assert _speech(text, ['Nestor'], ['']) == ['Four words right here.']
+
+    @pytest.mark.parametrize('inner,want', [
+        ('x ' * 150, None),   # exactly 300 characters once collapsed: unchanged
+        ('The first sentence goes on for a while, he said \u201cand so on.\u201d '
+         + 'more words here ' * 30,
+         'The first sentence goes on for a while, he said \u201cand so on.\u201d \u2026'),
+        ('Short. ' + 'word ' * 80, 'Short. ' + ' '.join(['word'] * 58) + ' \u2026'),
+    ])
+    def test_sample_line_cuts(self, inner, want):
+        from storyforge.extract_describe import _MAX_LINE_CHARS, _sample_line
+        got = _sample_line(inner)
+        assert got == (want or ' '.join(inner.split()))
+        assert len(got) <= _MAX_LINE_CHARS
+
+    def test_a_lowercase_alias_in_the_registry(self, book):
+        from storyforge.extract_describe import character_evidence
+        scenes = self._book(book, 'tom|Tom Buchanan|tom|supporting|\n', 'act1-sc02',
+                            'Dorren Hayle;Tom Buchanan', '"She is a nice girl," said Tom.')
+        assert self._lines(character_evidence(book, scenes, profile={})[0])['tom'] == [
+            'She is a nice girl,']
+
+    def test_a_rival_on_stage_blocks_a_lead_in(self, book):
+        """T-gap: the rivals guard (the Quintus/Apollo fix) through
+        character_evidence, by full name and by a scene-only word."""
+        from storyforge.extract_describe import character_evidence
+        chars = ('men|Menelaus||supporting|\nach|Achilles||supporting|\n'
+                 'gp|Ghost of Christmas Past||supporting|\ngq|Ghost of Christmas Present||'
+                 'supporting|\n')
+        scenes = self._book(book, chars, 'act1-sc02', 'Dorren Hayle;Menelaus;Achilles',
+                            'Then Achilles and Menelaus wept and lamented: '
+                            '"Four words right here."')
+        assert self._lines(character_evidence(book, scenes, profile={})[0])['men'] == []
+        scenes = self._book(book, '', 'act1-sc02',
+                            'Dorren Hayle;Menelaus;Ghost of Christmas Past',
+                            'Then the Ghost and Menelaus wept and lamented: '
+                            '"Four words right here."')
+        assert self._lines(character_evidence(book, scenes, profile={})[0])['men'] == []
+
+    def test_i_never_takes_another_speakers_line(self, book):
+        from storyforge.extract_describe import character_evidence
+        scenes = self._book(book, '', 'act1-sc02', 'Dorren Hayle;Tessa Merrin',
+                            '"Is she from New York?" I asked. "Not today, not ever," '
+                            'said Tessa.')
+        lines = self._lines(character_evidence(
+            book, scenes, profile={'narrative_mode': 'first-person'})[0])
+        assert lines['dorren-hayle'] == ['Is she from New York?']
+        assert lines['tessa-merrin'] == ['Not today, not ever,']
+
+    @pytest.mark.parametrize('profile,noted', [
+        ({}, True), ({'narrative_mode': 'multiple-POV'}, True), ({'narrative_mode': 7}, True),
+        ({'narrative_mode': 'third-limited'}, False), ({'narrative_mode': 'first-person'}, False),
+    ])
+    def test_a_mode_that_rules_out_i_is_noted(self, book, profile, noted):
+        """SF-1: a first-person narrator's lines went unsampled silently."""
+        from storyforge.extract_describe import character_evidence, scene_table
+        _, notes, _ = character_evidence(book, scene_table(os.path.join(book, 'reference')),
+                                         profile=profile)
+        assert any('narrative_mode' in n for n in notes) is noted
+
+    def test_characters_with_no_line_are_noted_and_not_called_silent(self, book):
+        """SF-2: "(none found)" read as a character who never speaks."""
+        from storyforge import extract_describe as d
+        scenes = d.scene_table(os.path.join(book, 'reference'))
+        chars, notes, _ = d.character_evidence(book, scenes, profile={})
+        silent = [c.id for c in chars if not c.lines]
+        assert silent and any('no line with a speech tag' in n and silent[0] in n
+                              for n in notes)
+        prompt = d.build_characters_prompt({}, chars)
+        assert '(none found)' not in prompt
+        assert 'that does not mean they never speak' in prompt
+
+    def _first_person_book(self, book):
+        with open(os.path.join(book, 'working', 'extraction-profile.json'), 'w') as f:
+            json.dump({'narrative_mode': 'first-person'}, f)
+        return self._book(book, '', 'act1-sc02', 'Dorren Hayle;Tessa Merrin',
+                          '"Is she from New York tonight?" I asked.')
+
+    def test_the_run_passes_the_profile(self, book, mock_api, mock_git, mock_costs):
+        """T-gap: Nick lost his lines because the narrative mode never
+        reached the sampler; check the live 5d path, not just the helper."""
+        self._first_person_book(book)
+        mock_api.set_response_fn(_answer(book))
+        _run(book)
+        [prompt] = [c['prompt'] for c in mock_api.calls
+                    if '## Its characters, as the scenes show them' in c['prompt']]
+        assert 'Is she from New York tonight?' in prompt
+
+    def test_the_dry_run_passes_the_profile(self, book):
+        from storyforge import extract_describe as d
+        scenes = self._first_person_book(book)
+        prompts = dict(cmd_extract._dry_run_bible_prompts(
+            d, book, {'narrative_mode': 'first-person'}, scenes))
+        assert 'Is she from New York tonight?' in prompts['5d characters']
