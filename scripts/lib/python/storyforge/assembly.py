@@ -285,7 +285,11 @@ _RULE_LINE_RE = re.compile(r'^[ \t]*(?:(?:[-*_][ \t]*){3,}|\|?[ \t]*:?-+:?[ \t]*
 
 
 def _dashes(text: str) -> str:
-    text = re.sub(r'-{4,}', '——', text)      # a long blank: "the ----shire"
+    # a long blank ("the ----shire"): as many em dashes as pandoc printed
+    # characters for the run (each --- one, a -- or - left over one more), so
+    # offsets don't move
+    text = re.sub(r'-{4,}', lambda m: '—' * (len(m.group(0)) // 3 + (len(m.group(0)) % 3 > 0)),
+                  text)
     text = re.sub(r'(?<=\d)--(?=\d)', '–', text)  # a range: 10--12
     text = re.sub(r'(?<!-)---?(?!-)', '—', text)  # prose's -- (and ---)
     return text

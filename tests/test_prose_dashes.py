@@ -41,6 +41,17 @@ def test_table_rule_left_alone():
     assert prose_dashes(md) == '| a | b |\n|---|:--:|\n| x\u2014y | 1 |'
 
 
+@needs_pandoc
+@pytest.mark.parametrize('n', range(4, 13))
+def test_any_long_run_prints_as_many_characters_as_pandoc(n):
+    import re, subprocess
+    md = 'Lord ' + '-' * n + ' came.'
+    pandoc = re.sub(r'<[^>]+>', '', subprocess.run(['pandoc', '-f', 'markdown', '-t', 'html'],
+                    input=md, capture_output=True, text=True).stdout)
+    ours = re.sub(r'<[^>]+>', '', _md_to_html(md))
+    assert len(ours) == len(pandoc) and '-' not in ours and '\u2013' not in ours
+
+
 def test_idempotent():
     s = 'a--b ----c 1--2'
     assert prose_dashes(prose_dashes(s)) == prose_dashes(s)
