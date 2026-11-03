@@ -136,7 +136,7 @@ Commands (`storyforge <name>`; full flag notes in `docs/history.md`):
 | `extract` | Structural data from prose. Phases 0–4 build the scene layer; `--phase 5` (also the last step of a full run) describes the layers above it: spine, architecture, themes, motifs, story summary, story architecture, character, world and systems bibles, voice guide and profile, timeline, chapter map (`extract_describe`) |
 | `enrich`, `timeline`, `repetition` | Metadata enrichment, timeline, cross-chapter repetition |
 | `cleanup` | Project health; `--scenes`, `--csv`, `--dry-run` |
-| `assemble` | Chapters + epub/PDF/HTML (GN: artist handoff bundle) |
+| `assemble` | Chapters + epub/PDF/HTML (GN: artist handoff bundle). Typed dashes go to pandoc as prose means them (`assembly.prose_dashes`, also in publish's HTML): `--` an em dash (a digit range an en dash), four or more hyphens a two-em blank ("the ——shire"); scene files are never changed, break lines, table rules, HTML comments and code spans are left alone, and the visible text's length is what pandoc's own reading gave, so Bookshelf's highlight offsets don't move |
 | `publish`, `annotations`, `visualize` | Bookshelf publish, reader annotations, dashboard data (see Dashboard data) |
 | `export` | The book's structured state as one versioned JSON bundle (see Export bundle) |
 | `cover`, `illustrate` | Cover; interior illustrations (prose only) |

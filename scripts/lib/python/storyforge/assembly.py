@@ -280,6 +280,53 @@ def extract_scene_prose(scene_file: str) -> str:
 # Chapter assembly
 # ============================================================================
 
+_DASH_SKIP_RE = re.compile(r'<!--.*?-->|`[^`\n]*`', re.S)
+_RULE_LINE_RE = re.compile(r'^[ \t]*(?:(?:[-*_][ \t]*){3,}|\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)+\|?[ \t]*)$', re.M)
+
+
+def _dashes(text: str) -> str:
+    # a long blank ("the ----shire"): as many em dashes as pandoc printed
+    # characters for the run (each --- one, a -- or - left over one more), so
+    # offsets don't move
+    text = re.sub(r'-{4,}', lambda m: '—' * (len(m.group(0)) // 3 + (len(m.group(0)) % 3 > 0)),
+                  text)
+    text = re.sub(r'(?<=\d)--(?=\d)', '–', text)  # a range: 10--12
+    text = re.sub(r'(?<!-)---?(?!-)', '—', text)  # prose's -- (and ---)
+    return text
+
+
+def prose_dashes(md: str) -> str:
+    """A manuscript's typed dashes as prose means them, before pandoc.
+
+    Pandoc's markdown reads ``--`` as an en dash and ``---`` as an em dash; a
+    typed manuscript (and every Gutenberg text) uses ``--`` for the em dash,
+    and a run of four or more for a blank ("the ----shire"), which pandoc
+    printed as an em dash and a stray hyphen. Each becomes the same number of
+    characters pandoc would have printed, so text offsets (Bookshelf anchors
+    highlights by them) don't move. Break lines, table rules, HTML comments
+    (the scene markers) and code spans are left alone. Idempotent.
+    """
+    if '--' not in md:
+        return md
+    out, pos = [], 0
+    for m in _DASH_SKIP_RE.finditer(md):
+        out.append(_dashes_outside_rules(md[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    out.append(_dashes_outside_rules(md[pos:]))
+    return ''.join(out)
+
+
+def _dashes_outside_rules(text: str) -> str:
+    out, pos = [], 0
+    for m in _RULE_LINE_RE.finditer(text):
+        out.append(_dashes(text[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    out.append(_dashes(text[pos:]))
+    return ''.join(out)
+
+
 _BREAK_MARKERS = {
     'space': '---',
     'blank': '---',
@@ -345,7 +392,7 @@ def assemble_chapter(chapter_num: int, project_dir: str,
         # Scene boundary marker
         parts.append(f'<!-- scene:{scene_id} -->')
         parts.append('')
-        parts.append(extract_scene_prose(scene_file))
+        parts.append(prose_dashes(extract_scene_prose(scene_file)))
 
     # Interior illustrations (#278). Markers become markdown images with
     # project-relative paths; the pandoc calls pass --resource-path so the path
@@ -833,7 +880,7 @@ def _md_to_html(markdown_text: str) -> str:
     import subprocess
     r = subprocess.run(
         ['pandoc', '-f', 'markdown', '-t', 'html', '--no-highlight'],
-        input=markdown_text, capture_output=True, text=True,
+        input=prose_dashes(markdown_text), capture_output=True, text=True,
     )
     if r.returncode != 0:
         raise RuntimeError(f'pandoc failed: {r.stderr[:300]}')
