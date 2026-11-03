@@ -126,7 +126,11 @@ def apply_scene_filter(
         if not result:
             log('ERROR: None of the requested scenes were found')
             raise SystemExit(1)
-        return result
+        # Story order, not the order typed: write gates each scene against the
+        # ledger and prior prose of the scenes before it, so drafting a later
+        # scene first reads the wrong neighbours. A scene named twice runs once.
+        wanted = set(result)
+        return [sid for sid in all_scene_ids if sid in wanted]
 
     if mode == 'single':
         if value not in all_scene_ids:
