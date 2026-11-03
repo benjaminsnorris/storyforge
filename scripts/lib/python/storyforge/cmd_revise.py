@@ -45,9 +45,19 @@ from storyforge.api import (
 from storyforge.cli import apply_coaching_override
 
 
+def _log_prompt_warnings(stderr: str) -> None:
+    """Log the WARNING lines `revision build-prompt` wrote to stderr (its
+    stdout is the prompt): the revision calendar's unreadable scenes.csv
+    data, which would otherwise be captured and dropped."""
+    for line in (stderr or '').splitlines():
+        if line.startswith('WARNING'):
+            log(line)
+
+
 # ============================================================================
 # Argument parsing
 # ============================================================================
+
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(
@@ -2300,6 +2310,7 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
         return
 
     prompt = result.stdout
+    _log_prompt_warnings(result.stderr)
 
     # Select model and invoke API
     pass_model = model_override or select_revision_model(pass_name, pass_purpose)
@@ -3237,6 +3248,7 @@ Rules:
                     env={**os.environ, 'PYTHONPATH': python_lib},
                 )
                 prompt = result.stdout
+                _log_prompt_warnings(result.stderr)
             except subprocess.CalledProcessError as e:
                 log(f'ERROR: Failed to build prompt for pass \'{pass_name}\'')
                 log(f'  {e.stderr}')

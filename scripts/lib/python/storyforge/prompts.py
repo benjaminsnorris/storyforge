@@ -9,6 +9,7 @@ references) and the direct Anthropic API (inlined file contents).
 import os
 import re
 import sys
+from collections.abc import Collection, Mapping
 
 from .common import parse_yaml_scalar
 
@@ -1540,6 +1541,166 @@ def _states_checklist(scene: dict, ref_dir: str) -> str:
             + '\n'.join(lines))
 
 
+#: How a calendar line or scene-list line marks the scene being drafted or
+#: checked (`checker.Book.in_calendar` strips it from a quoted line)
+THIS_SCENE = '  <- this scene'
+
+
+def scene_when(scene: Mapping[str, str]) -> str:
+    """A scene row's place in the story's calendar, as scenes.csv gives it
+    (`timeline_day`, `time_of_day`, `time_mode`): 'day 19, evening', or ''
+    when it has neither. The checker's calendar (`checker.Book.when`) and
+    the drafting prompt's both read it, so the two agree word for word."""
+    day = (scene.get('timeline_day') or '').strip()
+    time = (scene.get('time_of_day') or '').strip()
+    if not (day or time):
+        return ''
+    mode = (scene.get('time_mode') or '').strip().lower()
+    how = {'summary': 'a summary: covers a stretch from that day',
+           'frame': "frame narration: not the story's present",
+           'vision': "a vision: not the story's present"}.get(mode, '')
+    return ', '.join(filter(None, [f'day {day}' if day else '', time, how]))
+
+
+def is_dated(scene: Mapping[str, str]) -> bool:
+    """Whether the row has a `timeline_day` (a time of day alone is no day)."""
+    return bool((scene.get('timeline_day') or '').strip())
+
+
+def _ids(ids: str | Collection[str]) -> set[str]:
+    return {ids} if isinstance(ids, str) else set(ids)
+
+
+def live_order(order: Mapping[str, int], scenes: Mapping[str, Mapping[str, str]],
+               keep: str | Collection[str]) -> dict[str, int]:
+    """`order` without cut and merged scenes, but always with `keep` (the
+    scene being drafted or checked, or the scenes a revision pass covers):
+    the scenes the calendar and the checker see."""
+    keep = _ids(keep)
+    return {sid: i for sid, i in order.items() if sid in keep or
+            (scenes.get(sid, {}).get('status') or '').strip().lower() not in _GONE}
+
+
+def calendar_lines(order: Mapping[str, int], scenes: Mapping[str, Mapping[str, str]],
+                   at: str | Collection[str] = (), mark: str = THIS_SCENE) -> list[str]:
+    """`{id}: {when}` for every scene in `order` with a day or a time of day,
+    in reading order; the lines of `at` (one id or several) marked with
+    `mark`. The checker's `Book.calendar` and the drafting and revision
+    prompts' calendars are all this."""
+    at = _ids(at)
+    return [f'{sid}: {scene_when(scenes.get(sid, {}))}' + (mark if sid in at else '')
+            for sid in sorted(order, key=order.get) if scene_when(scenes.get(sid, {}))]
+
+
+def calendar_problems(order: Mapping[str, int],
+                      scenes: Mapping[str, Mapping[str, str]]) -> list[str]:
+    """What in scenes.csv the calendar can't read as the author meant: a
+    `timeline_day` that isn't a whole number (shown as written), a
+    `time_mode` that isn't one of `schema.VALID_TIME_MODES` (shown as an
+    ordinary scene), and a scene in reading order whose row isn't found
+    under its id (an id with spaces around it: left out)."""
+    from .schema import VALID_TIME_MODES
+    problems = []
+    for sid in sorted(order, key=order.get):
+        row = scenes.get(sid)
+        if row is None:
+            problems.append(f'{sid}: no scenes.csv row under that exact id (spaces around it?); '
+                            f'left out of the calendar')
+            continue
+        day = (row.get('timeline_day') or '').strip()
+        try:
+            int(day or '0')
+        except ValueError:
+            problems.append(f'{sid}: timeline_day {day!r} is not a whole number; shown as written')
+        mode = (row.get('time_mode') or '').strip().lower()
+        if mode and mode not in VALID_TIME_MODES:
+            problems.append(f'{sid}: time_mode {mode!r} is not one of '
+                            f'{", ".join(sorted(VALID_TIME_MODES))}; shown as an ordinary scene')
+    return problems
+
+
+def _calendar_block(scene_id: str, project_dir: str) -> str:
+    """The drafting prompt's calendar: `calendar_lines` (every live scene with
+    a day or a time of day, in reading order, earlier and later, this scene
+    marked), the scenes with no day named, and what to do with it. The
+    checker has had the calendar since #478 and stops on an elapsed time
+    that breaks it; the writer didn't, and E4's drafts broke it (5 TIM
+    contradictions before the gate, 2 with it). '' when no scene has a
+    `timeline_day` (times of day alone give no days to count), as the
+    checker's note is. What `calendar_problems` finds is logged as a
+    WARNING, the calendar still sent."""
+    from . import ledger
+    from .common import log
+    from .elaborate import _read_csv_as_map
+    scenes = _read_csv_as_map(os.path.join(project_dir, 'reference', 'scenes.csv'))
+    order = live_order(ledger.scene_order(project_dir), scenes, scene_id)
+    if not any(is_dated(scenes.get(sid, {})) for sid in order):
+        return ''
+    for problem in calendar_problems(order, scenes):
+        log(f'WARNING: {scene_id} (drafting calendar): scenes.csv: {problem}')
+    here = scenes.get(scene_id, {})
+    undated = [sid for sid in sorted(order, key=order.get)
+               if sid != scene_id and sid in scenes and not is_dated(scenes[sid])]
+    return ('## The Calendar\n\n'
+            "Each dated scene's day in the story's calendar (scenes.csv), in reading order"
+            + (f'; this scene is {scene_when(here)}' if is_dated(here) else
+               '; this scene has no day') + '. '
+            'Every elapsed time, day count or date the scene states ("a week ago", '
+            '"ten days since", "three nights out") must fit these days and the days of the '
+            'scenes whose events it counts from. Where the brief doesn\'t need a span, don\'t '
+            'name one: a vaguer phrase is better than a number that breaks the calendar. A '
+            "summary scene's day is where its stretch starts; a frame or vision scene is not "
+            "the story's present.\n\n" + '\n'.join(calendar_lines(order, scenes, scene_id))
+            + (f'\n\nNo day in scenes.csv (name no span counted from these): '
+               f'{", ".join(undated)}' if undated else ''))
+
+
+#: How the revision prompt's calendar marks the scenes the pass revises
+IN_THIS_PASS = '  <- in this pass'
+
+
+def revision_calendar_block(scene_ids: Collection[str], project_dir: str,
+                            pass_name: str, warn=None) -> str:
+    """The revision prompt's calendar (`revision.build_revision_prompt`): the
+    drafting prompt's `calendar_lines` with the scenes the pass revises
+    marked (`IN_THIS_PASS`), the scenes with no day named, and what a pass
+    may do with spans: add or change one only where the pass needs to, and
+    make any it writes fit. #478's thornwall-020 ("ten days" from day 5 to
+    day 19) came from a revision pass, which had the calendar only as the
+    raw scenes.csv. '' when no scene has a `timeline_day`, or the pass
+    covers no scene in scenes.csv (new scenes only). `calendar_problems` go
+    to `warn` (a callable taking the message; default `common.log`) as
+    WARNINGs: build-prompt runs as a subprocess whose stdout is the prompt,
+    so it passes stderr and its callers log what comes back."""
+    from . import ledger
+    from .elaborate import _read_csv_as_map
+    if warn is None:
+        from .common import log as warn
+    scenes = _read_csv_as_map(os.path.join(project_dir, 'reference', 'scenes.csv'))
+    full = ledger.scene_order(project_dir)
+    ids = [sid for sid in scene_ids if sid in full]
+    if not ids:
+        return ''
+    order = live_order(full, scenes, ids)
+    if not any(is_dated(scenes.get(sid, {})) for sid in order):
+        return ''
+    for problem in calendar_problems(order, scenes):
+        warn(f'WARNING: {pass_name} (revision calendar): scenes.csv: {problem}')
+    undated = [sid for sid in sorted(order, key=order.get)
+               if sid in scenes and not is_dated(scenes[sid])]
+    return ('## The Calendar\n\n'
+            "Each dated scene's day in the story's calendar (scenes.csv), in reading order; "
+            'the scenes this pass revises are marked. Every elapsed time, day count or date a '
+            'revised scene states ("a week ago", "ten days since", "three nights out") must fit '
+            'these days and the days of the scenes whose events it counts from. Add or change a '
+            'span only where the pass needs to; where you do, make it fit, or use a vaguer '
+            'phrase rather than a number that breaks the calendar. A summary scene\'s day is '
+            "where its stretch starts; a frame or vision scene is not the story's present.\n\n"
+            + '\n'.join(calendar_lines(order, scenes, ids, IN_THIS_PASS))
+            + (f'\n\nNo day in scenes.csv (name no span counted from these): '
+               f'{", ".join(undated)}' if undated else ''))
+
+
 def _character_names(ref_dir: str) -> dict[str, str]:
     """characters.csv id → name, for showing a state's subject."""
     from .elaborate import _read_csv
@@ -1679,6 +1840,7 @@ def build_scene_prompt_from_briefs(
         scene_id, scene, project_dir,
         shown={s.strip() for s in state_in.split(';') if s.strip()},
         rewrite=rewriting)
+    calendar_block = _calendar_block(scene_id, project_dir)
 
     # Craft principles
     craft = build_weighted_directive(project_dir)
@@ -1868,6 +2030,8 @@ Do NOT add creative interpretation or suggestions."""
 {state_block}
 
 {ledger_block}
+
+{calendar_block}
 
 {voice_guide}
 
