@@ -98,17 +98,30 @@ def main(argv=None):
     # Build domain list
     domains = _resolve_domains(args)
 
+    # Which runs call a model: not diagnose, not strict coaching, not the
+    # outcomes domain alone
+    needs_api = (not args.diagnose and coaching != 'strict'
+                 and any(d not in ('outcomes',) for d in domains))
+
     # API key check
-    if not args.dry_run and not args.diagnose and not os.environ.get('ANTHROPIC_API_KEY'):
-        needs_api = any(d not in ('outcomes',) for d in domains)
-        if needs_api and coaching != 'strict':
-            log('ERROR: ANTHROPIC_API_KEY not set. Required for hone domains.')
-            sys.exit(1)
+    if not args.dry_run and needs_api and not os.environ.get('ANTHROPIC_API_KEY'):
+        log('ERROR: ANTHROPIC_API_KEY not set. Required for hone domains.')
+        sys.exit(1)
 
     title = read_yaml_field('project.title', project_dir) or 'Untitled'
-    # diagnose calls no model: choosing one lists the API's models, which
-    # needs a key, so a read-only check on a machine without one crashed
-    model = '' if args.diagnose else select_model('synthesis')
+    # Choosing a model lists the API's models, which needs a key: a run that
+    # calls none (diagnose, strict, outcomes alone) mustn't crash without one,
+    # and one that calls a model (a --dry-run of it too, which names it) says
+    # what to set instead of a traceback
+    model = ''
+    if not args.diagnose:
+        try:
+            model = select_model('synthesis')
+        except RuntimeError as e:
+            if needs_api:
+                log(f'ERROR: hone could not choose a model ({e}). Set ANTHROPIC_API_KEY, '
+                    f'or STORYFORGE_MODEL to name one.')
+                sys.exit(1)
 
     log('============================================')
     log('Storyforge Hone')
@@ -123,7 +136,7 @@ def main(argv=None):
     if args.scenes:
         log(f'Scenes: {args.scenes}')
     if not args.diagnose:
-        log(f'Model: {model}')
+        log(f'Model: {model or "none (this run calls no model)"}')
     log('============================================')
 
     # Ensure we're on a feature branch before making changes
