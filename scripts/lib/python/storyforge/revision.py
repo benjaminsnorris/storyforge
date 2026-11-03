@@ -582,6 +582,15 @@ def build_revision_prompt(
         if len(intent_lines) > 2:  # More than just header
             intent_section = '\n'.join(intent_lines)
 
+    # The story's calendar, with this pass's scenes marked; what it can't
+    # read goes to stderr (build-prompt's stdout is the prompt)
+    from storyforge.prompts import revision_calendar_block
+    calendar_section = revision_calendar_block(
+        [os.path.splitext(os.path.basename(p))[0] for p in existing_paths], project_dir,
+        pass_name, warn=lambda msg: print(msg, file=sys.stderr))
+    if calendar_section:
+        calendar_section = '\n' + calendar_section
+
     # New scene creation instructions
     new_scenes_section = ''
     if new_scene_ids:
@@ -684,6 +693,7 @@ def build_revision_prompt(
         f'## Scope\n\nThis pass covers {file_count} scene file(s):\n\n{file_block}',
         config_section,
         intent_section,
+        calendar_section,
         new_scenes_section,
         overrides_section,
         craft_section,

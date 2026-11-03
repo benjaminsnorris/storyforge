@@ -72,6 +72,7 @@ import re
 from dataclasses import dataclass, field
 
 from storyforge import ledger
+from storyforge.prompts import THIS_SCENE, is_dated
 from storyforge.quotes import normalize, quote_in, word_count
 from storyforge.api import ToolInputError, ToolRun, converse, extract_text, is_truncated
 
@@ -254,15 +255,14 @@ class Book:
         """`rows` in place of the ledger on disk (the gate passes the ledger
         without the scene's earlier commitments)."""
         from storyforge.elaborate import _read_csv_as_map
-        from storyforge.prompts import _GONE, prior_scenes
+        from storyforge.prompts import live_order, prior_scenes
         ref_dir = os.path.join(project_dir, 'reference')
         order = ledger.scene_order(project_dir)
         if scene_id not in order:
             raise CheckError(f'{scene_id} is not a scene in reference/scenes.csv')
         scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
         # A cut or merged scene isn't the book: nothing is checked against it
-        order = {sid: i for sid, i in order.items() if sid == scene_id or (
-            scenes.get(sid, {}).get('status') or '').strip().lower() not in _GONE}
+        order = live_order(order, scenes, scene_id)
         texts = {}
         for sid in order:
             path = os.path.join(project_dir, 'scenes', f'{sid}.md')
@@ -279,24 +279,18 @@ class Book:
                    reference_docs(project_dir), earlier, len(earlier) == len(every))
 
     def when(self, sid: str) -> str:
-        """The scene's place in the story's calendar, as scenes.csv gives it
-        (`timeline_day`, `time_of_day`): 'day 19, evening', or '' when it has
-        neither."""
-        s = self.scenes.get(sid, {})
-        day, time = (s.get('timeline_day') or '').strip(), (s.get('time_of_day') or '').strip()
-        if not (day or time):
-            return ''
-        mode = (s.get('time_mode') or '').strip().lower()
-        how = {'summary': 'a summary: covers a stretch from that day',
-               'frame': "frame narration: not the story's present",
-               'vision': "a vision: not the story's present"}.get(mode, '')
-        return ', '.join(filter(None, [f'day {day}' if day else '', time, how]))
+        """The scene's place in the story's calendar: `prompts.scene_when` of
+        its scenes.csv row ('day 19, evening'; '' when it has neither a day
+        nor a time of day)."""
+        from storyforge.prompts import scene_when
+        return scene_when(self.scenes.get(sid, {}))
 
     def calendar(self) -> str:
         """The calendar line, `{id}: {when}`, of every scene with a day or a
-        time of day, in reading order ('' when none has either)."""
-        return '\n'.join(f'{sid}: {self.when(sid)}' for sid in sorted(self.order, key=self.order.get)
-                         if self.when(sid))
+        time of day, in reading order ('' when none has either):
+        `prompts.calendar_lines`, as the drafting prompt shows it."""
+        from storyforge.prompts import calendar_lines
+        return '\n'.join(calendar_lines(self.order, self.scenes))
 
     def index_line(self, sid: str) -> str:
         """The scene's line in the prompt's scene list, without the list
@@ -312,7 +306,7 @@ class Book:
         also that scene's `when` alone (as its story-so-far tag gives it)."""
         def bare(text: str) -> str:
             return normalize(text).strip(' .`"\'')
-        q = bare(re.sub(r'\s*<-\s*this scene\s*$', '',
+        q = bare(re.sub(r'\s*<-\s*this scene\s*$', '',  # THIS_SCENE
                         quote.strip().strip('`"\'').lstrip('- ')))
         if sid and self.when(sid) and q == bare(self.when(sid)):
             return True
@@ -383,7 +377,7 @@ def _calendar_note(book: Book, at: str) -> str:
     """How to check time against the calendar; '' when no scene has a day
     (a book with times of day only has no days to count)."""
     def dated(sid: str) -> bool:
-        return bool((book.scenes.get(sid, {}).get('timeline_day') or '').strip())
+        return is_dated(book.scenes.get(sid, {}))
     if not any(dated(sid) for sid in book.order):
         return ''
     here = book.when(at) if dated(at) else ''
@@ -588,7 +582,7 @@ TOOLS = [
 # ============================================================================
 
 def _scene_index(book: Book, at: str) -> str:
-    return '\n'.join(f'- {book.index_line(sid)}' + ('  <- this scene' if sid == at else '')
+    return '\n'.join(f'- {book.index_line(sid)}' + (THIS_SCENE if sid == at else '')
                      for sid in sorted(book.order, key=book.order.get))
 
 
