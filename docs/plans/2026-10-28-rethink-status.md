@@ -1,8 +1,32 @@
 # Storyforge rethink — status and handoff
 
-Last updated 2026-11-02, at v1.128.0 (every eval suite replays green; see Latest). **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met; 0.93 on 32 cases at v1.128.0); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and was met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2); v1.127.0's recording (the calendar, #486) passes 3; Ben accepted it (2026-11-02), and the ceiling is now 3 (#488)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). The gate now fixes a failing scene up to twice (v1.124.0) and reads each scene twice (v1.125.0; see "E4 over three runs, and two checker readings"). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
+Last updated 2026-11-02, at v1.129.0 (`check --accept` and the live re-check cost; see Latest; every eval suite replays green since v1.128.0). **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met; 0.93 on 32 cases at v1.128.0); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and was met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2); v1.127.0's recording (the calendar, #486) passes 3; Ben accepted it (2026-11-02), and the ceiling is now 3 (#488)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). The gate now fixes a failing scene up to twice (v1.124.0) and reads each scene twice (v1.125.0; see "E4 over three runs, and two checker readings"). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
-## Latest: every eval suite replays green (2026-11-02, #488)
+## Latest: the live re-check, and `check --accept` (2026-11-02, #492)
+
+**v1.129.0.** The live `write --force` test, on a scratch clone of shared-dark after its extract phase 4 (shared-dark #89: 1,249 commitments over 102 scenes, $10.46; its ledger migration was already on main, #88). `write pasta-and-wine --force` (scene 50 of 102), priced from the run's response logs (the cost ledger had only the draft: the gate's calls skip it, F-151, fixed in #491):
+
+| | cost |
+|---|---|
+| the rewrite (887 words, Opus) | $0.83 |
+| the gate on it (extraction, persistence, two readings; cache cold, 142k tokens written) | $0.93 |
+| the re-check of `condiments` (cache warm from the gate: 483k read, 19k written) | **$0.30** (forecast $0.95) |
+| the same re-check later from `check --pending` (cache cold) | $0.75 |
+
+**What it showed:**
+- **The re-check set is most of the rest of the book.** The rewrite changed 10 facts; `ledger.dependents`' subject overlap lists every later scene sharing a subject, and a main character is in almost all of them: **51 of the 52 later scenes**, forecast $48.45. Every mid-book scene measured lists 40–60 (worst case, all its facts changed). Over-including is by design (#473: a missed scene is a silent hole), so a rewrite of a mid-book scene costs about $15–50 in re-checks if all of them run, at $0.30 warm to $0.75 cold each.
+- **It stopped at the first scene on an error already in the book:** `condiments` (day 44) remembers the Grand Avenue diner the calendar puts on day 68. A re-check gates with no baseline (#480's review), so nothing in it is inherited. **Ben's decision (2026-11-02): keep it so. A stop is the author's to fix or accept.** With E8's ~10 inherited errors per run, most re-checks of an existing book will stop on such an error.
+- **There was no way to accept one,** so the book was stuck until the prose or the calendar changed.
+
+**What changed: `storyforge check --accept SCENES`** (no model call). Every failing gate run records its verified contradictions in `working/gate-blocked.csv` (a commit clears them); `--accept` moves them to `working/gate-reported.csv` as `accepted`, so later gate runs report them instead of stopping, and puts a `recheck-failed` scene back to `recheck`; `check --pending` carries on. Accepted rows survive the per-scene replacement (the checker's findings vary by run) and go when their quote leaves the prose. Only contradictions can be accepted. Stop messages and the forge skill name it. No prompt change; every suite replays.
+
+**Not measured yet:** the re-check over many scenes (the loop that accepts and re-runs was stopped to merge this first). `RECHECK_COST_PER_SCENE` stays $0.95: one warm re-check at $0.30 and one cold at $0.75 don't move it.
+
+- **Spend:** $13.21 (phase 4 on shared-dark $10.46, the scratch phase 4 started there by mistake $0.93, the write test $2.06, the cold re-check $0.75), plus the E8 re-record for #486's revision calendar already counted there.
+
+**Next, in order:** the re-check over the 51 scenes on scratch with `--accept` (its cost per scene, cold and warm, and how many stop on errors already in the book); then the low-confidence halt; `characters.csv` `pronouns`. #351 (the timeline solver) matters more now that the writer, revise and the checker all take `timeline_day` as fact.
+
+## Every eval suite replays green (2026-11-02, #488)
 
 **v1.128.0.** Seven of twelve suites failed or errored on main. None was a regression the work caused; each now passes for a recorded reason:
 

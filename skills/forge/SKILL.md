@@ -211,6 +211,9 @@ Bookshelf renders the manuscript dashboard from the data `publish` sends: invoke
 **"Audit the facts" / "What has the book committed to?" / "Review new facts" / "Digest":**
 Provide `storyforge audit`: the per-act digest of new ledger facts (`reference/commitments.csv`) not yet reviewed, fixed facts first, then relationship and knowledge, then physical state. Scope it with `--act N`, `--character ID`, `--scenes A..B` or `--thread ID`. The author marks what they've read with `storyforge audit --mark seen all` (or named ids), and a wrong fact with `--mark rejected ID`: the scene whose prose states it is listed to revise (drafting won't pass it until `storyforge check` passes it), and once it does, the later scenes that depend on it are re-checked; a fact with no prose to revise has its dependents re-checked with `storyforge check --pending`. Every ledger change is also recorded in `working/audit-log.csv`, readable at any pace. Don't mark facts on the author's behalf: the marking is the audit.
 
+**"The gate stopped on an error" / "Accept this error" / "This contradiction is fine":**
+A gate stop (write, revise, `check`, a re-check) is the author's to fix or accept. To fix it, revise the scene (or its brief, or the calendar in `scenes.csv`) and run `storyforge check --pending`. To accept it as written, run `storyforge check --accept SCENE` (no model call): its contradictions are reported from then on instead of stopping, and `storyforge check --pending` carries on. Only contradictions can be accepted; a broken promise, an unverified quote or a halt still has to be fixed.
+
 **"What should I do next?":**
 Use the `storyforge status --json` verdict from Step 1 and recommend its `next.command`. Also: if scoring was recently run, publishing (`./storyforge publish`) refreshes the dashboard in Bookshelf; if scene metadata is sparse, `storyforge enrich` is high value.
 

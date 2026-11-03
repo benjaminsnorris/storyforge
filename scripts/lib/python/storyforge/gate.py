@@ -602,6 +602,7 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
         raise error from e
     _classify(result, project_dir, before, already_reported)
     if not result.passed:
+        _note_blocked(project_dir, scene_id, command, result)
         return result
 
     # The model calls take minutes: a ledger changed meanwhile would be
@@ -647,7 +648,8 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
     ledger.save(project_dir, new, command=command)
     result.committed = True
     try:
-        record_reported(project_dir, scene_id, command, result.inherited)
+        record_reported(project_dir, scene_id, command, result.inherited, prose=prose)
+        record_blocked(project_dir, scene_id, command, [])
     except GateError as e:   # the ledger is written; the findings were logged
         from storyforge.common import log
         log(f'WARNING: {scene_id} passed, but {REPORTED_PATH} could not be updated: {e}. '
@@ -1200,51 +1202,47 @@ def clear_pending(project_dir: str, scene_id: str) -> None:
 #: log scrolls by. Not a block: `write` and `revise` go on past them. A
 #: scene's rows are replaced each time it commits; a gate run of the scene
 #: that finds one of them again (same source and quote, any command) counts
-#: it inherited.
+#: it inherited. Rows whose `command` is `ACCEPTED` are the author's
+#: (`storyforge check --accept`): they survive the replacement, so a check
+#: that happens not to raise one doesn't forget it (the checker's findings
+#: vary run to run), and go only when their quote leaves the scene's prose.
 REPORTED_PATH = 'working/gate-reported.csv'
 _REPORTED_COLUMNS = ['scene_id', 'command', 'source', 'quote', 'finding']
+#: The `command` of a row the author accepted (`storyforge check --accept`)
+ACCEPTED = 'accepted'
+#: The verified contradictions that stopped each scene's last gate run, the
+#: rows `storyforge check --accept` moves to `REPORTED_PATH` (Ben,
+#: 2026-11-02: a stop on an error in the book is the author's to fix or
+#: accept). Same columns; replaced by each gate run of the scene that gets
+#: to the check, and cleared when it commits.
+BLOCKED_PATH = 'working/gate-blocked.csv'
 
 
-def reported(project_dir: str) -> dict[str, list[dict[str, str]]]:
-    """Scene id → its rows in `REPORTED_PATH`.
-
-    Raises:
-        GateError: the file is malformed or unreadable.
-    """
-    path = os.path.join(project_dir, REPORTED_PATH)
+def _read_rows(project_dir: str, rel: str) -> dict[str, list[dict[str, str]]]:
+    path = os.path.join(project_dir, rel)
     if not os.path.isfile(path):
         return {}
     try:
         with open(path, encoding='utf-8') as f:
             lines = [line.rstrip('\n') for line in f if line.strip()]
     except (OSError, UnicodeDecodeError) as e:
-        raise GateError(f'{REPORTED_PATH}: {e}') from e
+        raise GateError(f'{rel}: {e}') from e
     if not lines or lines[0].split('|') != _REPORTED_COLUMNS:
-        raise GateError(f'{REPORTED_PATH}: the header must be {"|".join(_REPORTED_COLUMNS)}')
+        raise GateError(f'{rel}: the header must be {"|".join(_REPORTED_COLUMNS)}')
     out: dict[str, list[dict[str, str]]] = {}
     for line in lines[1:]:
         cells = line.split('|')
         if len(cells) != len(_REPORTED_COLUMNS):
-            raise GateError(f'{REPORTED_PATH}: a row with {len(cells)} cells: {line[:80]!r}')
+            raise GateError(f'{rel}: a row with {len(cells)} cells: {line[:80]!r}')
         row = dict(zip(_REPORTED_COLUMNS, cells))
         out.setdefault(row['scene_id'], []).append(row)
     return out
 
 
-def record_reported(project_dir: str, scene_id: str, command: str,
-                    findings: list[Finding]) -> None:
-    """Replace `scene_id`'s rows in `REPORTED_PATH` with `findings`
-    (none: its rows go). The file goes when it has no rows."""
-    from storyforge.common import csv_safe
-    rows = reported(project_dir)
-    rows.pop(scene_id, None)
-    if findings:
-        rows[scene_id] = [{'scene_id': scene_id, 'command': command,
-                           'source': csv_safe(f.established_scene or ''),
-                           'quote': csv_safe(_one_line(f.scene_quote)),
-                           'finding': csv_safe(_one_line(f.message()))} for f in findings]
-    path = os.path.join(project_dir, REPORTED_PATH)
-    if not rows:
+def _write_rows(project_dir: str, rel: str, rows: dict[str, list[dict[str, str]]]) -> None:
+    """Write `rows` to `rel`; the file goes when there are none."""
+    path = os.path.join(project_dir, rel)
+    if not any(rows.values()):
         if os.path.isfile(path):
             os.remove(path)
         return
@@ -1254,6 +1252,102 @@ def record_reported(project_dir: str, scene_id: str, command: str,
         for sid in sorted(rows):
             for row in rows[sid]:
                 f.write('|'.join(row[c] for c in _REPORTED_COLUMNS) + '\n')
+
+
+def _finding_rows(scene_id: str, command: str, findings: list[Finding]) -> list[dict[str, str]]:
+    from storyforge.common import csv_safe
+    return [{'scene_id': scene_id, 'command': command,
+             'source': csv_safe(f.established_scene or ''),
+             'quote': csv_safe(_one_line(f.scene_quote)),
+             'finding': csv_safe(_one_line(f.message()))} for f in findings]
+
+
+def _same(a: dict[str, str], b: dict[str, str]) -> bool:
+    """Whether two rows are the same finding, as `_classify` matches one:
+    the same source and quote."""
+    return a['source'] == b['source'] and _words(a['quote']) == _words(b['quote'])
+
+
+def reported(project_dir: str) -> dict[str, list[dict[str, str]]]:
+    """Scene id → its rows in `REPORTED_PATH`.
+
+    Raises:
+        GateError: the file is malformed or unreadable.
+    """
+    return _read_rows(project_dir, REPORTED_PATH)
+
+
+def blocked(project_dir: str) -> dict[str, list[dict[str, str]]]:
+    """Scene id → its rows in `BLOCKED_PATH` (`GateError` as `reported`)."""
+    return _read_rows(project_dir, BLOCKED_PATH)
+
+
+def record_reported(project_dir: str, scene_id: str, command: str,
+                    findings: list[Finding], prose: str | None = None) -> None:
+    """Replace `scene_id`'s rows in `REPORTED_PATH` with `findings`, keeping
+    the author's `ACCEPTED` rows (a finding matching one isn't added again)
+    except, with `prose`, those whose quote is no longer in it. The file
+    goes when it has no rows."""
+    rows = reported(project_dir)
+    accepted = [r for r in rows.pop(scene_id, []) if r['command'] == ACCEPTED
+                and (prose is None or _quoted_in(r['quote'], prose))]
+    new = [r for r in _finding_rows(scene_id, command, findings)
+           if not any(_same(r, a) for a in accepted)]
+    if accepted or new:
+        rows[scene_id] = accepted + new
+    _write_rows(project_dir, REPORTED_PATH, rows)
+
+
+def record_blocked(project_dir: str, scene_id: str, command: str,
+                   findings: list[Finding]) -> None:
+    """Replace `scene_id`'s rows in `BLOCKED_PATH` with `findings` (none:
+    its rows go)."""
+    rows = blocked(project_dir)
+    rows.pop(scene_id, None)
+    if findings:
+        rows[scene_id] = _finding_rows(scene_id, command, findings)
+    _write_rows(project_dir, BLOCKED_PATH, rows)
+
+
+def _note_blocked(project_dir: str, scene_id: str, command: str, result: 'GateResult') -> None:
+    """Record the verified contradictions that stopped `result`, for
+    `storyforge check --accept`; a file that can't be written is said, the
+    gate's verdict unchanged."""
+    try:
+        record_blocked(project_dir, scene_id, command,
+                       [f for f in result.findings if f.kind == 'contradiction'])
+    except GateError as e:
+        from storyforge.common import log
+        log(f'WARNING: {scene_id} did not pass, and {BLOCKED_PATH} could not be updated: '
+            f'{e}. Its contradictions can\'t be accepted until a check records them.')
+
+
+def accept_blocked(project_dir: str, scene_id: str) -> list[dict[str, str]]:
+    """The author accepts the verified contradictions that stopped
+    `scene_id`'s last gate run (Ben, 2026-11-02): its `BLOCKED_PATH` rows
+    move to `REPORTED_PATH` as `ACCEPTED`, so later gate runs of the scene
+    report them, not stop on them, and a `RECHECK_FAILED` listing goes back
+    to `RECHECK` (the author has acted). Returns the rows accepted (none:
+    nothing is recorded for the scene, nothing changed).
+
+    Raises:
+        GateError: a file is malformed or can't be written."""
+    stopped = blocked(project_dir)
+    rows = stopped.pop(scene_id, [])
+    if not rows:
+        return []
+    kept = reported(project_dir)
+    mine = kept.setdefault(scene_id, [])
+    for r in rows:
+        mine[:] = [m for m in mine if not _same(m, r)]
+        mine.append({**r, 'command': ACCEPTED})
+    _write_rows(project_dir, REPORTED_PATH, kept)
+    _write_rows(project_dir, BLOCKED_PATH, stopped)
+    row = pending(project_dir).get(scene_id)
+    if row and row['command'] == RECHECK_FAILED:
+        mark_pending(project_dir, scene_id, RECHECK,
+                     f're-check: the author accepted {len(rows)} finding(s)')
+    return rows
 
 
 # ============================================================================

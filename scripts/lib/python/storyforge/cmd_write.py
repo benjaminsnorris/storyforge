@@ -482,7 +482,8 @@ def run_recheck(project_dir: str, log_dir: str, skip: set[str] | frozenset[str] 
     if run.failed:
         log(f'  ERROR: the re-check of {run.failed} did not pass: {run.why}. It stays in '
             f'{gate_pending_path()}' + (f', and so do {", ".join(run.left)}' if run.left else '')
-            + '; fix it with revise or by hand, then `storyforge check --pending`.')
+            + f'; fix it with revise or by hand, or accept its contradictions '
+            f'(`storyforge check --accept {run.failed}`), then `storyforge check --pending`.')
     return run
 
 
