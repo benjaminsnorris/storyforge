@@ -193,3 +193,88 @@ def test_scene_when():
     assert scene_when({'timeline_day': '19', 'time_of_day': 'evening'}) == 'day 19, evening'
     assert scene_when({'timeline_day': '3', 'time_mode': 'vision'}) == \
         "day 3, a vision: not the story's present"
+
+
+class TestTheRevisionCalendar:
+    """Revise's prose passes (`revision.build_revision_prompt`) get the
+    calendar too: #478's thornwall-020, "ten days" from day 5 to day 19, came
+    from a `revision-plan` pass that had the days only as raw scenes.csv."""
+
+    SCOPE = 'act1-sc02,act2-sc01'
+
+    def _prompt(self, project_dir, scope=SCOPE, coaching='full'):
+        from storyforge.revision import build_revision_prompt
+        return build_revision_prompt('continuity', 'Fix continuity', scope, project_dir,
+                                     coaching_level=coaching, api_mode=True)
+
+    def test_every_scene_with_the_passs_scenes_marked(self, project_dir):
+        cal = _calendar(self._prompt(project_dir))
+        assert 'the scenes this pass revises are marked' in cal
+        assert 'Add or change a span only where the pass needs to' in cal
+        lines = [l for l in cal.splitlines() if ': day ' in l]
+        assert lines == ['act1-sc01: day 1, morning',
+                         'act1-sc02: day 1, evening  <- in this pass',
+                         'new-x1: day 2, afternoon',
+                         'act2-sc01: day 3, morning  <- in this pass',
+                         'act2-sc02: day 3, afternoon',
+                         'act2-sc03: day 4, evening']
+
+    def test_the_lines_are_the_checkers(self, project_dir):
+        _set(project_dir, 'act1-sc01', time_mode='summary')
+        _set(project_dir, 'new-x1', status='cut')
+        cal = _calendar(self._prompt(project_dir))
+        lines = [l.removesuffix('  <- in this pass') for l in cal.split('\n\n')[2].splitlines()]
+        assert lines == checker.Book.load(project_dir, SCENE).calendar().splitlines()
+
+    def test_a_cut_scene_in_the_pass_stays(self, project_dir):
+        _set(project_dir, 'act2-sc01', status='cut')
+        assert 'act2-sc01: day 3, morning  <- in this pass' in _calendar(self._prompt(project_dir))
+
+    def test_it_sits_after_the_intent_beats_and_before_the_scenes(self, project_dir):
+        prompt = self._prompt(project_dir)
+        assert prompt.index('## Intent-Beat Protection') < prompt.index(HEADING) \
+            < prompt.index('## Scene Content')
+
+    @pytest.mark.parametrize('coaching', ['coach', 'strict'])
+    def test_guides_get_it_too(self, project_dir, coaching):
+        assert HEADING in self._prompt(project_dir, coaching=coaching)
+
+    def test_scenes_with_no_day_are_named(self, project_dir):
+        _set(project_dir, 'new-x1', timeline_day='', time_of_day='')
+        assert _calendar(self._prompt(project_dir)).rstrip().endswith(
+            'No day in scenes.csv (name no span counted from these): new-x1')
+
+    def test_no_days_or_no_known_scene_gets_none(self, project_dir):
+        from storyforge.prompts import revision_calendar_block
+        assert revision_calendar_block(['not-a-scene'], project_dir, 'p') == ''
+        for sid in checker.Book.load(project_dir, SCENE).order:
+            _set(project_dir, sid, timeline_day='')
+        assert HEADING not in self._prompt(project_dir)
+
+    def test_warnings_go_to_stderr_never_into_the_prompt(self, project_dir, capsys):
+        # build-prompt's stdout is the prompt; a WARNING there would be sent
+        _set(project_dir, 'act2-sc02', timeline_day='Day 3')
+        prompt = self._prompt(project_dir)
+        out, err = capsys.readouterr()
+        assert 'WARNING' not in prompt and 'WARNING' not in out
+        assert ("WARNING: continuity (revision calendar): scenes.csv: act2-sc02: "
+                "timeline_day 'Day 3' is not a whole number") in err
+
+    def test_the_build_prompt_subprocess_keeps_them_apart(self, project_dir):
+        import subprocess
+        import sys
+        from conftest import PLUGIN_DIR as plugin
+        _set(project_dir, 'act2-sc02', time_mode='flashback')
+        result = subprocess.run(
+            [sys.executable, '-m', 'storyforge.revision', 'build-prompt', 'continuity',
+             'Fix continuity', self.SCOPE, project_dir, '--api-mode'],
+            capture_output=True, text=True, check=True,
+            env={**os.environ, 'PYTHONPATH': os.path.join(plugin, 'scripts', 'lib', 'python')})
+        assert HEADING in result.stdout and 'WARNING' not in result.stdout
+        assert "time_mode 'flashback'" in result.stderr
+
+    def test_revise_logs_what_comes_back(self, capsys):
+        from storyforge.cmd_revise import _log_prompt_warnings
+        _log_prompt_warnings('WARNING: p (revision calendar): x\nnoise\n')
+        out = capsys.readouterr().out
+        assert 'WARNING: p (revision calendar): x' in out and 'noise' not in out
