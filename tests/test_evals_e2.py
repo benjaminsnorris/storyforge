@@ -211,7 +211,7 @@ def _change_detector(code_of=lambda scene: 'TIM'):
     return detector
 
 
-def test_noticing_the_edited_scene_does_not_pass(tmp_path, monkeypatch):
+def test_noticing_the_edited_scene_does_not_reach_the_precision_target(tmp_path, monkeypatch):
     """Review of #341: a detector that flags whichever scene changed scored
     recall and precision 1.0. Code matching and the benign edits stop it."""
     monkeypatch.setitem(e2.DETECTORS, 'drift-check', _change_detector())
@@ -221,13 +221,13 @@ def test_noticing_the_edited_scene_does_not_pass(tmp_path, monkeypatch):
     assert out.by_code['KNO']['recall_code_match'] == 0.0
     assert out.metrics['benign_flagged'] == out.metrics['benign_cases']
     assert {g.name for g in out.gates} == {'recall_PHY', 'recall_TIM', 'recall_KNO',
-                                           'recall_REL', 'recall_TRT', 'precision'}
+                                           'recall_REL', 'recall_TRT', 'precision', 'flags'}
     actual = {g.name: g.actual for g in out.gates}
     assert actual['recall_TIM'] == 1.0 and actual['recall_KNO'] == 0.0
     assert actual['precision'] < e2.PRECISION_TARGET
 
 
-def test_a_perfect_detector_passes(tmp_path, monkeypatch):
+def test_a_perfect_detector_fails_until_its_floors_are_raised(tmp_path, monkeypatch):
     by_dir = {c['id']: c for c in e2.load_cases('carol')}
 
     def detector(project_dir, scenes, log_dir):
@@ -244,7 +244,7 @@ def test_a_perfect_detector_passes(tmp_path, monkeypatch):
     # #488: a gain over the recorded floors fails until they are raised
     assert not any(g.passed for g in out.gates)
     assert all('raise its floor to 1.0' in n for n in out.notes[:6])
-    monkeypatch.setitem(e2.FLOORS, 'e2-carol', {g.name: 1.0 for g in out.gates})
+    monkeypatch.setitem(e2.FLOORS, 'e2-carol', {g.name: g.actual for g in out.gates})
     out = _run_suite(tmp_path / 'again')
     assert all(g.passed for g in out.gates)
     assert not any('below the plan target' in n for n in out.notes)
@@ -281,60 +281,112 @@ class TestFloors:
     targets notes, as E7's noise ceiling is."""
 
     SUITES = ('e2-carol', 'e2-carol-checker', 'e2-corpus-drift', 'e2-corpus-validate')
+    ALL = {f'recall_{c}': 0.5 for c in e2.GATED_CODES} | {'precision': 0.5, 'flags': 10}
 
-    def _result(self, recall=None, precision=0.5, flags=10):
-        recall = recall or {}
-        return {'by_code': {c: {'recall_code_match': v} for c, v in recall.items()},
+    def _result(self, recall=None, precision=0.5, flags=10, cases=3):
+        recall = {c: 0.5 for c in e2.GATED_CODES} if recall is None else recall
+        return {'by_code': {c: {'recall_code_match': v, 'cases': cases}
+                            for c, v in recall.items()},
                 'metrics': {'precision': precision, 'flags_true': flags, 'flags_false': 0}}
 
-    def _with_floors(self, monkeypatch, floors):
+    def _gates(self, monkeypatch, floors, result):
         monkeypatch.setitem(e2.FLOORS, 'test', floors)
+        gates, notes = e2.floor_gates('test', result)
+        return {g.name: g for g in gates}, notes
 
-    def test_every_suite_has_a_floor_per_gate(self):
-        names = {f'recall_{c}' for c in e2.GATED_CODES} | {'precision'}
+    def test_floors_are_the_registered_e2_suites(self):
+        """TD-9: every E2 suite has floors, and only E2 suites do."""
+        names = {s.name for s in harness.discover(str(PLUGIN_DIR / 'evals' / 'suites'))
+                 if s.name.startswith('e2-')}
+        assert set(e2.FLOORS) == names == set(self.SUITES)
+
+    def test_every_suite_gates_precision_flags_and_its_codes(self):
         for suite in self.SUITES:
-            assert set(e2.FLOORS[suite]) == names, suite
+            keys = set(e2.FLOORS[suite])
+            assert {'precision', 'flags'} <= keys, suite
+            assert keys - {'precision', 'flags'} <= {f'recall_{c}' for c in e2.GATED_CODES}
 
     def test_floors_never_drop_below_the_recorded_values(self):
-        """Lowering a floor accepts a regression: it takes an edit here too."""
+        """Lowering a floor accepts a regression: it takes an edit here too.
+        Each non-zero floor is pinned as a minimum (a 0 can't be lowered)."""
         lowest = {
+            'e2-carol': {'flags': 1},
             'e2-carol-checker': {'recall_PHY': 0.6667, 'recall_TIM': 0.8, 'recall_KNO': 1.0,
-                                 'recall_REL': 0.8, 'recall_TRT': 0.5, 'precision': 0.7742},
-            'e2-corpus-drift': {'recall_TIM': 0.1667, 'precision': 0.4},
-            'e2-corpus-validate': {'recall_PHY': 0.4286, 'precision': 0.0305},
+                                 'recall_REL': 0.8, 'recall_TRT': 0.5, 'precision': 0.7742,
+                                 'flags': 31},
+            'e2-corpus-drift': {'recall_TIM': 0.1667, 'precision': 0.4, 'flags': 5},
+            'e2-corpus-validate': {'recall_PHY': 0.4286, 'precision': 0.0305, 'flags': 753},
         }
         for suite, floors in lowest.items():
             for name, value in floors.items():
                 assert e2.FLOORS[suite][name] >= value, (suite, name)
+        for suite in self.SUITES:
+            for name, value in e2.FLOORS[suite].items():
+                if value:
+                    assert name in lowest[suite], (suite, name)
 
     def test_equal_to_the_floor_passes(self, monkeypatch):
-        floors = {f'recall_{c}': 0.5 for c in e2.GATED_CODES} | {'precision': 0.5}
-        self._with_floors(monkeypatch, floors)
-        gates, notes = e2.floor_gates('test', self._result({c: 0.5 for c in e2.GATED_CODES}))
-        assert all(g.passed for g in gates)
+        gates, notes = self._gates(monkeypatch, self.ALL, self._result())
+        assert all(g.passed for g in gates.values())
         assert not any('FLOORS' in n for n in notes)
         assert any('below the plan target' in n for n in notes)
 
     def test_a_gain_fails_until_the_floor_is_raised(self, monkeypatch):
         """No slack: an unrecorded gain would hide a later loss (E7's CR-2)."""
-        floors = {f'recall_{c}': 0.5 for c in e2.GATED_CODES} | {'precision': 0.5}
-        self._with_floors(monkeypatch, floors)
-        gates, notes = e2.floor_gates('test', self._result(
+        gates, notes = self._gates(monkeypatch, self.ALL, self._result(
             {c: (0.75 if c == 'PHY' else 0.5) for c in e2.GATED_CODES}))
-        assert [g.name for g in gates if not g.passed] == ['recall_PHY']
+        assert [n for n, g in gates.items() if not g.passed] == ['recall_PHY']
         assert 'raise its floor to 0.75' in notes[0]
 
     def test_a_loss_fails(self, monkeypatch):
-        floors = {f'recall_{c}': 0.5 for c in e2.GATED_CODES} | {'precision': 0.5}
-        self._with_floors(monkeypatch, floors)
-        gates, notes = e2.floor_gates('test', self._result(
-            {c: 0.5 for c in e2.GATED_CODES}, precision=0.4))
-        assert [g.name for g in gates if not g.passed] == ['precision']
+        gates, notes = self._gates(monkeypatch, self.ALL, self._result(precision=0.4))
+        assert [n for n, g in gates.items() if not g.passed] == ['precision']
         assert 'a regression' in notes[0]
 
+    def test_a_silent_detector_fails_even_on_zero_floors(self, monkeypatch):
+        """SF-3: with every recall and precision floor 0, losing the flags
+        still fails."""
+        floors = {k: 0.0 for k in self.ALL} | {'flags': 1}
+        result = self._result({c: 0.0 for c in e2.GATED_CODES}, precision=0.0, flags=0)
+        gates, notes = self._gates(monkeypatch, floors, result)
+        assert [n for n, g in gates.items() if not g.passed] == ['flags']
+        assert any('only its flag count can regress' in n for n in notes)
+
+    def test_a_code_with_no_cases_is_not_gated(self, monkeypatch):
+        """SF-2: no REL case is no measurement, not a recall of 0."""
+        floors = {k: v for k, v in self.ALL.items() if k != 'recall_REL'}
+        recall = {c: 0.5 for c in e2.GATED_CODES if c != 'REL'}
+        gates, notes = self._gates(monkeypatch, floors, self._result(recall))
+        assert 'recall_REL' not in gates and all(g.passed for g in gates.values())
+        assert 'recall_REL: no REL case, not gated' in notes
+
+    def test_a_floored_code_whose_cases_vanish_fails(self, monkeypatch):
+        recall = {c: 0.5 for c in e2.GATED_CODES if c != 'REL'}
+        gates, notes = self._gates(monkeypatch, self.ALL, self._result(recall))
+        assert gates['recall_REL'].passed is False
+        assert any('no case of its code was scored' in n for n in notes)
+
+    def test_a_code_with_cases_and_no_floor_fails(self, monkeypatch):
+        floors = {k: v for k, v in self.ALL.items() if k != 'recall_REL'}
+        gates, notes = self._gates(monkeypatch, floors, self._result())
+        assert gates['recall_REL'].passed is False
+        assert any('no floor recorded' in n for n in notes)
+
     def test_too_few_flags_count_precision_as_zero(self, monkeypatch):
-        floors = {f'recall_{c}': 0.0 for c in e2.GATED_CODES} | {'precision': 0.0}
-        self._with_floors(monkeypatch, floors)
-        gates, notes = e2.floor_gates('test', self._result(precision=1.0, flags=2))
-        assert all(g.passed for g in gates)
-        assert any('every floor is 0' in n for n in notes)
+        floors = {k: 0.0 for k in self.ALL} | {'flags': 2}
+        gates, notes = self._gates(monkeypatch, floors, self._result(
+            {c: 0.0 for c in e2.GATED_CODES}, precision=1.0, flags=2))
+        assert gates['precision'].actual == 0.0
+        assert all(g.passed for g in gates.values())
+
+
+def test_corpus_suite_output_gates_on_the_named_suites_floors():
+    """T-6: suite_output reads FLOORS[suite], and names too few flags."""
+    from e2 import corpus
+    out = corpus.suite_output('e2-corpus-drift', 'x', [], {}, {}, {})
+    gates = {g.name: g for g in out.gates}
+    floors = e2.FLOORS['e2-corpus-drift']
+    assert {n: g.threshold for n, g in gates.items() if n in floors} == {
+        n: v for n, v in floors.items() if n in gates}
+    assert gates['flags'].passed is False      # nothing flagged
+    assert any('fewer than' in n for n in out.notes)

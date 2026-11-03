@@ -26,7 +26,8 @@ established quote is still in the book after the edit.
 
 A benign case (``"benign": true``, ``"code": null``, no spans) is an edit that
 contradicts nothing. Any flag on it is a false positive, so a detector that
-merely notices which scene changed can't pass the precision gate.
+merely notices which scene changed can't reach the plan's precision target
+(``PRECISION_TARGET``).
 
 Each case runs on its own copy of the book with one edit, and the detector is
 told which scene changed, as Storyforge's own checks are after an edit. The
@@ -56,20 +57,28 @@ GATED_CODES = ('PHY', 'TIM', 'KNO', 'REL', 'TRT')
 RECALL_TARGET = 0.9
 PRECISION_TARGET = 0.8
 #: The gates: each suite's replayed values, which must not change unseen
-#: (#488). A change that moves one fails until the floor moves with it in
-#: the same commit, up for a gain (so no slack hides a later loss) and down
-#: only as a visible decision (tests/test_evals_e2.py pins the lowest).
+#: (#488): a recall per gated code that has cases, precision
+#: (`precision_gate_value`) and the distinct flags raised, so a detector
+#: that goes silent fails even where every recall is 0. A change that moves
+#: one fails until it moves here in the same commit: up for a gain (no slack
+#: to hide a later loss), down only as a decision
+#: (`test_floors_never_drop_below_the_recorded_values` pins each non-zero one
+#: as a minimum). A gated code with no cases has no entry; one whose cases
+#: vanish fails, as E7's vanished flags do.
 FLOORS = {
     'e2-carol': {'recall_PHY': 0.0, 'recall_TIM': 0.0, 'recall_KNO': 0.0,
-                 'recall_REL': 0.0, 'recall_TRT': 0.0, 'precision': 0.0},
+                 'recall_REL': 0.0, 'recall_TRT': 0.0, 'precision': 0.0, 'flags': 1},
     'e2-carol-checker': {'recall_PHY': 0.6667, 'recall_TIM': 0.8, 'recall_KNO': 1.0,
-                         'recall_REL': 0.8, 'recall_TRT': 0.5, 'precision': 0.7742},
+                         'recall_REL': 0.8, 'recall_TRT': 0.5, 'precision': 0.7742,
+                         'flags': 31},
+    # neither corpus suite has a REL case (E1 is thin on REL)
     'e2-corpus-drift': {'recall_PHY': 0.0, 'recall_TIM': 0.1667, 'recall_KNO': 0.0,
-                        'recall_REL': 0.0, 'recall_TRT': 0.0, 'precision': 0.4},
+                        'recall_TRT': 0.0, 'precision': 0.4, 'flags': 5},
     'e2-corpus-validate': {'recall_PHY': 0.4286, 'recall_TIM': 0.0, 'recall_KNO': 0.0,
-                           'recall_REL': 0.0, 'recall_TRT': 0.0, 'precision': 0.0305},
+                           'recall_TRT': 0.0, 'precision': 0.0305, 'flags': 753},
 }
-# Below this many distinct flags, precision is noise and the gate fails
+# Below this many distinct flags, precision is noise and is counted as 0
+# (`precision_gate_value`)
 MIN_FLAGS_FOR_PRECISION = 5
 
 # A detector reads a project after an edit and returns flags
@@ -255,27 +264,45 @@ def score(cases: list[dict], case_flags: dict[str, list[dict]],
 
 
 def floor_gates(suite: str, result: dict) -> tuple[list, list[str]]:
-    """The suite's gates (each value equals its `FLOORS` entry) and notes:
-    which floor to move when one changed, and how far each value is from
-    the plan's target."""
+    """The suite's gates, each value equal to its `FLOORS` entry, and notes:
+    which entry to move when a value changed, a gated code with no cases,
+    which values are below the plan's targets, and when there is nothing
+    measured for a regression to lose."""
     from harness import Gate
-    values = {f'recall_{code}': result['by_code'].get(code, {}).get('recall_code_match', 0.0)
-              for code in GATED_CODES}
-    values['precision'] = precision_gate_value(result['metrics'])
+    metrics = result['metrics']
     floors = FLOORS[suite]
-    gates = [Gate(name, value, '==', floors[name]) for name, value in values.items()]
-    notes = [f'{name} {value}, FLOORS {floors[name]}: '
-             + (f'raise its floor to {value} in the same commit' if value > floors[name]
-                else 'a regression; lowering the floor is a decision (see FLOORS)')
-             for name, value in values.items() if value != floors[name]]
-    short = [name for name, value in values.items()
-             if value < (PRECISION_TARGET if name == 'precision' else RECALL_TARGET)]
+    values, notes = {}, []
+    for code in GATED_CODES:
+        name = f'recall_{code}'
+        if result['by_code'].get(code, {}).get('cases'):
+            values[name] = result['by_code'][code].get('recall_code_match', 0.0)
+        elif name in floors:
+            values[name] = None   # its cases are gone: fails, never a quiet 0
+        else:
+            notes.append(f'{name}: no {code} case, not gated')
+    values['precision'] = precision_gate_value(metrics)
+    values['flags'] = metrics['flags_true'] + metrics['flags_false']
+    gates = []
+    for name, value in values.items():
+        floor = floors.get(name)
+        gates.append(Gate(name, -1 if value is None else value, '==',
+                          -1 if floor is None else floor))
+        if value is None:
+            notes.append(f'{name}: FLOORS has {floor} but no case of its code was scored')
+        elif floor is None:
+            notes.append(f'{name} {value}: no floor recorded; add it to FLOORS[{suite!r}]')
+        elif value != floor:
+            notes.append(f'{name} {value}, FLOORS {floor}: '
+                         + (f'raise its floor to {value} in the same commit' if value > floor
+                            else 'a regression; lowering the floor is a decision (see FLOORS)'))
+    short = [name for name, value in values.items() if name != 'flags' and value is not None
+             and value < (PRECISION_TARGET if name == 'precision' else RECALL_TARGET)]
     if short:
         notes.append(f'below the plan target (recall {RECALL_TARGET} per code, precision '
                      f'{PRECISION_TARGET}), not gated: {", ".join(short)}')
-    if not any(floors.values()):
-        notes.append('every floor is 0: this detector finds none of these cases, so '
-                     'there is nothing yet for a regression to lose')
+    if not any(v for k, v in floors.items() if k != 'flags'):
+        notes.append('every recall and precision floor is 0: this detector finds none of '
+                     'these cases, so only its flag count can regress')
     return gates, notes
 
 

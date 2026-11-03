@@ -1,6 +1,7 @@
 """E2 on A Christmas Carol with the gate's checker (``storyforge.checker``):
 the same injected errors as ``e2-carol``, the Phase 3 detector in place of
-the drift check (rethink plan §5 Phase 3: E2 precision >= 0.8)."""
+the drift check. The plan's Phase 3 target (E2 precision >= 0.8, §5) is a
+note; the gate is ``e2.FLOORS['e2-carol-checker']`` (#488)."""
 
 import os
 
@@ -19,7 +20,7 @@ def run(ctx):
     detector = e2.GateChecker()
     case_flags, control_flags = e2.run_detector(BOOK, detector, ctx.work_dir, cases)
     result = e2.score(cases, case_flags, control_flags, e2.reading_order(book_dir))
-    gates, floor_notes = e2.floor_gates('e2-carol-checker', result)
+    gates, floor_notes = e2.floor_gates(ctx.name, result)
     missed = sorted(cid for cid, hit in result['detected'].items() if not hit)
     notes = ['detector: the gate checker (contradictions; no brief promises)',
              f'missed {len(missed)} of {result["metrics"]["cases"]}: {", ".join(missed)}',

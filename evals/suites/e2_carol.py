@@ -18,7 +18,7 @@ def run(ctx):
         raise ValueError('e2-carol fixtures: ' + '; '.join(problems))
     case_flags, control_flags = e2.run_detector(BOOK, e2.DETECTORS[DETECTOR], ctx.work_dir, cases)
     result = e2.score(cases, case_flags, control_flags, e2.reading_order(book_dir))
-    gates, floor_notes = e2.floor_gates('e2-carol', result)
+    gates, floor_notes = e2.floor_gates(ctx.name, result)
     missed = sorted(cid for cid, hit in result['detected'].items() if not hit)
     flagged = result['metrics']['flags_true'] + result['metrics']['flags_false']
     notes = [f'detector: {DETECTOR}',

@@ -154,8 +154,9 @@ def bootstrap_cues(project_dir: str) -> None:
 
 def suite_output(suite: str, detector_name: str, cases: list[dict], excluded: dict,
                  case_flags: dict, control_flags: dict):
-    """Score and gate the way ``e2-carol`` does: against the suite's
-    ``e2.FLOORS``, the plan's targets as notes."""
+    """Score and gate the way ``e2-carol`` does: against ``e2.FLOORS[suite]``
+    (*suite* is the running suite's name, ``ctx.name``), the plan's targets
+    as notes."""
     import e2
     from harness import SuiteOutput
     result = e2.score(cases, case_flags, control_flags, order=[])
@@ -164,4 +165,8 @@ def suite_output(suite: str, detector_name: str, cases: list[dict], excluded: di
     notes += [f'detector: {detector_name}',
              f'detected {len(found)} of {result["metrics"]["cases"]}: {", ".join(found) or "none"}']
     notes += [f'excluded {len(ids)}: {reason}' for reason, ids in sorted(excluded.items())]
+    flagged = result['metrics']['flags_true'] + result['metrics']['flags_false']
+    if flagged < e2.MIN_FLAGS_FOR_PRECISION:
+        notes.append(f'{flagged} distinct flag(s), fewer than {e2.MIN_FLAGS_FOR_PRECISION}: '
+                     'precision is counted as 0')
     return SuiteOutput(metrics=result['metrics'], by_code=result['by_code'], gates=gates, notes=notes)
