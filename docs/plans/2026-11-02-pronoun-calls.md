@@ -1,4 +1,4 @@
-# Pronouns in the books: the judgement calls (2026-11-03)
+# Pronouns in the books: the judgement calls (2026-11-02)
 
 Every character in the eight books got `he` or `she` in `reference/characters.csv`, merged in each book's repo (ashes #11, governor #83, lantern-folk #16, meridian-line #87, shared-dark #91, slipform #25, thornwall #72, understory #38). Most were clear from the prose and the character bible. These were judgement calls, with what decided each. Changing one is a one-cell edit in that book's `characters.csv`.
 
