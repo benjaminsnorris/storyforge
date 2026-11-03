@@ -2990,7 +2990,12 @@ def main(argv=None):
         revise_model = select_revision_model('prose', 'prose revision')
         per_pass = estimate_cost('revise', scene_count, avg_words, revise_model)
         total_forecast = per_pass * pending
-        log(f'Cost forecast: ~${total_forecast:.2f} ({pending} passes @ ~${per_pass:.2f})')
+        from storyforge import gate
+        # the gate's run on each rewritten scene is extra, and how many scenes
+        # a pass rewrites isn't known here (F-151)
+        log(f'Cost forecast: ~${total_forecast:.2f} ({pending} passes @ ~${per_pass:.2f}), '
+            f'plus about ${gate.RECHECK_COST_PER_SCENE:.2f} for the gate on each '
+            f'rewritten scene')
 
     # Check for deferred redrafting (multiple upstream passes)
     deferred_scenes, upstream_count = _collect_upstream_scenes(plan_rows)
@@ -3554,7 +3559,7 @@ Rules:
 
     # Cost summary
     if not args.dry_run:
-        print_summary(project_dir, 'revise', session_start=session_start)
+        print_summary(project_dir, ('revise', 'gate', 'gate-fix'), session_start=session_start)
     report_fallback_replies()
 
     if redraft_error:

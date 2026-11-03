@@ -128,3 +128,49 @@ class TestWriteCountsTheGate:
         assert 'of it the gate' in forecast[0]
         gate_part = float(forecast[0].split('~$')[2].split(' ')[0])
         assert gate_part == round(gate.RECHECK_COST_PER_SCENE, 2)
+
+
+class TestSpendLoggingEdges:
+    def test_a_failed_fix_still_logs_its_spend(self, project_dir, tmp_path, monkeypatch):
+        fail = gate.GateResult(SCENE)
+        monkeypatch.setattr(gate, 'problems_to_fix', lambda r: ['x'])
+        monkeypatch.setattr(gate.GateResult, 'passed', property(lambda r: False))
+        monkeypatch.setattr(gate, 'gate_scene', lambda *a, **k: fail)
+        monkeypatch.setattr(gate, '_brief_phrases', lambda *a: [])
+        reply = _text({'not': 'the schema'})
+        reply['usage'] = {'input_tokens': 9, 'output_tokens': 1}
+        with patch('storyforge.api._api_request', return_value=reply):
+            try:
+                gate.gate_and_fix(project_dir, SCENE, command='draft', prose='a scene',
+                                  log_dir=str(tmp_path / 'logs'), fix_model='claude-opus-5-5')
+            except gate.GateError:
+                pass
+        rows = [r for r in _ledger_rows(project_dir) if r['operation'] == 'gate-fix']
+        assert [r['input_tokens'] for r in rows] == ['9']
+
+    def test_a_failed_ledger_write_never_hides_the_gate_error(self, project_dir, tmp_path,
+                                                              monkeypatch):
+        def broken(self, *a, **k):
+            raise OSError('disk full')
+        monkeypatch.setattr(api.SpendMeter, 'log', broken)
+        monkeypatch.setattr(gate, '_gate_scene',
+                            lambda *a, **k: (_ for _ in ()).throw(gate.GateError('the real one')))
+        try:
+            gate.gate_scene(project_dir, SCENE, command='draft', log_dir=str(tmp_path))
+        except gate.GateError as e:
+            assert 'the real one' in str(e)
+        else:
+            raise AssertionError('no GateError')
+
+    def test_an_empty_filter_shows_every_operation(self, tmp_path, capsys):
+        from storyforge.costs import log_operation
+        log_operation(str(tmp_path), 'draft', 'claude-opus-5-5', 1, 1, 2.0)
+        print_summary(str(tmp_path), '')
+        assert 'all operations' in capsys.readouterr().out
+
+    def test_revise_counts_the_gate(self):
+        import inspect
+        from storyforge import cmd_revise
+        src = inspect.getsource(cmd_revise)
+        assert "print_summary(project_dir, ('revise', 'gate', 'gate-fix')" in src
+        assert 'for the gate on each' in src

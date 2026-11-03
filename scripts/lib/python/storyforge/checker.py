@@ -653,8 +653,8 @@ def _brief(book: Book, project_dir: str, at: str) -> Brief:
     parts = []
     if entering:
         parts.append('\n## What holds entering the scene (from its brief)\n\n'
-                     'The scene must not contradict these. They are not promises. One that '
-                     'the brief\'s own key actions or outcome override (the brief has a '
+                     'The scene must not contradict these. They are not promises. A physical '
+                     'state that the brief\'s own key actions or outcome override (the brief has a '
                      'character do what a state rules out) ended before the scene: that is '
                      'not a contradiction.\n\n'
                      + '\n'.join(entering) + '\n')

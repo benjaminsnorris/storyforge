@@ -42,7 +42,7 @@ class TestDraftingPrompt:
         states = prompt[prompt.index('## Active Physical States'):]
         assert states.count('- **') >= 1
 
-    def test_a_carried_state_matches_by_alias_and_case(self, project_dir, plugin_dir):
+    def test_a_carried_state_matches_by_id_in_any_case(self, project_dir, plugin_dir):
         _carry(project_dir, 'ARCHIVE-KEY-DORREN', 'archive-key-dorren')
         prompt = build_scene_prompt_from_briefs(SCENE, project_dir, plugin_dir)
         assert _checklist(prompt) == ''
@@ -83,3 +83,19 @@ class TestChecker:
         book = checker.Book.load(project_dir, SCENE)
         brief = checker._brief(book, project_dir, SCENE)
         assert 'ended before the scene: that is not a contradiction' in brief.text
+
+    def test_a_carried_state_in_words_is_not_a_promise(self, project_dir):
+        _carry(project_dir, 'no sleep 36h', 'No sleep 36h;bruised ribs')
+        book = checker.Book.load(project_dir, SCENE)
+        brief = checker._brief(book, project_dir, SCENE)
+        entering, promises = brief.text.split("## The brief's promises")
+        assert 'no sleep 36h' in entering and 'sleep' not in promises
+        assert 'bruised ribs' in promises
+
+    def test_only_a_physical_state_is_excused(self, project_dir):
+        """The F-150 note names physical states: knowledge the scene enters
+        with is still never contradicted."""
+        _carry(project_dir, 'archive-key-dorren', 'archive-key-dorren')
+        book = checker.Book.load(project_dir, SCENE)
+        brief = checker._brief(book, project_dir, SCENE)
+        assert 'A physical state that the brief' in brief.text

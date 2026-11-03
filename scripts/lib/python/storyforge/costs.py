@@ -282,7 +282,7 @@ def print_summary(project_dir: str, operation: str | tuple[str, ...] | None = No
             print('No cost data available.')
             return
 
-        wanted = (operation,) if isinstance(operation, str) else operation
+        wanted = (operation,) if isinstance(operation, str) and operation else (operation or None)
         all_rows = []
         for line in f:
             line = line.strip()

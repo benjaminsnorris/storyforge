@@ -503,7 +503,17 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                                check_model=check_model, introduced_by=introduced_by,
                                before=before)
         finally:
-            meter.log(project_dir, 'gate', scene_id)
+            _log_spend(meter, project_dir, 'gate', scene_id)
+
+
+def _log_spend(meter, project_dir: str, operation: str, scene_id: str) -> None:
+    """Write a meter's spend to the cost ledger; a failed write is a warning,
+    never an error that hides the gate's own."""
+    from storyforge.common import log
+    try:
+        meter.log(project_dir, operation, scene_id)
+    except Exception as e:
+        log(f'WARNING: could not log the cost of {operation} {scene_id}: {e}')
 
 
 def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | None = None,
@@ -1017,7 +1027,7 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                                           model=fix_model, protected=protected,
                                           earlier=tuple(rounds), edits_out=edits)
                     finally:
-                        meter.log(project_dir, 'gate-fix', scene_id)
+                        _log_spend(meter, project_dir, 'gate-fix', scene_id)
             except GateError as e:
                 if n == 1:
                     raise
