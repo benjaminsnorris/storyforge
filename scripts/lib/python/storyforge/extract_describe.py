@@ -1433,9 +1433,21 @@ _ROLE_RANK = {'protagonist': 0, 'antagonist': 0, 'deuteragonist': 0, 'supporting
 #: How far either side of a quote a speech tag ("said Scrooge") is looked
 #: for, never past the neighbouring quote.
 _ATTRIBUTION_CHARS = 80
+#: How far back a lead-in ending in a colon ("Then spake Menelaus:") is read.
+_LEAD_IN_CHARS = 200
+#: The longest sampled line; a longer speech is sampled by its opening.
+_MAX_LINE_CHARS = 300
 _SPEECH_VERBS = (r'said|says|asked|asks|cried|replied|returned|exclaimed|answered|'
                  r'whispered|muttered|shouted|added|continued|observed|rejoined|repeated|'
-                 r'called|murmured|demanded|retorted|told')
+                 r'called|murmured|demanded|retorted|told|spake|spoke|quoth|bespake')
+#: The verbs a lead-in ("Then spake Menelaus:", "and Nestor lamented:") uses.
+_LEAD_IN_VERBS = re.compile(rf'\b(?:{_SPEECH_VERBS}|lamented|wailed|prayed|began|groaned|'
+                            r'moaned|chid|upbraided|hailed|addressed|made\s+answer)\b',
+                            re.IGNORECASE)
+#: A name after one of these in a lead-in is spoken to or about, not speaking
+#: ("Then to Achilles spake Odysseus:").
+_NOT_SPEAKER = re.compile(r'\b(?:to|unto|at|on|upon|with|for|of|from|by|toward|towards|'
+                          r'before|against|beside|o)\s+(?:the\s+)?$', re.IGNORECASE)
 
 
 def single_quoted(texts: list[str]) -> bool:
@@ -1483,35 +1495,89 @@ def _who(scene: dict[str, str], alias: dict[str, str]) -> tuple[str, list[str], 
     return pov, present, unresolved
 
 
-def _speech(text: str, names: list[str]) -> list[str]:
-    """Quoted speech in `text` with a speech tag naming one of `names`
-    against it: "said NAME" or "NAME said" right after the quote, or right
-    before it ending in a comma or colon, within _ATTRIBUTION_CHARS and never
-    reaching past the neighbouring quote; never a possessive ("Scrooge's
-    nephew" tags the nephew). Lines under four words or over 300 characters
-    are left out."""
+def _name_pattern(names: list[str]) -> str:
+    """A regex for any of `names` as a name: capitalized in the text
+    whatever the registry's case ("tom" matches "Tom"), never a possessive
+    ("Scrooge's nephew" names the nephew; "Neoptolemus' head" too) or the
+    start of a longer word."""
+    alts = '|'.join(rf'(?=[A-Z])(?i:{re.escape(n)})'
+                    for n in sorted(set(names), key=len, reverse=True))
+    return rf'\b(?:{alts})(?![\'’]s)\b'
+
+
+def _sample_line(inner: str) -> str:
+    """A quoted span as one sampled line: whitespace collapsed, and a speech
+    longer than _MAX_LINE_CHARS cut to its opening sentences (or words)
+    with " …", so a long speech (an epic's) still shows its voice."""
+    line = ' '.join(inner.split())
+    if len(line) <= _MAX_LINE_CHARS:
+        return line
+    head = line[:_MAX_LINE_CHARS - 2]
+    ends = [m.end() for m in re.finditer(r'[.!?;][\'"’”)]*(?=\s)', head)]
+    head = head[:ends[-1]] if ends and ends[-1] >= 40 else head.rsplit(' ', 1)[0]
+    return head.rstrip() + ' …'
+
+
+def _speech(text: str, names: list[str], others: list[str] = ()) -> list[str]:
+    """Quoted speech in `text` attributed to one of `names`:
+
+    - a speech tag against the quote: "said NAME" or "NAME said" right after
+      it in the same paragraph, or right before it ending in a comma or
+      colon, within _ATTRIBUTION_CHARS and never reaching past the
+      neighbouring quote;
+    - or a lead-in ending in a colon just before it, as an epic introduces a
+      speech ("Then spake Menelaus:"): its last phrase (after the last
+      comma or sentence end) has a speech verb and names them, and no one
+      in `others` (the other characters' names). A name spoken to ("to
+      Achilles") doesn't count, and a name in an earlier phrase is left
+      alone: in "the great God cried, So to turn back from war Achilles
+      awed ...:" Achilles is the one spoken to.
+
+    Never a possessive. Lines under four words are left out; one over
+    _MAX_LINE_CHARS is cut to its opening (`_sample_line`)."""
     from .prose_analysis import dialogue_spans
     if not names:
         return []
-    name = r'(?:' + '|'.join(re.escape(n) for n in names) + r')(?![\'\u2019]s)\b'
-    tag = rf'(?:(?:{_SPEECH_VERBS})\s+(?:the\s+)?{name}|{name}\s+(?:{_SPEECH_VERBS})\b)'
+    name = _name_pattern(names)
+    other = re.compile(_name_pattern(list(others))) if others else None
+    tag = (rf'(?:(?:{_SPEECH_VERBS})\s+(?:the\s+)?{name}|'
+           rf'(?:the\s+)?{name}\s+(?:{_SPEECH_VERBS})\b)')
     # The tag sits against the quote: right after it ('"Bah!" said
     # Scrooge'), or right before it, ending in a comma or colon ('Scrooge
     # said, "Bah!"'). A tag ending the sentence before belongs to the quote
     # before that
-    tag_after = re.compile(rf'\s*(?:[\u2014\u2013-]\s*)?{tag}')
+    tag_after = re.compile(rf'\s*(?:[—–-]\s*)?{tag}')
     tag_before = re.compile(rf'\b{tag}\s*[,:]\s*$')
+    own = re.compile(name)
+
+    def lead_in(before: str) -> bool:
+        before = before.rstrip()
+        if not before.endswith(':'):
+            return False
+        clause = re.split(r'[,.!?;\n]', before[:-1])[-1]
+        if not _LEAD_IN_VERBS.search(clause):
+            return False
+        speaking = [m for m in own.finditer(clause)
+                    if not _NOT_SPEAKER.search(clause[:m.start()])]
+        rivals = [m for m in other.finditer(clause)
+                  if not _NOT_SPEAKER.search(clause[:m.start()])] if other else []
+        return bool(speaking) and not rivals
+
     spans = dialogue_spans(text)
     out = []
     for i, (start, end, inner) in enumerate(spans):
-        line = ' '.join(inner.split())
-        if len(line.split()) < 4 or len(line) > 300:
+        if len(inner.split()) < 4:
             continue
-        before = text[max(start - _ATTRIBUTION_CHARS, spans[i - 1][1] if i else 0):start]
+        prev_end = spans[i - 1][1] if i else 0
+        before = text[max(start - _ATTRIBUTION_CHARS, prev_end):start]
+        # A tag after a quote is in its paragraph: past a line break,
+        # "Penelope answered," introduces the next speech
         after = text[end:min(end + _ATTRIBUTION_CHARS,
-                             spans[i + 1][0] if i + 1 < len(spans) else len(text))]
-        if tag_after.match(after) or tag_before.search(before):
-            out.append(line)
+                             spans[i + 1][0] if i + 1 < len(spans) else len(text))
+                     ].split('\n', 1)[0]
+        if (tag_after.match(after) or tag_before.search(before)
+                or lead_in(text[max(start - _LEAD_IN_CHARS, prev_end):start])):
+            out.append(_sample_line(inner))
     return out
 
 
@@ -1522,7 +1588,8 @@ def _speaker_names(characters: list[dict[str, str]]) -> dict[str, list[str]]:
     several is the one character's whose name ends with it ("Scrooge" is
     Ebenezer Scrooge's, not "Boy Scrooge Sends for Turkey"'s), and no one's
     when several names end with it ("Cratchit": Bob and Mrs Cratchit).
-    Shorter words like "Bob" count only through `aliases`."""
+    Shorter words like "Bob" count only through `aliases`; a scene can
+    settle a shared word (`_scene_speaker_names`)."""
     words: dict[str, set[str]] = {}
     ends: dict[str, set[str]] = {}
     for c in characters:
@@ -1540,14 +1607,36 @@ def _speaker_names(characters: list[dict[str, str]]) -> dict[str, list[str]]:
     return out
 
 
+def _scene_speaker_names(present: list[dict[str, str]], pov: str,
+                         first_person: bool) -> dict[str, list[str]]:
+    """The names a speech tag may use for a character in one scene, beyond
+    `_speaker_names`: each capitalized word of four or more letters in the
+    name or aliases of exactly one character on stage ("said the Ghost" is
+    the one Ghost in the scene, though three names share the word), and "I"
+    for the POV character when the book is told in the first person."""
+    owners: dict[str, set[str]] = {}
+    for c in present:
+        for w in re.findall(r'[A-Z]\w{3,}', f'{c.get("name", "")} {c.get("aliases", "")}'):
+            owners.setdefault(w, set()).add(c['id'])
+    out: dict[str, list[str]] = {}
+    for w, ids in owners.items():
+        if len(ids) == 1:
+            out.setdefault(next(iter(ids)), []).append(w)
+    if first_person and pov:
+        out.setdefault(pov, []).append('I')
+    return out
+
+
 def character_evidence(project_dir: str, scenes: list[dict[str, str]],
+                       profile: dict | None = None,
                        ) -> tuple[list[CharacterEvidence], list[str], list[str]]:
     """The characters 5d describes, POV characters first (most scenes
     first), then by role (`_ROLE_RANK`), scenes on stage and scenes
     mentioned, with what code can say about each; the notes for the report
     (the registry, prose or ledger missing, names that resolve to no
     character, those past the caps); and the sources that had something
-    (for the provenance header).
+    (for the provenance header). A profile whose `narrative_mode` is first
+    person lets "I said" tag the POV character's lines.
 
     Raises DescribeFailed naming the file when characters.csv or a scene
     file can't be read."""
@@ -1565,9 +1654,16 @@ def character_evidence(project_dir: str, scenes: list[dict[str, str]],
     seen: dict[str, list[dict[str, str]]] = {}
     mentioned: dict[str, int] = {}
     unresolved: set[str] = set()
+    first_person = str((profile or {}).get('narrative_mode', '')).strip().lower() \
+        .startswith('first')
+    local: dict[str, dict[str, list[str]]] = {}
+    on_stage: dict[str, list[str]] = {}
     for s in scenes:
         pov, present, missing = _who(s, alias)
         unresolved.update(missing)
+        on_stage[s['id']] = present
+        local[s['id']] = _scene_speaker_names([by_id[c] for c in present if c in by_id],
+                                              pov, first_person)
         if pov:
             pov_count[pov] = pov_count.get(pov, 0) + 1
         for cid in present:
@@ -1595,7 +1691,11 @@ def character_evidence(project_dir: str, scenes: list[dict[str, str]],
         appears = seen[cid]
         lines: list[str] = []
         for s in appears:
-            lines += _speech(texts.get(s['id'], ''), speakers.get(cid, []))[:2]
+            here = local[s['id']]
+            others = [n for o in on_stage[s['id']] if o != cid
+                      for n in speakers.get(o, []) + here.get(o, [])]
+            lines += _speech(texts.get(s['id'], ''), speakers.get(cid, []) + here.get(cid, []),
+                             others)[:2]
         own = [f for f in facts if f.get('subject', '').strip() == cid]
         if len(own) > MAX_FACTS_PER_CHARACTER:
             capped.append(cid)
@@ -2926,7 +3026,7 @@ def run_characters(run: Run, profile: dict, scenes: list[dict[str, str]]) -> Ste
     rel = 'reference/character-bible.md'
     if not _gate(run, [rel], '5d (character bible)'):
         return 'skipped'
-    chars, notes, sources = character_evidence(run.project_dir, scenes)
+    chars, notes, sources = character_evidence(run.project_dir, scenes, profile)
     title, title_notes = _book_title(run.project_dir)
     run.reports.extend(f'5d: {n}' for n in notes + title_notes)
     if not chars:
