@@ -567,7 +567,10 @@ class TestErrorHandling:
                             lambda: project_dir)
         mock_costs.threshold_ok = False
 
-        # Should return early without API calls
-        main(['--direct', '--scenes', 'act1-sc01'])
+        # Stops without API calls, and exits 1: it once returned normally
+        # (exit 0), so a script read the abort as a finished run
+        with pytest.raises(SystemExit) as exc:
+            main(['--direct', '--scenes', 'act1-sc01'])
+        assert exc.value.code == 1
         api_calls = mock_api.calls_for('invoke_to_file')
         assert len(api_calls) == 0

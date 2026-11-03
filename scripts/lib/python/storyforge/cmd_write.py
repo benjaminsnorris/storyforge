@@ -190,8 +190,12 @@ def main(argv=None):
         log(f'Cost forecast: ~${estimated:.2f} for {len(pending_ids)} scenes '
             f'(avg {avg_words} words, model {model}, mode {write_mode}{gated})')
         if not check_threshold(estimated):
-            log('Aborting — cost threshold exceeded.')
-            return
+            # Nothing was drafted: exit 1, so a script or chained command
+            # doesn't read the stop as a finished run
+            log(f'ERROR: the forecast (~${estimated:.2f}) is over the cost threshold '
+                f'(STORYFORGE_COST_THRESHOLD, default $100): nothing drafted. Raise it '
+                f'or draft fewer scenes.')
+            sys.exit(1)
 
     # Session start
     from datetime import datetime
