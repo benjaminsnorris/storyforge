@@ -667,3 +667,30 @@ def get_annotations(bookshelf_url: str, token: str, slug: str,
         raise RuntimeError(
             f'Bookshelf annotations connection failed: {e}'
         ) from e
+
+
+def get_digest(bookshelf_url: str, token: str, slug: str) -> dict | None:
+    """What is live for a book: chapters, parts and a hash of each scene.
+
+    From `GET /api/books/<slug>/digest` (benjaminsnorris/bookshelf, the
+    publish-record PR). Returns None when Bookshelf has no book with the slug.
+
+    Raises:
+        RuntimeError: If the API returns an error, including a 404 from a
+            Bookshelf too old to have the route.
+    """
+    url = f'{bookshelf_url.rstrip("/")}/api/books/{urllib.parse.quote(slug)}/digest'
+    req = urllib.request.Request(url, headers={'Authorization': f'Bearer {token}'},
+                                 method='GET')
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors='replace') if e.fp else ''
+        if e.code == 404 and 'No book with slug' in detail:
+            return None
+        raise RuntimeError(f'Bookshelf digest failed (HTTP {e.code}): {detail}') from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f'Cannot reach Bookshelf: {e.reason}') from e
+    except OSError as e:
+        raise RuntimeError(f'Bookshelf digest connection failed: {e}') from e
