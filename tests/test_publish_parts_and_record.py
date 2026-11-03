@@ -185,6 +185,19 @@ class TestPublishRecord:
         assert 'Publish: record what is live' in log
         assert 'production/publish-record.json' in log
 
+    def test_the_record_commit_leaves_other_staged_files_alone(self, tmp_path, capsys):
+        proj = _git_project(tmp_path)
+        with open(os.path.join(proj, 'notes.md'), 'w') as f:
+            f.write('staged, not published\n')
+        subprocess.run(['git', '-C', proj, 'add', 'notes.md'], check=True)
+        _publish(proj, capsys)
+        files = subprocess.run(['git', '-C', proj, 'show', '--name-only', '--format=', 'HEAD'],
+                               capture_output=True, text=True).stdout.split()
+        assert files == ['production/publish-record.json']
+        staged = subprocess.run(['git', '-C', proj, 'diff', '--cached', '--name-only'],
+                                capture_output=True, text=True).stdout.split()
+        assert staged == ['notes.md']
+
     def test_a_failed_publish_writes_no_record(self, tmp_path, capsys):
         from storyforge import cmd_publish
         proj = _git_project(tmp_path)
@@ -230,7 +243,7 @@ class TestVerify:
         proj = _project(tmp_path, ['1', '1'], ['Volume I'])
         live = _live_from(_manifest(proj))
         code, out = _verify(proj, live, capsys)
-        assert code == 0
+        assert code == 2
         assert 'No production/publish-record.json' in out
         assert 'nothing to publish' in out
 

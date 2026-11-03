@@ -64,7 +64,8 @@ def parse_args(argv):
                         help='Compare the live book on Bookshelf with '
                              'production/publish-record.json and with what '
                              'publish would send now. Publishes nothing. Exits 1 '
-                             'when the live book differs from the record.')
+                             'when the live book differs from the record, 2 '
+                             'when there is no record.')
     parser.add_argument('--dry-run', action='store_true',
                         help='Generate manifest and show what would be published')
     # Deprecated no-op: publish no longer renders a dashboard to skip (#371)
@@ -253,7 +254,7 @@ def _record_publish(project_dir: str, manifest: dict, result: dict) -> None:
     the publish.
     """
     from storyforge.export import storyforge_version
-    from storyforge.git import commit_and_push
+    from storyforge.git import _git, _push
     from storyforge.publish_record import RECORD_PATH, build_record, write_record
     warnings: list[str] = []
     try:
@@ -269,17 +270,23 @@ def _record_publish(project_dir: str, manifest: dict, result: dict) -> None:
     if record['uncommitted_changes']:
         log('  Note: scenes, reference/ or storyforge.yaml had uncommitted '
             'changes, so what went live is not exactly the recorded commit.')
-    if commit_and_push(project_dir,
-                       f'Publish: record what is live on Bookshelf '
-                       f'({record["totals"]["scenes"]} scenes)',
-                       [RECORD_PATH]):
+    # Commit the record alone: `-- <path>` keeps anything else the author has
+    # staged out of this commit.
+    message = (f'Publish: record what is live on Bookshelf '
+               f'({record["totals"]["scenes"]} scenes)')
+    if (_git(project_dir, 'add', '--', RECORD_PATH, check=False).returncode == 0
+            and _git(project_dir, 'commit', '-m', message, '--', RECORD_PATH,
+                     check=False).returncode == 0):
+        _push(project_dir)
         log(f'  Record: {RECORD_PATH} (committed)')
     else:
         log(f'  Record: {RECORD_PATH} (written; not committed)')
 
 
 def _verify(project_dir: str, include_cover: bool) -> int:
-    """`publish --verify`: 0 when the live book matches the record, else 1."""
+    """`publish --verify`: 0 when the live book matches the record, 1 when it
+    differs (or the check failed), 2 when there is no record to check against.
+    """
     from storyforge.assembly import generate_publish_manifest
     from storyforge.bookshelf import authenticate, check_env, get_digest
     from storyforge.publish_record import (
@@ -288,7 +295,8 @@ def _verify(project_dir: str, include_cover: bool) -> int:
     record = read_record(project_dir)
     if record is None:
         log(f'No {RECORD_PATH}: this book has not been published by a '
-            f'Storyforge that records its publishes. Publish once to create it.')
+            f'Storyforge that records its publishes, so there is nothing to '
+            f'verify against (exit 2). Publish once to create it.')
 
     log('Generating publish manifest...')
     try:
@@ -319,7 +327,7 @@ def _verify(project_dir: str, include_cover: bool) -> int:
     log(f'Live: "{live.get("title")}", {len(live_chapters)} chapters, '
         f'{n_live} scenes (updated {live.get("updated_at", "?")})')
 
-    status = 0
+    status = 0 if record is not None else 2
     if record is not None:
         diffs = compare(record['chapters'], live_chapters)
         if diffs:

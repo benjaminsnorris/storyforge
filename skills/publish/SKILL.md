@@ -128,7 +128,7 @@ After a successful publish, `production/publish-record.json` records what went
 live: each chapter's title, heading and part, and a SHA-256 of each scene's
 HTML (no prose). It is committed. `storyforge publish --verify` asks Bookshelf
 for the live book's digest and compares the two. It exits 1 when the live book
-differs from the record, and lists what the project would change on the next
+differs from the record (2 when there is no record yet), and lists what the project would change on the next
 publish. Use it when the author asks whether the live book is current.
 
 Book parts ("Book I: Miss Brooke") come from `storyforge.yaml`'s `parts:` and
