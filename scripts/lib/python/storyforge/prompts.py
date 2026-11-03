@@ -1350,7 +1350,8 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
     entering the scene) and its location, and those the scene itself has
     already established (``ledger.drafting_slice``). Facts in ``shown`` (the
     brief's ``physical_state_in``, listed above it) are left out. Empty when
-    the ledger holds nothing for the scene.
+    neither the ledger nor characters.csv's ``pronouns`` has anything for
+    the scene (an empty ledger still gives the pronouns).
 
     Logs a WARNING for a POV, on-stage or location name that isn't in the
     registries (its facts can't be found), for facts tied to a scene id
@@ -1371,7 +1372,11 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
 
     ref_dir = os.path.join(project_dir, 'reference')
     rows = ledger.load_from(ref_dir)
-    if not rows:
+    # an empty ledger still has the characters' pronouns to give (a book
+    # whose ledger isn't built yet: the pronouns are the commonest fact the
+    # gate catches a draft getting wrong)
+    if not rows and not any((r.get('pronouns') or '').strip() for r in
+                            _read_csv(os.path.join(ref_dir, 'characters.csv'))):
         return ''
     order = ledger.scene_order(project_dir)
     if scene_id not in order:

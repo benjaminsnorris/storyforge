@@ -1137,6 +1137,7 @@ def validate_structure(ref_dir: str) -> dict:
     _validate_knowledge(scenes_map, briefs_map, checks)
     _validate_pacing(scenes_map, intent_map, checks)
     _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_dir=ref_dir)
+    _validate_pronouns(ref_dir, checks)
 
     failures = [c for c in checks if not c['passed']]
     blocking_failures = [c for c in failures if c.get('severity', 'blocking') != 'advisory']
@@ -1145,6 +1146,46 @@ def validate_structure(ref_dir: str) -> dict:
         'checks': checks,
         'failures': failures,
     }
+
+
+#: What characters.csv's `pronouns` may hold, alone or as the first of a
+#: slash form (`she/her`): the drafting prompt shows it to the writer as
+#: written (`prompts._established_facts_block`)
+VALID_PRONOUNS = ('he', 'she', 'they', 'it')
+
+
+def _validate_pronouns(ref_dir: str, checks: list[dict]) -> None:
+    """characters.csv's `pronouns`: a value outside `VALID_PRONOUNS` blocks
+    (the writer would be told it); no column, or a character with none, is
+    advisory (the writer then guesses, and a wrong gender is one of the
+    commonest errors the gate catches)."""
+    path = os.path.join(ref_dir, 'characters.csv')
+    if not os.path.isfile(path):
+        return
+    rows = _read_csv(path)
+    with open(path, encoding='utf-8') as f:
+        header = f.readline().rstrip('\r\n').split('|')
+    if 'pronouns' not in header:
+        checks.append(_check(
+            'registry', 'character-pronouns', False,
+            "characters.csv has no pronouns column: the drafting prompt can't say "
+            "who is he or she, so the writer guesses",
+            severity='advisory'))
+        return
+    bad = sorted(f"{r['id']} ({r['pronouns']!r})" for r in rows
+                 if (r.get('id') or '').strip() and (r.get('pronouns') or '').strip()
+                 and r['pronouns'].strip().lower().split('/')[0].strip() not in VALID_PRONOUNS)
+    checks.append(_check(
+        'registry', 'character-pronouns-values', not bad,
+        f"characters.csv pronouns not one of {', '.join(VALID_PRONOUNS)}: {', '.join(bad)}"
+        if bad else "Every character's pronouns are valid"))
+    empty = sorted(r['id'].strip() for r in rows
+                   if (r.get('id') or '').strip() and not (r.get('pronouns') or '').strip())
+    checks.append(_check(
+        'registry', 'character-pronouns-missing', not empty,
+        f"Characters with no pronouns (the writer guesses): {', '.join(empty)}"
+        if empty else "Every character has pronouns",
+        severity='advisory'))
 
 
 # Gap group definitions: which fields belong to which group

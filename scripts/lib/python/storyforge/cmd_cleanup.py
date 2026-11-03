@@ -158,9 +158,9 @@ ALWAYS_OPTIONAL_CSV_FILES: set[str] = {
 #: broken. Sourced from the owning module so the two cannot drift.
 OPTIONAL_CSV_COLUMNS: dict[str, set[str]] = {
     'reference/illustration-plan.csv': set(OPTIONAL_PLAN_COLUMNS),
-    # Plan §3.1 adds it; no book has it yet, and no writer fills it, so its
-    # absence is not a finding (an author's `pronouns` column is no longer
-    # an unexpected one)
+    # Plan §3.1 adds it; the author fills it (no writer does yet), so its
+    # absence is not a cleanup finding: `validate` reports it as advisory
+    # (`elaborate._validate_pronouns`) and checks its values
     'reference/characters.csv': {'pronouns'},
     # Added to the schema after projects existed; elaborate and extract add
     # them on their next write of the file
