@@ -1076,6 +1076,12 @@ def build_shared_context(project_dir: str, model: str = '') -> list[dict]:
             tier2_blocks.append({'type': 'text', 'text': f'=== {label} ===\n\n{content}'})
             tier2_chars += len(content) + len(label) + 10
 
+    # An adaptation's source bibles (#477); none without a `source:` block
+    from storyforge.prompts_source import bibles_text
+    for label, content in bibles_text(project_dir):
+        tier2_blocks.append({'type': 'text', 'text': f'=== {label} ===\n\n{content}'})
+        tier2_chars += len(content) + len(label) + 10
+
     # --- Apply cache_control breakpoints ---
     blocks = []
 

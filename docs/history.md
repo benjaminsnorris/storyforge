@@ -168,6 +168,18 @@ Set `project.medium: graphic-novel` in storyforge.yaml at init time to switch a 
 
 See the design spec: `docs/superpowers/specs/2026-05-20-graphic-novel-mode-design.md`.
 
+## Adaptations — the `source:` block (#477)
+
+An adaptation is a Storyforge project whose `storyforge.yaml` names another Storyforge project as its source. Decisions to keep:
+
+- **The source ledger is never merged into the project's.** `storyforge source import` writes only under `reference/source/<slug>/`. Each import is planned in memory, then swapped in whole (`.importing` and `.replaced` siblings), so a failed import leaves the old copy as it was. With several sources, every source is planned before any is written. A name map or rules file kept inside `reference/source/<slug>/` is refused, because the next import would delete it.
+- **The name map renames data, never source prose.** CSV and bible text is renamed by whole word, case-sensitive and longest name first. Id columns map by id, then by name. Rows with an empty `source_id` rename text only: the evals Homer maps needed these for names that appear only in prose fields (`Ilius`, `Pallas`, `Vulcan`). Source prose stays byte-identical, and the prompts carry a note listing the changed names. Scene ids keep their source names because ids are permanent.
+- **Import before spend.** Every prompt builder that reads a source calls `require_imported`, so a command stops before an API call instead of paying for a prompt that says the novel has a source but holds none of it.
+- **Coverage.** Scenes marked cut or merged don't cover a source scene. A `reorder` is checked against timeline days within one source only, because day numbers from different sources can't be compared.
+- **`mode`.** `faithful` blocks on uncovered or unreasoned source scenes, and revise fixes drift. `free` makes those advisory and reports drift without fixing it.
+- **Drift reaches revise.** Source-fidelity results carry a hash of the brief or prose they scored. Revise names results that are stale or missing rather than acting on them, and its polish loop checks drift before declaring convergence, so clean craft scores can't hide drift.
+- **Projects without a source don't change.** Golden snapshots in `tests/fixtures/golden-prompts/` fix the elaboration prompts to what `main` produced before #477. `validate --json` gains a `source` key only when a block exists.
+
 ## Interior Illustrations (prose books)
 
 `storyforge illustrate` handles interior art for prose books — distinct from the cover, and distinct from GN mode's page pipeline (which it refuses to run on). See benjaminsnorris/storyforge#278.

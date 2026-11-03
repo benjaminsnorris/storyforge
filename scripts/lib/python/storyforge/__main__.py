@@ -86,6 +86,7 @@ COMMANDS = {
     'scenes-setup': 'storyforge.cmd_scenes_setup',
     'scenes-export': 'storyforge.cmd_scenes_export',
     'scenes-import': 'storyforge.cmd_scenes_import',
+    'source': 'storyforge.cmd_source',
     'sync': 'storyforge.cmd_sync',
     'status': 'storyforge.cmd_status',
     'publish': 'storyforge.cmd_publish',
@@ -184,12 +185,14 @@ def _dispatch(module) -> None:
 
     A ``ledger.LedgerError`` (knowledge.csv or physical-states.csv still on
     disk, or a ledger with a duplicate or blank id, a bad header or a short
-    row) exits 1 with its message rather than a traceback.
+    row) exits 1 with its message rather than a traceback, as does a
+    ``source.SourceError`` (a `source:` block or name map that can't be used).
     """
     from storyforge.ledger import LedgerError
+    from storyforge.source import SourceError
     try:
         code = module.main(sys.argv[1:])
-    except LedgerError as e:
+    except (LedgerError, SourceError) as e:
         # A command with no up-front check reached the registries: stop as
         # plainly as the ones that check
         print(f'ERROR: {e}', file=sys.stderr)

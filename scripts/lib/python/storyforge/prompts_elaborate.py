@@ -72,6 +72,11 @@ def _existing_refs(project_dir: str) -> str:
         if content.strip():
             sections.append(f"### {label}\n\n{content.strip()}")
 
+    # An adaptation's source bibles (#477); none without a `source:` block
+    from .prompts_source import bibles_text
+    for label, content in bibles_text(project_dir):
+        sections.append(f"### {label}\n\n{content}")
+
     return '\n\n'.join(sections) if sections else '(no reference materials yet)'
 
 
@@ -122,6 +127,9 @@ def build_spine_prompt(project_dir: str, plugin_dir: str, seed: str = '',
         seed = read_yaml_field(yaml_path, 'project.logline') or ''
 
     refs_section = f'\n## Existing Reference Materials\n\n{refs}\n' if refs else ''
+    from .prompts_source import spine_section
+    src = spine_section(project_dir)
+    refs_section += f'\n{src}\n' if src else ''
 
     return f"""You are building the spine of a novel — the 5-10 irreducible story events that must happen.
 
@@ -213,6 +221,9 @@ def build_architecture_prompt(project_dir: str, plugin_dir: str,
 
     registries_section = f'\n\n{registries_text}\n' if registries_text else ''
     refs_section = f'\n## Reference Materials\n\n{refs}\n' if refs else ''
+    from .prompts_source import architecture_section
+    src = architecture_section(project_dir)
+    registries_section += f'\n{src}\n' if src else ''
 
     return f"""You are building the architecture of a novel — expanding the spine into a full structural plan.
 
@@ -321,6 +332,9 @@ def build_map_prompt(project_dir: str, plugin_dir: str,
     refs_section = f'\n## Reference Materials\n\n{refs}\n' if refs else ''
 
     lo, hi = _scene_count_range(project_dir)
+    from .prompts_source import map_section
+    src = map_section(project_dir)
+    registries_section += f'\n{src}\n' if src else ''
 
     return f"""You are mapping a novel — expanding the architecture into a complete scene-by-scene plan with locations, timeline, characters, and thread tracking.
 
@@ -412,6 +426,9 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
     registries_section = f'\n\n{registries_text}\n' if registries_text else ''
     refs_section = f'\n## Reference Materials\n\n{refs}\n' if refs else ''
     craft_section = f'\n## Craft Principles\n\n{craft}\n' if craft else ''
+    from .prompts_source import briefs_section
+    src = briefs_section(project_dir, scene_ids)
+    registries_section += f'\n{src}\n' if src else ''
 
     from .schema import OUTCOME_GUIDE   # schema imports elaborate
     return f"""You are writing the drafting contracts for a novel — the scene-level briefs that define exactly what happens in each scene, in enough detail that scenes can be drafted independently and still cohere.

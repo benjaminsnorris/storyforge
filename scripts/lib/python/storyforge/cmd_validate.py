@@ -102,6 +102,20 @@ def main(argv=None):
         for f in canon_result['other']:
             say(f'  {f["file"]}: [{f["severity"]}] {f["type"]}')
 
+    # Source coverage (#477): only for a project with a `source:` block, so
+    # every other project's report and exit code are as before
+    from storyforge import source as source_mod
+    source_result = None
+    try:
+        source_cfg = source_mod.read_config(project_dir)
+    except source_mod.SourceError as e:
+        source_cfg = None
+        source_result = {'findings': [source_mod.finding('blocking', str(e))],
+                         'lines': [], 'checked': False, 'mode': ''}
+    if source_cfg is not None:
+        source_result = source_mod.check_coverage(project_dir, source_cfg)
+        source_result['mode'] = source_cfg.mode
+
     structural_scores = None
     scores_previous = None
     if args.structural:
@@ -125,6 +139,10 @@ def main(argv=None):
         'scores': structural_scores,
         'scores_previous': scores_previous,
     }
+    if source_result is not None:
+        # Only an adaptation's report has the key: --json for every other
+        # project is unchanged
+        combined['source'] = source_result
 
     if args.json_output:
         print(json.dumps(combined))
@@ -136,8 +154,10 @@ def main(argv=None):
     schema_ok = schema is None or schema['failed'] == 0
     illustrations_ok = not illus_result['errors']
     canon_ok = not canon_result['errors']
+    source_ok = source_result is None or not any(
+        f['severity'] == 'blocking' for f in source_result['findings'])
     sys.exit(0 if structural_ok and schema_ok and illustrations_ok and canon_ok
-             else 1)
+             and source_ok else 1)
 
 
 def _status_logger(args):
@@ -214,6 +234,23 @@ def _print_human_readable(combined):
                         print(f'    {e["row"]} | {e["column"]}: "{unresolved}" — not in scenes.csv')
                     elif e['constraint'] == 'ledger':
                         print(f'    {e["reason"]}')
+
+    source = combined.get('source')
+    if source is not None:
+        blocking = [f for f in source['findings'] if f['severity'] == 'blocking']
+        print()
+        mode = f' ({source["mode"]})' if source.get('mode') else ''
+        print(f'--- Source coverage{mode} ---')
+        for line in source['lines']:
+            print(f'  {line}')
+        if source['checked'] and not source['findings']:
+            print('  Passed')
+        elif source['findings']:
+            print(f'  {len(blocking)} blocking, '
+                  f'{len(source["findings"]) - len(blocking)} advisory:')
+        for f in source['findings']:
+            where = f' {f["scene_id"]}:' if f['scene_id'] else ''
+            print(f'    [{f["severity"]}]{where} {f["message"]}')
 
     if flashbacks:
         share = sum(f['share'] for f in flashbacks)
