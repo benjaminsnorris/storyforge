@@ -492,6 +492,25 @@ def gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | No
                check_model: str | None = None,
                introduced_by: str | None = None,
                before: Snapshot | None = None) -> GateResult:
+    """`_gate_scene`, with its model calls (extraction, the persistence check,
+    every reading of the check) written to the cost ledger as `gate` rows for
+    the scene, whether or not it finishes (F-151)."""
+    from storyforge import api
+    with api.metered() as meter:
+        try:
+            return _gate_scene(project_dir, scene_id, command=command, prose=prose,
+                               log_dir=log_dir, extract_model=extract_model,
+                               check_model=check_model, introduced_by=introduced_by,
+                               before=before)
+        finally:
+            meter.log(project_dir, 'gate', scene_id)
+
+
+def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | None = None,
+                log_dir: str, extract_model: str | None = None,
+                check_model: str | None = None,
+                introduced_by: str | None = None,
+                before: Snapshot | None = None) -> GateResult:
     """Extract, halt, check and (if all clear) commit `scene_id`'s prose:
     `prose`, or the scene file when None. `command` is the command that
     wrote the prose (one of `GATE_COMMANDS`), recorded as the new rows'
@@ -974,6 +993,7 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             carries the first run as `.first` (None when the first run itself
             failed), so its findings can still be reported.
     """
+    from storyforge import api
     os.makedirs(log_dir, exist_ok=True)
     first = gate_scene(project_dir, scene_id, command=command, prose=prose, log_dir=log_dir,
                        extract_model=extract_model, check_model=check_model, before=before)
@@ -991,9 +1011,13 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                          if _quoted_in(p, current)]
             edits: list[dict] = []
             try:
-                fixed = fix_scene(scene_id, current, result, log_dir=run_dir,
-                                  model=fix_model, protected=protected,
-                                  earlier=tuple(rounds), edits_out=edits)
+                with api.metered() as meter:
+                    try:
+                        fixed = fix_scene(scene_id, current, result, log_dir=run_dir,
+                                          model=fix_model, protected=protected,
+                                          earlier=tuple(rounds), edits_out=edits)
+                    finally:
+                        meter.log(project_dir, 'gate-fix', scene_id)
             except GateError as e:
                 if n == 1:
                     raise
