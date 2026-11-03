@@ -5,7 +5,7 @@ the drift check (rethink plan §5 Phase 3: E2 precision >= 0.8)."""
 import os
 
 import e2
-from harness import Gate, Suite, SuiteOutput
+from harness import Suite, SuiteOutput
 
 BOOK = 'carol'
 
@@ -19,9 +19,7 @@ def run(ctx):
     detector = e2.GateChecker()
     case_flags, control_flags = e2.run_detector(BOOK, detector, ctx.work_dir, cases)
     result = e2.score(cases, case_flags, control_flags, e2.reading_order(book_dir))
-    gates = [Gate(f'recall_{code}', result['by_code'].get(code, {}).get('recall_code_match', 0.0),
-                  '>=', e2.RECALL_GATE) for code in e2.GATED_CODES]
-    gates.append(Gate('precision', e2.precision_gate_value(result['metrics']), '>=', e2.PRECISION_GATE))
+    gates, floor_notes = e2.floor_gates('e2-carol-checker', result)
     missed = sorted(cid for cid, hit in result['detected'].items() if not hit)
     notes = ['detector: the gate checker (contradictions; no brief promises)',
              f'missed {len(missed)} of {result["metrics"]["cases"]}: {", ".join(missed)}',
@@ -30,7 +28,8 @@ def run(ctx):
                                       if detector.unverified else '')]
     notes.append(f'{result["metrics"]["control_flags"]} flag(s) on unedited controls; '
                  f'{result["metrics"]["benign_flagged"]} benign case(s) flagged')
-    return SuiteOutput(metrics=result['metrics'], by_code=result['by_code'], gates=gates, notes=notes)
+    return SuiteOutput(metrics=result['metrics'], by_code=result['by_code'], gates=gates,
+                       notes=floor_notes + notes)
 
 
 SUITE = Suite('e2-carol-checker', 'The gate checker on errors injected into A Christmas Carol', run)

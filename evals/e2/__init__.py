@@ -49,10 +49,26 @@ from typing import Callable
 EVALS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES_DIR = os.path.join(EVALS_DIR, 'fixtures')
 ERROR_CODES = ('PHY', 'TIM', 'KNO', 'REL', 'TRT', 'WLD', 'PRM', 'VOI')
-# The plan's shipping gate for the checker (rethink plan §4.2)
+# The codes the plan sets a recall target for (rethink plan §4.2)
 GATED_CODES = ('PHY', 'TIM', 'KNO', 'REL', 'TRT')
-RECALL_GATE = 0.9
-PRECISION_GATE = 0.8
+#: The plan's targets (§4.2). No detector meets them, so they are notes, not
+#: gates: a gate no run passes says nothing (#488, as E7 in v1.123.0).
+RECALL_TARGET = 0.9
+PRECISION_TARGET = 0.8
+#: The gates: each suite's replayed values, which must not change unseen
+#: (#488). A change that moves one fails until the floor moves with it in
+#: the same commit, up for a gain (so no slack hides a later loss) and down
+#: only as a visible decision (tests/test_evals_e2.py pins the lowest).
+FLOORS = {
+    'e2-carol': {'recall_PHY': 0.0, 'recall_TIM': 0.0, 'recall_KNO': 0.0,
+                 'recall_REL': 0.0, 'recall_TRT': 0.0, 'precision': 0.0},
+    'e2-carol-checker': {'recall_PHY': 0.6667, 'recall_TIM': 0.8, 'recall_KNO': 1.0,
+                         'recall_REL': 0.8, 'recall_TRT': 0.5, 'precision': 0.7742},
+    'e2-corpus-drift': {'recall_PHY': 0.0, 'recall_TIM': 0.1667, 'recall_KNO': 0.0,
+                        'recall_REL': 0.0, 'recall_TRT': 0.0, 'precision': 0.4},
+    'e2-corpus-validate': {'recall_PHY': 0.4286, 'recall_TIM': 0.0, 'recall_KNO': 0.0,
+                           'recall_REL': 0.0, 'recall_TRT': 0.0, 'precision': 0.0305},
+}
 # Below this many distinct flags, precision is noise and the gate fails
 MIN_FLAGS_FOR_PRECISION = 5
 
@@ -236,6 +252,31 @@ def score(cases: list[dict], case_flags: dict[str, list[dict]],
         'by_code': by_code,
         'detected': code_matched,
     }
+
+
+def floor_gates(suite: str, result: dict) -> tuple[list, list[str]]:
+    """The suite's gates (each value equals its `FLOORS` entry) and notes:
+    which floor to move when one changed, and how far each value is from
+    the plan's target."""
+    from harness import Gate
+    values = {f'recall_{code}': result['by_code'].get(code, {}).get('recall_code_match', 0.0)
+              for code in GATED_CODES}
+    values['precision'] = precision_gate_value(result['metrics'])
+    floors = FLOORS[suite]
+    gates = [Gate(name, value, '==', floors[name]) for name, value in values.items()]
+    notes = [f'{name} {value}, FLOORS {floors[name]}: '
+             + (f'raise its floor to {value} in the same commit' if value > floors[name]
+                else 'a regression; lowering the floor is a decision (see FLOORS)')
+             for name, value in values.items() if value != floors[name]]
+    short = [name for name, value in values.items()
+             if value < (PRECISION_TARGET if name == 'precision' else RECALL_TARGET)]
+    if short:
+        notes.append(f'below the plan target (recall {RECALL_TARGET} per code, precision '
+                     f'{PRECISION_TARGET}), not gated: {", ".join(short)}')
+    if not any(floors.values()):
+        notes.append('every floor is 0: this detector finds none of these cases, so '
+                     'there is nothing yet for a regression to lose')
+    return gates, notes
 
 
 def precision_gate_value(metrics: dict) -> float:

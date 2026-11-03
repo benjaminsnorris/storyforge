@@ -34,9 +34,11 @@ from e8 import (DATA_FAMILIES, GATE_COUNT_KEYS, PassHalted, family, judge, prepa
 from harness import Gate, Suite, SuiteOutput
 
 MIN_REPLAYED = 15  # below this the rate is too noisy to gate on
-#: A judgement, set before the calendar re-record's result: E6's runs predate
-#: the gate, so the spread of the unflagged count itself is unmeasured
-MAX_UNFLAGGED = 2
+#: A judgement, set at 2 before the calendar re-record's result; that
+#: recording (v1.127.0) passes 3, which Ben accepted (2026-11-02) as
+#: which-cases-reintroduce noise, so 3 is the ceiling (#488). E6's runs
+#: predate the gate, so the unflagged count's spread is unmeasured
+MAX_UNFLAGGED = 3
 
 
 def run(ctx):

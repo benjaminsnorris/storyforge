@@ -342,6 +342,14 @@ def test_reintroductions_the_gate_listed_are_flagged_not_unflagged(monkeypatch, 
     assert gates['reintroduced_unflagged'].passed     # 2 is within the gate
 
 
+def test_the_unflagged_ceiling_is_the_accepted_three():
+    """#488: v1.127.0's recording passes 3, accepted 2026-11-02; raising the
+    ceiling again is a second, visible edit here."""
+    import importlib
+    suite = importlib.import_module('suites.e8_revision_safety')
+    assert suite.MAX_UNFLAGGED == 3
+
+
 def test_a_naturalness_fix_that_rewrites_nothing_is_pass_halted_with_why(monkeypatch):
     from storyforge import cmd_revise
     monkeypatch.setattr(cmd_revise, '_fix_upstream_briefs',

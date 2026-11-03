@@ -4,7 +4,7 @@ text, against the current detector (rethink plan §4.2). See ``evals/e2``."""
 import os
 
 import e2
-from harness import Gate, Suite, SuiteOutput
+from harness import Suite, SuiteOutput
 
 BOOK = 'carol'
 DETECTOR = 'drift-check'
@@ -18,9 +18,7 @@ def run(ctx):
         raise ValueError('e2-carol fixtures: ' + '; '.join(problems))
     case_flags, control_flags = e2.run_detector(BOOK, e2.DETECTORS[DETECTOR], ctx.work_dir, cases)
     result = e2.score(cases, case_flags, control_flags, e2.reading_order(book_dir))
-    gates = [Gate(f'recall_{code}', result['by_code'].get(code, {}).get('recall_code_match', 0.0),
-                  '>=', e2.RECALL_GATE) for code in e2.GATED_CODES]
-    gates.append(Gate('precision', e2.precision_gate_value(result['metrics']), '>=', e2.PRECISION_GATE))
+    gates, floor_notes = e2.floor_gates('e2-carol', result)
     missed = sorted(cid for cid, hit in result['detected'].items() if not hit)
     flagged = result['metrics']['flags_true'] + result['metrics']['flags_false']
     notes = [f'detector: {DETECTOR}',
@@ -30,7 +28,8 @@ def run(ctx):
     if flagged < e2.MIN_FLAGS_FOR_PRECISION:
         notes.append(f'{flagged} distinct flag(s), fewer than {e2.MIN_FLAGS_FOR_PRECISION}: '
                      'the precision gate counts precision as 0')
-    return SuiteOutput(metrics=result['metrics'], by_code=result['by_code'], gates=gates, notes=notes)
+    return SuiteOutput(metrics=result['metrics'], by_code=result['by_code'], gates=gates,
+                       notes=floor_notes + notes)
 
 
 SUITE = Suite('e2-carol', 'Detection of labelled errors injected into A Christmas Carol', run)
