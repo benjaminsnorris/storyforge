@@ -232,10 +232,50 @@ class TestReview443:
             return gate.Recheck(failed='act1-sc02', why='x', left=['act1-sc02'])
         monkeypatch.setattr(gate, 'recheck_pending', recheck)
         gate.mark_pending(setup, 'act1-sc02', 'recheck', 're-check: x')
-        main(['--force', '--scenes', 'act1-sc01'])
+        # The draft is in, but a re-check it owed failed: not a finished run
+        # (it exited 0 once, as if nothing were left)
+        with pytest.raises(SystemExit) as exc:
+            main(['--force', '--scenes', 'act1-sc01'])
+        assert exc.value.code == 1
         out = capsys.readouterr().out
         assert 'the re-check of act1-sc02 did not pass' in out
+        assert 're-checks this run owed and did not finish' in out
+        assert 'act1-sc02 (re-checked after act1-sc01 and did not pass: x)' in out
         assert gate.pending(setup)['act1-sc02']['command'] == 'recheck'
+
+    def test_rechecks_left_over_the_cost_threshold_exit_1(self, setup, monkeypatch, capsys):
+        """Re-checks the threshold kept from running were only a WARNING
+        mid-log, and the run exited 0 (the meridian-line pilot)."""
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        _gate(monkeypatch, {'act1-sc01': True})
+        monkeypatch.setattr(gate, 'recheck_pending', lambda pd, **k: gate.Recheck(
+            over_budget=True, left=['new-x1', 'new-x2']))
+        gate.mark_pending(setup, 'new-x1', 'recheck', 're-check: x')
+        with pytest.raises(SystemExit) as exc:
+            main(['--force', '--scenes', 'act1-sc01'])
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert '2 scene(s) listed for a re-check, not run: over the cost threshold ' \
+            '(new-x1, new-x2)' in out
+        assert 'storyforge check --pending' in out
+        assert 'scene(s) not drafted' not in out   # the drafts are in
+
+    def test_a_deferral_a_later_recheck_clears_is_not_reported(self, setup, monkeypatch,
+                                                               capsys):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
+        _gate(monkeypatch, {'act1-sc01': True, 'act1-sc02': True})
+        runs = iter([gate.Recheck(over_budget=True, left=['new-x1']),
+                     gate.Recheck(passed=['new-x1'])])
+
+        def recheck(pd, **k):
+            run = next(runs)
+            if run.passed:
+                gate.clear_pending(pd, 'new-x1')
+            return run
+        monkeypatch.setattr(gate, 'recheck_pending', recheck)
+        gate.mark_pending(setup, 'new-x1', 'recheck', 're-check: x')
+        main(['--force', '--scenes', 'act1-sc01,act1-sc02'])   # no SystemExit
+        assert 'did not finish' not in capsys.readouterr().out
 
     def test_a_pending_id_that_is_no_longer_a_scene_warns_and_does_not_block(
             self, setup, monkeypatch, capsys):
