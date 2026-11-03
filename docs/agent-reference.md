@@ -137,7 +137,7 @@ Commands (`storyforge <name>`; full flag notes in `docs/history.md`):
 | `enrich`, `timeline`, `repetition` | Metadata enrichment, timeline, cross-chapter repetition |
 | `cleanup` | Project health; `--scenes`, `--csv`, `--dry-run` |
 | `assemble` | Chapters + epub/PDF/HTML (GN: artist handoff bundle). Typed dashes go to pandoc as prose means them (`assembly.prose_dashes`, also in publish's HTML): `--` an em dash (a digit range an en dash), four or more hyphens a two-em blank ("the ——shire"); scene files are never changed, break lines, table rules, HTML comments and code spans are left alone, and the visible text's length is what pandoc's own reading gave, so Bookshelf's highlight offsets don't move |
-| `publish`, `annotations`, `visualize` | Bookshelf publish, reader annotations, dashboard data (see Dashboard data) |
+| `publish`, `annotations`, `visualize` | Bookshelf publish, reader annotations, dashboard data (see Dashboard data). Each chapter's manifest entry carries its book part (`{number, title}`, from `storyforge.yaml`'s `parts:`, which `scenes-setup` fills from the manuscript's part headings when they hold chapters). A successful publish writes and commits `production/publish-record.json` (`publish_record.py`: each chapter's title, heading and part and a SHA-256 of each scene's `content_html`, no prose); `publish --verify` compares Bookshelf's `GET /api/books/{slug}/digest` with it (exit 1 on a difference) and lists what the project would change |
 | `export` | The book's structured state as one versioned JSON bundle (see Export bundle) |
 | `cover`, `illustrate` | Cover; interior illustrations (prose only) |
 | `scenes-setup` (`scenes`), `scenes-export`, `scenes-import`, `sync` | Scene files and CSV ↔ `scenes-review.md` round-trip |

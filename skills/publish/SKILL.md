@@ -74,6 +74,7 @@ Delegate to the `storyforge publish` command. Always offer two options:
 | `--skip-visualize` | Deprecated no-op — publish no longer renders a dashboard |
 | `--annotations` | Fetch and display reader annotations after publishing |
 | `--dry-run` | Report what would publish and upload, and upload nothing |
+| `--verify` | Check the live book against `production/publish-record.json` and the project; publishes nothing |
 
 Default behavior (no flags): publish content, dashboard, cover, and any
 ingested illustrations.
@@ -120,6 +121,19 @@ blocked at this step is intact rather than half-published.
 
 `--dry-run` performs no negotiation and no upload. It checks every declared
 asset against its local file and reports which ones would block the publish.
+
+## What is live: the publish record
+
+After a successful publish, `production/publish-record.json` records what went
+live: each chapter's title, heading and part, and a SHA-256 of each scene's
+HTML (no prose). It is committed. `storyforge publish --verify` asks Bookshelf
+for the live book's digest and compares the two. It exits 1 when the live book
+differs from the record, and lists what the project would change on the next
+publish. Use it when the author asks whether the live book is current.
+
+Book parts ("Book I: Miss Brooke") come from `storyforge.yaml`'s `parts:` and
+the chapter map's `part` column; Bookshelf prints a part's title above the
+chapter that opens it.
 
 ## Step 5: Report Results
 
