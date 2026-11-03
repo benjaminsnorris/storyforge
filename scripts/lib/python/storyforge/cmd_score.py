@@ -114,6 +114,12 @@ def parse_args(argv):
     parser.add_argument('--bible-consistency', action='store_true',
                         help='LLM-check each drafted scene against the project '
                              'bibles (character/world/voice). On-demand only.')
+    parser.add_argument('--source-fidelity', choices=('briefs', 'prose'), default=None,
+                        help='Adaptations only (a source: block): check the briefs '
+                             '(before any prose) or the prose against the source '
+                             'scenes they adapt, and nothing else. A full scoring '
+                             'run (without --principles/--deterministic) already '
+                             'checks the prose.')
     parser.add_argument('--story-power', action='store_true',
                         help='Run the story-power scorecard (8 craft axes) on '
                              'logline + synopsis + theme + spine + architecture. '
@@ -473,6 +479,9 @@ def main(argv=None):
             or args.story_power):
         _run_elaboration_scoring(args)
         return
+    if args.source_fidelity:
+        _run_source_fidelity_only(args)
+        return
 
     from datetime import datetime
     session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
@@ -531,6 +540,16 @@ def main(argv=None):
         eval_model = opus_model
 
     log(f'Mode: {score_mode}, Model: {eval_model}')
+
+    # An adaptation (#477): read the block before anything is spent
+    from storyforge import source as source_mod
+    try:
+        source_cfg = source_mod.read_config(project_dir)
+        if source_cfg is not None:
+            source_mod.require_imported(project_dir, source_cfg)
+    except source_mod.SourceError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
 
     # Build shared context once for all API calls (prompt caching)
     system = build_shared_context(project_dir, model=eval_model)
@@ -761,6 +780,11 @@ def main(argv=None):
             filtered_ids, project_dir, scenes_dir, log_dir, cycle_dir,
             briefs_csv, score_mode, sonnet_model, plugin_dir, system=system,
         )
+
+    # Source fidelity (#477): an adaptation's prose against its source
+    if not targeted_principles and source_cfg is not None:
+        _run_source_fidelity(scene_ids, 'prose', project_dir, plugin_dir, cycle_dir,
+                             log_dir, sonnet_model, system, args.parallel)
 
     # =========================================================================
     # Act-level scoring (skip when targeting specific principles)
@@ -1561,6 +1585,123 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
                     f'({d["weak_count"]}/{d["total_scenes"]} weak)')
     else:
         log('  No fidelity results to process')
+
+
+def _run_source_fidelity(scene_ids, target, project_dir, plugin_dir, cycle_dir, log_dir,
+                         model, system, parallel) -> bool:
+    """Run source fidelity on the scenes; a scene it couldn't score is named
+    and counted in `_incomplete`. Returns True when every check that ran gave
+    a result."""
+    from storyforge import source as source_mod, source_fidelity
+    log(f'Running source fidelity on {"briefs" if target == "brief" else "prose"}...')
+    try:
+        results, skipped, failed = source_fidelity.run(
+            project_dir, scene_ids, target, plugin_dir=plugin_dir, out_dir=cycle_dir,
+            log_dir=log_dir, model=model, system=system, parallel=parallel)
+    except Exception as e:
+        # Anything, not only SourceError: in a full run the craft scores are
+        # already paid for, and the cycle still has to be marked and committed
+        log(f'  WARNING: source fidelity not run: {type(e).__name__}: {e}')
+        _incomplete.append(f'source fidelity: {e}')
+        return False
+    source_fidelity.report(results, skipped, failed, target)
+    if failed:
+        _incomplete.append(f'source fidelity: {", ".join(failed)}')
+    return not failed
+
+
+def _run_source_fidelity_only(args) -> None:
+    """`score --source-fidelity briefs|prose`: source fidelity alone, into
+    this cycle's directory (merged with what is there)."""
+    from storyforge import source as source_mod
+    from storyforge.ledger import exit_if_not_migrated
+
+    project_dir = detect_project_root()
+    exit_if_not_migrated(project_dir)
+    try:
+        cfg = source_mod.read_config(project_dir)
+    except source_mod.SourceError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    if cfg is None:
+        log('ERROR: --source-fidelity needs a `source:` block in storyforge.yaml '
+            '(this project adapts nothing)')
+        sys.exit(1)
+    target = 'brief' if args.source_fidelity == 'briefs' else 'prose'
+    metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    filter_mode, filter_value, _ = _resolve_filter(args)
+    scene_ids = apply_scene_filter(metadata_csv, build_scene_list(metadata_csv),
+                                   filter_mode, filter_value)
+    plugin_dir = get_plugin_dir()
+    model = select_model('evaluation')
+
+    from storyforge import source_fidelity
+    try:
+        rows = source_mod.read_source_map(project_dir)
+        if rows is None:
+            raise source_mod.SourceError(f'there is no reference/{source_mod.SOURCE_MAP} '
+                                         f'yet (elaborate --stage map writes it)')
+        rules = source_mod.read_rules(project_dir, cfg)
+    except source_mod.SourceError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    by_scene = source_mod.map_rows_by_scene(rows)
+    try:
+        source_mod.require_imported(project_dir, cfg)
+    except source_mod.SourceError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    cat = source_mod.catalogue(project_dir, cfg)
+    plans = [source_fidelity.plan_scene(project_dir, sid, target, plugin_dir, cfg,
+                                        by_scene, rules, cat=cat) for sid in scene_ids]
+    todo = [p for p in plans if not p.skip]
+    words = (sum(len(p.prompt.split()) for p in todo) // len(todo)) if todo else 0
+    cost = estimate_cost('fidelity', len(todo), words, model)
+    log(f'Source fidelity ({args.source_fidelity}): {len(todo)} of {len(scene_ids)} '
+        f'scenes to check, ~${cost:.2f} ({model})')
+    for p in plans:
+        if p.skip:
+            log(f'  {"ERROR" if p.broken else "not checked"}: {p.scene_id} ({p.skip})')
+    if args.dry_run:
+        return
+    if not todo:
+        log('ERROR: nothing to check' + ('' if scene_ids else ' (no scene matched the filter)'))
+        sys.exit(1)
+    if not check_threshold(cost):
+        log('Cost threshold check declined. Aborting.')
+        sys.exit(1)
+    _check_llm_preconditions('--source-fidelity', dry_run=False)
+
+    create_branch('score', project_dir)
+    ensure_branch_pushed(project_dir)
+    # Into the latest scored cycle when there is one; a new cycle holding
+    # only these files is marked incomplete so it never reads as the latest
+    # craft scores (project.latest_scores)
+    latest = os.path.join(project_dir, 'working', 'scores', 'latest')
+    new_cycle = not os.path.islink(latest)
+    if new_cycle:
+        cycle_dir = os.path.join(project_dir, 'working', 'scores',
+                                 f'cycle-{_determine_cycle(project_dir)}')
+    else:
+        cycle_dir = os.path.realpath(latest)
+    os.makedirs(cycle_dir, exist_ok=True)
+    log_dir = os.path.join(project_dir, 'working', 'logs')
+    system = build_shared_context(project_dir, model=model)
+    _incomplete.clear()
+    ok = _run_source_fidelity(scene_ids, target, project_dir, plugin_dir, cycle_dir,
+                              log_dir, model, system, args.parallel)
+    if new_cycle:
+        from storyforge.project import mark_cycle_incomplete
+        mark_cycle_incomplete(cycle_dir, ['scene scores: not run (score --source-fidelity '
+                                          'only)'] + _incomplete)
+    rel = os.path.relpath(cycle_dir, project_dir)
+    commit_and_push(project_dir, f'Score: source fidelity ({args.source_fidelity}), '
+                                 f'{os.path.basename(cycle_dir)}', ['working/'])
+    log(f'Results: {rel}/{source_fidelity.SCORES_FILE}')
+    if not ok:
+        for item in _incomplete:
+            log(f'  incomplete: {item}')
+        sys.exit(1)
 
 
 def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
