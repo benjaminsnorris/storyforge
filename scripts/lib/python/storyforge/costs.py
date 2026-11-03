@@ -255,9 +255,10 @@ def _print_section(label: str, count: int, totals: dict, session_mode: bool) -> 
         print(f'Total time:    {format_duration(totals["dur"])}')
 
 
-def print_summary(project_dir: str, operation: str | None = None,
+def print_summary(project_dir: str, operation: str | tuple[str, ...] | None = None,
                   session_start: str | None = None) -> None:
-    """Print cost totals from the ledger, optionally filtered by operation.
+    """Print cost totals from the ledger, optionally filtered by operation
+    (one, or a tuple of them: `write` counts its drafts and their gate runs).
 
     If session_start (ISO timestamp string) is provided, shows two sections:
     "This session" (rows at or after session_start) and "Project total" (all rows).
@@ -281,6 +282,7 @@ def print_summary(project_dir: str, operation: str | None = None,
             print('No cost data available.')
             return
 
+        wanted = (operation,) if isinstance(operation, str) and operation else (operation or None)
         all_rows = []
         for line in f:
             line = line.strip()
@@ -290,16 +292,16 @@ def print_summary(project_dir: str, operation: str | None = None,
             op_idx = col_map['operation']
             if op_idx >= len(parts):
                 continue
-            if operation and parts[op_idx] != operation:
+            if wanted and parts[op_idx] not in wanted:
                 continue
             all_rows.append(parts)
 
+    op_label = ', '.join(wanted) if wanted else 'all operations'
     if not all_rows:
-        label = f' for operation: {operation}' if operation else ''
+        label = f' for operation: {op_label}' if wanted else ''
         print(f'No cost data{label}.')
         return
 
-    op_label = operation or 'all operations'
 
     if session_start is not None:
         ts_idx = col_map.get('timestamp', -1)

@@ -178,8 +178,17 @@ def main(argv=None):
         estimated = estimate_cost('draft', len(pending_ids), avg_words, model)
         if write_mode == 'batch':
             estimated *= 0.5  # Batch API 50% discount
+        gated = ''
+        if coaching == 'full':
+            # Every drafted scene is gated, and the gate (extraction, the
+            # persistence check, the check's readings, a fix) costs several
+            # times the draft (F-151): a gate run is what a re-check costs
+            from storyforge import gate
+            gate_cost = len(pending_ids) * gate.RECHECK_COST_PER_SCENE
+            estimated += gate_cost
+            gated = f', ~${gate_cost:.2f} of it the gate'
         log(f'Cost forecast: ~${estimated:.2f} for {len(pending_ids)} scenes '
-            f'(avg {avg_words} words, model {model}, mode {write_mode})')
+            f'(avg {avg_words} words, model {model}, mode {write_mode}{gated})')
         if not check_threshold(estimated):
             log('Aborting — cost threshold exceeded.')
             return
@@ -270,7 +279,7 @@ def main(argv=None):
     log('============================================')
 
     if not args.dry_run and drafted_count > 0:
-        print_summary(project_dir, 'draft', session_start=session_start_iso)
+        print_summary(project_dir, ('draft', 'gate', 'gate-fix'), session_start=session_start_iso)
         # Does the new prose agree with the calendar? Reported, never fixed.
         from storyforge.timeline import drift_check
         drift_check(project_dir, [sid for sid in pending_ids

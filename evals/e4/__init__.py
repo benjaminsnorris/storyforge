@@ -230,7 +230,18 @@ def prior_prose(project_dir: str) -> str:
 def brief_block(project_dir: str, scene_id: str) -> str:
     rows = {r['id']: r for r in _read_rows(os.path.join(project_dir, 'reference',
                                                         'scene-briefs.csv'))}
-    row = rows.get(scene_id, {})
+    row = dict(rows.get(scene_id, {}))
+    # A state the brief carries in and out unchanged isn't a promise: the
+    # drafting prompt and the gate's checker don't ask the scene for it (F-149)
+    from storyforge import ledger
+    from storyforge.prompts import carried_states, state_key
+    ref = os.path.join(project_dir, 'reference')
+    aliases = ledger.alias_map(ledger.view(ledger.load_from(ref), 'physical'))
+    carried = carried_states(row, aliases)
+    if carried:
+        row['physical_state_out'] = ';'.join(
+            i for i in (row.get('physical_state_out') or '').split(';')
+            if i.strip() and state_key(i, aliases) not in carried)
     return '\n'.join(f'{k}: {(row.get(k) or "").strip()}' for k in PROMISE_FIELDS
                      if (row.get(k) or '').strip())
 

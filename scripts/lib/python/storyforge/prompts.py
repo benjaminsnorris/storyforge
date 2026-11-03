@@ -1525,9 +1525,31 @@ def _without_stale_facts(scene_id: str, scene: dict, ref_dir: str) -> dict:
     return out
 
 
+def carried_states(scene: Mapping[str, str], aliases: Mapping[str, str]) -> set[str]:
+    """The brief's `physical_state_out` items it also lists in
+    `physical_state_in`, as keys (`state_key`): states the scene inherits
+    and passes on unchanged. Continuity to keep, not something the scene
+    establishes: not a must-show item (`_states_checklist`) nor a promise
+    the checker holds the scene to (`checker._brief`). F-149: a Quintus
+    draft restated a hero's honour-gifts in 7 of 10 scenes."""
+    entering = {state_key(i, aliases)
+                for i in (scene.get('physical_state_in') or '').split(';') if i.strip()}
+    return {state_key(i, aliases)
+            for i in (scene.get('physical_state_out') or '').split(';')
+            if i.strip() and state_key(i, aliases) in entering}
+
+
+def state_key(item: str, aliases: Mapping[str, str]) -> str:
+    """A brief's state item as one key: its ledger id when one matches (by
+    id or alias, any case), else its words, lowercased."""
+    item = item.strip()
+    return aliases.get(item.lower()) or item.lower()
+
+
 def _states_checklist(scene: dict, ref_dir: str) -> str:
     """The brief's `physical_state_out` as a must-show list for the drafting
-    task. An item is matched the way the gate's checker matches it
+    task, less the states it carries over unchanged (`carried_states`,
+    F-149). An item is matched the way the gate's checker matches it
     (`ledger.alias_map` over the physical view, any case): a state is
     listed by its character and description (one that isn't binding was
     already taken out, `_without_stale_facts`); anything else as written ("no sleep 36h"). The
@@ -1540,9 +1562,12 @@ def _states_checklist(scene: dict, ref_dir: str) -> str:
     rows = ledger.load_from(ref_dir)
     views = {r['id']: r for r in ledger.view(rows, 'physical')}
     aliases = ledger.alias_map(list(views.values()))
+    carried = carried_states(scene, aliases)
     names = _character_names(ref_dir)
     lines = []
     for item in items:   # non-binding facts were taken out (_without_stale_facts)
+        if state_key(item, aliases) in carried:
+            continue
         rid = aliases.get(item.lower())
         if rid is not None:
             entry = views[rid]
@@ -1555,7 +1580,7 @@ def _states_checklist(scene: dict, ref_dir: str) -> str:
         return ''
     return ('\n\n**Physical states checklist — the scene ends with each of these, and each '
             'MUST be on the page (in action, sensation, dialogue or a stated fact), not left '
-            'for the reader to infer, even when it carries over from an earlier scene:**\n'
+            'for the reader to infer:**\n'
             + '\n'.join(lines))
 
 
@@ -1850,7 +1875,12 @@ def build_scene_prompt_from_briefs(
         if state_lines:
             state_block = (
                 "## Active Physical States\n\n"
-                "Characters entering this scene carry these states:\n\n"
+                "Characters entering this scene carry these states. They hold unless the "
+                "brief changes them: keep them true, and bring one onto the page only where "
+                "the scene uses it (an action-gating state where it limits what a character "
+                "does). Don't restate them for their own sake. Where the brief has a "
+                "character do what a state rules out, the brief wins: the state ended before "
+                "this scene, so don't invent a way around it.\n\n"
                 + '\n'.join(state_lines)
             )
 
@@ -1995,7 +2025,7 @@ Do NOT follow it with a reflection, a thematic echo, or a landscape-as-metaphor 
 - Interpretive brief fields (function, motifs, motif_details, subtext, emotions, and how key_actions are phrased) are notes to you, written with hindsight. The narration may reveal only what knowledge_in and knowledge_out allow: never state a fact, motive or meaning that appears only in those notes
 - Do NOT add characters not listed in on_stage
 - Do NOT resolve threads not listed in mice_threads for this scene
-- Acknowledge all action-gating physical states — characters cannot use injured limbs, don't have lost equipment
+- Acknowledge all action-gating physical states — characters cannot use injured limbs, don't have lost equipment — unless the brief has them do it
 
 Output the scene prose only. No metadata, no frontmatter, no commentary."""
 

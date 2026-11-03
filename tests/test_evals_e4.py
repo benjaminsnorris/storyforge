@@ -56,6 +56,17 @@ def test_brief_block_lists_promise_fields_only(tmp_path):
     assert 'dread' not in block
 
 
+def test_brief_block_leaves_carried_states_out(tmp_path):
+    """F-149: a state the brief carries in and out unchanged isn't a
+    promise, as for the drafting prompt and the gate's checker."""
+    _write(tmp_path / 'reference' / 'scene-briefs.csv',
+           'id|goal|physical_state_in|physical_state_out\n'
+           'a|find it|no sleep 36h|No sleep 36h;bruised ribs\n')
+    block = e4.brief_block(str(tmp_path), 'a')
+    assert 'physical_state_out: bruised ribs' in block
+    assert 'sleep' not in block
+
+
 def test_judge_prompt_marks_the_first_scene():
     assert '(none: this is the first scene)' in e4.judge_prompt([], 'goal: g', 'a', 'prose')
     assert '<scene id="a">' in e4.judge_prompt([('a', 'earlier')], 'goal: g', 'b', 'prose')

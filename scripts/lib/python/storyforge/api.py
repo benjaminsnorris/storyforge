@@ -264,6 +264,68 @@ def _output_config(schema: dict) -> dict:
     return {'format': {'type': 'json_schema', 'schema': schema}}
 
 
+class SpendMeter:
+    """Every Messages reply sent while it is open (`metered`), as
+    ``(model, usage)``: the model that wrote the reply (a refusal fallback's,
+    when one did) and its ``extract_usage``. For callers whose model calls
+    happen in helpers that don't know the project (the gate, F-151)."""
+
+    def __init__(self):
+        self.replies: list[tuple[str, dict]] = []
+
+    def by_model(self) -> dict[str, dict]:
+        """``{model: usage summed}``, in the order the models first replied."""
+        out: dict[str, dict] = {}
+        for model, usage in self.replies:
+            total = out.setdefault(model, dict.fromkeys(usage, 0))
+            for k, v in usage.items():
+                total[k] = total.get(k, 0) + (v or 0)
+        return out
+
+    def log(self, project_dir: str, operation: str, target: str = '') -> float:
+        """One cost-ledger row per model; returns the total cost."""
+        total = 0.0
+        for model, usage in self.by_model().items():
+            cost = calculate_cost_from_usage(usage, model)
+            total += cost
+            log_operation(project_dir, operation, model, usage['input_tokens'],
+                          usage['output_tokens'], cost, target=target,
+                          cache_read=usage.get('cache_read', 0),
+                          cache_create=usage.get('cache_create', 0))
+        return total
+
+
+_meters = threading.local()
+
+
+class metered:
+    """``with api.metered() as meter:`` records every reply `_send` and
+    `converse` get on this thread until it closes. Meters nest: each open
+    one records the reply."""
+
+    def __enter__(self) -> SpendMeter:
+        self.meter = SpendMeter()
+        stack = getattr(_meters, 'stack', None)
+        if stack is None:
+            stack = _meters.stack = []
+        stack.append(self.meter)
+        return self.meter
+
+    def __exit__(self, *exc) -> bool:
+        _meters.stack.remove(self.meter)
+        return False
+
+
+def _meter(response, model: str) -> None:
+    """Record a reply in every open meter on this thread."""
+    stack = getattr(_meters, 'stack', None)
+    if not stack or not isinstance(response, dict) or not response.get('usage'):
+        return
+    entry = (fallback_model(response) or model, extract_usage(response))
+    for m in stack:
+        m.replies.append(entry)
+
+
 def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
           system: list[dict] | None, output_schema: dict | None = None,
           fallback: bool = False) -> dict:
@@ -303,6 +365,7 @@ def _send(prompt: str, model: str, max_tokens: int, label: str, timeout: int,
         response = _api_request('messages', body, method='POST', timeout=timeout)
     finally:
         heartbeat.stop()
+    _meter(response, model)
     served = fallback_model(response)
     if served:
         # Not always a fresh refusal: after one, the API routes the same
@@ -483,6 +546,7 @@ def converse(prompt: str, model: str, tools: list[dict], handlers: dict,
             response = _api_request('messages', body, method='POST', timeout=timeout)
         finally:
             heartbeat.stop()
+        _meter(response, model)
         run.responses.append(response)
         run.response = response
         if log_file:
