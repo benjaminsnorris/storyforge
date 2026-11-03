@@ -224,6 +224,51 @@ def read_part_field(part_num: int, project_dir: str, field: str) -> str:
                                       part_num, field)
 
 
+def chapter_part(chapter_num: int, project_dir: str) -> dict | None:
+    """The chapter's part as ``{'number', 'title'}``, or None.
+
+    None when the chapter map gives no part or storyforge.yaml has no title
+    for it: a part number alone (an act, or a Homer book that is its own
+    chapter) is not a book part worth printing.
+    """
+    part_str = read_chapter_field(chapter_num, project_dir, 'part').strip()
+    if not part_str.isdigit() or int(part_str) < 1:
+        return None
+    title = read_part_field(int(part_str), project_dir, 'title').strip()
+    return {'number': int(part_str), 'title': title} if title else None
+
+
+def write_parts(project_dir: str, titles: list[str]) -> bool:
+    """Write ``parts:`` (number 1..N, in order) to storyforge.yaml.
+
+    Replaces the template's commented-out example block, or appends. Leaves a
+    ``parts:`` the author already wrote alone and returns False.
+    """
+    path = os.path.join(project_dir, 'storyforge.yaml')
+    if not titles or not os.path.isfile(path):
+        return False
+    with open(path, encoding='utf-8') as f:
+        lines = f.read().split('\n')
+    if any(re.match(r'^parts:', line) for line in lines):
+        return False
+    block = ['parts:']
+    for n, title in enumerate(titles, 1):
+        block += [f'  - number: {n}', f'    title: {yaml_single_quote(title)}']
+    start = next((i for i, line in enumerate(lines) if re.match(r'^#\s*parts:', line)), None)
+    if start is not None:
+        end = start + 1
+        while end < len(lines) and re.match(r'^#\s+(-\s+number:|title:)', lines[end]):
+            end += 1
+        lines[start:end] = block
+    else:
+        if lines and lines[-1] == '':
+            lines.pop()
+        lines += [''] + block + ['']
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
+    return True
+
+
 def get_chapter_part_title(chapter_num: int, project_dir: str) -> str:
     """Return the part title for a given chapter, or empty string."""
     part_str = read_chapter_field(chapter_num, project_dir, 'part')
@@ -1402,6 +1447,12 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
         heading = read_chapter_field(ch_num, project_dir, 'heading').strip()
         if heading in _CHAPTER_HEADINGS:
             chapter_entry['heading'] = heading
+        # The book part, from storyforge.yaml's `parts:` (F-155). Sent on
+        # every chapter of the part; Bookshelf prints the title above the
+        # chapter that opens it and groups its table of contents.
+        part = chapter_part(ch_num, project_dir)
+        if part:
+            chapter_entry['part'] = part
         chapters.append(chapter_entry)
 
     # Read optional metadata from storyforge.yaml

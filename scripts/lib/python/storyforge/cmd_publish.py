@@ -19,6 +19,11 @@ Usage:
     storyforge publish --no-dashboard     # Omit the dashboard data
     storyforge publish --annotations      # Fetch and display reader annotations
     storyforge publish --dry-run          # Report what would publish and upload
+    storyforge publish --verify           # Check the live book against the record
+
+After a successful publish, `production/publish-record.json` records what went
+live (hashes, not prose) and is committed. `--verify` compares the live book
+with it, and with what publish would send now. See `storyforge.publish_record`.
 """
 
 import argparse
@@ -55,6 +60,11 @@ def parse_args(argv):
                         help='Omit the dashboard data')
     parser.add_argument('--annotations', action='store_true',
                         help='Fetch and display reader annotations after publishing')
+    parser.add_argument('--verify', action='store_true',
+                        help='Compare the live book on Bookshelf with '
+                             'production/publish-record.json and with what '
+                             'publish would send now. Publishes nothing. Exits 1 '
+                             'when the live book differs from the record.')
     parser.add_argument('--dry-run', action='store_true',
                         help='Generate manifest and show what would be published')
     # Deprecated no-op: publish no longer renders a dashboard to skip (#371)
@@ -80,6 +90,9 @@ def main(argv=None):
     if args.skip_visualize:
         log('Note: --skip-visualize is a no-op — publish sends the dashboard as '
             'data and no longer renders it.')
+
+    if args.verify:
+        sys.exit(_verify(project_dir, include_cover))
 
     # Generate manifest
     log('Generating publish manifest...')
@@ -208,6 +221,8 @@ def main(argv=None):
     log(f'  Scenes: {pub.get("scenes", 0)}')
     log(f'  Words: {pub.get("words", 0):,}')
 
+    _record_publish(project_dir, manifest, result)
+
     highlights = result.get('highlights', {})
     if highlights:
         parts = []
@@ -229,6 +244,108 @@ def main(argv=None):
     # Step 7: Fetch annotations if requested
     if args.annotations:
         _show_annotations(env, token, manifest['slug'])
+
+
+def _record_publish(project_dir: str, manifest: dict, result: dict) -> None:
+    """Write and commit production/publish-record.json for this publish.
+
+    The book is already live, so a failure here is reported and never fails
+    the publish.
+    """
+    from storyforge.export import storyforge_version
+    from storyforge.git import commit_and_push
+    from storyforge.publish_record import RECORD_PATH, build_record, write_record
+    warnings: list[str] = []
+    try:
+        record = build_record(project_dir, manifest, result,
+                              storyforge_version(warnings))
+        write_record(project_dir, record)
+    except (OSError, ValueError, KeyError) as e:
+        log(f'WARNING: the publish record could not be written ({e}). The book '
+            f'is live; `publish --verify` has nothing to check it against.')
+        return
+    for w in warnings:
+        log(f'WARNING: {w}')
+    if record['uncommitted_changes']:
+        log('  Note: scenes, reference/ or storyforge.yaml had uncommitted '
+            'changes, so what went live is not exactly the recorded commit.')
+    if commit_and_push(project_dir,
+                       f'Publish: record what is live on Bookshelf '
+                       f'({record["totals"]["scenes"]} scenes)',
+                       [RECORD_PATH]):
+        log(f'  Record: {RECORD_PATH} (committed)')
+    else:
+        log(f'  Record: {RECORD_PATH} (written; not committed)')
+
+
+def _verify(project_dir: str, include_cover: bool) -> int:
+    """`publish --verify`: 0 when the live book matches the record, else 1."""
+    from storyforge.assembly import generate_publish_manifest
+    from storyforge.bookshelf import authenticate, check_env, get_digest
+    from storyforge.publish_record import (
+        RECORD_PATH, chapters_digest, compare, read_record)
+
+    record = read_record(project_dir)
+    if record is None:
+        log(f'No {RECORD_PATH}: this book has not been published by a '
+            f'Storyforge that records its publishes. Publish once to create it.')
+
+    log('Generating publish manifest...')
+    try:
+        manifest_path = generate_publish_manifest(
+            project_dir, include_dashboard=False, include_cover=include_cover)
+    except ValueError as e:
+        log(f'Error: {e}')
+        return 1
+    with open(manifest_path) as f:
+        manifest = json.load(f)
+    slug = (record or {}).get('slug') or manifest['slug']
+
+    env = check_env()
+    try:
+        token = authenticate(env['BOOKSHELF_SUPABASE_URL'],
+                             env['BOOKSHELF_SUPABASE_ANON_KEY'],
+                             env['BOOKSHELF_EMAIL'], env['BOOKSHELF_PASSWORD'])
+        live = get_digest(env['BOOKSHELF_URL'], token, slug)
+    except RuntimeError as e:
+        log(f'Verify failed: {e}')
+        return 1
+    if live is None:
+        log(f'Bookshelf has no book "{slug}".')
+        return 1
+
+    live_chapters = live.get('chapters', [])
+    n_live = sum(len(c['scenes']) for c in live_chapters)
+    log(f'Live: "{live.get("title")}", {len(live_chapters)} chapters, '
+        f'{n_live} scenes (updated {live.get("updated_at", "?")})')
+
+    status = 0
+    if record is not None:
+        diffs = compare(record['chapters'], live_chapters)
+        if diffs:
+            status = 1
+            log(f'The live book differs from the record of '
+                f'{record.get("published_at")} in {len(diffs)} place(s):')
+            for d in diffs[:50]:
+                log(f'  {d}')
+            if len(diffs) > 50:
+                log(f'  ... and {len(diffs) - 50} more')
+        else:
+            log(f'Live matches the record: published {record.get("published_at")} '
+                f'with Storyforge {record.get("storyforge_version") or "?"} '
+                f'from commit {(record.get("project_commit") or "?")[:12]}.')
+
+    pending = compare(chapters_digest(manifest['chapters']), live_chapters)
+    if pending:
+        log(f'Not yet published: the project differs from the live book in '
+            f'{len(pending)} place(s). Run `storyforge publish` to send them.')
+        for d in pending[:20]:
+            log(f'  {d}')
+        if len(pending) > 20:
+            log(f'  ... and {len(pending) - 20} more')
+    else:
+        log('The project matches the live book: nothing to publish.')
+    return status
 
 
 def _report_asset_plan(assets: list, sources: dict) -> None:
