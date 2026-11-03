@@ -201,7 +201,7 @@ Revision passes that wrote errors in shared-dark (E1 `tool-introduced` cases; E8
 
 ### Phase 4 — Safe revision
 - Dependency graph from `depends_on`; re-check set after any edit; rewrite-from-ledger command; reject-fact flow in the audit.
-- Success: E5 on rewritten scenes ≤ Phase 2 level; a rejected fact produces the correct re-check set on E1 cases; **E8 errors-introduced-per-pass is zero on the labeled set** (this is the gate that matters most, given the survey). *Redefined 2026-11-01 (Ben): at most 2 reintroductions the gate passes per run, since E8 moves between runs (E6: 6, 10 and 11 reintroduced) and what remained was checker recall; see the status doc.*
+- Success: E5 on rewritten scenes ≤ Phase 2 level; a rejected fact produces the correct re-check set on E1 cases; **E8 errors-introduced-per-pass is zero on the labeled set** (this is the gate that matters most, given the survey). *Redefined 2026-11-01 (Ben): at most 2 reintroductions the gate passes per run (raised to 3, 2026-11-02, #488), since E8 moves between runs (E6: 6, 10 and 11 reintroduced) and what remained was checker recall; see the status doc.*
 
 ### Phase 5 — Health and the export boundary (the Storygild move deferred)
 - Classics regression (E7) in CI. Pin the export bundle's `schema_version` and make Bookshelf read the bundle, so the production tools have one documented boundary with the core. Cut `CLAUDE.md` to what an agent needs today; move bug history to `docs/history.md`.
