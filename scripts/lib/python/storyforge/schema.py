@@ -22,9 +22,20 @@ VALID_TYPES = frozenset({
 
 VALID_TIME_MODES = frozenset({'scene', 'summary', 'frame', 'vision'})
 
+#: A time of day the scene's text doesn't give: checked and left open, not
+#: forgotten (a blank is "not filled in yet"). It is no time, so every
+#: place that shows a time shows it as none (`stated_time`) (#488).
+UNSTATED_TIME = 'unstated'
+
 VALID_TIMES = frozenset({
-    'morning', 'afternoon', 'evening', 'night', 'dawn', 'dusk',
+    'morning', 'afternoon', 'evening', 'night', 'dawn', 'dusk', UNSTATED_TIME,
 })
+
+
+def stated_time(value: str | None) -> str:
+    """A `time_of_day` as a time: stripped, and '' for `unstated`."""
+    value = (value or '').strip()
+    return '' if value.lower() == UNSTATED_TIME else value
 
 VALID_ACTION_SEQUEL = frozenset({'action', 'sequel'})
 
@@ -155,7 +166,8 @@ COLUMN_SCHEMA = {
     'time_of_day': {
         'type': 'enum', 'values': VALID_TIMES,
         'file': 'scenes.csv', 'stage': 'map',
-        'description': 'Time of day when the scene takes place.',
+        'description': 'Time of day when the scene takes place; unstated when '
+                       'the scene\'s text gives none (blank means not filled in yet).',
     },
     'duration': {
         'type': 'free_text', 'file': 'scenes.csv', 'stage': 'map',

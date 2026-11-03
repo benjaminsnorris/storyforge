@@ -42,7 +42,7 @@ from typing import Callable, Literal, TypedDict, get_args
 
 from .common import is_unfilled_template, log
 #: elaborate's voice-profile.csv columns, which `validate_voice_profile` checks
-from .schema import CHAPTER_MAP_COLUMNS, VOICE_PROFILE_COLUMNS
+from .schema import CHAPTER_MAP_COLUMNS, VOICE_PROFILE_COLUMNS, stated_time
 
 PROVENANCE_FILE = os.path.join('working', 'extraction-provenance.csv')
 
@@ -2368,7 +2368,7 @@ _WHOLE_NUMBER = re.compile(r'-?[0-9]+')
 
 def _scene_line(s: dict[str, str], extra: str = '') -> str:
     when = ', '.join(x for x in (s.get('timeline_date', '').strip(),
-                                 s.get('time_of_day', '').strip()) if x)
+                                 stated_time(s.get('time_of_day'))) if x)
     what = s.get('summary', '').strip() or s.get('function', '').strip()
     return (f'- {s.get("seq", "")} `{s["id"]}`' + (f' ({when})' if when else '') + extra
             + (f': {_one_line(what)}' if what else ''))

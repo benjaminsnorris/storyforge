@@ -13,10 +13,10 @@ scrooge-confronts-marley-ghost|11|Marley's Ghost Confronts Scrooge|||1|ebenezer-
 ghost-departs-phantoms-appear|12|Phantoms Depart, Scrooge to Bed|||1|ebenezer-scrooge|scrooges-chambers|1|night|10 minutes|revelation||373|390|scene|||||
 scrooge-wakes-awaits-spirit|13|Scrooge Wakes, The First Spirit Appears|||2|ebenezer-scrooge|scrooges-chambers|1|night|approximately 1 hour|revelation||1332|1050|scene|XXXX-12-25~||||
 spirit-transports-scrooge-past|14|Scrooge Returns to His Boyhood Country|||2|ebenezer-scrooge|open-country-road-childhood-town;market-town-outskirts|1|morning|15 minutes|revelation||425|500|scene|||||
-scrooge-sees-boyhood-school|15|Scrooge Weeps for His Boyhood Self|||2|ebenezer-scrooge|boyhood-boarding-school|1||10 minutes|revelation||657|620|scene|||||
-scrooge-revisits-second-christmas|16|Fan Fetches Scrooge Home|||2|ebenezer-scrooge|boyhood-boarding-school|1||20 minutes|revelation||633|680|scene|||||
+scrooge-sees-boyhood-school|15|Scrooge Weeps for His Boyhood Self|||2|ebenezer-scrooge|boyhood-boarding-school|1|unstated|10 minutes|revelation||657|620|scene|||||
+scrooge-revisits-second-christmas|16|Fan Fetches Scrooge Home|||2|ebenezer-scrooge|boyhood-boarding-school|1|unstated|20 minutes|revelation||633|680|scene|||||
 fezziwig-warehouse-christmas-party|17|Fezziwig's Dance, Scrooge Awakens|||2|ebenezer-scrooge|fezziwigs-warehouse|1|evening|several hours|revelation||1426|1300|scene|XXXX-12-24||||
-belle-releases-young-scrooge|18|Belle Releases Scrooge from Their Engagement|||2|ebenezer-scrooge|fezziwigs-warehouse;unnamed-interior|1||15 minutes|revelation||736|750|scene|||||
+belle-releases-young-scrooge|18|Belle Releases Scrooge from Their Engagement|||2|ebenezer-scrooge|fezziwigs-warehouse;unnamed-interior|1|unstated|15 minutes|revelation||736|750|scene|||||
 belle-family-happy-without-scrooge|19|Scrooge Smothers the Ghost's Light|||2|ebenezer-scrooge|belles-family-home;scrooges-bedroom|1|evening|20 minutes|revelation||949|750|scene|||||
 scrooge-awaits-second-spirit|20|Scrooge Waits for the Second Spirit|||2|ebenezer-scrooge|scrooges-chambers|1|night|15 minutes|introspection||495|530|scene|XXXX-12-25||||
 ghost-of-christmas-present-revealed|21|The Ghost of Christmas Present Revealed|||2|ebenezer-scrooge|scrooges-chambers|1|night|15 minutes|revelation||523|750|scene|XXXX-12-24~||||
@@ -29,10 +29,10 @@ scrooge-meets-final-phantom|27|Scrooge Meets the Silent Phantom|||3|ebenezer-scr
 merchants-discuss-dead-man|28|Merchants Joke About a Dead Man|||3|ebenezer-scrooge|london-city-streets-christmas|1|night|10 minutes|revelation||383|450|scene|||||
 wealthy-men-exchange-cold-words|29|Scrooge Reads His Own Absence|||3|ebenezer-scrooge|london-exchange-business-district|1|morning|15 minutes|revelation||418|430|scene|||||
 thieves-sell-dead-mans-belongings|30|Thieves Divide a Dead Man's Goods|||3|ebenezer-scrooge|old-joes-rag-and-bone-shop|1|night|20 minutes|revelation||1442|1300|scene|||||
-scrooge-confronts-shrouded-corpse|31|Scrooge Confronts the Shrouded Corpse|||3|ebenezer-scrooge|dead-mans-dark-chamber|1||10 minutes|confrontation||514|680|scene|||||
+scrooge-confronts-shrouded-corpse|31|Scrooge Confronts the Shrouded Corpse|||3|ebenezer-scrooge|dead-mans-dark-chamber|1|unstated|10 minutes|confrontation||514|680|scene|||||
 debtors-rejoice-at-creditors-death|32|Debtors Rejoice at Creditor's Death|||3|ebenezer-scrooge|debtor-familys-home|1|afternoon|10 minutes|revelation||450|490|scene|||||
 cratchit-family-mourns-tiny-tim|33|The Cratchits Grieve for Tiny Tim|||3|ebenezer-scrooge|cratchit-home-camden-town|1|evening|30 minutes|character||1026|1050|scene|XXXX-12-25~||||
-scrooge-reads-his-own-gravestone|34|Scrooge Reads His Own Name|||3|ebenezer-scrooge|london-city-streets-christmas;scrooges-counting-house;churchyard|1||20 minutes|revelation||683|800|scene|||||
+scrooge-reads-his-own-gravestone|34|Scrooge Reads His Own Name|||3|ebenezer-scrooge|london-city-streets-christmas;scrooges-counting-house;churchyard|1|unstated|20 minutes|revelation||683|800|scene|||||
 scrooge-wakes-transformed|35|Scrooge Wakes Reborn on Christmas|||3|ebenezer-scrooge|scrooges-chambers|1|morning|15 minutes|revelation||502|650|scene|XXXX-12-25||||
 scrooge-learns-christmas-day|36|Scrooge Learns It Is Christmas|||3|ebenezer-scrooge|scrooges-chambers|1|morning|2 minutes|revelation||87|150|scene|XXXX-12-25||||
 scrooge-buys-prize-turkey|37|Scrooge Buys the Prize Turkey|||3|ebenezer-scrooge|scrooges-chambers;street-outside-scrooges-chambers|1|morning|30 minutes|character||565|550|scene|XXXX-12-25||||

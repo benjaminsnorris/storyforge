@@ -24,6 +24,7 @@ import re
 from .common import log
 from .elaborate import OFF_PRESENT_MODES
 from .enrich import update_csv_field
+from .schema import stated_time
 from .scenes import match_scene_id
 
 
@@ -459,7 +460,7 @@ def build_assignment_prompt(batch: list[dict], present: int | None,
         lines.append(
             f'{item["id"]} — {item.get("title", "")}\n'
             f'  {item.get("summary", "")}\n'
-            f'  time of day: {item.get("time_of_day") or "?"}; duration: {item.get("duration") or "?"}\n'
+            f'  time of day: {stated_time(item.get("time_of_day")) or "?"}; duration: {item.get("duration") or "?"}\n'
             f'  cues: {"; ".join(parts)}\n'
             f'  provisional day: {provisional if provisional is not None else "?"}')
     anchor_text = '\n'.join(f'- {a}' for a in anchors[-30:]) or '(none yet)'

@@ -794,3 +794,22 @@ def test_scene_map_frame_still_needs_location_and_day(tmp_path):
     meta = next(c for c in r['checks'] if c['check'].startswith('operational'))
     assert meta['passed'] is False
     assert 'missing location, timeline_day' in meta['detail']
+
+
+def test_scene_map_accepts_unstated_time_of_day(tmp_path):
+    """#488: `unstated` (the text gives no time of day) satisfies L5's
+    metadata check; a blank time_of_day still fails it."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words\n'
+        'sc-1|1|t|S.|1|hero|loc|1|unstated|2h|character|mapped|0|800\n'
+        'sc-2|2|t|S.|1|hero|loc|1||2h|character|mapped|0|800\n'
+    )
+    (ref / 'scene-intent.csv').write_text('id|on_stage\n')
+    from storyforge.scoring_levels import score_scene_map
+    r = score_scene_map(str(tmp_path))
+    meta = next(c for c in r['checks'] if c['check'].startswith('operational'))
+    assert meta['passed'] is False
+    assert meta['detail'] == '1 row(s) missing metadata; first: sc-2 missing time_of_day'

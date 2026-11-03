@@ -1551,8 +1551,9 @@ def scene_when(scene: Mapping[str, str]) -> str:
     (`timeline_day`, `time_of_day`, `time_mode`): 'day 19, evening', or ''
     when it has neither. The checker's calendar (`checker.Book.when`) and
     the drafting prompt's both read it, so the two agree word for word."""
+    from .schema import stated_time
     day = (scene.get('timeline_day') or '').strip()
-    time = (scene.get('time_of_day') or '').strip()
+    time = stated_time(scene.get('time_of_day'))
     if not (day or time):
         return ''
     mode = (scene.get('time_mode') or '').strip().lower()
