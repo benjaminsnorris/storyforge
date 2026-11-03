@@ -200,7 +200,9 @@ class TestBuildPrompts:
         from storyforge.schema import VALID_TIMES, VALID_TYPES
         from storyforge.timeline import RELATIONS
         props = SKELETON_SCHEMA['properties']
-        assert set(props['time_of_day']['enum']) == set(VALID_TIMES) | {'unknown'}
+        # #488: no "unknown" for time_of_day; "unstated" is the answer
+        assert set(props['time_of_day']['enum']) == set(VALID_TIMES)
+        assert 'unstated' in props['time_of_day']['enum']
         assert set(props['type']['enum']) == set(VALID_TYPES) | {'unknown'}
         assert props['time_relation']['enum'] == list(RELATIONS)
 
@@ -439,6 +441,16 @@ class TestEnumAnswersReduced:
         r = parse_skeleton_response(
             _reply('SKELETON_SCHEMA', time_of_day='Evening (after dinner)'), 's1')
         assert r['time_of_day'] == 'evening'
+
+    def test_skeleton_time_of_day_unstated(self):
+        """#488: a text with no time of day is recorded as unstated, never
+        left blank (blank is "not filled in yet"); a stray "unknown" too."""
+        from storyforge.extract import build_skeleton_prompt, parse_skeleton_response
+        for answer in ('unstated', 'unknown', 'Unknown'):
+            r = parse_skeleton_response(_reply('SKELETON_SCHEMA', time_of_day=answer), 's1')
+            assert r['time_of_day'] == 'unstated', answer
+        prompt = build_skeleton_prompt('s1', 'Prose.', {})
+        assert '"unstated" when the text doesn\'t say' in prompt
 
 
 class TestKnowledgeIdsAtSource:

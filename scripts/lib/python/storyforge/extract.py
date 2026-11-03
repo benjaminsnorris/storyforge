@@ -252,7 +252,7 @@ Answer with a JSON object with these fields (a list field is a JSON array of str
 - pov: the POV character's full name
 - location (list): the places where this scene's action happens on the page, in order — usually just one. Use consistent canonical names. Only places the action is in, not places mentioned or remembered; a journey lists the places it passes through, never "X to Y" as one place
 {cues}
-- time_of_day: when in the day the scene happens
+- time_of_day: when in the day the scene happens; "unstated" when the text doesn't say (never a guess)
 - duration: approximate in-story duration, e.g., "2 hours", "30 minutes", "an afternoon"
 - type: the scene's primary narrative purpose
 - target_words: current word count is a reasonable target — the approximate word count
@@ -294,6 +294,7 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
     come from the manuscript's part headings (scenes-setup), never from the
     model.
     """
+    from .schema import UNSTATED_TIME
     data = _json_answer(response, SKELETON_SCHEMA)
     result = {'id': scene_id}
     for key in _SKELETON_FIELDS:
@@ -301,6 +302,8 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
         if isinstance(answer, list):  # an "unknown" place is no place
             answer = [v for v in answer if str(v).strip().lower() != 'unknown']
         value = _text(answer, ';')
+        if key == 'time_of_day' and value.lower() == 'unknown':
+            value = UNSTATED_TIME  # the schema offers no "unknown"; a stray one means the same
         if value and value.lower() != 'unknown':
             result[key] = value
     date = skeleton_cues(response)['date']
@@ -668,7 +671,8 @@ def _skeleton_schema() -> dict:
     cues['time_relation'] = {'type': 'string', 'enum': list(RELATIONS)}
     return _object({
         'title': _STR, 'pov': _STR, 'location': _STR_LIST, **cues,
-        'time_of_day': _enum(VALID_TIMES), 'duration': _STR, 'type': _enum(VALID_TYPES),
+        # "unstated", not "unknown": the text giving no time is an answer (#488)
+        'time_of_day': {'type': 'string', 'enum': sorted(VALID_TIMES)}, 'duration': _STR, 'type': _enum(VALID_TYPES),
         'target_words': _STR, 'act': _STR,
     })
 
