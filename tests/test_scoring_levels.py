@@ -737,3 +737,60 @@ def test_print_level_result_no_accepted_renders_no_suffix(capsys):
     out = capsys.readouterr().out
     assert '1 passed, 1 failed' in out
     assert 'accepted' not in out
+
+
+def test_scene_map_exempts_frame_narration(tmp_path):
+    """#488: a frame scene (time_mode=frame) needs no time_of_day or
+    duration, and its narrator need not be on stage; an ordinary scene
+    with the same gaps still fails both checks."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words|time_mode\n'
+        'frame-1|1|t|S.|1|narrator|loc|1|||character|mapped|0|800|frame\n'
+        'sc-2|2|t|S.|1|hero|loc|1|morning|2h|character|mapped|0|800|scene\n'
+    )
+    (ref / 'scene-intent.csv').write_text(
+        'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|'
+        'turning_point|characters|on_stage|mice_threads\n'
+        'frame-1|f|action|a|v|+/-|t|hero|hero|\n'
+        'sc-2|f|action|a|v|+/-|t|hero|hero|\n'
+    )
+    from storyforge.scoring_levels import score_scene_map
+
+    def checks():
+        r = score_scene_map(str(tmp_path))
+        return {c['check']: c for c in r['checks']}
+
+    c = checks()
+    assert c['operational metadata populated (location, timeline_day, '
+             'time_of_day, duration)']['passed'] is True
+    assert c['POV is on-stage in every scene with on_stage populated']['passed'] is True
+
+    # The same row as an ordinary scene fails both checks.
+    text = (ref / 'scenes.csv').read_text().replace('|frame\n', '|scene\n', 1)
+    (ref / 'scenes.csv').write_text(text)
+    c = checks()
+    meta = c['operational metadata populated (location, timeline_day, '
+             'time_of_day, duration)']
+    assert meta['passed'] is False and 'frame-1' in meta['detail']
+    pov = c['POV is on-stage in every scene with on_stage populated']
+    assert pov['passed'] is False and 'frame-1' in pov['detail']
+
+
+def test_scene_map_frame_still_needs_location_and_day(tmp_path):
+    """#488: the frame exemption covers time_of_day and duration only."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words|time_mode\n'
+        'frame-1|1|t|S.|1|narrator|||||character|mapped|0|800|frame\n'
+    )
+    (ref / 'scene-intent.csv').write_text('id|on_stage\n')
+    from storyforge.scoring_levels import score_scene_map
+    r = score_scene_map(str(tmp_path))
+    meta = next(c for c in r['checks'] if c['check'].startswith('operational'))
+    assert meta['passed'] is False
+    assert 'missing location, timeline_day' in meta['detail']
