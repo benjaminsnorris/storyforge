@@ -720,7 +720,8 @@ _FIELD_INSTRUCTIONS = {
     ),
     'time_of_day': (
         'Determine the time of day. Choose exactly one from: '
-        'morning, afternoon, evening, night, dawn, dusk.'
+        'morning, afternoon, evening, night, dawn, dusk; or unstated when '
+        'the scene gives none (never a guess).'
     ),
     'duration': (
         'Estimate the in-story duration of this scene (e.g., "2 hours", "30 minutes", "15 minutes").'

@@ -152,17 +152,21 @@ def bootstrap_cues(project_dir: str) -> None:
                            f'{", ".join(missing[:5])}')
 
 
-def suite_output(detector_name: str, cases: list[dict], excluded: dict, case_flags: dict,
-                 control_flags: dict):
-    """Score and gate the way ``e2-carol`` does; the plan's checker gate."""
+def suite_output(suite: str, detector_name: str, cases: list[dict], excluded: dict,
+                 case_flags: dict, control_flags: dict):
+    """Score and gate the way ``e2-carol`` does: against ``e2.FLOORS[suite]``
+    (*suite* is the running suite's name, ``ctx.name``), the plan's targets
+    as notes."""
     import e2
-    from harness import Gate, SuiteOutput
+    from harness import SuiteOutput
     result = e2.score(cases, case_flags, control_flags, order=[])
-    gates = [Gate(f'recall_{code}', result['by_code'].get(code, {}).get('recall_code_match', 0.0),
-                  '>=', e2.RECALL_GATE) for code in e2.GATED_CODES]
-    gates.append(Gate('precision', e2.precision_gate_value(result['metrics']), '>=', e2.PRECISION_GATE))
+    gates, notes = e2.floor_gates(suite, result)
     found = sorted(cid for cid, hit in result['detected'].items() if hit)
-    notes = [f'detector: {detector_name}',
+    notes += [f'detector: {detector_name}',
              f'detected {len(found)} of {result["metrics"]["cases"]}: {", ".join(found) or "none"}']
     notes += [f'excluded {len(ids)}: {reason}' for reason, ids in sorted(excluded.items())]
+    flagged = result['metrics']['flags_true'] + result['metrics']['flags_false']
+    if flagged < e2.MIN_FLAGS_FOR_PRECISION:
+        notes.append(f'{flagged} distinct flag(s), fewer than {e2.MIN_FLAGS_FOR_PRECISION}: '
+                     'precision is counted as 0')
     return SuiteOutput(metrics=result['metrics'], by_code=result['by_code'], gates=gates, notes=notes)

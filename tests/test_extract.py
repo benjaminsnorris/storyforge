@@ -200,7 +200,9 @@ class TestBuildPrompts:
         from storyforge.schema import VALID_TIMES, VALID_TYPES
         from storyforge.timeline import RELATIONS
         props = SKELETON_SCHEMA['properties']
-        assert set(props['time_of_day']['enum']) == set(VALID_TIMES) | {'unknown'}
+        # #488: no "unknown" for time_of_day; "unstated" is the answer
+        assert set(props['time_of_day']['enum']) == set(VALID_TIMES)
+        assert 'unstated' in props['time_of_day']['enum']
         assert set(props['type']['enum']) == set(VALID_TYPES) | {'unknown'}
         assert props['time_relation']['enum'] == list(RELATIONS)
 
@@ -439,6 +441,20 @@ class TestEnumAnswersReduced:
         r = parse_skeleton_response(
             _reply('SKELETON_SCHEMA', time_of_day='Evening (after dinner)'), 's1')
         assert r['time_of_day'] == 'evening'
+
+    def test_skeleton_time_of_day_unstated(self):
+        """#488: "unstated" (the text gives no time) is kept; a stray
+        "unknown" is left blank like every other field's, never turned into
+        unstated (SF-4: that would assert a reading the model didn't make)."""
+        from storyforge.extract import build_skeleton_prompt, parse_skeleton_response
+        for answer in ('unstated', 'Unstated'):
+            r = parse_skeleton_response(_reply('SKELETON_SCHEMA', time_of_day=answer), 's1')
+            assert r['time_of_day'] == 'unstated', answer
+        for answer in ('unknown', 'Unknown'):
+            r = parse_skeleton_response(_reply('SKELETON_SCHEMA', time_of_day=answer), 's1')
+            assert 'time_of_day' not in r, answer
+        prompt = build_skeleton_prompt('s1', 'Prose.', {})
+        assert '"unstated" when the text doesn\'t say' in prompt
 
 
 class TestKnowledgeIdsAtSource:

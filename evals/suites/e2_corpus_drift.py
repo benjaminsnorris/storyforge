@@ -9,7 +9,7 @@ from harness import Suite
 def run(ctx):
     cases, excluded = corpus.select()
     flags = corpus.run(cases, e2.drift_check, ctx.work_dir, prepare_tree=corpus.bootstrap_cues)
-    return corpus.suite_output('drift-check (timeline)', cases, excluded, *flags)
+    return corpus.suite_output(ctx.name, 'drift-check (timeline)', cases, excluded, *flags)
 
 
 SUITE = Suite('e2-corpus-drift', 'Timeline drift check vs real E1 errors', run)

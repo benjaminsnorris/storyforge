@@ -23,6 +23,7 @@ from storyforge.common import (
     read_yaml_field, select_model,
 )
 from storyforge.costs import log_operation
+from storyforge.schema import stated_time
 
 
 # Type-narrow the weight: the rubric defines only two values. A drift to
@@ -1072,7 +1073,7 @@ def parse_scene_map(project_dir: str) -> list[MappedScene]:
             pov=row.get('pov', '').strip(),
             location=row.get('location', '').strip(),
             timeline_day=row.get('timeline_day', '').strip(),
-            time_of_day=row.get('time_of_day', '').strip(),
+            time_of_day=stated_time(row.get('time_of_day')),
             scene_type=row.get('type', '').strip(),
             word_count=_as_int('word_count'),
             target_words=_as_int('target_words'),

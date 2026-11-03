@@ -35,6 +35,11 @@ def run(ctx):                       # ctx.work_dir is a fresh temp dir
 SUITE = Suite('e2-detection', 'Contradiction detection on labeled cases', run)
 ```
 
+A gate no run passes says nothing, so a failing suite stops meaning
+anything. Gate on what the suite records today (E7's `NOISE_CEILING`, E2's
+`e2.FLOORS`: the value must equal it, so a gain moves it in the same commit)
+and give the plan's target as a note (#488).
+
 ## Recorded API calls
 
 Every Anthropic call goes through `api._api_request`, which consults
