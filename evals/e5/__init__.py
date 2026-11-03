@@ -62,8 +62,10 @@ SAMPLE = 10
 PHASE2_PER_SCENE = 2.3
 # The plan-and-ledger redraft when the rewrite was added (v1.120.0): a
 # non-regression gate, so the rewrite's voice reference can't hide a ledger
-# that got worse
-LEDGER_ONLY_PER_SCENE = 3.7
+# that got worse. 3.7 -> 3.9 at v1.130.2 (#491: carried states off the
+# checklist; the rise is unplanned staging, none a carried state); Ben
+# accepted it (2026-11-03)
+LEDGER_ONLY_PER_SCENE = 3.9
 FACT_CODES = ('PHY', 'TIM', 'KNO', 'REL', 'TRT', 'WLD')
 
 JUDGE_PROMPT = """Compare two versions of the same scene of a novel: the author's original, and a redraft written from the scene's plan.
