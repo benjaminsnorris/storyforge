@@ -620,11 +620,18 @@ def _brief(book: Book, project_dir: str, at: str) -> Brief:
             brief.fields[col] = scene[col].strip()
             brief.items[col] = _split_cell(scene[col]) or [scene[col].strip()]
             promises.append(f'- **{col}**: {brief.fields[col]}')
+    from storyforge.prompts import carried_states, state_key
+    physical = ledger.alias_map(ledger.view(book.rows, 'physical'))
+    # A state the brief carries in and out unchanged holds entering the scene;
+    # it isn't a promise the scene must establish again (F-149)
+    carried = carried_states(scene, physical)
     for fields, lines in ((REGISTRY_ENTERING_FIELDS, entering),
                           (REGISTRY_PROMISE_FIELDS, promises)):
         for col, type_ in fields.items():
             aliases = ledger.alias_map(ledger.view(book.rows, type_))
             for item in _split_cell(scene.get(col, '')):
+                if col == 'physical_state_out' and state_key(item, physical) in carried:
+                    continue
                 rid = aliases.get(item.lower())
                 if rid is not None and by_id[rid].get('status') != 'binding':
                     brief.stale.append(f'{col}: {item} ({rid} is {by_id[rid].get("status")})')
@@ -646,7 +653,10 @@ def _brief(book: Book, project_dir: str, at: str) -> Brief:
     parts = []
     if entering:
         parts.append('\n## What holds entering the scene (from its brief)\n\n'
-                     'The scene must not contradict these. They are not promises.\n\n'
+                     'The scene must not contradict these. They are not promises. One that '
+                     'the brief\'s own key actions or outcome override (the brief has a '
+                     'character do what a state rules out) ended before the scene: that is '
+                     'not a contradiction.\n\n'
                      + '\n'.join(entering) + '\n')
     if promises:
         parts.append("\n## The brief's promises\n\n" + '\n'.join(promises) + '\n')
