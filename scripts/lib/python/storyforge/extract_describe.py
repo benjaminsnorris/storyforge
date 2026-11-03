@@ -38,7 +38,7 @@ import posixpath
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, Literal, TypedDict, get_args
+from typing import Callable, Literal, Sequence, TypedDict, get_args
 
 from .common import is_unfilled_template, log
 #: elaborate's voice-profile.csv columns, which `validate_voice_profile` checks
@@ -1431,23 +1431,28 @@ MAX_LINES = 8
 _ROLE_RANK = {'protagonist': 0, 'antagonist': 0, 'deuteragonist': 0, 'supporting': 1,
               'minor': 3, 'referenced': 4}
 #: How far either side of a quote a speech tag ("said Scrooge") is looked
-#: for, never past the neighbouring quote.
+#: for, never past the neighbouring quote (nor, after it, past a blank line).
 _ATTRIBUTION_CHARS = 80
 #: How far back a lead-in ending in a colon ("Then spake Menelaus:") is read.
 _LEAD_IN_CHARS = 200
 #: The longest sampled line; a longer speech is sampled by its opening.
 _MAX_LINE_CHARS = 300
+#: Speech verbs whose name, either side, is the speaker. None takes the one
+#: spoken to as its object ("told Tom", "bespake Paris" name the listener).
 _SPEECH_VERBS = (r'said|says|asked|asks|cried|replied|returned|exclaimed|answered|'
                  r'whispered|muttered|shouted|added|continued|observed|rejoined|repeated|'
-                 r'called|murmured|demanded|retorted|told|spake|spoke|quoth|bespake')
-#: The verbs a lead-in ("Then spake Menelaus:", "and Nestor lamented:") uses.
+                 r'called|murmured|demanded|retorted|spake|spoke|quoth')
+#: The verbs a lead-in ("Then spake Menelaus:", "and Nestor lamented:") uses;
+#: again none that takes the listener as its object ("hailed Odysseus").
 _LEAD_IN_VERBS = re.compile(rf'\b(?:{_SPEECH_VERBS}|lamented|wailed|prayed|began|groaned|'
-                            r'moaned|chid|upbraided|hailed|addressed|made\s+answer)\b',
-                            re.IGNORECASE)
-#: A name after one of these in a lead-in is spoken to or about, not speaking
-#: ("Then to Achilles spake Odysseus:").
+                            r'moaned|made\s+answer)\b', re.IGNORECASE)
+#: A name anywhere after one of these in a lead-in is spoken to or about,
+#: not speaking ("Then he spake unto Agamemnon and Menelaus:", "spoke to her
+#: son Telemachus:", "O Achilles").
 _NOT_SPEAKER = re.compile(r'\b(?:to|unto|at|on|upon|with|for|of|from|by|toward|towards|'
-                          r'before|against|beside|o)\s+(?:the\s+)?$', re.IGNORECASE)
+                          r'before|against|beside|o)\b', re.IGNORECASE)
+#: A blank line: the end of a paragraph, in wrapped prose or not.
+_PARAGRAPH_END = re.compile(r'\n[ \t]*\n')
 
 
 def single_quoted(texts: list[str]) -> bool:
@@ -1495,20 +1500,25 @@ def _who(scene: dict[str, str], alias: dict[str, str]) -> tuple[str, list[str], 
     return pov, present, unresolved
 
 
-def _name_pattern(names: list[str]) -> str:
-    """A regex for any of `names` as a name: capitalized in the text
-    whatever the registry's case ("tom" matches "Tom"), never a possessive
-    ("Scrooge's nephew" names the nephew; "Neoptolemus' head" too) or the
-    start of a longer word."""
-    alts = '|'.join(rf'(?=[A-Z])(?i:{re.escape(n)})'
-                    for n in sorted(set(names), key=len, reverse=True))
-    return rf'\b(?:{alts})(?![\'’]s)\b'
+def _name_pattern(names: Sequence[str]) -> str:
+    """A regex for any of `names` (blank ones ignored; there must be one
+    other) as a name: starting with a capital in the text whatever the
+    registry's case ("tom" matches "Tom", "émile" "Émile"), and never a
+    possessive ("Scrooge's nephew", "Achilles' son" name the nephew and
+    the son), the start of a longer word, or a title before another name
+    ("Captain" in "said Captain Harville" is Harville's)."""
+    alts = '|'.join(rf'{re.escape(n[0].upper())}(?i:{re.escape(n[1:])})'
+                    for n in sorted({n.strip() for n in names if n.strip()},
+                                    key=len, reverse=True))
+    return rf'\b(?:{alts})(?![\'’])\b(?![ \t]+[A-ZÀ-ÖØ-Þ])'
 
 
 def _sample_line(inner: str) -> str:
     """A quoted span as one sampled line: whitespace collapsed, and a speech
-    longer than _MAX_LINE_CHARS cut to its opening sentences (or words)
-    with " …", so a long speech (an epic's) still shows its voice."""
+    longer than _MAX_LINE_CHARS cut with " …" to its opening, so a long
+    speech (an epic's) still shows its voice: at the last sentence end
+    (`.!?;`, with any closing quote or bracket) that fits, if it is 40 or
+    more characters in, else at the last word that fits."""
     line = ' '.join(inner.split())
     if len(line) <= _MAX_LINE_CHARS:
         return line
@@ -1518,28 +1528,33 @@ def _sample_line(inner: str) -> str:
     return head.rstrip() + ' …'
 
 
-def _speech(text: str, names: list[str], others: list[str] = ()) -> list[str]:
+def _speech(text: str, names: Sequence[str], others: Sequence[str] = ()) -> list[str]:
     """Quoted speech in `text` attributed to one of `names`:
 
-    - a speech tag against the quote: "said NAME" or "NAME said" right after
-      it in the same paragraph, or right before it ending in a comma or
-      colon, within _ATTRIBUTION_CHARS and never reaching past the
-      neighbouring quote;
+    - a speech tag against the quote: "said NAME" or "NAME said"
+      (`_SPEECH_VERBS`) right after it, before any blank line, or right
+      before it ending in a comma or colon, within _ATTRIBUTION_CHARS and
+      never reaching past the neighbouring quote;
     - or a lead-in ending in a colon just before it, as an epic introduces a
-      speech ("Then spake Menelaus:"): its last phrase (after the last
-      comma or sentence end) has a speech verb and names them, and no one
-      in `others` (the other characters' names). A name spoken to ("to
-      Achilles") doesn't count, and a name in an earlier phrase is left
-      alone: in "the great God cried, So to turn back from war Achilles
-      awed ...:" Achilles is the one spoken to.
+      speech ("And Nestor lamented:"): its last phrase (after the last
+      comma, semicolon, sentence end or blank line) has a `_LEAD_IN_VERBS`
+      verb and names them, and names no one in `others` (the other
+      characters on stage) as speaker. A name after a `_NOT_SPEAKER` word
+      ("unto Agamemnon and Menelaus") is spoken to, not speaking; and a verb
+      in an earlier phrase doesn't count: in "the great God cried, So to
+      turn back from war Achilles awed ...:" the last phrase has no speech
+      verb, so Achilles, the one spoken to, gets nothing.
 
-    Never a possessive. Lines under four words are left out; one over
-    _MAX_LINE_CHARS is cut to its opening (`_sample_line`)."""
+    Names follow `_name_pattern` (never a possessive). Lines under four
+    words are left out; one over _MAX_LINE_CHARS is cut to its opening
+    (`_sample_line`)."""
     from .prose_analysis import dialogue_spans
+    names = [n for n in names if n.strip()]
+    others = [n for n in others if n.strip()]
     if not names:
         return []
     name = _name_pattern(names)
-    other = re.compile(_name_pattern(list(others))) if others else None
+    other = re.compile(_name_pattern(others)) if others else None
     tag = (rf'(?:(?:{_SPEECH_VERBS})\s+(?:the\s+)?{name}|'
            rf'(?:the\s+)?{name}\s+(?:{_SPEECH_VERBS})\b)')
     # The tag sits against the quote: right after it ('"Bah!" said
@@ -1554,13 +1569,13 @@ def _speech(text: str, names: list[str], others: list[str] = ()) -> list[str]:
         before = before.rstrip()
         if not before.endswith(':'):
             return False
-        clause = re.split(r'[,.!?;\n]', before[:-1])[-1]
+        clause = re.split(r'[,.!?;]|\n[ \t]*\n', before[:-1])[-1]
         if not _LEAD_IN_VERBS.search(clause):
             return False
         speaking = [m for m in own.finditer(clause)
-                    if not _NOT_SPEAKER.search(clause[:m.start()])]
+                    if not _NOT_SPEAKER.search(clause, 0, m.start())]
         rivals = [m for m in other.finditer(clause)
-                  if not _NOT_SPEAKER.search(clause[:m.start()])] if other else []
+                  if not _NOT_SPEAKER.search(clause, 0, m.start())] if other else []
         return bool(speaking) and not rivals
 
     spans = dialogue_spans(text)
@@ -1570,11 +1585,11 @@ def _speech(text: str, names: list[str], others: list[str] = ()) -> list[str]:
             continue
         prev_end = spans[i - 1][1] if i else 0
         before = text[max(start - _ATTRIBUTION_CHARS, prev_end):start]
-        # A tag after a quote is in its paragraph: past a line break,
+        # A tag after a quote is in its paragraph: past a blank line,
         # "Penelope answered," introduces the next speech
-        after = text[end:min(end + _ATTRIBUTION_CHARS,
-                             spans[i + 1][0] if i + 1 < len(spans) else len(text))
-                     ].split('\n', 1)[0]
+        after = _PARAGRAPH_END.split(text[end:min(
+            end + _ATTRIBUTION_CHARS,
+            spans[i + 1][0] if i + 1 < len(spans) else len(text))], 1)[0]
         if (tag_after.match(after) or tag_before.search(before)
                 or lead_in(text[max(start - _LEAD_IN_CHARS, prev_end):start])):
             out.append(_sample_line(inner))
@@ -1613,10 +1628,12 @@ def _scene_speaker_names(present: list[dict[str, str]], pov: str,
     `_speaker_names`: each capitalized word of four or more letters in the
     name or aliases of exactly one character on stage ("said the Ghost" is
     the one Ghost in the scene, though three names share the word), and "I"
-    for the POV character when the book is told in the first person."""
+    for the POV character (`pov`, the id of one of `present`) when the book
+    is told in the first person. Only capitalized words count, so a
+    lowercase alias adds nothing here (`_speaker_names` already has it)."""
     owners: dict[str, set[str]] = {}
     for c in present:
-        for w in re.findall(r'[A-Z]\w{3,}', f'{c.get("name", "")} {c.get("aliases", "")}'):
+        for w in re.findall(r'[A-ZÀ-ÖØ-Þ]\w{3,}', f'{c.get("name", "")} {c.get("aliases", "")}'):
             owners.setdefault(w, set()).add(c['id'])
     out: dict[str, list[str]] = {}
     for w, ids in owners.items():
@@ -1627,8 +1644,8 @@ def _scene_speaker_names(present: list[dict[str, str]], pov: str,
     return out
 
 
-def character_evidence(project_dir: str, scenes: list[dict[str, str]],
-                       profile: dict | None = None,
+def character_evidence(project_dir: str, scenes: list[dict[str, str]], *,
+                       profile: dict | None,
                        ) -> tuple[list[CharacterEvidence], list[str], list[str]]:
     """The characters 5d describes, POV characters first (most scenes
     first), then by role (`_ROLE_RANK`), scenes on stage and scenes
@@ -1636,7 +1653,11 @@ def character_evidence(project_dir: str, scenes: list[dict[str, str]],
     (the registry, prose or ledger missing, names that resolve to no
     character, those past the caps); and the sources that had something
     (for the provenance header). A profile whose `narrative_mode` is first
-    person lets "I said" tag the POV character's lines.
+    person lets "I said" tag the POV character's lines; one with no mode, or
+    a mode neither first nor third person ("multiple-POV"), is a note,
+    since a first-person narrator's lines then go unsampled. So is every
+    character no line could be attributed to: the prompt says that is not
+    silence.
 
     Raises DescribeFailed naming the file when characters.csv or a scene
     file can't be read."""
@@ -1654,8 +1675,13 @@ def character_evidence(project_dir: str, scenes: list[dict[str, str]],
     seen: dict[str, list[dict[str, str]]] = {}
     mentioned: dict[str, int] = {}
     unresolved: set[str] = set()
-    first_person = str((profile or {}).get('narrative_mode', '')).strip().lower() \
-        .startswith('first')
+    mode = (profile or {}).get('narrative_mode', '')
+    mode = mode.strip().lower() if isinstance(mode, str) else ''
+    first_person = mode.startswith('first')
+    if not mode.startswith(('first', 'third')):
+        notes.append(f'the profile\'s narrative_mode is {mode or "missing"!r}, not first or '
+                     f'third person, so a first-person narrator\'s lines ("I said") are not '
+                     f'sampled')
     local: dict[str, dict[str, list[str]]] = {}
     on_stage: dict[str, list[str]] = {}
     for s in scenes:
@@ -1708,6 +1734,10 @@ def character_evidence(project_dir: str, scenes: list[dict[str, str]],
                      for s in _sample(appears, MAX_MOMENTS)],
             facts=[_fact_line(f) for f in own[:MAX_FACTS_PER_CHARACTER]],
             lines=_sample(lines, MAX_LINES)))
+    silent = [c.id for c in out if not c.lines]
+    if silent and texts:
+        notes.append(f'{len(silent)} character(s) have no line with a speech tag the sampler '
+                     f'reads, so their voice is described without samples: {_first(silent)}')
     if capped:
         notes.append(f'{len(capped)} character(s) have more than {MAX_FACTS_PER_CHARACTER} '
                      f'established facts; the first {MAX_FACTS_PER_CHARACTER} are used: '
@@ -1742,7 +1772,9 @@ def build_characters_prompt(profile: dict, chars: list[CharacterEvidence],
             'Established facts (from the ledger, with the text\'s words):',
             *([f'- {f}' for f in c.facts] or ['- (none recorded)']),
             'Lines spoken near their name (likely theirs):',
-            *([f'- "{line}"' for line in c.lines] or ['- (none found)'])]))
+            *([f'- "{line}"' for line in c.lines]
+              or ['- (none the sampler could attribute to them; that does not mean '
+                  'they never speak)'])]))
     pov_ids = ', '.join(c.id for c in chars if c.pov_scenes) or '(none)'
     return f"""{_DESCRIBE_STANCE}
 
@@ -3026,7 +3058,7 @@ def run_characters(run: Run, profile: dict, scenes: list[dict[str, str]]) -> Ste
     rel = 'reference/character-bible.md'
     if not _gate(run, [rel], '5d (character bible)'):
         return 'skipped'
-    chars, notes, sources = character_evidence(run.project_dir, scenes, profile)
+    chars, notes, sources = character_evidence(run.project_dir, scenes, profile=profile)
     title, title_notes = _book_title(run.project_dir)
     run.reports.extend(f'5d: {n}' for n in notes + title_notes)
     if not chars:

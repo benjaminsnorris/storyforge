@@ -1364,7 +1364,8 @@ def _dry_run_bible_prompts(describe, project_dir, profile, scenes) -> list[tuple
         return prompt(ev)
     return [
         ('5d characters', build(
-            '5d characters', lambda: describe.character_evidence(project_dir, scenes, profile),
+            '5d characters',
+            lambda: describe.character_evidence(project_dir, scenes, profile=profile),
             lambda ev: describe.build_characters_prompt(profile, ev),
             lambda ev: '' if ev else 'no scene names a character in characters.csv')),
         ('5e world', build(
