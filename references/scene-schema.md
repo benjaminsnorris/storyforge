@@ -74,7 +74,7 @@ print(dump_schema_markdown())
 | `timeline_day` | integer | map | Chronological position (day number within the story). |
 | `time_mode` | enum: frame, scene, summary, vision | map | How the scene sits in time: scene (its action plays out on its day; the default when empty), summary (it covers a stretch of time; timeline_day is where it starts), frame (narration from after the story, looking back; never the story's present), or vision (events a character is shown that the story doesn't treat as fixed, such as A Christmas Carol's future; timeline_day is the day shown if the text fixes one; never the story's present). |
 | `timeline_date` | edtf | map | The calendar date the scene's own text states, in EDTF; empty when it states none. Unknown digits are X and never filled in: `XXXX-07-04` (no year given), `1922-22` (summer 1922), `1917~` (around 1917), `1922-06/1922-09` (a stretch). |
-| `time_of_day` | enum: afternoon, dawn, dusk, evening, morning, night | map | Time of day when the scene takes place. |
+| `time_of_day` | enum: afternoon, dawn, dusk, evening, morning, night, unstated | map | Time of day when the scene takes place; unstated when the scene's text gives none (blank means not filled in yet). |
 | `duration` | free_text | map | In-story duration (e.g., "2 hours", "30 minutes"). |
 | `type` | enum: action, character, confrontation, dialogue, introspection, plot, revelation, transition, world | map | Narrative purpose of the scene. |
 | `status` | enum: architecture, briefed, drafted, mapped, polished, spine | all | Elaboration depth — tracks how far the scene has progressed through the pipeline. |

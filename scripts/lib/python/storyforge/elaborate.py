@@ -16,6 +16,18 @@ from typing import Any
 # the story, and a vision (a future or a "shadow" the story doesn't treat as
 # fixed, such as A Christmas Carol's Stave IV)
 OFF_PRESENT_MODES = frozenset({'frame', 'vision'})
+# Time modes whose scene has no clock of its own: frame narration is told
+# from outside the story's time, so it has no time of day or duration to
+# give (a vision keeps its own). Nothing asks such a scene for CLOCK_FIELDS,
+# and its narrator, who has no body, need not be on stage (#488)
+CLOCKLESS_MODES = frozenset({'frame'})
+CLOCK_FIELDS = ('time_of_day', 'duration')
+
+
+def time_mode(row: dict) -> str:
+    """A scenes.csv row's `time_mode`, normalized: stripped, lower case,
+    'scene' when empty (the column's default)."""
+    return (row.get('time_mode') or '').strip().lower() or 'scene'
 
 
 DELIMITER = '|'
@@ -678,7 +690,7 @@ def _validate_timeline(scenes_map, checks):
     runs, current = [], None
     for sid in sorted_ids:
         # Frame narration and visions are never the story's present
-        if (scenes_map[sid].get('time_mode') or '').strip() in OFF_PRESENT_MODES:
+        if time_mode(scenes_map[sid]) in OFF_PRESENT_MODES:
             continue
         day_str = scenes_map[sid].get('timeline_day', '').strip()
         try:
@@ -1106,8 +1118,10 @@ def validate_structure(ref_dir: str) -> dict:
         if sid in briefs_map:
             merged.update({k: v for k, v in briefs_map[sid].items() if k != 'id'})
 
+        clockless = time_mode(merged) in CLOCKLESS_MODES
         missing = [col for col in required if not merged.get(col, '').strip()
-                   and not (unmigrated and col == 'act')]
+                   and not (unmigrated and col == 'act')
+                   and not (clockless and col in CLOCK_FIELDS)]
         checks.append(_check(
             'completeness', f'required-columns-{sid}',
             len(missing) == 0,

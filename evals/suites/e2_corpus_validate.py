@@ -8,7 +8,7 @@ from harness import Suite
 def run(ctx):
     cases, excluded = corpus.select()
     flags = corpus.run(cases, corpus.validate_detector, ctx.work_dir)
-    return corpus.suite_output('validate (continuity checks)', cases, excluded, *flags)
+    return corpus.suite_output(ctx.name, 'validate (continuity checks)', cases, excluded, *flags)
 
 
 SUITE = Suite('e2-corpus-validate', 'Deterministic continuity checks vs real E1 errors', run)

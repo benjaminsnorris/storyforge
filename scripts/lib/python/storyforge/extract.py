@@ -252,7 +252,7 @@ Answer with a JSON object with these fields (a list field is a JSON array of str
 - pov: the POV character's full name
 - location (list): the places where this scene's action happens on the page, in order — usually just one. Use consistent canonical names. Only places the action is in, not places mentioned or remembered; a journey lists the places it passes through, never "X to Y" as one place
 {cues}
-- time_of_day: when in the day the scene happens
+- time_of_day: when in the day the scene happens; "unstated" when the text doesn't say (never a guess)
 - duration: approximate in-story duration, e.g., "2 hours", "30 minutes", "an afternoon"
 - type: the scene's primary narrative purpose
 - target_words: current word count is a reasonable target — the approximate word count
@@ -668,7 +668,8 @@ def _skeleton_schema() -> dict:
     cues['time_relation'] = {'type': 'string', 'enum': list(RELATIONS)}
     return _object({
         'title': _STR, 'pov': _STR, 'location': _STR_LIST, **cues,
-        'time_of_day': _enum(VALID_TIMES), 'duration': _STR, 'type': _enum(VALID_TYPES),
+        # "unstated", not "unknown": the text giving no time is an answer (#488)
+        'time_of_day': {'type': 'string', 'enum': sorted(VALID_TIMES)}, 'duration': _STR, 'type': _enum(VALID_TYPES),
         'target_words': _STR, 'act': _STR,
     })
 
@@ -1169,7 +1170,7 @@ def analyze_expansion_opportunities(ref_dir: str) -> list[dict]:
 
     Returns a list of opportunity dicts with type, scene_id, description, priority.
     """
-    from .elaborate import _read_csv_as_map, OFF_PRESENT_MODES
+    from .elaborate import _read_csv_as_map, OFF_PRESENT_MODES, time_mode
 
     scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
     intent_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
@@ -1217,7 +1218,7 @@ def analyze_expansion_opportunities(ref_dir: str) -> list[dict]:
     prev_day = None
     prev_id = None
     for sid in sorted_ids:
-        if (scenes_map[sid].get('time_mode') or '').strip() in OFF_PRESENT_MODES:
+        if time_mode(scenes_map[sid]) in OFF_PRESENT_MODES:
             continue
         day_str = scenes_map[sid].get('timeline_day', '').strip()
         if not day_str:
@@ -1269,7 +1270,7 @@ def cleanup_timeline(ref_dir: str) -> list[dict]:
 
     Returns a list of fixes applied: [{scene_id, field, old_value, new_value}]
     """
-    from .elaborate import _read_csv_as_map, _write_csv, _FILE_MAP, OFF_PRESENT_MODES
+    from .elaborate import _read_csv_as_map, _write_csv, _FILE_MAP, OFF_PRESENT_MODES, time_mode
 
     scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
     sorted_ids = sorted(scenes_map.keys(),
@@ -1281,7 +1282,7 @@ def cleanup_timeline(ref_dir: str) -> list[dict]:
     days = []
     present = None
     for sid in sorted_ids:
-        if (scenes_map[sid].get('time_mode') or '').strip() in OFF_PRESENT_MODES:
+        if time_mode(scenes_map[sid]) in OFF_PRESENT_MODES:
             days.append((sid, None, False))
             continue
         try:

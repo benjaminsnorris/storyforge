@@ -153,6 +153,37 @@ def _apply_scene_filter(metadata_csv: str, filter_mode: str,
     return all_ids
 
 
+def _infer_times_of_day(metadata_csv: str, scenes_dir: str, scene_ids: list[str],
+                        force: bool) -> tuple[int, list[str]]:
+    """Fill time_of_day from keywords (the location, else the scene's first
+    1000 characters) where it's empty, or everywhere with *force*. Returns
+    how many were written and the scenes kept as `unstated` under *force*:
+    `unstated` is a reading of the whole scene (the text gives none), which
+    a keyword guess doesn't replace (#488)."""
+    from storyforge.schema import UNSTATED_TIME
+    written, kept_unstated = 0, []
+    for sid in scene_ids:
+        current_tod = _get_csv_field(metadata_csv, sid, 'time_of_day')
+        if current_tod.strip().lower() == UNSTATED_TIME:
+            if force:
+                kept_unstated.append(sid)
+            continue
+        if current_tod and not force:
+            continue
+        setting_val = _get_csv_field(metadata_csv, sid, 'location')
+        inferred = _infer_time_of_day(setting_val)
+        if not inferred:
+            scene_file = os.path.join(scenes_dir, f'{sid}.md')
+            if os.path.isfile(scene_file):
+                with open(scene_file) as f:
+                    head_text = f.read(1000)
+                inferred = _infer_time_of_day(head_text)
+        if inferred:
+            _update_csv_field(metadata_csv, sid, 'time_of_day', inferred)
+            written += 1
+    return written, kept_unstated
+
+
 def _infer_time_of_day(text: str) -> str:
     """Infer time_of_day from keywords in text."""
     lower = text.lower()
@@ -462,23 +493,12 @@ def main(argv=None):
         if not current_wc or current_wc == '0':
             _update_csv_field(metadata_csv, sid, 'word_count', actual_wc)
 
-    # Infer time_of_day
-    for sid in scene_ids:
-        current_tod = _get_csv_field(metadata_csv, sid, 'time_of_day')
-        if current_tod and not args.force:
-            continue
-        setting_val = _get_csv_field(metadata_csv, sid, 'location')
-        inferred = _infer_time_of_day(setting_val)
-        if not inferred:
-            scene_file = os.path.join(scenes_dir, f'{sid}.md')
-            if os.path.isfile(scene_file):
-                with open(scene_file) as f:
-                    head_text = f.read(1000)
-                inferred = _infer_time_of_day(head_text)
-        if inferred:
-            _update_csv_field(metadata_csv, sid, 'time_of_day', inferred)
-            free_enriched += 1
-
+    inferred_tod, kept_unstated = _infer_times_of_day(metadata_csv, scenes_dir, scene_ids,
+                                                      args.force)
+    free_enriched += inferred_tod
+    if kept_unstated:
+        log(f'time_of_day: kept unstated on {len(kept_unstated)} scene(s) despite --force '
+            f'(a keyword guess does not replace it): {", ".join(kept_unstated[:5])}')
     log(f'Free enrichment: {free_enriched} fields updated (word count + time_of_day)')
 
     # ========================================================================
