@@ -1,0 +1,248 @@
+"""The reading order: `ledger.seq_number` (the one seq conversion),
+`ledger.scene_order`, and what validate makes of the same seqs (#495)."""
+
+import os
+
+import pytest
+
+from storyforge import ledger
+
+
+def _scenes_path(project_dir):
+    return os.path.join(project_dir, 'reference', 'scenes.csv')
+
+
+def _set_seqs(project_dir, seqs: dict[str, str]):
+    """Rewrite scenes.csv with `seqs` (id → seq cell) applied, as raw text."""
+    path = _scenes_path(project_dir)
+    with open(path) as f:
+        lines = f.read().splitlines()
+    header = lines[0].split('|')
+    i, j = header.index('id'), header.index('seq')
+    out = [lines[0]]
+    for line in lines[1:]:
+        cells = line.split('|')
+        if cells[i] in seqs:
+            cells[j] = seqs[cells[i]]
+        out.append('|'.join(cells))
+    with open(path, 'w') as f:
+        f.write('\n'.join(out) + '\n')
+
+
+class TestSeqNumber:
+    @pytest.mark.parametrize('text,value', [('4', 4.0), (' 4.0 ', 4.0), ('12.5', 12.5)])
+    def test_numbers(self, text, value):
+        assert ledger.seq_number(text) == value
+
+    @pytest.mark.parametrize('text', ['', '  ', 'first', 'nan', 'NaN', 'inf', '-inf',
+                                      'Infinity', None])
+    def test_not_a_finite_number_raises(self, text):
+        with pytest.raises(ValueError):
+            ledger.seq_number(text)
+
+
+class TestSceneOrder:
+    def test_a_nan_seq_is_not_a_number(self, project_dir):
+        """float('nan') passed, and a nan sorts nowhere in particular."""
+        _set_seqs(project_dir, {'act1-sc02': 'nan'})
+        with pytest.raises(ValueError, match="act1-sc02 has no numeric seq \\('nan'\\)"):
+            ledger.scene_order(project_dir)
+
+    def test_an_infinite_seq_is_not_a_number(self, project_dir):
+        _set_seqs(project_dir, {'act1-sc02': 'inf'})
+        with pytest.raises(ValueError, match='act1-sc02 has no numeric seq'):
+            ledger.scene_order(project_dir)
+
+    def test_a_byte_order_mark_does_not_hide_every_scene(self, project_dir):
+        """A spreadsheet export's BOM made the header `\\ufeffid`: every row
+        had no id, scene_order was empty, and the missing-seq stop passed."""
+        path = _scenes_path(project_dir)
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+        expected = ledger.scene_order(project_dir)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('﻿' + text)
+        assert ledger.scene_order(project_dir) == expected and expected
+
+    def test_crlf_line_endings_read_the_same(self, project_dir):
+        path = _scenes_path(project_dir)
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+        expected = ledger.scene_order(project_dir)
+        with open(path, 'w', encoding='utf-8', newline='') as f:
+            f.write('﻿' + text.replace('\n', '\r\n'))
+        assert ledger.scene_order(project_dir) == expected
+
+    def test_decimal_seqs_sort_as_numbers(self, project_dir):
+        _set_seqs(project_dir, {'act2-sc01': '2.5'})
+        order = ledger.scene_order(project_dir)
+        assert order['act1-sc02'] < order['act2-sc01'] < order['new-x1']
+
+
+class TestValidateReadsSeqsAsNumbers:
+    def test_a_4_and_4_0_tie_is_reported_not_a_crash(self, project_dir):
+        """`int('4.0')` in _validate_threads threw before duplicate-seq could
+        say anything."""
+        from storyforge.elaborate import validate_structure
+        _set_seqs(project_dir, {'act2-sc01': '4.0', 'act2-sc02': '4'})
+        report = validate_structure(os.path.join(project_dir, 'reference'))
+        dup = [c for c in report['checks'] if c['check'] == 'duplicate-seq']
+        assert not dup[0]['passed']
+        assert 'act2-sc01' in dup[0]['message'] and 'act2-sc02' in dup[0]['message']
+
+    def test_a_decimal_seq_validates(self, project_dir):
+        from storyforge.elaborate import validate_structure
+        _set_seqs(project_dir, {'act2-sc01': '3.5'})
+        report = validate_structure(os.path.join(project_dir, 'reference'))
+        assert all(c['passed'] for c in report['checks'] if c['check'] == 'duplicate-seq')
+
+    def test_a_blank_seq_validates_without_a_crash(self, project_dir):
+        from storyforge.elaborate import validate_structure
+        _set_seqs(project_dir, {'act2-sc01': ''})
+        validate_structure(os.path.join(project_dir, 'reference'))
+
+
+def _write_scenes(project_dir, rows: list[str]):
+    """scenes.csv with only `rows` (`id|seq|title`), as raw text."""
+    with open(_scenes_path(project_dir), 'w') as f:
+        f.write('id|seq|title\n' + ''.join(r + '\n' for r in rows))
+
+
+def _structure(project_dir):
+    from storyforge.elaborate import validate_structure
+    report = validate_structure(os.path.join(project_dir, 'reference'))
+    return {c['check']: c for c in report['checks']
+            if c['check'] in ('duplicate-seq', 'scene-ids')}
+
+
+class TestSharedSeqs:
+    def test_a_duplicated_id_does_not_hide_a_tie(self, project_dir):
+        """Keyed by id, the second `x` row replaced the first, and the 5 tie
+        with `y` vanished (CR-1/SF-1)."""
+        _write_scenes(project_dir, ['x|5|A', 'y|5|B', 'x|9|C'])
+        rows = ledger.scene_rows(os.path.join(project_dir, 'reference'))[1]
+        assert ledger.shared_seqs(rows) == [('5', ['x', 'y'])]
+        checks = _structure(project_dir)
+        assert not checks['duplicate-seq']['passed']
+        assert "seq 5: ['x', 'y']" in checks['duplicate-seq']['message']
+        assert not checks['scene-ids']['passed']
+        assert 'x is on 2 rows' in checks['scene-ids']['message']
+
+    def test_a_quote_in_a_title_does_not_swallow_the_rows_after_it(self, project_dir):
+        """csv's default quoting read `"Hello` as an open quote (SF-2)."""
+        _write_scenes(project_dir, ['a|1|"Hello', 'b|2|B', 'c|2|C'])
+        rows = ledger.scene_rows(os.path.join(project_dir, 'reference'))[1]
+        assert [r['id'] for r in rows] == ['a', 'b', 'c']
+        assert ledger.shared_seqs(rows) == [('2', ['b', 'c'])]
+        assert not _structure(project_dir)['duplicate-seq']['passed']
+
+    def test_a_mixed_spelling_tie_names_each_spelling(self, project_dir):
+        """With 4.0 first, the message said "seq 4.0" though one cell says 4."""
+        _write_scenes(project_dir, ['a|4.0|A', 'b|4|B', 'c|5|C'])
+        rows = ledger.scene_rows(os.path.join(project_dir, 'reference'))[1]
+        assert ledger.shared_seqs(rows) == [('4 / 4.0', ['a', 'b'])]
+        assert "seq 4 / 4.0: ['a', 'b']" in _structure(project_dir)['duplicate-seq']['message']
+
+    def test_ties_come_in_reading_order(self, project_dir):
+        _write_scenes(project_dir, ['a|10|A', 'b|10|B', 'c|9|C', 'd|9|D', 'e|x|E', 'f|x|F'])
+        rows = ledger.scene_rows(os.path.join(project_dir, 'reference'))[1]
+        assert ledger.shared_seqs(rows) == [('9', ['c', 'd']), ('10', ['a', 'b']),
+                                            ('x', ['e', 'f'])]
+
+    def test_a_blank_id_row_is_reported_by_validate(self, project_dir):
+        """The id map reported a blank-id row in its tie as ''; it is now a
+        scene-ids failure of its own (SF-3)."""
+        _write_scenes(project_dir, ['a|1|A', '|1|Untitled'])
+        checks = _structure(project_dir)
+        assert not checks['scene-ids']['passed']
+        assert "a row has no id (seq '1', title 'Untitled')" in checks['scene-ids']['message']
+
+    def test_unique_ids_and_seqs_pass(self, project_dir):
+        checks = _structure(project_dir)
+        assert checks['scene-ids']['passed'] and checks['duplicate-seq']['passed']
+
+    def test_no_id_column_problem(self, project_dir):
+        with open(_scenes_path(project_dir), 'w') as f:
+            f.write('slug|seq\na|1\n')
+        assert ledger.scene_id_problems(*ledger.scene_rows(
+            os.path.join(project_dir, 'reference'))) == [
+            'reference/scenes.csv has no id column, so no scene has a place']
+
+
+class TestExitIfUnordered:
+    """Every way scenes.csv gives no single reading order stops write,
+    revise and check, saying what's wrong (SF-6/7/8, CR-1)."""
+
+    def _stop(self, project_dir, capsys) -> str:
+        with pytest.raises(SystemExit) as exc:
+            ledger.exit_if_unordered(project_dir)
+        assert exc.value.code == 1
+        return capsys.readouterr().out
+
+    def test_missing_scenes_csv(self, project_dir, capsys):
+        os.remove(_scenes_path(project_dir))
+        assert 'ERROR: reference/scenes.csv is missing' in self._stop(project_dir, capsys)
+
+    def test_empty_scenes_csv(self, project_dir, capsys):
+        open(_scenes_path(project_dir), 'w').close()
+        assert 'ERROR: reference/scenes.csv is empty' in self._stop(project_dir, capsys)
+
+    def test_a_header_with_no_scenes_passes(self, project_dir):
+        _write_scenes(project_dir, [])
+        ledger.exit_if_unordered(project_dir)
+
+    def test_no_id_column(self, project_dir, capsys):
+        with open(_scenes_path(project_dir), 'w') as f:
+            f.write('slug|seq\na|1\n')
+        out = self._stop(project_dir, capsys)
+        assert 'ERROR: scenes.csv: reference/scenes.csv has no id column' in out
+
+    def test_no_seq_column(self, project_dir, capsys):
+        with open(_scenes_path(project_dir), 'w') as f:
+            f.write('id|title\na|A\n')
+        assert 'scenes.csv has no seq column' in self._stop(project_dir, capsys)
+
+    def test_not_utf8_is_not_called_a_missing_seq(self, project_dir, capsys):
+        with open(_scenes_path(project_dir), 'wb') as f:
+            f.write('id|seq|title\na|1|Café\n'.encode('latin-1'))
+        out = self._stop(project_dir, capsys)
+        assert "can't be read" in out and 'Save it as UTF-8 text' in out
+        assert 'number in seq' not in out
+
+    def test_a_duplicated_id_and_the_tie_it_hid(self, project_dir, capsys):
+        _write_scenes(project_dir, ['x|5|A', 'y|5|B', 'x|9|C'])
+        out = self._stop(project_dir, capsys)
+        assert 'ERROR: scenes.csv: x is on 2 rows' in out
+        assert 'ERROR: scenes.csv: x, y share seq 5,' in out
+        assert 'its own id' in out and "author's call" in out
+
+    def test_a_blank_id(self, project_dir, capsys):
+        _write_scenes(project_dir, ['a|1|A', '|2|Untitled'])
+        assert "ERROR: scenes.csv: a row has no id (seq '2'" in self._stop(project_dir, capsys)
+
+    def test_every_problem_in_one_pass(self, project_dir, capsys):
+        _write_scenes(project_dir, ['a|nan|A', 'b|first|B', 'c|3|C', 'd|3.0|D'])
+        out = self._stop(project_dir, capsys)
+        assert "a has no numeric seq ('nan')" in out
+        assert "b has no numeric seq ('first')" in out
+        assert 'c, d share seq 3 / 3.0' in out
+        assert 'Give every scene a number in seq.' in out
+
+    def test_a_byte_order_mark_still_finds_the_tie(self, project_dir, capsys):
+        with open(_scenes_path(project_dir), 'w', encoding='utf-8') as f:
+            f.write('﻿id|seq|title\r\na|1|A\r\nb|1|B\r\n')
+        assert 'a, b share seq 1' in self._stop(project_dir, capsys)
+
+    def test_a_byte_order_mark_with_unique_seqs_passes(self, project_dir):
+        path = _scenes_path(project_dir)
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('﻿' + text)
+        ledger.exit_if_unordered(project_dir)
+
+    def test_many_unnumbered_scenes_are_capped(self, project_dir, capsys):
+        _write_scenes(project_dir, [f's{n}||T' for n in range(25)])
+        out = self._stop(project_dir, capsys)
+        assert out.count('has no numeric seq') == 20
+        assert '5 more scene(s) have no numeric seq' in out
