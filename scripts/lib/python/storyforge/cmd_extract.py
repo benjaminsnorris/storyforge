@@ -308,13 +308,14 @@ def _halt_chain(project_dir: str, phase: str, scene_id: str, error: Exception,
 
 
 def _log_api_usage(log_file: str, operation: str, target: str, model: str,
-                   project_dir: str) -> None:
-    """Log API usage/cost from a JSON response file."""
+                   project_dir: str, batch: bool = False) -> None:
+    """Log API usage/cost from a JSON response file (*batch*: the Batch API's
+    50% price)."""
     try:
         with open(log_file) as f:
             response = json.load(f)
         usage = extract_usage(response)
-        cost = calculate_cost_from_usage(usage, model)
+        cost = calculate_cost_from_usage(usage, model, batch=batch)
         log_operation(
             project_dir, operation, model,
             usage['input_tokens'], usage['output_tokens'], cost,
@@ -326,6 +327,23 @@ def _log_api_usage(log_file: str, operation: str, target: str, model: str,
         # Unrecorded cost makes the ledger, the threshold check and the
         # summary all read low: say so
         log(f'  WARNING: cost of {operation} ({target}) not recorded: {e}')
+
+
+def _log_batch_usage(batch_file: str, log_dir: str, operation: str, model: str,
+                     project_dir: str) -> None:
+    """Log the cost of every reply a batch download wrote. Each request in
+    *batch_file* was paid for if its response ({log_dir}/{custom_id}.json) is
+    there, refused and cut-off replies included; a failed item has none."""
+    try:
+        with open(batch_file) as f:
+            ids = [json.loads(line)['custom_id'] for line in f if line.strip()]
+    except (OSError, ValueError, KeyError) as e:
+        log(f'  WARNING: cost of {operation} not recorded: {e}')
+        return
+    for cid in ids:
+        response = os.path.join(log_dir, f'{cid}.json')
+        if os.path.isfile(response):
+            _log_api_usage(response, operation, cid, model, project_dir, batch=True)
 
 
 def _run_hone(plugin_dir: str, phase: int) -> None:
@@ -550,6 +568,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     skel_output = os.path.join(log_dir, 'extract-phase1-output')
     os.makedirs(skel_output, exist_ok=True)
     succeeded = set(download_batch_results(results_url, skel_output, log_dir) or [])
+    _log_batch_usage(batch_file, log_dir, 'extract-skeleton', model, project_dir)
 
     # Process results
     log('  Processing skeleton results...')
@@ -703,6 +722,7 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     intent_output = os.path.join(log_dir, 'extract-phase2-output')
     os.makedirs(intent_output, exist_ok=True)
     download_batch_results(results_url, intent_output, log_dir)
+    _log_batch_usage(batch_file, log_dir, 'extract-intent', model, project_dir)
 
     # Process results
     log('  Processing intent results...')
@@ -968,6 +988,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     brief_output = os.path.join(log_dir, 'extract-phase3a-output')
     os.makedirs(brief_output, exist_ok=True)
     download_batch_results(results_url, brief_output, log_dir)
+    _log_batch_usage(batch_file, log_dir, 'extract-briefs', model, project_dir)
 
     # Process results
     log('  Processing brief results...')

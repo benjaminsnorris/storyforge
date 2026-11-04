@@ -364,7 +364,7 @@ class TestAssignment:
         tl.write_cues(project_dir, {'a': {'relation': 'continues'},
                                     'b': {'relation': 'later', 'gap': 'next morning'},
                                     'c': {'relation': 'frame'}})
-        monkeypatch.setattr(tl, '_invoke_assignment', lambda model: (
+        monkeypatch.setattr(tl, '_invoke_assignment', lambda model, project_dir=None: (
             lambda prompt, log_file, label: 'a | 1 | scene | start\nb | 2 | scene | next\n'
                                             'c | 800 | frame | two years on\n'))
         logs = os.path.join(project_dir, 'working', 'logs')
@@ -389,7 +389,7 @@ class TestAssignment:
         import storyforge.timeline as tl
         _scenes(project_dir, [('a', '-2', 'scene'), ('b', '0', 'scene'), ('c', '9', 'scene')])
         tl.write_cues(project_dir, {'a': {'relation': 'later'}})
-        monkeypatch.setattr(tl, '_invoke_assignment', lambda model: (
+        monkeypatch.setattr(tl, '_invoke_assignment', lambda model, project_dir=None: (
             lambda prompt, log_file, label: 'CALENDAR:\na | 1 | scene | x\nb | 3 | scene | x\n'
                                             'c | 7 | scene | x\n'))
         result = tl.run_assignment(project_dir, 'm', os.path.join(project_dir, 'working', 'logs'),
@@ -403,7 +403,7 @@ class TestAssignment:
         import storyforge.timeline as tl
         _scenes(project_dir, [('a', '', ''), ('b', '', '')])
         tl.write_cues(project_dir, {'a': {'relation': 'later'}, 'b': {'relation': 'continues'}})
-        monkeypatch.setattr(tl, '_invoke_assignment', lambda model: (
+        monkeypatch.setattr(tl, '_invoke_assignment', lambda model, project_dir=None: (
             lambda prompt, log_file, label: 'CALENDAR:\na | 1 | scene | x\nb | 1 | frame narration\n'))
         tl.run_assignment(project_dir, 'm', os.path.join(project_dir, 'working', 'logs'), force=False)
         assert _column(project_dir, 'timeline_day') == {'a': '1', 'b': '1'}
@@ -621,7 +621,7 @@ class TestMonthAnchors:
             'b': {'relation': 'later', 'anchor': 'late October'},
             'c': {'relation': 'later', 'anchor': 'In March'},
             'd': {'relation': 'later', 'anchor': 'early in May'}})
-        monkeypatch.setattr(tl, '_invoke_assignment', lambda model: (
+        monkeypatch.setattr(tl, '_invoke_assignment', lambda model, project_dir=None: (
             lambda prompt, log_file, label:
                 'CALENDAR:\na | 1 | scene | x\nb | 50 | scene | x\nc | 185 | scene | x\n'
                 'd | 200 | scene | x\n'))
@@ -757,7 +757,7 @@ class TestSpikes:
         _scenes(project_dir, [('a', '', ''), ('b', '', ''), ('c', '', '')])
         tl.write_cues(project_dir, {'a': {'relation': 'later'}, 'b': {'relation': 'later'},
                                     'c': {'relation': 'later'}})
-        monkeypatch.setattr(tl, '_invoke_assignment', lambda model: (
+        monkeypatch.setattr(tl, '_invoke_assignment', lambda model, project_dir=None: (
             lambda prompt, log_file, label:
                 'CALENDAR:\na | 180 | scene | x\nb | 900 | summary | x\nc | 270 | scene | x\n'))
         tl.run_assignment(project_dir, 'm', os.path.join(project_dir, 'working', 'logs'), force=False)
@@ -1357,7 +1357,7 @@ class TestCueDates:
             'b': {'relation': 'later', 'date': '1829'},
             'c': {'relation': 'later', 'date': 'XXXX-03'},
             'd': {'relation': 'later'}})
-        monkeypatch.setattr(tl, '_invoke_assignment', lambda model: (
+        monkeypatch.setattr(tl, '_invoke_assignment', lambda model, project_dir=None: (
             lambda prompt, log_file, label: 'CALENDAR:\na | 1 | scene | x\nb | 2 | scene | x\n'
                                             'c | 3 | scene | x\nd | 4 | scene | x\n'))
         return tl.run_assignment(project_dir, 'm', os.path.join(project_dir, 'working', 'logs'),
