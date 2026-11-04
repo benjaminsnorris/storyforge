@@ -588,6 +588,24 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
                     print(f'    {item["scene_id"]}.{item["field"]}: {issue_type} ({item.get("reason", "unknown")})')
             print()
 
+    # Part 2b: Brief names found nowhere in the book (#496)
+    print('=== Brief Names Found Nowhere in the Book ===\n')
+    from storyforge.brief_names import brief_drift, checked_scope, describe_strays
+    drift = brief_drift(project_dir, scene_filter)
+    strays = drift.strays
+    if strays:
+        print('  A draft takes its facts from the brief, so it would write these in.')
+        print('  Check each against the book (advisory: drug names and emphasis show up too):')
+        for sid, by_field in sorted(strays.items()):
+            print(f'    {sid}: {describe_strays(by_field)}')
+    elif not drift.notes:
+        print(f'  None: {checked_scope(drift)}.')
+    for note in drift.notes:
+        print(f'  Not checked: {note}')
+    if drift.notes and drift.checked:
+        print(f'  ({checked_scope(drift)})')
+    print()
+
     # Part 3: Gaps
     print('=== Gaps ===\n')
     gaps = detect_gaps(scenes, intent, briefs, scene_filter)
@@ -650,12 +668,17 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
     print('\n=== Summary ===\n')
     print(f'  Structural score:    {overall:.2f}')
     print(f'  Brief issues:        {len(issues)} across {len(set(i["scene_id"] for i in issues))} scenes')
+    unchecked = f' ({len(drift.notes)} thing(s) not checked)' if drift.notes else ''
+    print(f'  Stray brief names:   {len(strays)} of {drift.checked} briefs checked{unchecked}')
     print(f'  Gaps:                {len(gaps)} empty fields across {len(set(g["scene_id"] for g in gaps))} scenes')
     clean = len(set(scenes.keys()) - set(i['scene_id'] for i in issues) - set(g['scene_id'] for g in gaps))
     print(f'  Clean scenes:        {clean} / {len(scenes)}')
 
     # Recommendations
     recs = []
+    if strays:
+        recs.append('Stray brief names: check each with the author before drafting from '
+                    'those briefs (a real name goes in characters.csv or locations.csv)')
     if issues:
         recs.append('Run: storyforge hone --domain briefs')
     if gaps:

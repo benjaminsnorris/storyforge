@@ -52,3 +52,65 @@ class TestCommitAndPushUpstream:
         (work / 'b.txt').write_text('b\n')
         assert commit_and_push(str(work), 'Add b')  # the commit itself happened
         assert 'WARNING: could not push storyforge/new' in capsys.readouterr().out
+        from storyforge import git
+        assert 'storyforge/new' in git.unpushed   # for the command's closing summary
+
+
+class TestAFailedCommit:
+    """SF-1/SF-3/SF-4/T-6 (#503's review): a failed commit said nothing and
+    left what it staged in the index, so the next commit (the review
+    phase's) swept the scene in under its own message."""
+
+    _repos = TestCommitAndPushUpstream._repos
+
+    @staticmethod
+    def _git(work, *a):
+        import subprocess
+        return subprocess.run(['git', '-C', str(work), *a], capture_output=True,
+                              text=True).stdout
+
+    def _rejecting(self, tmp_path):
+        remote, work = self._repos(tmp_path)
+        hook = work / '.git' / 'hooks' / 'pre-commit'
+        hook.write_text('#!/bin/sh\necho "hook says no" >&2\nexit 1\n')
+        hook.chmod(0o755)
+        return work
+
+    def test_it_says_why_and_unstages_what_it_staged(self, tmp_path, capsys):
+        from storyforge import git
+        work = self._rejecting(tmp_path)
+        (work / 'b.txt').write_text('b\n')
+        assert git.commit_and_push(str(work), 'Add b', ['b.txt']) is False
+        assert 'hook says no' in git.last_commit_error
+        assert 'WARNING: git commit "Add b" failed: hook says no' in capsys.readouterr().out
+        assert self._git(work, 'diff', '--cached', '--name-only').strip() == ''
+
+    def test_commit_or_raise_carries_gits_reason(self, tmp_path):
+        from storyforge import git
+        work = self._rejecting(tmp_path)
+        (work / 'b.txt').write_text('b\n')
+        with pytest.raises(git.CommitError, match='the commit "Add b" failed: hook says no'):
+            git.commit_or_raise(str(work), 'Add b', ['b.txt'])
+
+    def test_nothing_to_commit_in_a_real_repo_is_not_a_failure(self, tmp_path, capsys):
+        from storyforge import git
+        remote, work = self._repos(tmp_path)
+        before = self._git(work, 'rev-parse', 'HEAD')
+        git.commit_or_raise(str(work), 'Nothing', ['a.txt'])     # no raise
+        assert git.commit_and_push(str(work), 'Nothing', ['a.txt']) is False
+        assert git.last_commit_error == git.NOTHING_TO_COMMIT
+        assert 'WARNING' not in capsys.readouterr().out
+        assert self._git(work, 'rev-parse', 'HEAD') == before
+
+    def test_write_skips_a_rechecks_empty_commit_in_a_real_repo(self, tmp_path):
+        """The real write path: a re-check that ran nothing commits nothing."""
+        from storyforge import cmd_write
+        remote, work = self._repos(tmp_path)
+        (work / 'reference').mkdir()
+        (work / 'reference' / 'x.csv').write_text('id\n')
+        self._git(work, 'add', '.')
+        self._git(work, 'commit', '-qm', 'ref')
+        before = self._git(work, 'rev-parse', 'HEAD')
+        cmd_write._commit(str(work), 'Re-check after x: 0 passed',
+                          ['reference/', 'working/logs/', 'working/gate-pending.csv'])
+        assert self._git(work, 'rev-parse', 'HEAD') == before

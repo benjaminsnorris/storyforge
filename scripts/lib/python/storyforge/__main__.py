@@ -186,15 +186,20 @@ def _dispatch(module) -> None:
     A ``ledger.LedgerError`` (knowledge.csv or physical-states.csv still on
     disk, or a ledger with a duplicate or blank id, a bad header or a short
     row) exits 1 with its message rather than a traceback, as does a
-    ``source.SourceError`` (a `source:` block or name map that can't be used).
+    ``source.SourceError`` (a `source:` block or name map that can't be used),
+    or a ``costs.ThresholdError`` (`STORYFORGE_COST_THRESHOLD` isn't a number;
+    the commands that check the threshold stop on it up front, this catches
+    the rest).
     """
+    from storyforge.costs import ThresholdError
     from storyforge.ledger import LedgerError
     from storyforge.source import SourceError
     try:
         code = module.main(sys.argv[1:])
-    except (LedgerError, SourceError) as e:
-        # A command with no up-front check reached the registries: stop as
-        # plainly as the ones that check
+    except (LedgerError, SourceError, ThresholdError) as e:
+        # A command with no up-front check reached the registries, a source
+        # block, or a non-numeric STORYFORGE_COST_THRESHOLD: stop as plainly
+        # as the ones that check
         print(f'ERROR: {e}', file=sys.stderr)
         sys.exit(1)
     if code:

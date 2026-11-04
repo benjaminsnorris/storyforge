@@ -34,7 +34,7 @@ from storyforge.api import (
     is_truncated, stop_problem,
 )
 from storyforge.costs import (
-    estimate_cost, check_threshold, print_summary, log_operation,
+    estimate_cost, check_threshold, exit_if_bad_threshold, print_summary, log_operation,
 )
 from storyforge.scenes import (
     generate_slug, unique_slug, scene_id_slug, is_break_marker, parse_scene_boundaries,
@@ -177,6 +177,7 @@ def main(argv=None):
 
     install_signal_handlers()
     project_dir = detect_project_root()
+    exit_if_bad_threshold()   # before anything is spent
     log(f'Project root: {project_dir}')
 
     # API key check

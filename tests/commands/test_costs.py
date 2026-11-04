@@ -229,6 +229,40 @@ class TestCheckThreshold:
         assert check_threshold(0.0) is True
 
 
+class TestCostThreshold:
+    """A threshold that isn't a number is an error naming the variable and
+    the value, never a traceback (`float('abc')`) or a quiet fallback to the
+    default (#499's review)."""
+
+    @pytest.mark.parametrize('bad', ['abc', '', '  ', '$50', '50 dollars', 'nan', 'inf', '-5'])
+    def test_a_bad_value_is_an_error_naming_it(self, monkeypatch, bad):
+        from storyforge.costs import ThresholdError, cost_threshold
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', bad)
+        with pytest.raises(ThresholdError) as e:
+            cost_threshold()
+        assert 'STORYFORGE_COST_THRESHOLD' in str(e.value) and repr(bad) in str(e.value)
+        with pytest.raises(ThresholdError):
+            check_threshold(1.0)
+
+    def test_good_values(self, monkeypatch):
+        from storyforge.costs import cost_threshold
+        assert cost_threshold() == 100.0
+        assert cost_threshold(20.0) == 20.0
+        for raw, value in (('25', 25.0), (' 150.5 ', 150.5), ('0', 0.0)):
+            monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', raw)
+            assert cost_threshold() == value
+
+    def test_exit_if_bad_threshold_exits_1_with_an_error(self, monkeypatch, capsys):
+        from storyforge.costs import exit_if_bad_threshold
+        exit_if_bad_threshold()   # unset: nothing to say
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', 'lots')
+        with pytest.raises(SystemExit) as e:
+            exit_if_bad_threshold()
+        assert e.value.code == 1
+        out = capsys.readouterr().out
+        assert "ERROR: STORYFORGE_COST_THRESHOLD is 'lots'" in out and 'Nothing run' in out
+
+
 # ============================================================================
 # log_operation
 # ============================================================================
@@ -428,3 +462,132 @@ class TestPricingForResolvedModels:
     def test_cached_tokens_count_toward_the_long_prompt_threshold(self):
         cost = calculate_cost('claude-haiku-5-5', 1_000, 0, cache_read=150_000)
         assert cost == pytest.approx(1_000 * 0.50 / 1e6 + 150_000 * 0.05 / 1e6)
+
+
+class TestRunBudget:
+    """The threshold is one budget for a whole run (#499's review: drafting
+    and the re-checks were each checked against it alone)."""
+
+    class Meter:
+        def __init__(self, cost):
+            self._cost = cost
+
+        def cost(self):
+            return self._cost
+
+    def test_committed_is_the_meter_plus_what_is_owed_and_charged(self):
+        from storyforge.costs import RunBudget
+        assert RunBudget().committed() == 0.0
+        assert RunBudget(self.Meter(12.5)).committed(3.0) == 15.5
+        budget = RunBudget(self.Meter(1.0))
+        budget.charge(2.0)            # a draft the claude CLI wrote, at its forecast
+        budget.charge(-5.0)           # never a credit
+        budget.owed = 4.0             # revise: the passes still to run
+        assert budget.committed(0.5) == pytest.approx(7.5)
+
+    def test_the_rechecks_count_at_their_forecast_or_their_cost(self):
+        """A re-check counts at its forecast when its calls cost less or
+        weren't metered, and the rest of the run's spend is added to it,
+        not hidden under it."""
+        from storyforge import gate
+        from storyforge.costs import RunBudget
+        run = gate.Recheck(spent=5.0 + 2.4, spent_before=5.0)
+        budget = RunBudget(self.Meter(1.0))                    # drafting so far
+        budget.record(run)
+        assert budget.rechecks == pytest.approx(2.4)
+        assert budget.committed() == pytest.approx(1.0 + 2.4)  # unmetered re-check
+        # a re-check measured at $0.40 against its $2.40 forecast
+        budget = RunBudget(self.Meter(1.4))
+        budget.record(run, actual=0.4)
+        assert budget.committed(1.0) == pytest.approx(1.0 + 2.4 + 1.0)
+        # one measured at more than its forecast counts at its cost
+        budget = RunBudget(self.Meter(4.0))
+        budget.record(run, actual=3.0)
+        assert budget.committed() == pytest.approx(4.0)
+        budget.record(None)                                    # nothing ran
+        assert budget.rechecks == pytest.approx(2.4)
+
+    def test_the_spend_meter_prices_what_it_saw(self):
+        from storyforge import api
+        from storyforge.api import calculate_cost_from_usage
+        usage = {'input_tokens': 1000, 'output_tokens': 2000}
+        with api.metered() as meter:
+            assert meter.cost() == 0.0
+            api._meter({'usage': usage}, 'claude-sonnet-4-6')
+            api._meter({'usage': usage}, 'claude-opus-4-6')
+        want = sum(calculate_cost_from_usage(api.extract_usage({'usage': usage}), m)
+                   for m in ('claude-sonnet-4-6', 'claude-opus-4-6'))
+        assert meter.cost() == pytest.approx(want) and want > 0
+
+    def test_budgeted_recheck_measures_the_rechecks_apart(self, monkeypatch):
+        """The re-checks' own spend is told apart from the rest of the run's,
+        so neither hides the other: drafting $1.00, a re-check measured at
+        $0.50 against a $0.95 forecast counts $1.95."""
+        from storyforge import api, cmd_write, gate
+        from storyforge.costs import RunBudget
+
+        def spend(dollars):   # Opus 4.6 output is $25 a million tokens
+            api._meter({'usage': {'input_tokens': 0,
+                                  'output_tokens': int(dollars * 40_000)}},
+                       'claude-opus-4-6')
+
+        def run_recheck(pd, ld, skip=frozenset(), spent_before=0.0):
+            spend(0.5)
+            return gate.Recheck(spent=spent_before + 0.95, spent_before=spent_before)
+        monkeypatch.setattr(cmd_write, 'run_recheck', run_recheck)
+        with api.metered() as meter:
+            budget = RunBudget(meter)
+            spend(1.0)
+            cmd_write.budgeted_recheck('/nowhere', '/nowhere', set(), budget, reserved=2.0)
+        assert budget.rechecks_actual == pytest.approx(0.5)
+        assert budget.rechecks == pytest.approx(0.95)
+        assert budget.committed() == pytest.approx(1.95)
+
+    def test_a_metered_runs_worker_threads_are_counted(self):
+        """SF-6: meters are per thread, and `run_parallel`'s workers (the
+        drift check's cue extraction) went uncounted."""
+        from storyforge import api
+        from storyforge.runner import run_parallel
+
+        def worker(item):
+            api._meter({'usage': {'input_tokens': 0, 'output_tokens': 40_000}},
+                       'claude-opus-4-6')
+            return item
+        with api.metered() as meter:
+            run_parallel(['a', 'b', 'c'], worker, max_workers=3)
+        assert meter.cost() == pytest.approx(3.0)
+        assert getattr(api._meters, 'stack', []) == []   # nothing left open here
+
+
+class TestEveryCommandStopsOnABadThreshold:
+    """T-7 (#503's review): the commands that check the threshold stop on a
+    non-numeric one before any model call."""
+
+    @pytest.mark.parametrize('module, argv', [
+        ('storyforge.cmd_score', ['--direct']),
+        ('storyforge.cmd_scenes_setup', ['--split-chapters']),
+        ('storyforge.cmd_scenes_setup', ['--split-manuscript']),
+        ('storyforge.cmd_timeline', []),
+        ('storyforge.cmd_enrich', []),
+    ])
+    def test_exit_1_and_no_model_call(self, module, argv, mock_api, project_dir,
+                                      monkeypatch, capsys):
+        import importlib
+        mod = importlib.import_module(module)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', 'fifty')
+        monkeypatch.setattr(mod, 'detect_project_root', lambda: project_dir)
+        with pytest.raises(SystemExit) as e:
+            mod.main(argv)
+        assert e.value.code == 1
+        assert mock_api.call_count == 0
+        assert "STORYFORGE_COST_THRESHOLD is 'fifty'" in capsys.readouterr().out
+
+    def test_the_costs_check_cli_exits_2(self, monkeypatch, capsys):
+        from storyforge import costs
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', 'fifty')
+        monkeypatch.setattr('sys.argv', ['costs', 'check', '1.0'])
+        with pytest.raises(SystemExit) as e:
+            costs.main()
+        assert e.value.code == 2
+        assert "STORYFORGE_COST_THRESHOLD is 'fifty'" in capsys.readouterr().err

@@ -40,8 +40,10 @@ def run_parallel(
 
     log(f'Processing {total} {label}(s) with {max_workers} parallel workers...')
 
+    from storyforge.api import carry_meters
+    worker = carry_meters(worker_fn)   # the caller's spend meters see the workers' calls
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(worker_fn, item): item for item in items}
+        futures = {pool.submit(worker, item): item for item in items}
 
         for future in as_completed(futures):
             if is_shutting_down():

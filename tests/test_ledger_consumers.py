@@ -41,6 +41,39 @@ def test_a_command_stops_on_the_old_files(module, project_dir, monkeypatch, caps
     assert 'run `storyforge migrate`' in capsys.readouterr().out
 
 
+@pytest.mark.parametrize('module', ['cmd_write', 'cmd_revise', 'cmd_check'])
+def test_a_command_stops_on_a_shared_seq_before_any_call(
+        module, project_dir, monkeypatch, capsys):
+    """Every caller of exit_if_unordered stops on a shared seq before it
+    pays for anything (issue #495)."""
+    import importlib
+    from storyforge import api
+    from storyforge.elaborate import _read_csv, _write_csv
+    mod = importlib.import_module(f'storyforge.{module}')
+    scenes = os.path.join(project_dir, 'reference', 'scenes.csv')
+    rows = _read_csv(scenes)
+    rows[2]['seq'] = rows[1]['seq']
+    _write_csv(scenes, rows, list(rows[0]))
+
+    def no_call(*a, **k):
+        raise AssertionError('a model call before the shared-seq stop')
+    monkeypatch.setattr(api, '_api_request', no_call)
+    monkeypatch.setattr(mod, 'detect_project_root', lambda *a, **k: project_dir)
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    with pytest.raises(SystemExit) as exc:
+        mod.main([])
+    assert exc.value.code == 1
+    # The exit is the stop's own, not a later one the fixture would reach
+    # anyway (each command has other reasons to exit 1 here)
+    assert exc.traceback[-1].name == 'stop'
+    assert exc.traceback[-2].name == 'exit_if_unordered'
+    out = capsys.readouterr().out
+    assert (f'{", ".join(sorted([rows[1]["id"], rows[2]["id"]]))} share seq '
+            f'{rows[1]["seq"]}') in out
+    assert out.rstrip().endswith('reports these as duplicate-seq).')
+
+
 def test_the_dispatcher_turns_a_late_error_into_a_plain_stop(project_dir, monkeypatch, capsys):
     """A command with no up-front check that reaches the registries exits 1
     with the message, not a traceback."""
@@ -56,6 +89,23 @@ def test_the_dispatcher_turns_a_late_error_into_a_plain_stop(project_dir, monkey
     assert exc.value.code == 1
     assert 'ERROR: reference/knowledge.csv and reference/physical-states.csv must move' \
         in capsys.readouterr().err
+
+
+def test_the_dispatcher_turns_a_bad_cost_threshold_into_a_plain_stop(monkeypatch, capsys):
+    """A command that reaches `check_threshold` with a non-numeric
+    STORYFORGE_COST_THRESHOLD exits 1 with the message, not a traceback."""
+    from storyforge import __main__ as dispatcher
+    from storyforge.costs import check_threshold
+
+    class Command:
+        @staticmethod
+        def main(argv):
+            check_threshold(1.0)
+    monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', 'ten')
+    with pytest.raises(SystemExit) as exc:
+        dispatcher._dispatch(Command)
+    assert exc.value.code == 1
+    assert "ERROR: STORYFORGE_COST_THRESHOLD is 'ten'" in capsys.readouterr().err
 
 
 def test_neither_file_reads_as_empty_registries(project_dir):
@@ -235,7 +285,7 @@ class TestEstablishedFacts:
         assert '(the 2 most recent; 2 older not shown)' in prompt
         assert 'older states left out' in ''.join(capsys.readouterr())
 
-    def test_a_scene_without_a_number_stops_write_and_revise(self, project_dir):
+    def test_a_scene_without_a_number_stops_write_and_revise(self, project_dir, capsys):
         from storyforge.elaborate import _read_csv, _write_csv
         scenes = os.path.join(project_dir, 'reference', 'scenes.csv')
         rows = _read_csv(scenes)
@@ -244,6 +294,46 @@ class TestEstablishedFacts:
         with pytest.raises(SystemExit) as exc:
             ledger.exit_if_unordered(project_dir)
         assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert "ERROR: scenes.csv: act1-sc01 has no numeric seq ('first')" in out
+        assert 'ERROR: Give every scene a number in seq.' in out
+        assert 'share seq' not in out
+
+    def test_scenes_sharing_a_seq_stop_naming_each_seq(self, project_dir, capsys):
+        """scene_order put tied scenes in id order without a word, so the
+        facts in force for each were arbitrary (issue #495)."""
+        from storyforge.elaborate import _read_csv, _write_csv
+        scenes = os.path.join(project_dir, 'reference', 'scenes.csv')
+        rows = _read_csv(scenes)
+        rows[1]['seq'] = rows[0]['seq']          # act1-sc01, act1-sc02 at 1
+        rows[4]['seq'] = rows[3]['seq'] + '.0'   # 4 and 4.0 tie as numbers
+        _write_csv(scenes, rows, list(rows[0]))
+        with pytest.raises(SystemExit) as exc:
+            ledger.exit_if_unordered(project_dir)
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert 'ERROR: scenes.csv: act1-sc01, act1-sc02 share seq 1,' in out
+        assert f'ERROR: scenes.csv: {rows[3]["id"]}, {rows[4]["id"]} share seq 4 / 4.0,' in out
+        assert "author's call" in out and 'seq column of reference/scenes.csv' in out
+        # the gate and the evals still read an order from it
+        assert set(ledger.scene_order(project_dir)) == {r['id'] for r in rows}
+
+    def test_a_cut_scene_sharing_a_seq_still_stops(self, project_dir):
+        """validate's duplicate-seq counts every row, and scene_order ranks
+        every row, so a cut scene's tie stops too: one definition."""
+        from storyforge.elaborate import _read_csv, _write_csv, validate_structure
+        scenes = os.path.join(project_dir, 'reference', 'scenes.csv')
+        rows = _read_csv(scenes)
+        rows[1].update(seq=rows[0]['seq'], status='cut', word_count='0')
+        _write_csv(scenes, rows, list(rows[0]))
+        with pytest.raises(SystemExit):
+            ledger.exit_if_unordered(project_dir)
+        dup = [c for c in validate_structure(os.path.join(project_dir, 'reference'))['checks']
+               if c['check'] == 'duplicate-seq']
+        assert not dup[0]['passed']
+
+    def test_unique_seqs_pass(self, project_dir):
+        ledger.exit_if_unordered(project_dir)
 
     def test_nothing_for_the_scene_means_no_section(self, project_dir, plugin_dir):
         ref = os.path.join(project_dir, 'reference')

@@ -131,7 +131,7 @@ class TestRedraftsAreRewrites:
         seen = []
         monkeypatch.setattr(cmd_write, '_build_prompt',
                             lambda sid, *a, **k: seen.append(k.get('rewrite')) or '')
-        monkeypatch.setattr(cmd_revise, 'commit_and_push', lambda *a, **k: True)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **k: True)
         with pytest.raises(cmd_revise.RedraftError):   # no prompt: nothing drafted
             cmd_revise._redraft_from_briefs(project_dir, ['act1-sc01'], 'm', str(project_dir),
                                             system=[{'type': 'text', 'text': 's'}])
@@ -208,7 +208,7 @@ class TestRedraftsAreRewrites:
         from storyforge import cmd_revise
         with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md'), 'wb') as f:
             f.write(b'\x93cp1252\x94')
-        monkeypatch.setattr(cmd_revise, 'commit_and_push', lambda *a, **k: True)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **k: True)
         monkeypatch.setattr('storyforge.api.invoke_to_file',
                             lambda *a, **k: pytest.fail('drafted'))
         with pytest.raises(cmd_revise.RedraftError) as e:

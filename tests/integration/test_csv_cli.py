@@ -6,6 +6,7 @@ edge cases (missing file, missing field, empty CSV, CRLF normalization).
 """
 
 import os
+import sys
 
 import pytest
 
@@ -311,6 +312,41 @@ class TestRenumberSeq:
             fields = line.split('|')
             seq = int(fields[1])
             assert seq in (1, 2, 3)
+
+    def test_decimal_seqs_sort_as_numbers(self, tmp_path):
+        """int('2.5') was 0, so an inserted 2.5 went first (CR-3)."""
+        path = str(tmp_path / 'seq.csv')
+        with open(path, 'w') as f:
+            f.write('id|seq|title\na|1|A\nb|3|B\nc|2.5|C\n')
+        renumber_seq(path)
+        assert _read_lines(path)[1:] == ['a|1|A', 'c|2|C', 'b|3|B']
+
+    @pytest.mark.parametrize('rows', [
+        ['a|1|A', 'b|4.0|B', 'c|4|C'],      # a tie spelled two ways
+        ['a|1|A', 'b|2|B', 'c|2|C'],        # a plain tie
+        ['a|1|A', 'b||B', 'c|nan|C'],       # no numeric seq
+    ])
+    def test_refuses_to_pick_an_order(self, tmp_path, rows):
+        """A renumber would choose the order of tied or unnumbered scenes,
+        which is the author's call; the file is left as it was."""
+        path = str(tmp_path / 'seq.csv')
+        text = 'id|seq|title\n' + ''.join(r + '\n' for r in rows)
+        with open(path, 'w') as f:
+            f.write(text)
+        with pytest.raises(ValueError, match='not renumbering seq.csv'):
+            renumber_seq(path)
+        assert open(path).read() == text
+
+    def test_cli_refusal_exits_1(self, tmp_path, monkeypatch, capsys):
+        from storyforge import csv_cli
+        path = str(tmp_path / 'seq.csv')
+        with open(path, 'w') as f:
+            f.write('id|seq|title\na|2|A\nb|2|B\n')
+        monkeypatch.setattr(sys, 'argv', ['csv_cli', 'renumber-seq', path])
+        with pytest.raises(SystemExit) as exc:
+            csv_cli.main()
+        assert exc.value.code == 1
+        assert 'shared seq: a and b (seq 2)' in capsys.readouterr().err
 
     def test_no_seq_column_noop(self, sample_csv):
         """File without seq column should be unchanged."""

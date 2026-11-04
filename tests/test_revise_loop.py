@@ -458,7 +458,7 @@ class TestPolishLoopOrchestration:
         monkeypatch.setattr('storyforge.cmd_revise._run_lightweight_score', fake_lightweight)
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
-        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **kw: True)
         monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
                             lambda title, body, pd, work_type='': '')
         monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
@@ -479,12 +479,12 @@ class TestPolishLoopOrchestration:
         monkeypatch.setattr('storyforge.cmd_revise._run_deterministic_score', fake_deterministic)
         for name, fn in (('create_branch', lambda *a: None),
                          ('ensure_branch_pushed', lambda *a: None),
-                         ('commit_and_push', lambda *a, **kw: None),
                          ('create_draft_pr', lambda title, body, pd, work_type='': ''),
                          ('get_pr_body', lambda pd, pr: ''),
                          ('set_pr_body', lambda pd, pr, b: None),
                          ('add_pr_comment', lambda pd, pr, body: None)):
             monkeypatch.setattr(f'storyforge.cmd_revise.{name}', fn)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **kw: True)
 
     def test_source_drift_is_fixed_before_convergence(self, tmp_path, monkeypatch):
         """#477 review (SF-4/T-1): clean craft scores don't skip source drift."""
@@ -539,7 +539,7 @@ class TestPolishLoopOrchestration:
         monkeypatch.setattr('storyforge.cmd_revise._run_lightweight_score', fake_lightweight)
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
-        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **kw: True)
         monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
                             lambda title, body, pd, work_type='': '')
         monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
@@ -576,7 +576,7 @@ class TestPolishLoopOrchestration:
         monkeypatch.setattr('storyforge.cmd_revise._execute_single_pass', fake_execute)
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
-        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **kw: True)
         monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
                             lambda title, body, pd, work_type='': '')
         monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
@@ -613,7 +613,7 @@ class TestPolishLoopOrchestration:
         monkeypatch.setattr('storyforge.cmd_revise._execute_single_pass', fake_execute)
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
-        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **kw: True)
         monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
                             lambda title, body, pd, work_type='': '')
         monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
@@ -654,8 +654,8 @@ class TestPolishLoopOrchestration:
         monkeypatch.setattr('storyforge.cmd_revise._execute_single_pass', lambda *a, **kw: None)
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
-        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push',
-                            lambda p, msg, *a, **kw: commits.append(msg))
+        monkeypatch.setattr('storyforge.git.commit_and_push',
+                            lambda p, msg, *a, **kw: commits.append(msg) or True)
         monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
                             lambda title, body, pd, work_type='': '')
         monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
@@ -675,7 +675,7 @@ class TestPolishLoopOrchestration:
 
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
-        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **kw: True)
         monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
                             lambda title, body, pd, work_type='': '')
         monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
@@ -697,7 +697,7 @@ class TestPolishLoopOrchestration:
 
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
-        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **kw: True)
         monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
                             lambda title, body, pd, work_type='': '')
         monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
@@ -726,7 +726,7 @@ class TestPolishLoopOrchestration:
                             lambda p, s: ('', converged_diag))
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: 'storyforge/revise-test')
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
-        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: True)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **kw: True)
         monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
                             lambda title, body, pd, work_type='': pr_calls['create'].append(body) or '99')
         monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
@@ -772,7 +772,7 @@ class TestPolishLoopOrchestration:
                             lambda *a, **kw: None)
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: 'storyforge/revise-test')
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
-        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: True)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **kw: True)
         monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
                             lambda title, body, pd, work_type='': '99')
         monkeypatch.setattr('storyforge.cmd_revise.get_pr_body',

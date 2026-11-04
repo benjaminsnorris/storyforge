@@ -1816,8 +1816,11 @@ class Recheck:
     #: the forecast was over the cost threshold, so it stopped before a scene
     over_budget: bool = False
     forecast: float = 0.0
-    #: what the run is forecast to have spent, `spent_before` included
+    #: `spent_before` plus this call's re-checks at their forecast: what the
+    #: run has spent or reserved (`costs.RunBudget.committed`) once they ran
     spent: float = 0.0
+    #: what the caller's run had spent and reserved before this call
+    spent_before: float = 0.0
 
 
 def recheck_queue(project_dir: str, skip: set[str] | frozenset[str] = frozenset()) -> list[str]:
@@ -1842,14 +1845,17 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
     rest stay pending. `skip` is scenes the caller is about to redraft.
 
     Cost (Ben: forecast, and run under the threshold): the forecast is
-    logged first; before each scene, `spent_before` (what the caller's run
-    already spent on re-checks) plus this call's spend plus the queue left
-    at `RECHECK_COST_PER_SCENE` must be within `costs.check_threshold`,
-    otherwise it stops with `over_budget` and everything stays pending for
-    `storyforge check --pending`."""
+    logged first; before each scene, `spent_before` plus this call's spend
+    plus the queue left at `RECHECK_COST_PER_SCENE` must be within
+    `costs.check_threshold`, otherwise it stops with `over_budget` and
+    everything stays pending for `storyforge check --pending`. The
+    threshold is one budget for the caller's whole run (`costs.RunBudget`):
+    `spent_before` is what the run has spent so far, drafting and gating
+    included, plus what it reserves for the work it still owes, so the
+    re-checks get only what is left."""
     from storyforge.common import log
-    from storyforge.costs import check_threshold
-    run = Recheck(spent=spent_before)
+    from storyforge.costs import check_threshold, cost_threshold
+    run = Recheck(spent=spent_before, spent_before=spent_before)
     announced = False
     while True:
         queue = recheck_queue(project_dir, skip)
@@ -1859,9 +1865,11 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
         if not check_threshold(run.forecast):
             run.over_budget, run.left = True, queue
             log(f'WARNING: re-checking {len(queue)} scene(s) ({", ".join(queue[:8])}) would '
-                f'bring this run\'s re-checks to about ${run.forecast:.2f}, over the cost '
-                f'threshold: not run. They stay in {PENDING_PATH}; run `storyforge check '
-                f'--pending` (with STORYFORGE_COST_THRESHOLD raised if needed).')
+                f'bring this run to about ${run.forecast:.2f} (${run.spent_before:.2f} of it '
+                f'spent or owed before the re-checks), over the cost threshold '
+                f'(${cost_threshold():g}): not run. They stay in {PENDING_PATH}; run '
+                f'`storyforge check --pending` (with STORYFORGE_COST_THRESHOLD raised if '
+                f'needed).')
             return run
         if not announced:
             log(f'Re-checking {len(queue)} scene(s) whose facts depend on what changed, '

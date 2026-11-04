@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from storyforge import gate
+from storyforge import cmd_write, gate
 from storyforge.checker import CheckResult, Finding
 from storyforge.cmd_write import main
 
@@ -36,6 +36,9 @@ def _pure_prose_scenes(request):
         if stripped != text:
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(stripped)
+
+from storyforge.costs import check_threshold as _REAL_CHECK_THRESHOLD  # noqa: E402
+
 
 def _result(sid, passed):
     r = gate.GateResult(sid, check=CheckResult(sid, findings=[] if passed else [BAD]))
@@ -121,7 +124,7 @@ class TestGatedWrite:
     def test_batch_prose_is_refused_before_anything_is_spent(self, setup, monkeypatch, capsys):
         ran = []
         monkeypatch.setattr('storyforge.cmd_write._run_batch_mode',
-                            lambda *a, **k: ran.append(1) or (0, 0, []))
+                            lambda *a, **k: ran.append(1) or cmd_write.DraftOutcome(0, 0, []))
         monkeypatch.setattr('storyforge.cmd_write.estimate_cost',
                             lambda *a, **k: ran.append('cost') or 0.0)
         with pytest.raises(SystemExit) as exc:
@@ -146,7 +149,7 @@ class TestGatedWrite:
     def test_batch_runs_for_coaching_briefs(self, setup, monkeypatch):
         ran = []
         monkeypatch.setattr('storyforge.cmd_write._run_batch_mode',
-                            lambda *a, **k: ran.append(a[5]) or (0, 0, []))
+                            lambda *a, **k: ran.append(a[5]) or cmd_write.DraftOutcome(0, 0, []))
         main(['--batch', '--coaching', 'coach', '--force', '--scenes', 'act1-sc01'])
         assert ran == ['coach']
 
@@ -222,6 +225,227 @@ class TestReview443:
         # the scene is committed before the re-check runs, then the re-check
         assert commits.index('Draft scene act1-sc01') < commits.index(
             'Re-check after act1-sc01: 1 passed')
+
+    def test_a_failed_commit_stops_the_run_and_exits_1(self, setup, monkeypatch, capsys,
+                                                         mock_git):
+        """`write` ignored a failed `commit_and_push` and went on drafting
+        (#499's review): the next scene's commit would have swept this one's
+        ledger changes in under its message. Now it stops, exit 1, and says
+        the scene needs a commit by hand, not a redraft (C-3); the paid
+        drift check and the review phase, which commits, don't run (SF-1)."""
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
+        calls = _gate(monkeypatch, {'act1-sc01': True, 'act1-sc02': True})
+        drift = []
+        monkeypatch.setattr('storyforge.timeline.drift_check', lambda *a: drift.append(a))
+        mock_git.commit_success = False
+        with pytest.raises(SystemExit) as exc:
+            main(['--scenes', 'act1-sc01,act1-sc02'])
+        assert exc.value.code == 1
+        assert calls == [('act1-sc01', 'draft')]
+        assert _scene(setup, 'act1-sc02') is None            # never drafted
+        assert _scene(setup, 'act1-sc01') is not None        # written, kept
+        out = capsys.readouterr().out
+        assert '1 written but not committed (the files are on disk; do not redraft them)' \
+            in out
+        assert 'act1-sc01 (the commit "Draft scene act1-sc01" failed' in out
+        assert 'act1-sc02 (not attempted: the run stopped at act1-sc01)' in out
+        assert 'ERROR: 1 scene(s) not drafted' in out          # only act1-sc02
+        commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']
+        assert commits == ['Draft scene act1-sc01']
+        assert not mock_git.calls_for('run_review_phase') and drift == []
+        assert 'Skipping the timeline drift check and the review phase' in out
+
+    def test_a_failed_commit_of_a_scene_the_gate_stopped_says_both(
+            self, setup, monkeypatch, capsys, mock_git):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        _gate(monkeypatch, {'act1-sc01': False})
+        mock_git.commit_success = False
+        with pytest.raises(SystemExit):
+            main(['--scenes', 'act1-sc01'])
+        out = capsys.readouterr().out
+        assert 'it also did not pass the gate and is listed in working/gate-pending.csv' \
+            in out
+
+    def test_a_failed_recheck_commit_stops_the_run(self, setup, monkeypatch, capsys,
+                                                   mock_git):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
+        calls = _gate(monkeypatch, {'act1-sc01': True, 'act1-sc02': True})
+
+        def recheck(pd, *, log_dir, skip=frozenset(), **k):
+            gate.clear_pending(pd, 'new-x1')
+            return gate.Recheck(passed=['new-x1'])
+        monkeypatch.setattr(gate, 'recheck_pending', recheck)
+        gate.mark_pending(setup, 'new-x1', 'recheck', 're-check: x')
+        commits = []
+
+        def commit(pd, msg, paths=None):
+            commits.append(msg)
+            return not msg.startswith('Re-check')
+        monkeypatch.setattr('storyforge.git.commit_and_push', commit)
+        with pytest.raises(SystemExit) as exc:
+            main(['--scenes', 'act1-sc01,act1-sc02'])
+        assert exc.value.code == 1
+        assert calls == [('act1-sc01', 'draft')]
+        assert commits == ['Draft scene act1-sc01', 'Re-check after act1-sc01: 1 passed']
+        out = capsys.readouterr().out
+        assert 'the re-checks after act1-sc01 (the commit "Re-check after act1-sc01: 1 ' \
+            'passed" failed' in out
+        assert 'act1-sc02 (not attempted: the run stopped at act1-sc01)' in out
+
+    def test_interactive_a_failed_gate_commit_stops_the_run(
+            self, setup, monkeypatch, capsys, mock_git):
+        """T-2: the interactive CLI commits the scene itself; the gate's own
+        commit after it ("Gate scene") failing stops the run too."""
+        from storyforge import cmd_write
+        heads = iter(['before', 'after'] * 10)
+        import subprocess as sp
+        monkeypatch.setattr('storyforge.git._git', lambda pd, *a, check=True:
+                            sp.CompletedProcess(a, 0, stdout=next(heads) if a[:1] == (
+                                'rev-parse',) else 'M x', stderr=''))
+
+        def cli(prompt, model, project_dir):
+            path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+            with open(path, 'w') as f:
+                f.write(GOOD)
+            return 0
+        monkeypatch.setattr(cmd_write, '_invoke_interactive', cli)
+        calls = _gate(monkeypatch, {'act1-sc01': True, 'act1-sc02': True})
+        mock_git.commit_success = False
+        with pytest.raises(SystemExit) as exc:
+            main(['--interactive', '--force', '--scenes', 'act1-sc01,act1-sc02'])
+        assert exc.value.code == 1
+        assert calls == [('act1-sc01', 'draft')]
+        assert [c[1] for c in mock_git.calls_for('commit_and_push')] == ['Gate scene act1-sc01']
+        out = capsys.readouterr().out
+        assert 'act1-sc01 (the commit "Gate scene act1-sc01" failed' in out
+        assert 'act1-sc02 (not attempted: the run stopped at act1-sc01)' in out
+
+    def test_nothing_to_commit_is_not_a_failed_commit(self, setup, monkeypatch):
+        """A re-check that ran nothing (over the threshold) leaves nothing to
+        commit; `git commit` refuses that, which isn't a failure."""
+        import subprocess
+        from storyforge import cmd_write
+        seen = []
+
+        def git(pd, *a, check=True):   # git commit says there is nothing to commit
+            seen.append(a[0])
+            if a[0] == 'commit':
+                return subprocess.CompletedProcess(
+                    a, 1, stdout='On branch b\nnothing to commit, working tree clean\n',
+                    stderr='')
+            return subprocess.CompletedProcess(a, 0, stdout='', stderr='')
+        monkeypatch.setattr('storyforge.git._git', git)
+        cmd_write._commit(setup, 'Re-check after x: 0 passed', ['reference/'])   # no raise
+        assert 'push' not in seen and 'reset' not in seen
+
+    @staticmethod
+    def _metered_replies(monkeypatch, replies, output_tokens):
+        """`_direct_replies`, each reply also seen by the run's meter, as
+        `api._send` does, with `output_tokens` of usage."""
+        import json as _json
+        from storyforge import api
+        calls = []
+
+        def fake(prompt, model, log_file, max_tokens=4096, label='', timeout=600,
+                 system=None, output_schema=None, fallback=False):
+            sid = label.split()[-1]
+            calls.append(sid)
+            response = dict(replies[sid], usage={'input_tokens': 0,
+                                                 'output_tokens': output_tokens})
+            with open(log_file, 'w') as f:
+                _json.dump(response, f)
+            api._meter(response, 'claude-opus-4-6')
+            return response
+        monkeypatch.setattr('storyforge.cmd_write.invoke_to_file', fake)
+        return calls
+
+    def test_rechecks_get_what_drafting_spent_and_the_rest_of_the_run_leave(
+            self, setup, monkeypatch):
+        """The drafting forecast and the re-check forecast were checked
+        against the threshold separately, so a run could spend nearly twice
+        it: the re-checks were told the run had spent $0."""
+        from storyforge import api
+        self._metered_replies(monkeypatch, {'act1-sc01': _reply(GOOD),
+                                            'act1-sc02': _reply(GOOD)}, 10_000)
+        _gate(monkeypatch, {'act1-sc01': True, 'act1-sc02': True})
+        seen = []
+
+        def recheck(pd, *, log_dir, skip=frozenset(), spent_before=0.0, **k):
+            seen.append(spent_before)
+            gate.clear_pending(pd, 'new-x1')
+            return gate.Recheck(passed=['new-x1'], spent=spent_before + 1.0,
+                                spent_before=spent_before)
+        monkeypatch.setattr(gate, 'recheck_pending', recheck)
+        gate.mark_pending(setup, 'new-x1', 'recheck', 're-check: x')
+        main(['--scenes', 'act1-sc01,act1-sc02'])
+        draft = api.calculate_cost_from_usage(
+            {'input_tokens': 0, 'output_tokens': 10_000}, 'claude-opus-4-6')
+        # the forecast: mock_costs's $0.10 drafting plus the gate, per scene
+        per_scene = (0.10 + 2 * gate.RECHECK_COST_PER_SCENE) / 2
+        assert seen == [pytest.approx(draft + per_scene)]   # act1-sc02 still to draft
+
+    def test_drafting_stops_when_its_spend_passes_the_threshold(
+            self, setup, monkeypatch, capsys):
+        """One budget: the forecast was within the threshold but the first
+        scene cost far more, so drafting the next would go over. It ran on
+        before with nothing said."""
+        from storyforge import cmd_write
+        monkeypatch.setattr(cmd_write, 'check_threshold', _REAL_CHECK_THRESHOLD)
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '3')
+        calls = self._metered_replies(monkeypatch, {'act1-sc01': _reply(GOOD),
+                                                    'act1-sc02': _reply(GOOD)}, 100_000)
+        _gate(monkeypatch, {'act1-sc01': True, 'act1-sc02': True})   # $2.50 a draft
+        with pytest.raises(SystemExit) as exc:
+            main(['--force', '--scenes', 'act1-sc01,act1-sc02'])
+        assert exc.value.code == 1
+        assert calls == ['act1-sc01']
+        out = capsys.readouterr().out
+        assert 'drafting act1-sc02 and the 0 scene(s) after it would bring this run to about ' \
+            in out and 'over the cost threshold ($3)' in out
+        assert 'act1-sc02 (not attempted: the run reached the cost threshold)' in out
+
+    def test_interactive_drafts_are_charged_at_their_forecast(
+            self, setup, monkeypatch, capsys):
+        """TD-2/CR-4: the claude CLI's spend isn't metered; it was counted
+        as $0 against the re-checks' budget."""
+        from storyforge import cmd_write
+
+        def cli(prompt, model, project_dir):
+            with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md'), 'w') as f:
+                f.write(GOOD)
+            return 0
+        monkeypatch.setattr(cmd_write, '_invoke_interactive', cli)
+        _gate(monkeypatch, {'act1-sc01': True})
+        seen = []
+
+        def recheck(pd, *, spent_before=0.0, **k):
+            seen.append(spent_before)
+            return gate.Recheck(spent=spent_before, spent_before=spent_before)
+        monkeypatch.setattr(gate, 'recheck_pending', recheck)
+        gate.mark_pending(setup, 'new-x1', 'recheck', 're-check: x')
+        main(['--interactive', '--force', '--scenes', 'act1-sc01'])
+        assert seen == [pytest.approx(0.10)]   # mock_costs's drafting forecast
+        assert 'interactive drafting runs through the claude CLI' in capsys.readouterr().out
+
+    def test_rechecks_the_drafting_spend_leaves_no_room_for_are_deferred(
+            self, setup, monkeypatch, capsys):
+        # the gate's own threshold check is real (mock_costs passes everything)
+        monkeypatch.setattr('storyforge.costs.check_threshold', _REAL_CHECK_THRESHOLD)
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '1.5')
+        # $0.75 of output on Opus 4.6 ($25/M): a re-check's forecast alone
+        # is within $1.50 (it ran before), but not on top of the drafting
+        self._metered_replies(monkeypatch, {'act1-sc01': _reply(GOOD)}, 30_000)
+        assert gate.RECHECK_COST_PER_SCENE < 1.5 < 0.75 + gate.RECHECK_COST_PER_SCENE
+        _gate(monkeypatch, {'act1-sc01': True})
+        monkeypatch.setattr(gate, 'gate_scene', lambda *a, **k: pytest.fail('re-checked'))
+        gate.mark_pending(setup, 'new-x1', 'recheck', 're-check: x')
+        with pytest.raises(SystemExit) as exc:
+            main(['--force', '--scenes', 'act1-sc01'])
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert '1 scene(s) listed for a re-check, not run: over the cost threshold' in out
+        assert '($0.75 of it spent or owed before the re-checks), over the cost threshold ' \
+            '($1.5)' in out
 
     def test_a_failed_recheck_blocks_drafting_past_it(self, setup, monkeypatch, capsys):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
@@ -391,7 +615,7 @@ class TestReviseRedraftsAreGated:
     """revise's redraft-from-brief goes through write's gate, in reading
     order, and stops where write would."""
 
-    def _redraft(self, project_dir, monkeypatch, ids, gate_fails=()):
+    def _redraft(self, project_dir, monkeypatch, ids, gate_fails=(), recheck=None):
         from storyforge import cmd_revise, cmd_write
         drafted, gated, skips = [], [], []
         self.skips = skips
@@ -405,7 +629,7 @@ class TestReviseRedraftsAreGated:
                 f.write('A new redraft.')
             return ''
         monkeypatch.setattr(cmd_write, '_extract_scene_from_response', extract)
-        monkeypatch.setattr(cmd_revise, 'commit_and_push', lambda *a, **k: True)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **k: True)
         self.befores = {}
 
         def fake_gate(pd, sid, scene_file, command, log_dir, before=None):
@@ -413,7 +637,8 @@ class TestReviseRedraftsAreGated:
             self.befores[sid] = before
             return (False, 'a contradiction') if sid in gate_fails else (True, '')
         monkeypatch.setattr(cmd_write, 'run_recheck', lambda pd, ld, skip=frozenset(),
-                            spent_before=0.0: skips.append(set(skip)))
+                            spent_before=0.0: skips.append(set(skip))
+                            or (recheck(skip) if recheck else None))
         monkeypatch.setattr(cmd_write, '_gate_drafted_scene', fake_gate)
         error = None
         try:
@@ -444,6 +669,27 @@ class TestReviseRedraftsAreGated:
         assert drafted == ['act1-sc01', 'act1-sc02']
         assert 'act1-sc02 (redrafted, but the gate did not pass it' in error
         assert 'act2-sc01 (not redrafted: redrafting stops' in error
+
+    def test_a_recheck_failing_after_the_last_redraft_fails_the_run(
+            self, project_dir, monkeypatch):
+        """#503's review: a failed re-check stopped the next redraft, but one
+        after the last redraft let the run report success."""
+        def recheck(skip):
+            return None if skip else gate.Recheck(failed='act2-sc02', why='a contradiction')
+        drafted, _, error = self._redraft(project_dir, monkeypatch, ['act1-sc01', 'act1-sc02'],
+                                          recheck=recheck)
+        assert drafted == ['act1-sc01', 'act1-sc02']
+        assert 're-checks they owed did not finish' in error
+        assert 'act2-sc02 (re-checked after act1-sc02 and did not pass: a contradiction)' \
+            in error
+
+    def test_a_deferral_a_later_recheck_clears_does_not_fail_the_redrafts(
+            self, project_dir, monkeypatch):
+        runs = iter([gate.Recheck(over_budget=True, left=['act2-sc02']),
+                     gate.Recheck(passed=['act2-sc02'])])
+        _, _, error = self._redraft(project_dir, monkeypatch, ['act1-sc01', 'act1-sc02'],
+                                    recheck=lambda skip: next(runs))
+        assert error is None
 
     def test_each_redraft_skips_the_rest_of_the_run_in_its_recheck(
             self, project_dir, monkeypatch):
@@ -496,7 +742,7 @@ class TestReviseRedraftsRealGate:
         monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda sid, *a, **k: sid)
         monkeypatch.setattr('storyforge.api.invoke_to_file', lambda *a, **k: None)
         monkeypatch.setattr(cmd_write, '_extract_scene_from_response', lambda *a: '')
-        monkeypatch.setattr(cmd_revise, 'commit_and_push', lambda *a, **k: True)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **k: True)
         bad = Finding('contradiction', 'TIM', 'x', 'y', 'z', '', 'why')
         gated = []
 

@@ -575,3 +575,19 @@ class TestErrorHandling:
         assert mock_api.call_count == 0
         assert mock_git.calls == []   # no branch, PR or commit either
         assert 'over the cost threshold' in capsys.readouterr().out
+
+    def test_a_non_numeric_cost_threshold_stops_before_anything(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """A bad STORYFORGE_COST_THRESHOLD crashed with a ValueError at the
+        first threshold check (#499's review): now an ERROR naming it, exit
+        1, before any API or git call."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '100usd')
+        monkeypatch.setattr('storyforge.cmd_write.detect_project_root',
+                            lambda: project_dir)
+        with pytest.raises(SystemExit) as exc:
+            main(['--direct', '--scenes', 'act1-sc01'])
+        assert exc.value.code == 1
+        assert mock_api.call_count == 0
+        assert mock_git.calls == []
+        assert "ERROR: STORYFORGE_COST_THRESHOLD is '100usd'" in capsys.readouterr().out
