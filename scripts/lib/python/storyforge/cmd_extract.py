@@ -49,6 +49,10 @@ def parse_args(argv):
                         help='Run only phase N (0=characterize, 1=skeleton, 2=intent, '
                              '3=briefs, 4=commitments, 5=describe: spine, architecture, '
                              'themes and motifs)')
+    parser.add_argument('--acts', action='store_true',
+                        help='Decide the book\'s three acts again (one call over the whole '
+                             'scene list) and rewrite scenes.csv:act; phase 1 runs this step '
+                             'itself')
     parser.add_argument('--cleanup', action='store_true',
                         help='Run cleanup after extraction')
     parser.add_argument('--cleanup-only', action='store_true',
@@ -136,6 +140,16 @@ def main(argv=None):
     validate_passed = None
     validate_failures = 0
     _unanswered.clear()
+
+    if args.acts:
+        if args.dry_run:
+            log('Dry run: the act step makes one call over the scene list; nothing is sent.')
+            return
+        _run_acts(project_dir, scenes_dir, ref_dir, log_dir, profile_file)
+        commit_and_push(project_dir, 'Extract: acts (scenes.csv)',
+                        ['reference/scenes.csv', 'working/'])
+        print_summary(project_dir, 'extract', session_start=session_start)
+        return
 
     if not args.cleanup_only:
         # Phase 0: Characterize
@@ -558,6 +572,9 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     if marked:
         log(f'  status: {marked} scene(s) with prose and no status marked drafted')
 
+    # The acts: one call over the whole book, over the per-scene answers above
+    _run_acts(project_dir, scenes_dir, ref_dir, log_dir, profile_file)
+
     # The timeline pass: store each scene's time cues, then place every scene
     # on one calendar. Nobody authored these days, so they are replaced.
     from storyforge.timeline import write_cues, run_assignment
@@ -590,6 +607,22 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     _safe_remove(batch_file)
     _safe_rmdir(skel_output)
+
+
+def _run_acts(project_dir, scenes_dir, ref_dir, log_dir, profile_file):
+    """Decide the book's acts once for the whole book (`extract_acts`)."""
+    from storyforge.extract_acts import run_acts
+    log('  Deciding the acts...')
+    result = run_acts(ref_dir, scenes_dir, log_dir, _load_profile(profile_file),
+                      select_model('evaluation'),
+                      on_usage=lambda f, op, target, model: _log_api_usage(
+                          f, op, target, model, project_dir))
+    how = {'model': 'decided over the whole book',
+           'votes': f'fitted to the per-scene answers ({result.note})',
+           'none': f'not set ({result.note})'}[result.source]
+    log(f'  Acts {how}: starting at {", ".join(result.starts) or "-"}; '
+        f'{result.changed} scene(s) changed')
+    return result
 
 
 def _mark_drafted(ref_dir, scenes_dir, scene_ids) -> int:

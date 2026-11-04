@@ -56,7 +56,8 @@ cd [project_dir] && [plugin_path]/storyforge extract [options]
 
 Options:
 - `--phase 0` — Characterize manuscript only (cheap, fast, good first step)
-- `--phase 1` — Extract skeleton (scenes.csv) only
+- `--phase 1` — Extract skeleton (scenes.csv) only. It ends by deciding the book's three acts in one call that sees every scene, so `act` runs in order (each act a run of consecutive scenes) rather than each scene guessing its own
+- `--acts` — Decide the acts again and rewrite `scenes.csv:act` (one call, a few cents; for a book extracted before this step existed, or after its scenes change). Re-run `--phase 5 --force` afterwards: the spine, architecture and story architecture copy the acts
 - `--phase 2` — Extract intent only (needs phase 1)
 - `--phase 3` — Extract briefs only (needs phases 1-2)
 - `--phase 4` — Extract commitments only (needs phases 1-3). A second call per scene asks of each fact whether it lasts beyond the scene; one that does not (staging, set dressing, a feeling in the moment) is not recorded, and the log lists it with why
@@ -79,7 +80,7 @@ Work through each phase in this conversation:
 
 **Phase 0: Characterize.** Read the full manuscript (concatenate scene files) and produce a structural profile — narrative mode, POV characters, timeline, act structure, central conflict, compression points. Present the profile to the author for confirmation.
 
-**Phase 1: Skeleton.** For each scene, extract: title, POV, location, timeline day, time of day, duration, part assignment. Write to `reference/scenes.csv`. This can be done in batches — present a batch of 10 scenes at a time for the author to review.
+**Phase 1: Skeleton.** For each scene, extract: title, POV, location, timeline day, time of day, duration, part assignment. Then decide the three acts for the whole book at once: each act is a run of consecutive scenes, so `act` never steps back as `seq` rises. Write to `reference/scenes.csv`. This can be done in batches — present a batch of 10 scenes at a time for the author to review.
 
 **Phase 2: Intent.** For each scene, extract: function, scene type (action/sequel), emotional arc, value at stake, value shift, turning point, characters, on-stage characters, MICE threads. Write to `reference/scene-intent.csv`.
 
