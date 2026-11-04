@@ -265,7 +265,7 @@ could get wrong, including small words that carry weight ("finally", "all",
 
 
 def parse_claims(reply: str, docs: list[tuple[str, str]], scenes: list[dict[str, str]],
-                 every_section: bool = True) -> list[Claim]:
+                 every_section: bool = True, salvage: list[str] | None = None) -> list[Claim]:
     """The claims in a reply about `docs`. With `every_section`, a document
     with no claim is sent back (story-architecture.md's sections, some of
     which describe the prose rather than the story, may have none)."""
@@ -304,8 +304,41 @@ def parse_claims(reply: str, docs: list[tuple[str, str]], scenes: list[dict[str,
     missing = sections - {c.section for c in claims}
     if missing and every_section:
         problems.append('no claims from: ' + ', '.join(sorted(missing)))
+    if problems and salvage is not None:
+        return _salvaged(data, sections, ids, by_seq, salvage)
     if problems:
         raise _Problems(problems)
+    return claims
+
+
+def _salvaged(data: dict, sections: set[str], ids: set[str], by_seq: dict[str, str],
+              notes: list[str]) -> list[Claim]:
+    """The usable part of a second unusable claims reply: one bad scene id
+    in 180 claims shouldn't lose the pass (Eighty Days cited
+    `fix-drugs-passepartout-in-opium-den`, which isn't a scene). Unknown ids
+    are dropped and the rest kept, up to the limit; a claim left with no
+    scene is kept with none, so it is reported `unchecked`; a claim from no
+    known document or with no text is dropped. What was done goes in `notes`."""
+    claims, dropped_ids, no_scene, dropped = [], 0, 0, 0
+    for c in data['claims']:
+        if not isinstance(c, dict):
+            dropped += 1
+            continue
+        sec, text = str(c.get('section', '')).strip(), str(c.get('claim', '')).strip()
+        if sec not in sections or not text:
+            dropped += 1
+            continue
+        raw = c.get('scenes') if isinstance(c.get('scenes'), list) else []
+        cited = [str(x).strip() for x in raw if str(x).strip()]
+        cited = [x if x in ids else by_seq.get(x, x) for x in cited]
+        kept = [x for x in cited if x in ids][:MAX_SCENES_PER_CLAIM]
+        dropped_ids += len([x for x in cited if x not in ids])
+        no_scene += not kept
+        kind = c.get('kind') if c.get('kind') in KINDS else 'event'
+        claims.append(Claim(sec, kind, text, kept))
+    notes.append(f'claims reply still had problems after a retry; kept {len(claims)} '
+                 f'claim(s): {dropped_ids} unknown scene id(s) dropped, {no_scene} claim(s) '
+                 f'left with no scene (unchecked), {dropped} claim(s) dropped')
     return claims
 
 
@@ -424,7 +457,11 @@ def parse_verdicts(reply: str, count: int) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _ask(prompt_for: Callable, parse: Callable, schema: dict, model: str, log_file: str,
-         max_tokens: int, on_usage: Callable | None, label: str):
+         max_tokens: int, on_usage: Callable | None, label: str,
+         salvage: Callable | None = None):
+    """One structured call, retried once with the parser's problems. With
+    `salvage`, a second reply that still has problems is read by it instead
+    of failing the pass."""
     from .api import extract_text, invoke_to_file, is_truncated
     problems = None
     for attempt in (1, 2):
@@ -442,6 +479,10 @@ def _ask(prompt_for: Callable, parse: Callable, schema: dict, model: str, log_fi
             return parse(extract_text(response))
         except _Problems as e:
             if attempt == 2:
+                if salvage is not None:
+                    log(f'  WARNING: {label}: still {len(e.problems)} problem(s) after a retry; '
+                        'keeping what can be used')
+                    return salvage(extract_text(response))
                 raise FidelityError(f'{label}: still unusable after a retry: {e}') from e
             log(f'  {label}: {len(e.problems)} problem(s) in the reply; asking once more')
             problems = e.problems
@@ -499,7 +540,9 @@ def run(project_dir: str, model: str, *, log_dir: str,
         claims += _ask(lambda p, d=docs: build_claims_prompt(d, scenes, p),
                        lambda r, d=docs, e=every: parse_claims(r, d, scenes, e),
                        CLAIMS_SCHEMA, model, os.path.join(log_dir, f'text-fidelity-{label}.json'),
-                       CLAIMS_OUTPUT_TOKENS, on_usage, f'text-fidelity-{label}')
+                       CLAIMS_OUTPUT_TOKENS, on_usage, f'text-fidelity-{label}',
+                       salvage=lambda r, d=docs, e=every: parse_claims(
+                           r, d, scenes, e, salvage=result.notes))
     claims += anchor_claims(tiers, scenes)
     log(f'  {len(claims)} claim(s)')
 

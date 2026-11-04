@@ -453,3 +453,36 @@ def test_a_scene_cited_by_its_seq_reads_as_its_id(book):
     claims = tf.parse_claims(json.dumps(payload), tf.read_tiers(str(book)).summary_docs(),
                              tf._scenes(str(book)))
     assert claims[1].scenes == ['s3']
+
+
+def test_a_second_unusable_claims_reply_is_salvaged(book, monkeypatch):
+    # Eighty Days: one invented scene id in ~180 claims failed the whole pass
+    bad = _claims_payload()
+    bad['claims'][1]['scenes'] = ['s3', 'fix-drugs-in-opium-den']
+    bad['claims'][2]['scenes'] = ['invented-scene']
+
+    def fake(prompt, model, log_file, max_tokens=4096, **kw):
+        if 'Split them' in prompt:
+            reply = _reply(bad)
+        else:
+            lines = [l for l in prompt.split('## Claims')[1].splitlines() if l[:1].isdigit()]
+            reply = _reply({'verdicts': [{'n': int(l.split('.')[0]), 'verdict': 'supported',
+                                          'evidence': '', 'correction': ''} for l in lines]})
+        with open(log_file, 'w') as f:
+            json.dump(reply, f)
+        return reply
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    result = tf.run(str(book), 'm', log_dir=str(book / 'logs'))
+    by = {(c.section, c.claim): c for c in result.claims}
+    assert by[('synopsis', 'She burns it')].scenes == ['s3']
+    assert by[('synopsis', 'She burns it')].verdict == 'supported'
+    assert by[('act-shape', 'Ann finds the letter')].verdict == tf.UNCHECKED
+    assert any('2 unknown scene id(s) dropped' in n for n in result.notes)
+
+
+def test_the_first_reply_is_still_sent_back(book):
+    bad = _claims_payload()
+    bad['claims'][1]['scenes'] = ['nope']
+    with pytest.raises(tf._Problems):
+        tf.parse_claims(json.dumps(bad), tf.read_tiers(str(book)).summary_docs(),
+                        tf._scenes(str(book)))
