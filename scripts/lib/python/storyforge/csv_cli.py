@@ -155,7 +155,15 @@ def append_row(path, row):
 
 
 def renumber_seq(path):
-    """Renumber the seq column sequentially from 1."""
+    """Renumber the seq column sequentially from 1, in the current order.
+
+    Raises:
+        ValueError: if a row's seq is not a number, or two rows share one
+            (`ledger.seq_number`, so "4" and "4.0" do): a renumber would
+            pick their order, which is the author's call. The file is left
+            as it was.
+    """
+    from storyforge.ledger import seq_number
     lines = _read_lines(path)
     if not lines:
         return
@@ -164,15 +172,32 @@ def renumber_seq(path):
         seq_col = headers.index('seq')
     except ValueError:
         return
-    # Parse and sort by current seq
     rows = []
+    unnumbered = []
+    seen: dict[float, str] = {}
+    shared = []
     for line in lines[1:]:
+        if not line.strip():
+            continue
         fields = line.split(DELIMITER)
+        cell = fields[seq_col] if seq_col < len(fields) else ''
         try:
-            seq_val = int(fields[seq_col]) if seq_col < len(fields) else 0
+            seq_val = seq_number(cell)
         except ValueError:
-            seq_val = 0
+            unnumbered.append(f'{fields[0]} ({cell!r})')
+            continue
+        if seq_val in seen:
+            shared.append(f'{seen[seq_val]} and {fields[0]} (seq {cell.strip()})')
+        else:
+            seen[seq_val] = fields[0]
         rows.append((seq_val, fields))
+    if unnumbered or shared:
+        raise ValueError(
+            'not renumbering ' + os.path.basename(path) + ': '
+            + '; '.join([f'no numeric seq: {", ".join(unnumbered)}'] if unnumbered else [])
+            + ('; ' if unnumbered and shared else '')
+            + '; '.join([f'shared seq: {", ".join(shared)}'] if shared else [])
+            + '. Decide their order and give each its own number first.')
     rows.sort(key=lambda r: r[0])
     # Renumber
     out = [lines[0]]
@@ -243,7 +268,11 @@ def main():
         if len(sys.argv) < 3:
             print('Usage: renumber-seq <file>', file=sys.stderr)
             sys.exit(1)
-        renumber_seq(sys.argv[2])
+        try:
+            renumber_seq(sys.argv[2])
+        except ValueError as e:
+            print(f'ERROR: {e}', file=sys.stderr)
+            sys.exit(1)
 
     else:
         print(f'Unknown command: {cmd}', file=sys.stderr)
