@@ -270,15 +270,40 @@ def commit_and_push(project_dir: str, message: str, paths: list[str] | None = No
     reason is logged as a WARNING and kept in `last_commit_error`, and what
     this call staged is unstaged again, so a later commit doesn't sweep it
     in under its own message. A failed push is a WARNING (`_push`); the
-    commit stands and True is returned."""
+    commit stands and True is returned.
+
+    With `paths`, the commit holds only what is staged under them: anything
+    else already in the index (an author's `git add storyforge.yaml`) stays
+    staged and out of this commit. A bare `git commit` took the whole
+    index, so a pre-staged file rode along under this message (#509 CR-1).
+    Paths are literal, never globs: `x[1].md` doesn't also take `x1.md`.
+    """
     global last_commit_error
     if paths:
         for p in paths:
-            _git(project_dir, 'add', p, check=False)
+            _git(project_dir, '--literal-pathspecs', 'add', p, check=False)
+        # The staged files under `paths`, each named (old and new side of a
+        # rename too): a pathspec git doesn't know, such as a listed file that
+        # doesn't exist or is ignored, would fail the whole commit
+        staged = _git(project_dir, '--literal-pathspecs', 'diff', '--cached',
+                      '--name-only', '--no-renames', '-z', '--', *paths, check=False)
+        if staged.returncode != 0:
+            last_commit_error = (' '.join((staged.stderr or '').split())[:300]
+                                 or f'git diff --cached exited {staged.returncode}')
+            _git(project_dir, '--literal-pathspecs', 'reset', '-q', '--', *paths,
+                 check=False)
+            log(f'WARNING: git commit "{message}" failed: could not list what is '
+                f'staged: {last_commit_error}. Nothing was committed.')
+            return False
+        files = [f for f in staged.stdout.split('\0') if f]
+        if not files:
+            last_commit_error = NOTHING_TO_COMMIT
+            return False
+        r = _git(project_dir, '--literal-pathspecs', 'commit', '-m', message,
+                 '--', *files, check=False)
     else:
         _git(project_dir, 'add', '-A', check=False)
-
-    r = _git(project_dir, 'commit', '-m', message, check=False)
+        r = _git(project_dir, 'commit', '-m', message, check=False)
     if r.returncode != 0 and re.search(r'nothing (added )?to commit|no changes added to commit',
                                        r.stdout or ''):
         last_commit_error = NOTHING_TO_COMMIT
@@ -286,7 +311,8 @@ def commit_and_push(project_dir: str, message: str, paths: list[str] | None = No
     if r.returncode != 0:
         last_commit_error = (' '.join(((r.stderr or '') + ' ' + (r.stdout or '')).split())[:300]
                              or f'git commit exited {r.returncode}')
-        _git(project_dir, 'reset', '-q', '--', *(paths or ['.']), check=False)
+        _git(project_dir, '--literal-pathspecs', 'reset', '-q', '--', *(paths or ['.']),
+             check=False)
         log(f'WARNING: git commit "{message}" failed: {last_commit_error}. Nothing was '
             f'committed; what it staged is unstaged again.')
         return False

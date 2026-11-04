@@ -1,6 +1,6 @@
 """Tests for storyforge scenes-setup — scene file and metadata setup.
 
-Covers parse_args, rename mode, split-chapters mode, dry-run mode,
+Covers parse_args, rename mode, split-chapters mode, renumber mode, dry-run mode,
 error handling for missing modes and source directories, and
 metadata CSV creation.
 """
@@ -1159,3 +1159,356 @@ class TestEpigraphStaysWithOpeningScene:
         assert [r['id'] for r in rows] == ['carriage-comes-for-elizabeth',
                                           'lady-catherine-receives-them']
         assert 'epigraph' not in capsys.readouterr().out
+
+
+# ============================================================================
+# main — renumber mode
+# ============================================================================
+
+
+def _clean_tree(monkeypatch, status=''):
+    """`git status --porcelain` output for the renumber's uncommitted check
+    (mock_git's _git answers every call with the branch name)."""
+    def fake(project_dir, *args, check=True):
+        return subprocess.CompletedProcess(args=['git', *args], returncode=0,
+                                           stdout=status, stderr='')
+    monkeypatch.setattr('storyforge.cmd_scenes_setup._git', fake)
+
+
+class TestRenumberMode:
+    """--renumber: the command cleanup's `seq_needs_renumber` finding names.
+    It didn't exist, so the finding's fix was a command that failed."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, monkeypatch, project_dir, mock_git):
+        # after mock_git, which answers every _git call with the branch name
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        self.logged = []
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.log', self.logged.append)
+        _clean_tree(monkeypatch)
+
+    def _write(self, project_dir, text):
+        path = os.path.join(project_dir, 'reference', 'scenes.csv')
+        with open(path, 'wb') as f:
+            f.write(text.encode('utf-8'))
+        return path
+
+    def _run(self, *flags):
+        with pytest.raises(SystemExit) as exc:
+            main(['--renumber', *flags])
+        return exc.value.code
+
+    def _said(self, text):
+        return [m for m in self.logged if text in m]
+
+    def _plan(self, project_dir, rows):
+        plans = os.path.join(project_dir, 'working', 'plans')
+        os.makedirs(plans, exist_ok=True)
+        path = os.path.join(plans, 'revision-plan.csv')
+        with open(path, 'w') as f:
+            f.write('pass|name|purpose|scope|status\n' + ''.join(r + '\n' for r in rows))
+        return path
+
+    def test_flag_parses(self):
+        assert parse_args(['--renumber']).renumber is True
+        assert parse_args([]).renumber is False
+
+    def test_renumbers_in_reading_order_and_commits(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """No API key and a refusing cost check: neither is consulted, and
+        no model is called."""
+        monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+
+        def no_cost_check():
+            raise AssertionError('renumber consulted the cost threshold')
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.exit_if_bad_threshold',
+                            no_cost_check)
+        path = self._write(project_dir,
+                           'id|seq|title\nc|7|C\na|1|A\nb|2.5|B\nd|2|D\n')
+        assert self._run() == 0
+        assert open(path).read() == 'id|seq|title\na|1|A\nd|2|D\nb|3|B\nc|4|C\n'
+        assert self._said('Renumbered 2 of 4 scenes')
+        assert mock_git.calls_for('create_branch') == [('create_branch', 'scenes-setup')]
+        commits = mock_git.calls_for('commit_and_push')
+        assert len(commits) == 1
+        assert commits[0][2] == [os.path.join('reference', 'scenes.csv')]
+        assert '1..4' in commits[0][1]
+        assert self._said(f'Committed and pushed "{commits[0][1]}"')
+        assert mock_api.calls == []
+
+    def test_already_sequential_changes_nothing(
+            self, mock_api, mock_git, mock_costs, project_dir):
+        """Already 1..N: no write (not even CRLF -> LF or a reorder), no
+        branch, no commit."""
+        text = 'id|seq|title\r\nb|2|B\r\na|1|A\r\n'
+        path = self._write(project_dir, text)
+        assert self._run() == 0
+        assert open(path, 'rb').read() == text.encode()
+        assert self._said('already 1..2')
+        assert not mock_git.calls_for('create_branch')
+        assert not mock_git.calls_for('commit_and_push')
+
+    def test_twelve_numbered_rows_are_already_sequential(
+            self, mock_api, mock_git, mock_costs, project_dir):
+        """T-2: a text sort puts 10 before 2 and would 'renumber' 1..12."""
+        self._write(project_dir, 'id|seq\n' + ''.join(f's{i}|{i}\n' for i in range(1, 13)))
+        assert self._run() == 0
+        assert self._said('already 1..12')
+        assert not mock_git.calls_for('create_branch')
+        assert not mock_git.calls_for('commit_and_push')
+
+    def test_already_sequential_with_uncommitted_changes_exits_1(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """SF-2: after a failed commit the file is renumbered but not
+        committed; a rerun said "Nothing to change." and exited 0."""
+        _clean_tree(monkeypatch, status=' M reference/scenes.csv\n')
+        self._write(project_dir, 'id|seq\na|1\nb|2\n')
+        assert self._run() == 1
+        assert self._said('uncommitted changes')
+        assert self._said('git add reference/scenes.csv && git commit')
+        assert not mock_git.calls_for('commit_and_push')
+
+    @pytest.mark.parametrize('rows', [
+        'a|1|A\nb|4|B\nc|4.0|C\n',     # a tie spelled two ways
+        'a|1|A\nb|3|B\nc||C\n',        # unnumbered
+    ])
+    def test_refuses_ties_and_unnumbered(self, mock_api, mock_git, mock_costs,
+                                         project_dir, rows):
+        text = 'id|seq|title\n' + rows
+        path = self._write(project_dir, text)
+        assert self._run() == 1
+        assert open(path, 'rb').read() == text.encode()
+        assert [m for m in self.logged
+                if 'not renumbering scenes.csv' in m and 'Decide their order' in m]
+        assert not mock_git.calls_for('create_branch')
+        assert not mock_git.calls_for('commit_and_push')
+
+    def test_dry_run_writes_nothing(self, mock_api, mock_git, mock_costs, project_dir):
+        text = 'id|seq|title\na|1|A\nb|9|B\n'
+        path = self._write(project_dir, text)
+        assert self._run('--dry-run') == 0
+        assert open(path).read() == text
+        assert self._said('Would renumber 1 of 2')
+        assert not mock_git.calls_for('create_branch')
+        assert not mock_git.calls_for('commit_and_push')
+
+    def test_keeps_bom_and_writes_lf(self, mock_api, mock_git, mock_costs, project_dir):
+        path = self._write(project_dir, '﻿id|seq|title\r\nb|4|B\r\na|2|A\r\n')
+        assert self._run() == 0
+        assert open(path, 'rb').read() == '﻿id|seq|title\na|1|A\nb|2|B\n'.encode()
+
+    def test_keeps_permissions_and_symlink(self, mock_api, mock_git, mock_costs,
+                                           project_dir):
+        """CR-3: the write reset 600 to 644 and replaced a symlink."""
+        ref = os.path.join(project_dir, 'reference')
+        real = os.path.join(ref, 'scenes-real.csv')
+        with open(real, 'w') as f:
+            f.write('id|seq\na|1\nb|9\n')
+        os.chmod(real, 0o600)
+        link = os.path.join(ref, 'scenes.csv')
+        os.remove(link)
+        os.symlink('scenes-real.csv', link)
+        assert self._run() == 0
+        assert os.path.islink(link)
+        assert open(real).read() == 'id|seq\na|1\nb|2\n'
+        assert os.stat(real).st_mode & 0o777 == 0o600
+
+    def test_failed_commit_exits_1(self, mock_api, mock_git, mock_costs, project_dir):
+        """T-3: says it's renumbered on disk, with the commit subject and how
+        to commit it; the branch was made and the file is renumbered."""
+        from storyforge import git
+        mock_git.commit_success = False
+        path = self._write(project_dir, 'id|seq|title\na|1|A\nb|9|B\n')
+        assert self._run() == 1
+        assert mock_git.calls_for('create_branch')
+        assert open(path).read() == 'id|seq|title\na|1|A\nb|2|B\n'
+        said = self._said('renumbered on disk but not committed')
+        assert said and 'Scenes setup: renumber seq to 1..2 (1 changed)' in said[0]
+        assert 'git add reference/scenes.csv' in said[0]
+        assert not self._said('Committed and pushed')
+
+    def test_no_branch_leaves_file_alone(self, mock_api, mock_git, mock_costs,
+                                         project_dir, monkeypatch):
+        """create_branch failing ('') must not leave a renumber on main."""
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.create_branch',
+                            lambda name, d: '')
+        self._plan(project_dir, ['1|p|x|2|pending'])
+        text = 'id|seq|title\na|1|A\nb|9|B\nc|2|C\n'
+        path = self._write(project_dir, text)
+        assert self._run() == 1
+        assert open(path).read() == text
+        assert not mock_git.calls_for('commit_and_push')
+        assert not self._said('WARNING: revision pass')   # C-1: nothing renumbered
+
+    @pytest.mark.parametrize('text', ['id|title\na|A\n', None])
+    def test_missing_file_or_seq_column_exits_1(
+            self, mock_api, mock_git, mock_costs, project_dir, text):
+        if text is None:
+            os.remove(os.path.join(project_dir, 'reference', 'scenes.csv'))
+        else:
+            self._write(project_dir, text)
+        assert self._run() == 1
+        assert self._said('Nothing was renumbered') or self._said('no seq column')
+
+    def test_unreadable_file_exits_1(self, mock_api, mock_git, mock_costs, project_dir):
+        """T-1: invalid UTF-8 is 'cannot read', not a refusal; bytes kept."""
+        path = os.path.join(project_dir, 'reference', 'scenes.csv')
+        data = b'id|seq\na|1\nb|\xff9\n'
+        with open(path, 'wb') as f:
+            f.write(data)
+        assert self._run() == 1
+        assert self._said('cannot read reference/scenes.csv')
+        assert open(path, 'rb').read() == data
+        assert not mock_git.calls_for('create_branch')
+
+    def test_warns_only_about_passes_it_retargets(
+            self, mock_api, mock_git, mock_costs, project_dir):
+        """C-1/SF-5, T-4/T-5: a pending pass whose seqs name other scenes
+        after the renumber is named; one whose seqs keep their scenes, a
+        completed one and an id scope are not."""
+        self._plan(project_dir, [
+            '1|moves|p|3|pending',          # seq 3: no scene before, b after
+            '2|stays|p|1,2|pending',        # a and c keep 1 and 2
+            '3|done|p|[3]|completed',
+            '4|by-id|p|a;b|pending',
+            '5|semicolons|p|2;3|pending',
+        ])
+        # a=1, b=5, c=2 -> a=1, c=2, b=3
+        self._write(project_dir, 'id|seq\na|1\nb|5\nc|2\n')
+        assert self._run() == 0
+        warned = self._said('WARNING: revision pass')
+        assert [w.split('"')[1] for w in warned] == ['moves', 'semicolons']
+        assert 'now name' in warned[0]
+
+    def test_warns_about_a_moved_seq(self, mock_api, mock_git, mock_costs, project_dir):
+        self._plan(project_dir, ['1|moves|p|[2, 3]|pending', '2|first|p|1|pending'])
+        self._write(project_dir, 'id|seq\na|1\nb|3\nc|4\n')   # 3: b -> c
+        assert self._run('--dry-run') == 0
+        warned = self._said('WARNING: revision pass')
+        assert len(warned) == 1 and '"moves"' in warned[0]
+        assert 'would name' in warned[0]
+
+    def test_no_warning_when_nothing_needs_renumbering(
+            self, mock_api, mock_git, mock_costs, project_dir):
+        self._plan(project_dir, ['1|p|x|2|pending'])
+        self._write(project_dir, 'id|seq\na|1\nb|2\n')
+        assert self._run() == 0
+        assert not self._said('WARNING')
+
+    def test_a_stray_quote_hides_no_later_rows(self, mock_api, mock_git, mock_costs,
+                                               project_dir):
+        """SF-4: a quote-aware reader ran the rest of the file into one field."""
+        self._plan(project_dir, ['1|odd "quote|p|full|pending', '2|later|p|3|pending'])
+        self._write(project_dir, 'id|seq\na|1\nb|3\nc|4\n')
+        assert self._run() == 0
+        assert [w for w in self._said('WARNING: revision pass') if '"later"' in w]
+
+    @pytest.mark.parametrize('kind', ['broken-link', 'bad-encoding'])
+    def test_an_unreadable_plan_is_named(self, mock_api, mock_git, mock_costs,
+                                         project_dir, kind):
+        """SF-3/C-4: an unreadable plan returned [] with nothing said."""
+        plans = os.path.join(project_dir, 'working', 'plans')
+        os.makedirs(plans, exist_ok=True)
+        plan = os.path.join(plans, 'revision-plan.csv')
+        if kind == 'broken-link':
+            os.symlink('revision-plan-3.csv', plan)
+        else:
+            with open(plan, 'wb') as f:
+                f.write(b'pass|name|purpose|scope|status\n1|\xff|p|2|pending\n')
+        self._write(project_dir, 'id|seq\na|1\nb|3\n')
+        assert self._run() == 0
+        assert self._said('were not checked')
+
+    def test_no_plan_says_nothing(self, mock_api, mock_git, mock_costs, project_dir):
+        self._write(project_dir, 'id|seq\na|1\nb|3\n')
+        assert self._run() == 0
+        assert not self._said('WARNING')
+
+    def test_cleanup_finding_names_this_command(self):
+        """The finding's command must be one scenes-setup accepts."""
+        from storyforge.cmd_cleanup import _classify_issue
+        finding = _classify_issue('SEQ_NEEDS_RENUMBER:gaps', {})
+        argv = finding['command'].split()
+        assert argv[:2] == ['storyforge', 'scenes-setup']
+        assert parse_args(argv[2:]).renumber is True
+
+
+class TestRenumberRealGit:
+    """The renumber against real git: CR-1 (a pre-staged file rode along),
+    SF-1 (a failed push was reported as pushed), and a failed commit."""
+
+    @pytest.fixture
+    def repo(self, tmp_path, monkeypatch):
+        remote, work = tmp_path / 'remote.git', tmp_path / 'work'
+        run = lambda *a, cwd=work: subprocess.run(a, cwd=cwd, check=True,
+                                                  capture_output=True, text=True).stdout
+        run('git', 'init', '-q', '--bare', str(remote), cwd=tmp_path)
+        run('git', 'init', '-q', '-b', 'main', str(work), cwd=tmp_path)
+        for k, v in (('user.email', 't@e.st'), ('user.name', 'T')):
+            run('git', 'config', k, v)
+        (work / 'reference').mkdir()
+        (work / 'reference' / 'scenes.csv').write_text('id|seq\na|1\nb|5\n')
+        (work / 'storyforge.yaml').write_text('project:\n  title: T\n')
+        run('git', 'add', '.')
+        run('git', 'commit', '-qm', 'init')
+        run('git', 'remote', 'add', 'origin', str(remote))
+        run('git', 'push', '-qu', 'origin', 'main')
+        run('git', 'checkout', '-qb', 'storyforge/cleanup-1')
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: str(work))
+        self.logged = []
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.log', self.logged.append)
+        return remote, work, run
+
+    def _run(self):
+        with pytest.raises(SystemExit) as exc:
+            main(['--renumber'])
+        return exc.value.code
+
+    def test_a_pre_staged_file_is_not_committed(self, repo):
+        remote, work, run = repo
+        (work / 'storyforge.yaml').write_text('project:\n  title: Changed\n')
+        run('git', 'add', 'storyforge.yaml')
+        assert self._run() == 0
+        assert run('git', 'show', '--name-only', '--format=', 'HEAD').split() == [
+            'reference/scenes.csv']
+        assert run('git', 'diff', '--cached', '--name-only').split() == ['storyforge.yaml']
+        assert [m for m in self.logged if m.startswith('Committed and pushed')]
+
+    def test_a_failed_push_is_not_reported_as_pushed(self, repo):
+        import shutil
+        remote, work, run = repo
+        shutil.rmtree(remote)
+        assert self._run() == 1
+        assert [m for m in self.logged if 'the push failed' in m]
+        assert not [m for m in self.logged if m.startswith('Committed and pushed')]
+        assert 'renumber seq' in run('git', 'log', '-1', '--format=%s')
+
+    def test_a_failed_commit_names_gits_reason(self, repo):
+        remote, work, run = repo
+        hook = work / '.git' / 'hooks' / 'pre-commit'
+        hook.write_text('#!/bin/sh\necho "hook says no" >&2\nexit 1\n')
+        hook.chmod(0o755)
+        assert self._run() == 1
+        said = [m for m in self.logged if 'not committed' in m]
+        assert said and 'hook says no' in said[0]
+        assert (work / 'reference' / 'scenes.csv').read_text() == 'id|seq\na|1\nb|2\n'
+
+
+def test_scenes_alias_renumber_dry_run_needs_no_api_key(project_dir):
+    """T-6: `storyforge scenes` is scenes-setup, and its --renumber dry run
+    runs with no API key."""
+    import sys
+    from storyforge.__main__ import COMMANDS
+    assert COMMANDS['scenes'] == COMMANDS['scenes-setup']
+    with open(os.path.join(project_dir, 'reference', 'scenes.csv'), 'w') as f:
+        f.write('id|seq|title\na|1|A\nb|7|B\n')
+    plugin = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    env = {k: v for k, v in os.environ.items() if k != 'ANTHROPIC_API_KEY'}
+    env['PYTHONPATH'] = os.path.join(plugin, 'scripts', 'lib', 'python')
+    r = subprocess.run([sys.executable, '-m', 'storyforge', 'scenes', '--renumber',
+                        '--dry-run'], cwd=project_dir, env=env,
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert 'Would renumber 1 of 2' in r.stdout + r.stderr

@@ -15,6 +15,7 @@ Commands:
 
 import os
 import sys
+from collections import namedtuple
 
 DELIMITER = '|'
 
@@ -31,12 +32,26 @@ def _read_lines(path):
 
 
 def _write_lines(path, lines):
-    """Write lines atomically (write to temp, then rename)."""
-    tmp = path + f'.tmp.{os.getpid()}'
-    with open(tmp, 'w', encoding='utf-8') as f:
-        for line in lines:
-            f.write(line + '\n')
-    os.replace(tmp, path)
+    """Write lines atomically (write to temp, then rename), LF endings.
+
+    A symlink is written through to its target, and the target keeps its
+    permissions: the rename put a 644 regular file where a 600 file or a
+    symlink was (#509 CR-3).
+    """
+    import shutil
+    target = os.path.realpath(path)
+    tmp = target + f'.tmp.{os.getpid()}'
+    try:
+        with open(tmp, 'w', encoding='utf-8', newline='') as f:
+            for line in lines:
+                f.write(line + '\n')
+        if os.path.exists(target):
+            shutil.copymode(target, tmp)
+        os.replace(tmp, target)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
 
 
 def get_field(path, row_id, field, key_col='id'):
@@ -154,24 +169,42 @@ def append_row(path, row):
         f.write(row + '\n')
 
 
-def renumber_seq(path):
+class RenumberError(ValueError):
+    """`renumber_seq` won't renumber: no seq column, or a seq that is shared
+    or not a number. A subclass, so a caller can tell it from a
+    UnicodeDecodeError (itself a ValueError) reading the file."""
+
+
+#: What `renumber_seq` did, or would do with write=False: `changed` of
+#: `total` rows get a new seq cell (one spelled " 1" or "1.0" counts).
+#: `rows` is (old seq cell, row fields after the renumber) per row, in
+#: the new order; `header` is the header's fields.
+RenumberResult = namedtuple('RenumberResult', 'changed total header rows')
+
+
+def renumber_seq(path, write=True):
     """Renumber the seq column sequentially from 1, in the current order.
 
+    Returns a `RenumberResult`. Nothing is written when no seq changes (the
+    rows' order and line endings are left as they are) or when `write` is
+    False. An empty file is a result with total 0.
+
     Raises:
-        ValueError: if a row's seq is not a number, or two rows share one
-            (`ledger.seq_number`, so "4" and "4.0" do): a renumber would
-            pick their order, which is the author's call. The file is left
-            as it was.
+        RenumberError: if there is no seq column, or a row's seq is not a
+            number, or two rows share one (`ledger.seq_number`, so "4" and
+            "4.0" do): a renumber would pick their order, which is the
+            author's call. The file is left as it was.
+        OSError, UnicodeDecodeError: the file can't be read.
     """
     from storyforge.ledger import seq_number
     lines = _read_lines(path)
     if not lines:
-        return
+        return RenumberResult(0, 0, [], [])
     headers = lines[0].split(DELIMITER)
     try:
         seq_col = headers.index('seq')
     except ValueError:
-        return
+        raise RenumberError(f'not renumbering {os.path.basename(path)}: it has no seq column')
     rows = []
     unnumbered = []
     seen: dict[float, str] = {}
@@ -190,23 +223,29 @@ def renumber_seq(path):
             shared.append(f'{seen[seq_val]} and {fields[0]} (seq {cell.strip()})')
         else:
             seen[seq_val] = fields[0]
-        rows.append((seq_val, fields))
+        rows.append((seq_val, cell, fields))
     if unnumbered or shared:
-        raise ValueError(
+        raise RenumberError(
             'not renumbering ' + os.path.basename(path) + ': '
             + '; '.join([f'no numeric seq: {", ".join(unnumbered)}'] if unnumbered else [])
             + ('; ' if unnumbered and shared else '')
             + '; '.join([f'shared seq: {", ".join(shared)}'] if shared else [])
             + '. Decide their order and give each its own number first.')
     rows.sort(key=lambda r: r[0])
-    # Renumber
     out = [lines[0]]
-    for i, (_, fields) in enumerate(rows, 1):
+    renumbered = []
+    changed = 0
+    for i, (_, cell, fields) in enumerate(rows, 1):
         while len(fields) <= seq_col:
             fields.append('')
+        if cell != str(i):
+            changed += 1
         fields[seq_col] = str(i)
+        renumbered.append((cell, fields))
         out.append(DELIMITER.join(fields))
-    _write_lines(path, out)
+    if write and changed:
+        _write_lines(path, out)
+    return RenumberResult(changed, len(rows), headers, renumbered)
 
 
 def main():
@@ -270,8 +309,11 @@ def main():
             sys.exit(1)
         try:
             renumber_seq(sys.argv[2])
-        except ValueError as e:
+        except RenumberError as e:
             print(f'ERROR: {e}', file=sys.stderr)
+            sys.exit(1)
+        except (OSError, UnicodeDecodeError) as e:
+            print(f'ERROR: cannot read {sys.argv[2]}: {e}', file=sys.stderr)
             sys.exit(1)
 
     else:
