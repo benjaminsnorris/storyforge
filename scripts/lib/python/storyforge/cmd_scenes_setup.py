@@ -1,12 +1,15 @@
 """storyforge scenes-setup — Prepare manuscript into formatted scene files.
 
-Handles three input scenarios:
+Handles three input scenarios, plus a renumber:
   --rename           Rename existing scene files to proper slugs
   --split-chapters   Split chapter files into individual scenes
   --split-manuscript Split a single manuscript file into scenes
+  --renumber         Renumber scenes.csv's seq to 1..N in reading order
+                     (no model call; cleanup's `seq_needs_renumber` fix)
 
 Usage:
     storyforge scenes-setup --rename
+    storyforge scenes-setup --renumber [--dry-run]
     storyforge scenes-setup --split-chapters --source chapters/
     storyforge scenes-setup --split-manuscript --source manuscript.md
     storyforge scenes-setup --split-chapters --dry-run
@@ -26,7 +29,7 @@ from storyforge.common import (
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
-    commit_and_push, _git,
+    commit_and_push, commit_or_raise, CommitError, _git,
 )
 from storyforge.api import (
     invoke_to_file, extract_text, extract_usage, calculate_cost_from_usage,
@@ -41,7 +44,9 @@ from storyforge.scenes import (
     build_boundary_prompt, scenes_header, intent_header,
     keep_epigraph_with_opening, _title_from_file,
 )
-from storyforge.csv_cli import get_field, get_column, append_row
+from storyforge.csv_cli import (
+    get_field, get_column, append_row, renumber_seq, RenumberError,
+)
 
 
 # A part (or book, or volume) heading: "Part One", "PART II",
@@ -133,6 +138,169 @@ def _row_for_header(csv_path, values):
     return '|'.join(str(values.get(col, '')) for col in header)
 
 
+# ============================================================================
+# --renumber
+# ============================================================================
+
+_PLAN_REL = os.path.join('working', 'plans', 'revision-plan.csv')
+
+
+def _retargeted_passes(project_dir, before, after):
+    """Revision-plan passes not yet completed whose seq-number scope
+    (`revision.is_seq_scope`) names a different scene under `after` than
+    under `before` (seq -> scene id, as `resolve_scope` maps them when the
+    pass runs). Returns (pass names, problem): `problem` is why the plan
+    couldn't be checked, or ''. No plan is nothing to check.
+
+    Read line by line with quoting off: revise writes the plan unquoted, and
+    a stray `"` in one row hid every row after it.
+    """
+    import csv
+    from storyforge.revision import is_seq_scope, _scope_parts
+    plan = os.path.join(project_dir, _PLAN_REL)
+    if os.path.islink(plan) and not os.path.exists(plan):
+        return [], f'{_PLAN_REL} is a symlink to {os.readlink(plan)}, which is missing'
+    try:
+        with open(plan, newline='', encoding='utf-8') as f:
+            raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    except FileNotFoundError:
+        return [], ''
+    except (OSError, UnicodeDecodeError) as e:
+        return [], f'cannot read {_PLAN_REL}: {e}'
+    names = []
+    for row in csv.DictReader(raw.splitlines(), delimiter='|', quoting=csv.QUOTE_NONE):
+        if (row.get('status') or '').strip() == 'completed':
+            continue
+        scope = row.get('scope') or ''
+        if not is_seq_scope(scope):
+            continue
+        if scope.startswith('[') and scope.endswith(']'):
+            scope = scope[1:-1].replace(' ', '')
+        if any(before.get(p) != after.get(p) for p in _scope_parts(scope)):
+            names.append((row.get('name') or row.get('pass') or '?').strip())
+    return names, ''
+
+
+def _uncommitted(project_dir, rel):
+    """Whether `rel` differs from HEAD, or None when git can't say."""
+    r = _git(project_dir, 'status', '--porcelain', '--', rel, check=False)
+    if r.returncode != 0:
+        return None
+    return bool(r.stdout.strip())
+
+
+def renumber_scenes(project_dir, dry_run=False):
+    """Renumber reference/scenes.csv's seq to 1..N in the current reading
+    order (`csv_cli.renumber_seq`), then commit and push it. Returns the exit
+    code, 1 when:
+
+    - the file is missing or unreadable, or has no seq column;
+    - a seq is shared or not a number (choosing their order is the author's
+      call);
+    - the seq is already 1..N but the file has uncommitted changes (an
+      earlier renumber whose commit failed, say), which this won't commit;
+    - the branch can't be made (the file is left as it was);
+    - the commit fails, finds nothing to commit, or the push fails.
+
+    Nothing is written for a refusal, a seq already 1..N, a dry run, or a
+    branch that can't be made. A real renumber writes what `renumber_seq`
+    writes: rows in seq order, LF endings, a BOM kept, blank lines dropped,
+    the file's permissions kept and a symlink written through.
+    """
+    from storyforge import git as gitmod
+    rel = os.path.join('reference', 'scenes.csv')
+    path = os.path.join(project_dir, rel)
+
+    try:
+        result = renumber_seq(path, write=False)
+    except RenumberError as e:
+        log(f'ERROR: {e}')
+        return 1
+    except (OSError, UnicodeDecodeError) as e:
+        log(f'ERROR: cannot read {rel}: {e}. Nothing was renumbered.')
+        return 1
+    total = result.total
+
+    if result.changed == 0:
+        dirty = _uncommitted(project_dir, rel)
+        if dirty:
+            log(f'ERROR: {rel}\'s seq is already 1..{total}, but the file has '
+                f'uncommitted changes (an earlier renumber whose commit failed?). '
+                f'Check them with `git diff {rel}`, then commit them: '
+                f'git add {rel} && git commit -m "Scenes setup: renumber seq" && git push')
+            return 1
+        log(f'{rel}: seq is already 1..{total} in reading order. Nothing to change.')
+        if dirty is None:
+            log(f'WARNING: git could not say whether {rel} has uncommitted changes.')
+        return 0
+
+    # seq -> scene id before and after, over the scenes resolve_scope maps
+    # (cut scenes left out, seq stripped, as it does)
+    header = [h.lstrip('﻿') for h in result.header]
+    i_id = header.index('id') if 'id' in header else 0
+    i_seq = header.index('seq')
+    i_type = header.index('type') if 'type' in header else None
+    before, after = {}, {}
+    for old_cell, fields in result.rows:
+        if i_type is not None and i_type < len(fields) and fields[i_type].strip() == 'cut':
+            continue
+        sid = fields[i_id].strip() if i_id < len(fields) else ''
+        before[old_cell.strip()] = sid
+        after[fields[i_seq]] = sid
+    retargeted, plan_problem = _retargeted_passes(project_dir, before, after)
+
+    def warn_plan(would):
+        verb = 'would name' if would else 'now name'
+        for name in retargeted:
+            log(f'WARNING: revision pass "{name}" in {_PLAN_REL} is scoped by seq '
+                f'numbers, which {verb} different scenes. Re-scope it by scene id '
+                f'before running revise.')
+        if plan_problem:
+            log(f'WARNING: {plan_problem}, so revision passes scoped by seq numbers '
+                f'were not checked: a renumber retargets them.')
+
+    if dry_run:
+        log(f'Would renumber {result.changed} of {total} scenes in {rel} '
+            f'(seq 1..{total}, reading order unchanged).')
+        warn_plan(would=True)
+        log('Dry run: scenes.csv was not changed.')
+        return 0
+
+    if not create_branch('scenes-setup', project_dir):
+        log(f'ERROR: could not get off the main branch, so {rel} was not changed.')
+        return 1
+    try:
+        result = renumber_seq(path)
+    except RenumberError as e:   # the file changed since the preview
+        log(f'ERROR: {e}')
+        return 1
+    except OSError as e:
+        log(f'ERROR: cannot write {rel}: {e}. Nothing was renumbered.')
+        return 1
+    log(f'Renumbered {result.changed} of {total} scenes in {rel} '
+        f'(seq now 1..{total}, reading order unchanged).')
+    warn_plan(would=False)
+
+    message = f'Scenes setup: renumber seq to 1..{total} ({result.changed} changed)'
+    pushes_failed_before = len(gitmod.unpushed)
+    try:
+        commit_or_raise(project_dir, message, [rel])
+    except CommitError as e:
+        log(f'ERROR: {e}. {rel} is renumbered on disk but not committed: commit it '
+            f'with git add {rel} && git commit -m "{message}" && git push')
+        return 1
+    if gitmod.last_commit_error == gitmod.NOTHING_TO_COMMIT:
+        log(f'ERROR: {rel} is renumbered on disk, but git found nothing to commit '
+            f'under it (is it ignored?). Nothing was committed.')
+        return 1
+    if len(gitmod.unpushed) > pushes_failed_before:
+        log(f'ERROR: committed "{message}", but the push failed, so the commit is '
+            f'only local. Push it with git push.')
+        return 1
+    log(f'Committed and pushed "{message}".')
+    return 0
+
+
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         prog='storyforge scenes-setup',
@@ -146,6 +314,9 @@ def parse_args(argv):
                             help='Split chapter files into scenes')
     mode_group.add_argument('--split-manuscript', action='store_true',
                             help='Split a single manuscript file')
+    mode_group.add_argument('--renumber', action='store_true',
+                            help="Renumber reference/scenes.csv's seq to 1..N in "
+                                 'reading order (no model call)')
 
     parser.add_argument('--source', type=str, default='',
                         help='Source directory (for chapters) or file (for manuscript)')
@@ -166,10 +337,10 @@ def main(argv=None):
     session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     # Validate mode
-    modes = sum([args.rename, args.split_chapters, args.split_manuscript])
+    modes = sum([args.rename, args.split_chapters, args.split_manuscript, args.renumber])
     if modes == 0:
-        print('ERROR: Must specify one of --rename, --split-chapters, or --split-manuscript',
-              file=sys.stderr)
+        print('ERROR: Must specify one of --rename, --split-chapters, --split-manuscript, '
+              'or --renumber', file=sys.stderr)
         sys.exit(1)
     if modes > 1:
         print('ERROR: Only one mode may be specified', file=sys.stderr)
@@ -177,6 +348,11 @@ def main(argv=None):
 
     install_signal_handlers()
     project_dir = detect_project_root()
+
+    if args.renumber:
+        # No model call: no cost check, no API key, none of the setup below
+        sys.exit(renumber_scenes(project_dir, dry_run=args.dry_run))
+
     exit_if_bad_threshold()   # before anything is spent
     log(f'Project root: {project_dir}')
 

@@ -113,14 +113,73 @@ def _opening(scenes_dir: str, sid: str) -> str:
     return text + (' …' if len(words) > OPENING_WORDS else '')
 
 
+def _first_line(scenes_dir: str, sid: str) -> str:
+    path = os.path.join(scenes_dir, f'{sid}.md')
+    if not os.path.isfile(path):
+        return ''
+    with open(path, encoding='utf-8') as f:
+        lines = f.read().lstrip('\ufeff').splitlines()
+    if lines and lines[0].rstrip() == '---':            # frontmatter
+        close = next((i for i, line in enumerate(lines[1:], 1) if line.rstrip() == '---'),
+                     len(lines))
+        lines = lines[close + 1:]
+    return next((line for line in lines if line.strip()), '')
+
+
+def divisions(ref_dir: str, scenes_dir: str, scenes: list[dict[str, str]]) -> dict[str, str]:
+    """Where the printed book's divisions begin: scene id -> what it opens
+    ("part 2; Chapter XII"). Chapters come from `chapter-map.csv`, or else
+    from the headings at the top of scenes ("# Stave I"); parts from where
+    `scenes.csv:part` changes (F-162: in an epic the act turns fall at the
+    printed books' openings, which the act call couldn't see)."""
+    from .elaborate import _read_csv
+    from .extract_describe import _CHAPTER_HEADING
+    ids = {r['id'] for r in scenes}
+    chapters: dict[str, str] = {}
+    for row in _read_csv(os.path.join(ref_dir, 'chapter-map.csv')):
+        first = next((s.strip() for s in row.get('scenes', '').split(';') if s.strip() in ids),
+                     '')
+        if first:
+            chapters.setdefault(first, row.get('title', '').strip()
+                                or f'chapter {row.get("chapter", "").strip()}')
+    if not chapters:
+        for r in scenes:
+            m = _CHAPTER_HEADING.match(_first_line(scenes_dir, r['id']))
+            if m:
+                chapters[r['id']] = m.group(1).strip()
+    marks, prev = {}, None
+    for r in scenes:
+        part = r.get('part', '').strip()
+        bits = []
+        if part and part != prev:
+            bits.append(f'part {part}')
+        prev = part or prev
+        if r['id'] in chapters:
+            bits.append(chapters[r['id']])
+        if bits:
+            marks[r['id']] = '; '.join(bits)
+    return marks
+
+
 def build_acts_prompt(profile: dict[str, str], scenes: list[dict[str, str]],
-                      scenes_dir: str, problems: list[str] | None = None) -> str:
+                      scenes_dir: str, problems: list[str] | None = None,
+                      marks: dict[str, str] | None = None) -> str:
+    marks = marks or {}
     lines = []
     for row in scenes:
         summary = row.get('summary', '').strip()
         what = summary if summary else f'opens: {_opening(scenes_dir, row["id"])}'
+        if row['id'] in marks:
+            lines.append(f'[{marks[row["id"]]} begins]')
         lines.append(f'{row.get("seq", "")}. {row["id"]} | {row.get("title", "").strip()} '
                      f'| {what}')
+    divisions_note = ('''
+Lines in [brackets] mark where the printed book's parts and chapters begin.
+A turn often falls at one of them, so when the turn you see is near a
+division, check whether the act begins there; an act that begins inside a
+chapter should have a reason in the text. A single event (a death and its
+aftermath, a battle) belongs to one act.
+''' if marks else '')
     retry = ''
     if problems:
         retry = ('\n## Your previous answer could not be used\n\n'
@@ -136,7 +195,7 @@ the resolution and runs to the end. These are the book's dramatic acts, not
 its printed parts, volumes or books, which may or may not line up with them.
 Judge where the turns fall from what happens, not from how many scenes each
 act gets: acts are often uneven.
-
+{divisions_note}
 ## What a first reading of the book noted
 
 - Narrative mode: {profile.get('narrative_mode', 'unknown')}
@@ -214,12 +273,13 @@ def assign(scenes: list[dict[str, str]], starts: list[str]) -> list[int]:
     return acts
 
 
-def _ask_model(scenes, scenes_dir, profile, model, log_dir, on_usage) -> list[str]:
+def _ask_model(scenes, scenes_dir, profile, model, log_dir, on_usage,
+               marks=None) -> list[str]:
     from .api import extract_text, invoke_to_file, is_truncated
     problems = None
     for attempt in (1, 2):
         log_file = os.path.join(log_dir, f'extract-acts-{attempt}.json')
-        response = invoke_to_file(build_acts_prompt(profile, scenes, scenes_dir, problems),
+        response = invoke_to_file(build_acts_prompt(profile, scenes, scenes_dir, problems, marks),
                                   model, log_file, 2048, label='acts',
                                   output_schema=ACTS_SCHEMA)
         if on_usage:
@@ -261,7 +321,8 @@ def run_acts(ref_dir: str, scenes_dir: str, log_dir: str, profile: dict[str, str
         acts, source, note = fit_votes(votes), 'votes', f'fewer than {ACT_COUNT} scenes'
     else:
         try:
-            starts = _ask_model(scenes, scenes_dir, profile, model, log_dir, on_usage)
+            starts = _ask_model(scenes, scenes_dir, profile, model, log_dir, on_usage,
+                                divisions(ref_dir, scenes_dir, scenes))
             acts = assign(scenes, starts)
         except (RuntimeError, ValueError, OSError) as e:   # API error, refusal, unusable reply
             note = f'the act call failed ({e})'

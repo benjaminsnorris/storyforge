@@ -99,9 +99,11 @@ These require running a Storyforge command. Present the command to the author us
 |------|---------|
 | `scene_artifacts` | `storyforge cleanup --scenes` |
 | `crlf_line_endings` | `find reference working -name '*.csv' -exec sed -i '' $'s/\r$//' {} + && sed -i '' $'s/\r$//' storyforge.yaml` |
-| `seq_needs_renumber` | `storyforge scenes-setup --renumber` |
+| `seq_needs_renumber` | `storyforge scenes-setup --renumber` (no model call; renumbers `seq` to 1..N in reading order and commits; `--dry-run` previews) |
 
 The `crlf_line_endings` command must cover `storyforge.yaml` as well as the CSVs. Since #314 nothing in Storyforge converts that file — all five writers preserve whatever endings they find — so this command is the only path to LF, and a CSV-only remedy leaves the finding unclearable forever.
+
+`scenes-setup --renumber` exits 1 and changes nothing if two scenes share a seq (cleanup reports that as `duplicate_seq`) or a seq isn't a number: which scene comes first is the author's call, so relay its message and have them give each scene its own number first. It also exits 1 if the commit or push fails, or if `seq` is already 1..N but `scenes.csv` has uncommitted changes (usually an earlier renumber whose commit failed): relay the message, which says how to commit or push. If it warns that a pending revision pass is scoped by seq numbers that now name different scenes, tell the author to re-scope that pass by scene id before running revise. If it warns that the revision plan couldn't be read, tell them those passes weren't checked.
 
 After the command runs, update status to `done` and commit.
 
