@@ -1785,6 +1785,7 @@ class _SourceFixContext:
         source.require_imported(project_dir, self.cfg)
         self.rows = source.map_rows_by_scene(source.read_source_map(project_dir) or [])
         self.cat = source.catalogue(project_dir, self.cfg)
+        self.spans = source.spans(project_dir, self.cfg)
         self.rules = source.read_rules(project_dir, self.cfg) or '(none)'
         self.tables = _Tables(project_dir)
 
@@ -1805,6 +1806,13 @@ def _source_drift_fix(project_dir: str, scene_id: str, scene: dict, intent: dict
             for r in source.split_ids(row.get('source_scenes', ''))]
     if not refs or None in refs:
         return 'its source scenes are not in the imported source (run validate)'
+    outside = [f'{slug}:{sid}' for slug, sid in refs
+               if source.outside_range((slug, sid), ctx.spans)]
+    if outside:
+        # Only the range is adapted: a fix toward a scene outside it would
+        # pull the book past its span
+        return (f'its source scenes {", ".join(outside)} are outside the adapted range '
+                f'(run validate)')
     source_text = '\n\n'.join(source_scene_block(project_dir, slug, sid, prose=False,
                                                   tables=ctx.tables)
                                for slug, sid in refs)

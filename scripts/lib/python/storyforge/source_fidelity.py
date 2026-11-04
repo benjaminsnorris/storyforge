@@ -6,7 +6,9 @@ the evaluation tier, Sonnet) compares the scene's brief, or its prose, with the 
 (`reference/source-map.csv`) on `ELEMENTS`, lists every departure and tags it
 `deliberate` (the map row's treatment or note, or a version rule under
 `source.rules`, authorizes it) or `drift` (nothing does). Elements are scored
-1-5 on drift only, so a deliberate departure is never penalized.
+1-5 on drift only, so a deliberate departure is never penalized. With a
+`range:`, a scene whose map row names a source scene outside it is not
+checked (it is broken data, which validate blocks on).
 
 Output, in the score cycle's directory: `source-fidelity.csv`
 (`SCORE_COLUMNS`) and `source-fidelity-rationale.csv` (`RATIONALE_COLUMNS`),
@@ -173,7 +175,13 @@ class Plan:
 def plan_scene(project_dir: str, scene_id: str, target: str, plugin_dir: str,
                cfg: source.SourceConfig, map_rows: dict[str, dict],
                rules: str, tables: dict | None = None,
-               cat: dict | None = None, source_tables=None) -> Plan:
+               cat: dict | None = None, source_tables=None,
+               spans: dict | None = None) -> Plan:
+    """One scene's check, or why there is none. `cat` and `spans` (each
+    source's adapted scene ids, from `source.spans`) are read when not given; a caller
+    planning many scenes passes them. A map row naming a source scene outside
+    its source's `range:` is broken: only the range is being adapted, and
+    validate blocks on it."""
     if target not in TARGETS:
         raise ValueError(f'target must be one of {TARGETS}')
     row = map_rows.get(scene_id)
@@ -186,6 +194,11 @@ def plan_scene(project_dir: str, scene_id: str, target: str, plugin_dir: str,
     if not refs or any(r is None for r in refs):
         return Plan(scene_id, skip='its source scenes are not in the imported source '
                                    '(run validate)', broken=True)
+    spans = spans if spans is not None else source.spans(project_dir, cfg)
+    outside = [f'{slug}:{sid}' for slug, sid in refs if source.outside_range((slug, sid), spans)]
+    if outside:
+        return Plan(scene_id, skip=f'its source scenes {", ".join(outside)} are outside the '
+                                   f'adapted range (run validate)', broken=True)
     text = target_text(project_dir, scene_id, target, tables)
     if text is None:
         return Plan(scene_id, skip='no brief' if target == 'brief' else 'no prose')
@@ -406,9 +419,9 @@ def run(project_dir: str, scene_ids: list[str], target: str, *, plugin_dir: str,
     Returns (results, skipped, failed): `skipped` is scene -> why it had
     nothing to check (invented, no brief or prose), `failed` is scene -> why
     there is no result: a check that ran and failed, or a scene whose map
-    data is broken (not mapped, source scenes not found). Raises SourceError
-    for a source block, map or rules file that can't be used, or a source
-    not imported.
+    data is broken (not mapped, source scenes not found or outside the
+    source's `range:`). Raises SourceError for a source block, map, range or
+    rules file that can't be used, or a source not imported.
     """
     from storyforge.api import (
         calculate_cost_from_usage, extract_text, extract_usage, invoke_to_file, stop_problem,
@@ -430,9 +443,10 @@ def run(project_dir: str, scene_ids: list[str], target: str, *, plugin_dir: str,
     from storyforge.prompts_source import _Tables
     source.require_imported(project_dir, cfg)
     cat = source.catalogue(project_dir, cfg)
+    spans = source.spans(project_dir, cfg)
     src_tables = _Tables(project_dir)
     plans = {sid: plan_scene(project_dir, sid, target, plugin_dir, cfg, map_rows, rules,
-                             tables, cat, src_tables)
+                             tables, cat, src_tables, spans)
              for sid in scene_ids}
     skipped = {sid: p.skip for sid, p in plans.items() if p.skip and not p.broken}
     broken = {sid: p.skip for sid, p in plans.items() if p.broken}
