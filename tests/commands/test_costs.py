@@ -557,3 +557,37 @@ class TestRunBudget:
             run_parallel(['a', 'b', 'c'], worker, max_workers=3)
         assert meter.cost() == pytest.approx(3.0)
         assert getattr(api._meters, 'stack', []) == []   # nothing left open here
+
+
+class TestEveryCommandStopsOnABadThreshold:
+    """T-7 (#503's review): the commands that check the threshold stop on a
+    non-numeric one before any model call."""
+
+    @pytest.mark.parametrize('module, argv', [
+        ('storyforge.cmd_score', ['--direct']),
+        ('storyforge.cmd_scenes_setup', ['--split-chapters']),
+        ('storyforge.cmd_scenes_setup', ['--split-manuscript']),
+        ('storyforge.cmd_timeline', []),
+        ('storyforge.cmd_enrich', []),
+    ])
+    def test_exit_1_and_no_model_call(self, module, argv, mock_api, project_dir,
+                                      monkeypatch, capsys):
+        import importlib
+        mod = importlib.import_module(module)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', 'fifty')
+        monkeypatch.setattr(mod, 'detect_project_root', lambda: project_dir)
+        with pytest.raises(SystemExit) as e:
+            mod.main(argv)
+        assert e.value.code == 1
+        assert mock_api.call_count == 0
+        assert "STORYFORGE_COST_THRESHOLD is 'fifty'" in capsys.readouterr().out
+
+    def test_the_costs_check_cli_exits_2(self, monkeypatch, capsys):
+        from storyforge import costs
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', 'fifty')
+        monkeypatch.setattr('sys.argv', ['costs', 'check', '1.0'])
+        with pytest.raises(SystemExit) as e:
+            costs.main()
+        assert e.value.code == 2
+        assert "STORYFORGE_COST_THRESHOLD is 'fifty'" in capsys.readouterr().err

@@ -302,6 +302,7 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
         f'{prior_prose})...')
     served_before = len(fallback_replies())
     budget = _run_budget()
+    rechecks_open: list[str] = []   # re-checks after a redraft that failed or didn't run
     scenes_dir = os.path.join(project_dir, 'scenes')
     failed: list[str] = []
     written = 0
@@ -350,7 +351,8 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
             if why:
                 failed += _stopped_at(sid, why, scene_ids[i:])
                 break
-            _recheck_after(project_dir, log_dir, set(scene_ids[i:]), budget)
+            _note_recheck(rechecks_open, sid,
+                          _recheck_after(project_dir, log_dir, set(scene_ids[i:]), budget))
 
     _commit(
         project_dir,
@@ -360,6 +362,7 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
 
     if failed:
         raise RedraftError(f'{len(failed)} scene(s) not re-drafted: {"; ".join(failed)}')
+    _raise_if_rechecks_open(rechecks_open)
 
 
 def _commit(project_dir: str, message: str, paths: list[str] | None = None) -> None:
@@ -390,6 +393,29 @@ def _run_budget():
     session."""
     from storyforge.costs import RunBudget
     return _RUN_BUDGET if _RUN_BUDGET is not None else RunBudget()
+
+
+def _note_recheck(rechecks_open: list[str], after: str, run) -> None:
+    """Keep what a re-check after `after`'s redraft left undone: one that
+    failed, or scenes the threshold kept from running (the latest such
+    queue is what is still owed)."""
+    if run is None:
+        return
+    rechecks_open[:] = [x for x in rechecks_open if not x.startswith('over the threshold')]
+    if run.failed:
+        rechecks_open.append(f'{run.failed} (re-checked after {after} and did not pass: '
+                             f'{run.why})')
+    if run.over_budget and run.left:
+        rechecks_open.append(f'over the threshold, not run: {", ".join(run.left)}')
+
+
+def _raise_if_rechecks_open(rechecks_open: list[str]) -> None:
+    """A re-check a redraft owed and didn't finish fails the run, wherever
+    it falls (#503's review: one after the last redraft didn't)."""
+    if rechecks_open:
+        raise RedraftError(f'the redrafts are in, but re-checks they owed did not finish '
+                           f'(listed in working/gate-pending.csv; `storyforge check '
+                           f'--pending`): {"; ".join(rechecks_open)}')
 
 
 def _recheck_after(project_dir: str, log_dir: str, skip: set[str], budget):
@@ -1918,6 +1944,7 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
 
     log_dir = os.path.join(project_dir, 'working', 'logs')
     budget = _run_budget()
+    rechecks_open: list[str] = []   # re-checks after a redraft that failed or didn't run
     scene_ids = _reading_order(project_dir, scene_ids)
     from storyforge import gate
     baseline = gate.snapshot(project_dir)   # the book before this run
@@ -1998,10 +2025,12 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
         if why:
             failed += _stopped_at(scene_id, why, scene_ids[i:])
             break
-        _recheck_after(project_dir, log_dir, set(scene_ids[i:]), budget)
+        _note_recheck(rechecks_open, scene_id,
+                      _recheck_after(project_dir, log_dir, set(scene_ids[i:]), budget))
 
     if failed:
         raise RedraftError(f'{len(failed)} scene(s) not re-drafted: {"; ".join(failed)}')
+    _raise_if_rechecks_open(rechecks_open)
     return count
 
 

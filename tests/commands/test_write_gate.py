@@ -615,7 +615,7 @@ class TestReviseRedraftsAreGated:
     """revise's redraft-from-brief goes through write's gate, in reading
     order, and stops where write would."""
 
-    def _redraft(self, project_dir, monkeypatch, ids, gate_fails=()):
+    def _redraft(self, project_dir, monkeypatch, ids, gate_fails=(), recheck=None):
         from storyforge import cmd_revise, cmd_write
         drafted, gated, skips = [], [], []
         self.skips = skips
@@ -637,7 +637,8 @@ class TestReviseRedraftsAreGated:
             self.befores[sid] = before
             return (False, 'a contradiction') if sid in gate_fails else (True, '')
         monkeypatch.setattr(cmd_write, 'run_recheck', lambda pd, ld, skip=frozenset(),
-                            spent_before=0.0: skips.append(set(skip)))
+                            spent_before=0.0: skips.append(set(skip))
+                            or (recheck(skip) if recheck else None))
         monkeypatch.setattr(cmd_write, '_gate_drafted_scene', fake_gate)
         error = None
         try:
@@ -668,6 +669,27 @@ class TestReviseRedraftsAreGated:
         assert drafted == ['act1-sc01', 'act1-sc02']
         assert 'act1-sc02 (redrafted, but the gate did not pass it' in error
         assert 'act2-sc01 (not redrafted: redrafting stops' in error
+
+    def test_a_recheck_failing_after_the_last_redraft_fails_the_run(
+            self, project_dir, monkeypatch):
+        """#503's review: a failed re-check stopped the next redraft, but one
+        after the last redraft let the run report success."""
+        def recheck(skip):
+            return None if skip else gate.Recheck(failed='act2-sc02', why='a contradiction')
+        drafted, _, error = self._redraft(project_dir, monkeypatch, ['act1-sc01', 'act1-sc02'],
+                                          recheck=recheck)
+        assert drafted == ['act1-sc01', 'act1-sc02']
+        assert 're-checks they owed did not finish' in error
+        assert 'act2-sc02 (re-checked after act1-sc02 and did not pass: a contradiction)' \
+            in error
+
+    def test_a_deferral_a_later_recheck_clears_does_not_fail_the_redrafts(
+            self, project_dir, monkeypatch):
+        runs = iter([gate.Recheck(over_budget=True, left=['act2-sc02']),
+                     gate.Recheck(passed=['act2-sc02'])])
+        _, _, error = self._redraft(project_dir, monkeypatch, ['act1-sc01', 'act1-sc02'],
+                                    recheck=lambda skip: next(runs))
+        assert error is None
 
     def test_each_redraft_skips_the_rest_of_the_run_in_its_recheck(
             self, project_dir, monkeypatch):
