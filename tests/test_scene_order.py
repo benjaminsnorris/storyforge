@@ -100,3 +100,70 @@ class TestValidateReadsSeqsAsNumbers:
         from storyforge.elaborate import validate_structure
         _set_seqs(project_dir, {'act2-sc01': ''})
         validate_structure(os.path.join(project_dir, 'reference'))
+
+
+def _write_scenes(project_dir, rows: list[str]):
+    """scenes.csv with only `rows` (`id|seq|title`), as raw text."""
+    with open(_scenes_path(project_dir), 'w') as f:
+        f.write('id|seq|title\n' + ''.join(r + '\n' for r in rows))
+
+
+def _structure(project_dir):
+    from storyforge.elaborate import validate_structure
+    report = validate_structure(os.path.join(project_dir, 'reference'))
+    return {c['check']: c for c in report['checks']
+            if c['check'] in ('duplicate-seq', 'scene-ids')}
+
+
+class TestSharedSeqs:
+    def test_a_duplicated_id_does_not_hide_a_tie(self, project_dir):
+        """Keyed by id, the second `x` row replaced the first, and the 5 tie
+        with `y` vanished (CR-1/SF-1)."""
+        _write_scenes(project_dir, ['x|5|A', 'y|5|B', 'x|9|C'])
+        rows = ledger.scene_rows(os.path.join(project_dir, 'reference'))[1]
+        assert ledger.shared_seqs(rows) == [('5', ['x', 'y'])]
+        checks = _structure(project_dir)
+        assert not checks['duplicate-seq']['passed']
+        assert "seq 5: ['x', 'y']" in checks['duplicate-seq']['message']
+        assert not checks['scene-ids']['passed']
+        assert 'x is on 2 rows' in checks['scene-ids']['message']
+
+    def test_a_quote_in_a_title_does_not_swallow_the_rows_after_it(self, project_dir):
+        """csv's default quoting read `"Hello` as an open quote (SF-2)."""
+        _write_scenes(project_dir, ['a|1|"Hello', 'b|2|B', 'c|2|C'])
+        rows = ledger.scene_rows(os.path.join(project_dir, 'reference'))[1]
+        assert [r['id'] for r in rows] == ['a', 'b', 'c']
+        assert ledger.shared_seqs(rows) == [('2', ['b', 'c'])]
+        assert not _structure(project_dir)['duplicate-seq']['passed']
+
+    def test_a_mixed_spelling_tie_names_each_spelling(self, project_dir):
+        """With 4.0 first, the message said "seq 4.0" though one cell says 4."""
+        _write_scenes(project_dir, ['a|4.0|A', 'b|4|B', 'c|5|C'])
+        rows = ledger.scene_rows(os.path.join(project_dir, 'reference'))[1]
+        assert ledger.shared_seqs(rows) == [('4 / 4.0', ['a', 'b'])]
+        assert "seq 4 / 4.0: ['a', 'b']" in _structure(project_dir)['duplicate-seq']['message']
+
+    def test_ties_come_in_reading_order(self, project_dir):
+        _write_scenes(project_dir, ['a|10|A', 'b|10|B', 'c|9|C', 'd|9|D', 'e|x|E', 'f|x|F'])
+        rows = ledger.scene_rows(os.path.join(project_dir, 'reference'))[1]
+        assert ledger.shared_seqs(rows) == [('9', ['c', 'd']), ('10', ['a', 'b']),
+                                            ('x', ['e', 'f'])]
+
+    def test_a_blank_id_row_is_reported_by_validate(self, project_dir):
+        """The id map reported a blank-id row in its tie as ''; it is now a
+        scene-ids failure of its own (SF-3)."""
+        _write_scenes(project_dir, ['a|1|A', '|1|Untitled'])
+        checks = _structure(project_dir)
+        assert not checks['scene-ids']['passed']
+        assert "a row has no id (seq '1', title 'Untitled')" in checks['scene-ids']['message']
+
+    def test_unique_ids_and_seqs_pass(self, project_dir):
+        checks = _structure(project_dir)
+        assert checks['scene-ids']['passed'] and checks['duplicate-seq']['passed']
+
+    def test_no_id_column(self, project_dir):
+        with open(_scenes_path(project_dir), 'w') as f:
+            f.write('slug|seq\na|1\n')
+        assert ledger.scene_id_problems(*ledger.scene_rows(
+            os.path.join(project_dir, 'reference'))) == [
+            'reference/scenes.csv has no id column, so no scene has a place']

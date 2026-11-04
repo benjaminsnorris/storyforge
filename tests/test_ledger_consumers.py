@@ -286,7 +286,7 @@ class TestEstablishedFacts:
         assert exc.value.code == 1
         out = capsys.readouterr().out
         assert 'ERROR: scenes.csv: act1-sc01, act1-sc02 share seq 1,' in out
-        assert f'ERROR: scenes.csv: {rows[3]["id"]}, {rows[4]["id"]} share seq 4,' in out
+        assert f'ERROR: scenes.csv: {rows[3]["id"]}, {rows[4]["id"]} share seq 4 / 4.0,' in out
         assert "author's call" in out and 'seq column of reference/scenes.csv' in out
         # the gate and the evals still read an order from it
         assert set(ledger.scene_order(project_dir)) == {r['id'] for r in rows}

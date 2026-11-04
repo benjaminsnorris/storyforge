@@ -188,8 +188,7 @@ def exit_if_unordered(project_dir: str) -> None:
     except ValueError as e:
         log(f'ERROR: {e}. Give every scene a number in seq.')
         raise SystemExit(1)
-    from storyforge.elaborate import _read_csv_as_map, shared_seqs
-    shared = shared_seqs(_read_csv_as_map(path).values())
+    shared = shared_seqs(scene_rows(os.path.join(project_dir, 'reference'))[1])
     if shared:
         for seq, sids in shared:
             log(f'ERROR: scenes.csv: {", ".join(sids)} share seq {seq}, so '
@@ -615,6 +614,69 @@ def seq_number(text) -> float:
     return value
 
 
+def scene_rows(ref_dir: str) -> tuple[list[str], list[dict[str, str]]]:
+    """scenes.csv's header and every row as written: split on `|` with no
+    quoting (project CSVs never quote, so a `"` in a title is just a
+    character), the byte-order mark stripped, and a duplicated id kept as
+    two rows. `scene_order`, `shared_seqs` and `scene_id_problems` read
+    scenes.csv this one way. Missing file → ([], [])."""
+    return _read_rows(os.path.join(ref_dir, 'scenes.csv'))
+
+
+def scene_id_problems(header: list[str], rows: list[dict[str, str]]) -> list[str]:
+    """What keeps `scene_rows` from giving each scene one place: no id
+    column, a row with a blank id (`scene_order` skips it), an id on two
+    rows (the later row's seq wins). One string each; [] when clean. validate
+    (`scene-ids`) and `exit_if_unordered` both report these."""
+    if not header:
+        return []
+    if 'id' not in header:
+        return ['reference/scenes.csv has no id column, so no scene has a place']
+    problems = []
+    counts: dict[str, int] = {}
+    for row in rows:
+        sid = row.get('id', '').strip()
+        if sid:
+            counts[sid] = counts.get(sid, 0) + 1
+        else:
+            problems.append(f'a row has no id (seq {row.get("seq", "").strip()!r}, '
+                            f'title {csv_safe(row.get("title", "").strip())!r})')
+    problems += [f'{sid} is on {n} rows' for sid, n in counts.items() if n > 1]
+    return problems
+
+
+def shared_seqs(rows: list[dict[str, str]]) -> list[tuple[str, list[str]]]:
+    """The seqs two or more of `rows` (from `scene_rows`) share, as
+    (each spelling joined by " / ", sorted scene ids), in reading order.
+    validate's `duplicate-seq`, cleanup's `DUPLICATE_SEQ` and the
+    write/revise/check stop (`exit_if_unordered`) all read this one rule.
+
+    Every row with an id counts, whatever its status: `scene_order` ranks
+    every row (a cut scene's facts still sit at its position), so a tie with
+    a cut or unwritten scene is still an order nobody chose. Two rows with
+    one id count as two (`scene_id_problems` reports the id). Seqs compare
+    through `seq_number`, so "4" and "4.0" tie, as they do in `scene_order`;
+    a non-numeric seq ties only with the same text, and a blank seq or a
+    blank id is never part of a tie (`scene_order` and `scene_id_problems`
+    report those).
+    """
+    groups: dict[tuple, tuple[set[str], list[str]]] = {}
+    for row in rows:
+        sid = row.get('id', '').strip()
+        seq = row.get('seq', '').strip()
+        if not sid or not seq:
+            continue
+        try:
+            key: tuple = (0, seq_number(seq))
+        except ValueError:
+            key = (1, seq)
+        spellings, sids = groups.setdefault(key, (set(), []))
+        spellings.add(seq)
+        sids.append(sid)
+    return [(' / '.join(sorted(spellings)), sorted(sids))
+            for _, (spellings, sids) in sorted(groups.items()) if len(sids) > 1]
+
+
 def scene_order(project_dir: str) -> dict[str, int]:
     """Scene id → reading position, from `reference/scenes.csv`'s `seq`.
 
@@ -622,7 +684,7 @@ def scene_order(project_dir: str) -> dict[str, int]:
         ValueError: if a scene's `seq` is missing or not a number (the order
             would be a guess).
     """
-    _, rows = _read_rows(os.path.join(project_dir, 'reference', 'scenes.csv'))
+    _, rows = scene_rows(os.path.join(project_dir, 'reference'))
     keyed = []
     for row in rows:
         sid = row.get('id', '').strip()

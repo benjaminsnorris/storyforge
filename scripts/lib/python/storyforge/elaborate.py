@@ -1043,33 +1043,6 @@ def _validate_pacing(scenes_map, intent_map, checks):
                              'Turning point types are varied'))
 
 
-def shared_seqs(scenes) -> list[tuple[str, list[str]]]:
-    """The seqs two or more scenes share, as (seq, sorted scene ids), in
-    reading order: validate's `duplicate-seq` and the write/revise/check
-    stop (`ledger.exit_if_unordered`) both read this one definition.
-
-    Every row counts, whatever its status: `ledger.scene_order` ranks every
-    row of scenes.csv (a cut scene's facts still sit at its position), so a
-    tie with a cut or unwritten scene is still an order nobody chose. Seqs
-    compare as numbers where they are numbers, as `scene_order` sorts them
-    ("12" and "12.0" tie there too); a blank seq is not a shared one.
-    """
-    from storyforge.ledger import seq_number
-    groups: dict[object, tuple[str, list[str]]] = {}
-    for scene in scenes:
-        sid = (scene.get('id') or '').strip()
-        seq = (scene.get('seq') or '').strip()
-        if not sid or not seq:
-            continue
-        try:
-            key: object = (0, seq_number(seq))
-        except ValueError:
-            key = (1, seq)
-        groups.setdefault(key, (seq, []))[1].append(sid)
-    return [(seq, sorted(sids)) for _, (seq, sids) in sorted(groups.items())
-            if len(sids) > 1]
-
-
 def validate_structure(ref_dir: str) -> dict:
     """Run all structural validation checks against the scene CSVs.
 
@@ -1120,7 +1093,19 @@ def validate_structure(ref_dir: str) -> dict:
     # --- Identity: seq is unique ---
     # Two scenes sharing a seq have no defined reading order, and renumbering
     # would pick one silently (thornwall seq 58). The author decides the order.
-    dup_seqs = shared_seqs(scenes_map.values())
+    # Both read scenes.csv's rows as written (`ledger.scene_rows`), not
+    # scenes_map: keyed by id, it keeps only the last of two rows with one
+    # id, hiding a tie on the other row's seq.
+    from storyforge import ledger
+    scene_header, scene_rows = ledger.scene_rows(ref_dir)
+    id_problems = ledger.scene_id_problems(scene_header, scene_rows)
+    checks.append(_check(
+        'identity', 'scene-ids',
+        not id_problems,
+        'Scenes without one id each (reading order is undefined): '
+        + '; '.join(id_problems) if id_problems else 'Every scene has its own id',
+    ))
+    dup_seqs = ledger.shared_seqs(scene_rows)
     checks.append(_check(
         'identity', 'duplicate-seq',
         not dup_seqs,
