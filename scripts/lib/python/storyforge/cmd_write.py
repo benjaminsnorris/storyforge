@@ -528,9 +528,11 @@ def budgeted_recheck(project_dir: str, log_dir: str, skip: set[str] | frozenset[
     the re-checks get what the run's spend so far and `reserved` (the
     forecast of the work it still owes) leave of the threshold. Returns
     `run_recheck`'s answer."""
+    from storyforge import api
     before = budget.spent(reserved)
-    run = run_recheck(project_dir, log_dir, skip, spent_before=before)
-    budget.record(run, before)
+    with api.metered() as meter:   # told apart from the rest of the run's spend
+        run = run_recheck(project_dir, log_dir, skip, spent_before=before)
+    budget.record(run, before, actual=meter.cost())
     return run
 
 

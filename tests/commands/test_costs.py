@@ -480,17 +480,25 @@ class TestRunBudget:
         assert RunBudget().spent() == 0.0
         assert RunBudget(self.Meter(12.5)).spent(reserved=3.0) == 15.5
 
-    def test_the_rechecks_forecast_is_a_floor_under_the_meter(self):
-        """A re-check whose calls the meter can't see still counts."""
+    def test_the_rechecks_count_at_their_forecast_or_their_cost(self):
+        """A re-check counts at its forecast when its calls cost less or
+        weren't metered, and the rest of the run's spend is added to it,
+        not hidden under it."""
         from storyforge import gate
         from storyforge.costs import RunBudget
-        budget = RunBudget(self.Meter(1.0))
+        budget = RunBudget(self.Meter(1.0))                    # drafting so far
         budget.record(gate.Recheck(spent=5.0 + 2.4), spent_before=5.0)
         assert budget.rechecks == pytest.approx(2.4)
-        assert budget.spent() == pytest.approx(2.4)          # more than the meter's 1.0
-        budget.meter = self.Meter(10.0)
-        assert budget.spent(reserved=1.0) == pytest.approx(11.0)
-        budget.record(None, spent_before=3.0)                 # nothing ran
+        assert budget.spent() == pytest.approx(1.0 + 2.4)      # unmetered re-check
+        # a re-check measured at $0.40 against its $2.40 forecast
+        budget = RunBudget(self.Meter(1.4))
+        budget.record(gate.Recheck(spent=7.4), spent_before=5.0, actual=0.4)
+        assert budget.spent(reserved=1.0) == pytest.approx(1.0 + 2.4 + 1.0)
+        # one measured at more than its forecast counts at its cost
+        budget = RunBudget(self.Meter(4.0))
+        budget.record(gate.Recheck(spent=7.4), spent_before=5.0, actual=3.0)
+        assert budget.spent() == pytest.approx(4.0)
+        budget.record(None, spent_before=3.0)                  # nothing ran
         assert budget.rechecks == pytest.approx(2.4)
 
     def test_the_spend_meter_prices_what_it_saw(self):
@@ -504,3 +512,27 @@ class TestRunBudget:
         want = sum(calculate_cost_from_usage(api.extract_usage({'usage': usage}), m)
                    for m in ('claude-sonnet-4-6', 'claude-opus-4-6'))
         assert meter.cost() == pytest.approx(want) and want > 0
+
+    def test_budgeted_recheck_measures_the_rechecks_apart(self, monkeypatch):
+        """The re-checks' own spend is told apart from the rest of the run's,
+        so neither hides the other: drafting $1.00, a re-check measured at
+        $0.50 against a $0.95 forecast counts $1.95."""
+        from storyforge import api, cmd_write, gate
+        from storyforge.costs import RunBudget
+
+        def spend(dollars):   # Opus 4.6 output is $25 a million tokens
+            api._meter({'usage': {'input_tokens': 0,
+                                  'output_tokens': int(dollars * 40_000)}},
+                       'claude-opus-4-6')
+
+        def run_recheck(pd, ld, skip=frozenset(), spent_before=0.0):
+            spend(0.5)
+            return gate.Recheck(spent=spent_before + 0.95, spent_before=spent_before)
+        monkeypatch.setattr(cmd_write, 'run_recheck', run_recheck)
+        with api.metered() as meter:
+            budget = RunBudget(meter)
+            spend(1.0)
+            cmd_write.budgeted_recheck('/nowhere', '/nowhere', set(), budget, reserved=2.0)
+        assert budget.rechecks_actual == pytest.approx(0.5)
+        assert budget.rechecks == pytest.approx(0.95)
+        assert budget.spent() == pytest.approx(1.95)
