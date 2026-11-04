@@ -1058,6 +1058,22 @@ class TestPolishLoopForecast:
         assert events == [('fix', ['s01'], 2 + 2 * 2 + 5.0), ('pass', 1, 2 * 2 + 5.0),
                           ('score',)]
 
+    def test_a_source_drift_fix_alone_reserves_only_the_full_score(
+            self, tmp_path, monkeypatch):
+        """T-5/TD-2 (#510's review): with the craft converged the loop ends
+        after the fix, so its re-checks keep only the full score back, and
+        the reservation is put back after."""
+        from storyforge import cmd_revise
+        from storyforge.cmd_revise import _run_polish_loop
+        done = self.H._make_diag(high=0)
+        project_dir, events, _, _ = self._setup(
+            tmp_path, monkeypatch, [done], 14, upstream=['s01'])
+        monkeypatch.setattr(cmd_revise, '_source_drift_scenes',
+                            lambda p, quiet=False: {'s01': ['outcome']})
+        _run_polish_loop(project_dir, 3, None)
+        assert events == [('fix', ['s01'], 5.0), ('score',)]
+        assert cmd_revise._RUN_BUDGET.owed == 0.0
+
     def test_skip_final_score_leaves_the_score_out(self, tmp_path, monkeypatch):
         from storyforge.cmd_revise import _run_polish_loop
         high, done = self.H._make_diag(high=1), self.H._make_diag(high=0)

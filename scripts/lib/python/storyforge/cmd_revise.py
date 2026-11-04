@@ -15,6 +15,7 @@ Usage:
 """
 
 import argparse
+import contextlib
 import csv
 import hashlib
 import json
@@ -382,16 +383,34 @@ def _commit(project_dir: str, message: str, paths: list[str] | None = None) -> N
         sys.exit(1)
 
 
-#: The revise session's one cost budget (`costs.RunBudget`), metered from
-#: `main`; None outside it (a helper called directly, as the tests do)
+#: The revise session's one cost budget (`costs.RunBudget`), set for a run
+#: by `_budget_scope` (`main`'s, metered; the polish loop's when called on
+#: its own); None outside a run (a helper called directly, as the tests do)
 _RUN_BUDGET = None
 
 
 def _run_budget():
-    """The session's cost budget, or a fresh unmetered one when a helper is
-    called outside `main`."""
+    """The run's cost budget, or a fresh unmetered one when a helper is
+    called outside a run (nothing it reserves outlives the call)."""
     from storyforge.costs import RunBudget
     return _RUN_BUDGET if _RUN_BUDGET is not None else RunBudget()
+
+
+@contextlib.contextmanager
+def _budget_scope(meter=None):
+    """One budget for the run: the one already set (by `main`), or a new
+    one set for the block, so every helper's `_run_budget()` in it is the
+    same instance and a reservation made on it reaches their re-checks."""
+    global _RUN_BUDGET
+    if _RUN_BUDGET is not None:
+        yield _RUN_BUDGET
+        return
+    from storyforge.costs import RunBudget
+    _RUN_BUDGET = RunBudget(meter)
+    try:
+        yield _RUN_BUDGET
+    finally:
+        _RUN_BUDGET = None
 
 
 def _pass_cost(project_dir: str, model: str) -> float:
@@ -2074,7 +2093,7 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     return count
 
 
-def _stop_loop_if_over(project_dir: str, budget, next_cost: float, after: float,
+def _stop_loop_if_over(project_dir: str, budget, next_cost: float, *, after: float,
                        what: str, resume: str = '') -> None:
     """Stop the polish loop (exit 1) before `what` when the run's spend so
     far (`budget.committed`) plus its forecast `next_cost` and `after` (the
@@ -2098,6 +2117,18 @@ def _run_polish_loop(project_dir: str, max_loops: int,
                      coaching_override: str | None, *,
                      skip_initial_score: bool = False,
                      skip_final_score: bool = False) -> None:
+    """`_polish_loop` under one budget for the run (`_budget_scope`: `main`'s
+    when it runs there)."""
+    with _budget_scope():
+        _polish_loop(project_dir, max_loops, coaching_override,
+                     skip_initial_score=skip_initial_score,
+                     skip_final_score=skip_final_score)
+
+
+def _polish_loop(project_dir: str, max_loops: int,
+                 coaching_override: str | None, *,
+                 skip_initial_score: bool = False,
+                 skip_final_score: bool = False) -> None:
     """Two-phase polish loop: deterministic scoring → full LLM scoring.
 
     Phase 1: Score only deterministic principles (free, instant), polish with
@@ -2232,13 +2263,15 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         # forecast and the full score after the loop must fit the threshold
         this_pass = 0.0 if craft_converged else per_pass
         _stop_loop_if_over(project_dir, budget, len(upstream_scenes) * per_fix + this_pass,
-                           final_cost, f'iteration {iteration}')
-        # while it runs, the rest of the loop's forecast is kept from the re-checks
-        budget.owed = this_pass + (max_loops - iteration) * per_pass + final_cost
-
+                           after=final_cost, what=f'iteration {iteration}')
         if upstream_scenes:
             log(f'  Upstream issues in {len(upstream_scenes)} scenes — fixing briefs first')
-            fixed, skipped = _fix_and_redraft(project_dir, upstream_scenes)
+            # while they run, the rest of the loop's forecast is kept from
+            # the re-checks their redrafts owe (with the craft converged, the
+            # loop ends after them: only the full score is left)
+            rest = 0.0 if craft_converged else this_pass + (max_loops - iteration) * per_pass
+            with budget.reserving(rest + final_cost):
+                fixed, skipped = _fix_and_redraft(project_dir, upstream_scenes)
             brief_fix_skipped.update(skipped)
             if fixed:
                 _commit(project_dir,
@@ -2256,10 +2289,9 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         latest_cycle = os.path.join(project_dir, 'working', 'scores', 'latest')
         plan_rows = _generate_targeted_polish_plan(csv_plan_file, latest_diag,
                                                     findings_dir=latest_cycle)
-        budget.owed = (max_loops - iteration) * per_pass + final_cost
-        _execute_single_pass(project_dir, csv_plan_file, plan_rows, iteration,
-                             model_override=sonnet_model)
-        budget.owed = 0.0
+        with budget.reserving((max_loops - iteration) * per_pass + final_cost):
+            _execute_single_pass(project_dir, csv_plan_file, plan_rows, iteration,
+                                 model_override=sonnet_model)
 
         # Re-score
         log(f'\n=== Iteration {iteration}/{max_loops}: Re-score ===')
@@ -2297,9 +2329,8 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         log(f'\n=== Skipping Phase 2: Full Score (--skip-final-score) ===')
         final_summary = summary
     else:
-        budget.owed = 0.0
-        _stop_loop_if_over(project_dir, budget, final_cost, 0.0, 'the full score',
-                           'run `storyforge score` for it')
+        _stop_loop_if_over(project_dir, budget, final_cost, after=0.0,
+                           what='the full score', resume='run `storyforge score` for it')
         log(f'\n=== Phase 2: Full Score ===')
         _, final_llm_diag = _run_lightweight_score(project_dir, scene_ids)
         final_summary = _summarize_diagnosis(final_llm_diag)
@@ -2925,12 +2956,8 @@ def _fix_upstream_within_budget(project_dir: str, scene_ids: list[str], passes: 
         + (f', then {passes} passes @ ~${per_pass:.2f}' if per_pass else ''))
     _exit_if_over_threshold(forecast, 'nothing revised',
                             "fix those scenes' briefs first (`storyforge hone`)")
-    budget = _run_budget()
-    budget.owed = passes * per_pass
-    try:
+    with _run_budget().reserving(passes * per_pass):
         fixed, _ = _fix_and_redraft(project_dir, scene_ids)
-    finally:
-        budget.owed = 0.0
     if fixed:
         _commit(project_dir, f'Naturalness: upstream brief fixes for {len(fixed)} scenes',
                 ['reference/', 'scenes/', 'working/'])
@@ -2940,15 +2967,9 @@ def main(argv=None):
     """`_main`, metered: the cost threshold is one budget for the session
     (`costs.RunBudget`), so the re-checks after each gated scene get only
     what the passes, redrafts and gate runs before them left."""
-    global _RUN_BUDGET
     from storyforge import api
-    from storyforge.costs import RunBudget
-    with api.metered() as meter:
-        _RUN_BUDGET = RunBudget(meter)
-        try:
-            return _main(argv)
-        finally:
-            _RUN_BUDGET = None
+    with api.metered() as meter, _budget_scope(meter):
+        return _main(argv)
 
 
 def _main(argv=None):

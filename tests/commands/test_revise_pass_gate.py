@@ -101,6 +101,61 @@ class TestOneBudget:
         assert cmd_revise._run_budget().committed() == 0.0
 
 
+class TestReservationsReachTheRechecks:
+    """T-2 (#510's review): what the run reserves (`RunBudget.owed`) must
+    reach the re-checks after a pass's gated scenes and after a redraft;
+    either could take a fresh budget and lose it."""
+
+    @pytest.fixture
+    def budget(self, monkeypatch):
+        from storyforge.costs import RunBudget
+        b = RunBudget()
+        monkeypatch.setattr(cmd_revise, '_RUN_BUDGET', b)
+        return b
+
+    def _rechecks(self, monkeypatch):
+        seen = []
+        monkeypatch.setattr(cmd_write, 'run_recheck',
+                            lambda pd, ld, skip=frozenset(), spent_before=0.0:
+                            seen.append(spent_before))
+        return seen
+
+    def test_in_a_passs_gated_scenes(self, project_dir, monkeypatch, budget):
+        _scenes(project_dir, 'act1-sc01', 'act1-sc02')
+        monkeypatch.setattr(cmd_write, '_gate_drafted_scene', lambda *a, **k: (True, ''))
+        seen = self._rechecks(monkeypatch)
+        with budget.reserving(4.0):
+            _gate_pass(project_dir, ['act1-sc01', 'act1-sc02'])
+        per = gate.RECHECK_COST_PER_SCENE
+        assert seen == [pytest.approx(4.0 + per), pytest.approx(4.0)]
+
+    def test_after_a_redraft(self, project_dir, monkeypatch, budget):
+        from unittest.mock import patch
+        long = 'The rain fell on the cobblestones. ' * 40
+        with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md'), 'w') as f:
+            f.write(long)
+        monkeypatch.setattr(cmd_revise, '_gate_redraft', lambda *a, **k: '')
+        monkeypatch.setattr(cmd_revise, '_restore_gate_markers', lambda *a, **k: None)
+        seen = self._rechecks(monkeypatch)
+        with patch('storyforge.cmd_revise.invoke_api', return_value=long + ' New end.'), \
+             patch('storyforge.cmd_revise.select_model', return_value='claude-sonnet-5-5'), \
+             patch('storyforge.cmd_write._build_prompt', return_value='fake prompt'), \
+             patch('storyforge.common.get_coaching_level', return_value='full'), \
+             budget.reserving(4.0):
+            cmd_revise._redraft_scenes(project_dir, ['act1-sc01'])
+        assert seen == [pytest.approx(4.0)]
+
+    def test_the_polish_loop_is_one_budget_outside_main(self, monkeypatch):
+        """TD-3: outside `main` each `_run_budget()` was a new budget."""
+        seen = []
+        monkeypatch.setattr(cmd_revise, '_polish_loop',
+                            lambda *a, **k: seen.extend([cmd_revise._run_budget(),
+                                                         cmd_revise._run_budget()]))
+        cmd_revise._run_polish_loop('/p', 1, None)
+        assert seen[0] is seen[1]
+        assert cmd_revise._RUN_BUDGET is None   # gone with the run
+
+
 class TestGatePassScenes:
 
     def test_every_scene_gets_the_passs_one_baseline(self, project_dir, monkeypatch):

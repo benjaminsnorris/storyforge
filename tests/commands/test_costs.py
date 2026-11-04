@@ -475,6 +475,22 @@ class TestRunBudget:
         def cost(self):
             return self._cost
 
+    def test_reserving_sets_owed_and_puts_it_back_however_the_block_ends(self):
+        """TD-2 (#510's review): `owed` set by hand was left set on some paths."""
+        from storyforge.costs import RunBudget
+        budget = RunBudget()
+        budget.owed = 1.0
+        with budget.reserving(4.0):
+            assert budget.committed() == 4.0
+            with budget.reserving(-2.0):     # never a credit
+                assert budget.owed == 0.0
+            assert budget.owed == 4.0
+        assert budget.owed == 1.0
+        with pytest.raises(SystemExit):
+            with budget.reserving(9.0):
+                raise SystemExit(1)
+        assert budget.owed == 1.0
+
     def test_committed_is_the_meter_plus_what_is_owed_and_charged(self):
         from storyforge.costs import RunBudget
         assert RunBudget().committed() == 0.0
