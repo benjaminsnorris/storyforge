@@ -1254,24 +1254,38 @@ def _worse(n: int, before_run: GateResult, after_run: GateResult, diff: _Diff) -
     return ''
 
 
-def run_log_dir(log_dir: str, scene_id: str) -> str:
+def run_log_dir(log_dir: str, scene_id: str, *, now=None, pid: int | None = None) -> str:
     """A new directory, created, for one gate invocation's logs of
     `scene_id`: `log_dir/<scene>/<YYYYMMDD-HHMMSS>-<pid>`, with `-2`, `-3`
     ... when that is taken. Callers pass a fixed `log_dir` (write's
     working/logs/gate, check's working/logs/check), and the log files are
     named by scene alone (gate-check-<scene>.json), so without it a later
     run of the scene, or a re-check of it in the same run, overwrote the
-    record of what the earlier one was told and changed."""
+    record of what the earlier one was told and changed.
+
+    The directory is made exclusively (`os.mkdir`), so two calls never share
+    one, whatever the clock. `now` (a datetime) and `pid` are for tests.
+
+    Raises:
+        GateError: the directory can't be made (SF-5, #504's review: a
+            traceback named nothing); nothing was run.
+    """
     from datetime import datetime
-    base = os.path.join(log_dir, scene_id, f'{datetime.now():%Y%m%d-%H%M%S}-{os.getpid()}')
+    stamp = f'{(now or datetime.now()):%Y%m%d-%H%M%S}-{os.getpid() if pid is None else pid}'
+    parent = os.path.join(log_dir, scene_id)
+    base = os.path.join(parent, stamp)
     path, n = base, 1
-    while True:
-        try:
-            os.makedirs(path)
-            return path
-        except FileExistsError:
-            n += 1
-            path = f'{base}-{n}'
+    try:
+        os.makedirs(parent, exist_ok=True)
+        while True:
+            try:
+                os.mkdir(path)
+                return path
+            except FileExistsError:
+                n += 1
+                path = f'{base}-{n}'
+    except OSError as e:
+        raise GateError(f'{scene_id}: can\'t make the gate log directory {path}: {e}') from e
 
 
 def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
@@ -1854,10 +1868,11 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
                 f'forecast about ${len(queue) * RECHECK_COST_PER_SCENE:.2f}: {", ".join(queue)}')
             announced = True
         sid = queue[0]
-        logs = run_log_dir(os.path.join(log_dir, 'recheck'), sid)
-        log(f'Re-checking {sid} (logs: {os.path.relpath(logs, project_dir)})...')
+        log(f'Re-checking {sid}...')
         run.spent += RECHECK_COST_PER_SCENE   # paid whether or not it finishes
         try:
+            logs = run_log_dir(os.path.join(log_dir, 'recheck'), sid)
+            log(f'  logs: {os.path.relpath(logs, project_dir)}')
             result = gate_scene(project_dir, sid, command='recheck', log_dir=logs,
                                 extract_model=extract_model, check_model=check_model,
                                 introduced_by=_writer(project_dir, sid))

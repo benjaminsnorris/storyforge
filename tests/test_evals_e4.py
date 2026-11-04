@@ -122,14 +122,19 @@ def test_each_draft_is_gated_before_the_next_and_a_failure_drafts_on(monkeypatch
                         lambda p, m, **k: {'content': [{'type': 'text', 'text': 'Prose. ' * 120}]})
     bad = Finding('contradiction', 'TIM', 'x', 'y', 'z', '', 'why')
 
+    dirs = []
+
     def fake_gate(project_dir, sid, *, command, prose, log_dir, **k):
         order.append(('gate', sid))
+        dirs.append(log_dir)
         result = gate.GateResult(sid, check=CheckResult(sid, findings=[bad] if sid == 'a' else []))
         return gate.GatedScene(prose + ' Fixed.', result, result, fixed=True)
     monkeypatch.setattr(gate, 'gate_and_fix', fake_gate)
     gated = {}
     drafts, _ = e4.draft(str(tmp_path), ['a', 'b'], gated=gated, log_dir=str(tmp_path / 'g'))
     assert order == [('prompt', 'a'), ('gate', 'a'), ('prompt', 'b'), ('gate', 'b')]
+    # CR-4 (#504's review): gate_and_fix adds <scene>/<run> itself
+    assert dirs == [str(tmp_path / 'g')] * 2
     assert drafts['a'].endswith('Fixed.') and not gated['a'].result.passed
     assert (tmp_path / 'scenes' / 'a.md').read_text().endswith('Fixed.')
 

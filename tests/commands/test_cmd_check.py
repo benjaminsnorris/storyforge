@@ -143,6 +143,21 @@ class TestCheck:
         assert all(os.path.isfile(os.path.join(root, r, f'gate-check-{SCENE}.json'))
                    for r in runs)
 
+    def test_logs_that_cannot_be_made_are_reported_not_a_traceback(self, project,
+                                                                    monkeypatch):
+        """SF-5 (#504's review)."""
+        project_dir, _ = project
+
+        def fail(log_dir, scene_id, **k):
+            raise gate.GateError(f"{scene_id}: can't make the gate log directory x: denied")
+        monkeypatch.setattr(gate, 'run_log_dir', fail)
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main([SCENE])
+        assert e.value.code == 1
+        report = open(os.path.join(project_dir, 'working', 'check-report.md')).read()
+        assert f'## {SCENE}: not checked' in report and "can't make the gate log" in report
+        assert 'not checked' in gate.pending(project_dir)[SCENE]['reason']
+
     def test_no_scenes_named_is_an_error(self, project):
         with pytest.raises(SystemExit) as e:
             cmd_check.main([])

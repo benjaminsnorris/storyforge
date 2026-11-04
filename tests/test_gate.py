@@ -1589,12 +1589,41 @@ class TestRunLogs:
     looked)."""
 
     def test_each_call_gets_its_own_directory_under_the_scene(self, tmp_path):
+        """T-5 (#504's review): the clock and pid are injected, so a second
+        boundary between the calls can't change what is asserted."""
+        from datetime import datetime
+        when = datetime(2026, 11, 3, 8, 2, 38)
+        a = gate.run_log_dir(str(tmp_path), SCENE, now=when, pid=42)
+        b = gate.run_log_dir(str(tmp_path), SCENE, now=when, pid=42)
+        c = gate.run_log_dir(str(tmp_path), SCENE, now=when, pid=42)
+        assert [os.path.relpath(x, tmp_path) for x in (a, b, c)] == [
+            os.path.join(SCENE, '20261103-080238-42'),
+            os.path.join(SCENE, '20261103-080238-42-2'),
+            os.path.join(SCENE, '20261103-080238-42-3')]
+        assert all(os.path.isdir(x) for x in (a, b, c))
+
+    def test_the_default_stamp_is_the_clock_and_pid(self, tmp_path):
         a = gate.run_log_dir(str(tmp_path), SCENE)
-        b = gate.run_log_dir(str(tmp_path), SCENE)
-        assert a != b and os.path.isdir(a) and os.path.isdir(b)
-        assert os.path.dirname(a) == os.path.dirname(b) == str(tmp_path / SCENE)
-        assert os.path.basename(b).startswith(os.path.basename(a))   # same second: -2
-        assert str(os.getpid()) in os.path.basename(a)
+        assert os.path.basename(a).endswith(f'-{os.getpid()}')
+        assert os.path.dirname(a) == str(tmp_path / SCENE)
+
+    def test_a_directory_that_cannot_be_made_is_a_gate_error(self, tmp_path):
+        """SF-5 (#504's review): a makedirs failure was a traceback."""
+        blocker = tmp_path / 'logs'
+        blocker.write_text('a file where the directory goes')
+        with pytest.raises(gate.GateError, match="can't make the gate log directory"):
+            gate.run_log_dir(str(blocker), SCENE)
+
+    def test_a_recheck_whose_logs_cannot_be_made_is_listed_failed(self, project_dir,
+                                                                   tmp_path, monkeypatch):
+        """SF-5: the re-check says why and stops, never a traceback."""
+        blocker = tmp_path / 'logs'
+        blocker.write_text('x')
+        monkeypatch.setattr('storyforge.costs.check_threshold', lambda cost: True)
+        gate.mark_pending(project_dir, SCENE, gate.RECHECK, 'x')
+        run = gate.recheck_pending(project_dir, log_dir=str(blocker))
+        assert run.failed == SCENE and "can't make the gate log directory" in run.why
+        assert gate.pending(project_dir)[SCENE]['command'] == gate.RECHECK_FAILED
 
     def test_two_gate_and_fix_runs_keep_both_logs(self, monkeypatch, tmp_path):
         from storyforge.checker import CheckResult, Finding
