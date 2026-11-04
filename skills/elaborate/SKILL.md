@@ -223,6 +223,7 @@ author.
    - `reference/character-bible.md`
    - `reference/scenes.csv` (id, seq, title, status=spine)
    - `reference/scene-intent.csv` (id, function)
+   - `reference/spine.csv` (`id|seq|title|summary|function|act`): the same spine scenes, with a summary of at most 35 words and the act. The status ladder and `score --level 3` read it
 6. Commit: `git add -A && git commit -m "Elaborate: spine" && git push`
 
 ### Architecture Stage (Interactive)
@@ -233,7 +234,7 @@ author.
    - **Use canonical IDs from registries** for pov, characters, locations, value_at_stake. Add new registry entries for any new characters/locations/values introduced at this stage.
 4. Deepen character bible with supporting characters
 5. Create world bible if needed
-6. Write updates to all CSV files and reference docs
+6. Write updates to all CSV files and reference docs, including `reference/architecture.csv` (`id|seq|title|summary|act|pov|spine_event|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point`, one row per architecture scene, `spine_event` naming the spine scene it serves) and each of those scenes' `architecture_scene` in scenes.csv (its own id). The status ladder and `score --level 4` read it
 7. Run validation — fix any issues before committing
 8. Commit: `git add -A && git commit -m "Elaborate: architecture" && git push`
 

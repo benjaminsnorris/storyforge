@@ -1914,6 +1914,17 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     f.write(content + '\n')
                 written.append(filename)
 
+        # The stage's tier file (spine.csv, architecture.csv), from the rows it
+        # just wrote
+        if stage in ('spine', 'architecture') and 'scenes-csv' in blocks:
+            from storyforge.elaborate import write_stage_tier
+            stage_rows = csv_block_to_rows(blocks['scenes-csv'])
+            tier = write_stage_tier(
+                ref_dir, stage, [r.get('id', '') for r in stage_rows if r.get('id')],
+                {r['id']: r.get('spine_event', '') for r in stage_rows if r.get('id')})
+            if tier:
+                written.append(tier)
+
         if written:
             log(f'  Updated: {", ".join(written)}')
         elif interactive:

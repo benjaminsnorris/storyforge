@@ -179,6 +179,47 @@ def _file_for_column(col: str) -> str | None:
     return None
 
 
+def write_stage_tier(ref_dir: str, stage: str, stage_ids: list[str],
+                     spine_events: dict[str, str] | None = None) -> str:
+    """Write the structural tier an elaboration stage builds.
+
+    The spine stage's scenes are the book's spine (`spine.csv`), and the
+    architecture stage's are its architecture (`architecture.csv`). The
+    status ladder, the level floor checks and the boundary diffs read those
+    files, so a novel built by `storyforge elaborate` (not extracted) needs
+    them too. Each row is the scene's own data from scenes.csv and
+    scene-intent.csv; `spine_events` gives an architecture row's
+    `spine_event` (a spine scene's is its own id). Returns the file written,
+    or '' for a stage with no tier or no scenes.
+    """
+    if stage not in ('spine', 'architecture') or not stage_ids:
+        return ''
+    scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    intent = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+    spine_ids = set(_read_csv_as_map(os.path.join(ref_dir, 'spine.csv')))
+    rows = []
+    for sid in dict.fromkeys(stage_ids):
+        if sid not in scenes:
+            continue
+        row = {**intent.get(sid, {}), **scenes[sid]}
+        if stage == 'architecture':
+            event = (spine_events or {}).get(sid, '').strip()
+            row['spine_event'] = event or (sid if sid in spine_ids else '')
+        rows.append(row)
+    rows.sort(key=lambda r: int(r['seq']) if r.get('seq', '').isdigit() else 0)
+    name = 'spine.csv' if stage == 'spine' else 'architecture.csv'
+    _write_csv(os.path.join(ref_dir, name), rows, _FILE_MAP[name])
+    if stage == 'architecture':
+        anchors = {r['id'] for r in rows}
+        for sid, row in scenes.items():
+            if sid in anchors:
+                row['architecture_scene'] = sid
+        ordered = sorted(scenes.values(),
+                         key=lambda r: int(r['seq']) if r.get('seq', '').isdigit() else 0)
+        _write_csv(os.path.join(ref_dir, 'scenes.csv'), ordered, _FILE_MAP['scenes.csv'])
+    return f'{name} ({len(rows)} rows)'
+
+
 # ============================================================================
 # Read helpers
 # ============================================================================
