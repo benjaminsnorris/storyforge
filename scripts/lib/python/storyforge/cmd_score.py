@@ -122,6 +122,11 @@ def parse_args(argv):
                              'scenes they adapt, and nothing else. A full scoring '
                              'run (without --principles/--deterministic) already '
                              'checks the prose.')
+    parser.add_argument('--text-fidelity', action='store_true',
+                        help='Check the upper tiers (logline, synopsis, act-shape, theme, '
+                             'spine, architecture) against the book\'s prose: split into '
+                             'claims, each judged against the scenes it cites. Report only. '
+                             'Needs prose.')
     parser.add_argument('--story-power', action='store_true',
                         help='Run the story-power scorecard (8 craft axes) on '
                              'logline + synopsis + theme + spine + architecture. '
@@ -199,6 +204,8 @@ def _validate_flag_combinations(args) -> None:
         triggers.append('--level')
     if args.story_power:
         triggers.append('--story-power')
+    if args.text_fidelity:
+        triggers.append('--text-fidelity')
     if len(triggers) > 1:
         log(f'ERROR: these flags cannot be combined: {", ".join(triggers)}. '
             'Pick one entry point and re-run.')
@@ -229,6 +236,62 @@ def _check_llm_preconditions(operation: str, dry_run: bool) -> None:
         sys.exit(1)
 
 
+def _run_text_fidelity(project_dir: str, dry_run: bool) -> None:
+    """`score --text-fidelity`: the upper tiers against the book's prose
+    (`scoring_text_fidelity`). Report only; nothing is committed."""
+    from storyforge import scoring_text_fidelity as tf
+    from storyforge.common import read_yaml_field
+    model = select_model('synthesis')
+    tiers = tf.read_tiers(project_dir)
+    if tiers.empty():
+        log('ERROR: no upper tiers to check: story-summary.md is the template, and '
+            'spine.csv and architecture.csv are empty (extract --phase 5 writes them)')
+        sys.exit(1)
+    scenes = tf._scenes(project_dir)
+    if not any(tf._prose(project_dir, r['id']) for r in scenes):
+        log('ERROR: no scene has prose to check the tiers against')
+        sys.exit(1)
+    first = tf.forecast_claims(tiers, scenes, model) if (any(tiers.summary.values())
+                                                          or tiers.spine) else 0.0
+    log(f'Text fidelity: claims pass ~${first:.2f} ({model}); the check pass is '
+        f'forecast once the claims are known')
+    if dry_run:
+        print(tf.build_claims_prompt(tiers, scenes)[:3000])
+        return
+    if not check_threshold(first):
+        log('Cost threshold check declined. Aborting.')
+        sys.exit(1)
+    _check_llm_preconditions('--text-fidelity', dry_run=False)
+
+    spent = []
+
+    def on_usage(path, label):
+        import json
+        from storyforge.costs import log_operation
+        with open(path) as f:
+            usage = extract_usage(json.load(f))
+        cost = calculate_cost_from_usage(usage, model)
+        spent.append(cost)
+        log_operation(project_dir, f'score-{label}', model, usage['input_tokens'],
+                      usage['output_tokens'], cost, target='book',
+                      cache_read=usage.get('cache_read', 0),
+                      cache_create=usage.get('cache_create', 0))
+
+    out = tf.output_dir(project_dir)
+    try:
+        result = tf.run(project_dir, model, log_dir=os.path.join(out, 'logs'),
+                        approve=check_threshold, on_usage=on_usage)
+    except tf.FidelityError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    result.cost = sum(spent)
+    tf.write(result, out, read_yaml_field('project.title', project_dir) or '')
+    table = tf.counts(result.claims)
+    bad = sum(r['contradicted'] + r['overreach'] for r in table.values())
+    log(f'Text fidelity: {len(result.claims)} claims, {bad} contradicted or overreaching, '
+        f'${result.cost:.2f} → {out}/report.md')
+
+
 def _run_elaboration_scoring(args) -> None:
     """Dispatch elaboration-scoring entry points; short-circuits scene-prose scoring."""
     from datetime import datetime
@@ -245,6 +308,11 @@ def _run_elaboration_scoring(args) -> None:
     medium = get_medium(project_dir) or 'novel'
 
     _validate_flag_combinations(args)
+
+    # --text-fidelity: the upper tiers against the prose.
+    if args.text_fidelity:
+        _run_text_fidelity(project_dir, args.dry_run)
+        return
 
     # --story-power: 8-axis pitch-tier craft scorecard.
     if args.story_power:
@@ -479,7 +547,7 @@ def main(argv=None):
     # (--semantic is a modifier on --compare, not a standalone trigger.)
     if (args.level is not None or args.all_levels or args.compare or args.drift
             or args.boundary or args.all_boundaries or args.bible_consistency
-            or args.story_power):
+            or args.story_power or args.text_fidelity):
         _run_elaboration_scoring(args)
         return
     if args.source_fidelity:
