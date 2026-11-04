@@ -204,7 +204,9 @@ insp supt cpl pvt adm gov sen rep hon mt ft
 # lenient than the guard's _COMMON_CAPITALIZED on purpose (see above). Kept
 # short: a word the book uses anywhere, in any case, already passes. Drug
 # and brand names still show up; the finding is advisory. The question words
-# are here because a contraction ("Who's there?") reads as a possessive.
+# are here because a contraction ("Who's there?") reads as a possessive, and
+# the pronoun I's contractions because they are capitalized mid-sentence
+# ("Gawain: I'm the weakest") like a name (G-022).
 _DRIFT_COMMON = _COMMON_CAPITALIZED | _ABBREVIATIONS | frozenset('''
 detective officer sergeant lieutenant captain chief commander
 agent deputy sheriff inspector judge doctor nurse professor father mother
@@ -215,6 +217,7 @@ city state federal district hospital school university college church
 street avenue road station center centre agency council committee
 ave blvd rd
 who what where why how here let
+i'm i've i'll i'd i’m i’ve i’ll i’d
 '''.split())
 
 
