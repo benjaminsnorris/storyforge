@@ -31,6 +31,20 @@ act2-sc02|The ground gives way — Tessa barely escapes as the ridge collapses|a
 act2-sc03|Dorren presents evidence to the council; they dismiss it as procedural noise|sequel|Resolve to bitter resignation|justice|+/-|revelation|Dorren Hayle;Council Members;Kael Maren|Dorren Hayle;Council Members|-inquiry:archive-erasure;-inquiry:map-anomaly
 ```
 
+## Reference Materials
+
+### Key Decisions
+
+# Key Decisions — The Cartographer's Silence
+
+## KD-001: Magic System
+**Decision:** Maps don't just record reality — they shape it. Erasing something from the map weakens its hold on existence.
+**Rationale:** This inverts the cartographer's assumed neutrality and makes Dorren's profession the source of the conflict.
+
+## KD-002: Institutional Complicity
+**Decision:** The Pressure Cartography Office knows their maps affect reality. The "pressure" in the name is literal.
+**Rationale:** Raises the stakes from personal mystery to institutional horror.
+
 
 REGISTRIES
 

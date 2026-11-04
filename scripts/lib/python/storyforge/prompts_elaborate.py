@@ -56,21 +56,44 @@ def _project_context(project_dir: str) -> str:
 **Target word count:** {target}"""
 
 
-def _existing_refs(project_dir: str) -> str:
-    """Include any existing reference materials."""
+# The reference docs the stage prompts carry, in order. The shared system
+# context (common.build_shared_context) already carries the bibles and voice
+# guide, so a prompt built with system_context leaves those out, and only
+# those: the story summary, architecture and key decisions are in no system
+# block, and a stage that skipped them would build on decisions it never saw.
+_REFERENCE_DOCS = [
+    ('story-summary.md', 'Story Summary', False),
+    ('story-architecture.md', 'Story Architecture', False),
+    ('character-bible.md', 'Character Bible', True),
+    ('world-bible.md', 'World Bible', True),
+    ('voice-guide.md', 'Voice Guide', True),
+    ('key-decisions.md', 'Key Decisions', False),
+]
+
+
+def _existing_refs(project_dir: str, shared: bool = False) -> str:
+    """Include any existing reference materials.
+
+    With `shared`, the prompt goes with the shared system context, so the
+    docs that context carries (the bibles, the voice guide, the source
+    bibles) are left out and the rest are kept. A doc still holding its
+    template text is skipped (F-130)."""
+    from .common import is_unfilled_template
     sections = []
     ref_dir = os.path.join(project_dir, 'reference')
 
-    for name, label in [
-        ('story-architecture.md', 'Story Architecture'),
-        ('character-bible.md', 'Character Bible'),
-        ('world-bible.md', 'World Bible'),
-        ('voice-guide.md', 'Voice Guide'),
-        ('key-decisions.md', 'Key Decisions'),
-    ]:
-        content = _read_file(os.path.join(ref_dir, name))
+    for name, label, in_shared in _REFERENCE_DOCS:
+        if shared and in_shared:
+            continue
+        path = os.path.join(ref_dir, name)
+        if is_unfilled_template(path):
+            continue
+        content = _read_file(path)
         if content.strip():
             sections.append(f"### {label}\n\n{content.strip()}")
+
+    if shared:
+        return '\n\n'.join(sections)
 
     # An adaptation's source bibles (#477); none without a `source:` block
     from .prompts_source import bibles_text
@@ -117,10 +140,11 @@ def build_spine_prompt(project_dir: str, plugin_dir: str, seed: str = '',
         plugin_dir: Path to the Storyforge plugin root.
         seed: Author-provided seed text (logline, concepts, constraints).
               If empty, reads from storyforge.yaml logline.
-        system_context: If True, skip _existing_refs() (already in system prompt).
+        system_context: If True, leave out the reference docs the shared system
+            context carries (see _existing_refs).
     """
     context = _project_context(project_dir)
-    refs = '' if system_context else _existing_refs(project_dir)
+    refs = _existing_refs(project_dir, shared=system_context)
 
     yaml_path = os.path.join(project_dir, 'storyforge.yaml')
     if not seed:
@@ -214,7 +238,7 @@ def build_architecture_prompt(project_dir: str, plugin_dir: str,
                               system_context: bool = False) -> str:
     """Build the prompt for the architecture stage."""
     context = _project_context(project_dir)
-    refs = '' if system_context else _existing_refs(project_dir)
+    refs = _existing_refs(project_dir, shared=system_context)
     ref_dir = os.path.join(project_dir, 'reference')
     scenes = _read_csv_contents(os.path.join(ref_dir, 'scenes.csv'))
     intent = _read_csv_contents(os.path.join(ref_dir, 'scene-intent.csv'))
@@ -323,7 +347,7 @@ def build_map_prompt(project_dir: str, plugin_dir: str,
                      system_context: bool = False) -> str:
     """Build the prompt for the scene map stage."""
     context = _project_context(project_dir)
-    refs = '' if system_context else _existing_refs(project_dir)
+    refs = _existing_refs(project_dir, shared=system_context)
     ref_dir = os.path.join(project_dir, 'reference')
     scenes = _read_csv_contents(os.path.join(ref_dir, 'scenes.csv'))
     intent = _read_csv_contents(os.path.join(ref_dir, 'scene-intent.csv'))
@@ -408,11 +432,12 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
         scene_ids: If provided, only build briefs for these scenes.
                    If None, builds for all mapped scenes without briefs.
         registries_text: Optional formatted registry contents for prompt injection.
-        system_context: If True, skip _existing_refs() and _craft_principles()
-                        (already in system prompt).
+        system_context: If True, skip _craft_principles() and the reference
+                        docs the shared system context carries (see
+                        _existing_refs).
     """
     context = _project_context(project_dir)
-    refs = '' if system_context else _existing_refs(project_dir)
+    refs = _existing_refs(project_dir, shared=system_context)
     ref_dir = os.path.join(project_dir, 'reference')
     scenes = _read_csv_contents(os.path.join(ref_dir, 'scenes.csv'))
     intent = _read_csv_contents(os.path.join(ref_dir, 'scene-intent.csv'))
@@ -520,13 +545,14 @@ def build_voice_prompt(project_dir: str, plugin_dir: str,
     Args:
         project_dir: Path to the book project.
         plugin_dir: Path to the Storyforge plugin root.
-        system_context: If True, skip _existing_refs() (already in system prompt).
+        system_context: If True, leave out the reference docs the shared system
+            context carries (see _existing_refs).
     """
     from .common import get_medium
     medium = get_medium(project_dir)
 
     context = _project_context(project_dir)
-    refs = '' if system_context else _existing_refs(project_dir)
+    refs = _existing_refs(project_dir, shared=system_context)
     ref_dir = os.path.join(project_dir, 'reference')
     characters_csv = _read_csv_contents(os.path.join(ref_dir, 'characters.csv'))
 

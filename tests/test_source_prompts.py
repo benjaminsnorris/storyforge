@@ -94,7 +94,11 @@ class TestWithSource:
         assert 'selection and reframing of the source' in p
         assert 'Mode: **faithful**' in p
         assert 'softens the killing' in p         # the version rules
-        assert 'Not a rule' not in p
+        # The rules block holds only the rules section; the whole key
+        # decisions file is in the reference docs (G-012)
+        rules = p.split('### Version rules', 1)[1]
+        assert 'Not a rule' not in rules
+        assert p.count('Not a rule') == 1
 
     def test_spine_lists_the_source_spine_when_there_is_one(self, adapted, tmp_path):
         _write(adapted, {'reference/source/odyssey/spine.csv':
