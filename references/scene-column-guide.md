@@ -162,6 +162,15 @@ Bad facts (too granular, no scene depends on them):
 **How to check:** Fidelity scoring compares these against the prose. Low `key_actions` or `key_dialogue` fidelity means the prose diverged from the brief.
 **How to improve:** Either update the prose to include the contracted beats, or update the brief if the prose found something better.
 
+**Labelling who speaks a scripted line.** The gate treats a quoted line in the brief as the brief's own words: if the book contradicts it, that is a plan conflict for you to settle, not an error for the fixer. When the prose splits the line with a speech tag (`"Left hand on the case," he said. "Right hand free."`), the gate checks the tag against the speaker the brief names, but only if the brief names one in a form it can read:
+- `Name: "line"` or `"line" — Name`. The name is written exactly as in characters.csv (a name, an alias or the id), with no title before it and no possessive (`Thomas's`).
+- Put only the speaker after a dash. Anything after the name (`— Thomas, flat`) is fine, but a dash clause that ends in a colon is read as the next line's label.
+- Name one character per label. `Thomas and Elena:` or `Silas turns to Croy, who says:` is not read.
+- Repeat the label after each `;` and on each quoted line. An unquoted line has no speaker.
+- Fill in `pronouns` in characters.csv, so that a tag like `she said` can be checked too.
+
+A line without a label in one of these forms is still matched, but its speaker is not checked. The gate's report says which (`speaker checked` / `speaker not checked`).
+
 ### continuity_deps — Parallel Drafting Groups
 **Why it matters:** Scenes with no dependencies can be drafted simultaneously. Minimizing deps maximizes parallelism and reduces drafting time/cost.
 **How to check:** Run `compute_drafting_waves` to see the wave structure. Scenes in wave 1 have no deps; later waves depend on earlier ones.
