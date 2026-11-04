@@ -56,8 +56,14 @@ def _reply(acts):
             'usage': {'input_tokens': 10, 'output_tokens': 10}}
 
 
-def _act(first, title='t', reason='r'):
-    return {'first_scene': first, 'title': title, 'reason': reason}
+def _act(first, last='', title='t', reason='r'):
+    return {'first_scene': first, 'last_scene': last, 'title': title, 'reason': reason}
+
+
+def _acts(*starts, n=9):
+    """A consistent answer: each act ends right before the next begins."""
+    nums = [int(s[1:]) for s in starts] + [n + 1]
+    return [_act(s, f's{nums[i + 1] - 1:02d}') for i, s in enumerate(starts)]
 
 
 class TestBackwardSteps:
@@ -96,19 +102,29 @@ class TestParseActs:
     rows = _scenes(['1'] * 6)
 
     def test_reads_the_first_scenes(self):
-        reply = json.dumps({'acts': [_act('s01'), _act('s03'), _act('s05')]})
+        reply = json.dumps({'acts': _acts('s01', 's03', 's05', n=6)})
         assert parse_acts(reply, self.rows) == ['s01', 's03', 's05']
 
-    @pytest.mark.parametrize('starts, problem', [
-        (['s01', 's04'], 'expected exactly 3'),
-        (['s01', 's04', 'nope'], 'not in the list'),
-        (['s02', 's04', 's05'], 'must begin with the first scene'),
-        (['s01', 's05', 's04'], 'later than the act before'),
-        (['s01', 's04', 's04'], 'later than the act before'),
+    @pytest.mark.parametrize('acts, problem', [
+        ([('s01', 's03'), ('s04', 's06')], 'expected exactly 3'),
+        ([('s01', 's03'), ('s04', 's04'), ('nope', 's06')], 'not in the list'),
+        ([('s02', 's03'), ('s04', 's04'), ('s05', 's06')], 'must begin with the first scene'),
+        ([('s01', 's03'), ('s04', 's04'), ('s05', 's05')], 'must end with the last scene'),
+        ([('s01', 's04'), ('s05', 's03'), ('s04', 's06')], 'ends .* before it begins'),
+        ([('s01', 's04'), ('s04', 's04'), ('s05', 's06')], 'right after the previous act ends'),
     ])
-    def test_unusable_answers_are_named(self, starts, problem):
-        reply = json.dumps({'acts': [_act(s) for s in starts]})
+    def test_unusable_answers_are_named(self, acts, problem):
+        reply = json.dumps({'acts': [_act(f, l) for f, l in acts]})
         with pytest.raises(ActsProblems, match=problem):
+            parse_acts(reply, self.rows)
+
+    def test_a_gap_between_acts_is_sent_back(self):
+        # Five Weeks (2026-11-03): act 2's reason was the launch, but its
+        # first_scene was 75 scenes later; act 1 named the launch as its end
+        reply = json.dumps({'acts': [_act('s01', 's02'), _act('s05', 's05'),
+                                     _act('s06', 's06')]})
+        with pytest.raises(ActsProblems, match=r'act 1 ends at s02 \(seq 2\) but act 2 '
+                                               r'begins at s05 \(seq 5\)'):
             parse_acts(reply, self.rows)
 
     def test_assign_fills_runs(self):
@@ -154,7 +170,7 @@ class TestRunActs:
 
     def test_writes_contiguous_acts_from_the_answer(self, book, monkeypatch):
         result, calls, usage = self._run(
-            book, monkeypatch, [_reply([_act('s01'), _act('s04'), _act('s08')])])
+            book, monkeypatch, [_reply(_acts('s01', 's04', 's08'))])
         rows = _read_csv(str(book / 'reference' / 'scenes.csv'))
         assert [r['act'] for r in rows] == ['1', '1', '1', '2', '2', '2', '2', '3', '3']
         assert backward_steps(rows) == []
@@ -163,7 +179,7 @@ class TestRunActs:
 
     def test_keeps_every_other_column_and_the_column_order(self, book, monkeypatch):
         before = _read_csv(str(book / 'reference' / 'scenes.csv'))
-        self._run(book, monkeypatch, [_reply([_act('s01'), _act('s04'), _act('s08')])])
+        self._run(book, monkeypatch, [_reply(_acts('s01', 's04', 's08'))])
         with open(book / 'reference' / 'scenes.csv') as f:
             assert f.readline().strip() == '|'.join(COLUMNS)
         after = _read_csv(str(book / 'reference' / 'scenes.csv'))
@@ -173,8 +189,8 @@ class TestRunActs:
 
     def test_asks_once_more_with_the_problems(self, book, monkeypatch):
         result, calls, _ = self._run(book, monkeypatch, [
-            _reply([_act('s01'), _act('s04')]),
-            _reply([_act('s01'), _act('s04'), _act('s08')])])
+            _reply(_acts('s01', 's04')),
+            _reply(_acts('s01', 's04', 's08'))])
         assert len(calls) == 2 and 'expected exactly 3' in calls[1]
         assert result.source == 'model'
 
@@ -186,13 +202,13 @@ class TestRunActs:
         assert {r['act'] for r in rows} == {'1', '2', '3'}
 
     def test_a_second_unusable_answer_falls_back(self, book, monkeypatch):
-        bad = _reply([_act('s01'), _act('s04')])
+        bad = _reply(_acts('s01', 's04'))
         result, calls, _ = self._run(book, monkeypatch, [bad, bad])
         assert len(calls) == 2 and result.source == 'votes'
         assert backward_steps(_read_csv(str(book / 'reference' / 'scenes.csv'))) == []
 
     def test_a_cut_off_reply_falls_back(self, book, monkeypatch):
-        cut = dict(_reply([_act('s01'), _act('s04'), _act('s08')]), stop_reason='max_tokens')
+        cut = dict(_reply(_acts('s01', 's04', 's08')), stop_reason='max_tokens')
         result, _, _ = self._run(book, monkeypatch, [cut])
         assert result.source == 'votes'
 
@@ -229,7 +245,7 @@ class TestReviewEdges:
         rows[0]['status'] = 'cut'
         rows[3]['status'] = 'merged'
         _write(path, rows)
-        fake = self._fake(monkeypatch, _reply([_act('s02'), _act('s03'), _act('s05')]))
+        fake = self._fake(monkeypatch, _reply([_act('s02', 's02'), _act('s03', 's03'), _act('s05', 's07')]))
         result = run_acts(str(book / 'reference'), str(book / 'scenes'), str(book / 'logs'),
                           {}, 'm')
         assert result.source == 'model'
@@ -297,7 +313,7 @@ class TestExtractActsCommand:
                             lambda d, msg, paths: commits.append((msg, paths)))
 
         def fake(prompt, model, log_file, max_tokens=4096, **kw):
-            reply = _reply([_act('s01'), _act('s04'), _act('s08')])
+            reply = _reply(_acts('s01', 's04', 's08'))
             with open(log_file, 'w') as f:
                 json.dump(reply, f)
             return reply
