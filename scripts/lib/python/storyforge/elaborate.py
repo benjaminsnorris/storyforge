@@ -1139,7 +1139,7 @@ def validate_structure(ref_dir: str) -> dict:
     _validate_pacing(scenes_map, intent_map, checks)
     _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_dir=ref_dir)
     _validate_pronouns(ref_dir, checks)
-    _validate_brief_names(ref_dir, briefs_map, checks)
+    _validate_brief_names(ref_dir, checks)
 
     failures = [c for c in checks if not c['passed']]
     blocking_failures = [c for c in failures if c.get('severity', 'blocking') != 'advisory']
@@ -1204,29 +1204,37 @@ def _validate_pronouns(ref_dir: str, checks: list[dict]) -> None:
         severity='advisory'))
 
 
-def _validate_brief_names(ref_dir: str, briefs_map: dict, checks: list[dict]) -> None:
+def _validate_brief_names(ref_dir: str, checks: list[dict]) -> None:
     """Brief drift (category `briefs`, advisory, #496): names in a brief's
     fact-bearing fields that no scene's prose and no reference file uses
-    (`brief_names.stray_brief_names`). A draft takes its facts from the brief,
-    so it would write these people into the book; shared-dark's briefs named
-    about 100 (Olinsky, Ruzek) after a brief rewrite drifted. Advisory because
-    it over-reports (drug names, emphasis), one finding per scene."""
-    from .brief_names import describe_strays, stray_brief_names
-    if not briefs_map:
-        checks.append(_check('briefs', 'brief-stray-names', True,
-                             'No briefs: no brief names to check', severity='advisory'))
-        return
+    (`brief_names.brief_drift`). A draft takes its facts from the brief, so
+    it would write these people into the book (a brief rewrite that drifted
+    once put about 100 into one book's briefs). Advisory because it
+    over-reports (drug names, emphasis): one finding per scene, and one per
+    thing that couldn't be checked or read (a missing column, an unreadable
+    file), so a pass means checked and clean. No briefs file passes: there
+    is nothing to check yet."""
+    from .brief_names import brief_drift, checked_scope, describe_strays
+    from .common import csv_safe
     project_dir = os.path.dirname(os.path.abspath(ref_dir))
-    strays = stray_brief_names(project_dir, briefs_map)
-    for sid, by_field in sorted(strays.items()):
+    if not os.path.isfile(os.path.join(ref_dir, 'scene-briefs.csv')):
+        checks.append(_check('briefs', 'brief-stray-names', True,
+                             'No scene-briefs.csv: no brief names to check', severity='advisory'))
+        return
+    report = brief_drift(project_dir)
+    for sid, by_field in sorted(report.strays.items()):
         checks.append(_check(
             'briefs', f'brief-stray-names-{sid}', False,
             f"Brief names found in no prose or reference file (a draft from this brief "
             f"would write them in): {describe_strays(by_field)}",
             severity='advisory', scene_id=sid, fields=list(by_field)))
-    if not strays:
+    for note in report.notes:
+        checks.append(_check('briefs', 'brief-stray-names-unchecked', False,
+                             f'Brief names check incomplete: {csv_safe(note)}',
+                             severity='advisory'))
+    if not report.strays and not report.notes:
         checks.append(_check('briefs', 'brief-stray-names', True,
-                             'Every name in the briefs appears in the prose or a reference file',
+                             f'No stray brief names: {checked_scope(report)}',
                              severity='advisory'))
 
 
