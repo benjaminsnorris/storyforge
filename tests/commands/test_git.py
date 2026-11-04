@@ -277,6 +277,8 @@ class TestCommitAndPush:
 
         def mock_run(cmd, **kwargs):
             commands_run.append(cmd)
+            if 'diff' in cmd:
+                return _cp(stdout='file1.txt\0file2.txt\0')
             return _cp()
 
         monkeypatch.setattr('subprocess.run', mock_run)
@@ -284,11 +286,13 @@ class TestCommitAndPush:
         from storyforge.git import commit_and_push
         result = commit_and_push('/proj', 'Test commit', ['file1.txt', 'file2.txt'])
 
-        # Should have: add file1, add file2, commit, push
+        # Should have: add file1, add file2, commit only what is staged, push
         add_cmds = [c for c in commands_run if 'add' in c]
         assert len(add_cmds) == 2
         assert any('file1.txt' in c for c in add_cmds)
         assert any('file2.txt' in c for c in add_cmds)
+        commit = [c for c in commands_run if 'commit' in c]
+        assert commit[0][-3:] == ['--', 'file1.txt', 'file2.txt']   # #509 CR-1
         assert result is True
 
     def test_stages_all_when_no_paths(self, monkeypatch):
