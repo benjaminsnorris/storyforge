@@ -44,6 +44,16 @@ from storyforge.pages import (
 # Helpers
 # ============================================================================
 
+
+# The answer budget for each stage's reply (api.invoke adds THINKING_ALLOWANCE
+# on top). The map writes every scene's row, intent and source-map row in one
+# reply, and the briefs a dozen fields per scene; at 16,384 a 42-scene map
+# ran out in thinking (G-018). A reply that long takes several minutes, so
+# those stages also wait longer than API_TIMEOUT.
+STAGE_ANSWER_TOKENS = {'map': 32000, 'briefs': 32000}
+STAGE_TIMEOUT = {'map': 1500, 'briefs': 1500}
+
+
 def _python_lib():
     from pathlib import Path
     return str(Path(__file__).resolve().parent.parent)
@@ -1723,7 +1733,10 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         else:
             log(f'Invoking API for {stage} (model: {stage_model})...')
             try:
-                invoke_to_file(prompt, stage_model, stage_log, max_tokens=16384, system=system)
+                stage_response = invoke_to_file(
+                    prompt, stage_model, stage_log,
+                    max_tokens=STAGE_ANSWER_TOKENS.get(stage, 16384), system=system,
+                    **({'timeout': STAGE_TIMEOUT[stage]} if stage in STAGE_TIMEOUT else {}))
                 claude_rc = 0
             except Exception as e:
                 log(f'ERROR: API invocation failed: {e}')
@@ -1752,6 +1765,21 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                               cost, target=stage)
             except Exception:
                 pass
+
+        # A reply cut off at max_tokens holds a partial (or no) block: say so,
+        # rather than "no output blocks", and apply none of it (G-018)
+        from storyforge.api import is_truncated
+        if not interactive and is_truncated(locals().get('stage_response')):
+            usage = (stage_response or {}).get('usage', {})
+            thinking = (usage.get('output_tokens_details') or {}).get('thinking_tokens')
+            log(f'ERROR: the {stage} reply stopped at its output limit '
+                f'({usage.get("output_tokens", "?")} tokens'
+                + (f', {thinking} of them thinking' if thinking else '')
+                + '); nothing was applied and the phase is not advanced. '
+                + ('Brief fewer scenes at a time with --scene a,b,c. '
+                   if stage == 'briefs' else '')
+                + f'See the reply: {stage_log}')
+            sys.exit(1)
 
         # Parse response
         log(f'Parsing {stage} response...')
