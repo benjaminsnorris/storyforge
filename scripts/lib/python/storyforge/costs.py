@@ -7,6 +7,7 @@ Ledger format (pipe-delimited):
     timestamp|operation|model|input_tokens|output_tokens|cost_usd|duration_s
 """
 
+import contextlib
 import os
 import sys
 import threading
@@ -389,13 +390,14 @@ class RunBudget:
     (`rechecks_actual`, also in `meter`). `owed` is a standing reservation
     the caller keeps current (revise: the passes it still has to run).
 
-    `committed(owed)` is what the run has spent or promised: the meter's
-    cost, with the re-checks counted at their forecast where that is more
-    (a re-check counts even when its calls weren't metered), plus what was
-    charged, plus `self.owed` and `owed` (the work the caller still owes:
-    scenes it has yet to draft or check), which a re-check may not take.
-    Pass it as `spent_before` to `gate.recheck_pending`
-    (`cmd_write.budgeted_recheck` does)."""
+    `committed(upcoming)` is what the run has spent or promised: the
+    meter's cost, with the re-checks counted at their forecast where that
+    is more (a re-check counts even when its calls weren't metered), plus
+    what was charged, plus the standing `owed` and `upcoming` (the work the
+    caller is about to do: scenes it has yet to draft or check), which a
+    re-check may not take. Pass it as `spent_before` to
+    `gate.recheck_pending` (`cmd_write.budgeted_recheck` does). Set `owed`
+    for a stretch of work with `reserving`, which puts it back after."""
 
     def __init__(self, meter=None):
         self.meter = meter
@@ -408,11 +410,23 @@ class RunBudget:
         """Count spend the meter can't see, at its forecast."""
         self.charged += max(0.0, amount)
 
-    def committed(self, owed: float = 0.0) -> float:
+    def committed(self, upcoming: float = 0.0) -> float:
         actual = self.meter.cost() if self.meter is not None else 0.0
         other = max(0.0, actual - self.rechecks_actual)   # drafting, gating, passes
         return (other + self.charged + max(self.rechecks, self.rechecks_actual)
-                + self.owed + owed)
+                + self.owed + upcoming)
+
+    @contextlib.contextmanager
+    def reserving(self, amount: float):
+        """Keep `amount` (the forecast of work still to come) from the
+        re-checks while the block runs: `owed` is set to it, and put back
+        as it was however the block ends."""
+        before = self.owed
+        self.owed = max(0.0, amount)
+        try:
+            yield self
+        finally:
+            self.owed = before
 
     def record(self, run, actual: float = 0.0) -> None:
         """Count a re-check run: `run` (a `gate.Recheck`, or None when

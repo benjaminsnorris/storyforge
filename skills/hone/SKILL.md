@@ -120,7 +120,7 @@ flagged = detect_abstract_fields(briefs_map)
 
 **Over-specified beats** — too many key_actions for the scene's word count. A 2,500-word scene with 5 key_actions forces one mandatory beat every 500 words, leaving no room for atmosphere, interiority, or organic pacing. Rule of thumb: 2-3 key_actions per 2,500 words. Flag scenes where `len(key_actions.split(';')) > target_words / 800`.
 
-**Prescriptive dialogue** — exact quotes in `key_dialogue` make surrounding prose contort to deliver specific lines. Better to use dialogue direction ("Dorren rationalizes the anomaly using institutional language") than exact lines ("The eastern readings are within acceptable variance"). Flag scenes where `key_dialogue` contains quoted strings.
+**Prescriptive dialogue** — exact quotes in `key_dialogue` make surrounding prose contort to deliver specific lines. Better to use dialogue direction ("Dorren rationalizes the anomaly using institutional language") than exact lines ("The eastern readings are within acceptable variance"). Flag scenes where `key_dialogue` contains quoted strings. When a scripted line is kept, label its speaker (`Name: "line"`, the name as in characters.csv; see `references/scene-column-guide.md`) so the gate can check who says it.
 
 **Procedural goals** — goals framed as tasks ("Complete the quarterly audit") instead of dramatic questions ("Prove the maps are accurate before the review deadline"). The goal shapes how the drafter opens the scene — procedural goals produce bureaucratic openings.
 
