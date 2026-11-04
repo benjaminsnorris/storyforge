@@ -1030,6 +1030,24 @@ def _validate_pacing(scenes_map, intent_map, checks):
                              'Turning point types are varied'))
 
 
+def _validate_acts(scenes_map, checks):
+    """Acts are runs of consecutive scenes: in seq order a scene's act never
+    goes down (F-160). Advisory: the author decides, and `extract --acts`
+    redraws an extracted book's acts."""
+    from storyforge.extract_acts import backward_steps
+    steps = backward_steps(list(scenes_map.values()))
+    checks.append(_check(
+        'structure', 'acts-in-order', not steps,
+        (f"{len(steps)} scene(s) step back to an earlier act in seq order: "
+         + ', '.join(f'{a} -> {b}' for a, b in steps[:5])
+         + ('…' if len(steps) > 5 else '')
+         + ". Acts are runs of consecutive scenes; `storyforge extract --acts` "
+           "redraws an extracted book's acts")
+        if steps else 'Acts run in order',
+        severity='advisory',
+    ))
+
+
 def validate_structure(ref_dir: str) -> dict:
     """Run all structural validation checks against the scene CSVs.
 
@@ -1137,6 +1155,7 @@ def validate_structure(ref_dir: str) -> dict:
     _validate_timeline(scenes_map, checks)
     _validate_knowledge(scenes_map, briefs_map, checks)
     _validate_pacing(scenes_map, intent_map, checks)
+    _validate_acts(scenes_map, checks)
     _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_dir=ref_dir)
     _validate_pronouns(ref_dir, checks)
 
