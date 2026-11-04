@@ -293,6 +293,8 @@ class TestCommitAndPush:
         assert any('file2.txt' in c for c in add_cmds)
         commit = [c for c in commands_run if 'commit' in c]
         assert commit[0][-3:] == ['--', 'file1.txt', 'file2.txt']   # #509 CR-1
+        # named relative to the project, as `commit` reads them (subfolder projects)
+        assert '--relative' in [c for c in commands_run if 'diff' in c][0]
         assert result is True
 
     def test_stages_all_when_no_paths(self, monkeypatch):
@@ -308,7 +310,7 @@ class TestCommitAndPush:
         commit_and_push('/proj', 'Add all')
 
         add_cmds = [c for c in commands_run if 'add' in c]
-        assert any('-A' in c for c in add_cmds)
+        assert any(c[-3:] == ['-A', '--', '.'] for c in add_cmds)  # only the project
 
     def test_commits_with_message(self, monkeypatch):
         commands_run = []
