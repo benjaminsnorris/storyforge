@@ -790,6 +790,42 @@ class TestInheritedAndPlanConflicts:
                        command='revise', before=_snap(project_dir, f'"{quote}"'))
         assert result.passed and result.plan_conflicts == [] and len(result.inherited) == 1
 
+    def test_a_scripted_line_split_by_a_speech_tag_is_a_plan_conflict(
+            self, project_dir, tmp_path):
+        """mended-bridle (2026-11-03): the brief scripts "Left hand on the
+        case. Right hand free. ..."; the prose split it with "he said", the
+        checker called it a contradiction with a later scene (the one in
+        error), and the fix rewrote the scene to match that scene. It is the
+        brief against the book: the author's, never the fix's."""
+        line = 'Left hand on the case. Right hand free. He carried it the same way.'
+        _set_dialogue(project_dir, f'"{line}"')
+        quote = '"Left hand on the case," he said. "Right hand free. He carried it the same way."'
+        with open(os.path.join(project_dir, 'scenes', f'{SCENE}.md'), 'a') as f:
+            f.write(f'\n\n{quote}\n')
+        finding = {**_contradiction(), 'code': 'TRT', 'scene_quote': quote,
+                   'established_scene': 'act1-sc01'}
+        result = _gate(project_dir, tmp_path, [_commitment()], findings=[finding])
+        assert not result.passed
+        assert [f.code for f in result.plan_conflicts] == ['TRT']
+        assert gate.problems_to_fix(result) == []
+        assert any(x.startswith('PLAN CONFLICT') for x in gate.report_lines(result))
+
+    @pytest.mark.parametrize('quote, expected', [
+        # the line split by a tag, opening mark included or not
+        ('"Left hand on the case," he said. "Right hand free."', True),
+        ('Left hand on the case," he said. "Right hand free.', True),
+        ('“Left hand on the case,” Thomas said quietly. “Right hand free.”',
+         True),
+        # narration past a speech tag: the error may be in it
+        ('"Left hand on the case," he said, and she lifted it in her right hand.', False),
+        ('"Left hand," he said. She took the case in her right hand and held it out.', False),
+        # no scripted words at all
+        ('"Right shoulder," he said. "Fingers under the strap."', False),
+    ])
+    def test_speech_tags_are_seen_through_only_when_short(self, quote, expected):
+        phrases = ['Left hand on the case. Right hand free. He carried it the same way.']
+        assert gate._is_plan_conflict(quote, phrases) is expected
+
     def test_a_short_brief_phrase_is_not_a_source(self, project_dir):
         _set_dialogue(project_dir, '"No."; "It was there forty years ago."')
         assert gate._brief_phrases(project_dir, SCENE) == ['It was there forty years ago.']

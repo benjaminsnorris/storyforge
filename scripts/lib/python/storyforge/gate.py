@@ -322,17 +322,49 @@ def _brief_phrases(project_dir: str, scene_id: str) -> list[str]:
     return [p for p in phrases if _count(_words(p)) >= _MIN_BRIEF_WORDS]
 
 
+#: The most narration words a quote may have between and around its spoken
+#: words and still be read as a scripted line the prose split with a speech
+#: tag ("he said", "she said, not looking up")
+_MAX_TAG_WORDS = 6
+
+
+def _spoken(quote: str) -> list[str]:
+    """The quote's spoken words, the narration between and around them
+    taken out, when the narration is no more than a speech tag: at most
+    `_MAX_TAG_WORDS` words, and fewer than the spoken ones. Both readings of
+    its quote marks are tried (a quote can start mid-line, so the first mark
+    may close a line); none when it has no quote marks."""
+    segments = re.split(r'["“”]', quote)
+    if len(segments) < 2:
+        return []
+    out = []
+    for parity in (0, 1):
+        spoken = ' '.join(s for i, s in enumerate(segments) if i % 2 == parity)
+        told = _count(_words(' '.join(s for i, s in enumerate(segments) if i % 2 != parity)))
+        if told <= _MAX_TAG_WORDS and told < _count(_words(spoken)):
+            out.append(spoken)
+    return out
+
+
 def _is_plan_conflict(quote: str, phrases: list[str]) -> bool:
     """Whether a contradiction's `quote` is the brief's own words: the
     quote lies within a scripted phrase, or a scripted phrase makes up at
     least half of it (a short scripted line inside a long quote whose error
     is elsewhere is not one). A quote under `_MIN_BRIEF_WORDS` words is
-    never one."""
-    q = _words(quote)
-    n = _count(q)
-    if n < _MIN_BRIEF_WORDS:
-        return False
-    return any(q in p or (p in q and 2 * _count(p) >= n) for p in map(_words, phrases))
+    never one.
+
+    A scripted line the prose split with a speech tag (`"Left hand on the
+    case," he said. "Right hand free."`) is matched on its spoken words
+    (`_spoken`): the mended-bridle run (2026-11-03) sent such a line, the
+    brief's own, to the fix as a contradiction with a later scene, and the
+    fix rewrote the scene to match that scene's error."""
+    def matches(text: str) -> bool:
+        q = _words(text)
+        n = _count(q)
+        if n < _MIN_BRIEF_WORDS:
+            return False
+        return any(q in p or (p in q and 2 * _count(p) >= n) for p in map(_words, phrases))
+    return matches(quote) or any(matches(s) for s in _spoken(quote))
 
 
 # ============================================================================
