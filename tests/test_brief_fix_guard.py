@@ -100,6 +100,19 @@ class TestFixUpstreamBriefs:
         out = capsys.readouterr().out
         assert 'WARNING' in out and 'Mallen' in out and 'brief is unchanged' in out
 
+    def test_a_name_only_in_scene_intent_does_not_vouch(self, project_dir):
+        """TD-2: reference_text's default left scene-intent.csv in, so a name
+        an earlier rewrite put there vouched for this one (hone's guard
+        already left it out)."""
+        path = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(text.replace('Dorren Hayle', 'Dorren Hayle;Mallen', 1))
+        (fixed, skipped), _ = _fix(project_dir, REPLY.format(
+            g='keep the ledger closed', c='the warden, Mallen, demands it'))
+        assert fixed == [] and skipped == {'act1-sc01': 'named Mallen'}
+
     def test_grounded_rewrite_is_written(self, project_dir):
         (fixed, skipped), _ = _fix(project_dir, REPLY.format(
             g='keep the map hidden', c='the storm pins her in place'))
