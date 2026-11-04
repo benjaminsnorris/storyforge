@@ -1335,17 +1335,27 @@ def _update_pr_body_iteration(project_dir: str, pr_number: str,
               f'{summary["high_count"]} high / {summary["medium_count"]} medium')
     if converged:
         status += ' — converged'
-    line = f'- [x] Iteration {iteration} — {status}\n'
+    _note_pr_progress(project_dir, pr_number, f'- [x] Iteration {iteration} — {status}',
+                      body=body)
 
-    body = body.rstrip('\n') + '\n' + line + '\n'
-    set_pr_body(project_dir, pr_number, body)
+
+def _note_pr_progress(project_dir: str, pr_number: str, line: str, body: str = '') -> None:
+    """Append `line` to the polish loop's PR body (its Progress list)."""
+    if not pr_number:
+        return
+    body = body or get_pr_body(project_dir, pr_number)
+    if not body:
+        return
+    set_pr_body(project_dir, pr_number, body.rstrip('\n') + '\n' + line + '\n\n')
 
 
 def _post_polish_summary_comment(project_dir: str, pr_number: str,
                                  baseline_diag: list[dict],
                                  final_det_diag: list[dict], *,
-                                 final_llm_diag: list[dict] | None = None) -> None:
-    """Post a summary comment comparing baseline and final scores."""
+                                 final_llm_diag: list[dict] | None = None,
+                                 stopped: str = '') -> None:
+    """Post a summary comment comparing baseline and final scores
+    (`stopped`: why the loop stopped short, put first)."""
     if not pr_number:
         return
 
@@ -1383,6 +1393,8 @@ def _post_polish_summary_comment(project_dir: str, pr_number: str,
                       f'{llm_summary["medium_count"]} medium priority', '',
                       llm_table])
 
+    if stopped:
+        lines[:0] = [f'**{stopped}**', '']
     add_pr_comment(project_dir, pr_number, '\n'.join(lines))
 
 
@@ -2116,24 +2128,48 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     return count
 
 
-def _stop_loop_if_over(project_dir: str, budget, next_cost: float, *, after: float,
-                       what: str, resume: str = '') -> None:
+def _stop_loop_if_over(project_dir: str, next_cost: float, *, after: float,
+                       what: str, resume: str = '', pr_number: str = '',
+                       baseline_diag: list[dict] | None = None,
+                       latest_diag: list[dict] | None = None) -> None:
     """Stop the polish loop (exit 1) before `what` when the run's spend so
-    far (`budget.committed`) plus its forecast `next_cost` and `after` (the
-    full score still owed) would pass the cost threshold. Everything the
-    loop did before is committed: each iteration commits its pass, and the
-    scores since are committed here. `resume` says how to carry on."""
-    due = budget.committed(next_cost + after)
-    if check_threshold(due):
+    far plus its forecast `next_cost` and `after` (the full score still
+    owed) would pass the cost threshold. Everything the loop did before is
+    committed (each iteration commits its pass; the scores since are
+    committed here), and the draft PR gets the stop in its progress list
+    and the summary comment a finished loop posts. `resume` says how to
+    carry on."""
+    over = _over_threshold(next_cost + after)
+    if not over:
         return
     log(f'ERROR: {what} (~${next_cost:.2f})'
         + (f' and the full score after the loop (~${after:.2f})' if after else '')
-        + f' would bring this run to about ${due:.2f}, over the cost threshold '
-          f'(${cost_threshold():g}). Stopping before {what}; the work before it is '
-          f'committed. Raise STORYFORGE_COST_THRESHOLD and '
-          f'{resume or POLISH_RESUME}.')
+        + f': {over}. Stopping before {what}; the work before it is committed. '
+          f'Raise STORYFORGE_COST_THRESHOLD and {resume or POLISH_RESUME}.')
     _commit(project_dir, 'Polish: stopped at the cost threshold', ['working/'])
+    note = f'Stopped before {what} at the cost threshold: {over}'
+    _note_pr_progress(project_dir, pr_number, f'- [ ] {note}')
+    _post_polish_summary_comment(project_dir, pr_number, baseline_diag or [],
+                                 latest_diag or [], stopped=note)
     sys.exit(1)
+
+
+def _undo_scores(project_dir: str, cycle_dir: str, latest_before: str | None) -> str:
+    """Take back what a deterministic score wrote (`cycle_dir`, and
+    working/scores/latest repointed at it) for a loop refused before it
+    started; says what was done."""
+    import shutil
+    if not cycle_dir:
+        return ''
+    latest = os.path.join(project_dir, 'working', 'scores', 'latest')
+    if os.path.isdir(cycle_dir):
+        shutil.rmtree(cycle_dir)
+    if os.path.islink(latest):
+        os.remove(latest)
+    if latest_before is not None:
+        os.symlink(latest_before, latest)
+    return (f' (the deterministic scores it wrote, {os.path.basename(cycle_dir)}, '
+            f'are removed, and working/scores/latest is as it was)')
 
 
 def _run_polish_loop(project_dir: str, max_loops: int,
@@ -2203,7 +2239,9 @@ def _polish_loop(project_dir: str, max_loops: int,
         log('  Skipped initial scoring (--skip-initial-score) — using existing scores')
     else:
         log(f'\n=== Initial Deterministic Score ===')
-        _, baseline_diag = _run_deterministic_score(project_dir, scene_ids)
+        latest = os.path.join(project_dir, 'working', 'scores', 'latest')
+        latest_before = os.readlink(latest) if os.path.islink(latest) else None
+        scored_dir, baseline_diag = _run_deterministic_score(project_dir, scene_ids)
 
     baseline_summary = _summarize_diagnosis(baseline_diag)
     log(f'  Overall avg: {baseline_summary["overall_avg"]:.2f}')
@@ -2212,10 +2250,11 @@ def _polish_loop(project_dir: str, max_loops: int,
     if baseline_summary['high_principles']:
         log(f'    High: {", ".join(p.replace("_", " ") for p in baseline_summary["high_principles"])}')
 
-    # The up-front forecast (#503), before anything is spent or a branch
-    # made: the scoring above is free. How long the loop runs isn't known,
-    # so its maximum is forecast; the brief fixes of the scenes known now
-    # are in it, later ones are checked before their iteration
+    # The up-front forecast (#503), before anything is spent, a branch made
+    # or the scores committed: the scoring above is free. How long the loop
+    # runs isn't known, so every iteration is forecast; the brief fixes of
+    # the scenes known now are in it, later ones are checked before their
+    # iteration
     budget = _run_budget()
     per_pass = _pass_cost(project_dir, sonnet_model)
     final_cost = 0.0
@@ -2227,16 +2266,31 @@ def _polish_loop(project_dir: str, max_loops: int,
     fix_cost = _upstream_fix_cost(project_dir, upstream_next)
     forecast = max_loops * per_pass + fix_cost + final_cost
     from storyforge import gate
-    log(f'Cost forecast: up to ~${forecast:.2f}, the most the loop can spend: '
-        f'{max_loops} iterations @ ~${per_pass:.2f} (it stops sooner when it converges)'
-        + (f', brief fixes and redrafts for {len(upstream_next)} scene(s) @ '
+    log(f'Cost forecast: ~${forecast:.2f} for up to {max_loops} iterations @ '
+        f'~${per_pass:.2f} (it stops sooner when it converges)'
+        + (f', brief fixes and redrafts for {len(upstream_next)} scene(s) '
            f'~${fix_cost:.2f} (the gate on each redraft included)' if upstream_next else '')
-        + (f', the full score ~${final_cost:.2f}' if final_cost else '')
-        + f'; plus about ${gate.RECHECK_COST_PER_SCENE:.2f} for the gate on each '
-          f'rewritten scene')
-    log('  Each iteration is checked before it starts: what the run has spent, its '
-        'pass, the brief fixes it finds and the full score must fit the threshold.')
-    _exit_if_over_threshold(forecast, 'nothing revised', 'lower `--max-loops`')
+        + (f', the full score ~${final_cost:.2f}' if final_cost else ''))
+    log(f'  Not in it: the gate on each scene a pass rewrites (about '
+        f'${gate.RECHECK_COST_PER_SCENE:.2f} each), brief fixes later iterations find, '
+        f'and the re-checks. Before each iteration, and before its pass, what the run '
+        f'has spent plus what comes next must fit the threshold.')
+    over = _over_threshold(forecast)
+    if over:
+        undone = (_undo_scores(project_dir, scored_dir, latest_before)
+                  if not skip_initial_score else '')
+        # advice that can work: each part of the forecast that can go
+        ways = []
+        if max_loops > 1:
+            ways.append(f'lower `--max-loops` (~${per_pass:.2f} an iteration)')
+        if final_cost:
+            ways.append(f'add `--skip-final-score` (~${final_cost:.2f})')
+        if upstream_next:
+            ways.append(f'fix the briefs of {", ".join(upstream_next)} first '
+                        f'(`storyforge hone`, ~${fix_cost:.2f})')
+        log(f'ERROR: {over}: nothing revised{undone}. Raise STORYFORGE_COST_THRESHOLD'
+            + ''.join(f', or {w}' for w in ways) + '.')
+        sys.exit(1)
     _log_recheck_budget()
 
     # Create branch once for the whole loop
@@ -2285,9 +2339,11 @@ def _polish_loop(project_dir: str, max_loops: int,
         # Before each iteration: what the run has spent, this iteration's
         # forecast and the full score after the loop must fit the threshold
         this_pass = 0.0 if craft_converged else per_pass
-        _stop_loop_if_over(project_dir, budget,
+        stop_report = dict(pr_number=pr_number, baseline_diag=baseline_diag,
+                           latest_diag=latest_diag)
+        _stop_loop_if_over(project_dir,
                            _upstream_fix_cost(project_dir, upstream_scenes) + this_pass,
-                           after=final_cost, what=f'iteration {iteration}')
+                           after=final_cost, what=f'iteration {iteration}', **stop_report)
         if upstream_scenes:
             log(f'  Upstream issues in {len(upstream_scenes)} scenes — fixing briefs first')
             # while they run, the rest of the loop's forecast is kept from
@@ -2307,6 +2363,11 @@ def _polish_loop(project_dir: str, max_loops: int,
             _update_pr_body_iteration(project_dir, pr_number, iteration, summary,
                                       converged=True)
             break
+
+        if upstream_scenes:
+            # the fixes may have cost more than their forecast (CR-M1)
+            _stop_loop_if_over(project_dir, per_pass, after=final_cost,
+                               what=f"iteration {iteration}'s pass", **stop_report)
 
         # Generate targeted plan from diagnosis and execute
         log(f'\n=== Iteration {iteration}/{max_loops}: Polish (Sonnet) ===')
@@ -2353,8 +2414,10 @@ def _polish_loop(project_dir: str, max_loops: int,
         log(f'\n=== Skipping Phase 2: Full Score (--skip-final-score) ===')
         final_summary = summary
     else:
-        _stop_loop_if_over(project_dir, budget, final_cost, after=0.0,
-                           what='the full score', resume='run `storyforge score` for it')
+        _stop_loop_if_over(project_dir, final_cost, after=0.0,
+                           what='the full score', resume='run `storyforge score` for it',
+                           pr_number=pr_number, baseline_diag=baseline_diag,
+                           latest_diag=latest_diag)
         log(f'\n=== Phase 2: Full Score ===')
         _, final_llm_diag = _run_lightweight_score(project_dir, scene_ids)
         final_summary = _summarize_diagnosis(final_llm_diag)
