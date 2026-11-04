@@ -348,15 +348,85 @@ class TestRenumberSeq:
         assert exc.value.code == 1
         assert 'shared seq: a and b (seq 2)' in capsys.readouterr().err
 
-    def test_no_seq_column_noop(self, sample_csv):
-        """File without seq column should be unchanged."""
-        original = _read_lines(sample_csv)
-        renumber_seq(sample_csv)
-        after = _read_lines(sample_csv)
-        assert original == after
+    def test_no_seq_column_raises(self, sample_csv):
+        """#509 TD-1: no seq column was a silent no-op, indistinguishable
+        from "already 1..N"; it is a RenumberError, the file unchanged."""
+        from storyforge.csv_cli import RenumberError
+        original = open(sample_csv, 'rb').read()
+        with pytest.raises(RenumberError, match='no seq column'):
+            renumber_seq(sample_csv)
+        assert open(sample_csv, 'rb').read() == original
+
+    def test_returns_what_changed(self, tmp_path):
+        """#509 TD-1: the result says how many seq cells changed, counting
+        a respelled one (" 1", "2.0"), so a caller needn't re-sort."""
+        path = str(tmp_path / 'seq.csv')
+        with open(path, 'w') as f:
+            f.write('id|seq|title\nc|9|C\na| 1|A\nb|2.0|B\n')
+        result = renumber_seq(path)
+        assert (result.changed, result.total) == (3, 3)
+        assert result.header == ['id', 'seq', 'title']
+        assert [(old, fields[0], fields[1]) for old, fields in result.rows] == [
+            (' 1', 'a', '1'), ('2.0', 'b', '2'), ('9', 'c', '3')]
+        assert _read_lines(path)[1:] == ['a|1|A', 'b|2|B', 'c|3|C']
+
+    def test_write_false_previews(self, tmp_path):
+        path = str(tmp_path / 'seq.csv')
+        text = 'id|seq|title\nb|5|B\na|1|A\n'
+        with open(path, 'w') as f:
+            f.write(text)
+        result = renumber_seq(path, write=False)
+        assert (result.changed, result.total) == (1, 2)
+        assert open(path).read() == text
+
+    def test_already_sequential_writes_nothing(self, tmp_path):
+        """No seq changes: row order and CRLF endings are left alone."""
+        path = str(tmp_path / 'seq.csv')
+        data = b'id|seq|title\r\nb|2|B\r\na|1|A\r\n'
+        with open(path, 'wb') as f:
+            f.write(data)
+        result = renumber_seq(path)
+        assert (result.changed, result.total) == (0, 2)
+        assert open(path, 'rb').read() == data
+
+    def test_ten_or_more_rows_sort_numerically(self, tmp_path):
+        """1..12 is already in order; a text sort would put 10 before 2."""
+        path = str(tmp_path / 'seq.csv')
+        with open(path, 'w') as f:
+            f.write('id|seq\n' + ''.join(f's{i}|{i}\n' for i in range(1, 13)))
+        assert renumber_seq(path).changed == 0
+
+    def test_cli_unreadable_file_is_not_called_a_refusal(self, tmp_path, monkeypatch,
+                                                        capsys):
+        """#509 TD-1: UnicodeDecodeError is a ValueError, so the CLI called
+        an unreadable file "not renumbering ..."."""
+        from storyforge import csv_cli
+        path = str(tmp_path / 'seq.csv')
+        with open(path, 'wb') as f:
+            f.write(b'id|seq\na|\xff\n')
+        monkeypatch.setattr(sys, 'argv', ['csv_cli', 'renumber-seq', path])
+        with pytest.raises(SystemExit) as exc:
+            csv_cli.main()
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert 'ERROR: cannot read' in err and 'not renumbering' not in err
+
+    def test_keeps_permissions_and_writes_through_a_symlink(self, tmp_path):
+        """#509 CR-3: the temp-file rename made a 600 file 644 and put a
+        regular file where a symlink was."""
+        real = tmp_path / 'real.csv'
+        real.write_text('id|seq\na|3\n')
+        real.chmod(0o600)
+        link = tmp_path / 'link.csv'
+        link.symlink_to(real.name)
+        renumber_seq(str(link))
+        assert link.is_symlink()
+        assert real.read_text() == 'id|seq\na|1\n'
+        assert (real.stat().st_mode & 0o777) == 0o600
+        assert sorted(p.name for p in tmp_path.iterdir()) == ['link.csv', 'real.csv']
 
     def test_empty_file_noop(self, empty_csv):
-        renumber_seq(empty_csv)
+        assert renumber_seq(empty_csv).total == 0
         # File should still be empty
         assert open(empty_csv).read().strip() == ''
 

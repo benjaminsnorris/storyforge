@@ -5,6 +5,8 @@ import os
 import tempfile
 import shutil
 
+import pytest
+
 
 class TestParsing:
     def test_extract_scenes_from_response(self, tmp_path):
@@ -161,6 +163,23 @@ class TestRevision:
         joined = ' '.join(result) if isinstance(result, list) else str(result)
         assert 'act1-sc01' in joined
         assert 'act1-sc02' in joined
+
+    @pytest.mark.parametrize('scope,expected', [
+        ('1,5,12', True), ('[30, 31]', True), ('2;3', True), ('4', True),
+        ('full', False), ('act-2', False), ('part-1', False),
+        ('act1-sc01,act1-sc02', False), ('NEW:x,3', False), ('1,a', False),
+        (' [1, 2]', False),   # unstripped: resolve_scope doesn't unwrap it either
+    ])
+    def test_is_seq_scope(self, scope, expected):
+        """#509 TD-2: the one rule resolve_scope and scenes-setup
+        --renumber's warning share."""
+        from storyforge.revision import is_seq_scope
+        assert is_seq_scope(scope) is expected
+
+    def test_resolve_scope_seq_numbers(self, fixture_dir):
+        from storyforge.revision import resolve_scope
+        result = resolve_scope('[1, 2]', fixture_dir)
+        assert [os.path.basename(p) for p in result] == ['act1-sc01.md', 'act1-sc02.md']
 
     def test_resolve_scope_new_prefix(self, fixture_dir):
         from storyforge.revision import resolve_scope
