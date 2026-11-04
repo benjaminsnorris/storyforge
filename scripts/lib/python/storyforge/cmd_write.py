@@ -99,7 +99,7 @@ def main(argv=None):
     apply_coaching_override(args)
 
     project_dir = detect_project_root()
-    exit_if_bad_threshold()   # before anything is spent, not at the first re-check
+    exit_if_bad_threshold()   # a bad value crashed the forecast check with a traceback
     from storyforge.ledger import exit_if_not_migrated, exit_if_unordered
     exit_if_not_migrated(project_dir)  # the registries live in the ledger
     exit_if_unordered(project_dir)  # drafting reads the ledger as of each scene

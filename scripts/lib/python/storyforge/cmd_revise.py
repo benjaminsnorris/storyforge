@@ -383,14 +383,13 @@ def _commit(project_dir: str, message: str, paths: list[str] | None = None) -> N
 
 
 #: The revise session's one cost budget (`costs.RunBudget`), metered from
-#: `main`; None outside it (`_redraft_scenes` and `_redraft_from_briefs`
-#: are also called by hone, whose redrafts aren't metered here)
+#: `main`; None outside it (a helper called directly, as the tests do)
 _RUN_BUDGET = None
 
 
 def _run_budget():
-    """The session's cost budget, or a fresh unmetered one outside a revise
-    session."""
+    """The session's cost budget, or a fresh unmetered one when a helper is
+    called outside `main`."""
     from storyforge.costs import RunBudget
     return _RUN_BUDGET if _RUN_BUDGET is not None else RunBudget()
 

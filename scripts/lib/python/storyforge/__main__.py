@@ -197,8 +197,9 @@ def _dispatch(module) -> None:
     try:
         code = module.main(sys.argv[1:])
     except (LedgerError, SourceError, ThresholdError) as e:
-        # A command with no up-front check reached the registries: stop as
-        # plainly as the ones that check
+        # A command with no up-front check reached the registries, a source
+        # block, or a non-numeric STORYFORGE_COST_THRESHOLD: stop as plainly
+        # as the ones that check
         print(f'ERROR: {e}', file=sys.stderr)
         sys.exit(1)
     if code:
