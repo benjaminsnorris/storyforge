@@ -392,6 +392,11 @@ class TestKeepGoing:
     def test_accept_then_keep_going_again_passes(self, project, monkeypatch, capsys):
         project_dir, _ = project
         self._pend(project_dir, 'act1-sc01', 'act2-sc01')
+        # `--accept` refuses rows whose quotes aren't in the scene on disk
+        # (#504), so the recorded quote must be in both scenes' prose
+        for sid in ('act1-sc01', 'act2-sc01'):
+            with open(os.path.join(project_dir, 'scenes', f'{sid}.md'), 'a') as f:
+                f.write(f'\n\nThe sign said {HERE}.\n')
         _fake_gate(monkeypatch, {'act1-sc01': _finding(), 'act2-sc01': _finding()})
         with pytest.raises(SystemExit):
             cmd_check.main(['--pending', '--keep-going'])
