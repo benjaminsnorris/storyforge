@@ -101,6 +101,61 @@ class TestOneBudget:
         assert cmd_revise._run_budget().committed() == 0.0
 
 
+class TestReservationsReachTheRechecks:
+    """T-2 (#510's review): what the run reserves (`RunBudget.owed`) must
+    reach the re-checks after a pass's gated scenes and after a redraft;
+    either could take a fresh budget and lose it."""
+
+    @pytest.fixture
+    def budget(self, monkeypatch):
+        from storyforge.costs import RunBudget
+        b = RunBudget()
+        monkeypatch.setattr(cmd_revise, '_RUN_BUDGET', b)
+        return b
+
+    def _rechecks(self, monkeypatch):
+        seen = []
+        monkeypatch.setattr(cmd_write, 'run_recheck',
+                            lambda pd, ld, skip=frozenset(), spent_before=0.0:
+                            seen.append(spent_before))
+        return seen
+
+    def test_in_a_passs_gated_scenes(self, project_dir, monkeypatch, budget):
+        _scenes(project_dir, 'act1-sc01', 'act1-sc02')
+        monkeypatch.setattr(cmd_write, '_gate_drafted_scene', lambda *a, **k: (True, ''))
+        seen = self._rechecks(monkeypatch)
+        with budget.reserving(4.0):
+            _gate_pass(project_dir, ['act1-sc01', 'act1-sc02'])
+        per = gate.RECHECK_COST_PER_SCENE
+        assert seen == [pytest.approx(4.0 + per), pytest.approx(4.0)]
+
+    def test_after_a_redraft(self, project_dir, monkeypatch, budget):
+        from unittest.mock import patch
+        long = 'The rain fell on the cobblestones. ' * 40
+        with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md'), 'w') as f:
+            f.write(long)
+        monkeypatch.setattr(cmd_revise, '_gate_redraft', lambda *a, **k: '')
+        monkeypatch.setattr(cmd_revise, '_restore_gate_markers', lambda *a, **k: None)
+        seen = self._rechecks(monkeypatch)
+        with patch('storyforge.cmd_revise.invoke_api', return_value=long + ' New end.'), \
+             patch('storyforge.cmd_revise.select_model', return_value='claude-sonnet-5-5'), \
+             patch('storyforge.cmd_write._build_prompt', return_value='fake prompt'), \
+             patch('storyforge.common.get_coaching_level', return_value='full'), \
+             budget.reserving(4.0):
+            cmd_revise._redraft_scenes(project_dir, ['act1-sc01'])
+        assert seen == [pytest.approx(4.0)]
+
+    def test_the_polish_loop_is_one_budget_outside_main(self, monkeypatch):
+        """TD-3: outside `main` each `_run_budget()` was a new budget."""
+        seen = []
+        monkeypatch.setattr(cmd_revise, '_polish_loop',
+                            lambda *a, **k: seen.extend([cmd_revise._run_budget(),
+                                                         cmd_revise._run_budget()]))
+        cmd_revise._run_polish_loop('/p', 1, None)
+        assert seen[0] is seen[1]
+        assert cmd_revise._RUN_BUDGET is None   # gone with the run
+
+
 class TestGatePassScenes:
 
     def test_every_scene_gets_the_passs_one_baseline(self, project_dir, monkeypatch):
@@ -589,3 +644,99 @@ class TestReviseForecast:
         budget.owed = 4.0
         cmd_revise._recheck_after('/p', '/l', {'a', 'b'}, budget)
         assert seen == [pytest.approx(4.0 + 2 * gate.RECHECK_COST_PER_SCENE)]
+
+
+class TestNaturalnessForecast:
+    """#503 left `--naturalness` with no up-front forecast before its brief
+    fixes and redrafts: they spent unchecked, and their spend came out of
+    the re-checks' budget. Costs here: a scene's fix and redraft $3, a pass
+    $10; naturalness has 3 passes."""
+
+    def _setup(self, project_dir, monkeypatch, mock_git, threshold, charge=0.0, fixed=()):
+        revise_tests._run_pass_setup(project_dir, monkeypatch, 'craft')
+        monkeypatch.setattr(cmd_revise, '_detect_upstream_scenes',
+                            lambda p, rows: ['act1-sc01'])
+        monkeypatch.setattr(cmd_revise, '_upstream_fix_cost', lambda p, ids: 3.0 * len(ids))
+        monkeypatch.setattr(cmd_revise, '_pass_cost', lambda p, m: 10.0)
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', str(threshold))
+        seen = []
+
+        def fake_fix(p, ids):
+            budget = cmd_revise._run_budget()
+            seen.append((budget.owed, len(mock_git.calls_for('create_branch'))))
+            budget.charge(charge)   # what the fixes cost
+            return list(fixed), {} if fixed else {'act1-sc01': 'no reply'}
+        monkeypatch.setattr(cmd_revise, '_fix_and_redraft', fake_fix)
+        return seen
+
+    def _plan_target(self, project_dir):
+        return os.readlink(os.path.join(project_dir, 'working', 'plans',
+                                        'revision-plan.csv'))
+
+    def _link_plan(self, project_dir):
+        """revision-plan.csv as a link to a numbered plan, as revise leaves it."""
+        plans = os.path.join(project_dir, 'working', 'plans')
+        os.replace(os.path.join(plans, 'revision-plan.csv'),
+                   os.path.join(plans, 'revision-plan-7.csv'))
+        os.symlink('revision-plan-7.csv', os.path.join(plans, 'revision-plan.csv'))
+
+    def test_over_the_threshold_nothing_is_spent_written_or_branched(
+            self, mock_api, mock_git, project_dir, monkeypatch, capsys):
+        """SF-3, SF-4, T-6 (#510's review): the refused run had already
+        pointed revision-plan.csv at the naturalness plan."""
+        seen = self._setup(project_dir, monkeypatch, mock_git, 32)
+        self._link_plan(project_dir)
+        with pytest.raises(SystemExit) as e:
+            main(['--naturalness'])
+        assert e.value.code == 1
+        assert seen == [] and mock_api.call_count == 0
+        assert mock_git.calls == []   # no branch, no PR, no commit
+        assert self._plan_target(project_dir) == 'revision-plan-7.csv'
+        out = capsys.readouterr().out
+        assert 'Upstream issues in 1 scene(s): act1-sc01' in out
+        assert 'Cost forecast: ~$33.00: brief fixes and redrafts for 1 scene(s) ~$3.00' in out
+        assert 'the forecast (~$33.00) is over the cost threshold ($32): nothing revised. ' \
+            'Raise STORYFORGE_COST_THRESHOLD, or fix the briefs of act1-sc01 first ' \
+            '(`storyforge hone`), or start from a later pass (`storyforge revise N`)' in out
+
+    def test_a_later_start_forecasts_only_the_passes_it_runs(
+            self, mock_api, mock_git, project_dir, monkeypatch, capsys):
+        """CR-L1: `revise 3 --naturalness` forecast all 3 passes."""
+        self._setup(project_dir, monkeypatch, mock_git, 12)
+        with pytest.raises(SystemExit):
+            main(['--naturalness', '3'])
+        out = capsys.readouterr().out
+        assert 'Cost forecast: ~$13.00' in out and '1 passes @ ~$10.00' in out
+
+    def test_a_dry_run_forecasts_the_fixes_and_spends_nothing(
+            self, mock_api, mock_git, project_dir, monkeypatch, capsys):
+        """SF-1/T-3: a dry run paid for the fixes and committed them, on
+        whatever branch was checked out."""
+        seen = self._setup(project_dir, monkeypatch, mock_git, 1, fixed=['act1-sc01'])
+        main(['--naturalness', '--dry-run'])
+        assert seen == [] and mock_api.call_count == 0
+        assert not mock_git.calls_for('commit_and_push')
+        out = capsys.readouterr().out
+        assert 'Upstream issues in 1 scene(s): act1-sc01' in out
+        assert 'DRY RUN: their brief fixes and redrafts (~$3.00) are skipped' in out
+
+    @pytest.mark.parametrize('fixed, done', [
+        ([], 'no pass run; the brief fixes changed nothing'),
+        (['act1-sc01'], 'no pass run; the brief fixes and redrafts of act1-sc01 are '
+                        'committed'),
+    ])
+    def test_the_passes_are_reserved_then_checked_with_what_the_fixes_spent(
+            self, mock_api, mock_git, project_dir, monkeypatch, capsys, fixed, done):
+        """SF-4, SF-7, C-1: the fixes run on the run's branch; the stop says
+        what they did and names the spend apart from the forecast."""
+        seen = self._setup(project_dir, monkeypatch, mock_git, 50, charge=30.0, fixed=fixed)
+        with pytest.raises(SystemExit) as e:
+            main(['--naturalness'])
+        assert e.value.code == 1
+        assert seen == [(30.0, 1)]   # the 3 passes kept back; on the branch
+        assert mock_api.call_count == 0   # no pass run
+        commits = [c[1] for c in mock_git.calls_for('commit_and_push')]
+        assert commits == (['Naturalness: upstream brief fixes for 1 scenes'] if fixed else [])
+        out = capsys.readouterr().out
+        assert 'spent so far ~$30.00 + forecast ~$30.00 = ~$60.00 is over the cost ' \
+            f'threshold ($50): {done}' in out

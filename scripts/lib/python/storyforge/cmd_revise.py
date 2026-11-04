@@ -15,6 +15,7 @@ Usage:
 """
 
 import argparse
+import contextlib
 import csv
 import hashlib
 import json
@@ -152,6 +153,12 @@ def _next_plan_number(plans_dir):
                 except ValueError:
                     pass
     return highest + 1
+
+
+def _save_plan(plan_file, rows, what: str) -> str:
+    numbered = _create_versioned_plan(plan_file, rows)
+    log(f'Generated {what} plan ({len(rows)} passes): {numbered}')
+    return numbered
 
 
 def _create_versioned_plan(plan_file, rows):
@@ -382,16 +389,139 @@ def _commit(project_dir: str, message: str, paths: list[str] | None = None) -> N
         sys.exit(1)
 
 
-#: The revise session's one cost budget (`costs.RunBudget`), metered from
-#: `main`; None outside it (a helper called directly, as the tests do)
+#: The revise session's one cost budget (`costs.RunBudget`), set for a run
+#: by `_budget_scope` (`main`'s, metered; the polish loop's when called on
+#: its own); None outside a run (a helper called directly, as the tests do)
 _RUN_BUDGET = None
 
 
 def _run_budget():
-    """The session's cost budget, or a fresh unmetered one when a helper is
-    called outside `main`."""
+    """The run's cost budget, or a fresh unmetered one when a helper is
+    called outside a run (nothing it reserves outlives the call)."""
     from storyforge.costs import RunBudget
     return _RUN_BUDGET if _RUN_BUDGET is not None else RunBudget()
+
+
+@contextlib.contextmanager
+def _budget_scope(meter=None):
+    """One budget for the run: the one already set (by `main`), or a new
+    one set for the block, so every helper's `_run_budget()` in it is the
+    same instance and a reservation made on it reaches their re-checks."""
+    global _RUN_BUDGET
+    if _RUN_BUDGET is not None:
+        yield _RUN_BUDGET
+        return
+    from storyforge.costs import RunBudget
+    _RUN_BUDGET = RunBudget(meter)
+    try:
+        yield _RUN_BUDGET
+    finally:
+        _RUN_BUDGET = None
+
+
+def _pass_cost(project_dir: str, model: str) -> float:
+    """One prose pass's forecast: the whole book read and revised on
+    `model` (`costs.estimate_cost('revise', ...)` over the scenes' average
+    word count). The plan's passes, the polish loop's and naturalness's are
+    all forecast this way."""
+    avg_words, scene_count = _estimate_avg_words(project_dir)
+    return estimate_cost('revise', scene_count, avg_words, model)
+
+
+#: The brief-rewrite and drafting prompts' own text around the scene, in
+#: tokens (instructions, the scene's characters, place and plan)
+_PROMPT_OVERHEAD_TOKENS = 3000
+
+
+def _tokens(text: str) -> int:
+    """Tokens in `text`, as `costs.estimate_cost` counts them (1.3 a word)."""
+    return int(len(text.split()) * 1.3)
+
+
+def _upstream_fix_cost(project_dir: str, scene_ids: list[str]) -> float:
+    """The brief fixes and redrafts of `scene_ids` (`_fix_and_redraft`),
+    priced from what each call sends, at the creative tier's uncached input
+    price (#510's review, SF-6: a flat 1,500-token draft estimate left out
+    the shared context and the earlier prose a redraft sends). Conservative:
+    the context and earlier prose are often read from cache for less.
+
+    - the brief rewrite: the scene's prose (up to `_PROSE_CONTEXT_WORDS`)
+      and the prompt in, its `max_tokens` (1,024) out;
+    - the redraft: the shared context (`build_shared_context`), the earlier
+      prose `drafting.prior_prose` sends (`prior_prose_blocks`), the old
+      prose and the prompt in, the scene again out;
+    - the gate's run on the redraft (`gate.RECHECK_COST_PER_SCENE`).
+
+    The re-checks a redraft lists are not in it: they get what is left."""
+    from storyforge import gate
+    from storyforge.common import build_shared_context
+    from storyforge.costs import calculate_cost
+    from storyforge.prompts import prior_prose_blocks, prior_prose_mode
+    if not scene_ids:
+        return 0.0
+    model = select_model('creative')
+    context = sum(_tokens(b.get('text', ''))
+                  for b in build_shared_context(project_dir, model=model) or [])
+    try:
+        mode = prior_prose_mode(project_dir)
+    except ValueError:      # `_main` stops on a bad value before this
+        mode = 'none'
+    avg_words, _ = _estimate_avg_words(project_dir)
+    total = 0.0
+    for sid in scene_ids:
+        path = os.path.join(project_dir, 'scenes', f'{sid}.md')
+        if os.path.isfile(path):
+            with open(path, encoding='utf-8') as f:
+                words = len(f.read().split())
+        else:
+            words = avg_words
+        prose = int(words * 1.3)
+        prior = 0
+        if mode != 'none':
+            try:
+                prior = sum(_tokens(b['text'])
+                            for b in prior_prose_blocks(sid, project_dir, mode))
+            except (OSError, ValueError) as e:
+                log(f'WARNING: the forecast of {sid}\'s redraft leaves out the earlier '
+                    f'prose it would be sent: {e}')
+        brief_in = int(min(words, _PROSE_CONTEXT_WORDS) * 1.3) + _PROMPT_OVERHEAD_TOKENS
+        total += calculate_cost(model, brief_in, 1024)
+        total += calculate_cost(model, context + prior + prose + _PROMPT_OVERHEAD_TOKENS,
+                                prose)
+        total += gate.RECHECK_COST_PER_SCENE
+    return total
+
+
+def _over_threshold(forecast: float) -> str:
+    """'' when what the run has spent or reserved (`RunBudget.committed`)
+    plus `forecast` is within the cost threshold, else how far over, the
+    spend so far named apart from the forecast."""
+    spent = _run_budget().committed()
+    due = spent + forecast
+    if check_threshold(due):
+        return ''
+    if spent < 0.005:
+        return (f'the forecast (~${forecast:.2f}) is over the cost threshold '
+                f'(${cost_threshold():g})')
+    return (f'spent so far ~${spent:.2f} + forecast ~${forecast:.2f} = ~${due:.2f} is over '
+            f'the cost threshold (${cost_threshold():g})')
+
+
+def _exit_if_over_threshold(forecast: float, not_done: str, advice: str) -> None:
+    """The check before a stretch of paid work (#503): what the run has
+    spent or reserved plus `forecast` must be within the cost threshold,
+    else an ERROR naming both, and exit 1 before anything more is spent.
+    `not_done` says what that leaves undone ('nothing revised')."""
+    over = _over_threshold(forecast)
+    if over:
+        log(f'ERROR: {over}: {not_done}. Raise STORYFORGE_COST_THRESHOLD, or {advice}.')
+        sys.exit(1)
+
+
+def _log_recheck_budget() -> None:
+    log(f'  The re-checks after each gated scene get what is left of the '
+        f'${cost_threshold():g} threshold once the passes and the gate are paid for; '
+        f'any left over stay pending for `storyforge check --pending`.')
 
 
 def _note_recheck(rechecks_open: list[str], after: str, run) -> None:
@@ -718,8 +848,9 @@ def _update_pass_field(rows, pass_num, field, value, plan_file):
 # Auto-generated plans
 # ============================================================================
 
-def _generate_polish_plan(plan_file, project_dir=''):
-    """Generate a single-pass craft-only polish plan."""
+def _generate_polish_plan(plan_file, project_dir='', *, write=True):
+    """Generate a single-pass craft-only polish plan (`write=False`: the
+    rows only, for `_save_plan` once the run's forecast is approved)."""
     # Load AI-tell vocabulary for inclusion in guidance
     from storyforge.prompts import load_ai_tell_words, load_voice_profile, merge_banned_words
     plugin_dir = get_plugin_dir()
@@ -752,8 +883,8 @@ def _generate_polish_plan(plan_file, project_dir=''):
         'model_tier': 'opus',
         'fix_location': 'craft',
     }]
-    numbered = _create_versioned_plan(plan_file, rows)
-    log(f'Generated single-pass polish plan: {numbered}')
+    if write:
+        _save_plan(plan_file, rows, 'single-pass polish')
     return rows
 
 
@@ -803,8 +934,9 @@ def _build_naturalness_pass3_guidance(project_dir: str = '') -> str:
     )
 
 
-def _generate_naturalness_plan(plan_file, project_dir=''):
-    """Generate 3-pass plan for AI prose pattern removal.
+def _generate_naturalness_plan(plan_file, project_dir='', *, write=True):
+    """Generate 3-pass plan for AI prose pattern removal (`write=False`:
+    the rows only, for `_save_plan` once the run's forecast is approved).
 
     Targets the patterns most frequently penalized in scoring rationales:
     tricolon/parallelism, em-dash/antithesis, and AI vocabulary/hedging.
@@ -868,12 +1000,12 @@ def _generate_naturalness_plan(plan_file, project_dir=''):
             'fix_location': 'craft',
         },
     ]
-    numbered = _create_versioned_plan(plan_file, rows)
-    log(f'Generated 3-pass naturalness plan: {numbered}')
+    if write:
+        _save_plan(plan_file, rows, '3-pass naturalness')
     return rows
 
 
-def _generate_structural_plan(project_dir, plan_file):
+def _generate_structural_plan(project_dir, plan_file, *, write=True):
     """Generate CSV-only plan from structural proposals."""
     proposals_file = os.path.join(project_dir, 'working', 'scores', 'structural-proposals.csv')
     if not os.path.isfile(proposals_file):
@@ -949,7 +1081,8 @@ def _generate_structural_plan(project_dir, plan_file):
             'fix_location': info['fix_location'],
         })
 
-    _create_versioned_plan(plan_file, rows)
+    if write:
+        _create_versioned_plan(plan_file, rows)
 
     for i, (dim, info) in enumerate(sorted_dims, 1):
         log(f'  Pass {i}: {dim} (fix_location: {info["fix_location"]})')
@@ -958,7 +1091,7 @@ def _generate_structural_plan(project_dir, plan_file):
 
 
 def _generate_scores_plan(plan_file: str, diag_rows: list,
-                          findings_dir: str = '') -> list:
+                          findings_dir: str = '', *, write: bool = True) -> list:
     """Generate a revision plan from scoring diagnosis data.
 
     Creates upstream (brief) passes for brief-root-cause items and
@@ -1070,9 +1203,8 @@ def _generate_scores_plan(plan_file: str, diag_rows: list,
             'fix_location': 'craft',
         })
 
-    if rows:
-        _create_versioned_plan(plan_file, rows)
-        log(f'Generated score-driven plan: {len(rows)} passes')
+    if rows and write:
+        _save_plan(plan_file, rows, 'score-driven')
 
     return rows
 
@@ -1252,17 +1384,27 @@ def _update_pr_body_iteration(project_dir: str, pr_number: str,
               f'{summary["high_count"]} high / {summary["medium_count"]} medium')
     if converged:
         status += ' — converged'
-    line = f'- [x] Iteration {iteration} — {status}\n'
+    _note_pr_progress(project_dir, pr_number, f'- [x] Iteration {iteration} — {status}',
+                      body=body)
 
-    body = body.rstrip('\n') + '\n' + line + '\n'
-    set_pr_body(project_dir, pr_number, body)
+
+def _note_pr_progress(project_dir: str, pr_number: str, line: str, body: str = '') -> None:
+    """Append `line` to the polish loop's PR body (its Progress list)."""
+    if not pr_number:
+        return
+    body = body or get_pr_body(project_dir, pr_number)
+    if not body:
+        return
+    set_pr_body(project_dir, pr_number, body.rstrip('\n') + '\n' + line + '\n\n')
 
 
 def _post_polish_summary_comment(project_dir: str, pr_number: str,
                                  baseline_diag: list[dict],
                                  final_det_diag: list[dict], *,
-                                 final_llm_diag: list[dict] | None = None) -> None:
-    """Post a summary comment comparing baseline and final scores."""
+                                 final_llm_diag: list[dict] | None = None,
+                                 stopped: str = '') -> None:
+    """Post a summary comment comparing baseline and final scores
+    (`stopped`: why the loop stopped short, put first)."""
     if not pr_number:
         return
 
@@ -1300,6 +1442,8 @@ def _post_polish_summary_comment(project_dir: str, pr_number: str,
                       f'{llm_summary["medium_count"]} medium priority', '',
                       llm_table])
 
+    if stopped:
+        lines[:0] = [f'**{stopped}**', '']
     add_pr_comment(project_dir, pr_number, '\n'.join(lines))
 
 
@@ -2033,10 +2177,66 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     return count
 
 
+def _stop_loop_if_over(project_dir: str, next_cost: float, *, after: float,
+                       what: str, resume: str = '', pr_number: str = '',
+                       baseline_diag: list[dict] | None = None,
+                       latest_diag: list[dict] | None = None) -> None:
+    """Stop the polish loop (exit 1) before `what` when the run's spend so
+    far plus its forecast `next_cost` and `after` (the full score still
+    owed) would pass the cost threshold. Everything the loop did before is
+    committed (each iteration commits its pass; the scores since are
+    committed here), and the draft PR gets the stop in its progress list
+    and the summary comment a finished loop posts. `resume` says how to
+    carry on."""
+    over = _over_threshold(next_cost + after)
+    if not over:
+        return
+    log(f'ERROR: {what} (~${next_cost:.2f})'
+        + (f' and the full score after the loop (~${after:.2f})' if after else '')
+        + f': {over}. Stopping before {what}; the work before it is committed. '
+          f'Raise STORYFORGE_COST_THRESHOLD and {resume or POLISH_RESUME}.')
+    _commit(project_dir, 'Polish: stopped at the cost threshold', ['working/'])
+    note = f'Stopped before {what} at the cost threshold: {over}'
+    _note_pr_progress(project_dir, pr_number, f'- [ ] {note}')
+    _post_polish_summary_comment(project_dir, pr_number, baseline_diag or [],
+                                 latest_diag or [], stopped=note)
+    sys.exit(1)
+
+
+def _undo_scores(project_dir: str, cycle_dir: str, latest_before: str | None) -> str:
+    """Take back what a deterministic score wrote (`cycle_dir`, and
+    working/scores/latest repointed at it) for a loop refused before it
+    started; says what was done."""
+    import shutil
+    if not cycle_dir:
+        return ''
+    latest = os.path.join(project_dir, 'working', 'scores', 'latest')
+    if os.path.isdir(cycle_dir):
+        shutil.rmtree(cycle_dir)
+    if os.path.islink(latest):
+        os.remove(latest)
+    if latest_before is not None:
+        os.symlink(latest_before, latest)
+    return (f' (the deterministic scores it wrote, {os.path.basename(cycle_dir)}, '
+            f'are removed, and working/scores/latest is as it was)')
+
+
 def _run_polish_loop(project_dir: str, max_loops: int,
                      coaching_override: str | None, *,
                      skip_initial_score: bool = False,
                      skip_final_score: bool = False) -> None:
+    """`_polish_loop` under one budget for the run (`_budget_scope`: `main`'s
+    when it runs there)."""
+    with _budget_scope():
+        _polish_loop(project_dir, max_loops, coaching_override,
+                     skip_initial_score=skip_initial_score,
+                     skip_final_score=skip_final_score)
+
+
+def _polish_loop(project_dir: str, max_loops: int,
+                 coaching_override: str | None, *,
+                 skip_initial_score: bool = False,
+                 skip_final_score: bool = False) -> None:
     """Two-phase polish loop: deterministic scoring → full LLM scoring.
 
     Phase 1: Score only deterministic principles (free, instant), polish with
@@ -2063,10 +2263,6 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         log('ERROR: No drafted scenes found.')
         sys.exit(1)
 
-    # Create branch once for the whole loop
-    create_branch('revise', project_dir)
-    ensure_branch_pushed(project_dir)
-
     log('============================================')
     log(f'Storyforge Polish Loop — {title}')
     log(f'Scenes: {len(scene_ids)}')
@@ -2092,7 +2288,9 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         log('  Skipped initial scoring (--skip-initial-score) — using existing scores')
     else:
         log(f'\n=== Initial Deterministic Score ===')
-        _, baseline_diag = _run_deterministic_score(project_dir, scene_ids)
+        latest = os.path.join(project_dir, 'working', 'scores', 'latest')
+        latest_before = os.readlink(latest) if os.path.islink(latest) else None
+        scored_dir, baseline_diag = _run_deterministic_score(project_dir, scene_ids)
 
     baseline_summary = _summarize_diagnosis(baseline_diag)
     log(f'  Overall avg: {baseline_summary["overall_avg"]:.2f}')
@@ -2100,6 +2298,53 @@ def _run_polish_loop(project_dir: str, max_loops: int,
     log(f'  Medium priority: {baseline_summary["medium_count"]} principles')
     if baseline_summary['high_principles']:
         log(f'    High: {", ".join(p.replace("_", " ") for p in baseline_summary["high_principles"])}')
+
+    # The up-front forecast (#503), before anything is spent, a branch made
+    # or the scores committed: the scoring above is free. How long the loop
+    # runs isn't known, so every iteration is forecast; the brief fixes of
+    # the scenes known now are in it, later ones are checked before their
+    # iteration
+    budget = _run_budget()
+    per_pass = _pass_cost(project_dir, sonnet_model)
+    final_cost = 0.0
+    if not skip_final_score:
+        avg_words, _ = _estimate_avg_words(project_dir)
+        final_cost = estimate_cost('score', len(scene_ids), avg_words,
+                                   select_model('evaluation'))
+    upstream_next = _detect_upstream_scenes(project_dir, baseline_diag)
+    fix_cost = _upstream_fix_cost(project_dir, upstream_next)
+    forecast = max_loops * per_pass + fix_cost + final_cost
+    from storyforge import gate
+    log(f'Cost forecast: ~${forecast:.2f} for up to {max_loops} iterations @ '
+        f'~${per_pass:.2f} (it stops sooner when it converges)'
+        + (f', brief fixes and redrafts for {len(upstream_next)} scene(s) '
+           f'~${fix_cost:.2f} (the gate on each redraft included)' if upstream_next else '')
+        + (f', the full score ~${final_cost:.2f}' if final_cost else ''))
+    log(f'  Not in it: the gate on each scene a pass rewrites (about '
+        f'${gate.RECHECK_COST_PER_SCENE:.2f} each), brief fixes later iterations find, '
+        f'and the re-checks. Before each iteration, and before its pass, what the run '
+        f'has spent plus what comes next must fit the threshold.')
+    over = _over_threshold(forecast)
+    if over:
+        undone = (_undo_scores(project_dir, scored_dir, latest_before)
+                  if not skip_initial_score else '')
+        # advice that can work: each part of the forecast that can go
+        ways = []
+        if max_loops > 1:
+            ways.append(f'lower `--max-loops` (~${per_pass:.2f} an iteration)')
+        if final_cost:
+            ways.append(f'add `--skip-final-score` (~${final_cost:.2f})')
+        if upstream_next:
+            ways.append(f'fix the briefs of {", ".join(upstream_next)} first '
+                        f'(`storyforge hone`, ~${fix_cost:.2f})')
+        log(f'ERROR: {over}: nothing revised{undone}. Raise STORYFORGE_COST_THRESHOLD'
+            + ''.join(f', or {w}' for w in ways) + '.')
+        sys.exit(1)
+    _log_recheck_budget()
+
+    # Create branch once for the whole loop
+    create_branch('revise', project_dir)
+    ensure_branch_pushed(project_dir)
 
     # Commit initial scores and create PR
     _commit(project_dir, 'Polish: initial deterministic scores', ['working/'])
@@ -2122,8 +2367,10 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         # convergence check: an adaptation's source drift is no craft score
         # (#477). A scene whose brief fix was turned down is not sent again:
         # the same request would cost the same and likely meet the same fate.
-        upstream_scenes = [s for s in _detect_upstream_scenes(project_dir, latest_diag)
-                           if s not in brief_fix_skipped]
+        found = (upstream_next if upstream_next is not None
+                 else _detect_upstream_scenes(project_dir, latest_diag))
+        upstream_next = None
+        upstream_scenes = [s for s in found if s not in brief_fix_skipped]
 
         # Convergence check: no actionable issues. With no craft issues left,
         # only source drift is still fixed (as before, a diagnosis' brief
@@ -2138,9 +2385,22 @@ def _run_polish_loop(project_dir: str, max_loops: int,
                                           converged=True)
                 break
 
+        # Before each iteration: what the run has spent, this iteration's
+        # forecast and the full score after the loop must fit the threshold
+        this_pass = 0.0 if craft_converged else per_pass
+        stop_report = dict(pr_number=pr_number, baseline_diag=baseline_diag,
+                           latest_diag=latest_diag)
+        _stop_loop_if_over(project_dir,
+                           _upstream_fix_cost(project_dir, upstream_scenes) + this_pass,
+                           after=final_cost, what=f'iteration {iteration}', **stop_report)
         if upstream_scenes:
             log(f'  Upstream issues in {len(upstream_scenes)} scenes — fixing briefs first')
-            fixed, skipped = _fix_and_redraft(project_dir, upstream_scenes)
+            # while they run, the rest of the loop's forecast is kept from
+            # the re-checks their redrafts owe (with the craft converged, the
+            # loop ends after them: only the full score is left)
+            rest = 0.0 if craft_converged else this_pass + (max_loops - iteration) * per_pass
+            with budget.reserving(rest + final_cost):
+                fixed, skipped = _fix_and_redraft(project_dir, upstream_scenes)
             brief_fix_skipped.update(skipped)
             if fixed:
                 _commit(project_dir,
@@ -2153,13 +2413,19 @@ def _run_polish_loop(project_dir: str, max_loops: int,
                                       converged=True)
             break
 
+        if upstream_scenes:
+            # the fixes may have cost more than their forecast (CR-M1)
+            _stop_loop_if_over(project_dir, per_pass, after=final_cost,
+                               what=f"iteration {iteration}'s pass", **stop_report)
+
         # Generate targeted plan from diagnosis and execute
         log(f'\n=== Iteration {iteration}/{max_loops}: Polish (Sonnet) ===')
         latest_cycle = os.path.join(project_dir, 'working', 'scores', 'latest')
         plan_rows = _generate_targeted_polish_plan(csv_plan_file, latest_diag,
                                                     findings_dir=latest_cycle)
-        _execute_single_pass(project_dir, csv_plan_file, plan_rows, iteration,
-                             model_override=sonnet_model)
+        with budget.reserving((max_loops - iteration) * per_pass + final_cost):
+            _execute_single_pass(project_dir, csv_plan_file, plan_rows, iteration,
+                                 model_override=sonnet_model)
 
         # Re-score
         log(f'\n=== Iteration {iteration}/{max_loops}: Re-score ===')
@@ -2197,6 +2463,10 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         log(f'\n=== Skipping Phase 2: Full Score (--skip-final-score) ===')
         final_summary = summary
     else:
+        _stop_loop_if_over(project_dir, final_cost, after=0.0,
+                           what='the full score', resume='run `storyforge score` for it',
+                           pr_number=pr_number, baseline_diag=baseline_diag,
+                           latest_diag=latest_diag)
         log(f'\n=== Phase 2: Full Score ===')
         _, final_llm_diag = _run_lightweight_score(project_dir, scene_ids)
         final_summary = _summarize_diagnosis(final_llm_diag)
@@ -2585,29 +2855,30 @@ def _log_usage(project_dir, log_file, operation, target, model, duration_s=0):
 # ============================================================================
 
 def _estimate_avg_words(project_dir):
-    """Estimate average scene word count."""
+    """(Average words, scene count) over the book's drafted scenes:
+    scenes.csv's `word_count`, or, for a scene whose count is blank, 0 or
+    not a number, its file's own word count. (#510's review, SF-5: such
+    scenes were left out of the count, pricing every pass as if the book
+    were that much shorter.) A scene with neither isn't drafted, so no pass
+    revises it. With no scene at all: 3000 words, 1 scene, and a WARNING."""
+    counts: dict[str, int] = {}
     metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
     if os.path.isfile(metadata_csv):
         from storyforge.csv_cli import get_column
-        wc_col = get_column(metadata_csv, 'word_count')
-        total = sum(int(w) for w in wc_col if w and w != '0')
-        count = sum(1 for w in wc_col if w and w != '0')
-        if count > 0:
-            return total // count, count
-
-    # Fall back to scene files
+        for sid, wc in zip(get_column(metadata_csv, 'id'),
+                           get_column(metadata_csv, 'word_count')):
+            if wc.strip().isdigit() and int(wc) > 0:
+                counts[sid] = int(wc)
     scenes_dir = os.path.join(project_dir, 'scenes')
-    total = 0
-    count = 0
     if os.path.isdir(scenes_dir):
         for f in os.listdir(scenes_dir):
-            if f.endswith('.md'):
-                wc = len(open(os.path.join(scenes_dir, f)).read().split())
-                total += wc
-                count += 1
-
-    if count > 0:
-        return total // count, count
+            if f.endswith('.md') and f[:-3] not in counts:
+                with open(os.path.join(scenes_dir, f), encoding='utf-8') as fh:
+                    counts[f[:-3]] = len(fh.read().split())
+    if counts:
+        return sum(counts.values()) // len(counts), len(counts)
+    log('WARNING: no scene has a word count or a scene file; the cost forecast '
+        'assumes one scene of 3000 words')
     return 3000, 1
 
 
@@ -2803,19 +3074,32 @@ def _register_new_scenes(project_dir, targets, pass_name):
 # Main
 # ============================================================================
 
+def _fix_upstream_before_passes(project_dir: str, scene_ids: list[str],
+                                pass_forecast: float) -> None:
+    """`--naturalness`'s brief fixes and redrafts, on the run's branch,
+    after the forecast of them and the passes was approved. While they run
+    the passes' forecast is kept from the re-checks the redrafts owe; then
+    the passes are checked again with what the fixes actually spent."""
+    with _run_budget().reserving(pass_forecast):
+        fixed, _ = _fix_and_redraft(project_dir, scene_ids)
+    if fixed:
+        _commit(project_dir, f'Naturalness: upstream brief fixes for {len(fixed)} scenes',
+                ['reference/', 'scenes/', 'working/'])
+        done = (f'no pass run; the brief fixes and redrafts of {", ".join(fixed)} '
+                f'are committed')
+    else:
+        done = 'no pass run; the brief fixes changed nothing'
+    _exit_if_over_threshold(pass_forecast, done,
+                            'start from a later pass (`storyforge revise N`)')
+
+
 def main(argv=None):
     """`_main`, metered: the cost threshold is one budget for the session
     (`costs.RunBudget`), so the re-checks after each gated scene get only
     what the passes, redrafts and gate runs before them left."""
-    global _RUN_BUDGET
     from storyforge import api
-    from storyforge.costs import RunBudget
-    with api.metered() as meter:
-        _RUN_BUDGET = RunBudget(meter)
-        try:
-            return _main(argv)
-        finally:
-            _RUN_BUDGET = None
+    with api.metered() as meter, _budget_scope(meter):
+        return _main(argv)
 
 
 def _main(argv=None):
@@ -2884,12 +3168,19 @@ def _main(argv=None):
                          skip_final_score=args.skip_final_score)
         return
 
-    # Auto-generate plans
+    # Auto-generate plans. A generated plan is written (and revision-plan.csv
+    # pointed at it) only once the forecast is approved: a refused run
+    # leaves the plan it would have replaced (#510's review, SF-3)
+    new_plan = ''            # what kind of plan was generated, for `_save_plan`
+    upstream_scenes: list[str] = []   # naturalness: briefs to fix before the passes
     if args.polish:
         log('Polish mode -- generating craft-only revision plan...')
-        plan_rows = _generate_polish_plan(csv_plan_file, project_dir)
+        plan_rows = _generate_polish_plan(csv_plan_file, project_dir, write=False)
+        new_plan = 'single-pass polish'
     elif args.naturalness:
         log('Naturalness mode -- generating 3-pass plan for AI pattern removal...')
+        plan_rows = _generate_naturalness_plan(csv_plan_file, project_dir, write=False)
+        new_plan = '3-pass naturalness'
         # Check for upstream causes first (load latest diagnosis if available)
         _naturalness_diag_rows = []
         _latest_diag = os.path.join(project_dir, 'working', 'scores', 'latest', 'diagnosis.csv')
@@ -2897,14 +3188,6 @@ def _main(argv=None):
             _naturalness_diag_rows = _read_diagnosis(os.path.dirname(_latest_diag))
         # (with no diagnosis, an adaptation's source drift still counts)
         upstream_scenes = _detect_upstream_scenes(project_dir, _naturalness_diag_rows)
-        if upstream_scenes:
-            log(f'Upstream issues in {len(upstream_scenes)} scenes — fixing briefs')
-            fixed, _ = _fix_and_redraft(project_dir, upstream_scenes)
-            if fixed:
-                _commit(project_dir,
-                                f'Naturalness: upstream brief fixes for {len(fixed)} scenes',
-                                ['reference/', 'scenes/', 'working/'])
-        plan_rows = _generate_naturalness_plan(csv_plan_file, project_dir)
     elif args.scores:
         log('Scores mode -- generating revision plan from diagnosis data...')
         diag_file = os.path.join(project_dir, 'working', 'scores', 'latest', 'diagnosis.csv')
@@ -2915,12 +3198,14 @@ def _main(argv=None):
         diag_rows = _read_diagnosis(os.path.dirname(diag_file))
         findings_dir = os.path.dirname(diag_file)
         plan_rows = _generate_scores_plan(csv_plan_file, diag_rows,
-                                          findings_dir=findings_dir)
+                                          findings_dir=findings_dir, write=False)
         if not plan_rows:
             log('No actionable items in diagnosis -- nothing to revise')
             sys.exit(0)
+        new_plan = 'score-driven'
     elif args.structural:
-        plan_rows = _generate_structural_plan(project_dir, csv_plan_file)
+        plan_rows = _generate_structural_plan(project_dir, csv_plan_file, write=False)
+        new_plan = 'structural'
     elif os.path.isfile(csv_plan_file):
         log(f'Using CSV revision plan: {csv_plan_file}')
         plan_rows = _read_csv_plan(csv_plan_file)
@@ -2984,6 +3269,45 @@ def _main(argv=None):
         log(f'ERROR: Pass number {start_pass} is out of range (1-{total_passes})')
         sys.exit(1)
 
+    # Cost forecast, before a branch, a PR, a plan written or anything spent
+    # (#503; #510's review: --naturalness's brief fixes and their redrafts
+    # come first, and a dry run runs neither them nor the passes)
+    per_pass = 0.0
+    pass_forecast = 0.0
+    fix_forecast = _upstream_fix_cost(project_dir, upstream_scenes) if upstream_scenes else 0.0
+    if upstream_scenes:
+        log(f'Upstream issues in {len(upstream_scenes)} scene(s): '
+            f'{", ".join(upstream_scenes)}')
+    if args.dry_run and upstream_scenes:
+        log(f'  DRY RUN: their brief fixes and redrafts (~${fix_forecast:.2f}) are '
+            f'skipped; a run fixes them before the passes')
+    if not args.dry_run:
+        pending = sum(
+            1 for i in range(start_pass, total_passes + 1)
+            if _read_pass_field(plan_rows, i, 'status') != 'completed'
+        )
+        revise_model = select_revision_model('prose', 'prose revision')
+        per_pass = _pass_cost(project_dir, revise_model)
+        pass_forecast = per_pass * pending
+        from storyforge import gate
+        # the gate's run on each scene a pass rewrites is extra, and how many
+        # scenes a pass rewrites isn't known here (F-151)
+        log(f'Cost forecast: ~${fix_forecast + pass_forecast:.2f}: '
+            + (f'brief fixes and redrafts for {len(upstream_scenes)} scene(s) '
+               f'~${fix_forecast:.2f} (the gate on each redraft included), then '
+               if upstream_scenes else '')
+            + f'{pending} passes @ ~${per_pass:.2f}, plus about '
+              f'${gate.RECHECK_COST_PER_SCENE:.2f} for the gate on each rewritten scene')
+        # One budget for the session (#503's review, CR-1): the gate on what
+        # the passes rewrite always runs, and the re-checks get what the
+        # actual spend, the gate and the work still to come leave
+        _exit_if_over_threshold(
+            fix_forecast + pass_forecast, 'nothing revised',
+            (f'fix the briefs of {", ".join(upstream_scenes)} first (`storyforge hone`), '
+             f'or ' if upstream_scenes else '')
+            + 'start from a later pass (`storyforge revise N`)')
+        _log_recheck_budget()
+
     # Project title
     project_title = read_yaml_field('project.title', project_dir) or '(untitled project)'
 
@@ -3038,6 +3362,11 @@ def _main(argv=None):
                 with open(manifest, 'w') as f:
                     f.writelines(lines)
 
+    if upstream_scenes and not args.dry_run:
+        _fix_upstream_before_passes(project_dir, upstream_scenes, pass_forecast)
+    if new_plan:
+        _save_plan(csv_plan_file, plan_rows, new_plan)
+
     # ---- Load reader annotations if available ----
     annotations_csv = os.path.join(project_dir, 'working', 'annotations.csv')
     annotation_findings = []
@@ -3060,36 +3389,6 @@ def _main(argv=None):
     log(f'Coaching level: {effective_coaching}')
     log(f'Starting from pass: {start_pass} of {total_passes}')
     log('============================================')
-
-    # Cost forecast
-    per_pass = 0.0
-    if not args.dry_run:
-        pending = sum(
-            1 for i in range(start_pass, total_passes + 1)
-            if _read_pass_field(plan_rows, i, 'status') != 'completed'
-        )
-        avg_words, scene_count = _estimate_avg_words(project_dir)
-        revise_model = select_revision_model('prose', 'prose revision')
-        per_pass = estimate_cost('revise', scene_count, avg_words, revise_model)
-        total_forecast = per_pass * pending
-        from storyforge import gate
-        # the gate's run on each rewritten scene is extra, and how many scenes
-        # a pass rewrites isn't known here (F-151)
-        log(f'Cost forecast: ~${total_forecast:.2f} ({pending} passes @ ~${per_pass:.2f}), '
-            f'plus about ${gate.RECHECK_COST_PER_SCENE:.2f} for the gate on each '
-            f'rewritten scene')
-        # One budget for the session (#503's review, CR-1): the passes are
-        # checked against the threshold before anything is spent; the gate
-        # on what they rewrite always runs, and the re-checks get what the
-        # passes' actual spend, the gate and the passes still to run leave
-        if not check_threshold(total_forecast):
-            log(f'ERROR: the forecast (~${total_forecast:.2f}) is over the cost threshold '
-                f'(${cost_threshold():g}): nothing revised. Raise STORYFORGE_COST_THRESHOLD, '
-                f'or run fewer passes (`--pass N`).')
-            sys.exit(1)
-        log(f'  The re-checks after each gated scene get what is left of the '
-            f'${cost_threshold():g} threshold once the passes and the gate are paid for; '
-            f'any left over stay pending for `storyforge check --pending`.')
 
     # Check for deferred redrafting (multiple upstream passes)
     deferred_scenes, upstream_count = _collect_upstream_scenes(plan_rows)
