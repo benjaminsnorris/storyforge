@@ -658,3 +658,175 @@ class TestCheckBudget:
         assert '--accept' not in out
         report = open(os.path.join(project_dir, 'working', 'check-report.md')).read()
         assert '## Not checked' in report and f'Not checked: {SCENE}, act2-sc01' in report
+
+
+class TestKeepGoingReview503:
+    """#503's review of --keep-going."""
+
+    def _pend(self, project_dir, *ids):
+        for sid in ids:
+            gate.mark_pending(project_dir, sid, 'draft', 'stale')
+
+    def _rechecks(self, monkeypatch, runs):
+        """Each re-check run in turn: `runs` is a list of callables
+        (project_dir) -> gate.Recheck; the queue is non-empty while any are
+        left."""
+        runs = list(runs)
+        monkeypatch.setattr(gate, 'recheck_queue',
+                            lambda pd, skip=frozenset(): ['new-x1'] if runs else [])
+        monkeypatch.setattr(gate, 'recheck_pending', lambda pd, **k: runs.pop(0)(pd))
+
+    def test_stale_blocked_rows_are_not_offered_for_accept(self, project, monkeypatch,
+                                                          capsys):
+        """SF-2: a scene this run couldn't check kept an earlier run's
+        contradictions in gate-blocked.csv; --accept was offered on them."""
+        project_dir, _ = project
+        from storyforge.checker import CheckResult
+        old = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01',
+                                                             findings=[_finding()]))
+        gate._note_blocked(project_dir, 'act1-sc01', 'advisor', old)   # an earlier run
+        self._pend(project_dir, 'act1-sc01')
+        _fake_gate(monkeypatch, {'act1-sc01': 'extraction failed: HTTP 500'})
+        with pytest.raises(SystemExit):
+            cmd_check.main(['--pending', '--keep-going'])
+        out = capsys.readouterr().out
+        assert '--accept act1-sc01' not in out
+        assert 'Nothing to accept for act1-sc01' in out
+
+    def test_a_deferred_recheck_that_passes_later_is_settled(self, project, monkeypatch,
+                                                            capsys):
+        """SF-5/CR-3: it stayed in the summary, marked later scenes
+        provisional, and made the run exit 1."""
+        project_dir, _ = project
+        self._pend(project_dir, 'act1-sc01', SCENE, 'act2-sc01')
+        _fake_gate(monkeypatch, {})
+
+        def deferred(pd):
+            gate.mark_pending(pd, 'new-x1', gate.RECHECK, 'x')
+            return gate.Recheck(over_budget=True, left=['new-x1'])
+
+        def later(pd):
+            gate.clear_pending(pd, 'new-x1')
+            return gate.Recheck(passed=['new-x1'])
+        self._rechecks(monkeypatch, [deferred, later])
+        cmd_check.main(['--pending', '--keep-going'])          # exit 0
+        out = capsys.readouterr().out
+        assert 'provisional' not in out and 'not re-checked' not in out
+        assert '3 of 3 scene(s) checked passed.' in out
+
+    def test_rechecks_skipped_for_the_budget_are_named_and_exit_1(
+            self, project, monkeypatch, capsys):
+        """T-3."""
+        project_dir, _ = project
+        self._pend(project_dir, 'act1-sc01')
+        _fake_gate(monkeypatch, {})
+
+        def deferred(pd):
+            gate.mark_pending(pd, 'new-x1', gate.RECHECK, 'x')
+            return gate.Recheck(over_budget=True, left=['new-x1'])
+        self._rechecks(monkeypatch, [deferred])
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--pending', '--keep-going'])
+        assert e.value.code == 1
+        assert 'not re-checked (over the cost threshold; still pending): new-x1' \
+            in capsys.readouterr().out
+
+    def test_rechecks_left_behind_a_failed_one_are_named(self, project, monkeypatch, capsys):
+        project_dir, _ = project
+        self._pend(project_dir, 'act1-sc01')
+        _fake_gate(monkeypatch, {})
+
+        def failed(pd):
+            gate.mark_pending(pd, 'act2-sc02', gate.RECHECK, 'x')
+            gate.mark_pending(pd, 'new-x1', gate.RECHECK_FAILED, 'x')
+            return gate.Recheck(failed='new-x1', why='a contradiction', left=['act2-sc02'])
+        self._rechecks(monkeypatch, [failed])
+        with pytest.raises(SystemExit):
+            cmd_check.main(['--pending', '--keep-going'])
+        assert 'not re-checked (behind a re-check that failed; still pending): act2-sc02' \
+            in capsys.readouterr().out
+
+    def test_provisional_follows_reading_order(self, project, monkeypatch, capsys):
+        """T-4: a failed re-check of new-x1 (after act1-sc02, before
+        act2-sc01) makes only the later run scene provisional."""
+        project_dir, _ = project
+        self._pend(project_dir, 'act1-sc01', SCENE, 'act2-sc01')
+        _fake_gate(monkeypatch, {})
+
+        def failed(pd):
+            gate.mark_pending(pd, 'new-x1', gate.RECHECK_FAILED, 'x')
+            return gate.Recheck(failed='new-x1', why='a contradiction')
+        self._rechecks(monkeypatch, [failed])
+        with pytest.raises(SystemExit):
+            cmd_check.main(['--pending', '--keep-going'])
+        out = capsys.readouterr().out
+        assert f'{SCENE}: passed (provisional' not in out
+        assert 'act2-sc01: passed (provisional: new-x1, earlier, has not passed)' in out
+        assert 'Provisional: act2-sc01 were checked' in out
+
+    @pytest.mark.parametrize('recorded', [True, False])
+    def test_a_failed_recheck_is_offered_for_accept_only_with_a_contradiction(
+            self, project, monkeypatch, capsys, recorded):
+        """T-5."""
+        project_dir, _ = project
+        from storyforge.checker import CheckResult
+        self._pend(project_dir, 'act1-sc01')
+        _fake_gate(monkeypatch, {})
+
+        def failed(pd):
+            gate.mark_pending(pd, 'new-x1', gate.RECHECK_FAILED, 'x')
+            if not recorded:
+                return gate.Recheck(failed='new-x1', why='could not run')
+            r = gate.GateResult('new-x1', check=CheckResult('new-x1', findings=[_finding()]))
+            gate._note_blocked(pd, 'new-x1', 'recheck', r)
+            return gate.Recheck(failed='new-x1', why='a contradiction', result=r)
+        self._rechecks(monkeypatch, [failed])
+        with pytest.raises(SystemExit):
+            cmd_check.main(['--pending', '--keep-going'])
+        out = capsys.readouterr().out
+        assert ('`storyforge check --accept new-x1`' in out) is recorded
+        assert ('Nothing to accept for new-x1' in out) is (not recorded)
+
+    def test_accept_takes_no_keep_going(self, project):
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--accept', SCENE, '--keep-going'])
+        assert e.value.code == 1
+
+    def test_an_unreadable_blocked_file_is_a_warning(self, project, monkeypatch, capsys):
+        project_dir, _ = project
+        self._pend(project_dir, 'act1-sc01')
+        _fake_gate(monkeypatch, {'act1-sc01': _finding()})
+
+        def unreadable(pd):
+            raise gate.GateError('bad header')
+        monkeypatch.setattr(gate, 'blocked', unreadable)
+        monkeypatch.setattr(gate, '_note_blocked', lambda *a: None)
+        with pytest.raises(SystemExit):
+            cmd_check.main(['--pending', '--keep-going'])
+        assert 'could not be read (bad header): which of them can be accepted is unknown' \
+            in capsys.readouterr().out
+
+    def test_the_summary_is_logged_even_when_the_commit_fails(self, project, monkeypatch,
+                                                             capsys):
+        project_dir, _ = project
+        self._pend(project_dir, 'act1-sc01')
+        _fake_gate(monkeypatch, {'act1-sc01': _finding()})
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **k: False)
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--pending', '--keep-going'])
+        assert e.value.code == 1
+        out = capsys.readouterr().out
+        assert '`storyforge check --accept act1-sc01`' in out
+        assert 'the commit failed' in out
+
+    def test_a_report_that_cannot_be_written_is_an_error_not_a_traceback(
+            self, project, monkeypatch, capsys):
+        project_dir, commits = project
+        self._pend(project_dir, 'act1-sc01')
+        _fake_gate(monkeypatch, {})
+        os.makedirs(os.path.join(project_dir, cmd_check.REPORT_PATH))   # a directory
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--pending', '--keep-going'])
+        assert e.value.code == 1
+        assert f'ERROR: could not write {cmd_check.REPORT_PATH}' in capsys.readouterr().out
+        assert commits   # the ledger is still committed
