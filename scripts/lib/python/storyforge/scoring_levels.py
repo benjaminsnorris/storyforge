@@ -262,6 +262,7 @@ def score_spine(project_dir: str, medium: str = 'novel') -> dict:
     ))
 
     checks.extend(_summary_checks(rows, label='event'))
+    checks.extend(_act_order_checks(rows, label='event'))
     return _result(3, 'spine', checks)
 
 
@@ -270,6 +271,22 @@ def score_spine(project_dir: str, medium: str = 'novel') -> dict:
 # ============================================================================
 
 _SUMMARY_MAX_WORDS = 35
+
+
+def _act_order_checks(rows: list[dict], label: str) -> list[CheckResult]:
+    """Acts are runs of consecutive scenes, so in seq order a row's act never
+    goes down (F-160: per-scene guesses flipped between acts)."""
+    from storyforge.extract_acts import backward_steps
+    steps = backward_steps(rows)
+    return [_check(
+        'acts run in order (act never steps back as seq rises)',
+        not steps,
+        (f'{len(steps)} {label}(s) step back to an earlier act; first: '
+         + ', '.join(f'{a} -> {b}' for a, b in steps[:3])
+         + ('…' if len(steps) > 3 else ''))
+        if steps else '',
+        severity='medium',
+    )]
 
 
 def _summary_checks(
@@ -422,6 +439,7 @@ def score_architecture(project_dir: str, medium: str = 'novel') -> dict:
         ))
 
     checks.extend(_summary_checks(rows, label='anchor'))
+    checks.extend(_act_order_checks(rows, label='anchor'))
     return _result(4, 'architecture', checks)
 
 
@@ -536,6 +554,7 @@ def score_scene_map(project_dir: str) -> dict:
         ))
 
     checks.extend(_summary_checks(map_rows, label='scene'))
+    checks.extend(_act_order_checks(map_rows, label='scene'))
     return _result(5, 'scene-map', checks)
 
 
