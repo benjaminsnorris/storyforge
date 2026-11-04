@@ -2005,6 +2005,10 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
             'message': f'schema: {err.get("file", "")}: {describe_schema_error(err)}'})
     if any(err.get('constraint') == 'enum' for err in schema_report['errors']):
         report['passed'] = False
+    from storyforge.schema import unchecked_lines
+    for line in unchecked_lines(schema_report):
+        report['failures'].append({'severity': 'advisory', 'scene_id': '',
+                                   'message': f'schema: {line}'})
     if source_cfg is not None and stage in ('map', 'briefs'):
         # Source coverage (#477), in the stage's report; a blocking gap holds
         # the phase like any other blocking failure

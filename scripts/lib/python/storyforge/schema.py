@@ -694,6 +694,9 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
     failed = 0
     skipped = 0
     errors: list[dict] = []
+    # registry (file, or "file (ledger type)") -> cells naming ids it can't
+    # check because it has no rows
+    unchecked: dict[str, int] = {}
 
     for filename, columns, key_prefix in _validated_files():
         path = os.path.join(ref_dir, filename)
@@ -788,7 +791,11 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                     csv_name = _registry_key(schema)
                     alias_map = registries.get(csv_name, {})
                     if not alias_map:
+                        # Nothing to check the ids against: say so, so an
+                        # empty registry never reads as a pass (B-019, B-020)
                         skipped += 1
+                        if project_dir:
+                            unchecked[csv_name] = unchecked.get(csv_name, 0) + 1
                         continue
 
                     bad = _check_registry(value, alias_map,
@@ -826,6 +833,8 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                         })
 
                 elif constraint == 'mice':
+                    if project_dir and not mice_alias:
+                        unchecked[schema['registry']] = unchecked.get(schema['registry'], 0) + 1
                     problems = _check_mice(value, mice_alias, mice_type_map)
                     if not problems:
                         passed += 1
@@ -894,7 +903,15 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
         'failed': failed,
         'skipped': skipped,
         'errors': errors,
+        'unchecked': unchecked,
     }
+
+
+def unchecked_lines(report: dict) -> list[str]:
+    """One line per registry `validate_schema` couldn't check ids against
+    because it has no rows (`report['unchecked']`)."""
+    return [f'{n} cell(s) name ids from reference/{reg}, which has no rows: not checked'
+            for reg, n in sorted((report.get('unchecked') or {}).items())]
 
 
 # ============================================================================
