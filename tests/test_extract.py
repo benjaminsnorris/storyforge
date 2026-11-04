@@ -240,6 +240,26 @@ class TestBuildPrompts:
         assert '- function:' in prompt and '- value_shift:' in prompt and '- mice_threads' in prompt
         assert 'FUNCTION:' not in prompt
 
+    def test_intent_prompt_casts_are_not_kept_to_the_registry(self):
+        """#523: the cast instructions ask for a new id for anyone the
+        character list leaves out, count a god acting from afar or in
+        disguise as on stage, and leave out names that appear only in a
+        patronymic, simile or genealogy."""
+        from storyforge.extract import build_intent_prompt
+        prompt = build_intent_prompt('s1', 'Prose.', {}, {'title': 'T'})
+        lines = prompt.splitlines()
+        on_stage = next(l for l in lines if l.startswith('- on_stage (list):'))
+        characters = next(l for l in lines if l.startswith('- characters (list):'))
+        assert 'acts or speaks' in on_stage
+        assert 'from afar' in on_stage and 'disguise' in on_stage
+        assert 'physically present' not in on_stage
+        assert 'acts or speaks (as on_stage), plus' in characters
+        for passing in ('patronymic', 'epithet', 'simile', 'genealogy'):
+            assert passing in characters
+        assert 'ALL characters present or referenced by name' not in prompt
+        ids = next(l for l in lines if 'Characters registry' in l)
+        assert 'give anyone not listed a new lowercase-hyphen id' in ids
+
     def test_intent_prompt_offers_only_valid_value_shifts(self):
         """The prompt asks for exactly one shift, and every shift it names
         is one the schema allows.

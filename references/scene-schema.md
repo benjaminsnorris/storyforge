@@ -92,8 +92,8 @@ print(dump_schema_markdown())
 | `value_at_stake` | registry: values.csv | architecture | The abstract value being tested. Normalized against reference/values.csv (McKee). |
 | `value_shift` | enum: +/+, +/++, +/-, -/+, -/-, -/-- | architecture | Polarity change (Story Grid). A scene that doesn't shift a value is a nonevent. |
 | `turning_point` | enum: action, revelation | architecture | What turns the scene — action (character does something) or revelation (new information). |
-| `characters` | registry: characters.csv (array) | map | All characters present or referenced. Normalized against reference/characters.csv. |
-| `on_stage` | registry: characters.csv (array) | map | Characters physically present (subset of characters). |
+| `characters` | registry: characters.csv (array) | map | Everyone on stage, plus anyone whose actions are narrated in the scene or who is discussed at length; not a name only in a patronymic, epithet, title, simile, comparison or genealogy. Normalized against reference/characters.csv. |
+| `on_stage` | registry: characters.csv (array) | map | Everyone present who acts or speaks, including a god or other power acting on the scene from afar, or present in disguise (under their own id). A subset of characters. |
 | `mice_threads` | mice: mice-threads.csv | map | MICE threads (Kowal): +name where the thread begins (once), -name where it resolves (at most once), bare name where a scene advances or touches an open thread. Threads may interleave; nesting is guidance, not a rule. |
 
 ### scene-briefs.csv — drafting contracts

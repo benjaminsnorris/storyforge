@@ -448,6 +448,23 @@ class TestFormatRegistriesForPrompt:
         result = format_registries_for_prompt(project_dir)
         assert result.startswith('## Canonical Registries')
 
+    def test_partial_labels_only_the_named_registry(self, project_dir):
+        """#523: extract phase 2 marks characters.csv as known so far; every
+        other caller's prompt is unchanged."""
+        from storyforge.enrich import PARTIAL_REGISTRY_NOTE
+        plain = format_registries_for_prompt(project_dir)
+        marked = format_registries_for_prompt(project_dir, partial=('characters.csv',))
+        assert PARTIAL_REGISTRY_NOTE not in plain
+        assert marked == plain.replace(
+            '### Characters (reference/characters.csv)\n',
+            f'### Characters (reference/characters.csv) — {PARTIAL_REGISTRY_NOTE}\n')
+
+    @pytest.mark.parametrize('partial', [('character.csv',), ('knowledge',), 'characters.csv'])
+    def test_partial_naming_no_registry_file_raises(self, project_dir, partial):
+        """A typo would silently restore the unlabelled list (#523)."""
+        with pytest.raises(ValueError, match='partial'):
+            format_registries_for_prompt(project_dir, partial=partial)
+
 
 # ============================================================================
 # load_registry_alias_maps

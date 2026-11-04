@@ -489,12 +489,29 @@ _VALUE_FIELDS = ('value_at_stake',)
 _KNOWLEDGE_FIELDS = ('knowledge_in', 'knowledge_out')
 
 
+# Registry definitions for prompts: (filename, section_title, extra_columns);
+# extra_columns are additional columns to show alongside id and name
+_PROMPT_REGISTRIES = (
+    ('characters.csv', 'Characters', []),
+    ('locations.csv', 'Locations', []),
+    ('values.csv', 'Values', []),
+    ('mice-threads.csv', 'MICE Threads', ['type']),
+    ('motif-taxonomy.csv', 'Motifs', []),
+)
+
+#: The heading note on a registry that ``partial`` marks as not complete
+PARTIAL_REGISTRY_NOTE = ('known so far, NOT complete: give anyone or anything '
+                         'not listed a new lowercase-hyphen id')
+
+
 def format_registries_for_prompt(project_dir: str,
-                                 exclude: tuple[str, ...] = ()) -> str:
+                                 exclude: tuple[str, ...] = (),
+                                 partial: tuple[str, ...] = ()) -> str:
     """Format registry CSV contents as a prompt section.
 
     Reads all registry files and returns a formatted string showing
-    canonical IDs that Claude should use in its output.  Registries
+    canonical IDs that Claude should use in its output (a registry named
+    in ``partial`` is offered as a starting list instead).  Registries
     whose files don't exist or contain only a header row are skipped.
     Knowledge facts come from the ledger (``reference/commitments.csv``).
 
@@ -503,6 +520,15 @@ def format_registries_for_prompt(project_dir: str,
         exclude: Registries to leave out, by filename or ``'knowledge'``
             (e.g. ``('knowledge',)`` for a prompt that renders the facts
             itself).
+        partial: Registries, by filename, to label as known so far and not
+            complete (``PARTIAL_REGISTRY_NOTE``), so the model gives a new id
+            to anyone not listed rather than keeping to the list: extract
+            phase 2's ``characters.csv``, which holds only the POV
+            characters at that point (#523). The outer heading still says
+            "use these IDs": the note sits on the registry's own heading.
+            A name that isn't a registry filename raises ValueError (a typo
+            would silently restore the unlabelled list). A registry in both
+            ``exclude`` and ``partial`` is left out.
 
     Returns:
         Formatted markdown string, or empty string if no registries exist.
@@ -515,15 +541,9 @@ def format_registries_for_prompt(project_dir: str,
 
     ref_dir = os.path.join(project_dir, 'reference')
 
-    # Registry definitions: (filename, section_title, extra_columns)
-    # extra_columns are additional columns to show alongside id and name
-    registries = [
-        ('characters.csv', 'Characters', []),
-        ('locations.csv', 'Locations', []),
-        ('values.csv', 'Values', []),
-        ('mice-threads.csv', 'MICE Threads', ['type']),
-        ('motif-taxonomy.csv', 'Motifs', []),
-    ]
+    registries = _PROMPT_REGISTRIES
+    if isinstance(partial, str) or set(partial) - {r[0] for r in registries}:
+        raise ValueError(f'partial names no registry file: {partial!r}')
 
     sections: list[str] = []
 
@@ -577,7 +597,8 @@ def format_registries_for_prompt(project_dir: str,
                 entries.append(f'- {rid} ({rname})')
 
         if entries:
-            sections.append(f'### {title} (reference/{filename})\n' +
+            note = f' — {PARTIAL_REGISTRY_NOTE}' if filename in partial else ''
+            sections.append(f'### {title} (reference/{filename}){note}\n' +
                             '\n'.join(entries))
 
     if 'knowledge' not in exclude:
@@ -975,6 +996,8 @@ def _field_instruction(field: str) -> str:
             'does something that changes the situation; revelation means new '
             'information changes the situation>'
         ),
+        # The legacy enrich wording; extract phase 2's cast definitions
+        # (extract.build_intent_prompt, #523) are the current ones
         'characters': (
             'CHARACTERS: <semicolon-separated list of ALL characters present '
             'or referenced by name>'

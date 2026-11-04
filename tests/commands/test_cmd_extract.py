@@ -826,6 +826,80 @@ class TestPhase2Force:
         assert seen['force'] is True
 
 
+class TestPhase2CastPrompt:
+    """#523: after phase 1, characters.csv holds only the POV characters.
+    Phase 2 offered it as "use these IDs", and the casts kept to it (the
+    Odyssey's five ids left Eumaeus out of his own hut). The list is now
+    labelled incomplete in phase 2's prompt only."""
+
+    def test_phase_2_labels_the_character_registry_incomplete(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        from storyforge.enrich import PARTIAL_REGISTRY_NOTE
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_extract.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_extract._run_hone', lambda *a, **k: None)
+        mock_api.set_response_fn(_chain_or_csv_reply)
+
+        main(['--phase', '2'])
+
+        prompts = [r['params']['messages'][0]['content']
+                   for c in mock_api.calls_for('submit_batch') for r in c['requests']]
+        assert prompts
+        for prompt in prompts:
+            # still offered, so a listed person keeps their id ...
+            assert '- dorren-hayle (Dorren Hayle)' in prompt
+            # ... but as a partial list, and only the characters
+            assert (f'### Characters (reference/characters.csv) — {PARTIAL_REGISTRY_NOTE}\n'
+                    in prompt)
+            assert prompt.count(PARTIAL_REGISTRY_NOTE) == 1
+            assert '### Locations (reference/locations.csv)\n' in prompt
+
+    def test_only_phase_2_gets_the_note_and_new_ids_reach_the_csv(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """Every other phase still offers the registry as the ids to use,
+        and a new id phase 2 answers with is kept in scene-intent.csv (hone,
+        stubbed here, then adds it to the registry)."""
+        from storyforge.enrich import PARTIAL_REGISTRY_NOTE
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_extract.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_extract._run_hone', lambda *a, **k: None)
+        monkeypatch.setattr('storyforge.elaborate.validate_structure', lambda ref_dir: {
+            'passed': True, 'failures': [], 'checks': []})
+        monkeypatch.setattr('storyforge.cmd_extract.get_coaching_level', lambda pd: 'full')
+        monkeypatch.setattr('storyforge.extract.run_cleanup', lambda ref_dir: {
+            'total_fixes': 0})
+        monkeypatch.setattr('storyforge.cmd_extract._run_phase_5', lambda *a, **k: None)
+
+        def reply(prompt):
+            if 'Extract the narrative intent' in prompt:
+                return _structured('INTENT_SCHEMA', function='Sets up the audit.',
+                                   characters=['dorren-hayle', 'old-mother-vey'],
+                                   on_stage=['old-mother-vey'])
+            return _chain_or_csv_reply(prompt)
+
+        mock_api.set_response_fn(reply)
+        main(['--force'])
+
+        prompts = [r['params']['messages'][0]['content']
+                   for c in mock_api.calls_for('submit_batch') for r in c['requests']]
+        prompts += [c['prompt'] for c in mock_api.calls if c.get('prompt')]
+        intent = [p for p in prompts if 'Extract the narrative intent' in p]
+        others = [p for p in prompts if 'Extract the narrative intent' not in p]
+        assert intent and all(PARTIAL_REGISTRY_NOTE in p for p in intent)
+        assert not any(PARTIAL_REGISTRY_NOTE in p for p in others)
+        # the others do render the character list, without the note
+        assert any('### Characters (reference/characters.csv)\n' in p for p in others)
+
+        from storyforge.elaborate import _read_csv_as_map
+        rows = _read_csv_as_map(os.path.join(project_dir, 'reference', 'scene-intent.csv'))
+        sent = {r['custom_id'] for c in mock_api.calls_for('submit_batch') for r in c['requests']
+                if 'Extract the narrative intent' in r['params']['messages'][0]['content']}
+        assert sent and all((rows[sid]['characters'], rows[sid]['on_stage'])
+                            == ('dorren-hayle;old-mother-vey', 'old-mother-vey') for sid in sent)
+
+
 class TestMergeBatchResults:
     """Extracting The Great Gatsby wrote briefs for 1 of 39 scenes: the loop
     asked "is the CSV empty?" per scene, so only the first scene was added."""

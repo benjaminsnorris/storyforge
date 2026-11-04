@@ -671,7 +671,11 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     model = select_model('evaluation')
     profile = _load_profile(profile_file)
-    registries = format_registries_for_prompt(project_dir)
+    # After phase 1 the character registry holds only the POV characters
+    # (hone phase 1 builds it from the pov column). When it was offered as
+    # the list to use, it anchored every cast to those few (#523), so it is labelled
+    # incomplete; hone phase 2 adds the new ids the casts bring.
+    registries = format_registries_for_prompt(project_dir, partial=('characters.csv',))
 
     batch_file = os.path.join(log_dir, 'extract-phase2-batch.jsonl')
     _safe_remove(batch_file)
