@@ -171,15 +171,32 @@ def exit_if_not_migrated(project_dir: str) -> None:
 
 def exit_if_unordered(project_dir: str) -> None:
     """Stop the command (exit 1) when scenes.csv has a scene without a
-    numeric `seq`: drafting reads the ledger as of each scene
-    (`drafting_slice`), and without an order what came before is a guess."""
-    if not os.path.isfile(os.path.join(project_dir, 'reference', 'scenes.csv')):
+    numeric `seq`, or two scenes sharing one: drafting reads the ledger as
+    of each scene (`drafting_slice`) and the gate checks against the facts
+    in force there, so without one order what came before is a guess.
+
+    `scene_order` itself still ranks tied scenes by id, without a word: the
+    gate and the evals read it, and E8's thornwall trees carry a tie. The
+    stop is here, at the command entry, before any model call."""
+    path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if not os.path.isfile(path):
         return
+    from storyforge.common import log
     try:
         scene_order(project_dir)
     except ValueError as e:
-        from storyforge.common import log
         log(f'ERROR: {e}. Give every scene a number in seq.')
+        raise SystemExit(1)
+    from storyforge.elaborate import _read_csv_as_map, shared_seqs
+    shared = shared_seqs(_read_csv_as_map(path).values())
+    if shared:
+        for seq, sids in shared:
+            log(f'ERROR: scenes.csv: {", ".join(sids)} share seq {seq}, so '
+                f'their reading order is undefined.')
+        log('ERROR: Which scene comes first is the author\'s call: decide it, '
+            'then give each scene its own number in the seq column of '
+            'reference/scenes.csv (`storyforge validate` reports these as '
+            'duplicate-seq).')
         raise SystemExit(1)
 
 

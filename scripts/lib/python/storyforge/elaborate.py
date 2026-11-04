@@ -1030,6 +1030,32 @@ def _validate_pacing(scenes_map, intent_map, checks):
                              'Turning point types are varied'))
 
 
+def shared_seqs(scenes) -> list[tuple[str, list[str]]]:
+    """The seqs two or more scenes share, as (seq, sorted scene ids), in
+    reading order: validate's `duplicate-seq` and the write/revise/check
+    stop (`ledger.exit_if_unordered`) both read this one definition.
+
+    Every row counts, whatever its status: `ledger.scene_order` ranks every
+    row of scenes.csv (a cut scene's facts still sit at its position), so a
+    tie with a cut or unwritten scene is still an order nobody chose. Seqs
+    compare as numbers where they are numbers, as `scene_order` sorts them
+    ("12" and "12.0" tie there too); a blank seq is not a shared one.
+    """
+    groups: dict[object, tuple[str, list[str]]] = {}
+    for scene in scenes:
+        sid = (scene.get('id') or '').strip()
+        seq = (scene.get('seq') or '').strip()
+        if not sid or not seq:
+            continue
+        try:
+            key: object = (0, float(seq))
+        except ValueError:
+            key = (1, seq)
+        groups.setdefault(key, (seq, []))[1].append(sid)
+    return [(seq, sorted(sids)) for _, (seq, sids) in sorted(groups.items())
+            if len(sids) > 1]
+
+
 def validate_structure(ref_dir: str) -> dict:
     """Run all structural validation checks against the scene CSVs.
 
@@ -1080,18 +1106,12 @@ def validate_structure(ref_dir: str) -> dict:
     # --- Identity: seq is unique ---
     # Two scenes sharing a seq have no defined reading order, and renumbering
     # would pick one silently (thornwall seq 58). The author decides the order.
-    by_seq: dict[str, list[str]] = {}
-    for sid, scene in scenes_map.items():
-        seq = scene.get('seq', '').strip()
-        if seq:
-            by_seq.setdefault(seq, []).append(sid)
-    dup_seqs = {seq: sids for seq, sids in by_seq.items() if len(sids) > 1}
+    dup_seqs = shared_seqs(scenes_map.values())
     checks.append(_check(
         'identity', 'duplicate-seq',
         not dup_seqs,
         "Scenes share a seq (reading order is undefined): "
-        + '; '.join(f"seq {seq}: {sorted(sids)}"
-                    for seq, sids in sorted(dup_seqs.items()))
+        + '; '.join(f"seq {seq}: {sids}" for seq, sids in dup_seqs)
         if dup_seqs else "Every seq is unique",
     ))
 
