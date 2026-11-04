@@ -94,6 +94,8 @@ def main(argv=None):
             sys.exit(1)
         _accept(project_dir, [s.strip() for s in args.accept.split(',') if s.strip()])
         return
+    from storyforge.costs import exit_if_bad_threshold
+    exit_if_bad_threshold()   # the re-checks and --pending's forecast check it
     if not (args.positional or args.scenes or args.act or args.from_seq or args.pending):
         log('ERROR: name the scenes to check (an id, a range, --scenes, --act, --from-seq '
             'or --pending).')

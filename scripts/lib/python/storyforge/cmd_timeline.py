@@ -37,7 +37,7 @@ from storyforge.common import (
 from storyforge.cli import add_scene_filter_args, resolve_filter_args
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.csv_cli import get_field
-from storyforge.costs import estimate_cost, check_threshold, print_summary
+from storyforge.costs import estimate_cost, check_threshold, exit_if_bad_threshold, print_summary
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
     update_pr_task, commit_and_push,
@@ -91,6 +91,7 @@ def main(argv=None):
 
     install_signal_handlers()
     project_dir = detect_project_root()
+    exit_if_bad_threshold()   # before anything is spent
 
     parallel = args.parallel or int(os.environ.get('STORYFORGE_TIMELINE_PARALLEL', '6'))
     os.environ.setdefault('STORYFORGE_PARALLEL', str(parallel))

@@ -46,7 +46,10 @@ from storyforge.api import (
     calculate_cost_from_usage, submit_batch, poll_batch, download_batch_results,
     stop_problem, fallback_model, is_refusal, RefusalError, report_fallback_replies,
 )
-from storyforge.costs import estimate_cost, check_threshold, log_operation, print_summary
+from storyforge.costs import (
+    estimate_cost, check_threshold, cost_threshold, exit_if_bad_threshold, log_operation,
+    print_summary,
+)
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.csv_cli import get_field, update_field
 
@@ -95,6 +98,7 @@ def main(argv=None):
     apply_coaching_override(args)
 
     project_dir = detect_project_root()
+    exit_if_bad_threshold()   # before anything is spent, not at the first re-check
     from storyforge.ledger import exit_if_not_migrated, exit_if_unordered
     exit_if_not_migrated(project_dir)  # the registries live in the ledger
     exit_if_unordered(project_dir)  # drafting reads the ledger as of each scene
@@ -192,9 +196,8 @@ def main(argv=None):
         if not check_threshold(estimated):
             # Nothing was drafted: exit 1, so a script or chained command
             # doesn't read the stop as a finished run
-            limit = os.environ.get('STORYFORGE_COST_THRESHOLD', '100')
             log(f'ERROR: the forecast (~${estimated:.2f}) is over the cost threshold '
-                f'(${limit}): nothing written. Set STORYFORGE_COST_THRESHOLD higher, '
+                f'(${cost_threshold():g}): nothing written. Set STORYFORGE_COST_THRESHOLD higher, '
                 f'or write fewer scenes.')
             sys.exit(1)
 

@@ -229,6 +229,40 @@ class TestCheckThreshold:
         assert check_threshold(0.0) is True
 
 
+class TestCostThreshold:
+    """A threshold that isn't a number is an error naming the variable and
+    the value, never a traceback (`float('abc')`) or a quiet fallback to the
+    default (#499's review)."""
+
+    @pytest.mark.parametrize('bad', ['abc', '', '  ', '$50', '50 dollars', 'nan', 'inf', '-5'])
+    def test_a_bad_value_is_an_error_naming_it(self, monkeypatch, bad):
+        from storyforge.costs import ThresholdError, cost_threshold
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', bad)
+        with pytest.raises(ThresholdError) as e:
+            cost_threshold()
+        assert 'STORYFORGE_COST_THRESHOLD' in str(e.value) and repr(bad) in str(e.value)
+        with pytest.raises(ThresholdError):
+            check_threshold(1.0)
+
+    def test_good_values(self, monkeypatch):
+        from storyforge.costs import cost_threshold
+        assert cost_threshold() == 100.0
+        assert cost_threshold(20.0) == 20.0
+        for raw, value in (('25', 25.0), (' 150.5 ', 150.5), ('0', 0.0)):
+            monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', raw)
+            assert cost_threshold() == value
+
+    def test_exit_if_bad_threshold_exits_1_with_an_error(self, monkeypatch, capsys):
+        from storyforge.costs import exit_if_bad_threshold
+        exit_if_bad_threshold()   # unset: nothing to say
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', 'lots')
+        with pytest.raises(SystemExit) as e:
+            exit_if_bad_threshold()
+        assert e.value.code == 1
+        out = capsys.readouterr().out
+        assert "ERROR: STORYFORGE_COST_THRESHOLD is 'lots'" in out and 'Nothing run' in out
+
+
 # ============================================================================
 # log_operation
 # ============================================================================

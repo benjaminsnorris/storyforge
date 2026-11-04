@@ -2748,6 +2748,10 @@ def main(argv=None):
     session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     project_dir = detect_project_root()
+    # the re-checks after each gated scene check the threshold: a bad value
+    # stops the run here, not after the passes were paid for
+    from storyforge.costs import exit_if_bad_threshold
+    exit_if_bad_threshold()
     from storyforge.ledger import exit_if_not_migrated, exit_if_unordered
     exit_if_not_migrated(project_dir)  # the registries live in the ledger
     exit_if_unordered(project_dir)  # drafting reads the ledger as of each scene

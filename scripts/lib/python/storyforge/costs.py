@@ -334,14 +334,56 @@ def format_duration(seconds: int) -> str:
     return f'{h}h {m}m {s}s'
 
 
-def check_threshold(estimated_cost: float, threshold: float = 100.0) -> bool:
+#: The environment variable that sets the cost threshold, in US dollars
+THRESHOLD_ENV = 'STORYFORGE_COST_THRESHOLD'
+DEFAULT_THRESHOLD = 100.0
+
+
+class ThresholdError(ValueError):
+    """`STORYFORGE_COST_THRESHOLD` is set to something that isn't a cost."""
+
+
+def cost_threshold(default: float = DEFAULT_THRESHOLD) -> float:
+    """The cost threshold in effect: `STORYFORGE_COST_THRESHOLD` when set,
+    else `default`. A value that isn't a finite, non-negative number
+    (blank included) raises `ThresholdError` naming the variable and the
+    value, never a fallback to the default: a typo must not quietly become
+    $100 of spending."""
+    raw = os.environ.get(THRESHOLD_ENV)
+    if raw is None:
+        return default
+    try:
+        value = float(raw.strip())
+    except ValueError:
+        value = float('nan')
+    if value != value or value in (float('inf'), float('-inf')) or value < 0:
+        raise ThresholdError(
+            f'{THRESHOLD_ENV} is {raw!r}, which is not a cost threshold: set it to a '
+            f'number of US dollars (e.g. 25 or 150.50), or unset it for the default '
+            f'(${default:g}).')
+    return value
+
+
+def exit_if_bad_threshold() -> None:
+    """Exit 1 with an ERROR when `STORYFORGE_COST_THRESHOLD` isn't a number.
+    Commands that check the threshold call it before anything is spent, so
+    a bad value stops the run up front, not after the first paid calls."""
+    try:
+        cost_threshold()
+    except ThresholdError as e:
+        from storyforge.common import log
+        log(f'ERROR: {e} Nothing run.')
+        sys.exit(1)
+
+
+def check_threshold(estimated_cost: float, threshold: float = DEFAULT_THRESHOLD) -> bool:
     """Check whether estimated cost is within threshold.
 
     Returns True if OK to proceed, False if over threshold.
-    Uses STORYFORGE_COST_THRESHOLD env var if set.
+    Uses STORYFORGE_COST_THRESHOLD env var if set (`cost_threshold`; a value
+    that isn't a number raises `ThresholdError`).
     """
-    threshold = float(os.environ.get('STORYFORGE_COST_THRESHOLD', threshold))
-    return estimated_cost <= threshold
+    return estimated_cost <= cost_threshold(threshold)
 
 
 # ============================================================================
@@ -402,8 +444,12 @@ def main():
             print('Usage: ... check <estimated_cost> [threshold]', file=sys.stderr)
             sys.exit(1)
         estimated = float(sys.argv[2])
-        threshold = float(sys.argv[3]) if len(sys.argv) > 3 else 100.0
-        ok = check_threshold(estimated, threshold)
+        threshold = float(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_THRESHOLD
+        try:
+            ok = check_threshold(estimated, threshold)
+        except ThresholdError as e:
+            print(f'ERROR: {e}', file=sys.stderr)
+            sys.exit(2)
         print('ok' if ok else 'over')
         sys.exit(0 if ok else 1)
 

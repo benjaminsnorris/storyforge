@@ -58,6 +58,23 @@ def test_the_dispatcher_turns_a_late_error_into_a_plain_stop(project_dir, monkey
         in capsys.readouterr().err
 
 
+def test_the_dispatcher_turns_a_bad_cost_threshold_into_a_plain_stop(monkeypatch, capsys):
+    """A command that reaches `check_threshold` with a non-numeric
+    STORYFORGE_COST_THRESHOLD exits 1 with the message, not a traceback."""
+    from storyforge import __main__ as dispatcher
+    from storyforge.costs import check_threshold
+
+    class Command:
+        @staticmethod
+        def main(argv):
+            check_threshold(1.0)
+    monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', 'ten')
+    with pytest.raises(SystemExit) as exc:
+        dispatcher._dispatch(Command)
+    assert exc.value.code == 1
+    assert "ERROR: STORYFORGE_COST_THRESHOLD is 'ten'" in capsys.readouterr().err
+
+
 def test_neither_file_reads_as_empty_registries(project_dir):
     os.remove(os.path.join(project_dir, 'reference', ledger.LEDGER_FILE))
     from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps

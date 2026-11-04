@@ -376,6 +376,20 @@ class TestDiagnosisHelpers:
 class TestMainDryRun:
     """Tests for main() in dry-run mode."""
 
+    def test_a_non_numeric_cost_threshold_stops_before_anything(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        """revise's re-checks read the threshold after the passes were paid
+        for; a bad value crashed there. Now an ERROR up front, exit 1."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', 'x')
+        monkeypatch.setattr('storyforge.cmd_revise.detect_project_root',
+                            lambda: project_dir)
+        with pytest.raises(SystemExit) as e:
+            main(['--polish'])
+        assert e.value.code == 1
+        assert mock_api.call_count == 0 and mock_git.calls == []
+        assert "ERROR: STORYFORGE_COST_THRESHOLD is 'x'" in capsys.readouterr().out
+
     def test_polish_dry_run(self, mock_api, mock_git, mock_costs, project_dir,
                             monkeypatch, capsys):
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')

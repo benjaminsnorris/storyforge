@@ -31,7 +31,7 @@ from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
     update_pr_task, commit_and_push,
 )
-from storyforge.costs import estimate_cost, check_threshold, print_summary
+from storyforge.costs import estimate_cost, check_threshold, exit_if_bad_threshold, print_summary
 from storyforge.api import (
     invoke_to_file, extract_text_from_file, submit_batch,
     poll_batch, download_batch_results, extract_usage,
@@ -256,6 +256,7 @@ def main(argv=None):
 
     install_signal_handlers()
     project_dir = detect_project_root()
+    exit_if_bad_threshold()   # before anything is spent
     from storyforge.ledger import exit_if_not_migrated
     exit_if_not_migrated(project_dir)  # the registries live in the ledger
     log(f'Project root: {project_dir}')

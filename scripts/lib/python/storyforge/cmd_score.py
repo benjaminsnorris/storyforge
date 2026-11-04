@@ -42,7 +42,9 @@ from storyforge.api import (
     stop_problem, is_truncated,
     build_batch_request,
 )
-from storyforge.costs import estimate_cost, check_threshold, log_operation, print_summary
+from storyforge.costs import (
+    estimate_cost, check_threshold, exit_if_bad_threshold, log_operation, print_summary,
+)
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.csv_cli import get_field, get_column, update_field
 
@@ -470,6 +472,7 @@ def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
 
     install_signal_handlers()
+    exit_if_bad_threshold()   # before anything is spent
     _incomplete.clear()
 
     # Elaboration entry points short-circuit the prose-scoring flow.

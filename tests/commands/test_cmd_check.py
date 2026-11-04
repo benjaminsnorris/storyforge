@@ -134,6 +134,17 @@ class TestCheck:
             cmd_check.main([])
         assert e.value.code == 1
 
+    def test_a_non_numeric_cost_threshold_stops_before_anything(
+            self, project, monkeypatch, capsys):
+        """It crashed with a ValueError at the first threshold check."""
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', 'twenty')
+        monkeypatch.setattr(gate, 'gate_scene', lambda *a, **k: pytest.fail('checked'))
+        for argv in ([SCENE], ['--pending']):
+            with pytest.raises(SystemExit) as e:
+                cmd_check.main(argv)
+            assert e.value.code == 1
+            assert "ERROR: STORYFORGE_COST_THRESHOLD is 'twenty'" in capsys.readouterr().out
+
 
 class TestPendingAndRecheck:
     """Phase 4: `--pending`, a re-check row keeps its prose's writer, and a
