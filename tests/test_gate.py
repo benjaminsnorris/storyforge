@@ -811,7 +811,9 @@ class TestInheritedAndPlanConflicts:
         assert any(x.startswith('PLAN CONFLICT') for x in gate.report_lines(result))
 
     LINE = ['Left hand on the case. Right hand free. He carried it the same way.']
-    NAMES = frozenset({'thomas', 'thomas bright horse', 'cora'})
+    NAMES = gate.Cast({'thomas': frozenset({'thomas-bright-horse'}),
+                       'thomas bright horse': frozenset({'thomas-bright-horse'}),
+                       'cora': frozenset({'cora-dunning'})})
 
     @pytest.mark.parametrize('quote, expected', [
         # the real mended-bridle split line, and the same with the opening
@@ -848,16 +850,16 @@ class TestInheritedAndPlanConflicts:
 
     def test_a_name_tag_needs_the_name_in_the_registry(self):
         quote = '"Left hand on the case," said Thomas. "Right hand free."'
-        assert not gate._is_plan_conflict(quote, self.LINE)   # no names known
+        assert not gate._is_plan_conflict(quote, self.LINE, gate.Cast())   # no names known
         assert gate._is_plan_conflict('"Left hand on the case," said he. "Right hand free."',
-                                      self.LINE)
+                                      self.LINE, gate.Cast())
 
     def test_speaker_names_come_from_the_character_registry(self, project_dir):
         import csv
         path = os.path.join(project_dir, 'reference', 'characters.csv')
         with open(path, newline='') as f:
             row = next(csv.DictReader(f, delimiter='|'))
-        names = gate._speaker_names(project_dir)
+        names = gate._cast(project_dir).names
         assert gate._words(row['name']).strip() in names
 
     def test_a_short_brief_phrase_is_not_a_source(self, project_dir):
@@ -875,6 +877,10 @@ def _set_characters(project_dir, rows):
             f.write('|'.join(r.values()) + '\n')
 
 
+def _words_eq(a, b):
+    return gate._words(a) == gate._words(b)
+
+
 class TestSpeechTagSpeaker:
     """#504's known limit: a split line's tag naming someone other than the
     character the brief scripts the line for is not the brief's words, so
@@ -890,7 +896,12 @@ class TestSpeechTagSpeaker:
          'pronouns': 'he/him'},
         {'id': 'cora-dunning', 'name': 'Cora Dunning', 'aliases': 'Cora', 'pronouns': 'she'},
         {'id': 'lena-callis', 'name': 'Lena Callis', 'aliases': 'Lena', 'pronouns': ''},
+        {'id': 'maren-cole', 'name': 'Maren Cole', 'aliases': 'Maren', 'pronouns': 'she'},
+        {'id': 'rook', 'name': 'Rook', 'aliases': '', 'pronouns': 'she'},
     ]
+    #: Thomas is an alias two characters share; only the full names tell them apart
+    TWO_THOMASES = PEOPLE + [{'id': 'thomas-webb', 'name': 'Thomas Webb',
+                              'aliases': 'Thomas', 'pronouns': 'he'}]
 
     def _cast(self, project_dir, people=None):
         _set_characters(project_dir, people or self.PEOPLE)
@@ -901,40 +912,102 @@ class TestSpeechTagSpeaker:
         _set_dialogue(project_dir, dialogue)
         return gate._brief_lines(project_dir, SCENE, cast), cast
 
+    def _speaker(self, project_dir, dialogue, people=None, line=None):
+        """The speaker the brief gives `line` (default LINE)."""
+        lines, _ = self._lines(project_dir, dialogue.format(line=line or self.LINE), people)
+        return next(p.speaker for p in lines if _words_eq(p.text, line or self.LINE))
+
     @pytest.mark.parametrize('dialogue', [
         'Thomas: "{line}"',
         'Thomas, low, to Cora: "{line}"',
+        'Thomas tells Cora: "{line}"',                  # the listener after a verb
         '"{line}" — Thomas',
+        '"{line}" – Thomas',                            # en dash
         '"{line}" -- Thomas Bright Horse, flat',
         '"You are Cora Dunning." / Thomas Bright Horse: "{line}"',
+        'thomas-bright-horse: "{line}"',                # the id as a name
         # narration before the label's last clause names someone else
         '"Come inside." Cora does not move. Thomas, at the door: "{line}"',
+        # CR-1: a stop before a bracket, a quote mark, a dash, an ellipsis
+        '(Cora waits.) Thomas: "{line}"',
+        'Cora mutters \'wait.\' Thomas: "{line}"',
+        'Cora waits.— Thomas: "{line}"',
+        'Cora waits… Thomas: "{line}"',
+        'Cora waits...Thomas: "{line}"',
+        # CR-2: a title doesn't end the clause, in any case
+        'Thomas, to Sgt. Cora: "{line}"',
+        'Thomas, to SGT. Cora: "{line}"',
+        'Thomas, to det. Cora Dunning: "{line}"',
+        'Thomas, to Capt. Emmett: "{line}"',
+        # a label naming no one doesn't count against one that does
+        'Council: "{line}" — Thomas',
+        # escaped quotes (meridian-line's briefs)
+        'Thomas: \\"{line}\\"',
+        '\\"{line}\\" — Thomas',
     ])
     def test_the_brief_names_the_speaker(self, project_dir, dialogue):
-        lines, _ = self._lines(project_dir, dialogue.format(line=self.LINE))
-        assert gate.Scripted(self.LINE, 'thomas-bright-horse') in lines
+        assert self._speaker(project_dir, dialogue) == 'thomas-bright-horse'
 
-    @pytest.mark.parametrize('dialogue', [
-        '"{line}"',                                     # mended-bridle: no labels
-        'Council: "{line}"',                            # not a character
-        'Spoken to the grave: "{line}"',                # narration
-        '"{line}" — Thomas\'s answer to Cora',          # a possessive
-        '"{line}" — though he knew the answer',
-        '"{line}" / "Come inside."',
+    def test_the_residue_line(self, project_dir):
+        """CR-1: shared-dark's residue: "(Pause. Rook shifts her weight in
+        the doorway.) Maren:" gave Maren's line to Rook."""
+        line = 'Still you, after all of it?'
+        dialogue = ('Hank: "No, it does not go away." (Pause. Rook shifts her weight in the '
+                    'doorway.) Maren: "{line}"')
+        assert self._speaker(project_dir, dialogue, line=line) == 'maren-cole'
+
+    def test_only_the_first_clause_after_a_dash_counts(self, project_dir):
+        lines, _ = self._lines(project_dir,
+                               f'"{self.LINE}" — Lena. Thomas: "Come inside now, then."')
+        assert [(p.text, p.speaker) for p in lines] == [
+            (self.LINE, 'lena-callis'), ('Come inside now, then.', 'thomas-bright-horse')]
+
+    @pytest.mark.parametrize('dialogue, why', [
+        ('"{line}"', gate._NO_LABEL),                   # mended-bridle: no labels
+        ('Council: "{line}"', gate._NO_LABEL),          # not a character
+        ('Spoken to the grave: "{line}"', gate._NO_LABEL),
+        ('told Thomas: "{line}"', gate._NO_LABEL),      # C-4: the listener
+        ('"{line}" — though he knew the answer', gate._NO_LABEL),
+        ('"{line}" / "Come inside."', gate._NO_LABEL),
         # the dash clause ending in a colon labels the next line, not this one
-        '"{line}" — Cora, after he leaves: "Come inside, then."',
-        # two labels that disagree
-        'Cora: "{line}" — Thomas',
+        ('"{line}" — Cora, after he leaves: "Come inside, then."', gate._NO_LABEL),
+        ('"{line}" — Thomas\'s answer to Cora', gate._UNCLEAR),   # a possessive
+        ('Cora: "{line}" — Thomas', gate._UNCLEAR),     # two labels that disagree
+        # CR-3: more than one character in the label
+        ('Thomas and Cora: "{line}"', gate._UNCLEAR),
+        ('Thomas or Emmett: "{line}"', gate._UNCLEAR),
+        ('Thomas, Cora: "{line}"', gate._UNCLEAR),
+        ('Thomas turns to Cora, who says: "{line}"', gate._UNCLEAR),
+        ('Thomas looks at Cora, and Cora says: "{line}"', gate._UNCLEAR),
+        ('Thomas watches as she says: "{line}"', gate._UNCLEAR),
+        # CR-1: a spaced dash in the label
+        ('Thomas, afraid — and Cora hears it: "{line}"', gate._UNCLEAR),
+        ('"{line}" — Thomas, watching — Cora nods', gate._UNCLEAR),
     ])
-    def test_the_brief_names_no_speaker(self, project_dir, dialogue):
+    def test_the_brief_names_no_speaker(self, project_dir, dialogue, why):
         lines, _ = self._lines(project_dir, dialogue.format(line=self.LINE))
-        assert gate.Scripted(self.LINE, None) in lines
+        assert (self.LINE, None, why) in lines
+
+    def test_an_unquoted_line_has_no_speaker(self, project_dir):
+        """SF-5: a key_dialogue item with no quote marks is a phrase whole,
+        its label included, and is given no speaker."""
+        lines, _ = self._lines(project_dir, f'Thomas: {self.LINE}')
+        assert lines == [(f'Thomas: {self.LINE}', None, gate._NO_QUOTES)]
 
     def test_a_name_two_characters_share_names_no_one(self, project_dir):
-        people = self.PEOPLE + [{'id': 'thomas-webb', 'name': 'Thomas Webb',
-                                 'aliases': 'Thomas', 'pronouns': 'he'}]
-        lines, _ = self._lines(project_dir, f'Thomas: "{self.LINE}"', people)
-        assert lines == [gate.Scripted(self.LINE, None)]
+        assert self._speaker(project_dir, 'Thomas: "{line}"', self.TWO_THOMASES) is None
+        lines, _ = self._lines(project_dir, f'Thomas: "{self.LINE}"', self.TWO_THOMASES)
+        assert lines[0].why == gate._SHARED
+        # the full name tells them apart
+        assert self._speaker(project_dir, 'Thomas Webb: "{line}"',
+                             self.TWO_THOMASES) == 'thomas-webb'
+
+    def test_no_characters_names_no_one(self, project_dir):
+        os.remove(os.path.join(project_dir, 'reference', 'characters.csv'))
+        _set_dialogue(project_dir, f'Thomas: "{self.LINE}"')
+        cast = gate._cast(project_dir)
+        assert gate._brief_lines(project_dir, SCENE, cast) == [
+            (self.LINE, None, gate._NO_CAST)]
 
     @pytest.mark.parametrize('tag, expected', [
         # a name or alias: agree → plan conflict; disagree → to the fix
@@ -949,12 +1022,34 @@ class TestSpeechTagSpeaker:
         ('they said', False),
         # "I", "we", "you": can't tell, matched as before
         ('I said', True),
+        ('we said', True),
         ('you said', True),
+        # C-4: "told" names its listener after it; only "Thomas told" is a tag
+        ('Thomas told', True),
+        ('told Thomas', False),
     ])
     def test_the_tag_must_fit_the_briefs_speaker(self, project_dir, tag, expected):
         lines, cast = self._lines(project_dir, f'Thomas: "{self.LINE}"')
         quote = self.SPLIT.format(tag=tag)
         assert gate._is_plan_conflict(quote, lines, cast) is expected
+
+    def test_a_shared_name_tag_fits_either_characters_line(self, project_dir):
+        for label in ('Thomas Bright Horse', 'Thomas Webb'):
+            lines, cast = self._lines(project_dir, f'{label}: "{self.LINE}"',
+                                      self.TWO_THOMASES)
+            assert gate._is_plan_conflict(self.SPLIT.format(tag='Thomas said'), lines, cast)
+        lines, cast = self._lines(project_dir, f'Thomas Bright Horse: "{self.LINE}"',
+                                  self.TWO_THOMASES)
+        assert not gate._is_plan_conflict(self.SPLIT.format(tag='Thomas Webb said'),
+                                          lines, cast)
+
+    def test_an_id_tag_is_checked(self, project_dir):
+        people = [{**p, 'id': 'old-man'} if p['id'] == 'thomas-bright-horse' else p
+                  for p in self.PEOPLE]
+        lines, cast = self._lines(project_dir, f'Thomas: "{self.LINE}"', people)
+        assert lines[0].speaker == 'old-man'
+        assert gate._is_plan_conflict(self.SPLIT.format(tag='old-man said'), lines, cast)
+        assert not gate._is_plan_conflict(self.SPLIT.format(tag='Emmett said'), lines, cast)
 
     def test_every_tag_of_a_line_split_twice_must_fit(self, project_dir):
         lines, cast = self._lines(project_dir, f'Thomas: "{self.LINE}"')
@@ -998,11 +1093,50 @@ class TestSpeechTagSpeaker:
         assert gate._is_plan_conflict(self.SPLIT.format(tag=tag), lines, cast)
 
     def test_a_name_not_in_the_registry_is_not_a_tag(self, project_dir):
-        lines, cast = self._lines(project_dir, f'Thomas: "{self.LINE}"')
+        """C-2: a tag naming someone not in characters.csv is narration: the
+        line isn't split, so it isn't set aside."""
+        lines, cast = self._lines(project_dir, f'"{self.LINE}"')
         assert not gate._is_plan_conflict(self.SPLIT.format(tag='Naseka said'), lines, cast)
 
-    def _gate_split(self, project_dir, tmp_path, dialogue, tag):
-        self._cast(project_dir)
+    # -- what the report says (SF-1) ------------------------------------------
+
+    @pytest.mark.parametrize('dialogue, tag, note', [
+        ('Thomas: "{line}"', 'Thomas said', 'speaker checked: Thomas Bright Horse'),
+        ('Thomas: "{line}"', 'he said', 'speaker checked: Thomas Bright Horse'),
+        ('"{line}"', 'Emmett said', 'speaker not checked: the brief names no speaker'),
+        ('Lena: "{line}"', 'she said',
+         "speaker not checked: Lena Callis's pronouns are not known"),
+        ('Thomas: "{line}"', 'I said', 'speaker not checked: the tag says "i"'),
+        ('Thomas and Cora: "{line}"', 'Thomas said',
+         "speaker not checked: the brief's speaker label is not clear"),
+    ])
+    def test_the_note_says_whether_the_speaker_was_checked(self, project_dir, dialogue,
+                                                           tag, note):
+        lines, cast = self._lines(project_dir, dialogue.format(line=self.LINE))
+        assert gate._plan_conflict(self.SPLIT.format(tag=tag), lines, cast) == note
+
+    def test_the_note_for_a_shared_name_and_an_unquoted_line(self, project_dir):
+        lines, cast = self._lines(project_dir, f'Thomas: "{self.LINE}"', self.TWO_THOMASES)
+        assert gate._plan_conflict(self.SPLIT.format(tag='he said'), lines, cast) == (
+            'speaker not checked: the brief names a name two characters share')
+        lines, cast = self._lines(project_dir, self.LINE)
+        assert gate._plan_conflict(self.SPLIT.format(tag='he said'), lines, cast) == (
+            'speaker not checked: the brief line has no quote marks')
+
+    def test_the_note_for_a_quote_no_tag_splits(self, project_dir):
+        lines, cast = self._lines(project_dir, f'Thomas: "{self.LINE}"')
+        assert gate._plan_conflict(f'"{self.LINE}"', lines, cast) == (
+            'speaker not checked: no speech tag splits the quote')
+
+    def test_an_unchecked_match_wins_the_note(self, project_dir):
+        """Two phrases match, one checked and one not: the conflict was set
+        aside without the check, so the note says not checked."""
+        lines, cast = self._lines(project_dir, f'Thomas: "{self.LINE}"; "{self.LINE}"')
+        assert gate._plan_conflict(self.SPLIT.format(tag='Thomas said'), lines, cast) == (
+            'speaker not checked: the brief names no speaker')
+
+    def _gate_split(self, project_dir, tmp_path, dialogue, tag, people=None):
+        self._cast(project_dir, people)
         _set_dialogue(project_dir, dialogue)
         quote = self.SPLIT.format(tag=tag)
         with open(os.path.join(project_dir, 'scenes', f'{SCENE}.md'), 'a') as f:
@@ -1022,10 +1156,62 @@ class TestSpeechTagSpeaker:
                                   'Thomas said')
         assert [f.code for f in result.plan_conflicts] == ['TRT']
         assert gate.problems_to_fix(result) == []
+        line = next(x for x in gate.report_lines(result) if x.startswith('PLAN CONFLICT'))
+        assert line.endswith('(speaker checked: Thomas Bright Horse)')
+
+    def test_the_report_says_when_the_speaker_was_not_checked(self, project_dir, tmp_path):
+        result = self._gate_split(project_dir, tmp_path, f'"{self.LINE}"', 'Emmett said')
+        line = next(x for x in gate.report_lines(result) if x.startswith('PLAN CONFLICT'))
+        assert line.endswith('(speaker not checked: the brief names no speaker)')
 
     def test_the_gate_reads_pronouns_from_the_registry(self, project_dir, tmp_path):
         result = self._gate_split(project_dir, tmp_path, f'Thomas: "{self.LINE}"', 'she said')
         assert result.plan_conflicts == [] and [f.code for f in result.fixable] == ['TRT']
+
+    # -- what can't be checked is said (SF-3, SF-4) ---------------------------
+
+    def _logged(self, monkeypatch):
+        from storyforge import common
+        logged = []
+        monkeypatch.setattr(common, 'log', logged.append)
+        monkeypatch.setattr(gate, '_WARNED', set())
+        return logged
+
+    def test_no_characters_csv_is_a_warning_once(self, project_dir, tmp_path, monkeypatch):
+        logged = self._logged(monkeypatch)
+        os.remove(os.path.join(project_dir, 'reference', 'characters.csv'))
+        _set_dialogue(project_dir, f'Thomas: "{self.LINE}"')
+        quote = self.SPLIT.format(tag='he said')
+        with open(os.path.join(project_dir, 'scenes', f'{SCENE}.md'), 'a') as f:
+            f.write(f'\n\n{quote}\n')
+        for run in range(2):
+            finding = {**_contradiction(), 'scene_quote': quote}
+            result = _gate(project_dir, tmp_path / str(run), [_commitment()],
+                           findings=[finding])
+            assert len(result.plan_conflicts) == 1
+        warned = [x for x in logged if 'characters.csv' in x]
+        assert warned == ['WARNING: no reference/characters.csv: the gate checks no speaker '
+                          'of a scripted line']
+
+    def test_a_characters_csv_with_no_names_is_a_warning(self, project_dir):
+        _set_characters(project_dir, [{'id': 'x', 'name': '', 'aliases': ''}])
+        assert gate._cast(project_dir).warnings == (
+            'reference/characters.csv has no named characters: the gate checks no speaker '
+            'of a scripted line',)
+
+    def test_an_unreadable_pronoun_is_a_warning(self, project_dir, monkeypatch):
+        logged = self._logged(monkeypatch)
+        people = [{**p, 'pronouns': 'he/her'} if p['id'] == 'thomas-bright-horse' else p
+                  for p in self.PEOPLE]
+        cast = self._cast(project_dir, people)
+        gate._warn_once(cast.warnings)
+        gate._warn_once(cast.warnings)
+        assert len(logged) == 1
+        assert "Thomas Bright Horse's pronouns ('he/her') can't be read" in logged[0]
+        assert logged[0].startswith('WARNING: characters.csv:')
+
+    def test_a_readable_cast_has_no_warnings(self, project_dir):
+        assert self._cast(project_dir).warnings == ()
 
 
 def _snap(project_dir, old_scene=None):
@@ -1166,15 +1352,15 @@ class TestReview480:
         """CR-5: 'forty years' is in the scripted line, but the error is the
         prose's to fix."""
         assert not gate._is_plan_conflict('forty years', [
-            "It was there forty years ago. It isn't there now. There is no note."])
+            "It was there forty years ago. It isn't there now. There is no note."], gate.Cast())
 
     def test_a_short_brief_line_inside_a_long_quote_is_not_a_plan_conflict(self):
         """SF-8: the error ("three moons") is outside the scripted words."""
         assert not gate._is_plan_conflict(
             '"I\'ll see you at dawn," she said, as the three moons rose over the ridge',
-            ["I'll see you at dawn"])
+            ["I'll see you at dawn"], gate.Cast())
         assert gate._is_plan_conflict('"I\'ll see you at dawn," she said',
-                                      ["I'll see you at dawn"])
+                                      ["I'll see you at dawn"], gate.Cast())
 
     def test_curly_quotes_count_as_scripted(self, project_dir):
         _set_dialogue(project_dir, 'She says \u201cWe leave before the bells.\u201d')
