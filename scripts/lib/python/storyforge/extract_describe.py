@@ -2671,6 +2671,14 @@ def _book_title(project_dir: str) -> tuple[str, list[str]]:
 
 STRUCTURE_MAX_TOKENS = 12_000
 THEMES_MAX_TOKENS = 12_000
+
+
+def themes_max_tokens(scenes: list, mentions: list) -> int:
+    """5b's answer tags every scene and groups every motif mention by number,
+    so it grows with the book: Middlemarch (341 scenes, 2,174 mentions) was cut
+    off at 312 scenes under the flat 12,000, and the Iliad's reply came within
+    600 tokens of the limit (storyforge-evals, 2026-11-03)."""
+    return max(THEMES_MAX_TOKENS, 3_000 + 45 * len(scenes) + 5 * len(mentions))
 PITCH_MAX_TOKENS = 16_000
 CHARACTERS_MAX_TOKENS = 24_000
 WORLD_MAX_TOKENS = 16_000
@@ -2981,7 +2989,7 @@ def run_themes(run: Run, profile: dict, scenes: list[dict[str, str]]) -> StepOut
     result = _ask(run, 'themes',
                   lambda problems: build_themes_prompt(profile, scenes, mentions, problems),
                   lambda text: parse_themes(text, scenes, mentions),
-                  THEMES_SCHEMA, THEMES_MAX_TOKENS)
+                  THEMES_SCHEMA, themes_max_tokens(scenes, mentions))
     motif_rows = [{**m, 'aliases': ';'.join(m['aliases'])} for m in result['motifs']]
     if not _write_all(run, [(rels[0], _csv_text(result['themes'], _THEMES_COLS)),
                             (rels[1], _csv_text(motif_rows, _MOTIF_COLS))], '5b', '5b'):
