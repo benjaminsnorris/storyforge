@@ -14,13 +14,16 @@ expansion, a rewrite. This module holds everything deterministic about that:
   `source_id` is a text-only form (Ilius -> Ilium, "son of Saturn").
 - `import_source`: copies a source project's scene CSVs, registries, ledger,
   structural CSVs and bibles into `reference/source/<slug>/` with the map
-  applied, copies its prose (`scenes/*.md`) byte for byte, and writes
+  applied (and `chapter-map.csv` for a chapters range), copies its prose
+  (`scenes/*.md`) byte for byte, and writes
   `source-bible.md`. It writes nothing outside `reference/source/` (the new
   copy is staged in a sibling directory, then swapped in).
 - `read_source_map` / `check_coverage`: `reference/source-map.csv`, which the
   map stage writes, and validate's coverage check of it.
-- `SourceRange` / `adapted_ids` / `spans`: a source's optional `range:` (the
-  chapters or scenes this novel adapts; the rest stays imported as context).
+- `SourceRange` / `resolve_range` / `adapted_ids` / `spans`: a source's
+  optional `range:` (the chapters or scenes this novel adapts; the rest stays
+  imported as context), and `check_bible_span`, which stops a bible built for
+  another range.
 
 A project with no `source:` block gets None from `read_config`, and every
 caller does exactly what it did before.
@@ -93,7 +96,13 @@ class SourceRange:
     `chapters 1-4` (the `chapter` numbers of the source's chapter-map.csv) or
     `scenes first-id..last-id` (both ends included, in reading order). Seq
     numbers are not accepted: they are positions, and change when the source
-    gains or loses a scene; ids and chapters don't."""
+    gains or loses a scene. Scene ids are permanent, and chapter numbers are
+    fixed by the source's chapter map.
+
+    The type holds its canonical form (chapter numbers without leading
+    zeros; scene ends that are slugs), so `describe()` is an identity:
+    `check_bible_span` compares it with the range the bible was built for,
+    and `parse_range(describe())` gives the same range back."""
     kind: str
     first: str
     last: str
@@ -101,15 +110,24 @@ class SourceRange:
     def __post_init__(self):
         if self.kind not in RANGE_KINDS:
             raise SourceError(f'range kind {self.kind!r}; use one of {", ".join(RANGE_KINDS)}')
+        if not (isinstance(self.first, str) and isinstance(self.last, str)):
+            raise SourceError('a range\'s ends are text')
         if not self.first or not self.last:
             raise SourceError('a range needs both ends')
         if self.kind == 'chapters':
-            if not (self.first.isdigit() and self.last.isdigit()):
+            if not (_ASCII_DIGITS.match(self.first) and _ASCII_DIGITS.match(self.last)):
                 raise SourceError(f'chapter numbers must be whole numbers, not '
                                   f'{self.first!r} and {self.last!r}')
+            object.__setattr__(self, 'first', str(int(self.first)))
+            object.__setattr__(self, 'last', str(int(self.last)))
             if int(self.first) > int(self.last):
                 raise SourceError(f'chapters {self.first}-{self.last} is inverted '
                                   f'(the first chapter comes after the last)')
+        else:
+            bad = [e for e in (self.first, self.last) if not _SLUG_RE.match(e)]
+            if bad:
+                raise SourceError(f'{bad[0]!r} is not a scene id (lowercase letters, digits '
+                                  f'and hyphens); a range of scenes is `first-id..last-id`')
 
     def describe(self) -> str:
         """The range as written in storyforge.yaml (normalized)."""
@@ -120,8 +138,9 @@ class SourceRange:
                 else f'scenes {self.first}..{self.last}')
 
 
-_CHAPTERS_RE = re.compile(r'^chapters?\s+(\d+)(?:\s*-\s*(\d+))?$')
-_SCENES_RE = re.compile(r'^scenes?\s+([^\s.][^\s]*?)(?:\s*\.\.\s*([^\s.][^\s]*))?$')
+_ASCII_DIGITS = re.compile(r'^[0-9]+$')
+_CHAPTERS_RE = re.compile(r'^chapters?\s+([0-9]+)(?:\s*-\s*([0-9]+))?$')
+_SCENES_RE = re.compile(r'^scenes?\s+(\S+?)(?:\s*\.\.\s*(\S+))?$')
 
 
 def parse_range(slug: str, text: str) -> SourceRange:
@@ -131,16 +150,11 @@ def parse_range(slug: str, text: str) -> SourceRange:
     `resolve_range`."""
     where = f'storyforge.yaml: source {slug} range {text!r}'
     t = text.strip()
-    m = _CHAPTERS_RE.match(t)
-    if m:
-        first = str(int(m.group(1)))
-        last = str(int(m.group(2))) if m.group(2) else first
-    else:
-        m = _SCENES_RE.match(t)
-        if not m or '..' in m.group(1) or (m.group(2) and '..' in m.group(2)):
-            raise SourceError(f'{where}: write `chapters 1-4` (chapter numbers from the '
-                              f'source\'s chapter-map.csv) or `scenes first-id..last-id`')
-        first, last = m.group(1), m.group(2) or m.group(1)
+    m = _CHAPTERS_RE.match(t) or _SCENES_RE.match(t)
+    if not m:
+        raise SourceError(f'{where}: write `chapters 1-4` (chapter numbers from the '
+                          f'source\'s chapter-map.csv) or `scenes first-id..last-id`')
+    first, last = m.group(1), m.group(2) or m.group(1)
     try:
         return SourceRange('chapters' if t.startswith('chapter') else 'scenes', first, last)
     except SourceError as e:
@@ -249,19 +263,43 @@ def _parse_projects(block: list[str]) -> list[dict[str, str]]:
             continue
         kv = re.match(r'^\s+(\w+):\s*(.*)$', line)
         if kv and items:
+            if kv.group(1) in items[-1]:
+                raise SourceError(f'storyforge.yaml: source project {len(items)} gives '
+                                  f'`{kv.group(1)}` twice')
             items[-1][kv.group(1)] = parse_yaml_scalar(kv.group(2))
         elif kv:
             raise SourceError('storyforge.yaml: `source.projects` entries start '
                               'with `- slug: ...`')
+        else:
+            # Not `key: value` (e.g. `range : x`): never silently dropped
+            raise SourceError(f'storyforge.yaml: can\'t read {line.strip()!r} in '
+                              f'`source.projects` (write `key: value`)')
     return items
+
+
+# The keys a `source.projects` entry and the `source:` block take; any other
+# is refused, so a misspelled or misplaced `range:` can't silently mean the
+# whole source
+PROJECT_KEYS = ('slug', 'path', 'name_map', 'range')
+BLOCK_KEYS = ('projects', 'name_map', 'mode', 'rules')
+
+
+def _unknown_key(where: str, key: str, allowed: tuple[str, ...]) -> SourceError:
+    hint = (' (a range goes on its project entry: `range: chapters 1-4`)'
+            if key in ('range', 'ranges', 'chapters', 'chapter', 'scenes', 'from', 'to')
+            else '')
+    return SourceError(f'storyforge.yaml: {where} has no key `{key}`; it takes '
+                       f'{", ".join(allowed)}{hint}')
 
 
 def read_config(project_dir: str) -> SourceConfig | None:
     """The project's `source:` block, or None when it has none.
 
     Raises SourceError for a block that can't be used: no projects, a project
-    without a slug or path, a repeated or malformed slug, an unknown mode, or
-    a `range:` that is empty, malformed or inverted.
+    without a slug or path, a repeated or malformed slug, an unknown mode, a
+    key either level doesn't take (or a project gives twice), or a `range:`
+    that is empty, malformed, or an inverted chapter range (an inverted
+    scenes range needs the source: `resolve_range`).
     `mode` defaults to faithful; `name_map` and `rules` to nothing.
     """
     block = _source_block(project_dir)
@@ -281,8 +319,14 @@ def read_config(project_dir: str) -> SourceConfig | None:
                                   f'write `range: chapters 1-4` or `range: scenes '
                                   f'first-id..last-id` on one line, or remove it')
             rng = parse_range(slug, item['range'])
+        for key in item:
+            if key not in PROJECT_KEYS:
+                raise _unknown_key(f'source project {slug}', key, PROJECT_KEYS)
         projects.append(SourceProject(slug, path, item.get('name_map', '').strip(), rng))
     keys = _direct_keys(block)
+    for key in keys:
+        if key not in BLOCK_KEYS:
+            raise _unknown_key('the `source:` block', key, BLOCK_KEYS)
     # SourceConfig checks the projects, the slugs and the mode
     return SourceConfig(
         projects=tuple(projects),
@@ -302,11 +346,16 @@ def _direct_keys(block: list[str]) -> dict[str, str]:
     indent = len(content[0]) - len(content[0].lstrip())
     keys = {}
     for line in content:
-        if len(line) - len(line.lstrip()) != indent:
-            continue
+        if len(line) - len(line.lstrip()) != indent or line.lstrip().startswith('-'):
+            continue   # deeper, or a projects item written at the block's indent
         m = re.match(r'^\s+(\w+):\s*(.*)$', line)
-        if m:
-            keys[m.group(1)] = parse_yaml_scalar(m.group(2))
+        if not m:
+            raise SourceError(f'storyforge.yaml: can\'t read {line.strip()!r} in the '
+                              f'`source:` block (write `key: value`)')
+        if m.group(1) in keys:
+            raise SourceError(f'storyforge.yaml: the `source:` block gives '
+                              f'`{m.group(1)}` twice')
+        keys[m.group(1)] = parse_yaml_scalar(m.group(2))
     return keys
 
 
@@ -578,7 +627,8 @@ def import_source(project_dir: str, cfg: SourceConfig, slug: str,
     lacks a registry entry, the map or rules file lives inside the
     directory the import replaces, or the project's `range:` for it can't be
     resolved (`resolve_range`). A chapters range also copies the source's
-    chapter-map.csv; without a range the import is what it was before ranges."""
+    chapter-map.csv; without a range nothing past `IMPORTED_CSVS` and
+    `IMPORTED_DOCS` is copied, and the bible has no span line."""
     result = plan_import(project_dir, cfg, slug)
     if not dry_run:
         write_import(result)
@@ -776,7 +826,8 @@ def build_source_bible(slug: str, tables: dict, nm: NameMap = EMPTY_MAP,
     before / the adapted span / after: scenes in the span keep their outcome
     and value lines, the others are one line each (context, not material),
     and the cast is ordered and counted by the span. Places, threads and the
-    timeline stay whole-source. Without one the bible is what it was."""
+    timeline stay whole-source. Without one there is no `Adapted span:`
+    line, one undivided events list, and whole-source cast counts."""
     scenes = sorted(_as_dicts(tables.get('scenes.csv')), key=_seq)
     in_span = set(span) if span is not None else None
     intent = {r.get('id', ''): r for r in _as_dicts(tables.get('scene-intent.csv'))}
@@ -941,7 +992,9 @@ def source_prose(project_dir: str, slug: str, scene_id: str) -> str | None:
 def require_imported(project_dir: str, cfg: SourceConfig) -> None:
     """Raise SourceError naming every source not imported yet: a prompt built
     without it would say the novel adapts a source and show none of it. Also
-    raises for a source bible built for another `range:` (`check_bible_span`)."""
+    raises for a source bible built for another `range:` (`check_bible_span`),
+    and for a range the imported copy can't resolve (`adapted_ids`), so every
+    caller's up-front check stops before any spend rather than mid-run."""
     missing = [s for s in cfg.slugs() if not is_imported(project_dir, s)]
     if missing:
         raise SourceError(f'source {", ".join(missing)} '
@@ -949,6 +1002,8 @@ def require_imported(project_dir: str, cfg: SourceConfig) -> None:
                           f'run `storyforge source import`')
     for p in cfg.projects:
         check_bible_span(project_dir, p)
+        if p.range is not None:
+            adapted_ids(project_dir, cfg, p.slug)
 
 
 def check_bible_span(project_dir: str, proj: SourceProject) -> None:
@@ -986,17 +1041,28 @@ def resolve_range(slug: str, rng: SourceRange, scenes: list[dict[str, str]],
     """The scene ids `rng` covers, in reading order. `scenes` are the
     source's scenes in reading order; `chapters` its chapter-map rows (needed
     for a chapters range). Raises SourceError for an id that isn't a scene, a
-    last scene before the first, a chapter the map doesn't have (or has
-    twice), chapters that list no scene or a scene not in scenes.csv, and
-    chapters whose scenes aren't one continuous run of reading order: a
-    range is never silently narrowed or widened."""
+    last scene before the first, a chapters range with no chapter map (or one
+    without `chapter` and `scenes` columns), any chapter number the map lists
+    twice, a chapter in the range the map doesn't have, chapters that list no
+    scene or a scene not in scenes.csv, and chapters whose scenes aren't one
+    continuous run of reading order (a scene listed twice included): a range
+    is never silently narrowed or widened.
+
+    A chapter map lists a Storyforge source's active scenes only, so a cut,
+    merged or archived source scene (`INACTIVE_STATUSES`) between two of the
+    chapters' scenes doesn't break the run; it is in the span, as a scenes
+    range over the same stretch has it, and coverage asks for it as it does
+    for every source scene. Map rows whose `chapter` isn't a number can't be
+    named by a range; a run they break names them."""
     where = f'source {slug}: range {rng.describe()!r}'
     ids = [s.get('id', '').strip() for s in scenes]
     pos = {i: n for n, i in enumerate(ids) if i}
     if rng.kind == 'scenes':
         for end in (rng.first, rng.last):
             if end not in pos:
-                raise SourceError(f'{where}: {end} is not a scene of the source')
+                hint = (' (a range of scenes is written `first-id..last-id`)'
+                        if rng.first == rng.last and '-' in end else '')
+                raise SourceError(f'{where}: {end} is not a scene of the source{hint}')
         a, b = pos[rng.first], pos[rng.last]
         if a > b:
             raise SourceError(f'{where} is inverted: {rng.last} comes before {rng.first} '
@@ -1009,10 +1075,12 @@ def resolve_range(slug: str, rng: SourceRange, scenes: list[dict[str, str]],
         raise SourceError(f'{where}: reference/{CHAPTER_MAP} needs `chapter` and `scenes` '
                           f'columns')
     by_num: dict[int, dict] = {}
+    unnumbered: list[str] = []
     for row in chapters:
         raw = row.get('chapter', '').strip()
-        if not raw.isdigit():
-            continue   # a chapter the range can't name
+        if not _ASCII_DIGITS.match(raw):
+            unnumbered.append(raw or '(blank)')   # a range can't name it
+            continue
         if int(raw) in by_num:
             raise SourceError(f'{where}: reference/{CHAPTER_MAP} lists chapter {raw} twice')
         by_num[int(raw)] = row
@@ -1028,11 +1096,21 @@ def resolve_range(slug: str, rng: SourceRange, scenes: list[dict[str, str]],
     if unknown:
         raise SourceError(f'{where}: reference/{CHAPTER_MAP} lists scenes not in the '
                           f'source\'s scenes.csv: {", ".join(unknown[:8])}')
-    span = [i for i in ids[min(pos[m] for m in members):max(pos[m] for m in members) + 1] if i]
-    if len(members) != len(set(members)) or set(members) != set(span):
+    lo, hi = min(pos[m] for m in members), max(pos[m] for m in members)
+    span = [i for i in ids[lo:hi + 1] if i]
+    inactive = {s.get('id', '').strip() for s in scenes[lo:hi + 1]
+                if s.get('status', '').strip() in INACTIVE_STATUSES}
+    twice = sorted({m for m in members if members.count(m) > 1})
+    gaps = [i for i in span if i not in set(members) and i not in inactive]
+    if twice or gaps:
+        why = (f'lists {", ".join(twice[:8])} twice' if twice else
+               f'skips {", ".join(gaps[:8])}, which lie between its first and last scene')
+        if unnumbered:
+            why += (f'; rows a range can\'t name (no chapter number): '
+                    f'{", ".join(unnumbered[:8])}')
         raise SourceError(f'{where}: the chapter map\'s scenes for these chapters are not '
-                          f'one continuous run of the source\'s reading order (seq); give '
-                          f'the range as `scenes first-id..last-id`')
+                          f'one continuous run of the source\'s reading order (it {why}); '
+                          f'give the range as `scenes first-id..last-id`')
     return span
 
 
@@ -1214,8 +1292,9 @@ def check_coverage(project_dir: str, cfg: SourceConfig) -> dict:
     With a `range:`, only the range's source scenes need accounting for; a
     row adapting a scene outside it blocks in either mode (the map, briefs
     and fidelity prompts never show it), a cut row naming one is advisory
-    (it needs no row), and a range that can't be resolved blocks and leaves
-    that source's coverage uncounted."""
+    (it needs no row), and a range that can't be resolved, or an import made
+    for another range (or a missing source bible), blocks and leaves that
+    source's coverage uncounted."""
     findings: list[dict] = []
     lines: list[str] = []
 
@@ -1226,8 +1305,8 @@ def check_coverage(project_dir: str, cfg: SourceConfig) -> dict:
     for slug in missing:
         add('blocking', f'source {slug} is not imported: run `storyforge source import`')
     cat = {}
-    spans_: dict[str, frozenset[str]] = {}   # only sources with a range
-    no_span: set[str] = set()                # a range that can't be resolved
+    spans_: dict[str, frozenset[str] | None] = {}   # as `spans`: None = whole source
+    no_span: set[str] = set()   # an import or range coverage can't be counted against
     for slug in cfg.slugs():
         if slug in missing:
             continue
@@ -1244,6 +1323,13 @@ def check_coverage(project_dir: str, cfg: SourceConfig) -> dict:
             add('blocking', f'source {slug}: duplicate scene ids {", ".join(dupes)}')
         cat[slug] = {r['id']: r for r in rows_ if r.get('id')}
         try:
+            # An import made for another range (or none) is counted against
+            # nothing: its bible and every prompt would disagree with the yaml
+            if (cfg.project(slug).range is not None and not
+                    os.path.isfile(os.path.join(source_dir(project_dir, slug), SOURCE_BIBLE))):
+                raise SourceError(f'reference/source/{slug}/{SOURCE_BIBLE} is missing: '
+                                  f're-run `storyforge source import`')
+            check_bible_span(project_dir, cfg.project(slug))
             span = adapted_ids(project_dir, cfg, slug, rows_)
         except SourceError as e:
             # Coverage of a range that can't be resolved would be wrong either
@@ -1251,8 +1337,7 @@ def check_coverage(project_dir: str, cfg: SourceConfig) -> dict:
             add('blocking', str(e))
             no_span.add(slug)
             continue
-        if span is not None:
-            spans_[slug] = frozenset(span)
+        spans_[slug] = None if span is None else frozenset(span)
 
     try:
         rows = read_source_map(project_dir)
@@ -1343,8 +1428,8 @@ def check_coverage(project_dir: str, cfg: SourceConfig) -> dict:
     # Every source scene being adapted (the range's, or all) is accounted for
     for slug, src in cat.items():
         if slug in no_span:
-            lines.append(f'Source {slug}: coverage not checked (its range can\'t be '
-                         f'resolved; see the finding)')
+            lines.append(f'Source {slug}: coverage not checked (its import or range can\'t '
+                         f'be used; see the finding)')
             continue
         span = spans_.get(slug)
         counts = {'mapped': 0, 'compressed': 0, 'cut': 0, 'cut_no_reason': 0,

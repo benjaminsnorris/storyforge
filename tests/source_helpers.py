@@ -114,9 +114,12 @@ def import_source(project_dir, **kw):
 
 
 # ----------------------------------------------------------------------------
-# The no-range snapshot (source ranges): what an adaptation without a
-# `range:` produces, fixed in tests/fixtures/golden-prompts/source-no-range.json
-# from main's code before ranges existed
+# The no-range snapshot: what an adaptation without a `range:` produces,
+# fixed in tests/fixtures/golden-prompts/source-no-range.json from the code
+# as it was before source ranges were added (#517). A deliberate change
+# regenerates it: json.dump({**snapshot_outputs(tmp, plugin),
+# **snapshot_outputs_multi(tmp2, plugin)}, f, indent=1, sort_keys=True,
+# ensure_ascii=False) plus a trailing newline.
 # ----------------------------------------------------------------------------
 
 SNAPSHOT_FILES = {
@@ -167,4 +170,48 @@ def snapshot_outputs(tmp_path, plugin):
         'briefs': prompts_source.briefs_section(proj, None),
         'coverage': json.dumps(source.check_coverage(proj, cfg), sort_keys=True, indent=1),
         'fidelity': plan.prompt,
+    }
+
+
+MULTI_YAML = """project:
+  title: "Telemachus"
+source:
+  projects:
+    - slug: odyssey
+      path: ../odyssey
+    - slug: iliad
+      path: ../iliad
+  name_map: reference/names.csv
+  mode: free
+"""
+
+
+def snapshot_outputs_multi(tmp_path, plugin):
+    """The same outputs for two sources (the second a copy of the first, so
+    every id is shared and refs are `slug:id`) in free mode, keyed `multi_*`."""
+    import json
+    from storyforge import prompts_source, source_fidelity
+    proj = make_adaptation(tmp_path)
+    _write(str(tmp_path / 'iliad'), SOURCE_FILES)
+    _write(proj, {'storyforge.yaml': MULTI_YAML})
+    cfg = source.read_config(proj)
+    for slug in cfg.slugs():
+        source.import_source(proj, cfg, slug)
+    _write(proj, {**SNAPSHOT_FILES, 'reference/source-map.csv': (
+        'scene_id|source_scenes|treatment|note\n'
+        'olympus-council-meets|odyssey:gods-debate;iliad:gods-debate|compress|\n'
+        'athena-at-the-door|odyssey:minerva-visits;iliad:assembly-called|compress|both\n'
+        'telemachus-sails-at-night||invent|\n'
+        '|iliad:ship-sails|cut|later\n')})
+    rows = source.map_rows_by_scene(source.read_source_map(proj))
+    plan = source_fidelity.plan_scene(proj, 'athena-at-the-door', 'brief', plugin, cfg, rows,
+                                      source.read_rules(proj, cfg))
+    return {
+        'multi_spine': prompts_source.spine_section(proj),
+        'multi_architecture': prompts_source.architecture_section(proj),
+        'multi_map': prompts_source.map_section(proj),
+        'multi_briefs': prompts_source.briefs_section(proj, None),
+        'multi_coverage': json.dumps(source.check_coverage(proj, cfg), sort_keys=True,
+                                     indent=1),
+        'multi_fidelity': plan.prompt,
     }

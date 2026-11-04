@@ -6,10 +6,14 @@ their prompts stay byte for byte what they were. With a block, a source not
 imported yet raises SourceError before any prompt is built. With a block, they give the spine the source's events to
 select from, the architecture its cast and POV distribution, the map every
 source scene to account for in `reference/source-map.csv`, and the briefs
-each scene's source briefs and the source prose itself. A source with a
-`range:` gives each of them only the range's scenes (`source.adapted_scenes`);
-the rest of the source reaches the model only through the Source Bible, as
-context.
+each scene's source briefs and the source prose itself.
+
+With a `range:`, the spine, architecture and map sections use only the span's
+scenes (`source.adapted_scenes`), and the briefs section refuses a scene whose
+map row names a source scene outside the span; the rest of the source reaches
+the model only through the Source Bible, as context. A source not imported, a
+bible built for another range, or a range that can't be resolved raises
+SourceError before any prompt is built.
 """
 
 from __future__ import annotations
@@ -42,8 +46,13 @@ def _header(cfg: source.SourceConfig) -> str:
            'rules or a stated reason cut it' if cfg.mode == 'faithful'
            else '**free**: the source is a starting point; follow it where the plan '
                 'does, and give a reason for each source scene left out')
-    return (f'This novel adapts a source ({names}); its events, cast and places are in '
+    head = (f'This novel adapts a source ({names}); its events, cast and places are in '
             f'the Source Bible. Mode: {how}.')
+    spans = [f'`{p.slug}`: {p.range.describe()}' for p in cfg.projects if p.range]
+    if spans:
+        head += (f' Only part of the source is adapted ({"; ".join(spans)}): "every '
+                 f'source event" means every event in the adapted span.')
+    return head
 
 
 def rules_block(project_dir: str, cfg: source.SourceConfig) -> str:
@@ -117,7 +126,8 @@ def architecture_section(project_dir: str) -> str:
     ranged = any(p.range is not None for p in cfg.projects)
     parts = [f'## Source\n\n{_header(cfg)}',
              'Build the architecture from the source\'s cast. The POV distribution below is '
-             + ('the adapted span\'s' if ranged else 'the source\'s')
+             + ('the source\'s (within the adapted span, for a source with a range)'
+                if ranged else 'the source\'s')
              + '; keep it, or change it where the version rules or a POV shift '
              'call for it.']
     for slug in cfg.slugs():
@@ -349,9 +359,8 @@ def briefs_section(project_dir: str, scene_ids: list[str] | None) -> str:
                 body.append(f'#### Source scene {ref}: not found in the imported source')
                 continue
             if source.outside_range(hit, spans):
-                outside.append(f'{sid} ({ref})')
-                body.append(f'#### Source scene {ref}: outside the adapted range '
-                            f'({source.range_note(cfg, hit[0])}), so not shown')
+                outside.append(f'{sid} ({ref}: {hit[0]} adapts '
+                               f'{source.range_note(cfg, hit[0])})')
                 continue
             words = len((source.source_prose(project_dir, *hit) or '').split())
             show = words <= budget
@@ -373,8 +382,12 @@ def briefs_section(project_dir: str, scene_ids: list[str] | None) -> str:
         log(f'WARNING: source scenes not found in the imported source (run validate): '
             f'{", ".join(unresolved)}')
     if outside:
-        log(f'WARNING: source scenes outside the adapted range, not shown (run validate): '
-            f'{", ".join(outside)}')
+        # A brief written without its source would be wrong, and validate
+        # blocks the row anyway: stop before anything is spent
+        raise source.SourceError(
+            f'the source map adapts scenes outside the adapted range: '
+            f'{", ".join(outside)}; widen `range` in storyforge.yaml (and re-run '
+            f'`storyforge source import`) or fix the map, then run validate')
     if no_prose:
         log(f'WARNING: source prose left out of the briefs prompt (over '
             f'{SOURCE_PROSE_MAX_WORDS:,} words): {", ".join(no_prose)}; brief fewer '

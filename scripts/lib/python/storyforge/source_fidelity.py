@@ -177,8 +177,8 @@ def plan_scene(project_dir: str, scene_id: str, target: str, plugin_dir: str,
                rules: str, tables: dict | None = None,
                cat: dict | None = None, source_tables=None,
                spans: dict | None = None) -> Plan:
-    """One scene's check, or why there is none. `cat` and `spans` (the
-    sources' ranges, `source.spans`) are read when not given; a caller
+    """One scene's check, or why there is none. `cat` and `spans` (each
+    source's adapted scene ids, from `source.spans`) are read when not given; a caller
     planning many scenes passes them. A map row naming a source scene outside
     its source's `range:` is broken: only the range is being adapted, and
     validate blocks on it."""
