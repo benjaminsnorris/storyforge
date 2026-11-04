@@ -401,9 +401,13 @@ For each scene:
 ### Output Format
 
 ```scenes-csv
-id|seq|title|act|pov|location|timeline_day|time_mode|time_of_day|duration|status
+id|seq|title|summary|act|part|pov|location|timeline_day|time_mode|time_of_day|duration|target_words|status
 (all scenes — status is "mapped" for new/updated scenes)
 ```
+
+- `summary`: what happens in the scene, in at most 50 words. Rewrite an existing scene's summary when the map splits it or moves part of it elsewhere
+- `part`: the book part the scene falls in, by number (storyforge.yaml `parts:`); leave it empty for a book without parts
+- `target_words`: the scene's planned length; together they come to about the target word count, and uneven lengths are fine
 
 Scene ids: {SCENE_ID_RULE} Keep every existing scene's id exactly as it is; to move a scene, change its seq.
 

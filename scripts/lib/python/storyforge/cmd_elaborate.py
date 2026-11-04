@@ -279,6 +279,10 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
 
     if total_gaps == 0 and group_count == 0:
         log('No gaps found — all validation checks pass.')
+        if dry_run:
+            # Nothing to fill; a dry run commits nothing and runs no review
+            # or recommend calls (G-019)
+            return
     else:
         log(f'Found {total_gaps} field gaps across {group_count} group(s)')
         for name, group in groups.items():

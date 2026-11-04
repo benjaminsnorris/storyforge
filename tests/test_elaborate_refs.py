@@ -79,3 +79,11 @@ def test_template_docs_are_skipped(project):
     refs = pe._existing_refs(project, shared=True)
     assert 'Story Summary' not in refs and 'Key Decisions' not in refs
     assert 'ARCHITECTURE-MARKER' in refs
+
+
+def test_map_prompt_asks_for_summary_part_and_target_words(project):
+    """G-020: the map didn't ask for these, so a new novel's mapped scenes had
+    no summary (the L5 floor fails) and no part or planned length."""
+    prompt = pe.build_map_prompt(project, PLUGIN, system_context=True)
+    assert ('id|seq|title|summary|act|part|pov|location|timeline_day|time_mode|'
+            'time_of_day|duration|target_words|status') in prompt

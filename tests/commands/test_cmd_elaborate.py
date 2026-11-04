@@ -509,3 +509,23 @@ class TestResponseParsing:
         assert os.path.isdir(validate_dir)
         reports = [f for f in os.listdir(validate_dir) if f.startswith('validate-')]
         assert len(reports) >= 1
+
+
+class TestGapFillDryRunWithNoGaps:
+    """G-019: with nothing to fill, a dry run still committed a validation
+    report and ran the paid review and recommend calls."""
+
+    def test_no_gaps_dry_run_commits_and_reviews_nothing(self, mock_api, mock_git, mock_costs,
+                                                         project_dir, monkeypatch):
+        monkeypatch.setattr('storyforge.cmd_elaborate.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.elaborate.analyze_gaps', lambda ref_dir: {
+            'total_gaps': 0, 'groups': {}, 'validation': {'failures': []},
+        })
+        reviews = []
+        monkeypatch.setattr('storyforge.cmd_elaborate.run_review_phase',
+                            lambda *a, **k: reviews.append(a))
+        main(['--stage', 'gap-fill', '--dry-run'])
+        assert reviews == []
+        assert mock_git.calls_for('commit_and_push') == []
+        assert mock_api.call_count == 0
