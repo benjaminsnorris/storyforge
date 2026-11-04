@@ -428,19 +428,68 @@ def _pass_cost(project_dir: str, model: str) -> float:
     return estimate_cost('revise', scene_count, avg_words, model)
 
 
+#: The brief-rewrite and drafting prompts' own text around the scene, in
+#: tokens (instructions, the scene's characters, place and plan)
+_PROMPT_OVERHEAD_TOKENS = 3000
+
+
+def _tokens(text: str) -> int:
+    """Tokens in `text`, as `costs.estimate_cost` counts them (1.3 a word)."""
+    return int(len(text.split()) * 1.3)
+
+
 def _upstream_fix_cost(project_dir: str, scene_ids: list[str]) -> float:
-    """The brief fixes and redrafts of `scene_ids` (`_fix_and_redraft`):
-    for each, the brief rewrite and the redraft on the creative tier, and
-    the gate's run on the redraft (`gate.RECHECK_COST_PER_SCENE`). The
-    re-checks a redraft lists are not in it: they get what is left."""
+    """The brief fixes and redrafts of `scene_ids` (`_fix_and_redraft`),
+    priced from what each call sends, at the creative tier's uncached input
+    price (#510's review, SF-6: a flat 1,500-token draft estimate left out
+    the shared context and the earlier prose a redraft sends). Conservative:
+    the context and earlier prose are often read from cache for less.
+
+    - the brief rewrite: the scene's prose (up to `_PROSE_CONTEXT_WORDS`)
+      and the prompt in, its `max_tokens` (1,024) out;
+    - the redraft: the shared context (`build_shared_context`), the earlier
+      prose `drafting.prior_prose` sends (`prior_prose_blocks`), the old
+      prose and the prompt in, the scene again out;
+    - the gate's run on the redraft (`gate.RECHECK_COST_PER_SCENE`).
+
+    The re-checks a redraft lists are not in it: they get what is left."""
     from storyforge import gate
+    from storyforge.common import build_shared_context
+    from storyforge.costs import calculate_cost
+    from storyforge.prompts import prior_prose_blocks, prior_prose_mode
     if not scene_ids:
         return 0.0
-    avg_words, _ = _estimate_avg_words(project_dir)
     model = select_model('creative')
-    return len(scene_ids) * (estimate_cost('revise', 1, avg_words, model)
-                             + estimate_cost('draft', 1, avg_words, model)
-                             + gate.RECHECK_COST_PER_SCENE)
+    context = sum(_tokens(b.get('text', ''))
+                  for b in build_shared_context(project_dir, model=model) or [])
+    try:
+        mode = prior_prose_mode(project_dir)
+    except ValueError:      # `_main` stops on a bad value before this
+        mode = 'none'
+    avg_words, _ = _estimate_avg_words(project_dir)
+    total = 0.0
+    for sid in scene_ids:
+        path = os.path.join(project_dir, 'scenes', f'{sid}.md')
+        if os.path.isfile(path):
+            with open(path, encoding='utf-8') as f:
+                words = len(f.read().split())
+        else:
+            words = avg_words
+        prose = int(words * 1.3)
+        prior = 0
+        if mode != 'none':
+            try:
+                prior = sum(_tokens(b['text'])
+                            for b in prior_prose_blocks(sid, project_dir, mode))
+            except (OSError, ValueError) as e:
+                log(f'WARNING: the forecast of {sid}\'s redraft leaves out the earlier '
+                    f'prose it would be sent: {e}')
+        brief_in = int(min(words, _PROSE_CONTEXT_WORDS) * 1.3) + _PROMPT_OVERHEAD_TOKENS
+        total += calculate_cost(model, brief_in, 1024)
+        total += calculate_cost(model, context + prior + prose + _PROMPT_OVERHEAD_TOKENS,
+                                prose)
+        total += gate.RECHECK_COST_PER_SCENE
+    return total
 
 
 def _over_threshold(forecast: float) -> str:
@@ -2806,29 +2855,30 @@ def _log_usage(project_dir, log_file, operation, target, model, duration_s=0):
 # ============================================================================
 
 def _estimate_avg_words(project_dir):
-    """Estimate average scene word count."""
+    """(Average words, scene count) over the book's drafted scenes:
+    scenes.csv's `word_count`, or, for a scene whose count is blank, 0 or
+    not a number, its file's own word count. (#510's review, SF-5: such
+    scenes were left out of the count, pricing every pass as if the book
+    were that much shorter.) A scene with neither isn't drafted, so no pass
+    revises it. With no scene at all: 3000 words, 1 scene, and a WARNING."""
+    counts: dict[str, int] = {}
     metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
     if os.path.isfile(metadata_csv):
         from storyforge.csv_cli import get_column
-        wc_col = get_column(metadata_csv, 'word_count')
-        total = sum(int(w) for w in wc_col if w and w != '0')
-        count = sum(1 for w in wc_col if w and w != '0')
-        if count > 0:
-            return total // count, count
-
-    # Fall back to scene files
+        for sid, wc in zip(get_column(metadata_csv, 'id'),
+                           get_column(metadata_csv, 'word_count')):
+            if wc.strip().isdigit() and int(wc) > 0:
+                counts[sid] = int(wc)
     scenes_dir = os.path.join(project_dir, 'scenes')
-    total = 0
-    count = 0
     if os.path.isdir(scenes_dir):
         for f in os.listdir(scenes_dir):
-            if f.endswith('.md'):
-                wc = len(open(os.path.join(scenes_dir, f)).read().split())
-                total += wc
-                count += 1
-
-    if count > 0:
-        return total // count, count
+            if f.endswith('.md') and f[:-3] not in counts:
+                with open(os.path.join(scenes_dir, f), encoding='utf-8') as fh:
+                    counts[f[:-3]] = len(fh.read().split())
+    if counts:
+        return sum(counts.values()) // len(counts), len(counts)
+    log('WARNING: no scene has a word count or a scene file; the cost forecast '
+        'assumes one scene of 3000 words')
     return 3000, 1
 
 

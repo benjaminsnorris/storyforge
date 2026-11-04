@@ -897,6 +897,63 @@ class TestEstimateAvgWords:
         assert avg > 0
         assert count > 0
 
+    def test_a_scene_without_a_count_is_counted_from_its_file(self, tmp_path):
+        """SF-5 (#510's review): rows without a word count were left out,
+        so a pass over the book was priced as one over fewer scenes."""
+        from storyforge.cmd_revise import _estimate_avg_words
+        os.makedirs(tmp_path / 'reference')
+        os.makedirs(tmp_path / 'scenes')
+        (tmp_path / 'reference' / 'scenes.csv').write_text(
+            'id|seq|word_count\na|1|3000\nb|2|\nc|3|0\n')
+        (tmp_path / 'scenes' / 'b.md').write_text('word ' * 1000)
+        # c has no count and no file: not drafted, no pass revises it
+        assert _estimate_avg_words(str(tmp_path)) == (2000, 2)
+
+    def test_with_no_scene_it_says_what_it_assumed(self, tmp_path, capsys):
+        from storyforge.cmd_revise import _estimate_avg_words
+        assert _estimate_avg_words(str(tmp_path)) == (3000, 1)
+        assert 'WARNING: no scene has a word count' in capsys.readouterr().out
+
+
+class TestUpstreamFixCost:
+    """SF-6/T-4 (#510's review): the redraft's forecast assumed 1,500 tokens
+    out and nothing but the scene in, but it sends the shared context and
+    the earlier prose and writes the scene again."""
+
+    MODEL = 'claude-opus-5-5'
+
+    def _setup(self, project_dir, monkeypatch, prior):
+        with open(os.path.join(project_dir, 'scenes', 'act1-sc02.md'), 'w') as f:
+            f.write('word ' * 500)
+        monkeypatch.setattr('storyforge.cmd_revise.select_model', lambda tier: self.MODEL)
+        monkeypatch.setattr('storyforge.common.build_shared_context',
+                            lambda pd, model='': [{'type': 'text', 'text': 'ctx ' * 1000}])
+        monkeypatch.setattr('storyforge.prompts.prior_prose_mode', lambda pd, *a: 'full')
+        monkeypatch.setattr('storyforge.prompts.prior_prose_blocks', prior)
+
+    def test_it_prices_what_the_calls_send(self, project_dir, monkeypatch):
+        from storyforge import gate
+        from storyforge.cmd_revise import _upstream_fix_cost
+        from storyforge.costs import calculate_cost
+        self._setup(project_dir, monkeypatch,
+                    lambda sid, pd, mode: [{'type': 'text', 'text': 'prior ' * 2000}])
+        prose = int(500 * 1.3)
+        want = (calculate_cost(self.MODEL, prose + 3000, 1024)                # brief
+                + calculate_cost(self.MODEL, 1300 + 2600 + prose + 3000, prose)  # redraft
+                + gate.RECHECK_COST_PER_SCENE)
+        assert _upstream_fix_cost(project_dir, ['act1-sc02']) == pytest.approx(want)
+        assert _upstream_fix_cost(project_dir, []) == 0.0
+
+    def test_earlier_prose_it_cannot_read_is_said(self, project_dir, monkeypatch, capsys):
+        from storyforge.cmd_revise import _upstream_fix_cost
+
+        def unreadable(sid, pd, mode):
+            raise ValueError('scene order unknown')
+        self._setup(project_dir, monkeypatch, unreadable)
+        assert _upstream_fix_cost(project_dir, ['act1-sc02']) > 0
+        assert "WARNING: the forecast of act1-sc02's redraft leaves out the earlier " \
+            'prose it would be sent: scene order unknown' in capsys.readouterr().out
+
 
 # ============================================================================
 # _register_new_scenes
