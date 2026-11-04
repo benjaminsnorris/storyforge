@@ -126,7 +126,7 @@ REWRITTEN_FILES = ('scene-briefs.csv', 'scene-intent.csv')
 # The reference formats read as text. Images and PDFs (a graphic novel's
 # canon art) are skipped as holding no text to read; anything else is
 # skipped too, and a caller that passes *notes* is told which
-_TEXT_EXTENSIONS = ('.md', '.csv', '.txt', '.yaml', '.yml')
+_TEXT_EXTENSIONS = ('.md', '.csv', '.txt', '.yaml', '.yml', '.json')
 _NO_TEXT_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.pdf')
 
 

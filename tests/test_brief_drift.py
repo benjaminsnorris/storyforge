@@ -331,6 +331,18 @@ class TestGuardUnchanged:
         assert 'Dorren Hayle' in text
 
 
+    def test_a_gutenberg_config_is_read_not_noted_as_skipped(self, project_dir):
+        """Gawain: `init --fetch` keeps the fetch config as
+        reference/gutenberg.json, so every Gutenberg project's validate said
+        the names check was incomplete. JSON is text: it is read."""
+        with open(_ref(project_dir, 'gutenberg.json'), 'w') as f:
+            f.write('{"edition": "Jessie L. Weston, 1898"}\n')
+        notes = []
+        text = reference_text(project_dir, notes=notes)
+        assert 'Weston' in text
+        assert not any('not a text format' in n for n in notes)
+
+
 class TestHoneDiagnose:
     def _diagnose(self, project_dir, monkeypatch, capsys, *args):
         monkeypatch.setattr(cmd_hone, 'detect_project_root', lambda: project_dir)
