@@ -356,7 +356,7 @@ class TestMainPassLoopIsGated:
         assert '`storyforge check --pending`' in out
         assert "re-run `storyforge revise` for the plan's passes left" in out
         # the pass's scenes and its completed status are committed before the stop
-        assert len(committed) == 2
+        assert len(committed) == 3   # the pass, before the gate, the stop
         assert _read_csv_plan(plan_file)[0]['status'] == 'completed'
         assert set(gate.pending(project_dir)) == {'act1-sc01', 'act1-sc02'}
 
@@ -434,8 +434,8 @@ class TestInteractivePass:
             return sp.CompletedProcess(args, 0, stdout=out, stderr='')
         monkeypatch.setattr(cmd_revise, '_git', git)
         commits = []
-        monkeypatch.setattr(cmd_revise, 'commit_and_push',
-                            lambda d, msg, paths=None: commits.append((msg, paths)))
+        monkeypatch.setattr('storyforge.git.commit_and_push',
+                            lambda d, msg, paths=None: commits.append((msg, paths)) or True)
         main(['--interactive'])
         return gated, commits
 
@@ -527,3 +527,37 @@ class TestPolishLoopPassIsGated:
         with pytest.raises(SystemExit):
             cmd_revise._execute_single_pass(project_dir, plan_file, rows, 1)
         assert calls == []
+
+
+class TestAFailedCommitStopsRevise:
+    """SF-3 (#503's review): revise ignored every `commit_and_push` result,
+    so a failed commit was silent and the session went on (and paid)."""
+
+    def test_the_gate_is_not_run_after_a_failed_commit(self, project_dir, monkeypatch,
+                                                       capsys):
+        _scenes(project_dir, 'act1-sc01')
+        gated, _ = _stub_gate(monkeypatch)
+        import storyforge.git as sfgit
+
+        def fail(*a, **k):
+            sfgit.last_commit_error = 'error: unable to create index.lock'
+            return False
+        monkeypatch.setattr('storyforge.git.commit_and_push', fail)
+        with pytest.raises(SystemExit) as e:
+            _gate_pass(project_dir, ['act1-sc01'])
+        assert e.value.code == 1 and gated == []
+        out = capsys.readouterr().out
+        assert 'ERROR: the commit "Revision: polish, before the gate" failed: error: unable ' \
+            'to create index.lock' in out
+
+    def test_nothing_to_commit_carries_on(self, project_dir, monkeypatch):
+        _scenes(project_dir, 'act1-sc01')
+        gated, _ = _stub_gate(monkeypatch)
+        import storyforge.git as sfgit
+
+        def nothing(*a, **k):
+            sfgit.last_commit_error = sfgit.NOTHING_TO_COMMIT
+            return False
+        monkeypatch.setattr('storyforge.git.commit_and_push', nothing)
+        _gate_pass(project_dir, ['act1-sc01'])
+        assert gated == [('act1-sc01', 'revise')]

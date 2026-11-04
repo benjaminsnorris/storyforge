@@ -249,8 +249,29 @@ def add_pr_comment(project_dir: str, pr_number: str, body: str) -> None:
 # Commit helpers
 # ============================================================================
 
+#: Why the last `commit_and_push` didn't commit ('' after one that did):
+#: `NOTHING_TO_COMMIT`, or git's own message
+last_commit_error = ''
+NOTHING_TO_COMMIT = 'nothing to commit'
+#: The branches a push failed for in this process (`_push`), for a
+#: command's closing summary
+unpushed: list[str] = []
+
+
+class CommitError(Exception):
+    """A commit that had something to commit failed (`commit_or_raise`)."""
+
+
 def commit_and_push(project_dir: str, message: str, paths: list[str] | None = None) -> bool:
-    """Stage paths (or all), commit, and push. Returns True on success."""
+    """Stage paths (or all), commit, and push. Returns True on success.
+
+    False when nothing was staged (`last_commit_error` is
+    `NOTHING_TO_COMMIT`; nothing said) or the commit failed: then git's
+    reason is logged as a WARNING and kept in `last_commit_error`, and what
+    this call staged is unstaged again, so a later commit doesn't sweep it
+    in under its own message. A failed push is a WARNING (`_push`); the
+    commit stands and True is returned."""
+    global last_commit_error
     if paths:
         for p in paths:
             _git(project_dir, 'add', p, check=False)
@@ -258,11 +279,34 @@ def commit_and_push(project_dir: str, message: str, paths: list[str] | None = No
         _git(project_dir, 'add', '-A', check=False)
 
     r = _git(project_dir, 'commit', '-m', message, check=False)
+    if r.returncode != 0 and re.search(r'nothing (added )?to commit|no changes added to commit',
+                                       r.stdout or ''):
+        last_commit_error = NOTHING_TO_COMMIT
+        return False
     if r.returncode != 0:
+        last_commit_error = (' '.join(((r.stderr or '') + ' ' + (r.stdout or '')).split())[:300]
+                             or f'git commit exited {r.returncode}')
+        _git(project_dir, 'reset', '-q', '--', *(paths or ['.']), check=False)
+        log(f'WARNING: git commit "{message}" failed: {last_commit_error}. Nothing was '
+            f'committed; what it staged is unstaged again.')
         return False
 
+    last_commit_error = ''
     _push(project_dir)
     return True
+
+
+def commit_or_raise(project_dir: str, message: str, paths: list[str] | None) -> None:
+    """`commit_and_push` for a command that must not carry on past a failed
+    commit: raises `CommitError` with git's reason. Nothing to commit under
+    `paths` (`NOTHING_TO_COMMIT`) is not a failure."""
+    global last_commit_error
+    last_commit_error = ''   # a stubbed commit sets none: not a stale one
+    if not commit_and_push(project_dir, message, paths):
+        if last_commit_error == NOTHING_TO_COMMIT:
+            return
+        raise CommitError(f'the commit "{message}" failed: '
+                          f'{last_commit_error or "see `git status`"}')
 
 
 def _push(project_dir: str) -> bool:
@@ -282,6 +326,8 @@ def _push(project_dir: str) -> bool:
         branch = current_branch(project_dir) or 'HEAD'
         log(f'WARNING: could not push {branch}; the commit is only local: '
             f'{(r.stderr or r.stdout).strip()[:200]}')
+        if branch not in unpushed:
+            unpushed.append(branch)
         return False
     return True
 

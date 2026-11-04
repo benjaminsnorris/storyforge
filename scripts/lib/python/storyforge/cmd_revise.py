@@ -33,7 +33,7 @@ from storyforge.common import (
 from storyforge.costs import estimate_cost, log_operation, print_summary
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
-    update_pr_task, commit_and_push, _git, has_gh, current_branch,
+    update_pr_task, _git, has_gh, current_branch,
     get_pr_body, set_pr_body, add_pr_comment,
 )
 from storyforge.api import (
@@ -350,7 +350,7 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
                 break
             _recheck_after(project_dir, log_dir, set(scene_ids[i:]), budget)
 
-    commit_and_push(
+    _commit(
         project_dir,
         f'Revision: redraft {written} scenes from corrected briefs'
         + fallback_note(served_before),
@@ -358,6 +358,23 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
 
     if failed:
         raise RedraftError(f'{len(failed)} scene(s) not re-drafted: {"; ".join(failed)}')
+
+
+def _commit(project_dir: str, message: str, paths: list[str] | None = None) -> None:
+    """Commit and push, or stop the session: a failed commit is an ERROR
+    with git's reason and exit 1 (#503's review, SF-3), as in `write`.
+    Carrying on would pay for more passes on a branch whose commits aren't
+    landing, and the next commit would sweep these files in under its own
+    message; `git.commit_and_push` unstages what it staged. Nothing to
+    commit is not a failure; a failed push stays a WARNING."""
+    from storyforge import git
+    try:
+        git.commit_or_raise(project_dir, message, paths)
+    except git.CommitError as e:
+        log(f'ERROR: {e}. The files are written but not committed: fix what stopped the '
+            f'commit (`git status`), commit them by hand, then run revise again (a pass '
+            f'already marked completed is skipped).')
+        sys.exit(1)
 
 
 #: The revise session's one cost budget (`costs.RunBudget`), metered from
@@ -489,8 +506,8 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
     ordered = _reading_order(project_dir, scene_ids)
     _pend_ungated(project_dir, ordered, pass_name, 'not gated yet', announce=False)
     from storyforge import git
-    git.commit_and_push(project_dir, f'Revision: {pass_name}, before the gate',
-                        ['scenes/', 'reference/', 'working/'])
+    _commit(project_dir, f'Revision: {pass_name}, before the gate',
+            ['scenes/', 'reference/', 'working/'])
     log(f'  Gating {len(ordered)} revised scene(s) in reading order...')
     budget = _run_budget()
     trouble = ''  # a re-check that didn't pass or wasn't run
@@ -2053,7 +2070,7 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         log(f'    High: {", ".join(p.replace("_", " ") for p in baseline_summary["high_principles"])}')
 
     # Commit initial scores and create PR
-    commit_and_push(project_dir, 'Polish: initial deterministic scores', ['working/'])
+    _commit(project_dir, 'Polish: initial deterministic scores', ['working/'])
     pr_body = _build_polish_pr_body(title, len(scene_ids), max_loops, baseline_diag)
     pr_number = create_draft_pr(f'Polish: {title}', pr_body, project_dir,
                                 work_type='polish')
@@ -2094,7 +2111,7 @@ def _run_polish_loop(project_dir: str, max_loops: int,
             fixed, skipped = _fix_and_redraft(project_dir, upstream_scenes)
             brief_fix_skipped.update(skipped)
             if fixed:
-                commit_and_push(project_dir,
+                _commit(project_dir,
                                 f'Polish: upstream brief fixes for {len(fixed)} scenes',
                                 ['reference/', 'scenes/', 'working/'])
 
@@ -2138,7 +2155,7 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         log(f'\n  Reached max iterations ({max_loops})')
 
     # Commit deterministic phase results
-    commit_and_push(project_dir, 'Polish: deterministic phase complete', ['working/'])
+    _commit(project_dir, 'Polish: deterministic phase complete', ['working/'])
 
     # ------------------------------------------------------------------
     # Phase 2: Full LLM scoring (one run for the complete picture)
@@ -2151,7 +2168,7 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         log(f'\n=== Phase 2: Full Score ===')
         _, final_llm_diag = _run_lightweight_score(project_dir, scene_ids)
         final_summary = _summarize_diagnosis(final_llm_diag)
-        commit_and_push(project_dir, 'Polish: full score after deterministic loop',
+        _commit(project_dir, 'Polish: full score after deterministic loop',
                         ['working/'])
 
     # Post summary comment
@@ -2253,7 +2270,6 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
                          model_override: str | None = None) -> None:
     """Execute a single revision pass from a plan. Subset of main pass loop."""
     from storyforge.common import select_revision_model, get_coaching_level, build_shared_context
-    from storyforge.git import commit_and_push
     from storyforge.api import invoke_to_file, extract_text, fallback_replies, fallback_note
 
     pass_name = plan_rows[0].get('name', 'polish')
@@ -2372,7 +2388,7 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
     # some is not marked completed
     if not skipped:
         _update_pass_field(plan_rows, 1, 'status', 'completed', csv_plan_file)
-    commit_and_push(
+    _commit(
         project_dir,
         f'Polish: loop iteration {iteration} — {pass_name}' + fallback_note(served_before),
         ['scenes/', 'reference/', 'working/'],
@@ -2853,7 +2869,7 @@ def _main(argv=None):
             log(f'Upstream issues in {len(upstream_scenes)} scenes — fixing briefs')
             fixed, _ = _fix_and_redraft(project_dir, upstream_scenes)
             if fixed:
-                commit_and_push(project_dir,
+                _commit(project_dir,
                                 f'Naturalness: upstream brief fixes for {len(fixed)} scenes',
                                 ['reference/', 'scenes/', 'working/'])
         plan_rows = _generate_naturalness_plan(csv_plan_file, project_dir)
@@ -3203,7 +3219,7 @@ def _main(argv=None):
             _log_usage(project_dir, '', 'revise', pass_name, pass_model, duration)
 
             # Git commit if needed
-            commit_and_push(project_dir, f'Revision: {pass_name}', ['.'])
+            _commit(project_dir, f'Revision: {pass_name}', ['.'])
             _git(project_dir, 'push', check=False)
 
             # Mark completed
@@ -3487,18 +3503,18 @@ Rules:
         if head_before == head_after:
             log('  No commit from Claude. Creating manual commit...')
             if effective_coaching in ('coach', 'strict') and not rewritten:
-                commit_and_push(
+                _commit(
                     project_dir,
                     f'{effective_coaching.capitalize()}: {pass_name}',
                     ['working/coaching/', 'working/logs/', 'working/costs/', 'working/pipeline.csv'],
                 )
             else:
-                commit_and_push(project_dir,
+                _commit(project_dir,
                                 f'Revision: {pass_name}' + fallback_note(served_before), ['.'])
         elif rewritten:
             # the session committed its own prose; the gate's fixes and
             # ledger came after
-            commit_and_push(project_dir, f'Revision: gate the scenes of {pass_name}',
+            _commit(project_dir, f'Revision: gate the scenes of {pass_name}',
                             ['scenes/', 'reference/', 'working/'])
 
         # Does the revised prose still agree with the calendar? Reported in
@@ -3522,7 +3538,7 @@ Rules:
         _update_pass_field(plan_rows, pass_num, 'owed', '', csv_plan_file)
         _update_pass_field(plan_rows, pass_num, 'status', 'completed', csv_plan_file)
         if gate_failures:
-            commit_and_push(project_dir, f'Revision: {pass_name} done, stopped at the gate',
+            _commit(project_dir, f'Revision: {pass_name} done, stopped at the gate',
                             [csv_plan_file])
             _fail_gated_pass(pass_name, gate_failures, PLAN_RESUME,
                              redraft_needed if defer_redraft else frozenset())
@@ -3603,7 +3619,7 @@ Rules:
     if completed == total_passes:
         log('All revision passes are done!')
         os.makedirs(os.path.join(project_dir, 'working', 'reviews'), exist_ok=True)
-        commit_and_push(
+        _commit(
             project_dir,
             'Revision complete: advance phase to review',
             ['storyforge.yaml', 'working/pipeline.csv'],

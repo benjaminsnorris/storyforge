@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from storyforge import gate
+from storyforge import cmd_write, gate
 from storyforge.checker import CheckResult, Finding
 from storyforge.cmd_write import main
 
@@ -124,7 +124,7 @@ class TestGatedWrite:
     def test_batch_prose_is_refused_before_anything_is_spent(self, setup, monkeypatch, capsys):
         ran = []
         monkeypatch.setattr('storyforge.cmd_write._run_batch_mode',
-                            lambda *a, **k: ran.append(1) or (0, 0, []))
+                            lambda *a, **k: ran.append(1) or cmd_write.DraftOutcome(0, 0, []))
         monkeypatch.setattr('storyforge.cmd_write.estimate_cost',
                             lambda *a, **k: ran.append('cost') or 0.0)
         with pytest.raises(SystemExit) as exc:
@@ -149,7 +149,7 @@ class TestGatedWrite:
     def test_batch_runs_for_coaching_briefs(self, setup, monkeypatch):
         ran = []
         monkeypatch.setattr('storyforge.cmd_write._run_batch_mode',
-                            lambda *a, **k: ran.append(a[5]) or (0, 0, []))
+                            lambda *a, **k: ran.append(a[5]) or cmd_write.DraftOutcome(0, 0, []))
         main(['--batch', '--coaching', 'coach', '--force', '--scenes', 'act1-sc01'])
         assert ran == ['coach']
 
@@ -230,9 +230,13 @@ class TestReview443:
                                                          mock_git):
         """`write` ignored a failed `commit_and_push` and went on drafting
         (#499's review): the next scene's commit would have swept this one's
-        ledger changes in under its message. Now it stops, exit 1."""
+        ledger changes in under its message. Now it stops, exit 1, and says
+        the scene needs a commit by hand, not a redraft (C-3); the paid
+        drift check and the review phase, which commits, don't run (SF-1)."""
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
         calls = _gate(monkeypatch, {'act1-sc01': True, 'act1-sc02': True})
+        drift = []
+        monkeypatch.setattr('storyforge.timeline.drift_check', lambda *a: drift.append(a))
         mock_git.commit_success = False
         with pytest.raises(SystemExit) as exc:
             main(['--scenes', 'act1-sc01,act1-sc02'])
@@ -241,11 +245,26 @@ class TestReview443:
         assert _scene(setup, 'act1-sc02') is None            # never drafted
         assert _scene(setup, 'act1-sc01') is not None        # written, kept
         out = capsys.readouterr().out
-        assert 'act1-sc01 (written but not committed: the commit "Draft scene act1-sc01" ' \
-            'failed' in out
+        assert '1 written but not committed (the files are on disk; do not redraft them)' \
+            in out
+        assert 'act1-sc01 (the commit "Draft scene act1-sc01" failed' in out
         assert 'act1-sc02 (not attempted: the run stopped at act1-sc01)' in out
+        assert 'ERROR: 1 scene(s) not drafted' in out          # only act1-sc02
         commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']
         assert commits == ['Draft scene act1-sc01']
+        assert not mock_git.calls_for('run_review_phase') and drift == []
+        assert 'Skipping the timeline drift check and the review phase' in out
+
+    def test_a_failed_commit_of_a_scene_the_gate_stopped_says_both(
+            self, setup, monkeypatch, capsys, mock_git):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        _gate(monkeypatch, {'act1-sc01': False})
+        mock_git.commit_success = False
+        with pytest.raises(SystemExit):
+            main(['--scenes', 'act1-sc01'])
+        out = capsys.readouterr().out
+        assert 'it also did not pass the gate and is listed in working/gate-pending.csv' \
+            in out
 
     def test_a_failed_recheck_commit_stops_the_run(self, setup, monkeypatch, capsys,
                                                    mock_git):
@@ -269,7 +288,36 @@ class TestReview443:
         assert calls == [('act1-sc01', 'draft')]
         assert commits == ['Draft scene act1-sc01', 'Re-check after act1-sc01: 1 passed']
         out = capsys.readouterr().out
-        assert 're-checks after act1-sc01 (written but not committed' in out
+        assert 'the re-checks after act1-sc01 (the commit "Re-check after act1-sc01: 1 ' \
+            'passed" failed' in out
+        assert 'act1-sc02 (not attempted: the run stopped at act1-sc01)' in out
+
+    def test_interactive_a_failed_gate_commit_stops_the_run(
+            self, setup, monkeypatch, capsys, mock_git):
+        """T-2: the interactive CLI commits the scene itself; the gate's own
+        commit after it ("Gate scene") failing stops the run too."""
+        from storyforge import cmd_write
+        heads = iter(['before', 'after'] * 10)
+        import subprocess as sp
+        monkeypatch.setattr('storyforge.git._git', lambda pd, *a, check=True:
+                            sp.CompletedProcess(a, 0, stdout=next(heads) if a[:1] == (
+                                'rev-parse',) else 'M x', stderr=''))
+
+        def cli(prompt, model, project_dir):
+            path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+            with open(path, 'w') as f:
+                f.write(GOOD)
+            return 0
+        monkeypatch.setattr(cmd_write, '_invoke_interactive', cli)
+        calls = _gate(monkeypatch, {'act1-sc01': True, 'act1-sc02': True})
+        mock_git.commit_success = False
+        with pytest.raises(SystemExit) as exc:
+            main(['--interactive', '--force', '--scenes', 'act1-sc01,act1-sc02'])
+        assert exc.value.code == 1
+        assert calls == [('act1-sc01', 'draft')]
+        assert [c[1] for c in mock_git.calls_for('commit_and_push')] == ['Gate scene act1-sc01']
+        out = capsys.readouterr().out
+        assert 'act1-sc01 (the commit "Gate scene act1-sc01" failed' in out
         assert 'act1-sc02 (not attempted: the run stopped at act1-sc01)' in out
 
     def test_nothing_to_commit_is_not_a_failed_commit(self, setup, monkeypatch):
@@ -277,11 +325,18 @@ class TestReview443:
         commit; `git commit` refuses that, which isn't a failure."""
         import subprocess
         from storyforge import cmd_write
-        monkeypatch.setattr('storyforge.git._git', lambda pd, *a, check=True:
-                            subprocess.CompletedProcess(a, 0, stdout='', stderr=''))
-        monkeypatch.setattr('storyforge.git.commit_and_push',
-                            lambda *a, **k: pytest.fail('committed nothing'))
-        cmd_write._commit(setup, 'Re-check after x: 0 passed', ['reference/'])
+        seen = []
+
+        def git(pd, *a, check=True):   # git commit says there is nothing to commit
+            seen.append(a[0])
+            if a[0] == 'commit':
+                return subprocess.CompletedProcess(
+                    a, 1, stdout='On branch b\nnothing to commit, working tree clean\n',
+                    stderr='')
+            return subprocess.CompletedProcess(a, 0, stdout='', stderr='')
+        monkeypatch.setattr('storyforge.git._git', git)
+        cmd_write._commit(setup, 'Re-check after x: 0 passed', ['reference/'])   # no raise
+        assert 'push' not in seen and 'reset' not in seen
 
     @staticmethod
     def _metered_replies(monkeypatch, replies, output_tokens):
@@ -531,7 +586,7 @@ class TestReviseRedraftsAreGated:
                 f.write('A new redraft.')
             return ''
         monkeypatch.setattr(cmd_write, '_extract_scene_from_response', extract)
-        monkeypatch.setattr(cmd_revise, 'commit_and_push', lambda *a, **k: True)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **k: True)
         self.befores = {}
 
         def fake_gate(pd, sid, scene_file, command, log_dir, before=None):
@@ -622,7 +677,7 @@ class TestReviseRedraftsRealGate:
         monkeypatch.setattr('storyforge.cmd_write._build_prompt', lambda sid, *a, **k: sid)
         monkeypatch.setattr('storyforge.api.invoke_to_file', lambda *a, **k: None)
         monkeypatch.setattr(cmd_write, '_extract_scene_from_response', lambda *a: '')
-        monkeypatch.setattr(cmd_revise, 'commit_and_push', lambda *a, **k: True)
+        monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **k: True)
         bad = Finding('contradiction', 'TIM', 'x', 'y', 'z', '', 'why')
         gated = []
 

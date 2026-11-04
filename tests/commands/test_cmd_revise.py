@@ -467,8 +467,8 @@ class TestMainDryRun:
         monkeypatch.setattr('storyforge.cmd_revise._fix_and_redraft',
                             lambda p, ids: (fixed, {} if fixed else {'act1-sc01': 'no reply'}))
         made = []
-        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push',
-                            lambda p, msg, *a, **kw: made.append(msg))
+        monkeypatch.setattr('storyforge.git.commit_and_push',
+                            lambda p, msg, *a, **kw: made.append(msg) or True)
 
         main(['--naturalness', '--dry-run'])
 
@@ -1027,9 +1027,10 @@ class TestOwedScenes:
             return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
         monkeypatch.setattr('subprocess.run', run)
         monkeypatch.setattr(
-            'storyforge.cmd_revise.commit_and_push',
+            'storyforge.git.commit_and_push',
             lambda *a, **kw: committed.append(_read_csv_plan(
-                os.path.join(project_dir, 'working', 'plans', 'revision-plan.csv'))[0]['owed']))
+                os.path.join(project_dir, 'working', 'plans', 'revision-plan.csv'))[0]['owed'])
+            or True)
         main([])
 
     def test_a_re_run_revises_only_the_scenes_still_owed(
@@ -1045,7 +1046,8 @@ class TestOwedScenes:
         assert exc.value.code == 1
         row = _read_csv_plan(plan_file)[0]
         assert row['status'] != 'completed' and row['owed'] == 'act1-sc02'
-        assert committed == ['act1-sc02']  # owed is in the commit with the scenes
+        # owed is in the commit with the scenes (and in the gate's commit after it)
+        assert committed and set(committed) == {'act1-sc02'}
         assert 're-run `storyforge revise`' in capsys.readouterr().out
 
         prompts.clear()
@@ -1197,7 +1199,7 @@ class TestPolishLoopPass:
         monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
         commits = []
         monkeypatch.setattr('storyforge.git.commit_and_push',
-                            lambda d, msg, paths: commits.append(msg))
+                            lambda d, msg, paths: commits.append(msg) or True)
         # scripts/lib/python/storyforge/cmd_revise.py -> the plugin root
         plugin_dir = os.path.abspath(os.path.join(
             os.path.dirname(cmd_revise.__file__), '..', '..', '..', '..'))
