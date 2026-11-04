@@ -837,6 +837,30 @@ class TestPendingReason480:
         return cmd_write._gate_drafted_scene(project_dir, 'act1-sc01', path, 'revise',
                                              str(project_dir))
 
+    def test_the_runs_logs_are_named(self, project_dir, monkeypatch, capsys):
+        """Each gate run logs to its own directory (`gate.run_log_dir`): the
+        log says which."""
+        r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
+        logs = os.path.join(project_dir, 'working', 'logs', 'gate', 'act1-sc01', '20261103-1')
+        self._out(project_dir, monkeypatch, gate.GatedScene('prose', r, r, log_dir=logs))
+        assert ('Gate logs: ' + os.path.join('working', 'logs', 'gate', 'act1-sc01',
+                                             '20261103-1')) in capsys.readouterr().out
+
+    def test_a_gate_error_names_its_logs(self, project_dir, monkeypatch, capsys):
+        from storyforge import cmd_write
+        err = gate.GateError('cut off')
+        err.log_dir = os.path.join(project_dir, 'working', 'logs', 'gate', 'act1-sc01', 'r')
+
+        def fail(*a, **k):
+            raise err
+        monkeypatch.setattr(gate, 'gate_and_fix', fail)
+        path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        passed, _ = cmd_write._gate_drafted_scene(project_dir, 'act1-sc01', path, 'revise',
+                                                  str(project_dir))
+        assert not passed
+        assert ('Gate logs: ' + os.path.join('working', 'logs', 'gate', 'act1-sc01', 'r')
+                ) in capsys.readouterr().out
+
     def test_two_fix_rounds_say_so(self, project_dir, monkeypatch, capsys):
         r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
         rounds = [gate.FixRound(['a', 'b'], [{}]), gate.FixRound(['c'], [{}, {}])]
@@ -862,9 +886,36 @@ class TestPendingReason480:
         r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
         passed, why = self._out(project_dir, monkeypatch, gate.GatedScene(
             'prose', r, r, fixed=True, rounds=[gate.FixRound(['a'], [])],
-            notes=['fix round 2 failed (x); kept the prose and verdict before it']))
+            notes=['fix round 2 failed (x); kept the prose and verdict before it'],
+            discarded=2))
         assert 'NOTE: fix round 2 failed (x)' in capsys.readouterr().out
-        assert why.startswith('1 problem(s) after one fix (a later fix was discarded')
+        assert why.startswith('1 problem(s) after one fix (fix round 2 was discarded; the '
+                              'log says why)')
+
+    def test_a_note_that_is_not_a_discard_says_nothing_was_discarded(self, project_dir,
+                                                                     monkeypatch):
+        """SF-6/C-3 (#504's review): the reason was inferred from `.notes`;
+        a round's unplaced-findings note isn't a discard."""
+        r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
+        rounds = [gate.FixRound(['a'], [{}]), gate.FixRound(['b'], [{}])]
+        passed, why = self._out(project_dir, monkeypatch, gate.GatedScene(
+            'prose', r, r, fixed=True, rounds=rounds,
+            notes=['fix round 1: 1 new finding(s) ... could not be placed']))
+        assert why.startswith('1 problem(s) after 2 fixes:') and 'discarded' not in why
+
+    def test_a_discarded_first_fix_says_the_scene_is_as_written(self, project_dir,
+                                                                monkeypatch, capsys):
+        """mended-bridle (2026-11-03): a first fix that made the scene worse
+        is discarded; the reason must not say a later one was."""
+        r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
+        note = ('fix round 1 brought in 1 problem(s) in the words it changed (x); kept the '
+                'prose as given and the first verdict')
+        passed, why = self._out(project_dir, monkeypatch,
+                                gate.GatedScene('prose', r, r, fixed=False, notes=[note],
+                                                discarded=1))
+        assert not passed and f'NOTE: {note}' in capsys.readouterr().out
+        assert why.startswith('1 problem(s) not fixed: the fix was discarded, the scene left '
+                              'as written')
 
     def test_plan_conflicts_left_after_a_fix_are_the_authors(self, project_dir, monkeypatch):
         """SF-5 (#482): a fix whose re-check left only plan conflicts said

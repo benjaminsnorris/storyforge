@@ -58,6 +58,7 @@ import copy
 import os
 import re
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 from storyforge import audit, ledger, persistence
 from storyforge.checker import (GATE_READINGS, CheckError, CheckResult, Dispute, Finding,
@@ -79,8 +80,10 @@ REPORTED = ('disagrees', 'ends registry', 'subject', 'cap', 'unplaced')
 
 class GateError(RuntimeError):
     """A gate step couldn't finish; nothing was written. From `gate_and_fix`,
-    `.first` is the first gate run when there was one."""
+    `.first` is the first gate run when there was one, and `.log_dir` the
+    invocation's logs (`run_log_dir`)."""
     first: 'GateResult | None' = None
+    log_dir: str = ''
 
 
 def _among(f: Finding, findings: list[Finding]) -> bool:
@@ -276,6 +279,19 @@ _MIN_QUOTE_WORDS = 4
 _MIN_PART_WORDS = 3
 
 
+def _found_in(quote: str, text: str) -> bool:
+    """Whether `quote`'s parts (split at an ellipsis) are in `text`, in
+    order, ignoring case, punctuation and spacing; no minimum length."""
+    words, at = _words(text), 0
+    parts = [p for p in (_words(x) for x in re.split(r'\.\.\.|…', quote)) if p.strip()]
+    for p in parts:
+        found = words.find(p, at)
+        if found < 0:
+            return False
+        at = found + len(p) - 1
+    return bool(parts)
+
+
 def _quoted_in(quote: str, text: str) -> bool:
     """Whether `quote` is in `text`, ignoring case, punctuation and spacing:
     its parts (split at an ellipsis, as quotes are verified) in order, each
@@ -322,17 +338,98 @@ def _brief_phrases(project_dir: str, scene_id: str) -> list[str]:
     return [p for p in phrases if _count(_words(p)) >= _MIN_BRIEF_WORDS]
 
 
-def _is_plan_conflict(quote: str, phrases: list[str]) -> bool:
+#: A speech tag that may split a scripted line (`_is_speech_tag`): one of
+#: these verbs with a pronoun or a character's name, nothing else
+_SPEECH_VERBS = frozenset('said says asked asks answered replied told called whispered '
+                          'murmured muttered shouted added repeated'.split())
+_PRONOUNS = frozenset('he she they i we you'.split())
+#: The most words a character's name in a speech tag may have
+_MAX_NAME_WORDS = 3
+#: Quote marks a scripted line is spoken between: double quotes, straight or
+#: curly, and curly single quotes (a closing ’ followed by a letter is an
+#: apostrophe, not a mark)
+_QUOTE_MARKS = re.compile(r'["“”‘]|’(?!\w)')
+
+
+def _speaker_names(project_dir: str) -> frozenset[str]:
+    """The characters' names and aliases (reference/characters.csv), as
+    `_words` phrases without the padding: the names a speech tag may use."""
+    from storyforge.enrich import load_alias_map
+    names = load_alias_map(os.path.join(project_dir, 'reference', 'characters.csv'))
+    return frozenset(_words(n).strip() for n in names if _words(n).strip())
+
+
+def _is_speech_tag(text: str, names: frozenset[str] | set[str]) -> bool:
+    """Whether `text` is only a speech tag: a speech verb (`_SPEECH_VERBS`)
+    and a pronoun or a character's name (`names`, up to `_MAX_NAME_WORDS`
+    words), either order, punctuation aside ("he said", "said Thomas"). An
+    adverb, a place or anything else in it makes it narration, which may hold
+    the error."""
+    words = _words(text).split()
+    if not 2 <= len(words) <= _MAX_NAME_WORDS + 1:
+        return False
+    for verb, who in ((words[0], words[1:]), (words[-1], words[:-1])):
+        if verb in _SPEECH_VERBS and (
+                (len(who) == 1 and who[0] in _PRONOUNS) or ' '.join(who) in names):
+            return True
+    return False
+
+
+def _split_line(quote: str, names: frozenset[str] | set[str] = frozenset()) -> str | None:
+    """The spoken words of `quote` when it is one line the prose split with
+    speech tags (`"Left hand on the case," he said. "Right hand free."`):
+    two or more spoken parts, each tag between them only a speech tag
+    (`_is_speech_tag`), and no words before the first part or after the
+    last. Otherwise None: narration before or after a line, or a tag with
+    anything else in it, may be where the error is. Both readings of its
+    quote marks are tried (a quote can start mid-line, so its first mark may
+    close a line)."""
+    segments = _QUOTE_MARKS.split(quote.replace('\r\n', '\n'))
+    for parity in (0, 1):
+        spoken = [x for i, x in enumerate(segments) if i % 2 == parity]
+        told = [(i, x) for i, x in enumerate(segments) if i % 2 != parity]
+        tags = [x for i, x in told if 0 < i < len(segments) - 1]
+        ends = [x for i, x in told if not 0 < i < len(segments) - 1]
+        if (tags and sum(1 for x in spoken if _words(x).strip()) >= 2
+                and all(_is_speech_tag(x, names) for x in tags)
+                and not any(_words(x).strip() for x in ends)):
+            return ' '.join(spoken)
+    return None
+
+
+def _is_plan_conflict(quote: str, phrases: list[str],
+                      names: frozenset[str] | set[str] = frozenset()) -> bool:
     """Whether a contradiction's `quote` is the brief's own words: the
     quote lies within a scripted phrase, or a scripted phrase makes up at
     least half of it (a short scripted line inside a long quote whose error
     is elsewhere is not one). A quote under `_MIN_BRIEF_WORDS` words is
-    never one."""
-    q = _words(quote)
-    n = _count(q)
-    if n < _MIN_BRIEF_WORDS:
-        return False
-    return any(q in p or (p in q and 2 * _count(p) >= n) for p in map(_words, phrases))
+    never one.
+
+    A scripted line the prose split with a speech tag (`"Left hand on the
+    case," he said. "Right hand free."`) is matched on its spoken words
+    (`_split_line`; `names`: the characters a tag may name): the
+    mended-bridle run (2026-11-03) sent such a line, the brief's own, to the
+    fix as a contradiction with a later scene, and the fix rewrote the scene
+    to match that scene's error. Narration before or after a line is not
+    taken out (`"...," said the dead man.`), and a tag with anything but a
+    speaker and a speech verb is narration: either may hold the error. A
+    split line's spoken words must all lie within one scripted phrase.
+
+    Not checked: the speaker a tag names. A tag naming the wrong character
+    ("Cora said" for Thomas's line) passes as the brief's line."""
+    def matches(text: str, within: bool = False) -> bool:
+        q = _words(text)
+        n = _count(q)
+        if n < _MIN_BRIEF_WORDS:
+            return False
+        return any(q in p or (not within and p in q and 2 * _count(p) >= n)
+                   for p in map(_words, phrases))
+    if matches(quote):
+        return True
+    # a split line's spoken words must all be the brief's: with the tag set
+    # aside, nothing else in the quote may be (the error could be there)
+    line = _split_line(quote, names)
+    return line is not None and matches(line, within=True)
 
 
 # ============================================================================
@@ -459,7 +556,8 @@ def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
             continue
         if phrases is None:
             phrases = _brief_phrases(project_dir, result.scene_id)
-        if _is_plan_conflict(f.scene_quote, phrases):
+            names = _speaker_names(project_dir)
+        if _is_plan_conflict(f.scene_quote, phrases, names):
             result.plan_conflicts.append(f)
 
 
@@ -947,9 +1045,18 @@ class GatedScene:
     # only then); not `bool(rounds)`: a later fix can undo an earlier one
     fixed: bool = False
     rounds: list[FixRound] = field(default_factory=list)  # the fixes kept, in order
-    #: later rounds discarded, and why (their prose and verdict are not what's
-    #: kept): the caller logs these
+    #: what the caller must log: the round discarded and why (its prose and
+    #: verdict are not what's kept), and findings a round couldn't place
     notes: list[str] = field(default_factory=list)
+    #: the fix round whose fix was discarded (0: none); `rounds` holds the
+    #: ones kept, so 1 with no rounds means the scene is as given
+    discarded: int = 0
+    #: why `BLOCKED_PATH` couldn't be put back to the kept run's
+    #: contradictions after a discard ('' when it was): the caller says so
+    blocked_stale: str = ''
+    #: this invocation's logs (`run_log_dir`): the first run's, and each
+    #: re-check's in `recheck/`, `recheck-2/`
+    log_dir: str = ''
 
 
 def _blocking_count(result: GateResult) -> int:
@@ -965,6 +1072,220 @@ def _undone_edit(earlier: list[FixRound] | tuple, before: str, after: str) -> st
             if find and find not in replace and find not in before and find in after:
                 return find
     return None
+
+
+def _word_list(text: str) -> list[str]:
+    from storyforge.checker import normalize
+    return re.findall(r'\w+', normalize(text).lower())
+
+
+class Span(NamedTuple):
+    """Words [start, end) of a prose's word list (`_word_list`); an empty
+    span marks the place between two words."""
+    start: int
+    end: int
+
+
+@dataclass
+class _Diff:
+    """What a fix changed, as a word diff of the prose before and after it,
+    computed once per round (`_diff`): the changed spans on each side
+    (words put in, replaced or taken out; an empty span where words were
+    only added on the other side)."""
+    before: list[str]
+    after: list[str]
+    before_spans: list[Span]
+    after_spans: list[Span]
+
+
+def _diff(before: str, after: str) -> _Diff:
+    from difflib import SequenceMatcher
+    old, new = _word_list(before), _word_list(after)
+    ops = [op for op in SequenceMatcher(None, old, new, autojunk=False).get_opcodes()
+           if op[0] != 'equal']
+    return _Diff(old, new, [Span(i1, i2) for _, i1, i2, _, _ in ops],
+                 [Span(j1, j2) for _, _, _, j1, j2 in ops])
+
+
+def _quote_spans(quote: str, words: list[str]) -> list[Span]:
+    """Every place `quote` (its parts, split at an ellipsis, in order) is in
+    `words`."""
+    parts = [p for p in (_word_list(x) for x in re.split(r'\.\.\.|…', quote)) if p]
+    if not parts:
+        return []
+
+    def at(part: list[str], start: int) -> int:
+        for i in range(start, len(words) - len(part) + 1):
+            if words[i:i + len(part)] == part:
+                return i
+        return -1
+    out, first = [], parts[0]
+    for i in range(len(words) - len(first) + 1):
+        if words[i:i + len(first)] != first:
+            continue
+        end, ok = i + len(first), True
+        for part in parts[1:]:
+            j = at(part, end)
+            if j < 0:
+                ok = False
+                break
+            end = j + len(part)
+        if ok:
+            out.append(Span(i, end))
+    return out
+
+
+#: How many unchanged words must lie between a quote and every change for
+#: the quote to count as away from the fix (`_touches(near=True)`): a word
+#: diff can line a change up a word or two off where the edit was
+#: ("forty-one, the morning after. The coffee" against "forty-one. The
+#: coffee" matches the two "the"s). Tuned on a handful of E4/E8 replays
+#: (2026-11-03), not measured
+_NEAR_WORDS = 4
+
+
+def _touches(span: Span, changed: list[Span], near: bool = False) -> bool:
+    """Whether `span` overlaps a changed span (an empty one: lies strictly
+    inside it); with `near`, whether fewer than `_NEAR_WORDS` unchanged
+    words lie between it and a changed span."""
+    s, e = span
+    if near:
+        return any(a - _NEAR_WORDS < e and s < b + _NEAR_WORDS for a, b in changed)
+    return any((a < e and s < b) if a < b else (s < a < e) for a, b in changed)
+
+
+def _in_edited_text(f: Finding, changed: list[Span], words: list[str]) -> bool:
+    """Whether `f`'s scene quote lies in text the fix changed: found in
+    `words`, and every place it is found touches a changed span (an empty
+    one, words taken out, when the quote spans it). A quote not found: no."""
+    places = _quote_spans(f.scene_quote, words)
+    return bool(places) and all(_touches(p, changed) for p in places)
+
+
+def _in_untouched_text(f: Finding, changed: list[Span], words: list[str]) -> bool:
+    """Whether `f`'s scene quote lies only in text the fix left alone: found
+    in `words`, and no place it is found comes near a changed span
+    (`_touches(near=True)`: words put in right after a quote may be its
+    fix). A quote not found: no (it may be about the change)."""
+    places = _quote_spans(f.scene_quote, words)
+    return bool(places) and not any(_touches(p, changed, near=True) for p in places)
+
+
+def _unplaced(run: GateResult, words: list[str]) -> list[Finding]:
+    """`run`'s blocking findings whose scene quote is blank or not found in
+    `words` (an unverified quote, a paraphrase, a promise with no nearest
+    words): they can't be placed relative to the fix."""
+    return [f for f in run.findings + run.unverified if not _quote_spans(f.scene_quote, words)]
+
+
+def _persists(f: Finding, earlier: list[Finding]) -> bool:
+    """Whether `f` is a problem the run before the fix already had: the same
+    target (`checker.same_target`, a contradiction with no source only on a
+    fact id both name): the same promise, or the same source and
+    established words. The scene quote and code are not compared: the fix
+    changed the one, and readings vary on the other. A contradiction with
+    the same file or calendar but other established words (a fix that
+    swaps one wrong date for another against another line) is a new one.
+
+    `earlier` includes the run's inherited findings: a problem already in
+    the book that the fix's words restate is that problem, not the fix's."""
+    from storyforge.checker import same_target
+    return any(same_target(f, g, need_fact=True) for g in earlier)
+
+
+def _introduced(before_run: GateResult, after_run: GateResult, diff: _Diff) -> list[Finding]:
+    """The blocking findings of `after_run` (the gate run on the fixed
+    prose) that the fix brought in, not a problem `before_run` already had
+    (`_persists`) and either:
+
+    - in words the fix changed (`_in_edited_text`), or
+    - a broken promise (CR-2, #504's review) whose quote can't be placed or
+      isn't away from the fix: a fix that takes out the words keeping a
+      promise leaves nothing to quote.
+
+    A finding in words the fix left alone is not the fix's, however new:
+    two readings of the same words differ (E8, 2026-11-01). Nor is a new
+    contradiction whose quote can't be placed: nothing ties it to the
+    edits (two readings make different unverified findings too); it still
+    counts in `_worse`'s total, and the caller is told it couldn't be
+    placed."""
+    if not after_run.check or not diff.after_spans:
+        return []
+    earlier = list(before_run.check.findings + before_run.check.unverified
+                   if before_run.check else [])
+    out = []
+    for f in after_run.findings + after_run.unverified:
+        if _persists(f, earlier):
+            continue
+        if _in_edited_text(f, diff.after_spans, diff.after):
+            out.append(f)
+        elif f.kind == 'broken-promise' and not _in_untouched_text(f, diff.after_spans,
+                                                                   diff.after):
+            out.append(f)
+    return out
+
+
+def _worse(n: int, before_run: GateResult, after_run: GateResult, diff: _Diff) -> str:
+    """Why fix round `n`'s prose (which failed as `after_run`) is worse
+    than the prose it fixed (failed as `before_run`), or '' when it isn't:
+    more blocking problems, or a problem the fix brought in (`_introduced`).
+
+    The count leaves out, on each side, the findings whose quotes lie only
+    in words the fix left alone (`_in_untouched_text`): those words are in
+    both proses, and two readings of them differ. E4's missing-persons
+    (2026-11-03): a fix cleared both first findings, the re-check found
+    four new ones, every one in words it hadn't touched, and a plain count
+    would have thrown the fix away. A finding that can't be placed counts."""
+    then_alone = sum(_in_untouched_text(f, diff.before_spans, diff.before)
+                     for f in before_run.findings + before_run.unverified)
+    now_alone = sum(_in_untouched_text(f, diff.after_spans, diff.after)
+                    for f in after_run.findings + after_run.unverified)
+    then = _blocking_count(before_run) - then_alone
+    now = _blocking_count(after_run) - now_alone
+    if now > then:
+        alone = (f' (not counting {then_alone} and {now_alone} in words it left alone)'
+                 if then_alone or now_alone else '')
+        return f'fix round {n} left {now} problem(s), more than the {then} before it{alone}'
+    new = _introduced(before_run, after_run, diff)
+    if new:
+        return (f'fix round {n} brought in {len(new)} problem(s) ('
+                + '; '.join(_one_line(f.message())[:200] for f in new[:3])
+                + (' ...' if len(new) > 3 else '') + ')')
+    return ''
+
+
+def run_log_dir(log_dir: str, scene_id: str, *, now=None, pid: int | None = None) -> str:
+    """A new directory, created, for one gate invocation's logs of
+    `scene_id`: `log_dir/<scene>/<YYYYMMDD-HHMMSS>-<pid>`, with `-2`, `-3`
+    ... when that is taken. Callers pass a fixed `log_dir` (write's
+    working/logs/gate, check's working/logs/check), and the log files are
+    named by scene alone (gate-check-<scene>.json), so without it a later
+    run of the scene, or a re-check of it in the same run, overwrote the
+    record of what the earlier one was told and changed.
+
+    The directory is made exclusively (`os.mkdir`), so two calls never share
+    one, whatever the clock. `now` (a datetime) and `pid` are for tests.
+
+    Raises:
+        GateError: the directory can't be made (SF-5, #504's review: a
+            traceback named nothing); nothing was run.
+    """
+    from datetime import datetime
+    stamp = f'{(now or datetime.now()):%Y%m%d-%H%M%S}-{os.getpid() if pid is None else pid}'
+    parent = os.path.join(log_dir, scene_id)
+    base = os.path.join(parent, stamp)
+    path, n = base, 1
+    try:
+        os.makedirs(parent, exist_ok=True)
+        while True:
+            try:
+                os.mkdir(path)
+                return path
+            except FileExistsError:
+                n += 1
+                path = f'{base}-{n}'
+    except OSError as e:
+        raise GateError(f'{scene_id}: can\'t make the gate log directory {path}: {e}') from e
 
 
 def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
@@ -987,11 +1308,24 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     - A fix that changes nothing (every problem judged a false alarm) is not
       re-gated: the last verdict stands, and a re-roll of the same prose
       won't overturn it.
-    - A later round never leaves things worse than the round before it: its
-      fix is discarded, and the earlier prose and verdict kept, when it
-      fails (`GateError`), puts back words an earlier fix removed (checked
-      before its gate run, which would commit on a lucky pass), or leaves
-      more blocking problems. Each discard is in `.notes`.
+    - Every round, the first included: a fix whose run fails worse than
+      the run before it (`_worse`: more blocking problems near the change,
+      or a problem it brought in, `_introduced`) is discarded (mended-bridle,
+      2026-11-03: the first fix made a scene that agreed with its brief
+      match a later scene's error, and its re-check, fewer problems in all,
+      was kept). The prose and verdict before it are kept, `BLOCKED_PATH`
+      is put back to that run's contradictions (`.blocked_stale` when it
+      can't be), and `.discarded` names the round. A first fix discarded
+      leaves the prose as given (`.fixed` False). A run that passed is
+      always kept (it committed), and so is a re-gate with no edit (the
+      same prose).
+    - Round 2 on: the fix is also discarded, the earlier prose and verdict
+      kept, when the fix or its check fails (`GateError`; in round 1 that
+      raises, there being no fixed prose to keep) or it puts back words an
+      earlier fix removed (checked before its gate run, which would commit
+      on a lucky pass).
+    - Each discard, and each round's findings it couldn't place, is in
+      `.notes` for the caller to log.
     - Otherwise the prose kept is the last gated, with that run's verdict.
 
     The caller must write `.prose` to the scene file at once, whether or not
@@ -1001,21 +1335,30 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     Raises:
         GateError: from the first gate run, the first fix or its re-gate; it
             carries the first run as `.first` (None when the first run itself
-            failed), so its findings can still be reported.
+            failed), so its findings can still be reported, and the logs as
+            `.log_dir`.
+
+    Logs: each invocation writes to its own `run_log_dir(log_dir,
+    scene_id)` (`.log_dir`), so a later gate of the scene never overwrites
+    this one's.
     """
     from storyforge import api
-    os.makedirs(log_dir, exist_ok=True)
-    first = gate_scene(project_dir, scene_id, command=command, prose=prose, log_dir=log_dir,
-                       extract_model=extract_model, check_model=check_model, before=before)
-    current, result, rounds, notes, run_dir = prose, first, [], [], log_dir
+    logs = run_log_dir(log_dir, scene_id)
+    first = None
     try:
+        first = gate_scene(project_dir, scene_id, command=command, prose=prose, log_dir=logs,
+                           extract_model=extract_model, check_model=check_model,
+                           before=before)
+        current, result, rounds, notes, run_dir = prose, first, [], [], logs
+        discarded, blocked_stale = 0, ''
         for n in range(1, FIX_ROUNDS + 1):
             if result.passed:
                 break
             to_fix = problems_to_fix(result)
             if not to_fix and (result.plan_conflicts or n > 1):
                 break
-            kept = 'the prose and verdict before it'
+            kept = ('the prose as given and the first verdict' if n == 1
+                    else 'the prose and verdict before it')
             # the brief's own words the scene has: the fix must keep them
             protected = [p for p in _brief_phrases(project_dir, scene_id)
                          if _quoted_in(p, current)]
@@ -1032,6 +1375,7 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                 if n == 1:
                     raise
                 notes.append(f'fix round {n} failed ({e}); kept {kept}')
+                discarded = n
                 break
             if to_fix and fixed == current:
                 break
@@ -1039,10 +1383,11 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             if undone:
                 notes.append(f'fix round {n} put back words an earlier fix removed '
                              f'("{_one_line(undone)[:80]}"); kept {kept}')
+                discarded = n
                 break
             # each run's log (and the fix that read it) in its own directory:
-            # log_dir, log_dir/recheck, log_dir/recheck-2
-            next_dir = os.path.join(log_dir, 'recheck' if n == 1 else f'recheck-{n}')
+            # logs, logs/recheck, logs/recheck-2
+            next_dir = os.path.join(logs, 'recheck' if n == 1 else f'recheck-{n}')
             try:
                 again = gate_scene(project_dir, scene_id, command=command, prose=fixed,
                                    log_dir=next_dir, extract_model=extract_model,
@@ -1051,19 +1396,50 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                 if n == 1:
                     raise
                 notes.append(f'the check after fix round {n} failed ({e}); kept {kept}')
+                discarded = n
                 break
-            if n > 1 and not again.passed and _blocking_count(again) > _blocking_count(result):
-                notes.append(f'fix round {n} left {_blocking_count(again)} problem(s), more '
-                             f'than the {_blocking_count(result)} before it; kept {kept}')
+            # never worse, the first round included (mended-bridle, 2026-11-03:
+            # round 1 made a correct scene match another scene's error, and its
+            # re-check's broken promise, in the words it changed, was kept).
+            # A pass is kept: it committed. A re-roll with no edit is the
+            # same prose, so its verdict stands
+            worse, loose = '', ''
+            if fixed != current and not again.passed:
+                diff = _diff(current, fixed)
+                worse = _worse(n, result, again, diff)
+                # SF-3 (#504's review): a new problem that can't be placed is
+                # neither tied to the fix nor cleared of it: say so
+                earlier = (result.check.findings + result.check.unverified
+                           if result.check else [])
+                unplaced = [f for f in _unplaced(again, diff.after)
+                            if f.kind != 'broken-promise' and not _persists(f, earlier)]
+                if unplaced:
+                    loose = (f'fix round {n}: {len(unplaced)} new finding(s) of the check '
+                             f'after it could not be placed in the fixed prose ('
+                             + ', '.join(f'{f.code} vs {f.source}' for f in unplaced[:5])
+                             + '): judged by the problem count only')
+            if worse:
+                notes.append(f'{worse}; kept {kept}')
+                discarded = n
+                if loose:
+                    notes.append(loose)
+                # the blocked list is the kept run's, for `check --accept`
+                blocked_stale = _note_blocked(project_dir, scene_id, command, result)
+                if blocked_stale:
+                    notes.append(f'WARNING: {blocked_stale}; it lists the discarded fix\'s '
+                                 f'contradictions, which `check --accept` refuses')
                 break
+            if loose:
+                notes.append(loose)
             if fixed != current:
                 rounds.append(FixRound(to_fix, edits))
             current, result, run_dir = fixed, again, next_dir
     except GateError as e:
-        e.first = first
+        e.first, e.log_dir = first, logs
         raise
     return GatedScene(current, result, first, fixed=current != prose, rounds=rounds,
-                      notes=notes)
+                      notes=notes, log_dir=logs, discarded=discarded,
+                      blocked_stale=blocked_stale)
 
 
 def _one_line(text: str) -> str:
@@ -1248,7 +1624,8 @@ ACCEPTED = 'accepted'
 #: rows `storyforge check --accept` moves to `REPORTED_PATH` (Ben,
 #: 2026-11-02: a stop on an error in the book is the author's to fix or
 #: accept). Same columns; replaced by each gate run of the scene that gets
-#: to the check, and cleared when it commits.
+#: to the check, put back to the kept run's when `gate_and_fix` discards a
+#: fix, and cleared when it commits.
 BLOCKED_PATH = 'working/gate-blocked.csv'
 
 
@@ -1343,17 +1720,22 @@ def record_blocked(project_dir: str, scene_id: str, command: str,
     _write_rows(project_dir, BLOCKED_PATH, rows)
 
 
-def _note_blocked(project_dir: str, scene_id: str, command: str, result: 'GateResult') -> None:
+def _note_blocked(project_dir: str, scene_id: str, command: str, result: 'GateResult') -> str:
     """Record the verified contradictions that stopped `result`, for
-    `storyforge check --accept`; a file that can't be written is said, the
-    gate's verdict unchanged."""
+    `storyforge check --accept`. A file that can't be read or written
+    (malformed, or an OS error: SF-1, #504's review) is said, the gate's
+    verdict unchanged, and returned ('' when written): its rows may then
+    describe another run's prose, which `accept_blocked` refuses."""
     try:
         record_blocked(project_dir, scene_id, command,
                        [f for f in result.findings if f.kind == 'contradiction'])
-    except GateError as e:
+    except (GateError, OSError) as e:
         from storyforge.common import log
-        log(f'WARNING: {scene_id} did not pass, and {BLOCKED_PATH} could not be updated: '
-            f'{e}. Its contradictions can\'t be accepted until a check records them.')
+        why = f'{BLOCKED_PATH} could not be updated: {e}'
+        log(f'WARNING: {scene_id} did not pass, and {why}. Its contradictions can\'t be '
+            f'accepted until a check records them.')
+        return why
+    return ''
 
 
 def accept_blocked(project_dir: str, scene_id: str) -> list[dict[str, str]]:
@@ -1370,6 +1752,21 @@ def accept_blocked(project_dir: str, scene_id: str) -> list[dict[str, str]]:
     rows = stopped.pop(scene_id, [])
     if not rows:
         return []
+    # SF-1 (#504's review): a run whose rows couldn't be replaced leaves
+    # another prose's findings; accept only what the scene on disk says
+    try:
+        with open(os.path.join(project_dir, 'scenes', f'{scene_id}.md'),
+                  encoding='utf-8') as f:
+            prose = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        raise GateError(f'{scene_id}: can\'t read the scene to match its recorded '
+                        f'contradictions: {e}') from e
+    gone = [r['quote'] for r in rows if not _found_in(r['quote'], prose)]
+    if gone:
+        raise GateError(f'{scene_id}: {len(gone)} recorded contradiction(s) quote words not '
+                        f'in the scene ("{gone[0][:80]}"): {BLOCKED_PATH} describes other '
+                        f'prose; nothing accepted. Run `storyforge check {scene_id}` to '
+                        f'record what this prose has.')
     kept = reported(project_dir)
     mine = kept.setdefault(scene_id, [])
     for r in rows:
@@ -1482,8 +1879,9 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
         log(f'Re-checking {sid}...')
         run.spent += RECHECK_COST_PER_SCENE   # paid whether or not it finishes
         try:
-            result = gate_scene(project_dir, sid, command='recheck',
-                                log_dir=os.path.join(log_dir, 'recheck', sid),
+            logs = run_log_dir(os.path.join(log_dir, 'recheck'), sid)
+            log(f'  logs: {os.path.relpath(logs, project_dir)}')
+            result = gate_scene(project_dir, sid, command='recheck', log_dir=logs,
                                 extract_model=extract_model, check_model=check_model,
                                 introduced_by=_writer(project_dir, sid))
         except GateError as e:

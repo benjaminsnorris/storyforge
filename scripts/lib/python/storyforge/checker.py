@@ -904,15 +904,18 @@ def _overlap(x: str, y: str) -> bool:
 _FIELD_PROMISES = frozenset(PROMISE_FIELDS) | frozenset(REGISTRY_PROMISE_FIELDS)
 
 
-def _same_finding(a: Finding, b: Finding) -> bool:
-    """Whether two readings' findings are one problem. A contradiction: the
-    same code, the same source (scene, file or calendar; with none, the
-    same ledger fact or brief field), and both quotes overlapping
-    (`_overlap`), so two problems in one sentence, or two calendar lines,
-    stay two. A broken promise: the same registry id, or for a brief field
-    (several items each) the same item, word for word. When in doubt, two:
-    a duplicate costs a line, a merge loses a problem."""
-    if a.kind != b.kind or a.code != b.code:
+def same_target(a: Finding, b: Finding, *, need_fact: bool = False) -> bool:
+    """Whether two findings are about the same established thing, whatever
+    the scene's words. A contradiction: the same source (scene, file or
+    calendar; with none, the same ledger fact or brief field) and
+    established quotes overlapping (`_overlap`), so two calendar lines, or
+    two facts in one bible, are two. A broken promise: the same registry
+    id, or for a brief field (several items each) the same item, word for
+    word. `need_fact`: a contradiction with no source matches only on a
+    fact id both name (two without one are not shown to be the same).
+    `_same_finding` builds on it; so does the gate's never-worse rule
+    (`gate._persists`)."""
+    if a.kind != b.kind:
         return False
     if a.kind == 'broken-promise':
         if a.fact_id != b.fact_id:
@@ -923,10 +926,20 @@ def _same_finding(a: Finding, b: Finding) -> bool:
         return bool(ea) and ea == _words_of(b.established_quote)
     if a.established_scene != b.established_scene:
         return False
-    if not a.established_scene and a.fact_id != b.fact_id:
+    if not a.established_scene and (a.fact_id != b.fact_id
+                                    or (need_fact and not a.fact_id)):
         return False
-    return (_overlap(a.scene_quote, b.scene_quote)
-            and _overlap(a.established_quote, b.established_quote))
+    return _overlap(a.established_quote, b.established_quote)
+
+
+def _same_finding(a: Finding, b: Finding) -> bool:
+    """Whether two readings' findings are one problem: the same code and
+    `same_target`, and for a contradiction both scene quotes overlapping
+    (`_overlap`), so two problems in one sentence stay two. When in doubt,
+    two: a duplicate costs a line, a merge loses a problem."""
+    if a.code != b.code or not same_target(a, b):
+        return False
+    return a.kind == 'broken-promise' or _overlap(a.scene_quote, b.scene_quote)
 
 
 def _rule_disputes(out: CheckResult, disputes: list[Dispute] | None,

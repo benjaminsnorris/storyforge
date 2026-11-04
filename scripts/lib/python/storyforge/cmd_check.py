@@ -333,9 +333,12 @@ def _check_scenes(project_dir: str, scene_ids: list[str], log_dir: str, budget,
         listed_as = gate.RECHECK_FAILED if recheck else 'advisor'
         failed_here = False
         try:
+            # this check's own logs: an earlier check of the scene keeps its own
+            logs = gate.run_log_dir(os.path.join(log_dir, 'check'), scene_id)
+            log(f'  logs: {os.path.relpath(logs, project_dir)}')
             result = gate.gate_scene(
                 project_dir, scene_id, command='recheck' if recheck else 'advisor',
-                log_dir=os.path.join(log_dir, 'check'),
+                log_dir=logs,
                 introduced_by=gate._writer(project_dir, scene_id) if recheck else None)
         except gate.GateError as e:
             why = ' '.join(str(e).split())

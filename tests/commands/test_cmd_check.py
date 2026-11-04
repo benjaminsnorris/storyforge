@@ -129,6 +129,35 @@ class TestCheck:
             cmd_check.main([SCENE])
         assert e.value.code == 1
 
+    def test_each_check_of_a_scene_keeps_its_own_logs(self, project):
+        """2026-11-03: every check wrote working/logs/check/gate-check-<scene>.json,
+        so checking a scene again overwrote what the last check was told."""
+        project_dir, _ = project
+        for _ in range(2):
+            with _api([[]]):
+                cmd_check.main([SCENE])
+            gate.clear_pending(project_dir, SCENE)
+        root = os.path.join(project_dir, 'working', 'logs', 'check', SCENE)
+        runs = sorted(os.listdir(root))
+        assert len(runs) == 2
+        assert all(os.path.isfile(os.path.join(root, r, f'gate-check-{SCENE}.json'))
+                   for r in runs)
+
+    def test_logs_that_cannot_be_made_are_reported_not_a_traceback(self, project,
+                                                                    monkeypatch):
+        """SF-5 (#504's review)."""
+        project_dir, _ = project
+
+        def fail(log_dir, scene_id, **k):
+            raise gate.GateError(f"{scene_id}: can't make the gate log directory x: denied")
+        monkeypatch.setattr(gate, 'run_log_dir', fail)
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main([SCENE])
+        assert e.value.code == 1
+        report = open(os.path.join(project_dir, 'working', 'check-report.md')).read()
+        assert f'## {SCENE}: not checked' in report and "can't make the gate log" in report
+        assert 'not checked' in gate.pending(project_dir)[SCENE]['reason']
+
     def test_no_scenes_named_is_an_error(self, project):
         with pytest.raises(SystemExit) as e:
             cmd_check.main([])
@@ -363,6 +392,11 @@ class TestKeepGoing:
     def test_accept_then_keep_going_again_passes(self, project, monkeypatch, capsys):
         project_dir, _ = project
         self._pend(project_dir, 'act1-sc01', 'act2-sc01')
+        # `--accept` refuses rows whose quotes aren't in the scene on disk
+        # (#504), so the recorded quote must be in both scenes' prose
+        for sid in ('act1-sc01', 'act2-sc01'):
+            with open(os.path.join(project_dir, 'scenes', f'{sid}.md'), 'a') as f:
+                f.write(f'\n\nThe sign said {HERE}.\n')
         _fake_gate(monkeypatch, {'act1-sc01': _finding(), 'act2-sc01': _finding()})
         with pytest.raises(SystemExit):
             cmd_check.main(['--pending', '--keep-going'])
@@ -510,8 +544,11 @@ class TestFix:
         """T-2 (#482): the second fix's prompt carries the first's edits, and the
         edits reach the rounds, through the real fix_scene and prompt."""
         from storyforge.checker import CheckResult, Finding
+        # a half-fix: the same contradiction (same source, same established
+        # words) after round 1, which round 2 is for
         bad = lambda q: gate.GateResult(SCENE, check=CheckResult(SCENE, findings=[
-            Finding('contradiction', 'TIM', q, 'act1-sc01', 'e', '', 'why')]))
+            Finding('contradiction', 'TIM', q, 'act1-sc01', 'It took three days to the pass.',
+                    '', 'why')]))
         runs = iter([bad('eight days'), bad('five days'), gate.GateResult(SCENE)])
         replies = iter([[{'problem': 1, 'find': 'eight days', 'replace': 'five days'}],
                         [{'problem': 1, 'find': 'five days', 'replace': 'three days'}]])

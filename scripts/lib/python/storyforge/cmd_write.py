@@ -466,6 +466,8 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
         out = gate.gate_and_fix(project_dir, scene_id, command=command, prose=prose,
                                 log_dir=os.path.join(log_dir, 'gate'), before=before)
     except gate.GateError as e:
+        if e.log_dir:
+            log(f'  Gate logs: {os.path.relpath(e.log_dir, project_dir)}')
         if e.first is not None:
             for line in gate.report_lines(e.first):
                 log(f'  (first check) {line}')
@@ -479,6 +481,8 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
     if out.fixed:
         with open(scene_file, 'w', encoding='utf-8') as f:
             f.write(out.prose)
+    if out.log_dir:
+        log(f'  Gate logs: {os.path.relpath(out.log_dir, project_dir)}')
     for n, r in enumerate(out.rounds, start=1):
         log(f'  Fix round {n}: {len(r.problems)} problem(s) sent, {len(r.edits)} edit(s); '
             f're-checked.')
@@ -502,8 +506,14 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
              if out.first.plan_conflicts and not gate.problems_to_fix(out.first)
              else f'after {fixes} (what is left is plan conflicts: the author\'s)'
              if left_to_author else f'after {fixes}')
-    if out.notes:
-        tried += f' (a later fix was discarded: {len(out.notes)} note(s) in the log)'
+    if out.discarded == 1 and not out.rounds:
+        tried = ('not fixed: the fix was discarded, the scene left as written (the log '
+                 'says why)')
+    elif out.discarded:
+        tried += f' (fix round {out.discarded} was discarded; the log says why)'
+    if out.blocked_stale:   # SF-1 (#504's review): said where the author looks
+        tried += (f' [{out.blocked_stale}: `check --accept` refuses this scene until '
+                  f'`storyforge check {scene_id}` records it again]')
     return False, _pend(project_dir, scene_id, command,
                         f'{len(problems)} problem(s) {tried}: '
                         + ' / '.join(problems[:3]) + ('; ...' if len(problems) > 3 else '')
