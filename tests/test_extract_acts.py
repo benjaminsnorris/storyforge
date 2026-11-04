@@ -327,3 +327,29 @@ class TestExtractActsCommand:
         rows = _read_csv(str(book / 'reference' / 'scenes.csv'))
         assert [r['act'] for r in rows] == ['1', '1', '1', '2', '2', '2', '2', '3', '3']
         assert commits == [('Extract: acts (scenes.csv)', ['reference/scenes.csv', 'working/'])]
+
+
+class TestSpineEventSpansActs:
+    """A spine event's anchors in two acts (Eighty Days, 2026-11-03:
+    fix-names-fogg-robber is act 1 in the spine, its row 14 anchor act 2)."""
+
+    def _check(self, tmp_path, rows):
+        _write(str(tmp_path / 'reference' / 'architecture.csv'), rows,
+               ['id', 'seq', 'act', 'spine_event'])
+        result = score_architecture(str(tmp_path))
+        return next(c for c in result['checks'] if c['check'].startswith('each spine event'))
+
+    def test_an_event_across_an_act_break_is_reported(self, tmp_path):
+        check = self._check(tmp_path, [
+            {'id': 'a', 'seq': '1', 'act': '1', 'spine_event': 'wager'},
+            {'id': 'b', 'seq': '5', 'act': '1', 'spine_event': 'fix'},
+            {'id': 'c', 'seq': '14', 'act': '2', 'spine_event': 'fix'}])
+        assert not check['passed'] and check['severity'] == 'low'
+        assert 'fix (acts 1, 2)' in check['detail']
+
+    def test_events_within_one_act_pass(self, tmp_path):
+        check = self._check(tmp_path, [
+            {'id': 'a', 'seq': '1', 'act': '1', 'spine_event': 'wager'},
+            {'id': 'b', 'seq': '5', 'act': '2', 'spine_event': 'fix'},
+            {'id': 'c', 'seq': '14', 'act': '2', 'spine_event': 'fix'}])
+        assert check['passed']
