@@ -110,7 +110,7 @@ class TestReadTiers:
 class TestClaims:
     def test_prompt_lists_documents_and_scenes(self, book):
         tiers = tf.read_tiers(str(book))
-        prompt = tf.build_claims_prompt(tiers, tf._scenes(str(book)))
+        prompt = tf.build_claims_prompt(tiers.summary_docs(), tf._scenes(str(book)))
         assert '### synopsis' in prompt and '### spine:letter-found' in prompt
         assert 'its anchor scenes: s1, s5' in prompt
         assert '1. s1 | Scene 1 | Summary 1' in prompt
@@ -118,7 +118,7 @@ class TestClaims:
 
     def test_parse_reads_claims(self, book):
         tiers = tf.read_tiers(str(book))
-        claims = tf.parse_claims(json.dumps(_claims_payload()), tiers, tf._scenes(str(book)))
+        claims = tf.parse_claims(json.dumps(_claims_payload()), tiers.summary_docs(), tf._scenes(str(book)))
         assert [c.section for c in claims][:2] == ['logline', 'synopsis']
         assert claims[3].scenes == ['s2', 's4']
 
@@ -133,7 +133,7 @@ class TestClaims:
         payload = _claims_payload()
         change(payload)
         with pytest.raises(tf._Problems, match=problem):
-            tf.parse_claims(json.dumps(payload), tf.read_tiers(str(book)), tf._scenes(str(book)))
+            tf.parse_claims(json.dumps(payload), tf.read_tiers(str(book)).summary_docs(), tf._scenes(str(book)))
 
     def test_anchor_summaries_are_claims_about_their_own_scene(self, book):
         claims = tf.anchor_claims(tf.read_tiers(str(book)), tf._scenes(str(book)))
@@ -332,7 +332,7 @@ class TestReviewEdges:
     ])
     def test_malformed_claims_are_problems(self, book, payload, problem):
         with pytest.raises(tf._Problems, match=problem):
-            tf.parse_claims(json.dumps(payload), tf.read_tiers(str(book)), tf._scenes(str(book)))
+            tf.parse_claims(json.dumps(payload), tf.read_tiers(str(book)).summary_docs(), tf._scenes(str(book)))
 
     @pytest.mark.parametrize('verdict, problem', [
         ({'n': True, 'verdict': 'supported'}, 'not in the list'),
@@ -342,3 +342,114 @@ class TestReviewEdges:
     def test_malformed_verdicts_are_problems(self, verdict, problem):
         with pytest.raises(tf._Problems, match=problem):
             tf.parse_verdicts(json.dumps({'verdicts': [verdict]}), 1)
+
+
+ARCHITECTURE = """<!-- storyforge:extracted v1 step=5c -->
+# Ann -- Story Architecture
+
+---
+
+## Premise
+
+> Ann finds a letter that undoes her family.
+
+---
+
+## Theme
+
+### Core Theme
+Secrets cost more than they hide.
+
+### Motifs & Symbols
+
+| Motif | Meaning |
+|---|---|
+| The letter | The letter is the past that will not stay buried. |
+
+## Structure
+
+### Length
+2,000 words in 4 scenes
+
+### Act 1: The Attic
+**20% of the novel (~400 words, 1 scenes)**
+*Ann finds the letter.*
+
+## Point of View Structure
+
+### Pattern
+Close third on Ann.
+
+| POV | Scenes | Words |
+|---|---|---|
+| ann | 4 | 2,000 |
+
+## Novel Identity Summary
+
+**Length:** 2,000 words
+"""
+
+
+class TestStoryArchitecture:
+    def test_sections_leave_out_what_the_csvs_count(self, tmp_path):
+        path = tmp_path / 'sa.md'
+        path.write_text(ARCHITECTURE)
+        sections = dict(tf.story_architecture_sections(str(path)))
+        assert list(sections) == [
+            'story-architecture:Premise', 'story-architecture:Theme / Core Theme',
+            'story-architecture:Theme / Motifs & Symbols',
+            'story-architecture:Structure / Act 1: The Attic',
+            'story-architecture:Point of View Structure / Pattern']
+        assert sections['story-architecture:Theme / Motifs & Symbols'] == \
+            '- The letter: The letter is the past that will not stay buried.'
+        assert '% of the novel' not in sections['story-architecture:Structure / Act 1: The Attic']
+        assert '2,000' not in sections['story-architecture:Point of View Structure / Pattern']
+        assert 'extracted' not in ''.join(sections.values())
+
+    def test_its_own_claims_call_and_not_every_section_needs_a_claim(self, book, monkeypatch):
+        (book / 'reference' / 'story-architecture.md').write_text(ARCHITECTURE)
+        tiers = tf.read_tiers(str(book))
+        assert len(tiers.story_architecture) == 5
+        prompts = []
+
+        def fake(prompt, model, log_file, max_tokens=4096, **kw):
+            prompts.append(prompt)
+            if 'Split them' in prompt and '### story-architecture:Premise' in prompt:
+                reply = _reply({'claims': [{'section': 'story-architecture:Premise',
+                                            'kind': 'event', 'claim': 'Ann finds a letter',
+                                            'scenes': ['s1']}]})
+            elif 'Split them' in prompt:
+                reply = _reply(_claims_payload())
+            else:
+                lines = [l for l in prompt.split('## Claims')[1].splitlines() if l[:1].isdigit()]
+                reply = _reply({'verdicts': [{'n': int(l.split('.')[0]), 'verdict': 'supported',
+                                              'evidence': '', 'correction': ''} for l in lines]})
+            with open(log_file, 'w') as f:
+                json.dump(reply, f)
+            return reply
+        monkeypatch.setattr(api, 'invoke_to_file', fake)
+        result = tf.run(str(book), 'm', log_dir=str(book / 'logs'))
+        claims_calls = [p for p in prompts if 'Split them' in p]
+        assert len(claims_calls) == 2
+        assert 'story-architecture:' not in claims_calls[0]
+        assert any(c.section == 'story-architecture:Premise' for c in result.claims)
+        out = str(book / 'out')
+        tf.write(result, out)
+        assert '| story-architecture | 1 |' in open(os.path.join(out, 'report.md')).read()
+
+    def test_a_template_story_architecture_is_left_out(self, book):
+        from storyforge.common import get_plugin_dir
+        template = os.path.join(get_plugin_dir(), 'templates', 'reference', 'story-architecture.md')
+        if not os.path.isfile(template):
+            pytest.skip('no story-architecture template')
+        with open(template) as f:
+            (book / 'reference' / 'story-architecture.md').write_text(f.read())
+        assert tf.read_tiers(str(book)).story_architecture == []
+
+
+def test_a_scene_cited_by_its_seq_reads_as_its_id(book):
+    payload = _claims_payload()
+    payload['claims'][1]['scenes'] = ['3']
+    claims = tf.parse_claims(json.dumps(payload), tf.read_tiers(str(book)).summary_docs(),
+                             tf._scenes(str(book)))
+    assert claims[1].scenes == ['s3']

@@ -340,7 +340,9 @@ and the author records the verdict themselves.
 ### Text fidelity: the upper tiers against the prose (LLM)
 
 `./storyforge score --text-fidelity` checks the logline, synopsis, act-shape,
-theme, spine and architecture against the book's own prose. One call splits
+theme, spine, architecture and `story-architecture.md` against the book's own
+prose (story-architecture.md's sections in a call of their own, leaving out
+what the CSVs count: lengths, act shares, POV tables). One call splits
 them into claims, each naming the 1-4 scenes where the text should show it
 (an anchor's summary is a claim about its own scene). Claims are then judged
 in batches against those scenes' prose only: `supported`, `contradicted`,
@@ -352,9 +354,10 @@ tiers come from the same data, so only this check catches a tier that is wrong
 about the book. Use it on an extracted book, or on a drafted one before trusting
 its pitch. It writes `working/scores/text-fidelity/<timestamp>/report.md` and
 `claims.csv`, and changes nothing. Synthesis tier: about $1 for a 150-scene
-book. The claims pass is forecast up front, and the check pass once the claims
-are known; both go through the cost threshold. `story-architecture.md` isn't
-checked yet.
+book, about $2 with story-architecture.md. The claims pass is forecast up front,
+and the check pass once the claims are known; both go through the cost
+threshold. It finds claims the text contradicts, not omissions: a summary that
+leaves out a turn passes.
 
 ### Bible-consistency (LLM, cached)
 

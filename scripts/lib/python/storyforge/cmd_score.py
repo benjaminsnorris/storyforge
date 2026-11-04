@@ -251,12 +251,13 @@ def _run_text_fidelity(project_dir: str, dry_run: bool) -> None:
     if not any(tf._prose(project_dir, r['id']) for r in scenes):
         log('ERROR: no scene has prose to check the tiers against')
         sys.exit(1)
-    first = tf.forecast_claims(tiers, scenes, model) if (any(tiers.summary.values())
-                                                          or tiers.spine) else 0.0
+    first = tf.forecast_claims(tiers, scenes, model)
     log(f'Text fidelity: claims pass ~${first:.2f} ({model}); the check pass is '
         f'forecast once the claims are known')
     if dry_run:
-        print(tf.build_claims_prompt(tiers, scenes)[:3000])
+        for docs in (tiers.summary_docs(), tiers.story_architecture):
+            if docs:
+                print(tf.build_claims_prompt(docs, scenes)[:3000])
         return
     if not check_threshold(first):
         log('Cost threshold check declined. Aborting.')
