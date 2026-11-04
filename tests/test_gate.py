@@ -865,6 +865,169 @@ class TestInheritedAndPlanConflicts:
         assert gate._brief_phrases(project_dir, SCENE) == ['It was there forty years ago.']
 
 
+def _set_characters(project_dir, rows):
+    """Replace characters.csv with `rows` (dicts; the header is the first
+    row's keys)."""
+    path = os.path.join(project_dir, 'reference', 'characters.csv')
+    with open(path, 'w', newline='') as f:
+        f.write('|'.join(rows[0]) + '\n')
+        for r in rows:
+            f.write('|'.join(r.values()) + '\n')
+
+
+class TestSpeechTagSpeaker:
+    """#504's known limit: a split line's tag naming someone other than the
+    character the brief scripts the line for is not the brief's words, so
+    the wrong-speaker error goes to the fix, not to the author as a plan
+    conflict."""
+
+    LINE = 'Left hand on the case. Right hand free. He carried it the same way.'
+    SPLIT = '"Left hand on the case," {tag}. "Right hand free. He carried it the same way."'
+    PEOPLE = [
+        {'id': 'thomas-bright-horse', 'name': 'Thomas Bright Horse', 'aliases': 'Thomas',
+         'pronouns': 'he/him'},
+        {'id': 'emmett-slade', 'name': 'Emmett Slade', 'aliases': 'Emmett;Slade',
+         'pronouns': 'he/him'},
+        {'id': 'cora-dunning', 'name': 'Cora Dunning', 'aliases': 'Cora', 'pronouns': 'she'},
+        {'id': 'lena-callis', 'name': 'Lena Callis', 'aliases': 'Lena', 'pronouns': ''},
+    ]
+
+    def _cast(self, project_dir, people=None):
+        _set_characters(project_dir, people or self.PEOPLE)
+        return gate._cast(project_dir)
+
+    def _lines(self, project_dir, dialogue, people=None):
+        cast = self._cast(project_dir, people)
+        _set_dialogue(project_dir, dialogue)
+        return gate._brief_lines(project_dir, SCENE, cast), cast
+
+    @pytest.mark.parametrize('dialogue', [
+        'Thomas: "{line}"',
+        'Thomas, low, to Cora: "{line}"',
+        '"{line}" — Thomas',
+        '"{line}" -- Thomas Bright Horse, flat',
+        '"You are Cora Dunning." / Thomas Bright Horse: "{line}"',
+        # narration before the label's last clause names someone else
+        '"Come inside." Cora does not move. Thomas, at the door: "{line}"',
+    ])
+    def test_the_brief_names_the_speaker(self, project_dir, dialogue):
+        lines, _ = self._lines(project_dir, dialogue.format(line=self.LINE))
+        assert gate.Scripted(self.LINE, 'thomas-bright-horse') in lines
+
+    @pytest.mark.parametrize('dialogue', [
+        '"{line}"',                                     # mended-bridle: no labels
+        'Council: "{line}"',                            # not a character
+        'Spoken to the grave: "{line}"',                # narration
+        '"{line}" — Thomas\'s answer to Cora',          # a possessive
+        '"{line}" — though he knew the answer',
+        '"{line}" / "Come inside."',
+        # the dash clause ending in a colon labels the next line, not this one
+        '"{line}" — Cora, after he leaves: "Come inside, then."',
+        # two labels that disagree
+        'Cora: "{line}" — Thomas',
+    ])
+    def test_the_brief_names_no_speaker(self, project_dir, dialogue):
+        lines, _ = self._lines(project_dir, dialogue.format(line=self.LINE))
+        assert gate.Scripted(self.LINE, None) in lines
+
+    def test_a_name_two_characters_share_names_no_one(self, project_dir):
+        people = self.PEOPLE + [{'id': 'thomas-webb', 'name': 'Thomas Webb',
+                                 'aliases': 'Thomas', 'pronouns': 'he'}]
+        lines, _ = self._lines(project_dir, f'Thomas: "{self.LINE}"', people)
+        assert lines == [gate.Scripted(self.LINE, None)]
+
+    @pytest.mark.parametrize('tag, expected', [
+        # a name or alias: agree → plan conflict; disagree → to the fix
+        ('Thomas said', True),
+        ('said Thomas Bright Horse', True),
+        ('Emmett said', False),
+        ('said Slade', False),
+        ('Cora said', False),
+        # a pronoun, checked against known pronouns
+        ('he said', True),
+        ('she said', False),
+        ('they said', False),
+        # "I", "we", "you": can't tell, matched as before
+        ('I said', True),
+        ('you said', True),
+    ])
+    def test_the_tag_must_fit_the_briefs_speaker(self, project_dir, tag, expected):
+        lines, cast = self._lines(project_dir, f'Thomas: "{self.LINE}"')
+        quote = self.SPLIT.format(tag=tag)
+        assert gate._is_plan_conflict(quote, lines, cast) is expected
+
+    def test_every_tag_of_a_line_split_twice_must_fit(self, project_dir):
+        lines, cast = self._lines(project_dir, f'Thomas: "{self.LINE}"')
+        twice = ('"Left hand on the case," he said. "Right hand free," {}. '
+                 '"He carried it the same way."')
+        assert gate._is_plan_conflict(twice.format('Thomas said'), lines, cast)
+        assert not gate._is_plan_conflict(twice.format('Emmett said'), lines, cast)
+
+    def test_a_wrong_speaker_also_fails_the_half_rule(self, project_dir):
+        """A scripted phrase that is half the split quote matches by the
+        half rule; a tag naming someone else rules it out there too."""
+        lines, cast = self._lines(project_dir, 'Thomas: "Left hand on the case, always"')
+        quote = '"Left hand on the case, always," {}. "Right hand."'
+        assert gate._is_plan_conflict(quote.format('Thomas said'), lines, cast)
+        assert not gate._is_plan_conflict(quote.format('Emmett said'), lines, cast)
+
+    @pytest.mark.parametrize('people', [
+        # no pronouns column
+        [{k: v for k, v in p.items() if k != 'pronouns'} for p in PEOPLE],
+        # a column, but the speaker's cell is empty or unreadable
+        [{**p, 'pronouns': ''} for p in PEOPLE],
+        [{**p, 'pronouns': 'he/her'} for p in PEOPLE],
+    ])
+    def test_a_pronoun_tag_is_unchecked_without_known_pronouns(self, project_dir, people):
+        lines, cast = self._lines(project_dir, f'Thomas: "{self.LINE}"', people)
+        assert cast.pronouns.get('thomas-bright-horse') is None
+        assert gate._is_plan_conflict(self.SPLIT.format(tag='she said'), lines, cast)
+        # a name is still checked
+        assert not gate._is_plan_conflict(self.SPLIT.format(tag='Emmett said'), lines, cast)
+
+    def test_a_speaker_with_pronouns_she(self, project_dir):
+        lines, cast = self._lines(project_dir, f'Cora: "{self.LINE}"')
+        assert gate._is_plan_conflict(self.SPLIT.format(tag='she said'), lines, cast)
+        assert not gate._is_plan_conflict(self.SPLIT.format(tag='he said'), lines, cast)
+
+    @pytest.mark.parametrize('tag', ['Emmett said', 'she said', 'Thomas said', 'he said'])
+    def test_an_unattributed_line_is_matched_as_before(self, project_dir, tag):
+        """The real mended-bridle brief names no speakers: nothing to
+        check, so any speaker's tag still matches."""
+        lines, cast = self._lines(project_dir, f'"You are Cora Dunning." / "{self.LINE}"')
+        assert gate._is_plan_conflict(self.SPLIT.format(tag=tag), lines, cast)
+
+    def test_a_name_not_in_the_registry_is_not_a_tag(self, project_dir):
+        lines, cast = self._lines(project_dir, f'Thomas: "{self.LINE}"')
+        assert not gate._is_plan_conflict(self.SPLIT.format(tag='Naseka said'), lines, cast)
+
+    def _gate_split(self, project_dir, tmp_path, dialogue, tag):
+        self._cast(project_dir)
+        _set_dialogue(project_dir, dialogue)
+        quote = self.SPLIT.format(tag=tag)
+        with open(os.path.join(project_dir, 'scenes', f'{SCENE}.md'), 'a') as f:
+            f.write(f'\n\n{quote}\n')
+        finding = {**_contradiction(), 'code': 'TRT', 'scene_quote': quote,
+                   'established_scene': 'act1-sc01'}
+        return _gate(project_dir, tmp_path, [_commitment()], findings=[finding])
+
+    def test_the_gate_sends_a_wrong_speaker_to_the_fix(self, project_dir, tmp_path):
+        result = self._gate_split(project_dir, tmp_path, f'Thomas: "{self.LINE}"',
+                                  'Emmett said')
+        assert not result.passed and result.plan_conflicts == []
+        assert [f.code for f in result.fixable] == ['TRT']
+
+    def test_the_gate_keeps_the_right_speaker_a_plan_conflict(self, project_dir, tmp_path):
+        result = self._gate_split(project_dir, tmp_path, f'Thomas: "{self.LINE}"',
+                                  'Thomas said')
+        assert [f.code for f in result.plan_conflicts] == ['TRT']
+        assert gate.problems_to_fix(result) == []
+
+    def test_the_gate_reads_pronouns_from_the_registry(self, project_dir, tmp_path):
+        result = self._gate_split(project_dir, tmp_path, f'Thomas: "{self.LINE}"', 'she said')
+        assert result.plan_conflicts == [] and [f.code for f in result.fixable] == ['TRT']
+
+
 def _snap(project_dir, old_scene=None):
     """The book as it is (`gate.snapshot`), with SCENE's prose before the
     pass set to `old_scene` (None: as on disk)."""
