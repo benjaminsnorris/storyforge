@@ -263,6 +263,194 @@ class TestPendingAndRecheck:
         assert gate.pending(project_dir)['act2-sc01']['command'] == gate.RECHECK_FAILED
 
 
+def _finding(kind='contradiction'):
+    from storyforge.checker import Finding
+    return Finding(kind=kind, code='TIM', scene_quote=HERE, established_scene='act1-sc01',
+                   established_quote='y', fact_id='', explanation='why')
+
+
+def _fake_gate(monkeypatch, outcomes, spend=0):
+    """`gate.gate_scene` passing every scene but those in `outcomes`: a
+    Finding fails with it (recorded for --accept as the real gate does), a
+    string raises a GateError. `spend` output tokens of Opus 4.6 are metered
+    per scene. Returns the scenes gated, in order."""
+    from storyforge import api
+    from storyforge.checker import CheckResult
+    seen = []
+
+    def fake(project_dir, scene_id, *, command, introduced_by=None, **k):
+        seen.append(scene_id)
+        if spend:
+            api._meter({'usage': {'input_tokens': 0, 'output_tokens': spend}},
+                       'claude-opus-4-6')
+        outcome = outcomes.get(scene_id)
+        if isinstance(outcome, str):
+            raise gate.GateError(outcome)
+        if outcome is not None:
+            r = gate.GateResult(scene_id, check=CheckResult(scene_id, findings=[outcome]))
+            gate._note_blocked(project_dir, scene_id, command, r)
+            return r
+        gate.clear_pending(project_dir, scene_id)
+        r = gate.GateResult(scene_id, check=None)
+        r.committed = True
+        return r
+    monkeypatch.setattr(gate, 'gate_scene', fake)
+    monkeypatch.setattr(gate, '_writer', lambda pd, sid: 'draft')
+    return seen
+
+
+class TestKeepGoing:
+    """`check --pending --keep-going`: one decision per run, not per paid
+    stop. Every pending scene is checked in reading order; each failure
+    stays pending (and acceptable); a summary names them all with the
+    exact --accept command; exit 1 if any failed."""
+
+    def _pend(self, project_dir, *ids):
+        for sid in ids:
+            gate.mark_pending(project_dir, sid, 'draft', 'stale')
+
+    def test_every_scene_is_checked_and_each_failure_stays_pending(
+            self, project, monkeypatch, capsys):
+        project_dir, commits = project
+        self._pend(project_dir, 'act2-sc01', 'act1-sc01', SCENE)
+        seen = _fake_gate(monkeypatch, {'act1-sc01': _finding(), 'act2-sc01': _finding()})
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--pending', '--keep-going'])
+        assert e.value.code == 1
+        assert seen == ['act1-sc01', SCENE, 'act2-sc01']       # reading order, all of them
+        waiting = gate.pending(project_dir)
+        assert set(waiting) == {'act1-sc01', 'act2-sc01'}       # SCENE passed and came off
+        assert set(gate.blocked(project_dir)) == {'act1-sc01', 'act2-sc01'}
+        out = capsys.readouterr().out
+        assert '1 of 3 scene(s) checked passed.' in out
+        assert 'CONTRADICTION: TIM' in out
+        assert '`storyforge check --accept act1-sc01,act2-sc01`' in out
+        report = open(os.path.join(project_dir, 'working', 'check-report.md')).read()
+        assert '## Summary' in report and 'check --accept act1-sc01,act2-sc01' in report
+        assert 'Not checked' not in report
+        assert commits and commits[-1][0] == 'Check: 1 of 3 scene(s) passed'
+
+    def test_results_after_a_failure_are_provisional(self, project, monkeypatch, capsys):
+        project_dir, _ = project
+        self._pend(project_dir, 'act1-sc01', SCENE, 'act2-sc01')
+        _fake_gate(monkeypatch, {'act1-sc01': _finding(), 'act2-sc01': _finding()})
+        with pytest.raises(SystemExit):
+            cmd_check.main(['--pending', '--keep-going'])
+        out = capsys.readouterr().out
+        assert f'{SCENE}: passed (provisional: act1-sc01, earlier, has not passed)' in out
+        assert 'Provisional: act1-sc02, act2-sc01 were checked after a scene earlier in the ' \
+            'book that had not passed' in out
+        assert f'{SCENE} passed and committed their facts meanwhile' in out
+        assert 'act2-sc01: (provisional: checked while act1-sc01 had not passed)' in out
+
+    def test_a_scene_with_nothing_to_accept_is_named_apart(self, project, monkeypatch, capsys):
+        """--accept errors on a scene with nothing recorded (and accepts
+        nothing), so the command lists only scenes it would work on."""
+        project_dir, _ = project
+        self._pend(project_dir, 'act1-sc01', SCENE, 'act2-sc01')
+        _fake_gate(monkeypatch, {'act1-sc01': 'extraction failed: HTTP 500',
+                                 SCENE: _finding('broken-promise'),
+                                 'act2-sc01': _finding()})
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--pending', '--keep-going'])
+        assert e.value.code == 1
+        out = capsys.readouterr().out
+        assert 'could not be checked: extraction failed: HTTP 500' in out
+        assert '`storyforge check --accept act2-sc01`' in out
+        assert f'Nothing to accept for act1-sc01, {SCENE}' in out
+        assert set(gate.pending(project_dir)) == {'act1-sc01', SCENE, 'act2-sc01'}
+
+    def test_accept_then_keep_going_again_passes(self, project, monkeypatch, capsys):
+        project_dir, _ = project
+        self._pend(project_dir, 'act1-sc01', 'act2-sc01')
+        _fake_gate(monkeypatch, {'act1-sc01': _finding(), 'act2-sc01': _finding()})
+        with pytest.raises(SystemExit):
+            cmd_check.main(['--pending', '--keep-going'])
+        cmd_check.main(['--accept', 'act1-sc01,act2-sc01'])
+        assert gate.blocked(project_dir) == {}
+        _fake_gate(monkeypatch, {})
+        cmd_check.main(['--pending', '--keep-going'])           # all pass: exit 0
+        assert gate.pending(project_dir) == {}
+        assert '2 of 2 scene(s) checked passed.' in capsys.readouterr().out
+
+    def test_a_failed_recheck_does_not_stop_the_run(self, project, monkeypatch, capsys):
+        project_dir, _ = project
+        self._pend(project_dir, 'act1-sc01', 'act2-sc01')
+        seen = _fake_gate(monkeypatch, {})
+        calls = []
+
+        def queue(pd, skip=frozenset()):
+            return [] if calls else ['new-x1']
+
+        def recheck(pd, **k):
+            calls.append(1)
+            gate.mark_pending(pd, 'new-x1', gate.RECHECK_FAILED, 'x')
+            return gate.Recheck(failed='new-x1', why='a contradiction')
+        monkeypatch.setattr(gate, 'recheck_queue', queue)
+        monkeypatch.setattr(gate, 'recheck_pending', recheck)
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--pending', '--keep-going'])
+        assert e.value.code == 1
+        assert seen == ['act1-sc01', 'act2-sc01']    # the stop-at-first run stops here
+        out = capsys.readouterr().out
+        assert 'new-x1 (re-checked after act1-sc01 passed): a contradiction' in out
+
+    def test_keep_going_needs_pending(self, project):
+        for argv in (['--keep-going', SCENE], ['--keep-going']):
+            with pytest.raises(SystemExit) as e:
+                cmd_check.main(argv)
+            assert e.value.code == 1
+
+    def test_over_the_threshold_up_front_checks_nothing(self, project, monkeypatch):
+        project_dir, _ = project
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '1')
+        self._pend(project_dir, 'act1-sc01', SCENE)
+        seen = _fake_gate(monkeypatch, {})
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--pending', '--keep-going'])
+        assert e.value.code == 1 and seen == []
+
+    def test_the_run_stops_when_its_spend_reaches_the_threshold(
+            self, project, monkeypatch, capsys):
+        """One budget across the run: the forecast was within it, but the
+        first scene actually cost more, so the rest would go over."""
+        project_dir, _ = project
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '3')
+        self._pend(project_dir, 'act1-sc01', SCENE, 'act2-sc01')
+        assert 3 * gate.RECHECK_COST_PER_SCENE <= 3
+        seen = _fake_gate(monkeypatch, {}, spend=80_000)   # $2.00 a scene
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--pending', '--keep-going'])
+        assert e.value.code == 1
+        assert seen == ['act1-sc01']
+        assert set(gate.pending(project_dir)) == {SCENE, 'act2-sc01'}
+        out = capsys.readouterr().out
+        assert f'checking {SCENE} and the 1 scene(s) after it would bring this run to about ' \
+            in out and 'over the cost threshold ($3): stopped' in out
+        assert f'not checked, still pending: {SCENE}, act2-sc01' in out
+
+
+class TestOneBudget:
+    def test_rechecks_get_what_the_checks_spent_and_the_rest_leave(
+            self, project, monkeypatch):
+        """check's re-checks were told the run had spent only their own
+        forecast: the scenes it checked didn't count."""
+        from storyforge import api
+        seen = []
+        _fake_gate(monkeypatch, {}, spend=40_000)          # $1.00 a scene
+        monkeypatch.setattr(gate, 'recheck_queue', lambda pd, skip=frozenset(): ['new-x1'])
+
+        def recheck(pd, *, spent_before=0.0, **k):
+            seen.append(spent_before)
+            return gate.Recheck(spent=spent_before, spent_before=spent_before)
+        monkeypatch.setattr(gate, 'recheck_pending', recheck)
+        cmd_check.main(['--scenes', f'act1-sc01,{SCENE}'])
+        one = api.calculate_cost_from_usage({'input_tokens': 0, 'output_tokens': 40_000},
+                                            'claude-opus-4-6')
+        per = gate.RECHECK_COST_PER_SCENE
+        assert seen == [pytest.approx(one + per), pytest.approx(2 * one)]
+
+
 class TestFix:
     def test_apply_edits(self):
         assert gate.apply_edits('a b c', [{'find': 'b', 'replace': 'B'},

@@ -214,6 +214,8 @@ Provide `storyforge audit`: the per-act digest of new ledger facts (`reference/c
 **"The gate stopped on an error" / "Accept this error" / "This contradiction is fine":**
 A gate stop (write, revise, `check`, a re-check) is the author's to fix or accept. To fix it, revise the scene (or its brief, or the calendar in `scenes.csv`) and run `storyforge check --pending`. To accept it as written, run `storyforge check --accept SCENE` (no model call): its contradictions are reported from then on instead of stopping, and `storyforge check --pending` carries on. Only contradictions can be accepted; a broken promise, an unverified quote or a halt still has to be fixed.
 
+With many scenes waiting (after a redraft early in the book, say), `storyforge check --pending --keep-going` checks them all in reading order instead of stopping at the first that fails, so the author decides once: it ends with every scene that didn't pass, its findings, and the exact `storyforge check --accept a,b,c` for those with contradictions to accept, and exits 1 if any failed. Tell the author that results for scenes after one that failed are provisional (they were checked without that scene's current facts in the ledger); once it passes, what depends on it is re-checked. The cost threshold (`STORYFORGE_COST_THRESHOLD`) is one budget for the whole run: it forecasts first and stops, exit 1, if the run would go over.
+
 **"What should I do next?":**
 Use the `storyforge status --json` verdict from Step 1 and recommend its `next.command`. Also: if scoring was recently run, publishing (`./storyforge publish`) refreshes the dashboard in Bookshelf; if scene metadata is sparse, `storyforge enrich` is high value.
 

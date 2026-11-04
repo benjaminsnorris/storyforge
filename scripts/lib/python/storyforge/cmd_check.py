@@ -6,6 +6,7 @@ Usage:
     storyforge check --scenes a,b,c
     storyforge check --act 2
     storyforge check --pending                 # every scene waiting on the gate
+    storyforge check --pending --keep-going    # ... all of them, not stopping at a failure
     storyforge check --accept act1-sc03        # accept what stopped it, then --pending
 
 For prose the author wrote (rethink plan §3.2, "in advisor mode, step 3
@@ -32,6 +33,26 @@ and they are re-checked after it, in reading order, under the cost threshold
 itself. `--pending` checks every scene in `working/gate-pending.csv`; one
 listed for a re-check keeps the command that wrote its prose.
 
+Cost: the threshold is one budget for the whole run (`costs.RunBudget`).
+`--pending` forecasts its scenes at `gate.RECHECK_COST_PER_SCENE` before
+anything is spent and exits 1 when that is over; before each scene, what
+the run has spent (metered) plus the scenes left must still be within it,
+or the run stops there (they stay pending; exit 1). The re-checks after a
+scene get only what the run's spend and the scenes still to check leave.
+
+`--pending --keep-going` checks every waiting scene in reading order and
+doesn't stop at one that fails: each failure is listed pending as above
+(its contradictions recorded in `working/gate-blocked.csv`, so `--accept`
+works on it), and the run goes on, re-check failures included. At the end
+a summary lists every scene that didn't pass with its findings and the
+exact `storyforge check --accept a,b,c` for those with contradictions to
+accept, and it exits 1 if any didn't pass. Results for scenes after one
+that didn't pass are provisional: they are checked against a ledger
+without that scene's current facts (it keeps its earlier ones, if any),
+which is why the run otherwise stops. When it later passes, the scenes
+depending on facts it changed are listed for a re-check, and its own check
+reads its new facts against the later scenes.
+
 A stop is the author's to fix or accept (Ben, 2026-11-02). `--accept SCENES`
 accepts the verified contradictions that stopped each scene's last gate run
 (`working/gate-blocked.csv`, `gate.accept_blocked`): they move to
@@ -47,6 +68,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from dataclasses import dataclass, field
 
 from storyforge.common import detect_project_root, install_signal_handlers, log, set_log_file
 
@@ -65,6 +87,13 @@ def parse_args(argv):
     parser.add_argument('--from-seq', help='From sequence number (N or N-M range)')
     parser.add_argument('--pending', action='store_true',
                         help='Every scene waiting on the gate (working/gate-pending.csv)')
+    parser.add_argument('--keep-going', action='store_true',
+                        help='With --pending: check every waiting scene in reading order '
+                             'instead of stopping at the first that fails. Each failure '
+                             'stays pending (and can be accepted with --accept); a summary '
+                             'lists them with the --accept command; exit 1 if any failed. '
+                             'Results for scenes after one that fails are provisional: '
+                             'they are checked against a ledger without its current facts.')
     parser.add_argument('--accept', metavar='SCENES',
                         help='Comma-separated scene IDs: accept the contradictions that '
                              'stopped each one\'s last gate run (no model call)')
@@ -89,7 +118,8 @@ def main(argv=None):
     ledger.exit_if_not_migrated(project_dir)
     ledger.exit_if_unordered(project_dir)
     if args.accept:
-        if args.positional or args.scenes or args.act or args.from_seq or args.pending:
+        if (args.positional or args.scenes or args.act or args.from_seq or args.pending
+                or args.keep_going):
             log('ERROR: --accept takes its own scene list; name no others with it.')
             sys.exit(1)
         _accept(project_dir, [s.strip() for s in args.accept.split(',') if s.strip()])
@@ -102,6 +132,10 @@ def main(argv=None):
         sys.exit(1)
     if args.pending and (args.positional or args.scenes or args.act or args.from_seq):
         log('ERROR: --pending checks the scenes waiting on the gate; name no others with it.')
+        sys.exit(1)
+    if args.keep_going and not args.pending:
+        log('ERROR: --keep-going goes with --pending (check every scene waiting on the gate '
+            'without stopping at the first that fails).')
         sys.exit(1)
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)
@@ -125,12 +159,13 @@ def main(argv=None):
         if not scene_ids:
             log('Nothing in the book is waiting on the gate.')
             return
-        from storyforge.costs import check_threshold
+        from storyforge.costs import check_threshold, cost_threshold
         forecast = len(scene_ids) * gate.RECHECK_COST_PER_SCENE
         log(f'{len(scene_ids)} scene(s) waiting on the gate, forecast about ${forecast:.2f}')
         if not check_threshold(forecast):
-            log(f'ERROR: that is over the cost threshold: nothing checked. Raise '
-                f'STORYFORGE_COST_THRESHOLD, or check them a few at a time with --scenes.')
+            log(f'ERROR: that is over the cost threshold (${cost_threshold():g}): nothing '
+                f'checked. Raise STORYFORGE_COST_THRESHOLD, or check them a few at a time '
+                f'with --scenes.')
             sys.exit(1)
         unknown = []
     else:
@@ -154,17 +189,124 @@ def main(argv=None):
         log('ERROR: could not create or find a branch to work on; nothing checked.')
         sys.exit(1)
 
-    report = ['# Check report', '']
-    passed, stopped_at, stop_why, recheck_trouble = 0, '', '', ''
-    spent = 0.0   # this run's re-checks, forecast
+    # The threshold is one budget for the run: the re-checks after a scene
+    # get what the checks so far actually spent (metered) and the scenes
+    # still to check leave (`costs.RunBudget`)
+    from storyforge import api
+    from storyforge.costs import RunBudget
+    with api.metered() as meter:
+        run = _check_scenes(project_dir, scene_ids, log_dir, RunBudget(meter),
+                            keep_going=args.keep_going, budgeted=args.pending)
+
+    report = run.report
+    summary = _keep_going_summary(project_dir, run) if args.keep_going else []
+    if summary:
+        report += ['## Summary', ''] + summary + ['']
+    path = os.path.join(project_dir, REPORT_PATH)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(report))
+    log(f'Report: {path}')
+    if not commit_and_push(project_dir, f'Check: {run.passed} of {len(scene_ids)} scene(s) '
+                           f'passed', ['reference/commitments.csv', 'working/']):
+        log('ERROR: the commit failed: the ledger and report are written but not committed.')
+        sys.exit(1)
+    if args.keep_going:
+        for line in summary:
+            log(line)
+        if run.failures or run.recheck_failures or run.not_rechecked or run.stopped_at:
+            sys.exit(1)
+        return
+    if run.over_budget:
+        log(f'ERROR: stopped before {run.stopped_at}: the run reached the cost threshold; '
+            f'{run.passed} of {len(scene_ids)} scene(s) passed. Not checked, still pending: '
+            f'{", ".join(run.unchecked)}.')
+        sys.exit(1)
+    if run.stopped_at:
+        log(f'ERROR: stopped at {run.stopped_at}, which {run.stop_why}; {run.passed} of '
+            f'{len(scene_ids)} scene(s) passed. Edit it and check it again, or accept its '
+            f'contradictions: `storyforge check --accept {run.stopped_at}`.')
+        sys.exit(1)
+    if run.recheck_trouble:
+        log(f'ERROR: {run.passed} of {len(scene_ids)} scene(s) passed, but the '
+            f'{run.recheck_trouble}; it is listed in {gate.PENDING_PATH} '
+            f'(`storyforge check --pending`).')
+        sys.exit(1)
+
+
+@dataclass
+class _Run:
+    """What `_check_scenes` found."""
+    report: list = field(default_factory=lambda: ['# Check report', ''])
+    passed: int = 0
+    #: the scene the run stopped at ('' when it didn't stop), and why
+    stopped_at: str = ''
+    stop_why: str = ''
+    #: the scenes left unchecked when it stopped
+    unchecked: list = field(default_factory=list)
+    #: it stopped because the run reached the cost threshold
+    over_budget: bool = False
+    #: a re-check that failed or wasn't run (the stop-at-first run's message)
+    recheck_trouble: str = ''
+    #: --keep-going: scene id → the lines saying why it didn't pass (its
+    #: blocking findings, or why it couldn't be checked)
+    failures: dict = field(default_factory=dict)
+    #: --keep-going: a scene re-checked after one of the run's scenes that
+    #: didn't pass → (the run's scene, why)
+    recheck_failures: dict = field(default_factory=dict)
+    #: --keep-going: the scenes listed for a re-check that weren't run (over
+    #: the cost threshold)
+    not_rechecked: list = field(default_factory=list)
+    #: --keep-going: scene id → the earlier scene that hadn't passed when it
+    #: was checked (its result is provisional)
+    provisional: dict = field(default_factory=dict)
+
+
+def _check_scenes(project_dir: str, scene_ids: list[str], log_dir: str, budget,
+                  keep_going: bool = False, budgeted: bool = False) -> _Run:
+    """Check `scene_ids` (in reading order) through the gate, re-checking
+    after each one that passes what it listed, under the run's one cost
+    budget (`budget`, a `costs.RunBudget`: the re-checks get what the run's
+    spend and the scenes still to check, at `gate.RECHECK_COST_PER_SCENE`,
+    leave). `budgeted` (--pending, whose forecast was checked up front):
+    before each scene, the run's spend plus the scenes left must still be
+    within the threshold, or it stops there (they stay pending).
+
+    It stops at the first scene that doesn't pass or can't be checked, and
+    at a re-check left failed or unrun before a later scene of the run.
+    With `keep_going` it doesn't: each failure is listed pending (and its
+    contradictions recorded for `--accept`) and the run goes on; a scene
+    checked after an earlier one that hadn't passed is `provisional`."""
+    from storyforge import gate, ledger
+    from storyforge.costs import check_threshold, cost_threshold
+    run = _Run()
+    report = run.report
+    order = ledger.scene_order(project_dir)
+    unsettled: list[str] = []   # scenes that didn't pass (or weren't re-checked)
     for n, scene_id in enumerate(scene_ids):
+        rest = scene_ids[n + 1:]
+        if budgeted:
+            due = budget.spent(reserved=(len(rest) + 1) * gate.RECHECK_COST_PER_SCENE)
+            if not check_threshold(due):
+                log(f'ERROR: checking {scene_id} and the {len(rest)} scene(s) after it would '
+                    f'bring this run to about ${due:.2f}, over the cost threshold '
+                    f'(${cost_threshold():g}): stopped. They stay in {gate.PENDING_PATH}.')
+                run.stopped_at, run.over_budget = scene_id, True
+                run.unchecked = scene_ids[n:]
+                report += ['## Not checked', '', f'Stopped before {scene_id}: the run reached '
+                           f'the cost threshold (about ${due:.2f} with the rest). Not '
+                           f'checked: {", ".join(scene_ids[n:])}.', '']
+                break
         log(f'--- Checking {scene_id} ---')
+        earlier = [s for s in unsettled if order.get(s, -1) < order.get(scene_id, -1)]
+        if earlier:
+            run.provisional[scene_id] = earlier[0]
         # read again for each scene: earlier scenes' re-checks list more
         row = gate.pending(project_dir).get(scene_id, {})
         recheck = row.get('command') in (gate.RECHECK, gate.RECHECK_FAILED)
         # a failed scene stays listed as it was listed: a re-check keeps its
         # prose's writer
         listed_as = gate.RECHECK_FAILED if recheck else 'advisor'
+        failed_here = False
         try:
             result = gate.gate_scene(
                 project_dir, scene_id, command='recheck' if recheck else 'advisor',
@@ -175,76 +317,130 @@ def main(argv=None):
             log(f'ERROR: {why}')
             report += [f'## {scene_id}: not checked', '', f'- {why}', '']
             gate.mark_pending(project_dir, scene_id, listed_as, f'not checked: {why}')
-            stopped_at, stop_why = scene_id, 'did not pass'
+            run.failures[scene_id] = [f'could not be checked: {why}']
+            failed_here = True
         else:
             lines = gate.report_lines(result)
             verdict = 'passed' if result.passed else 'did not pass'
-            log(f'{scene_id}: {verdict}')
+            log(f'{scene_id}: {verdict}' + (f' (provisional: {earlier[0]}, earlier, has not '
+                                            f'passed)' if earlier else ''))
             for line in lines:
                 log(f'  {line}')
             report += [f'## {scene_id}: {verdict}', ''] + [f'- {line}' for line in lines] \
                 + ([] if lines else ['- nothing to report']) + ['']
             if result.passed:
-                passed += 1
-                lines, run = _recheck_after(project_dir, result, log_dir,
-                                            set(scene_ids[n + 1:]), spent)
+                run.passed += 1
+                lines, rerun = _recheck_after(project_dir, result, log_dir, set(rest), budget)
                 report += lines
-                if run is not None:
-                    spent = run.spent
-                    blocked = [s for s in ([run.failed] if run.failed else run.left)
-                               if run.failed or run.over_budget]
+                if rerun is not None:
+                    blocked = [s for s in ([rerun.failed] if rerun.failed else rerun.left)
+                               if rerun.failed or rerun.over_budget]
+                    if rerun.failed:
+                        run.recheck_failures[rerun.failed] = (scene_id, rerun.why)
+                    if rerun.over_budget:
+                        run.not_rechecked += [s for s in rerun.left
+                                              if s not in run.not_rechecked]
+                    unsettled += [s for s in blocked if s not in unsettled]
                     if blocked:
-                        recheck_trouble = (f're-check of {run.failed} did not pass'
-                                           if run.failed else
-                                           f're-check of {", ".join(run.left)} not run '
-                                           f'(over the cost threshold)')
+                        run.recheck_trouble = (f're-check of {rerun.failed} did not pass'
+                                               if rerun.failed else
+                                               f're-check of {", ".join(rerun.left)} not '
+                                               f'run (over the cost threshold)')
                     # a scene of this run after one left stale would be checked
                     # against a ledger missing its facts
                     order = ledger.scene_order(project_dir)
                     first = min(blocked, key=order.get) if blocked else ''
-                    if first and any(order[s] > order[first] for s in scene_ids[n + 1:]):
-                        stopped_at = first
-                        stop_why = ('was re-checked and did not pass' if run.failed
-                                    else 'was not re-checked (over the cost threshold)')
+                    if (not keep_going and first
+                            and any(order[s] > order[first] for s in rest)):
+                        run.stopped_at = first
+                        run.stop_why = ('was re-checked and did not pass' if rerun.failed
+                                        else 'was not re-checked (over the cost threshold)')
             else:
+                problems = gate.blocking_lines(lines)
                 gate.mark_pending(project_dir, scene_id, listed_as,
                                   f'{sum(1 for x in lines if not x.startswith(("NOTE", "COMMITTED")))} '
                                   f'problem(s); see {REPORT_PATH}')
-                stopped_at, stop_why = scene_id, 'did not pass'
-        if stopped_at:
-            rest = scene_ids[n + 1:]
+                run.failures[scene_id] = problems or ['did not pass (see the report)']
+                failed_here = True
+        if failed_here:
+            unsettled.append(scene_id)
+            if not keep_going:
+                run.stopped_at, run.stop_why = scene_id, 'did not pass'
+        if run.stopped_at:
             if rest:
-                report += ['## Not checked', '', f'Stopped at {stopped_at}: later scenes would '
-                           f'be checked against a ledger without its facts. Not checked: '
-                           f'{", ".join(rest)}.', '']
+                run.unchecked = rest
+                report += ['## Not checked', '', f'Stopped at {run.stopped_at}: later scenes '
+                           f'would be checked against a ledger without its facts. Not '
+                           f'checked: {", ".join(rest)}.', '']
             break
-
-    path = os.path.join(project_dir, REPORT_PATH)
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(report))
-    log(f'Report: {path}')
-    if not commit_and_push(project_dir, f'Check: {passed} of {len(scene_ids)} scene(s) passed',
-                           ['reference/commitments.csv', 'working/']):
-        log('ERROR: the commit failed: the ledger and report are written but not committed.')
-        sys.exit(1)
-    if stopped_at:
-        log(f'ERROR: stopped at {stopped_at}, which {stop_why}; {passed} of '
-            f'{len(scene_ids)} scene(s) passed. Edit it and check it again, or accept its '
-            f'contradictions: `storyforge check --accept {stopped_at}`.')
-        sys.exit(1)
-    if recheck_trouble:
-        log(f'ERROR: {passed} of {len(scene_ids)} scene(s) passed, but the {recheck_trouble}; '
-            f'it is listed in {gate.PENDING_PATH} (`storyforge check --pending`).')
-        sys.exit(1)
+    return run
 
 
-def _recheck_after(project_dir: str, result, log_dir: str, skip: set[str], spent: float):
+def _keep_going_summary(project_dir: str, run: _Run) -> list[str]:
+    """--keep-going's closing lines: every scene that didn't pass with why,
+    the re-checks that failed or didn't run, which results are provisional,
+    and the exact `--accept` command for the scenes with contradictions to
+    accept."""
+    from storyforge import gate
+    total = run.passed + len(run.failures)
+    lines = [f'{run.passed} of {total} scene(s) checked passed.']
+    if run.stopped_at:
+        lines.append(f'ERROR: stopped before {run.stopped_at} (the cost threshold); not '
+                     f'checked, still pending: {", ".join(run.unchecked)}.')
+    if not (run.failures or run.recheck_failures or run.not_rechecked):
+        return lines
+    lines.append('ERROR: these did not pass (each stays in '
+                 f'{gate.PENDING_PATH}):')
+    for sid, why in run.failures.items():
+        lines.append(f'  {sid}:' + (f' (provisional: checked while {run.provisional[sid]} '
+                                    f'had not passed)' if sid in run.provisional else ''))
+        lines += [f'    - {w}' for w in why]
+    for sid, (after, why) in run.recheck_failures.items():
+        lines.append(f'  {sid} (re-checked after {after} passed): {why}')
+    if run.not_rechecked:
+        lines.append(f'  not re-checked (over the cost threshold; still pending): '
+                     f'{", ".join(run.not_rechecked)}')
+    later = [s for s in run.provisional if s not in run.failures]
+    if run.provisional:
+        lines.append(
+            f'Provisional: {", ".join(run.provisional)} were checked after a scene earlier in '
+            f'the book that had not passed, against a ledger without that scene\'s current '
+            f'facts (it keeps its earlier ones, if any). Once it passes, the scenes depending '
+            f'on facts it changed are listed for a re-check, and its own check reads its new '
+            f'facts against them' + (f'; {", ".join(later)} passed and committed their '
+                                     f'facts meanwhile' if later else '') + '.')
+    try:
+        recorded = gate.blocked(project_dir)
+    except gate.GateError as e:
+        lines.append(f'WARNING: {gate.BLOCKED_PATH} could not be read ({e}): which of them '
+                     f'can be accepted is unknown.')
+        return lines
+    failed = list(run.failures) + list(run.recheck_failures)
+    acceptable = [s for s in failed if recorded.get(s)]
+    to_fix = [s for s in failed if not recorded.get(s)]
+    if acceptable:
+        lines.append(f'To accept their contradictions as written (no model call; a scene with '
+                     f'other problems still stops on those): '
+                     f'`storyforge check --accept {",".join(acceptable)}`, then '
+                     f'`storyforge check --pending --keep-going`.')
+    if to_fix:
+        lines.append(f'Nothing to accept for {", ".join(to_fix)} (no verified contradiction '
+                     f'stopped it: a broken promise, an unverified quote, an extraction '
+                     f'problem, a halt, or a check that could not run): fix the scene, its '
+                     f'brief or the book, then check it again.')
+    return lines
+
+
+def _recheck_after(project_dir: str, result, log_dir: str, skip: set[str], budget):
     """Re-check the scenes `result` listed (not those later in this run),
-    as `write` does. Returns the report lines and the `gate.Recheck` (None
-    when nothing was pending)."""
-    from storyforge.cmd_write import report_changes, run_recheck
+    as `write` does, under the run's one budget (`skip`, the scenes still to
+    check, reserved at `gate.RECHECK_COST_PER_SCENE`). Returns the report
+    lines and the `gate.Recheck` (None when nothing was pending)."""
+    from storyforge import gate
+    from storyforge.cmd_write import budgeted_recheck, report_changes
     report_changes(result)
-    run = run_recheck(project_dir, os.path.join(log_dir, 'check'), skip, spent_before=spent)
+    run = budgeted_recheck(project_dir, os.path.join(log_dir, 'check'), skip, budget,
+                           reserved=len(skip) * gate.RECHECK_COST_PER_SCENE)
     lines = [f'- {result.scene_id} changed {fid}; its dependents can\'t all be found: {why}'
              for fid, why in result.unrelated.items()]
     lines += [f'- depends on {result.scene_id} but can\'t be re-checked now: {x}'
