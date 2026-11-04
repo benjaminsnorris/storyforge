@@ -470,7 +470,14 @@ class TestMainDryRun:
         monkeypatch.setattr('storyforge.git.commit_and_push',
                             lambda p, msg, *a, **kw: made.append(msg) or True)
 
-        main(['--naturalness', '--dry-run'])
+        class Stop(Exception):
+            pass
+
+        def stop(*a, **k):   # the plan is saved after the fixes: stop before the passes
+            raise Stop
+        monkeypatch.setattr('storyforge.cmd_revise._save_plan', stop)
+        with pytest.raises(Stop):
+            main(['--naturalness'])   # a dry run fixes nothing (#510's review, SF-1)
 
         assert [m for m in made if 'upstream' in m] == commits
 

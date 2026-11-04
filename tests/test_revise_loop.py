@@ -1004,7 +1004,7 @@ class TestPolishLoopForecast:
         budget = RunBudget()
         monkeypatch.setattr(cmd_revise, '_RUN_BUDGET', budget)
         monkeypatch.setattr(cmd_revise, '_pass_cost', lambda p, m: 2.0)
-        monkeypatch.setattr(cmd_revise, '_upstream_fix_cost', lambda p: 3.0)
+        monkeypatch.setattr(cmd_revise, '_upstream_fix_cost', lambda p, ids: 3.0 * len(ids))
         monkeypatch.setattr(cmd_revise, 'estimate_cost', lambda op, n, w, m: 5.0)
         monkeypatch.setattr(cmd_revise, '_detect_upstream_scenes',
                             lambda p, d: list(upstream))
