@@ -92,6 +92,25 @@ def _find_scenes_csv(project_dir: str) -> str:
 # Scope resolution
 # ============================================================================
 
+def _scope_parts(scope: str) -> list[str]:
+    """A list scope's items, `30,31` and `30;31` alike (inline `[...]`
+    already unwrapped)."""
+    return [s.strip() for s in scope.replace(';', ',').split(',') if s.strip()]
+
+
+def is_seq_scope(scope: str) -> bool:
+    """Whether `resolve_scope` reads `scope` as seq numbers ("1,5,12",
+    "[30, 31]", "2;3"), which it maps to scenes when the pass runs, so a
+    renumber retargets it. One rule for resolve_scope and scenes-setup
+    --renumber's warning; `scope` as written, unstripped, as resolve_scope
+    gets it."""
+    if scope.startswith('[') and scope.endswith(']'):
+        scope = scope[1:-1].replace(' ', '')
+    if scope in ('full', 'scene-level', 'targeted') or re.match(r'^(act|part)-\d+$', scope):
+        return False
+    return all(p.isdigit() for p in _scope_parts(scope))
+
+
 def resolve_scope(scope: str, project_dir: str) -> list[str]:
     """Parse a scope string and return a list of scene file paths.
 
@@ -124,6 +143,7 @@ def resolve_scope(scope: str, project_dir: str) -> list[str]:
     active_rows = [r for r in rows if (r.get('type') or '').strip() != 'cut']
     active_rows.sort(key=lambda r: int(r.get('seq', '0').strip() or '0'))
 
+    raw_scope = scope
     # Normalize inline list syntax: [30, 31] -> 30,31
     if scope.startswith('[') and scope.endswith(']'):
         scope = scope[1:-1].replace(' ', '')
@@ -140,12 +160,8 @@ def resolve_scope(scope: str, project_dir: str) -> list[str]:
         ]
 
     else:
-        # Comma- or semicolon-separated list — detect if all numeric (seq numbers)
-        normalized = scope.replace(';', ',')
-        parts = [s.strip() for s in normalized.split(',') if s.strip()]
-        all_numeric = all(p.isdigit() for p in parts if not p.startswith('NEW:'))
-
-        if all_numeric and not any(p.startswith('NEW:') for p in parts):
+        parts = _scope_parts(scope)
+        if is_seq_scope(raw_scope):
             # Resolve seq numbers to scene IDs
             seq_to_id = {r.get('seq', '').strip(): r['id'].strip() for r in active_rows}
             target_ids = []
