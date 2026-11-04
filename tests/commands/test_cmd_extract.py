@@ -826,6 +826,36 @@ class TestPhase2Force:
         assert seen['force'] is True
 
 
+class TestPhase2CastPrompt:
+    """#523: after phase 1, characters.csv holds only the POV characters.
+    Phase 2 offered it as "use these IDs", and the casts kept to it (the
+    Odyssey's five ids left Eumaeus out of his own hut). The list is now
+    labelled incomplete in phase 2's prompt only."""
+
+    def test_phase_2_labels_the_character_registry_incomplete(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        from storyforge.enrich import PARTIAL_REGISTRY_NOTE
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_extract.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_extract._run_hone', lambda *a, **k: None)
+        mock_api.set_response_fn(_chain_or_csv_reply)
+
+        main(['--phase', '2'])
+
+        prompts = [r['params']['messages'][0]['content']
+                   for c in mock_api.calls_for('submit_batch') for r in c['requests']]
+        assert prompts
+        for prompt in prompts:
+            # still offered, so a listed person keeps their id ...
+            assert '- dorren-hayle (Dorren Hayle)' in prompt
+            # ... but as a partial list, and only the characters
+            assert (f'### Characters (reference/characters.csv) — {PARTIAL_REGISTRY_NOTE}\n'
+                    in prompt)
+            assert prompt.count(PARTIAL_REGISTRY_NOTE) == 1
+            assert '### Locations (reference/locations.csv)\n' in prompt
+
+
 class TestMergeBatchResults:
     """Extracting The Great Gatsby wrote briefs for 1 of 39 scenes: the loop
     asked "is the CSV empty?" per scene, so only the first scene was added."""

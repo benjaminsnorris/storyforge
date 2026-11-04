@@ -489,8 +489,14 @@ _VALUE_FIELDS = ('value_at_stake',)
 _KNOWLEDGE_FIELDS = ('knowledge_in', 'knowledge_out')
 
 
+#: The heading note on a registry that ``partial`` marks as not complete
+PARTIAL_REGISTRY_NOTE = ('known so far, NOT complete: give anyone or anything '
+                         'not listed a new lowercase-hyphen id')
+
+
 def format_registries_for_prompt(project_dir: str,
-                                 exclude: tuple[str, ...] = ()) -> str:
+                                 exclude: tuple[str, ...] = (),
+                                 partial: tuple[str, ...] = ()) -> str:
     """Format registry CSV contents as a prompt section.
 
     Reads all registry files and returns a formatted string showing
@@ -503,6 +509,11 @@ def format_registries_for_prompt(project_dir: str,
         exclude: Registries to leave out, by filename or ``'knowledge'``
             (e.g. ``('knowledge',)`` for a prompt that renders the facts
             itself).
+        partial: Registries, by filename, to label as known so far and not
+            complete (``PARTIAL_REGISTRY_NOTE``), so the model gives a new id
+            to anyone not listed rather than keeping to the list: extract
+            phase 2's ``characters.csv``, which holds only the POV
+            characters at that point (#523).
 
     Returns:
         Formatted markdown string, or empty string if no registries exist.
@@ -577,7 +588,8 @@ def format_registries_for_prompt(project_dir: str,
                 entries.append(f'- {rid} ({rname})')
 
         if entries:
-            sections.append(f'### {title} (reference/{filename})\n' +
+            note = f' — {PARTIAL_REGISTRY_NOTE}' if filename in partial else ''
+            sections.append(f'### {title} (reference/{filename}){note}\n' +
                             '\n'.join(entries))
 
     if 'knowledge' not in exclude:
