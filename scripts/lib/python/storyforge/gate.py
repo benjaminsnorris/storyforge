@@ -324,31 +324,67 @@ def _brief_phrases(project_dir: str, scene_id: str) -> list[str]:
     return [p for p in phrases if _count(_words(p)) >= _MIN_BRIEF_WORDS]
 
 
-#: The most narration words a quote may have between and around its spoken
-#: words and still be read as a scripted line the prose split with a speech
-#: tag ("he said", "she said, not looking up")
-_MAX_TAG_WORDS = 6
+#: A speech tag that may split a scripted line (`_is_speech_tag`): one of
+#: these verbs with a pronoun or a character's name, nothing else
+_SPEECH_VERBS = frozenset('said says asked asks answered replied told called whispered '
+                          'murmured muttered shouted added repeated'.split())
+_PRONOUNS = frozenset('he she they i we you'.split())
+#: The most words a character's name in a speech tag may have
+_MAX_NAME_WORDS = 3
+#: Quote marks a scripted line is spoken between: double quotes, straight or
+#: curly, and curly single quotes (a closing ’ followed by a letter is an
+#: apostrophe, not a mark)
+_QUOTE_MARKS = re.compile(r'["“”‘]|’(?!\w)')
 
 
-def _spoken(quote: str) -> list[str]:
-    """The quote's spoken words, the narration between and around them
-    taken out, when the narration is no more than a speech tag: at most
-    `_MAX_TAG_WORDS` words, and fewer than the spoken ones. Both readings of
-    its quote marks are tried (a quote can start mid-line, so the first mark
-    may close a line); none when it has no quote marks."""
-    segments = re.split(r'["“”]', quote)
-    if len(segments) < 2:
-        return []
-    out = []
+def _speaker_names(project_dir: str) -> frozenset[str]:
+    """The characters' names and aliases (reference/characters.csv), as
+    `_words` phrases without the padding: the names a speech tag may use."""
+    from storyforge.enrich import load_alias_map
+    names = load_alias_map(os.path.join(project_dir, 'reference', 'characters.csv'))
+    return frozenset(_words(n).strip() for n in names if _words(n).strip())
+
+
+def _is_speech_tag(text: str, names: frozenset[str] | set[str]) -> bool:
+    """Whether `text` is only a speech tag: a speech verb (`_SPEECH_VERBS`)
+    and a pronoun or a character's name (`names`, up to `_MAX_NAME_WORDS`
+    words), either order, punctuation aside ("he said", "said Thomas"). An
+    adverb, a place or anything else in it makes it narration, which may hold
+    the error."""
+    words = _words(text).split()
+    if not 2 <= len(words) <= _MAX_NAME_WORDS + 1:
+        return False
+    for verb, who in ((words[0], words[1:]), (words[-1], words[:-1])):
+        if verb in _SPEECH_VERBS and (
+                (len(who) == 1 and who[0] in _PRONOUNS) or ' '.join(who) in names):
+            return True
+    return False
+
+
+def _split_line(quote: str, names: frozenset[str] | set[str] = frozenset()) -> str | None:
+    """The spoken words of `quote` when it is one line the prose split with
+    speech tags (`"Left hand on the case," he said. "Right hand free."`):
+    two or more spoken parts, each tag between them only a speech tag
+    (`_is_speech_tag`), and no words before the first part or after the
+    last. Otherwise None: narration before or after a line, or a tag with
+    anything else in it, may be where the error is. Both readings of its
+    quote marks are tried (a quote can start mid-line, so its first mark may
+    close a line)."""
+    segments = _QUOTE_MARKS.split(quote.replace('\r\n', '\n'))
     for parity in (0, 1):
-        spoken = ' '.join(s for i, s in enumerate(segments) if i % 2 == parity)
-        told = _count(_words(' '.join(s for i, s in enumerate(segments) if i % 2 != parity)))
-        if told <= _MAX_TAG_WORDS and told < _count(_words(spoken)):
-            out.append(spoken)
-    return out
+        spoken = [x for i, x in enumerate(segments) if i % 2 == parity]
+        told = [(i, x) for i, x in enumerate(segments) if i % 2 != parity]
+        tags = [x for i, x in told if 0 < i < len(segments) - 1]
+        ends = [x for i, x in told if not 0 < i < len(segments) - 1]
+        if (tags and sum(1 for x in spoken if _words(x).strip()) >= 2
+                and all(_is_speech_tag(x, names) for x in tags)
+                and not any(_words(x).strip() for x in ends)):
+            return ' '.join(spoken)
+    return None
 
 
-def _is_plan_conflict(quote: str, phrases: list[str]) -> bool:
+def _is_plan_conflict(quote: str, phrases: list[str],
+                      names: frozenset[str] | set[str] = frozenset()) -> bool:
     """Whether a contradiction's `quote` is the brief's own words: the
     quote lies within a scripted phrase, or a scripted phrase makes up at
     least half of it (a short scripted line inside a long quote whose error
@@ -357,16 +393,29 @@ def _is_plan_conflict(quote: str, phrases: list[str]) -> bool:
 
     A scripted line the prose split with a speech tag (`"Left hand on the
     case," he said. "Right hand free."`) is matched on its spoken words
-    (`_spoken`): the mended-bridle run (2026-11-03) sent such a line, the
-    brief's own, to the fix as a contradiction with a later scene, and the
-    fix rewrote the scene to match that scene's error."""
-    def matches(text: str) -> bool:
+    (`_split_line`; `names`: the characters a tag may name): the
+    mended-bridle run (2026-11-03) sent such a line, the brief's own, to the
+    fix as a contradiction with a later scene, and the fix rewrote the scene
+    to match that scene's error. Narration before or after a line is not
+    taken out (`"...," said the dead man.`), and a tag with anything but a
+    speaker and a speech verb is narration: either may hold the error. A
+    split line's spoken words must all lie within one scripted phrase.
+
+    Not checked: the speaker a tag names. A tag naming the wrong character
+    ("Cora said" for Thomas's line) passes as the brief's line."""
+    def matches(text: str, within: bool = False) -> bool:
         q = _words(text)
         n = _count(q)
         if n < _MIN_BRIEF_WORDS:
             return False
-        return any(q in p or (p in q and 2 * _count(p) >= n) for p in map(_words, phrases))
-    return matches(quote) or any(matches(s) for s in _spoken(quote))
+        return any(q in p or (not within and p in q and 2 * _count(p) >= n)
+                   for p in map(_words, phrases))
+    if matches(quote):
+        return True
+    # a split line's spoken words must all be the brief's: with the tag set
+    # aside, nothing else in the quote may be (the error could be there)
+    line = _split_line(quote, names)
+    return line is not None and matches(line, within=True)
 
 
 # ============================================================================
@@ -493,7 +542,8 @@ def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
             continue
         if phrases is None:
             phrases = _brief_phrases(project_dir, result.scene_id)
-        if _is_plan_conflict(f.scene_quote, phrases):
+            names = _speaker_names(project_dir)
+        if _is_plan_conflict(f.scene_quote, phrases, names):
             result.plan_conflicts.append(f)
 
 

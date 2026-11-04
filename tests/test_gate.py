@@ -810,21 +810,55 @@ class TestInheritedAndPlanConflicts:
         assert gate.problems_to_fix(result) == []
         assert any(x.startswith('PLAN CONFLICT') for x in gate.report_lines(result))
 
+    LINE = ['Left hand on the case. Right hand free. He carried it the same way.']
+    NAMES = frozenset({'thomas', 'thomas bright horse', 'cora'})
+
     @pytest.mark.parametrize('quote, expected', [
-        # the line split by a tag, opening mark included or not
-        ('"Left hand on the case," he said. "Right hand free."', True),
-        ('Left hand on the case," he said. "Right hand free.', True),
-        ('“Left hand on the case,” Thomas said quietly. “Right hand free.”',
+        # the real mended-bridle split line, and the same with the opening
+        # mark cut off (a quote may start mid-line)
+        ('"Left hand on the case," he said. "Right hand free. He carried it the same way."',
          True),
-        # narration past a speech tag: the error may be in it
+        ('Left hand on the case," he said. "Right hand free.', True),
+        # a name or a pronoun, either order; up to three words of name
+        ('"Left hand on the case," said Thomas. "Right hand free."', True),
+        ('"Left hand on the case," Thomas Bright Horse said. "Right hand free."', True),
+        # curly double and single quotes; CRLF inside
+        ('\u201cLeft hand on the case,\u201d he said. \u201cRight hand free.\u201d', True),
+        ('\u2018Left hand on the case,\u2019 he said. \u2018Right hand free.\u2019', True),
+        ('"Left hand on the case,"\r\nhe said. "Right hand free."', True),
+        # CR-1/SF-2 (#504 review): narration before or after an unsplit line
+        # is not a tag; a wrong speaker there may be the error
+        ('"Left hand on the case, right hand free," said the dead man.', False),
+        ('The dead man said, "Left hand on the case. Right hand free."', False),
+        # anything in the tag beyond speaker and verb is narration
+        ('"Left hand on the case," she said in Brennick. "Right hand free."', False),
+        ('"Left hand on the case," Thomas said quietly. "Right hand free."', False),
+        ('"Left hand on the case," said the dead man. "Right hand free."', False),
+        ('"Left hand on the case," Ana Maria de la Cruz said. "Right hand free."', False),
+        # narration past the line
         ('"Left hand on the case," he said, and she lifted it in her right hand.', False),
         ('"Left hand," he said. She took the case in her right hand and held it out.', False),
+        # spoken words outside the brief's line are not ignored
+        ('"Left hand on the case," he said. "Right hand free. In Brennick, always."', False),
         # no scripted words at all
         ('"Right shoulder," he said. "Fingers under the strap."', False),
     ])
-    def test_speech_tags_are_seen_through_only_when_short(self, quote, expected):
-        phrases = ['Left hand on the case. Right hand free. He carried it the same way.']
-        assert gate._is_plan_conflict(quote, phrases) is expected
+    def test_only_a_line_split_by_a_speech_tag_is_seen_through(self, quote, expected):
+        assert gate._is_plan_conflict(quote, self.LINE, self.NAMES) is expected
+
+    def test_a_name_tag_needs_the_name_in_the_registry(self):
+        quote = '"Left hand on the case," said Thomas. "Right hand free."'
+        assert not gate._is_plan_conflict(quote, self.LINE)   # no names known
+        assert gate._is_plan_conflict('"Left hand on the case," said he. "Right hand free."',
+                                      self.LINE)
+
+    def test_speaker_names_come_from_the_character_registry(self, project_dir):
+        import csv
+        path = os.path.join(project_dir, 'reference', 'characters.csv')
+        with open(path, newline='') as f:
+            row = next(csv.DictReader(f, delimiter='|'))
+        names = gate._speaker_names(project_dir)
+        assert gate._words(row['name']).strip() in names
 
     def test_a_short_brief_phrase_is_not_a_source(self, project_dir):
         _set_dialogue(project_dir, '"No."; "It was there forty years ago."')
