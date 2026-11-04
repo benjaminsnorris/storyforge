@@ -68,9 +68,14 @@ Identify 5-10 irreducible story events. For each, provide a row in pipe-delimite
 Output in a fenced block labeled `scenes-csv`:
 
 ```scenes-csv
-id|seq|title|status
+id|seq|title|summary|act|status
 (one row per spine event — seq is reading order, status is always "spine")
 ```
+
+- `summary`: what happens in the event, in at most 35 words
+- `act`: the structural act it falls in (1, 2, 3, ...); follow the story summary's act-shape when there is one
+
+These rows are also the book's spine (`reference/spine.csv`).
 
 Scene ids: A scene id is a 3-5 word lowercase hyphenated slug naming the scene's core event (e.g., gatsby-reunites-with-daisy). It is permanent: never encode the scene's position (no act1-sc03, scene-12, ch3-2), and never rename an id when a scene moves or its title changes. Order lives in seq.
 

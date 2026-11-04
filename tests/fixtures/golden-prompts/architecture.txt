@@ -64,9 +64,14 @@ Expand the spine (5-10 events) into 15-25 scenes. For each scene:
 Update the scenes CSV with new columns filled:
 
 ```scenes-csv
-id|seq|title|act|pov|status
+id|seq|title|summary|act|pov|spine_event|status
 (all scenes — existing spine scenes updated, new scenes added, status is "architecture")
 ```
+
+- `summary`: what happens in the scene, in at most 50 words
+- `spine_event`: the id of the spine scene this scene serves (a spine scene gives its own id)
+
+These rows are also the book's architecture (`reference/architecture.csv`).
 
 Scene ids: A scene id is a 3-5 word lowercase hyphenated slug naming the scene's core event (e.g., gatsby-reunites-with-daisy). It is permanent: never encode the scene's position (no act1-sc03, scene-12, ch3-2), and never rename an id when a scene moves or its title changes. Order lives in seq. Keep every existing scene's id exactly as it is; to move a scene, change its seq.
 

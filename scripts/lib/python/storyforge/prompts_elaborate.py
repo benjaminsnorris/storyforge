@@ -206,9 +206,14 @@ Identify 5-10 irreducible story events. For each, provide a row in pipe-delimite
 Output in a fenced block labeled `scenes-csv`:
 
 ```scenes-csv
-id|seq|title|status
+id|seq|title|summary|act|status
 (one row per spine event — seq is reading order, status is always "spine")
 ```
+
+- `summary`: what happens in the event, in at most 35 words
+- `act`: the structural act it falls in (1, 2, 3, ...); follow the story summary's act-shape when there is one
+
+These rows are also the book's spine (`reference/spine.csv`).
 
 Scene ids: {SCENE_ID_RULE}
 
@@ -281,9 +286,14 @@ Expand the spine (5-10 events) into 15-25 scenes. For each scene:
 Update the scenes CSV with new columns filled:
 
 ```scenes-csv
-id|seq|title|act|pov|status
+id|seq|title|summary|act|pov|spine_event|status
 (all scenes — existing spine scenes updated, new scenes added, status is "architecture")
 ```
+
+- `summary`: what happens in the scene, in at most 50 words
+- `spine_event`: the id of the spine scene this scene serves (a spine scene gives its own id)
+
+These rows are also the book's architecture (`reference/architecture.csv`).
 
 Scene ids: {SCENE_ID_RULE} Keep every existing scene's id exactly as it is; to move a scene, change its seq.
 
