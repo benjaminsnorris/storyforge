@@ -2,7 +2,18 @@
 
 Last updated 2026-11-03, at v1.130.2 (carried states and the gate's spend, #491; see Latest; every eval suite replays green since v1.128.0, E5's ledger-only ceiling raised to 3.9 at v1.130.2). **Phase 3 is done** and **Phase 4 is done** (#466 `ledger.dependents`, #468 the re-check, #470 the reject flow, #473 the re-check-set eval, #474 the wider graph, #475 every prose pass through the gate, #476 rewrite-from-ledger, and #478, the checker's calendar with E8's redefined gate). Phase 4's criteria: **re-check set recall 0.92 (met; 0.93 on 32 cases at v1.128.0); E5 on rewritten scenes 1.2 per scene, ≤ 2.3 (met); E8: the plan's "zero reintroduced" was redefined (Ben, 2026-11-01) as at most 2 reintroductions the gate passes per run, and was met: 4 reintroduced, 2 passed by the gate at v1.122.0 (#478: 3 and 2); v1.127.0's recording (the calendar, #486) passes 3; Ben accepted it (2026-11-02), and the ceiling is now 3 (#488)**. #480 reworked what the gate stops on (its "false alarms" were mostly real errors). The gate now fixes a failing scene up to twice (v1.124.0) and reads each scene twice (v1.125.0; see "E4 over three runs, and two checker readings"). **Phase 5, shrunk, is done** (v1.123.0): E7 runs in CI with a noise ceiling, and publish sends Bookshelf the export bundle's `dashboard_data` (Bookshelf's only structured input); the Storygild move is deferred (Ben, 2026-11-01; see the plan's Phase 5). **A fresh session starts here:** read **Latest**, then `CLAUDE.md` and `docs/agent-reference.md`. The plan is `docs/plans/2026-10-28-storyforge-rethink.md`. Everything after **Next steps** is reference and history.
 
-## Latest: carried states, stale states and the gate's spend (2026-11-03, #491)
+## Latest: one cost budget per run, and `check --pending --keep-going` (2026-11-03, #503)
+
+**v1.132.0.** The three problems #499's review left, and a way to clear many stale scenes in one decision.
+
+- **`STORYFORGE_COST_THRESHOLD` that isn't a number** is an ERROR naming it, exit 1, before anything is spent (`costs.cost_threshold`, `exit_if_bad_threshold`); it crashed with a traceback, in revise after the passes were paid for.
+- **A failed commit in `write`** stops the run, exit 1 (`cmd_write.CommitError`): the next scene's commit would have swept the scene's ledger changes in under its own message. Batch mode, already paid for, writes the rest uncommitted.
+- **The threshold is one budget for a run** (`costs.RunBudget`): write, check and revise are metered, and the re-checks get only what the run's actual spend and the work it still owes leave. Before, write's re-checks got the whole threshold again after drafting.
+- **`storyforge check --pending --keep-going`** checks every waiting scene in reading order without stopping at a failure, then lists every one that didn't pass with its findings and the exact `check --accept a,b,c`. Results after a failure are provisional (checked without that scene's current facts). Under the same one budget: forecast first, stop with exit 1 when the run's spend would go over.
+
+**Next:** the re-check over the 51 shared-dark scenes on scratch (below) can now run as `check --pending --keep-going` with `--accept` between runs.
+
+## Carried states, stale states and the gate's spend (2026-11-03, #491)
 
 **v1.130.2.** Three fixes from the evals' Quintus VIII round trip (storyforge-evals F-149 to F-151).
 
