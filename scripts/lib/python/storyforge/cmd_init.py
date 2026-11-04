@@ -115,6 +115,8 @@ def _claude_md(d: dict, meta: dict) -> str:
     about = d['title']
     if d['author']:
         about += f' by {d["author"]}'
+    if meta.get('translator'):
+        about += f', translated by {meta["translator"]}'
     if d['year']:
         about += f' ({d["year"]})'
     lines = [f'# {d["title"]} — Storyforge Project', '', '## About This Project', '']
@@ -202,7 +204,10 @@ def main(argv=None):
     for name in sorted(os.listdir(ref_templates)):
         entry = os.path.join(ref_templates, name)
         if name not in GN_ONLY and os.path.isfile(entry):
-            shutil.copy(entry, os.path.join(project, 'reference', name))
+            with open(entry, encoding='utf-8') as f:
+                text = f.read()
+            with open(os.path.join(project, 'reference', name), 'w', encoding='utf-8') as f:
+                f.write(text.replace('PROJECT_TITLE', details['title']))
     with open(os.path.join(project, 'storyforge.yaml'), 'w') as f:
         f.write(_storyforge_yaml(plugin, details, target))
     with open(os.path.join(project, 'CLAUDE.md'), 'w') as f:
