@@ -249,11 +249,19 @@ source:
     # or: range: scenes muse-invoked-odysseus-situation-framed..suitors-ambush-at-asteris
 ```
 
-- **Chapters** are the source's `chapter-map.csv` numbers (for the extracted *Odyssey*, chapter N is Book N). The chapters' scenes must be one continuous run of the source's reading order; otherwise give the range as scenes. A chapters range copies the source's `chapter-map.csv` into `reference/source/<slug>/`.
+- **Chapters** are the source's `chapter-map.csv` numbers (for the extracted *Odyssey*, chapter N is Book N). The chapters' scenes must be one continuous run of the source's reading order; otherwise give the range as scenes. A cut, merged or archived source scene between them (a chapter map lists active scenes only) is in the span. A row whose `chapter` isn't a number can't be named. A chapters range copies the source's `chapter-map.csv` into `reference/source/<slug>/`.
 - **Scenes** are source scene ids, which are permanent. Seq numbers are not accepted: they are positions, and change when the source gains or loses a scene.
-- **Strict.** A malformed or empty `range:`, an inverted range, an id that isn't a scene of the source, a chapter the map doesn't have (or lists twice), and chapters with no scenes stop `source import` and every command that reads the source; none is narrowed or ignored.
-- **The whole source is still imported.** The scenes outside the span are context (what the characters remember, what comes later), not material. The map, spine, architecture and briefs prompts show only the span's scenes; the spine shows the span's events in place of the source's whole-book `spine.csv`. `validate` asks only the span's scenes to be accounted for: a map row adapting a scene outside it blocks in either mode (widen the range instead), and a `cut` row for one is advisory (it needs no row). Source fidelity and the revise drift fix refuse a scene whose map row names a scene outside the span.
-- **The source bible** keeps the whole source but marks the span: an `Adapted span:` line, then the events in three parts (before, the span, after). Scenes in the span keep their outcome and value lines; the others are one line each. Cast counts (POV, on stage) are within the span; places, threads and the timeline stay whole-source. A bible built for another range (or for none) stops every prompt until `source import` is re-run.
+- **Strict.** Each of these stops `source import` and every prompt or score run that reads the source, and `validate` reports it as blocking; none is narrowed or ignored:
+  - a malformed or empty `range:`, or an inverted range
+  - an id that isn't a scene of the source
+  - a chapters range on a source with no chapter map, or one without `chapter` and `scenes` columns
+  - a chapter number listed twice, or a chapter the map doesn't have
+  - chapters that list no scenes, or a scene not in `scenes.csv`
+  - chapters whose scenes aren't one continuous run
+
+  A key a `projects` entry or the `source:` block doesn't take (`ranges:`, `chapters:`, a `range:` outside its project entry), or a key given twice, is refused the same way.
+- **The whole source is still imported.** The scenes outside the span are context (what the characters remember, what comes later), not material. The map, spine, architecture and briefs prompts show only the span's scenes; the spine shows the span's events in place of the source's whole-book `spine.csv`. `validate` asks only the span's scenes to be accounted for: a map row adapting a scene outside it blocks in either mode (widen the range instead), and a `cut` row for one is advisory (it needs no row). The briefs prompt, source fidelity and the revise drift fix refuse a scene whose map row names a scene outside the span.
+- **The source bible** keeps the whole source but marks the span: an `Adapted span:` line, then the events in three parts (before, the span, after). Scenes in the span keep their outcome and value lines; the others are one line each. Cast counts (POV, on stage) are within the span; places, threads and the timeline stay whole-source. A bible built for another range (or for none) stops every prompt, and blocks `validate`, until `source import` is re-run.
 
 ### The name map
 
