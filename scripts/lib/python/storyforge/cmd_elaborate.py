@@ -1991,6 +1991,20 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     # ========================================================================
     log('Running validation...')
     report = validate_structure(ref_dir)
+    # The column schema too, which `storyforge validate` checks: a map that
+    # wrote "action: she strikes" as a turning point used to report
+    # "Validation passed" here (Beowulf B-018). A value outside a closed set
+    # (an enum) is malformed output and blocks; an id not in its registry yet
+    # is reported, advisory, since a later stage or the author may register it
+    from storyforge.schema import validate_schema, describe_schema_error
+    schema_report = validate_schema(ref_dir, project_dir)
+    for err in schema_report['errors']:
+        report['failures'].append({
+            'severity': 'blocking' if err.get('constraint') == 'enum' else 'advisory',
+            'scene_id': '',
+            'message': f'schema: {err.get("file", "")}: {describe_schema_error(err)}'})
+    if any(err.get('constraint') == 'enum' for err in schema_report['errors']):
+        report['passed'] = False
     if source_cfg is not None and stage in ('map', 'briefs'):
         # Source coverage (#477), in the stage's report; a blocking gap holds
         # the phase like any other blocking failure

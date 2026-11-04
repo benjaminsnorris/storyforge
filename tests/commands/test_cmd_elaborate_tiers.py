@@ -109,3 +109,36 @@ def test_prompts_ask_for_the_tier_columns(novel):
     assert 'id|seq|title|summary|act|status' in pe.build_spine_prompt(novel, plugin, 'seed')
     assert ('id|seq|title|summary|act|pov|spine_event|status'
             in pe.build_architecture_prompt(novel, plugin))
+
+
+# Beowulf B-018: the stage's own validation didn't read the column schema, so
+# a reply with "action: description" turning points and a "+/--" shift was
+# reported "Validation passed" and advanced the phase while `storyforge
+# validate` failed.
+BAD_ENUM_ARCH_REPLY = ARCH_REPLY.replace(
+    'knight-offers-game|Challenge|action|ease to awe|honor|+/-|action',
+    'knight-offers-game|Challenge|action|ease to awe|honor|+/--|action: he holds out the axe')
+
+
+def _phase(project):
+    from storyforge.common import read_yaml_field
+    return read_yaml_field('phase', project)
+
+
+def test_a_stage_that_breaks_the_schema_does_not_pass(novel, mock_api, capsys):
+    _run(mock_api, 'spine', SPINE_REPLY)
+    before = _phase(novel)
+    _run(mock_api, 'architecture', BAD_ENUM_ARCH_REPLY)
+    out = capsys.readouterr().out
+    assert 'Validation passed' not in out.split('Running validation...')[-1]
+    assert 'turning_point: "action: he holds out the axe"' in out
+    assert 'value_shift: "+/--"' in out
+    assert _phase(novel) == before   # not advanced to scene-map
+
+
+def test_registry_misses_are_advisory_and_enums_clean_no_block(novel, mock_api, capsys):
+    _run(mock_api, 'spine', SPINE_REPLY)
+    _run(mock_api, 'architecture', ARCH_REPLY)
+    out = capsys.readouterr().out.split('Running validation...')[-1]
+    assert '[blocking] schema:' not in out
+    assert '[advisory] schema: architecture.csv: gawain-strikes-blow | pov: "gawain"' in out
