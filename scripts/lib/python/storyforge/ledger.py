@@ -34,6 +34,7 @@ from those files is `docs/plans/2026-10-30-ledger-migration-proposal.md`.
 from __future__ import annotations
 
 import csv
+import math
 import os
 import re
 import threading
@@ -279,7 +280,9 @@ def _read_rows(path: str) -> tuple[list[str], list[dict[str, str]]]:
     lines, _ = _raw_lines(path)
     if not lines:
         return [], []
-    header = [h.strip() for h in lines[0].split('|')]
+    # A spreadsheet export's byte-order mark would make the first column
+    # `\ufeffid`, and every row would read as having no id
+    header = [h.strip() for h in lines[0].lstrip('\ufeff').split('|')]
     rows = []
     for line in lines[1:]:
         if not line.strip():
@@ -598,6 +601,20 @@ def _split(value: str) -> list[str]:
 # Derived state
 # ============================================================================
 
+def seq_number(text) -> float:
+    """A scene's `seq` as a number: the one conversion `scene_order`,
+    `shared_seqs`, validate and cleanup use, so they can't drift apart.
+
+    Raises:
+        ValueError: if `text` is blank, not a number, or not finite (`nan`
+            and `inf` would sort nowhere in particular).
+    """
+    value = float(str(text if text is not None else '').strip())
+    if not math.isfinite(value):
+        raise ValueError(f'seq {text!r} is not a finite number')
+    return value
+
+
 def scene_order(project_dir: str) -> dict[str, int]:
     """Scene id → reading position, from `reference/scenes.csv`'s `seq`.
 
@@ -612,7 +629,7 @@ def scene_order(project_dir: str) -> dict[str, int]:
         if not sid:
             continue
         try:
-            keyed.append((float(row.get('seq', '')), sid))
+            keyed.append((seq_number(row.get('seq', '')), sid))
         except ValueError:
             raise ValueError(f'scenes.csv: {sid} has no numeric seq '
                              f'({row.get("seq", "")!r})') from None

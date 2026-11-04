@@ -9,6 +9,7 @@ All files are pipe-delimited with 'id' as the join key.
 """
 
 import csv
+import math
 import os
 from typing import Any
 
@@ -136,6 +137,18 @@ def _read_csv(path: str) -> list[dict[str, str]]:
 _ACT_RENAMED_FILES = frozenset({'spine.csv', 'architecture.csv'})
 
 
+def _seq_sort_key(scene: dict) -> float:
+    """A scene's seq to sort by (`ledger.seq_number`, so `4.0` and `12.5`
+    sort as numbers rather than crashing an `int()`). A blank or non-numeric
+    seq sorts last: write, revise and check stop on it up front
+    (`ledger.exit_if_unordered`)."""
+    from storyforge.ledger import seq_number
+    try:
+        return seq_number(scene.get('seq', ''))
+    except ValueError:
+        return math.inf
+
+
 def _read_csv_as_map(path: str) -> dict[str, dict[str, str]]:
     """Read a pipe-delimited CSV into a dict keyed by 'id'."""
     rows = _read_csv(path)
@@ -231,7 +244,7 @@ def get_scenes(
 
     results = []
     sorted_ids = sorted(scenes_map.keys(),
-                        key=lambda sid: int(scenes_map[sid].get('seq', 0)))
+                        key=lambda sid: _seq_sort_key(scenes_map[sid]))
 
     for sid in sorted_ids:
         row = dict(scenes_map[sid])
@@ -407,13 +420,13 @@ def compute_drafting_waves(ref_dir: str) -> list[list[str]]:
     while remaining:
         # Find scenes whose deps are all assigned
         wave = []
-        for sid in sorted(remaining, key=lambda s: int(scenes_map.get(s, {}).get('seq', 0))):
+        for sid in sorted(remaining, key=lambda s: _seq_sort_key(scenes_map.get(s, {}))):
             if deps.get(sid, set()).issubset(assigned):
                 wave.append(sid)
 
         if not wave:
             # Circular dependency — break it by taking the lowest-seq scene
-            lowest = min(remaining, key=lambda s: int(scenes_map.get(s, {}).get('seq', 0)))
+            lowest = min(remaining, key=lambda s: _seq_sort_key(scenes_map.get(s, {})))
             wave = [lowest]
 
         waves.append(wave)
@@ -444,7 +457,7 @@ def score_structure(ref_dir: str) -> list[dict]:
 
     results = []
     sorted_ids = sorted(scenes_map.keys(),
-                        key=lambda sid: int(scenes_map[sid].get('seq', 0)))
+                        key=lambda sid: _seq_sort_key(scenes_map[sid]))
 
     for sid in sorted_ids:
         scene = scenes_map[sid]
@@ -484,7 +497,7 @@ def score_structure(ref_dir: str) -> list[dict]:
                 score -= 1
 
         # Knowledge flow
-        if not brief.get('knowledge_in', '').strip() and int(scene.get('seq', 0)) > 1:
+        if not brief.get('knowledge_in', '').strip() and _seq_sort_key(scene) > 1:
             issues.append('Missing knowledge_in (not the first scene)')
             score -= 1
         if not brief.get('knowledge_out', '').strip():
@@ -591,7 +604,7 @@ def _validate_threads(scenes_map, intent_map, checks, ref_dir=''):
                 if rid and rtype:
                     registry_types[rid] = rtype
     sorted_ids = sorted(scenes_map.keys(),
-                        key=lambda sid: int(scenes_map[sid].get('seq', 0)))
+                        key=lambda sid: _seq_sort_key(scenes_map[sid]))
 
     opens = {}    # thread -> [scene ids with "+thread"]
     closes = {}   # thread -> [scene ids with "-thread"]
@@ -684,7 +697,7 @@ def _validate_timeline(scenes_map, checks):
     every scene in ``scenes``, so grouping loses nothing.
     """
     sorted_ids = sorted(scenes_map.keys(),
-                        key=lambda sid: int(scenes_map[sid].get('seq', 0)))
+                        key=lambda sid: _seq_sort_key(scenes_map[sid]))
 
     present_day = None
     present_id = None
@@ -743,7 +756,7 @@ def _validate_timeline(scenes_map, checks):
 def _validate_knowledge(scenes_map, briefs_map, checks):
     """Check knowledge flow: knowledge_in should be available from prior scenes."""
     sorted_ids = sorted(scenes_map.keys(),
-                        key=lambda sid: int(scenes_map[sid].get('seq', 0)))
+                        key=lambda sid: _seq_sort_key(scenes_map[sid]))
 
     available_knowledge = set()
     for sid in sorted_ids:
@@ -801,7 +814,7 @@ def state_owner_absent(state: dict, scenes_map: dict, intent_map: dict) -> bool:
 def _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_dir: str = ''):
     """Check physical state flow: physical_state_in must come from prior scenes' physical_state_out."""
     sorted_ids = sorted(scenes_map.keys(),
-                        key=lambda sid: int(scenes_map[sid].get('seq', 0)))
+                        key=lambda sid: _seq_sort_key(scenes_map[sid]))
 
     available_states = set()
 
@@ -946,7 +959,7 @@ def _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_di
 def _validate_pacing(scenes_map, intent_map, checks):
     """Check pacing: polarity stretches, scene type rhythm, turning point variety."""
     sorted_ids = sorted(scenes_map.keys(),
-                        key=lambda sid: int(scenes_map[sid].get('seq', 0)))
+                        key=lambda sid: _seq_sort_key(scenes_map[sid]))
 
     action_sequels = []
     value_shifts = []
@@ -1041,6 +1054,7 @@ def shared_seqs(scenes) -> list[tuple[str, list[str]]]:
     compare as numbers where they are numbers, as `scene_order` sorts them
     ("12" and "12.0" tie there too); a blank seq is not a shared one.
     """
+    from storyforge.ledger import seq_number
     groups: dict[object, tuple[str, list[str]]] = {}
     for scene in scenes:
         sid = (scene.get('id') or '').strip()
@@ -1048,7 +1062,7 @@ def shared_seqs(scenes) -> list[tuple[str, list[str]]]:
         if not sid or not seq:
             continue
         try:
-            key: object = (0, float(seq))
+            key: object = (0, seq_number(seq))
         except ValueError:
             key = (1, seq)
         groups.setdefault(key, (seq, []))[1].append(sid)
