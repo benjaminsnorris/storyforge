@@ -197,6 +197,53 @@ class TestRunActs:
         assert result.source == 'votes'
 
 
+class TestReviewEdges:
+    def _fake(self, monkeypatch, reply):
+        def fake(prompt, model, log_file, max_tokens=4096, **kw):
+            if isinstance(reply, Exception):
+                raise reply
+            fake.prompt = prompt
+            with open(log_file, 'w') as f:
+                json.dump(reply, f)
+            return reply
+        monkeypatch.setattr(api, 'invoke_to_file', fake)
+        return fake
+
+    def test_no_votes_and_a_failed_call_leaves_the_acts_alone(self, book, monkeypatch):
+        path = str(book / 'reference' / 'scenes.csv')
+        _write(path, _scenes([''] * 9))
+        before = open(path).read()
+        self._fake(monkeypatch, RuntimeError('HTTP 500'))
+        result = run_acts(str(book / 'reference'), str(book / 'scenes'), str(book / 'logs'),
+                          {}, 'm')
+        assert result.source == 'none' and open(path).read() == before
+
+    def test_a_programming_error_is_not_swallowed(self, book, monkeypatch):
+        self._fake(monkeypatch, KeyError('bug'))
+        with pytest.raises(KeyError):
+            run_acts(str(book / 'reference'), str(book / 'scenes'), str(book / 'logs'), {}, 'm')
+
+    def test_cut_and_merged_scenes_are_left_out(self, book, monkeypatch):
+        path = str(book / 'reference' / 'scenes.csv')
+        rows = _scenes(['1', '1', '2', '2', '3', '3', '3'])
+        rows[0]['status'] = 'cut'
+        rows[3]['status'] = 'merged'
+        _write(path, rows)
+        fake = self._fake(monkeypatch, _reply([_act('s02'), _act('s03'), _act('s05')]))
+        result = run_acts(str(book / 'reference'), str(book / 'scenes'), str(book / 'logs'),
+                          {}, 'm')
+        assert result.source == 'model'
+        assert '1. s01' not in fake.prompt and 's04' not in fake.prompt
+        acts = {r['id']: r['act'] for r in _read_csv(path)}
+        assert acts['s01'] == '1' and acts['s04'] == '2'     # untouched
+        assert [acts[s] for s in ('s02', 's03', 's05', 's06', 's07')] == ['1', '2', '3', '3', '3']
+
+    def test_a_scene_with_no_seq_sorts_last(self):
+        rows = _scenes(['1', '2', '3'])
+        rows[0]['seq'] = ''
+        assert backward_steps(rows) == [('s03', 's01')]
+
+
 class TestChecksReportActsOutOfOrder:
     def _project(self, tmp_path, acts):
         ref = tmp_path / 'reference'

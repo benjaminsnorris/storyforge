@@ -44,11 +44,15 @@ def _schema() -> dict:
 ACTS_SCHEMA = _schema()
 
 
+INACTIVE = frozenset({'cut', 'merged'})
+
+
 def _seq(row: dict[str, str]) -> float:
+    """A row's seq for sorting; one with no number sorts last."""
     try:
-        return float(row.get('seq') or 0)
+        return float(row.get('seq', '').strip())
     except ValueError:
-        return 0.0
+        return float('inf')
 
 
 def in_order(rows: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -226,21 +230,29 @@ def run_acts(ref_dir: str, scenes_dir: str, log_dir: str, profile: dict[str, str
         columns = f.readline().rstrip('\r\n').lstrip('﻿').split('|')
     if 'act' not in columns:
         columns.append('act')
-    scenes = in_order(rows)
+    # Cut and merged scenes aren't in the book: they keep their act and
+    # aren't shown to the model or counted in the fit
+    scenes = [r for r in in_order(rows)
+              if r.get('status', '').strip().lower() not in INACTIVE]
+    if not scenes:
+        return ActsResult('none', [], 0, 'every scene is cut or merged')
+    votes = [r.get('act', '') for r in scenes]
 
     source, note = 'model', ''
     if len(scenes) < ACT_COUNT:
-        acts, source, note = fit_votes([r.get('act', '') for r in scenes]), 'votes', \
-            f'fewer than {ACT_COUNT} scenes'
+        acts, source, note = fit_votes(votes), 'votes', f'fewer than {ACT_COUNT} scenes'
     else:
         try:
             starts = _ask_model(scenes, scenes_dir, profile, model, log_dir, on_usage)
             acts = assign(scenes, starts)
-        except Exception as e:      # API error, refusal, unusable reply
+        except (RuntimeError, ValueError, OSError) as e:   # API error, refusal, unusable reply
             note = f'the act call failed ({e})'
+            if not any(v.strip() in {str(a) for a in range(1, ACT_COUNT + 1)} for v in votes):
+                log(f'  WARNING: {note}, and no scene has an act to fit; acts left as they were')
+                return ActsResult('none', [], 0, note)
             log(f'  WARNING: {note}; fitting the per-scene acts to the closest '
                 'contiguous split instead')
-            acts, source = fit_votes([r.get('act', '') for r in scenes]), 'votes'
+            acts, source = fit_votes(votes), 'votes'
 
     changed = 0
     for row, act in zip(scenes, acts):
