@@ -218,7 +218,8 @@ Optional. Declares that this project adapts another Storyforge project (an extra
 
 | Field | Type | Required | Description | Default | Example |
 |-------|------|----------|-------------|---------|---------|
-| `projects` | list | required | One entry per source: `slug` (lowercase letters, digits, hyphens; names `reference/source/<slug>/`), `path` (the source project, relative to this one or absolute), and optionally its own `name_map` | — | see below |
+| `projects` | list | required | One entry per source: `slug` (lowercase letters, digits, hyphens; names `reference/source/<slug>/`), `path` (the source project, relative to this one or absolute), and optionally its own `name_map` and `range` | — | see below |
+| `projects[].range` | string | optional | The part of this source the novel adapts: `chapters N-M` (or `chapter N`; the `chapter` numbers of the source's `reference/chapter-map.csv`, both ends included) or `scenes first-id..last-id` (or `scene id`; source scene ids, both ends included, in reading order). See [Adapting part of a source](#adapting-part-of-a-source) | none (the whole source) | `chapters 1-4` |
 | `name_map` | path | optional | `source_id\|target_id\|source_name\|target_name`: the names the adaptation uses. A per-project `name_map` overrides it. Several projects can share one file | none (names unchanged) | `reference/source/name-map.csv` |
 | `mode` | enum | optional | `faithful`: a source scene missing from the source map, or cut with no reason, blocks `validate`; a `reorder` across the source's timeline needs a note; `revise` fixes source drift. `free`: a missing or unreasoned source scene is advisory, reorders aren't checked, and drift is reported but left as it is. Malformed map rows, unknown ids and scenes with no row block in both | `faithful` | `free` |
 | `rules` | path | optional | Where the version rules are (what this version softens, cuts or keeps): a file, or one section of it as `file.md#heading-slug`. Source fidelity reads it to tell a deliberate departure from drift | none | `reference/key-decisions.md#version-rules` |
@@ -235,6 +236,25 @@ source:
 
 Two projects can import the same source and differ only in `mode` and key decisions; both can point `name_map` at one shared file.
 
+### Adapting part of a source
+
+A `range` on a `projects` entry makes the novel adapt only that span of the source: a novella of the Telemachy takes *Odyssey* Books I–IV, a later book XIII–XXIV.
+
+```yaml
+source:
+  projects:
+    - slug: odyssey
+      path: ../odyssey
+      range: chapters 1-4        # Books I-IV
+    # or: range: scenes muse-invoked-odysseus-situation-framed..suitors-ambush-at-asteris
+```
+
+- **Chapters** are the source's `chapter-map.csv` numbers (for the extracted *Odyssey*, chapter N is Book N). The chapters' scenes must be one continuous run of the source's reading order; otherwise give the range as scenes. A chapters range copies the source's `chapter-map.csv` into `reference/source/<slug>/`.
+- **Scenes** are source scene ids, which are permanent. Seq numbers are not accepted: they are positions, and change when the source gains or loses a scene.
+- **Strict.** A malformed or empty `range:`, an inverted range, an id that isn't a scene of the source, a chapter the map doesn't have (or lists twice), and chapters with no scenes stop `source import` and every command that reads the source; none is narrowed or ignored.
+- **The whole source is still imported.** The scenes outside the span are context (what the characters remember, what comes later), not material. The map, spine, architecture and briefs prompts show only the span's scenes; the spine shows the span's events in place of the source's whole-book `spine.csv`. `validate` asks only the span's scenes to be accounted for: a map row adapting a scene outside it blocks in either mode (widen the range instead), and a `cut` row for one is advisory (it needs no row). Source fidelity and the revise drift fix refuse a scene whose map row names a scene outside the span.
+- **The source bible** keeps the whole source but marks the span: an `Adapted span:` line, then the events in three parts (before, the span, after). Scenes in the span keep their outcome and value lines; the others are one line each. Cast counts (POV, on stage) are within the span; places, threads and the timeline stay whole-source. A bible built for another range (or for none) stops every prompt until `source import` is re-run.
+
 ### The name map
 
 Every character and location in the source's registries needs a row, even an unchanged name; `source import` stops and lists the ones that lack one. The import maps ids (registry ids, and the `pov`, `location`, `characters`, `on_stage`, `subject` and `known_by` columns) by `source_id`, sets each registry row's `name` from its `target_name`, and replaces names in every other cell (briefs, intents, summaries, commitments' `statement` and `quote`, aliases): whole words, case-sensitive, longest first. A row with an empty `source_id` is a text-only form, such as `||Ilius|Ilium` or `||Saturn|Cronus`. A `source_name` needs a capital letter. In the id columns, a token that is a name rather than an id (a project that keeps names there) is mapped by name; one the map knows neither way is left as written and listed by the import. Two people who share a source name share a `target_name` and differ by `target_id`; a source name given two different target names can't be replaced in text, so it stays as written and the import says so. Source prose (`scenes/*.md`) is copied as written: it is the evidence for source fidelity, and the briefs prompt lists the map's changed names so the source's names don't reach the new prose.
@@ -243,8 +263,8 @@ Every character and location in the source's registries needs a row, even an unc
 
 | Command | What it does with the source |
 |---|---|
-| `source import` | Copies `scenes.csv`, `scene-intent.csv`, `scene-briefs.csv`, `characters.csv`, `locations.csv`, `values.csv`, `mice-threads.csv`, `commitments.csv`, `spine.csv`, `architecture.csv`, the reference docs (story summary and architecture, character, world and systems bibles, timeline; a template copy is skipped) and `scenes/*.md` into `reference/source/<slug>/`, applies the name map, and writes `source-bible.md` (the events in reading order with outcomes and value shifts, the cast, places, threads and timeline). It replaces `reference/source/<slug>/` wholesale (staged beside it, then swapped in), so keep nothing of your own there: a name map or rules file inside it is refused. A re-run that changes nothing writes nothing; with several sources, every one is built before any is written. The source's ledger is context, never merged into this project's |
-| `elaborate` | The source bible joins the reference materials. Spine: the source's events to select and reframe. Architecture: the source's cast and POV distribution. Map: every source scene, which the reply must account for in `reference/source-map.csv`. Briefs: each scene's source briefs and source prose |
+| `source import` | Copies `scenes.csv`, `scene-intent.csv`, `scene-briefs.csv`, `characters.csv`, `locations.csv`, `values.csv`, `mice-threads.csv`, `commitments.csv`, `spine.csv`, `architecture.csv` (and `chapter-map.csv` for a chapters `range`), the reference docs (story summary and architecture, character, world and systems bibles, timeline; a template copy is skipped) and `scenes/*.md` into `reference/source/<slug>/`, applies the name map, and writes `source-bible.md` (the events in reading order with outcomes and value shifts, the cast, places, threads and timeline). It replaces `reference/source/<slug>/` wholesale (staged beside it, then swapped in), so keep nothing of your own there: a name map or rules file inside it is refused. A re-run that changes nothing writes nothing; with several sources, every one is built before any is written. The source's ledger is context, never merged into this project's |
+| `elaborate` | The source bible joins the reference materials. Spine: the source's events to select and reframe. Architecture: the source's cast and POV distribution. Map: every source scene, which the reply must account for in `reference/source-map.csv`. Briefs: each scene's source briefs and source prose. With a `range`, each uses only the span's scenes |
 | `validate` | Source coverage (see `reference/source-map.csv`) |
 | `score` | `source-fidelity.csv`: the briefs or prose against the source scenes, each departure tagged `deliberate` or `drift` |
 | `revise` | In `--naturalness` and `--polish --loop` (before the loop's convergence check), faithful-mode scenes with drift on a brief or prose unchanged since it was scored get their briefs fixed toward the source, then redrafted. Results scored on something since changed, and no results at all, are said |
