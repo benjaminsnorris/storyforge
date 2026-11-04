@@ -226,3 +226,43 @@ class TestValidate:
 def test_the_new_book_template_has_the_column():
     with open(os.path.join(PLUGIN_DIR, 'templates', 'reference', 'characters.csv')) as f:
         assert f.readline().rstrip('\n').split('|')[-1] == 'pronouns'
+
+
+class TestLocationList:
+    """`location` is an ordered list of places (`a;b`): each place is read,
+    not the whole cell as one unknown name (gawain G-026)."""
+
+    def _places(self, project_dir):
+        path = os.path.join(project_dir, 'reference', 'locations.csv')
+        with open(path, encoding='utf-8') as f:
+            lines = f.read().splitlines()
+        return [l.split('|')[1] for l in lines[1:3]]
+
+    def test_each_place_in_the_list_is_known(self, project_dir, capsys):
+        _pronouns(project_dir, {'dorren-hayle': 'she'})
+        first, second = self._places(project_dir)
+        path = os.path.join(project_dir, 'reference', ledger.LEDGER_FILE)
+        with open(path, 'a', encoding='utf-8') as f:
+            for pid, fact in (('cartography-office', 'the office floods each spring'),
+                              ('private-study', 'the study has no window')):
+                row = dict.fromkeys(ledger.COLUMNS, '')
+                row.update(id=f'{pid}-fact', type='physical', subject=pid,
+                           statement=fact, status='binding', mutable='state')
+                f.write('|'.join(row[c] for c in ledger.COLUMNS) + '\n')
+        block = _established_facts_block(
+            SCENE, {'pov': 'Dorren Hayle', 'location': f'{first};{second}'},
+            project_dir, set())
+        out = capsys.readouterr().out
+        assert 'not in characters.csv or locations.csv' not in out
+        assert 'the office floods each spring' in block
+        assert 'the study has no window' in block
+        assert block.count('(location)') == 2
+
+    def test_an_unknown_place_in_the_list_is_named_alone(self, project_dir, capsys):
+        _pronouns(project_dir, {'dorren-hayle': 'she'})
+        first, _ = self._places(project_dir)
+        _established_facts_block(
+            SCENE, {'pov': 'Dorren Hayle', 'location': f'{first};Nowhere Atall'},
+            project_dir, set())
+        out = capsys.readouterr().out
+        assert 'no pronouns or ledger facts for them: Nowhere Atall' in out

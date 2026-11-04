@@ -1419,15 +1419,19 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
             subjects.append(cid)
         elif name and not cid and name not in unknown:
             unknown.append(name)
-    location = scene.get('location', '').strip()
-    place = place_ids.get(location.lower())
-    if location and not place:
-        unknown.append(location)
+    # `location` is an ordered list of places (`a;b`), each its own subject
+    found_places: list[str] = []
+    for location in scene.get('location', '').split(';'):
+        location = location.strip()
+        place = place_ids.get(location.lower())
+        if place and place not in found_places:
+            found_places.append(place)
+        elif location and not place and location not in unknown:
+            unknown.append(location)
     if unknown:
         log(f'WARNING: {scene_id}: not in characters.csv or locations.csv, so '
             f'the prompt has no pronouns or ledger facts for them: {", ".join(unknown)}')
-    found = ledger.drafting_slice(rows, scene_id, order,
-                                  subjects + ([place] if place else []))
+    found = ledger.drafting_slice(rows, scene_id, order, subjects + found_places)
     if found.unplaced:
         ids = [r['id'] for r in found.unplaced]
         log(f'WARNING: {scene_id}: {len(ids)} ledger fact(s) name a scene that '
@@ -1448,8 +1452,8 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
     sections = []
     trimmed = []
     no_pronouns: list[str] = []
-    for sid in subjects + ([place] if place else []):
-        is_place = sid == place
+    for sid in subjects + found_places:
+        is_place = sid in found_places
         row = places.get(sid, {}) if is_place else characters.get(sid, {})
         heading = (row.get('name') or sid).strip()
         resolved = None if is_place else cast.by_id.get(sid)

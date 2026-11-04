@@ -204,7 +204,8 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
     ref_dir = os.path.join(project_dir, 'reference')
     scene = get_scene(scene_id, ref_dir) or {}
     subjects = _subjects(project_dir)
-    names = [scene.get('pov', ''), scene.get('location', '')] + scene.get('on_stage', '').split(';')
+    names = ([scene.get('pov', '')] + scene.get('location', '').split(';')
+             + scene.get('on_stage', '').split(';'))
     scene_subjects = {subjects[n.strip().lower()] for n in names if n.strip().lower() in subjects}
     known, recorded, left_out = known_for_scene(rows, scene_id, order, scene_subjects)
     if left_out:
