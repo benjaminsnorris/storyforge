@@ -289,6 +289,27 @@ def _act_order_checks(rows: list[dict], label: str) -> list[CheckResult]:
     )]
 
 
+def _spine_span_checks(rows: list[dict]) -> list[CheckResult]:
+    """A spine event's anchors should fall in one act. One that spans an act
+    break is either two events or a sign the break is in the wrong place;
+    spine.csv can only give it one act (phase 5 takes its first anchor's)."""
+    acts: dict[str, list[str]] = {}
+    for r in rows:
+        event, act = r.get('spine_event', '').strip(), r.get('act', '').strip()
+        if event and act and act not in acts.setdefault(event, []):
+            acts[event].append(act)
+    spanning = [f'{e} (acts {", ".join(a)})' for e, a in acts.items() if len(a) > 1]
+    return [_check(
+        "each spine event's anchors fall in one act",
+        not spanning,
+        (f'{len(spanning)} spine event(s) have anchors in more than one act '
+         '(split the event, or move the act break): ' + '; '.join(spanning[:3])
+         + ('…' if len(spanning) > 3 else ''))
+        if spanning else '',
+        severity='low',
+    )]
+
+
 def _summary_checks(
     rows: list[dict], *, label: Literal['event', 'anchor', 'scene'],
 ) -> list[dict]:
@@ -440,6 +461,7 @@ def score_architecture(project_dir: str, medium: str = 'novel') -> dict:
 
     checks.extend(_summary_checks(rows, label='anchor'))
     checks.extend(_act_order_checks(rows, label='anchor'))
+    checks.extend(_spine_span_checks(rows))
     return _result(4, 'architecture', checks)
 
 
