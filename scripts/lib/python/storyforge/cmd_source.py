@@ -109,15 +109,24 @@ def main(argv=None):
             log(f'  NOTE: {note}')
 
     changed = [r.slug for r in results if r.changed]
-    if args.dry_run or not changed:
+    if args.dry_run:
+        return 0
+    # An adaptation's empty registries start as the source's cast and places (B-013)
+    seeded = source.seed_registries(project_dir, cfg)
+    for rel, n in seeded:
+        log(f'Seeded {rel} with {n} row(s) from the source (it had none)')
+    if not changed and not seeded:
         return 0
     if args.no_commit:
         log('Written, not committed (--no-commit).')
         return 0
     from storyforge.git import commit_and_push, ensure_on_branch
     ensure_on_branch('source-import', project_dir)
-    if not commit_and_push(project_dir, f'Source: import {", ".join(changed)}',
-                           [f'reference/source/{s}' for s in changed]):
+    message = (f'Source: import {", ".join(changed)}' if changed
+               else 'Source: seed the registries')
+    if not commit_and_push(project_dir, message,
+                           [f'reference/source/{s}' for s in changed]
+                           + [rel for rel, _n in seeded]):
         log('ERROR: the import is written but the commit failed; commit '
             'reference/source/ yourself')
         return 1

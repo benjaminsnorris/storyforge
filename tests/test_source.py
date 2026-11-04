@@ -595,3 +595,43 @@ class TestValidateFixes:
             f.write('\nsource:\n  projects:\n    - slug: a\n      path: ../a\n  mode: loose\n')
         r = _validate(project_dir, '--no-schema')
         assert 'loose' in r.stdout and r.returncode == 1
+
+
+class TestSeedRegistries:
+    """B-013: an adaptation's empty registries start as the source's cast and
+    places (name-mapped), so the stages have canonical ids to use."""
+
+    def _seed(self, proj):
+        _import(proj)
+        return source.seed_registries(proj, source.read_config(proj))
+
+    def test_empty_registries_get_the_sources_mapped_rows(self, adaptation):
+        ref = os.path.join(adaptation, 'reference')
+        with open(os.path.join(ref, 'characters.csv'), 'w') as f:
+            f.write('id|name|aliases|role|death_scene|pronouns\n')   # init's header, no rows
+        seeded = dict(self._seed(adaptation))
+        assert seeded == {'reference/characters.csv': 5, 'reference/locations.csv': 3}
+        chars = open(os.path.join(ref, 'characters.csv')).read().splitlines()
+        assert chars[0] == 'id|name|aliases|role|death_scene|pronouns'   # the project's header
+        assert 'zeus|Zeus|son of Cronus|supporting||' in chars
+        assert 'athena|Athena|Pallas Athena;Pallas|supporting||' in chars
+        locs = open(os.path.join(ref, 'locations.csv')).read()
+        assert locs.startswith('id|name|aliases\n') and 'ithaca-hall|Hall of Odysseus|' in locs
+        assert not os.path.exists(os.path.join(ref, 'values.csv'))   # the source has none
+
+    def test_a_registry_with_rows_is_never_touched(self, adaptation):
+        path = os.path.join(adaptation, 'reference', 'characters.csv')
+        with open(path, 'w') as f:
+            f.write('id|name\nmentor|Mentor\n')
+        seeded = dict(self._seed(adaptation))
+        assert 'reference/characters.csv' not in seeded
+        assert open(path).read() == 'id|name\nmentor|Mentor\n'
+
+    def test_cli_seeds_and_commits_them(self, adaptation, monkeypatch):
+        from storyforge import cmd_source
+        monkeypatch.setattr(cmd_source, 'detect_project_root', lambda: adaptation)
+        assert cmd_source.main(['import', '--no-commit']) == 0
+        chars = open(os.path.join(adaptation, 'reference', 'characters.csv')).read()
+        assert 'odysseus|Odysseus' in chars
+        # a second run seeds nothing more: the registry now has rows
+        assert source.seed_registries(adaptation, source.read_config(adaptation)) == []
