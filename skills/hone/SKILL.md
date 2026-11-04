@@ -56,7 +56,7 @@ Based on the author's request and project state:
 → All domains in order: registries → gaps → structural → briefs.
 
 **"How's my data?" / "What needs work?" / no specific direction:**
-→ Run `--diagnose` to get the full picture first. This runs structural scoring (8 dimensions), brief quality detection (abstract/overspecified/verbose), and gap detection in one read-only pass. **Read the actual output before recommending anything.**
+→ Run `--diagnose` to get the full picture first. This runs structural scoring (8 dimensions), brief quality detection (abstract/overspecified/verbose), brief names found nowhere in the book, and gap detection in one read-only pass. **Read the actual output before recommending anything.**
 
 ### Full coaching mode: Act, don't ask
 
@@ -65,6 +65,8 @@ In full coaching mode, you are a **proactive creative partner**. That means:
 - **Data quality issues → fix them immediately.** Don't present a menu and ask "What would you like to tackle?" — that's coach mode behavior. Instead, tell the author what you're about to fix and why, then do it. "You have 27 overspecified briefs — I'm going to trim those now" not "Want me to run the briefs domain?"
 - **Run fixes in sequence, not as a menu.** If diagnose reveals gaps + brief issues + stale registries, run them all: registries first, then gaps, then briefs. Report results as you go.
 - **If a domain is clean, say so in one line** and move on. Don't pad with praise.
+
+**Brief names found nowhere in the book** (also an advisory finding in `storyforge validate`) are names in a brief that no prose and no reference file uses: a draft from that brief would write those people into the book (shared-dark's briefs named about 100 after a brief rewrite drifted). They are not something `--domain briefs` fixes. Read each against the prose and registries: a real character missing from `characters.csv` goes there (or into an alias); a stray is taken out of the brief, by hand or by re-extracting the briefs from the prose (`storyforge extract --phase 3 --force`, a paid run). Drug and brand names show up too; say so rather than "fixing" them.
 
 Execution order when multiple issues exist:
 1. If registries are missing or stale → run `storyforge hone --domain registries` (normalization first)
@@ -242,7 +244,7 @@ For all modes: wait for the author's choice. If they choose to run it themselves
 # Combined: act 2 briefs in coaching mode
 ./storyforge hone --domain briefs --act 2 --coaching coach
 
-# Diagnose — read-only assessment (structural scores + brief quality + gaps)
+# Diagnose — read-only assessment (structural scores + brief quality + brief names + gaps)
 ./storyforge hone --diagnose
 
 # Diagnose scoped to an act

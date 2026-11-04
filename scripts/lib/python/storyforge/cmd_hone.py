@@ -588,6 +588,21 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
                     print(f'    {item["scene_id"]}.{item["field"]}: {issue_type} ({item.get("reason", "unknown")})')
             print()
 
+    # Part 2b: Brief names found nowhere in the book (#496)
+    print('=== Brief Names Found Nowhere in the Book ===\n')
+    from storyforge.brief_names import describe_strays, stray_brief_names
+    strays = stray_brief_names(project_dir, briefs, scene_filter) if briefs else {}
+    if not briefs:
+        print('  No briefs: no brief names to check.')
+    elif not strays:
+        print('  Every name in the briefs appears in the prose or a reference file.')
+    else:
+        print('  A draft takes its facts from the brief, so it would write these in.')
+        print('  Check each against the book (advisory: drug names and emphasis show up too):')
+        for sid, by_field in sorted(strays.items()):
+            print(f'    {sid}: {describe_strays(by_field)}')
+    print()
+
     # Part 3: Gaps
     print('=== Gaps ===\n')
     gaps = detect_gaps(scenes, intent, briefs, scene_filter)
@@ -650,12 +665,16 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
     print('\n=== Summary ===\n')
     print(f'  Structural score:    {overall:.2f}')
     print(f'  Brief issues:        {len(issues)} across {len(set(i["scene_id"] for i in issues))} scenes')
+    print(f'  Stray brief names:   {len(strays)} scenes')
     print(f'  Gaps:                {len(gaps)} empty fields across {len(set(g["scene_id"] for g in gaps))} scenes')
     clean = len(set(scenes.keys()) - set(i['scene_id'] for i in issues) - set(g['scene_id'] for g in gaps))
     print(f'  Clean scenes:        {clean} / {len(scenes)}')
 
     # Recommendations
     recs = []
+    if strays:
+        recs.append('Stray brief names: fix those briefs by hand, or re-extract them from '
+                    'the prose, before drafting from them')
     if issues:
         recs.append('Run: storyforge hone --domain briefs')
     if gaps:

@@ -13,6 +13,7 @@ import csv
 import os
 import re
 
+from storyforge.brief_names import REWRITTEN_FILES
 from storyforge.common import log
 
 from storyforge.elaborate import (
@@ -1762,17 +1763,13 @@ No explanation. No markdown. Just the labeled lines."""
 # Briefs domain: hone_briefs
 # ============================================================================
 
-# The files hone's model rewrites write: neither vouches for a name, since
-# an earlier rewrite (hone's, or revise's brief fix) may have invented it
-_REWRITTEN_FILES = ('scene-briefs.csv', 'scene-intent.csv')
-
 
 def _apply_checked_rewrites(row: dict, sid: str, rewrites: dict, current_values: dict,
                             kind: str, project_dir: str, known_reference: str,
                             rejected: dict[str, list[str]]) -> int:
     """Write one reply's changed fields into *row* (a scene's brief or intent),
     unless the reply names a capitalized word that *known_reference* (the
-    reference files but ``_REWRITTEN_FILES``) and the scene's prose never use;
+    reference files but ``REWRITTEN_FILES``) and the scene's prose never use;
     then the row is left as it was and the scene listed in *rejected* with
     why. The row's own fields don't vouch for a name either. Returns the
     number of fields changed."""
@@ -1894,7 +1891,7 @@ def hone_briefs(
         by_scene.setdefault(issue['scene_id'], []).append(issue)
 
     from storyforge.brief_names import reference_text
-    known_reference = reference_text(project_dir, exclude=_REWRITTEN_FILES)
+    known_reference = reference_text(project_dir, exclude=REWRITTEN_FILES)
     rejected: dict[str, list[str]] = {}
     changed_ids: list[str] = []
 
@@ -2663,7 +2660,7 @@ def hone_intent(
                         if det_fields_rewritten > 0 else 0)
     api_fields_rewritten = 0
     from storyforge.brief_names import reference_text
-    known_reference = reference_text(project_dir, exclude=_REWRITTEN_FILES)
+    known_reference = reference_text(project_dir, exclude=REWRITTEN_FILES)
     rejected: dict[str, list[str]] = {}
     changed_ids: list[str] = []
     total_scenes = len(by_scene)

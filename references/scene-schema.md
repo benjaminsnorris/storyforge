@@ -139,6 +139,7 @@ Run `./storyforge validate` to check both structural integrity and schema compli
 - **Knowledge flow:** knowledge_in references match prior scenes' knowledge_out
 - **Thread management:** each MICE thread opens once and closes at most once; interleaving is reported, not an error; no thread dormant >8 scenes
 - **Pacing:** No flat polarity stretches (3+ scenes); action/sequel rhythm varied; turning point types varied
+- **Brief names (advisory):** names in a brief's goal, conflict, outcome, crisis, decision, key actions and dialogue, knowledge, physical states and subtext that no scene's prose and no reference file uses (scene-briefs.csv and scene-intent.csv don't count: a brief rewrite that drifted writes them). A draft takes its facts from the brief, so it would write these people into the book. One finding per scene, naming each field and its names. A scene with no prose yet is also compared against the other briefs. A run of capitalized words ("Danny Olinsky") is one name; possessives, plurals, words the book uses in any case, weekdays, months, titles ("Detective") and institutional words ("Internal Affairs") pass; a word opening a sentence or beat counts only where the briefs also use it as a name. It still over-reports drug and brand names, so check each against the book
 
 **Schema checks:**
 - **Enum values:** Constrained columns contain only allowed values
