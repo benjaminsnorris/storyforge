@@ -45,7 +45,8 @@ evals repo's `corpus/<slug>/meta.json`). Text keys (see `TEXT_KEYS`):
   heading_case     "title" title-cases the groups filled into the heading
   verse            true keeps the text's line breaks (see below)
   drop_cap_case    "title" title-cases an all-capitals first word opening a
-                   chapter ("LO," -> "Lo,", "HROTHGAR" -> "Hrothgar"): the
+                   chapter ("LO," -> "Lo,", "HROTHGAR" -> "Hrothgar",
+                   "STONE-BRIGHT" -> "Stone-bright", "A CUP" -> "A cup"): the
                    printed drop capital, which extraction would quote
   strip_brackets   true removes square brackets and keeps their words
                    (Gummere's restorations of the damaged manuscript)
@@ -243,13 +244,21 @@ def title_words(text: str) -> str:
     return ' '.join(word(w) for w in text.split())
 
 
-_DROP_CAP_RE = re.compile(r"^([^\w]*)([A-Z][A-Z'’]+)\b")
+# The printed drop capital and the small capitals after it: an all-capitals
+# first word, its hyphenated parts ("STONE-BRIGHT"), and, when that word is a
+# single letter, the all-capitals word after it ("A CUP"), where the small
+# capitals run on
+_DROP_CAP_RE = re.compile(r"^([^\w]*)((?:[A-Z] +)?[A-Z][A-Z'’]*(?:-[A-Z][A-Z'’]*)*)\b")
 
 
 def drop_cap_word(text: str) -> str:
-    """An all-capitals first word (two letters or more) title-cased."""
-    return _DROP_CAP_RE.sub(lambda m: m.group(1) + m.group(2)[0] + m.group(2)[1:].lower(),
-                            text, count=1)
+    """The all-capitals opening (two letters or more) in sentence case."""
+    def fix(m: re.Match) -> str:
+        caps = m.group(2)
+        if sum(c.isalpha() for c in caps) < 2:
+            return m.group(0)
+        return m.group(1) + caps[0] + caps[1:].lower()
+    return _DROP_CAP_RE.sub(fix, text, count=1)
 
 
 def drop_unmatched_underscores(text: str) -> str:

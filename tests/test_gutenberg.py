@@ -118,6 +118,20 @@ class TestVerse:
         assert 'owned by thee!\n' in out
         assert '{0a}' not in out and 'A note' not in out
 
+    @pytest.mark.parametrize('line, want', [
+        ('HROTHGAR spake', 'Hrothgar spake'),
+        ('LO, praise', 'Lo, praise'),
+        # a hyphenated drop cap is one word (Beowulf V: "STONE-BRIGHT the street")
+        ('STONE-BRIGHT the street', 'Stone-bright the street'),
+        # small capitals run on past a one-letter first word (XVIII: "A CUP she gave him")
+        ('A CUP she gave him', 'A cup she gave him'),
+        ('A Cup she gave', 'A Cup she gave'),
+        ('I went alone', 'I went alone'),
+        ('"WELL hast thou', '"Well hast thou'),
+    ])
+    def test_drop_cap_word(self, line, want):
+        assert g.drop_cap_word(line) == want
+
     def test_summary_counts_verse_lines(self):
         stats = g.summarize(g.normalize(raw(VERSE), VERSE_META), VERSE_META)
         assert stats['chapters'] == 2
