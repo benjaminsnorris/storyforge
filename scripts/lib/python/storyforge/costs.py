@@ -376,6 +376,34 @@ def exit_if_bad_threshold() -> None:
         sys.exit(1)
 
 
+class RunBudget:
+    """The cost threshold as one budget for a whole run: drafting, gating
+    and re-checks together, not each forecast checked against it on its own
+    (#499's review: a run could spend nearly twice the threshold).
+
+    `meter` is the run's `api.metered()` meter (None: nothing measured, as
+    for a caller outside a metered run). `rechecks` is the re-checks'
+    forecast spend so far (`record`). `spent(reserved)` is what the run has
+    spent, the meter's actual cost but at least the re-checks' forecast (so
+    a re-check counts even when its calls aren't metered), plus `reserved`:
+    the forecast of the work the run still owes (scenes it has yet to draft
+    or check), which a re-check may not take. Pass it as `spent_before` to
+    `gate.recheck_pending` (`cmd_write.budgeted_recheck` does)."""
+
+    def __init__(self, meter=None):
+        self.meter = meter
+        self.rechecks = 0.0
+
+    def spent(self, reserved: float = 0.0) -> float:
+        actual = self.meter.cost() if self.meter is not None else 0.0
+        return max(actual, self.rechecks) + reserved
+
+    def record(self, run, spent_before: float) -> None:
+        """Count a `gate.Recheck`'s forecast spend (None: nothing ran)."""
+        if run is not None:
+            self.rechecks += max(0.0, run.spent - spent_before)
+
+
 def check_threshold(estimated_cost: float, threshold: float = DEFAULT_THRESHOLD) -> bool:
     """Check whether estimated cost is within threshold.
 

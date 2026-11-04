@@ -69,6 +69,38 @@ def _gate_pass(project_dir, ids):
     return cmd_revise._gate_pass_scenes(project_dir, ids, 'polish', str(project_dir))
 
 
+class TestOneBudget:
+    """The threshold is one budget for the revise session (#499's review)."""
+
+    def test_the_rechecks_reserve_the_gate_runs_the_pass_still_owes(
+            self, project_dir, monkeypatch):
+        _scenes(project_dir, 'act1-sc01', 'act1-sc02', 'act2-sc01')
+        seen = []
+        monkeypatch.setattr(cmd_write, '_gate_drafted_scene', lambda *a, **k: (True, ''))
+        monkeypatch.setattr(cmd_write, 'run_recheck',
+                            lambda pd, ld, skip=frozenset(), spent_before=0.0:
+                            seen.append(spent_before))
+        _gate_pass(project_dir, ['act1-sc01', 'act1-sc02', 'act2-sc01'])
+        per = gate.RECHECK_COST_PER_SCENE
+        assert seen == [pytest.approx(2 * per), pytest.approx(per), pytest.approx(0.0)]
+
+    def test_the_session_is_metered(self, monkeypatch):
+        """What the passes spent counts against the re-checks after them."""
+        from storyforge import api
+        seen = []
+
+        def fake_main(argv=None):
+            api._meter({'usage': {'input_tokens': 0, 'output_tokens': 40_000}},
+                       'claude-opus-4-6')
+            seen.append(cmd_revise._run_budget().spent())
+            return 0
+        monkeypatch.setattr(cmd_revise, '_main', fake_main)
+        assert main([]) == 0
+        assert seen and seen[0] > 0.5
+        assert cmd_revise._RUN_BUDGET is None   # gone with the session
+        assert cmd_revise._run_budget().spent() == 0.0
+
+
 class TestGatePassScenes:
 
     def test_every_scene_gets_the_passs_one_baseline(self, project_dir, monkeypatch):

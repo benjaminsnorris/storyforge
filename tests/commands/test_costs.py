@@ -462,3 +462,45 @@ class TestPricingForResolvedModels:
     def test_cached_tokens_count_toward_the_long_prompt_threshold(self):
         cost = calculate_cost('claude-haiku-5-5', 1_000, 0, cache_read=150_000)
         assert cost == pytest.approx(1_000 * 0.50 / 1e6 + 150_000 * 0.05 / 1e6)
+
+
+class TestRunBudget:
+    """The threshold is one budget for a whole run (#499's review: drafting
+    and the re-checks were each checked against it alone)."""
+
+    class Meter:
+        def __init__(self, cost):
+            self._cost = cost
+
+        def cost(self):
+            return self._cost
+
+    def test_spent_is_the_meter_plus_what_is_reserved(self):
+        from storyforge.costs import RunBudget
+        assert RunBudget().spent() == 0.0
+        assert RunBudget(self.Meter(12.5)).spent(reserved=3.0) == 15.5
+
+    def test_the_rechecks_forecast_is_a_floor_under_the_meter(self):
+        """A re-check whose calls the meter can't see still counts."""
+        from storyforge import gate
+        from storyforge.costs import RunBudget
+        budget = RunBudget(self.Meter(1.0))
+        budget.record(gate.Recheck(spent=5.0 + 2.4), spent_before=5.0)
+        assert budget.rechecks == pytest.approx(2.4)
+        assert budget.spent() == pytest.approx(2.4)          # more than the meter's 1.0
+        budget.meter = self.Meter(10.0)
+        assert budget.spent(reserved=1.0) == pytest.approx(11.0)
+        budget.record(None, spent_before=3.0)                 # nothing ran
+        assert budget.rechecks == pytest.approx(2.4)
+
+    def test_the_spend_meter_prices_what_it_saw(self):
+        from storyforge import api
+        from storyforge.api import calculate_cost_from_usage
+        usage = {'input_tokens': 1000, 'output_tokens': 2000}
+        with api.metered() as meter:
+            assert meter.cost() == 0.0
+            api._meter({'usage': usage}, 'claude-sonnet-4-6')
+            api._meter({'usage': usage}, 'claude-opus-4-6')
+        want = sum(calculate_cost_from_usage(api.extract_usage({'usage': usage}), m)
+                   for m in ('claude-sonnet-4-6', 'claude-opus-4-6'))
+        assert meter.cost() == pytest.approx(want) and want > 0

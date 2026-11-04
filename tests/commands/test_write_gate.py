@@ -37,6 +37,9 @@ def _pure_prose_scenes(request):
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(stripped)
 
+from storyforge.costs import check_threshold as _REAL_CHECK_THRESHOLD  # noqa: E402
+
+
 def _result(sid, passed):
     r = gate.GateResult(sid, check=CheckResult(sid, findings=[] if passed else [BAD]))
     r.committed = passed
@@ -279,6 +282,72 @@ class TestReview443:
         monkeypatch.setattr('storyforge.git.commit_and_push',
                             lambda *a, **k: pytest.fail('committed nothing'))
         cmd_write._commit(setup, 'Re-check after x: 0 passed', ['reference/'])
+
+    @staticmethod
+    def _metered_replies(monkeypatch, replies, output_tokens):
+        """`_direct_replies`, each reply also seen by the run's meter, as
+        `api._send` does, with `output_tokens` of usage."""
+        import json as _json
+        from storyforge import api
+        calls = []
+
+        def fake(prompt, model, log_file, max_tokens=4096, label='', timeout=600,
+                 system=None, output_schema=None, fallback=False):
+            sid = label.split()[-1]
+            calls.append(sid)
+            response = dict(replies[sid], usage={'input_tokens': 0,
+                                                 'output_tokens': output_tokens})
+            with open(log_file, 'w') as f:
+                _json.dump(response, f)
+            api._meter(response, 'claude-opus-4-6')
+            return response
+        monkeypatch.setattr('storyforge.cmd_write.invoke_to_file', fake)
+        return calls
+
+    def test_rechecks_get_what_drafting_spent_and_the_rest_of_the_run_leave(
+            self, setup, monkeypatch):
+        """The drafting forecast and the re-check forecast were checked
+        against the threshold separately, so a run could spend nearly twice
+        it: the re-checks were told the run had spent $0."""
+        from storyforge import api
+        self._metered_replies(monkeypatch, {'act1-sc01': _reply(GOOD),
+                                            'act1-sc02': _reply(GOOD)}, 10_000)
+        _gate(monkeypatch, {'act1-sc01': True, 'act1-sc02': True})
+        seen = []
+
+        def recheck(pd, *, log_dir, skip=frozenset(), spent_before=0.0, **k):
+            seen.append(spent_before)
+            gate.clear_pending(pd, 'new-x1')
+            return gate.Recheck(passed=['new-x1'], spent=spent_before + 1.0,
+                                spent_before=spent_before)
+        monkeypatch.setattr(gate, 'recheck_pending', recheck)
+        gate.mark_pending(setup, 'new-x1', 'recheck', 're-check: x')
+        main(['--scenes', 'act1-sc01,act1-sc02'])
+        draft = api.calculate_cost_from_usage(
+            {'input_tokens': 0, 'output_tokens': 10_000}, 'claude-opus-4-6')
+        # the forecast: mock_costs's $0.10 drafting plus the gate, per scene
+        per_scene = (0.10 + 2 * gate.RECHECK_COST_PER_SCENE) / 2
+        assert seen == [pytest.approx(draft + per_scene)]   # act1-sc02 still to draft
+
+    def test_rechecks_the_drafting_spend_leaves_no_room_for_are_deferred(
+            self, setup, monkeypatch, capsys):
+        # the gate's own threshold check is real (mock_costs passes everything)
+        monkeypatch.setattr('storyforge.costs.check_threshold', _REAL_CHECK_THRESHOLD)
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '1.5')
+        # $0.75 of output on Opus 4.6 ($25/M): a re-check's forecast alone
+        # is within $1.50 (it ran before), but not on top of the drafting
+        self._metered_replies(monkeypatch, {'act1-sc01': _reply(GOOD)}, 30_000)
+        assert gate.RECHECK_COST_PER_SCENE < 1.5 < 0.75 + gate.RECHECK_COST_PER_SCENE
+        _gate(monkeypatch, {'act1-sc01': True})
+        monkeypatch.setattr(gate, 'gate_scene', lambda *a, **k: pytest.fail('re-checked'))
+        gate.mark_pending(setup, 'new-x1', 'recheck', 're-check: x')
+        with pytest.raises(SystemExit) as exc:
+            main(['--force', '--scenes', 'act1-sc01'])
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert '1 scene(s) listed for a re-check, not run: over the cost threshold' in out
+        assert '($0.75 of it spent or owed before the re-checks), over the cost threshold ' \
+            '($1.5)' in out
 
     def test_a_failed_recheck_blocks_drafting_past_it(self, setup, monkeypatch, capsys):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})

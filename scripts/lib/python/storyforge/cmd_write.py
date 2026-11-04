@@ -176,6 +176,7 @@ def main(argv=None):
         log(f'ERROR: {e}')
         sys.exit(1)
 
+    scene_forecast = 0.0   # a scene's share of the forecast: reserved from the re-checks
     if not args.dry_run:
         model = select_model('drafting')
         avg_words = _avg_word_count(metadata_csv)
@@ -193,6 +194,7 @@ def main(argv=None):
             gated = f', ~${gate_cost:.2f} of it the gate'
         log(f'Cost forecast: ~${estimated:.2f} for {len(pending_ids)} scenes '
             f'(avg {avg_words} words, model {model}, mode {write_mode}{gated})')
+        scene_forecast = estimated / len(pending_ids)
         if not check_threshold(estimated):
             # Nothing was drafted: exit 1, so a script or chained command
             # doesn't read the stop as a finished run
@@ -270,11 +272,18 @@ def main(argv=None):
             coaching, use_briefs, args.force, filter_mode,
         )
     else:
-        drafted_count, total_words, failed, recheck_open = _run_direct_mode(
-            pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
-            coaching, use_briefs, args.force, filter_mode, write_mode,
-            args.dry_run, prior_prose=prior_prose,
-        )
+        # The threshold is one budget for the run: the re-checks get what
+        # drafting actually spent (metered) and the scenes still to draft
+        # leave (`costs.RunBudget`)
+        from storyforge import api
+        from storyforge.costs import RunBudget
+        with api.metered() as meter:
+            drafted_count, total_words, failed, recheck_open = _run_direct_mode(
+                pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
+                coaching, use_briefs, args.force, filter_mode, write_mode,
+                args.dry_run, prior_prose=prior_prose, budget=RunBudget(meter),
+                scene_forecast=scene_forecast,
+            )
 
     # Session summary
     elapsed = int(time.time() - session_start)
@@ -510,6 +519,18 @@ def run_recheck(project_dir: str, log_dir: str, skip: set[str] | frozenset[str] 
             f'{gate_pending_path()}' + (f', and so do {", ".join(run.left)}' if run.left else '')
             + f'; fix it with revise or by hand, or accept its contradictions '
             f'(`storyforge check --accept {run.failed}`), then `storyforge check --pending`.')
+    return run
+
+
+def budgeted_recheck(project_dir: str, log_dir: str, skip: set[str] | frozenset[str],
+                     budget, reserved: float = 0.0):
+    """`run_recheck` under the run's one cost budget (`costs.RunBudget`):
+    the re-checks get what the run's spend so far and `reserved` (the
+    forecast of the work it still owes) leave of the threshold. Returns
+    `run_recheck`'s answer."""
+    before = budget.spent(reserved)
+    run = run_recheck(project_dir, log_dir, skip, spent_before=before)
+    budget.record(run, before)
     return run
 
 
@@ -995,7 +1016,8 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
 def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                      metadata_csv, coaching, use_briefs, force, filter_mode,
-                     write_mode, dry_run, prior_prose='none'):
+                     write_mode, dry_run, prior_prose='none', budget=None,
+                     scene_forecast: float = 0.0):
     """Run direct/interactive mode. Returns (drafted_count, total_words,
     failed, recheck_open), ``failed`` naming each scene not drafted and why,
     ``recheck_open`` each re-check that didn't pass or wasn't run (over the
@@ -1013,8 +1035,10 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
     pass the gate (committed for the author and listed in ``gate.pending``),
     or an earlier scene still in ``gate.pending`` (a failed re-check
     included). After a scene passes and is committed, the later scenes that
-    depend on what it changed are re-checked (``run_recheck``; Phase 4),
-    not those this run redrafts anyway. At other coaching levels a bad reply
+    depend on what it changed are re-checked (``budgeted_recheck``; Phase
+    4), not those this run redrafts anyway, under the run's one cost budget:
+    ``budget`` (``costs.RunBudget``) is what the run has spent, and each
+    scene still to draft reserves ``scene_forecast``. At other coaching levels a bad reply
     skips only its scene. At every level a failed commit (the scene's, or
     the re-checks' after it) stops the run: the next scene's commit would
     sweep its files in under the wrong message."""
@@ -1040,7 +1064,9 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
         model = select_model('drafting')
         system = build_shared_context(project_dir, model=model)
 
-    recheck_spent = 0.0   # what this run's re-checks are forecast to cost so far
+    if budget is None:
+        from storyforge.costs import RunBudget
+        budget = RunBudget()
     # the book before this run, once: what the gate counts as already there
     baseline = gate.snapshot(project_dir) if gated else None
     for i, scene_id in enumerate(pending_ids):
@@ -1207,8 +1233,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             # The scene is committed; now the later scenes that depend on
             # what it changed (not those this run redrafts anyway)
             later = {s for s in pending_ids[i + 1:] if force or not _drafted(scenes_dir, s)}
-            run = run_recheck(project_dir, os.path.join(log_dir, 'gate'), later,
-                              spent_before=recheck_spent)
+            run = budgeted_recheck(project_dir, os.path.join(log_dir, 'gate'), later,
+                                   budget, reserved=len(later) * scene_forecast)
             # The latest run's queue is what's still owed: an earlier
             # deferral is either in it again or was re-checked since
             recheck_deferred = list(run.left) if run is not None and run.over_budget else []
@@ -1216,7 +1242,6 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                 recheck_failed.append(f'{run.failed} (re-checked after {scene_id} and did not '
                                       f'pass: {run.why})')
             if run is not None:
-                recheck_spent = run.spent
                 try:
                     _commit(project_dir, f'Re-check after {scene_id}: '
                             f'{len(run.passed)} passed'

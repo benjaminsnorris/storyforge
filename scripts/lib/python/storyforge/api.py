@@ -282,6 +282,11 @@ class SpendMeter:
                 total[k] = total.get(k, 0) + (v or 0)
         return out
 
+    def cost(self) -> float:
+        """What the replies so far cost, in US dollars (nothing logged)."""
+        return sum(calculate_cost_from_usage(usage, model)
+                   for model, usage in self.by_model().items())
+
     def log(self, project_dir: str, operation: str, target: str = '') -> float:
         """One cost-ledger row per model; returns the total cost."""
         total = 0.0

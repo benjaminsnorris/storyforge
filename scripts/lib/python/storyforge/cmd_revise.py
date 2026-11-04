@@ -299,7 +299,7 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
     log(f'  Redrafting {len(scene_ids)} scenes from updated briefs (prior prose: '
         f'{prior_prose})...')
     served_before = len(fallback_replies())
-    spent = 0.0   # this run's re-checks, forecast
+    budget = _run_budget()
     scenes_dir = os.path.join(project_dir, 'scenes')
     failed: list[str] = []
     written = 0
@@ -348,7 +348,7 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
             if why:
                 failed += _stopped_at(sid, why, scene_ids[i:])
                 break
-            spent = _recheck_after(project_dir, log_dir, set(scene_ids[i:]), spent)
+            _recheck_after(project_dir, log_dir, set(scene_ids[i:]), budget)
 
     commit_and_push(
         project_dir,
@@ -360,14 +360,26 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
         raise RedraftError(f'{len(failed)} scene(s) not re-drafted: {"; ".join(failed)}')
 
 
-def _recheck_after(project_dir: str, log_dir: str, skip: set[str], spent: float) -> float:
+#: The revise session's one cost budget (`costs.RunBudget`), metered from
+#: `main`; None outside a revise session (a redraft hone runs)
+_RUN_BUDGET = None
+
+
+def _run_budget():
+    """The session's cost budget, or a fresh unmetered one outside a revise
+    session."""
+    from storyforge.costs import RunBudget
+    return _RUN_BUDGET if _RUN_BUDGET is not None else RunBudget()
+
+
+def _recheck_after(project_dir: str, log_dir: str, skip: set[str], budget) -> None:
     """After a redraft passed: re-check the later scenes it listed, except
-    `skip` (this run redrafts them), as `write` does; returns the re-checks'
-    forecast spend so far, which bounds the next call."""
-    from storyforge import cmd_write
-    run = cmd_write.run_recheck(project_dir, os.path.join(log_dir, 'gate'), skip,
-                                spent_before=spent)
-    return run.spent if run is not None else spent
+    `skip` (this run redrafts them), as `write` does, under the session's
+    one budget: what it has spent, and the gate runs `skip` still owes at
+    `gate.RECHECK_COST_PER_SCENE` reserved."""
+    from storyforge import cmd_write, gate
+    cmd_write.budgeted_recheck(project_dir, os.path.join(log_dir, 'gate'), skip, budget,
+                               reserved=len(skip) * gate.RECHECK_COST_PER_SCENE)
 
 
 def _gate_redraft(project_dir: str, scene_id: str, scene_file: str, log_dir: str,
@@ -480,7 +492,7 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
     git.commit_and_push(project_dir, f'Revision: {pass_name}, before the gate',
                         ['scenes/', 'reference/', 'working/'])
     log(f'  Gating {len(ordered)} revised scene(s) in reading order...')
-    spent = 0.0   # this run's re-checks, forecast
+    budget = _run_budget()
     trouble = ''  # a re-check that didn't pass or wasn't run
     scenes_dir = os.path.join(project_dir, 'scenes')
     for i, sid in enumerate(ordered):
@@ -511,10 +523,12 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
             log(f'  ERROR: the gate did not pass the revision of {sid}: {why}')
             return ([f'{sid} (the gate did not pass it: {why})']
                     + _pend_ungated(project_dir, rest, pass_name, f'the gate stopped at {sid}'))
-        run = cmd_write.run_recheck(project_dir, os.path.join(log_dir, 'gate'), set(rest),
-                                    spent_before=spent)
+        # one budget for the session: the pass's spend and the gate runs
+        # still owed (the rest of this pass) come first
+        run = cmd_write.budgeted_recheck(project_dir, os.path.join(log_dir, 'gate'),
+                                         set(rest), budget,
+                                         reserved=len(rest) * gate.RECHECK_COST_PER_SCENE)
         if run is not None:
-            spent = run.spent
             if run.failed:
                 trouble = (f'{run.failed} (re-checked after {sid} and did not pass: '
                            f'{run.why}; listed in {gate.PENDING_PATH})')
@@ -1882,7 +1896,7 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     system = build_shared_context(project_dir, model=model)
 
     log_dir = os.path.join(project_dir, 'working', 'logs')
-    spent = 0.0   # this run's re-checks, forecast
+    budget = _run_budget()
     scene_ids = _reading_order(project_dir, scene_ids)
     from storyforge import gate
     baseline = gate.snapshot(project_dir)   # the book before this run
@@ -1963,7 +1977,7 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
         if why:
             failed += _stopped_at(scene_id, why, scene_ids[i:])
             break
-        spent = _recheck_after(project_dir, log_dir, set(scene_ids[i:]), spent)
+        _recheck_after(project_dir, log_dir, set(scene_ids[i:]), budget)
 
     if failed:
         raise RedraftError(f'{len(failed)} scene(s) not re-drafted: {"; ".join(failed)}')
@@ -2742,6 +2756,21 @@ def _register_new_scenes(project_dir, targets, pass_name):
 # ============================================================================
 
 def main(argv=None):
+    """`_main`, metered: the cost threshold is one budget for the session
+    (`costs.RunBudget`), so the re-checks after each gated scene get only
+    what the passes, redrafts and gate runs before them left."""
+    global _RUN_BUDGET
+    from storyforge import api
+    from storyforge.costs import RunBudget
+    with api.metered() as meter:
+        _RUN_BUDGET = RunBudget(meter)
+        try:
+            return _main(argv)
+        finally:
+            _RUN_BUDGET = None
+
+
+def _main(argv=None):
     from datetime import datetime
     args = parse_args(argv or [])
     install_signal_handlers()
