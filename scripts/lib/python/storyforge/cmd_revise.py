@@ -394,6 +394,47 @@ def _run_budget():
     return _RUN_BUDGET if _RUN_BUDGET is not None else RunBudget()
 
 
+def _pass_cost(project_dir: str, model: str) -> float:
+    """One prose pass's forecast: the whole book read and revised on
+    `model` (`costs.estimate_cost('revise', ...)` over the scenes' average
+    word count). The plan's passes, the polish loop's and naturalness's are
+    all forecast this way."""
+    avg_words, scene_count = _estimate_avg_words(project_dir)
+    return estimate_cost('revise', scene_count, avg_words, model)
+
+
+def _upstream_fix_cost(project_dir: str) -> float:
+    """One scene's brief fix and redraft (`_fix_and_redraft`): the brief
+    rewrite and the redraft on the creative tier, and the gate's run on the
+    redraft (`gate.RECHECK_COST_PER_SCENE`). The re-checks the redraft lists
+    are not in it: they get what is left of the budget."""
+    from storyforge import gate
+    avg_words, _ = _estimate_avg_words(project_dir)
+    model = select_model('creative')
+    return (estimate_cost('revise', 1, avg_words, model)
+            + estimate_cost('draft', 1, avg_words, model)
+            + gate.RECHECK_COST_PER_SCENE)
+
+
+def _exit_if_over_threshold(forecast: float, not_done: str, advice: str) -> None:
+    """The up-front check (#503): what the session has spent or reserved
+    (`RunBudget.committed`) plus `forecast` must be within the cost
+    threshold, else an ERROR naming both, and exit 1 before anything more
+    is spent. `not_done` says what that leaves undone ('nothing revised')."""
+    due = _run_budget().committed(forecast)
+    if not check_threshold(due):
+        log(f'ERROR: the forecast (~${due:.2f}) is over the cost threshold '
+            f'(${cost_threshold():g}): {not_done}. Raise STORYFORGE_COST_THRESHOLD, '
+            f'or {advice}.')
+        sys.exit(1)
+
+
+def _log_recheck_budget() -> None:
+    log(f'  The re-checks after each gated scene get what is left of the '
+        f'${cost_threshold():g} threshold once the passes and the gate are paid for; '
+        f'any left over stay pending for `storyforge check --pending`.')
+
+
 def _note_recheck(rechecks_open: list[str], after: str, run) -> None:
     """Keep what a re-check after `after`'s redraft left undone: one that
     failed, or scenes the threshold kept from running (the latest such
@@ -2033,6 +2074,26 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     return count
 
 
+def _stop_loop_if_over(project_dir: str, budget, next_cost: float, after: float,
+                       what: str, resume: str = '') -> None:
+    """Stop the polish loop (exit 1) before `what` when the run's spend so
+    far (`budget.committed`) plus its forecast `next_cost` and `after` (the
+    full score still owed) would pass the cost threshold. Everything the
+    loop did before is committed: each iteration commits its pass, and the
+    scores since are committed here. `resume` says how to carry on."""
+    due = budget.committed(next_cost + after)
+    if check_threshold(due):
+        return
+    log(f'ERROR: {what} (~${next_cost:.2f})'
+        + (f' and the full score after the loop (~${after:.2f})' if after else '')
+        + f' would bring this run to about ${due:.2f}, over the cost threshold '
+          f'(${cost_threshold():g}). Stopping before {what}; the work before it is '
+          f'committed. Raise STORYFORGE_COST_THRESHOLD and '
+          f'{resume or POLISH_RESUME}.')
+    _commit(project_dir, 'Polish: stopped at the cost threshold', ['working/'])
+    sys.exit(1)
+
+
 def _run_polish_loop(project_dir: str, max_loops: int,
                      coaching_override: str | None, *,
                      skip_initial_score: bool = False,
@@ -2062,10 +2123,6 @@ def _run_polish_loop(project_dir: str, max_loops: int,
     if not scene_ids:
         log('ERROR: No drafted scenes found.')
         sys.exit(1)
-
-    # Create branch once for the whole loop
-    create_branch('revise', project_dir)
-    ensure_branch_pushed(project_dir)
 
     log('============================================')
     log(f'Storyforge Polish Loop — {title}')
@@ -2101,6 +2158,37 @@ def _run_polish_loop(project_dir: str, max_loops: int,
     if baseline_summary['high_principles']:
         log(f'    High: {", ".join(p.replace("_", " ") for p in baseline_summary["high_principles"])}')
 
+    # The up-front forecast (#503), before anything is spent or a branch
+    # made: the scoring above is free. How long the loop runs isn't known,
+    # so its maximum is forecast; the brief fixes of the scenes known now
+    # are in it, later ones are checked before their iteration
+    budget = _run_budget()
+    per_pass = _pass_cost(project_dir, sonnet_model)
+    per_fix = _upstream_fix_cost(project_dir)
+    final_cost = 0.0
+    if not skip_final_score:
+        avg_words, _ = _estimate_avg_words(project_dir)
+        final_cost = estimate_cost('score', len(scene_ids), avg_words,
+                                   select_model('evaluation'))
+    upstream_next = _detect_upstream_scenes(project_dir, baseline_diag)
+    forecast = max_loops * per_pass + len(upstream_next) * per_fix + final_cost
+    from storyforge import gate
+    log(f'Cost forecast: up to ~${forecast:.2f}, the most the loop can spend: '
+        f'{max_loops} iterations @ ~${per_pass:.2f} (it stops sooner when it converges)'
+        + (f', brief fixes and redrafts for {len(upstream_next)} scene(s) @ '
+           f'~${per_fix:.2f} (the gate on each redraft included)' if upstream_next else '')
+        + (f', the full score ~${final_cost:.2f}' if final_cost else '')
+        + f'; plus about ${gate.RECHECK_COST_PER_SCENE:.2f} for the gate on each '
+          f'rewritten scene')
+    log('  Each iteration is checked before it starts: what the run has spent, its '
+        'pass, the brief fixes it finds and the full score must fit the threshold.')
+    _exit_if_over_threshold(forecast, 'nothing revised', 'lower `--max-loops`')
+    _log_recheck_budget()
+
+    # Create branch once for the whole loop
+    create_branch('revise', project_dir)
+    ensure_branch_pushed(project_dir)
+
     # Commit initial scores and create PR
     _commit(project_dir, 'Polish: initial deterministic scores', ['working/'])
     pr_body = _build_polish_pr_body(title, len(scene_ids), max_loops, baseline_diag)
@@ -2122,8 +2210,10 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         # convergence check: an adaptation's source drift is no craft score
         # (#477). A scene whose brief fix was turned down is not sent again:
         # the same request would cost the same and likely meet the same fate.
-        upstream_scenes = [s for s in _detect_upstream_scenes(project_dir, latest_diag)
-                           if s not in brief_fix_skipped]
+        found = (upstream_next if upstream_next is not None
+                 else _detect_upstream_scenes(project_dir, latest_diag))
+        upstream_next = None
+        upstream_scenes = [s for s in found if s not in brief_fix_skipped]
 
         # Convergence check: no actionable issues. With no craft issues left,
         # only source drift is still fixed (as before, a diagnosis' brief
@@ -2137,6 +2227,14 @@ def _run_polish_loop(project_dir: str, max_loops: int,
                 _update_pr_body_iteration(project_dir, pr_number, iteration, summary,
                                           converged=True)
                 break
+
+        # Before each iteration: what the run has spent, this iteration's
+        # forecast and the full score after the loop must fit the threshold
+        this_pass = 0.0 if craft_converged else per_pass
+        _stop_loop_if_over(project_dir, budget, len(upstream_scenes) * per_fix + this_pass,
+                           final_cost, f'iteration {iteration}')
+        # while it runs, the rest of the loop's forecast is kept from the re-checks
+        budget.owed = this_pass + (max_loops - iteration) * per_pass + final_cost
 
         if upstream_scenes:
             log(f'  Upstream issues in {len(upstream_scenes)} scenes — fixing briefs first')
@@ -2158,8 +2256,10 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         latest_cycle = os.path.join(project_dir, 'working', 'scores', 'latest')
         plan_rows = _generate_targeted_polish_plan(csv_plan_file, latest_diag,
                                                     findings_dir=latest_cycle)
+        budget.owed = (max_loops - iteration) * per_pass + final_cost
         _execute_single_pass(project_dir, csv_plan_file, plan_rows, iteration,
                              model_override=sonnet_model)
+        budget.owed = 0.0
 
         # Re-score
         log(f'\n=== Iteration {iteration}/{max_loops}: Re-score ===')
@@ -2197,6 +2297,9 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         log(f'\n=== Skipping Phase 2: Full Score (--skip-final-score) ===')
         final_summary = summary
     else:
+        budget.owed = 0.0
+        _stop_loop_if_over(project_dir, budget, final_cost, 0.0, 'the full score',
+                           'run `storyforge score` for it')
         log(f'\n=== Phase 2: Full Score ===')
         _, final_llm_diag = _run_lightweight_score(project_dir, scene_ids)
         final_summary = _summarize_diagnosis(final_llm_diag)
@@ -2803,6 +2906,36 @@ def _register_new_scenes(project_dir, targets, pass_name):
 # Main
 # ============================================================================
 
+def _fix_upstream_within_budget(project_dir: str, scene_ids: list[str], passes: int,
+                                dry_run: bool) -> None:
+    """`--naturalness`'s brief fixes and redrafts, forecast first: they and
+    the plan's `passes` passes after them (none in a dry run, which runs no
+    pass) must be within the cost threshold before anything is spent.
+    While they run, the passes' share is reserved from the re-checks the
+    redrafts owe (`RunBudget.owed`); the passes are checked again, with
+    what the fixes actually spent, before the first one."""
+    n = len(scene_ids)
+    per_scene = _upstream_fix_cost(project_dir)
+    per_pass = 0.0 if dry_run else _pass_cost(
+        project_dir, select_revision_model('prose', 'prose revision'))
+    forecast = n * per_scene + passes * per_pass
+    log(f'Upstream issues in {n} scenes — fixing briefs first')
+    log(f'Cost forecast: ~${forecast:.2f}: brief fixes and redrafts for {n} scene(s) '
+        f'@ ~${per_scene:.2f} (the gate on each redraft included)'
+        + (f', then {passes} passes @ ~${per_pass:.2f}' if per_pass else ''))
+    _exit_if_over_threshold(forecast, 'nothing revised',
+                            "fix those scenes' briefs first (`storyforge hone`)")
+    budget = _run_budget()
+    budget.owed = passes * per_pass
+    try:
+        fixed, _ = _fix_and_redraft(project_dir, scene_ids)
+    finally:
+        budget.owed = 0.0
+    if fixed:
+        _commit(project_dir, f'Naturalness: upstream brief fixes for {len(fixed)} scenes',
+                ['reference/', 'scenes/', 'working/'])
+
+
 def main(argv=None):
     """`_main`, metered: the cost threshold is one budget for the session
     (`costs.RunBudget`), so the re-checks after each gated scene get only
@@ -2885,11 +3018,13 @@ def _main(argv=None):
         return
 
     # Auto-generate plans
+    upstream_fixed = False   # naturalness's brief fixes ran (and were paid for)
     if args.polish:
         log('Polish mode -- generating craft-only revision plan...')
         plan_rows = _generate_polish_plan(csv_plan_file, project_dir)
     elif args.naturalness:
         log('Naturalness mode -- generating 3-pass plan for AI pattern removal...')
+        plan_rows = _generate_naturalness_plan(csv_plan_file, project_dir)
         # Check for upstream causes first (load latest diagnosis if available)
         _naturalness_diag_rows = []
         _latest_diag = os.path.join(project_dir, 'working', 'scores', 'latest', 'diagnosis.csv')
@@ -2898,13 +3033,9 @@ def _main(argv=None):
         # (with no diagnosis, an adaptation's source drift still counts)
         upstream_scenes = _detect_upstream_scenes(project_dir, _naturalness_diag_rows)
         if upstream_scenes:
-            log(f'Upstream issues in {len(upstream_scenes)} scenes — fixing briefs')
-            fixed, _ = _fix_and_redraft(project_dir, upstream_scenes)
-            if fixed:
-                _commit(project_dir,
-                                f'Naturalness: upstream brief fixes for {len(fixed)} scenes',
-                                ['reference/', 'scenes/', 'working/'])
-        plan_rows = _generate_naturalness_plan(csv_plan_file, project_dir)
+            _fix_upstream_within_budget(project_dir, upstream_scenes, len(plan_rows),
+                                        args.dry_run)
+            upstream_fixed = True
     elif args.scores:
         log('Scores mode -- generating revision plan from diagnosis data...')
         diag_file = os.path.join(project_dir, 'working', 'scores', 'latest', 'diagnosis.csv')
@@ -3068,9 +3199,8 @@ def _main(argv=None):
             1 for i in range(start_pass, total_passes + 1)
             if _read_pass_field(plan_rows, i, 'status') != 'completed'
         )
-        avg_words, scene_count = _estimate_avg_words(project_dir)
         revise_model = select_revision_model('prose', 'prose revision')
-        per_pass = estimate_cost('revise', scene_count, avg_words, revise_model)
+        per_pass = _pass_cost(project_dir, revise_model)
         total_forecast = per_pass * pending
         from storyforge import gate
         # the gate's run on each rewritten scene is extra, and how many scenes
@@ -3079,17 +3209,16 @@ def _main(argv=None):
             f'plus about ${gate.RECHECK_COST_PER_SCENE:.2f} for the gate on each '
             f'rewritten scene')
         # One budget for the session (#503's review, CR-1): the passes are
-        # checked against the threshold before anything is spent; the gate
-        # on what they rewrite always runs, and the re-checks get what the
-        # passes' actual spend, the gate and the passes still to run leave
-        if not check_threshold(total_forecast):
-            log(f'ERROR: the forecast (~${total_forecast:.2f}) is over the cost threshold '
-                f'(${cost_threshold():g}): nothing revised. Raise STORYFORGE_COST_THRESHOLD, '
-                f'or run fewer passes (`--pass N`).')
-            sys.exit(1)
-        log(f'  The re-checks after each gated scene get what is left of the '
-            f'${cost_threshold():g} threshold once the passes and the gate are paid for; '
-            f'any left over stay pending for `storyforge check --pending`.')
+        # checked against the threshold before anything is spent (with what
+        # naturalness's brief fixes already spent); the gate on what they
+        # rewrite always runs, and the re-checks get what the passes' actual
+        # spend, the gate and the passes still to run leave
+        _exit_if_over_threshold(
+            total_forecast,
+            'no pass run (the brief fixes before them are committed)' if upstream_fixed
+            else 'nothing revised',
+            'run fewer passes (`--pass N`)')
+        _log_recheck_budget()
 
     # Check for deferred redrafting (multiple upstream passes)
     deferred_scenes, upstream_count = _collect_upstream_scenes(plan_rows)

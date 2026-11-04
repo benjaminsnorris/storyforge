@@ -589,3 +589,58 @@ class TestReviseForecast:
         budget.owed = 4.0
         cmd_revise._recheck_after('/p', '/l', {'a', 'b'}, budget)
         assert seen == [pytest.approx(4.0 + 2 * gate.RECHECK_COST_PER_SCENE)]
+
+
+class TestNaturalnessForecast:
+    """#503 left `--naturalness` with no up-front forecast before its brief
+    fixes and redrafts: they spent unchecked, and their spend came out of
+    the re-checks' budget. Costs here: a scene's fix and redraft $3, a pass
+    $10; naturalness has 3 passes."""
+
+    def _setup(self, project_dir, monkeypatch, threshold, charge=0.0):
+        revise_tests._run_pass_setup(project_dir, monkeypatch, 'craft')
+        monkeypatch.setattr(cmd_revise, '_detect_upstream_scenes',
+                            lambda p, rows: ['act1-sc01'])
+        monkeypatch.setattr(cmd_revise, '_upstream_fix_cost', lambda p: 3.0)
+        monkeypatch.setattr(cmd_revise, '_pass_cost', lambda p, m: 10.0)
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', str(threshold))
+        owed = []
+
+        def fake_fix(p, ids):
+            budget = cmd_revise._run_budget()
+            owed.append(budget.owed)
+            budget.charge(charge)   # what the fixes cost
+            return [], {'act1-sc01': 'no reply'}
+        monkeypatch.setattr(cmd_revise, '_fix_and_redraft', fake_fix)
+        return owed
+
+    def test_over_the_threshold_the_brief_fixes_spend_nothing(
+            self, mock_api, mock_git, project_dir, monkeypatch, capsys):
+        owed = self._setup(project_dir, monkeypatch, 32)
+        with pytest.raises(SystemExit) as e:
+            main(['--naturalness'])
+        assert e.value.code == 1
+        assert owed == [] and mock_api.call_count == 0
+        assert not mock_git.calls_for('commit_and_push')
+        out = capsys.readouterr().out
+        assert 'Cost forecast: ~$33.00: brief fixes and redrafts for 1 scene(s) @ ~$3.00' in out
+        assert 'the forecast (~$33.00) is over the cost threshold ($32): nothing revised' in out
+
+    def test_a_dry_run_forecasts_the_fixes_alone(
+            self, mock_api, mock_git, project_dir, monkeypatch):
+        """A dry run runs no pass (its brief fixes do call the API)."""
+        owed = self._setup(project_dir, monkeypatch, 4)
+        main(['--naturalness', '--dry-run'])
+        assert owed == [0.0]
+
+    def test_the_passes_are_reserved_then_checked_with_what_the_fixes_spent(
+            self, mock_api, mock_git, project_dir, monkeypatch, capsys):
+        owed = self._setup(project_dir, monkeypatch, 50, charge=30.0)
+        with pytest.raises(SystemExit) as e:
+            main(['--naturalness'])
+        assert e.value.code == 1
+        assert owed == [30.0]   # the 3 passes, kept from the redrafts' re-checks
+        assert mock_api.call_count == 0   # no pass run
+        out = capsys.readouterr().out
+        assert 'the forecast (~$60.00) is over the cost threshold ($50): no pass run ' \
+            '(the brief fixes before them are committed)' in out

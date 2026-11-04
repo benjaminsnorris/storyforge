@@ -979,3 +979,120 @@ class TestPostPolishSummaryComment:
         from storyforge.cmd_revise import _post_polish_summary_comment
         # Should not raise
         _post_polish_summary_comment(str(tmp_path), '', [], [])
+
+
+class TestPolishLoopForecast:
+    """#503 left `--polish --loop` with no up-front forecast: it spent on
+    passes unchecked, and that spend came out of its own re-checks' budget.
+    Costs here: a pass $2, a scene's brief fix and redraft $3, the full
+    score $5."""
+
+    H = TestPolishLoopOrchestration()
+
+    def _setup(self, tmp_path, monkeypatch, diags, threshold, upstream=(), charge=0.0):
+        from storyforge import cmd_revise
+        from storyforge.costs import RunBudget
+        project_dir = self.H._setup_project(tmp_path)
+        self.H._patch_loop(monkeypatch, diags[0])
+        scores = iter(diags)
+        last = [diags[0]]
+
+        def fake_deterministic(proj, scene_ids):
+            last[0] = next(scores, last[0])
+            return '', last[0]
+        monkeypatch.setattr(cmd_revise, '_run_deterministic_score', fake_deterministic)
+        budget = RunBudget()
+        monkeypatch.setattr(cmd_revise, '_RUN_BUDGET', budget)
+        monkeypatch.setattr(cmd_revise, '_pass_cost', lambda p, m: 2.0)
+        monkeypatch.setattr(cmd_revise, '_upstream_fix_cost', lambda p: 3.0)
+        monkeypatch.setattr(cmd_revise, 'estimate_cost', lambda op, n, w, m: 5.0)
+        monkeypatch.setattr(cmd_revise, '_detect_upstream_scenes',
+                            lambda p, d: list(upstream))
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', str(threshold))
+        events, commits, branches = [], [], []
+
+        def fake_execute(proj, plan_file, rows, iteration, model_override=None):
+            events.append(('pass', iteration, budget.owed))
+            budget.charge(charge)   # what the pass cost
+
+        def fake_fix(proj, ids):
+            events.append(('fix', list(ids), budget.owed))
+            return [], {sid: 'turned down' for sid in ids}
+
+        def fake_score(proj, ids):
+            events.append(('score',))
+            return '', diags[-1]
+        monkeypatch.setattr(cmd_revise, '_execute_single_pass', fake_execute)
+        monkeypatch.setattr(cmd_revise, '_fix_and_redraft', fake_fix)
+        monkeypatch.setattr(cmd_revise, '_run_lightweight_score', fake_score)
+        monkeypatch.setattr(cmd_revise, 'create_branch', lambda *a: branches.append(a))
+        monkeypatch.setattr('storyforge.git.commit_and_push',
+                            lambda p, msg, *a, **k: commits.append(msg) or True)
+        return project_dir, events, commits, branches
+
+    def test_over_the_threshold_up_front_it_spends_nothing(
+            self, tmp_path, monkeypatch, capsys):
+        from storyforge.cmd_revise import _run_polish_loop
+        high = self.H._make_diag(high=1)
+        project_dir, events, commits, branches = self._setup(
+            tmp_path, monkeypatch, [high], 13.5, upstream=['s01'])
+        with pytest.raises(SystemExit) as e:
+            _run_polish_loop(project_dir, 3, None)
+        assert e.value.code == 1
+        assert events == [] and commits == [] and branches == []
+        out = capsys.readouterr().out
+        # its maximum: 3 iterations, the brief fix known now, the full score
+        assert 'Cost forecast: up to ~$14.00, the most the loop can spend' in out
+        assert 'the forecast (~$14.00) is over the cost threshold ($13.5): ' \
+            'nothing revised' in out
+
+    def test_within_it_runs_and_the_rechecks_get_what_is_left(self, tmp_path, monkeypatch):
+        from storyforge.cmd_revise import _run_polish_loop
+        high, done = self.H._make_diag(high=1), self.H._make_diag(high=0)
+        project_dir, events, commits, _ = self._setup(
+            tmp_path, monkeypatch, [high, done], 14, upstream=['s01'])
+        _run_polish_loop(project_dir, 3, None)
+        # while the brief fix runs, this iteration's pass, the 2 after it and
+        # the full score are kept from its re-checks; during the pass, the 2
+        # after it and the full score
+        assert events == [('fix', ['s01'], 2 + 2 * 2 + 5.0), ('pass', 1, 2 * 2 + 5.0),
+                          ('score',)]
+
+    def test_skip_final_score_leaves_the_score_out(self, tmp_path, monkeypatch):
+        from storyforge.cmd_revise import _run_polish_loop
+        high, done = self.H._make_diag(high=1), self.H._make_diag(high=0)
+        project_dir, events, _, _ = self._setup(
+            tmp_path, monkeypatch, [high, done], 9, upstream=['s01'])
+        _run_polish_loop(project_dir, 3, None, skip_final_score=True)
+        assert [e[0] for e in events] == ['fix', 'pass']
+
+    def test_it_stops_before_an_iteration_that_would_pass_the_threshold(
+            self, tmp_path, monkeypatch, capsys):
+        from storyforge.cmd_revise import _run_polish_loop
+        diags = [self.H._make_diag(high=1, avg=3.0), self.H._make_diag(high=1, avg=3.5)]
+        # forecast 5 x $2 + $5 = $15; the first pass costs $14
+        project_dir, events, commits, _ = self._setup(
+            tmp_path, monkeypatch, diags, 20, charge=14.0)
+        with pytest.raises(SystemExit) as e:
+            _run_polish_loop(project_dir, 5, None)
+        assert e.value.code == 1
+        assert [e[:2] for e in events] == [('pass', 1)]
+        assert commits[-1] == 'Polish: stopped at the cost threshold'
+        out = capsys.readouterr().out
+        assert 'ERROR: iteration 2 (~$2.00) and the full score after the loop (~$5.00) ' \
+            'would bring this run to about $21.00, over the cost threshold ($20)' in out
+        assert 're-run `storyforge revise --polish --loop`' in out
+
+    def test_the_full_score_is_checked_before_it_runs(self, tmp_path, monkeypatch, capsys):
+        from storyforge.cmd_revise import _run_polish_loop
+        high, done = self.H._make_diag(high=1), self.H._make_diag(high=0)
+        project_dir, events, commits, _ = self._setup(
+            tmp_path, monkeypatch, [high, done], 20, charge=16.0)
+        with pytest.raises(SystemExit) as e:
+            _run_polish_loop(project_dir, 3, None)
+        assert e.value.code == 1
+        assert ('score',) not in events
+        assert 'Polish: deterministic phase complete' in commits
+        out = capsys.readouterr().out
+        assert 'the full score (~$5.00) would bring this run to about $21.00' in out
+        assert 'run `storyforge score` for it' in out
