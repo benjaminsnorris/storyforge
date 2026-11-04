@@ -1079,7 +1079,10 @@ class _FixRounds:
 
     def _result(self, *tags, extraction=False):
         from storyforge.checker import CheckResult, Finding
-        findings = [Finding('contradiction', 'TIM', t, 'act1-sc01', 'e', '', 'why')
+        # one target throughout (same source and established words), so a
+        # later round's finding is the problem left, not a new one
+        findings = [Finding('contradiction', 'TIM', t, 'act1-sc01',
+                            'Dorren Hayle pressed the brass calipers', '', 'why')
                     for t in tags]
         r = gate.GateResult(SCENE, check=CheckResult(SCENE, findings=findings))
         if extraction:
@@ -1213,6 +1216,7 @@ class TestSecondFixRound(_FixRounds):
                               [('v1', []), ('v2', [])])
         assert out.prose == 'v1' and out.result is r1 and len(out.rounds) == 1
         assert out.notes[0].startswith('fix round 2 left 3 problem(s), more than the 1')
+        assert out.discarded == 2
 
     def test_extraction_only_then_a_fix(self, monkeypatch, tmp_path):
         """T-1: the re-gate counts as round 1; round 2's fix reads the re-gate."""
@@ -1301,11 +1305,11 @@ class TestFirstFixNeverWorse(_FixRounds):
         out, dirs, _ = self._run(monkeypatch, tmp_path, [first, again],
                                  [(self.FIXED, self.EDITS)])
         assert _blocking_count(again) < _blocking_count(first)   # fewer, and still worse
-        assert out.prose == self.PROSE and not out.fixed
+        assert out.prose == self.PROSE and not out.fixed and out.discarded == 1
         assert out.result is first and out.first is first and out.rounds == []
         assert len(dirs) == 2   # no second round on the discarded prose
-        assert out.notes[0].startswith('fix round 1 brought in 1 problem(s) in the words it '
-                                       'changed (PRM breaks the brief [key_dialogue]')
+        assert out.notes[0].startswith('fix round 1 brought in 1 problem(s) (PRM breaks the '
+                                       'brief [key_dialogue]')
         assert out.notes[0].endswith('kept the prose as given and the first verdict')
         assert self.blocked == [first]   # gate-blocked.csv is the kept run's again
 
@@ -1319,6 +1323,10 @@ class TestFirstFixNeverWorse(_FixRounds):
                               [(self.FIXED, self.EDITS)])
         assert out.prose == self.PROSE and out.result is first
         assert out.notes[0].startswith('fix round 1 left 2 problem(s), more than the 1')
+        # SF-3 (#504's review): they couldn't be placed, and that is said
+        assert out.notes[1] == ('fix round 1: 2 new finding(s) of the check after it could '
+                                'not be placed in the fixed prose (PHY vs x, PHY vs y): '
+                                'judged by the problem count only')
 
     def test_findings_in_words_the_fix_left_alone_do_not_count_against_it(self, monkeypatch,
                                                                           tmp_path):
@@ -1345,17 +1353,24 @@ class TestFirstFixNeverWorse(_FixRounds):
             'She picked up the phone. Seven forty-one, the morning after. The coffee was cold.')
         f = self._finding('contradiction', 'She picked up the phone. Seven forty-one.',
                           source='scenes.csv')
-        assert not gate._in_untouched_text(f, gate._changed_ranges(before, after, 0),
-                                           gate._word_list(before))
+        d = gate._diff(before, after)
+        assert not gate._in_untouched_text(f, d.before_spans, d.before)
         assert not gate._in_untouched_text(self._finding('contradiction', 'The coffee was '
-                                                         'cold'),
-                                           gate._changed_ranges(before, after, 0),
-                                           gate._word_list(before))
+                                                         'cold'), d.before_spans, d.before)
         far = before + ' ' + 'Nothing else moved in the house that morning.'
+        d = gate._diff(far, after + far[len(before):])
         assert gate._in_untouched_text(self._finding('contradiction', 'in the house that '
-                                                     'morning'),
-                                       gate._changed_ranges(far, after + far[len(before):], 0),
-                                       gate._word_list(far))
+                                                     'morning'), d.before_spans, d.before)
+
+    @pytest.mark.parametrize('gap, alone', [(3, False), (4, True), (5, True)])
+    def test_away_from_the_fix_means_four_unchanged_words_between(self, gap, alone):
+        """TD-5 (#504's review): code and docs say the same thing."""
+        filler = ' '.join(f'w{i}' for i in range(gap))
+        before = f'alpha beta gamma {filler} one two three'
+        after = f'alpha beta CHANGED {filler} one two three'
+        d = gate._diff(before, after)
+        f = self._finding('contradiction', 'one two three')
+        assert gate._in_untouched_text(f, d.after_spans, d.after) is alone
 
     def test_a_new_finding_in_words_the_fix_left_alone_is_not_the_fixs(self, monkeypatch,
                                                                         tmp_path):
@@ -1371,12 +1386,80 @@ class TestFirstFixNeverWorse(_FixRounds):
 
     def test_a_problem_the_fix_did_not_clear_is_not_one_it_brought_in(self, monkeypatch,
                                                                       tmp_path):
-        """A contradiction with the same source in the rewritten words (other
-        established words: a half-fix moved the value): the fix didn't clear
-        it, it didn't make it, and the next round is for it."""
+        """The same contradiction (same source, same established words) in
+        the rewritten words: a half-fix. The fix didn't clear it, it didn't
+        make it, and round 2 is for it (T-3, #504's review: round 2 runs)."""
         first = self._first()
         again = self._with(self._finding('contradiction', 'She kept the case on her right '
-                                         'shoulder', established='Thomas watched the strap'))
+                                         'shoulder'))
+        last = self._with()
+        v2 = self.FIXED.replace('right shoulder', 'left hand')
+        out, dirs, seen = self._run(monkeypatch, tmp_path, [first, again, last],
+                                    [(self.FIXED, self.EDITS),
+                                     (v2, [{'find': 'right shoulder', 'replace': 'left hand'}])])
+        assert len(seen) == 2 and len(dirs) == 3 and seen[1][0] == self.FIXED
+        assert out.prose == v2 and out.result is last and out.notes == []
+
+    def test_another_contradiction_with_the_same_file_is_new(self, monkeypatch, tmp_path):
+        """CR-3/SF-4 (#504's review): a bible or the calendar is one source
+        for many facts; a fix that swaps one contradiction with it for
+        another (other established words) made the new one."""
+        first = self._first()
+        again = self._with(self._finding('contradiction', 'She kept the case on her right '
+                                         'shoulder', established='Thomas watched the strap '
+                                         'go slack in her fingers'))
+        out, _, _ = self._run(monkeypatch, tmp_path, [first, again], [(self.FIXED, self.EDITS)])
+        assert out.prose == self.PROSE and out.result is first
+        assert out.notes[0].startswith('fix round 1 brought in 1 problem(s) (TRT contradicts '
+                                       'cache')
+
+    @pytest.mark.parametrize('before, after, persists', [
+        # the same scripted line broken again: the problem left, not a new one
+        (('key_dialogue', '"Left hand on the case. Right hand free."'),
+         ('key_dialogue', '"Left hand on the case. Right hand free."'), True),
+        # another scripted line of the same field: a new promise broken
+        (('key_dialogue', '"Left hand on the case. Right hand free."'),
+         ('key_dialogue', '"You are Cora Dunning."'), False),
+        # a registry promise: the id is the promise
+        (('rowan-field-books-cached', 'x'), ('rowan-field-books-cached', 'y'), True),
+    ])
+    def test_the_same_promise_persists(self, before, after, persists):
+        """T-2 (#504's review): the broken-promise branch of _persists."""
+        a = self._finding('broken-promise', '', source='', fact_id=after[0],
+                          established=after[1], code='PRM')
+        b = self._finding('broken-promise', '', source='', fact_id=before[0],
+                          established=before[1], code='PRM')
+        assert gate._persists(a, [b]) is persists
+
+    @pytest.mark.parametrize('fact_a, fact_b, persists', [
+        ('cora-left-hand', 'cora-left-hand', True),
+        ('cora-left-hand', 'rowan-right-shoulder', False),
+        ('', '', False),   # no source, no fact: not shown to be the same
+    ])
+    def test_a_ledger_contradiction_persists_by_fact_id(self, fact_a, fact_b, persists):
+        """T-2: a contradiction with the ledger (no source scene)."""
+        est = 'Cora carries the transit case in her left hand'
+        a = self._finding('contradiction', 'q', source='', fact_id=fact_a, established=est)
+        b = self._finding('contradiction', 'q', source='', fact_id=fact_b, established=est)
+        assert gate._persists(a, [b]) is persists
+
+    def test_a_fix_that_takes_out_a_promises_words_is_discarded(self, monkeypatch, tmp_path):
+        """CR-2 (#504's review): the re-check reports the promise broken with
+        no quote (its words are gone), the count is unchanged, and the fix
+        was kept."""
+        first = self._with(self._finding('contradiction', 'The coffeepot sat cold on the '
+                                         'stove', code='PHY'))
+        again = self._with(self._promise(''))
+        out, _, _ = self._run(monkeypatch, tmp_path, [first, again], [(self.FIXED, self.EDITS)])
+        assert out.prose == self.PROSE and out.result is first
+        assert out.notes[0].startswith('fix round 1 brought in 1 problem(s) (PRM breaks')
+
+    def test_a_new_broken_promise_far_from_the_fix_is_not_its(self, monkeypatch, tmp_path):
+        """Its nearest words are in a paragraph the fix never came near: a
+        reading's variance, as for a contradiction."""
+        first = self._with(self._finding('contradiction', 'The coffeepot sat cold on the '
+                                         'stove', code='PHY'))
+        again = self._with(self._promise('a hand above the ridge'))
         out, _, _ = self._run(monkeypatch, tmp_path, [first, again],
                               [(self.FIXED, self.EDITS), (self.FIXED, [])])
         assert out.prose == self.FIXED and out.result is again and out.notes == []
@@ -1384,8 +1467,8 @@ class TestFirstFixNeverWorse(_FixRounds):
     def test_a_quote_across_words_the_fix_took_out_is_the_fixs(self):
         before = 'He did not see her. She rode on.'
         after = 'He did see her. She rode on.'
-        changed = gate._changed_ranges(before, after)
-        words = gate._word_list(after)
+        d = gate._diff(before, after)
+        changed, words = d.after_spans, d.after
         f = self._finding('contradiction', 'He did see her')
         assert gate._in_edited_text(f, changed, words)
         assert not gate._in_edited_text(self._finding('contradiction', 'She rode on'),
@@ -1395,8 +1478,8 @@ class TestFirstFixNeverWorse(_FixRounds):
         before = 'The river ran high. The road was dry.'
         after = 'The river ran high. The road was dry. The river ran high.'
         f = self._finding('contradiction', 'The river ran high')
-        assert not gate._in_edited_text(f, gate._changed_ranges(before, after),
-                                        gate._word_list(after))
+        d = gate._diff(before, after)
+        assert not gate._in_edited_text(f, d.after_spans, d.after)
 
     def test_a_reroll_with_no_edit_keeps_its_verdict(self, monkeypatch, tmp_path):
         """Extraction-only: the same prose gated again, its verdict stands

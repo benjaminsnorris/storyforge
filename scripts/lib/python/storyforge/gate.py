@@ -58,6 +58,7 @@ import copy
 import os
 import re
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 from storyforge import audit, ledger, persistence
 from storyforge.checker import (GATE_READINGS, CheckError, CheckResult, Dispute, Finding,
@@ -1031,9 +1032,12 @@ class GatedScene:
     # only then); not `bool(rounds)`: a later fix can undo an earlier one
     fixed: bool = False
     rounds: list[FixRound] = field(default_factory=list)  # the fixes kept, in order
-    #: rounds discarded, and why (their prose and verdict are not what's
-    #: kept): the caller logs these
+    #: what the caller must log: the round discarded and why (its prose and
+    #: verdict are not what's kept), and findings a round couldn't place
     notes: list[str] = field(default_factory=list)
+    #: the fix round whose fix was discarded (0: none); `rounds` holds the
+    #: ones kept, so 1 with no rounds means the scene is as given
+    discarded: int = 0
     #: this invocation's logs (`run_log_dir`): the first run's, and each
     #: re-check's in `recheck/`, `recheck-2/`
     log_dir: str = ''
@@ -1059,20 +1063,37 @@ def _word_list(text: str) -> list[str]:
     return re.findall(r'\w+', normalize(text).lower())
 
 
-def _changed_ranges(before: str, after: str, side: int = 1) -> list[tuple[int, int]]:
-    """Where `after` differs from `before`, as word-index ranges [start,
-    end) of `after` (`side` 1) or of `before` (`side` 0): words put in,
-    replaced or taken out, and an empty range at each place words were only
-    added on the other side."""
+class Span(NamedTuple):
+    """Words [start, end) of a prose's word list (`_word_list`); an empty
+    span marks the place between two words."""
+    start: int
+    end: int
+
+
+@dataclass
+class _Diff:
+    """What a fix changed, as a word diff of the prose before and after it,
+    computed once per round (`_diff`): the changed spans on each side
+    (words put in, replaced or taken out; an empty span where words were
+    only added on the other side)."""
+    before: list[str]
+    after: list[str]
+    before_spans: list[Span]
+    after_spans: list[Span]
+
+
+def _diff(before: str, after: str) -> _Diff:
     from difflib import SequenceMatcher
-    ops = SequenceMatcher(None, _word_list(before), _word_list(after),
-                          autojunk=False).get_opcodes()
-    return [(j1, j2) if side else (i1, i2) for tag, i1, i2, j1, j2 in ops if tag != 'equal']
+    old, new = _word_list(before), _word_list(after)
+    ops = [op for op in SequenceMatcher(None, old, new, autojunk=False).get_opcodes()
+           if op[0] != 'equal']
+    return _Diff(old, new, [Span(i1, i2) for _, i1, i2, _, _ in ops],
+                 [Span(j1, j2) for _, _, _, j1, j2 in ops])
 
 
-def _quote_ranges(quote: str, words: list[str]) -> list[tuple[int, int]]:
+def _quote_spans(quote: str, words: list[str]) -> list[Span]:
     """Every place `quote` (its parts, split at an ellipsis, in order) is in
-    `words`, as word-index ranges [start, end)."""
+    `words`."""
     parts = [p for p in (_word_list(x) for x in re.split(r'\.\.\.|…', quote)) if p]
     if not parts:
         return []
@@ -1094,124 +1115,124 @@ def _quote_ranges(quote: str, words: list[str]) -> list[tuple[int, int]]:
                 break
             end = j + len(part)
         if ok:
-            out.append((i, end))
+            out.append(Span(i, end))
     return out
 
 
-#: How many words from a change a quote must be to count as away from it
-#: (`_touches(near=True)`): a word diff can line a change up a word or two
-#: off where the edit was ("forty-one, the morning after. The coffee" against
-#: "forty-one. The coffee" matches the two "the"s)
+#: How many unchanged words must lie between a quote and every change for
+#: the quote to count as away from the fix (`_touches(near=True)`): a word
+#: diff can line a change up a word or two off where the edit was
+#: ("forty-one, the morning after. The coffee" against "forty-one. The
+#: coffee" matches the two "the"s). Tuned on a handful of E4/E8 replays
+#: (2026-11-03), not measured
 _NEAR_WORDS = 4
 
 
-def _touches(s: int, e: int, changed: list[tuple[int, int]], near: bool = False) -> bool:
-    """Whether the words [s, e) overlap a changed range (an empty one: lies
-    strictly inside them); with `near`, whether one comes within
-    `_NEAR_WORDS` words of them."""
+def _touches(span: Span, changed: list[Span], near: bool = False) -> bool:
+    """Whether `span` overlaps a changed span (an empty one: lies strictly
+    inside it); with `near`, whether fewer than `_NEAR_WORDS` unchanged
+    words lie between it and a changed span."""
+    s, e = span
     if near:
-        return any(a - _NEAR_WORDS <= e and s <= b + _NEAR_WORDS for a, b in changed)
+        return any(a - _NEAR_WORDS < e and s < b + _NEAR_WORDS for a, b in changed)
     return any((a < e and s < b) if a < b else (s < a < e) for a, b in changed)
 
 
-def _in_edited_text(f: Finding, changed: list[tuple[int, int]], words: list[str]) -> bool:
+def _in_edited_text(f: Finding, changed: list[Span], words: list[str]) -> bool:
     """Whether `f`'s scene quote lies in text the fix changed: found in
-    `words`, and every place it is found touches a changed range (an empty
-    range, words taken out, when the quote spans it). A quote that isn't
-    found (an unverified one) can't be tied to the fix: no."""
-    places = _quote_ranges(f.scene_quote, words)
-    return bool(places) and all(_touches(s, e, changed) for s, e in places)
+    `words`, and every place it is found touches a changed span (an empty
+    one, words taken out, when the quote spans it). A quote not found: no."""
+    places = _quote_spans(f.scene_quote, words)
+    return bool(places) and all(_touches(p, changed) for p in places)
 
 
-def _in_untouched_text(f: Finding, changed: list[tuple[int, int]], words: list[str]) -> bool:
+def _in_untouched_text(f: Finding, changed: list[Span], words: list[str]) -> bool:
     """Whether `f`'s scene quote lies only in text the fix left alone: found
-    in `words`, and no place it is found comes near a changed range
+    in `words`, and no place it is found comes near a changed span
     (`_touches(near=True)`: words put in right after a quote may be its
-    fix). A quote that isn't found: no (it may be about the change)."""
-    places = _quote_ranges(f.scene_quote, words)
-    return bool(places) and not any(_touches(s, e, changed, near=True) for s, e in places)
+    fix). A quote not found: no (it may be about the change)."""
+    places = _quote_spans(f.scene_quote, words)
+    return bool(places) and not any(_touches(p, changed, near=True) for p in places)
 
 
-def _near_the_fix(run: GateResult, prose: str, changed: list[tuple[int, int]]) -> tuple[int, int]:
-    """(`run`'s blocking problems, how many of its findings lie only in text
-    the fix left alone): those are in both proses, so they don't count for
-    or against the fix."""
-    words = _word_list(prose)
-    alone = [f for f in run.findings + run.unverified
-             if f.scene_quote.strip() and _in_untouched_text(f, changed, words)]
-    return _blocking_count(run), len(alone)
+def _unplaced(run: GateResult, words: list[str]) -> list[Finding]:
+    """`run`'s blocking findings whose scene quote is blank or not found in
+    `words` (an unverified quote, a paraphrase, a promise with no nearest
+    words): they can't be placed relative to the fix."""
+    return [f for f in run.findings + run.unverified if not _quote_spans(f.scene_quote, words)]
 
 
 def _persists(f: Finding, earlier: list[Finding]) -> bool:
     """Whether `f` is a problem the run before the fix already had: the same
-    kind against the same thing (a contradiction: the same source, or with
-    none the same ledger fact; a broken promise: `checker._same_finding`'s
-    same promise). The scene quote and code are not compared: the fix
-    changed the one, and readings vary on the other. Nor are a
-    contradiction's established words: a half-fix that moves a wrong value
-    to another wrong one ("eight days" to "five", against another calendar
-    line) is the same problem left, which the next round is for, not one
-    the fix made."""
-    from storyforge.checker import _FIELD_PROMISES, _words_of
-    for g in earlier:
-        if f.kind != g.kind:
-            continue
-        if f.kind == 'contradiction':
-            if (f.established_scene == g.established_scene
-                    and (f.established_scene or f.fact_id == g.fact_id)):
-                return True
-        elif f.fact_id == g.fact_id and (
-                f.fact_id not in _FIELD_PROMISES
-                or (_words_of(f.established_quote)
-                    and _words_of(f.established_quote) == _words_of(g.established_quote))):
-            return True
-    return False
+    target (`checker.same_target`, a contradiction with no source only on a
+    fact id both name): the same promise, or the same source and
+    established words. The scene quote and code are not compared: the fix
+    changed the one, and readings vary on the other. A contradiction with
+    the same file or calendar but other established words (a fix that
+    swaps one wrong date for another against another line) is a new one.
+
+    `earlier` includes the run's inherited findings: a problem already in
+    the book that the fix's words restate is that problem, not the fix's."""
+    from storyforge.checker import same_target
+    return any(same_target(f, g, need_fact=True) for g in earlier)
 
 
-def _introduced(before_run: GateResult, after_run: GateResult, before: str,
-                after: str) -> list[Finding]:
-    """The blocking findings of `after_run` (the gate run on `after`, the
-    fixed prose) that the fix brought in: in text the fix changed
-    (`_in_edited_text`) and not a problem `before_run` already had
-    (`_persists`). A finding in text the fix left alone is not the fix's,
-    however new: two readings of the same words differ, so a re-check finds
-    things the first run didn't (E8, 2026-11-01)."""
-    if not after_run.check:
+def _introduced(before_run: GateResult, after_run: GateResult, diff: _Diff) -> list[Finding]:
+    """The blocking findings of `after_run` (the gate run on the fixed
+    prose) that the fix brought in, not a problem `before_run` already had
+    (`_persists`) and either:
+
+    - in words the fix changed (`_in_edited_text`), or
+    - a broken promise (CR-2, #504's review) whose quote can't be placed or
+      isn't away from the fix: a fix that takes out the words keeping a
+      promise leaves nothing to quote.
+
+    A finding in words the fix left alone is not the fix's, however new:
+    two readings of the same words differ (E8, 2026-11-01). Nor is a new
+    contradiction whose quote can't be placed: nothing ties it to the
+    edits (two readings make different unverified findings too); it still
+    counts in `_worse`'s total, and the caller is told it couldn't be
+    placed."""
+    if not after_run.check or not diff.after_spans:
         return []
-    changed = _changed_ranges(before, after)
-    if not changed:
-        return []
-    words = _word_list(after)
     earlier = list(before_run.check.findings + before_run.check.unverified
                    if before_run.check else [])
-    return [f for f in after_run.findings + after_run.unverified
-            if f.scene_quote.strip() and _in_edited_text(f, changed, words)
-            and not _persists(f, earlier)]
+    out = []
+    for f in after_run.findings + after_run.unverified:
+        if _persists(f, earlier):
+            continue
+        if _in_edited_text(f, diff.after_spans, diff.after):
+            out.append(f)
+        elif f.kind == 'broken-promise' and not _in_untouched_text(f, diff.after_spans,
+                                                                   diff.after):
+            out.append(f)
+    return out
 
 
-def _worse(n: int, before_run: GateResult, after_run: GateResult, before: str,
-           after: str) -> str:
-    """Why fix round `n`'s prose (`after`, which failed as `after_run`) is
-    worse than the prose it fixed (`before`, failed as `before_run`), or ''
-    when it isn't: more blocking problems, or a problem in the text it
-    edited that the run before didn't have (`_introduced`).
+def _worse(n: int, before_run: GateResult, after_run: GateResult, diff: _Diff) -> str:
+    """Why fix round `n`'s prose (which failed as `after_run`) is worse
+    than the prose it fixed (failed as `before_run`), or '' when it isn't:
+    more blocking problems, or a problem the fix brought in (`_introduced`).
 
     The count leaves out, on each side, the findings whose quotes lie only
-    in words the fix left alone (`_near_the_fix`): those words are in both
-    proses, and two readings of them differ. E4's missing-persons
+    in words the fix left alone (`_in_untouched_text`): those words are in
+    both proses, and two readings of them differ. E4's missing-persons
     (2026-11-03): a fix cleared both first findings, the re-check found
     four new ones, every one in words it hadn't touched, and a plain count
-    would have thrown the fix away."""
-    then_all, then_alone = _near_the_fix(before_run, before, _changed_ranges(before, after, 0))
-    now_all, now_alone = _near_the_fix(after_run, after, _changed_ranges(before, after))
-    then, now = then_all - then_alone, now_all - now_alone
+    would have thrown the fix away. A finding that can't be placed counts."""
+    then_alone = sum(_in_untouched_text(f, diff.before_spans, diff.before)
+                     for f in before_run.findings + before_run.unverified)
+    now_alone = sum(_in_untouched_text(f, diff.after_spans, diff.after)
+                    for f in after_run.findings + after_run.unverified)
+    then = _blocking_count(before_run) - then_alone
+    now = _blocking_count(after_run) - now_alone
     if now > then:
         alone = (f' (not counting {then_alone} and {now_alone} in words it left alone)'
                  if then_alone or now_alone else '')
         return f'fix round {n} left {now} problem(s), more than the {then} before it{alone}'
-    new = _introduced(before_run, after_run, before, after)
+    new = _introduced(before_run, after_run, diff)
     if new:
-        return (f'fix round {n} brought in {len(new)} problem(s) in the words it changed ('
+        return (f'fix round {n} brought in {len(new)} problem(s) ('
                 + '; '.join(_one_line(f.message())[:200] for f in new[:3])
                 + (' ...' if len(new) > 3 else '') + ')')
     return ''
@@ -1297,7 +1318,7 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     except GateError as e:
         e.log_dir = logs
         raise
-    current, result, rounds, notes, run_dir = prose, first, [], [], logs
+    current, result, rounds, notes, run_dir, discarded = prose, first, [], [], logs, 0
     try:
         for n in range(1, FIX_ROUNDS + 1):
             if result.passed:
@@ -1323,6 +1344,7 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                 if n == 1:
                     raise
                 notes.append(f'fix round {n} failed ({e}); kept {kept}')
+                discarded = n
                 break
             if to_fix and fixed == current:
                 break
@@ -1330,6 +1352,7 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             if undone:
                 notes.append(f'fix round {n} put back words an earlier fix removed '
                              f'("{_one_line(undone)[:80]}"); kept {kept}')
+                discarded = n
                 break
             # each run's log (and the fix that read it) in its own directory:
             # logs, logs/recheck, logs/recheck-2
@@ -1342,19 +1365,38 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                 if n == 1:
                     raise
                 notes.append(f'the check after fix round {n} failed ({e}); kept {kept}')
+                discarded = n
                 break
             # never worse, the first round included (mended-bridle, 2026-11-03:
             # round 1 made a correct scene match another scene's error, and its
             # re-check's broken promise, in the words it changed, was kept).
             # A pass is kept: it committed. A re-roll with no edit is the
             # same prose, so its verdict stands
-            worse = (_worse(n, result, again, current, fixed)
-                     if fixed != current and not again.passed else '')
+            worse, loose = '', ''
+            if fixed != current and not again.passed:
+                diff = _diff(current, fixed)
+                worse = _worse(n, result, again, diff)
+                # SF-3 (#504's review): a new problem that can't be placed is
+                # neither tied to the fix nor cleared of it: say so
+                earlier = (result.check.findings + result.check.unverified
+                           if result.check else [])
+                unplaced = [f for f in _unplaced(again, diff.after)
+                            if f.kind != 'broken-promise' and not _persists(f, earlier)]
+                if unplaced:
+                    loose = (f'fix round {n}: {len(unplaced)} new finding(s) of the check '
+                             f'after it could not be placed in the fixed prose ('
+                             + ', '.join(f'{f.code} vs {f.source}' for f in unplaced[:5])
+                             + '): judged by the problem count only')
             if worse:
                 notes.append(f'{worse}; kept {kept}')
+                discarded = n
+                if loose:
+                    notes.append(loose)
                 # the blocked list is the kept run's, for `check --accept`
                 _note_blocked(project_dir, scene_id, command, result)
                 break
+            if loose:
+                notes.append(loose)
             if fixed != current:
                 rounds.append(FixRound(to_fix, edits))
             current, result, run_dir = fixed, again, next_dir
@@ -1362,7 +1404,7 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
         e.first, e.log_dir = first, logs
         raise
     return GatedScene(current, result, first, fixed=current != prose, rounds=rounds,
-                      notes=notes, log_dir=logs)
+                      notes=notes, log_dir=logs, discarded=discarded)
 
 
 def _one_line(text: str) -> str:

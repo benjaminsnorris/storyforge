@@ -325,8 +325,11 @@ class TestFix:
         """T-2 (#482): the second fix's prompt carries the first's edits, and the
         edits reach the rounds, through the real fix_scene and prompt."""
         from storyforge.checker import CheckResult, Finding
+        # a half-fix: the same contradiction (same source, same established
+        # words) after round 1, which round 2 is for
         bad = lambda q: gate.GateResult(SCENE, check=CheckResult(SCENE, findings=[
-            Finding('contradiction', 'TIM', q, 'act1-sc01', 'e', '', 'why')]))
+            Finding('contradiction', 'TIM', q, 'act1-sc01', 'It took three days to the pass.',
+                    '', 'why')]))
         runs = iter([bad('eight days'), bad('five days'), gate.GateResult(SCENE)])
         replies = iter([[{'problem': 1, 'find': 'eight days', 'replace': 'five days'}],
                         [{'problem': 1, 'find': 'five days', 'replace': 'three days'}]])
