@@ -21,9 +21,12 @@ _SUBSTITUTIONS = (
 
 def normalize(text: str) -> str:
     """Lowercased, whitespace collapsed, quotes, dashes and ellipses made
-    plain, markdown emphasis (`*`, `_`) removed."""
+    plain, markdown emphasis (`*`, `_`) and verse hard breaks removed."""
     for old, new in _SUBSTITUTIONS:
         text = text.replace(old, new)
+    # A verse line's hard break (a backslash ending the line, `source fetch
+    # --verse`): a quote running across two lines matches without it
+    text = re.sub(r'\\(?=[ \t]*(?:\n|$))', '', text)
     text = re.sub(r'[*_]+', '', text)
     return ' '.join(text.split()).lower()
 

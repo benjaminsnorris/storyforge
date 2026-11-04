@@ -81,6 +81,7 @@ COMMANDS = {
     'cleanup': 'storyforge.cmd_cleanup',
     'cover': 'storyforge.cmd_cover',
     'illustrate': 'storyforge.cmd_illustrate',
+    'init': 'storyforge.cmd_init',
     'migrate': 'storyforge.cmd_migrate',
     'migrate-medium': 'storyforge.cmd_migrate_medium',
     'scenes-setup': 'storyforge.cmd_scenes_setup',
