@@ -79,8 +79,10 @@ REPORTED = ('disagrees', 'ends registry', 'subject', 'cap', 'unplaced')
 
 class GateError(RuntimeError):
     """A gate step couldn't finish; nothing was written. From `gate_and_fix`,
-    `.first` is the first gate run when there was one."""
+    `.first` is the first gate run when there was one, and `.log_dir` the
+    invocation's logs (`run_log_dir`)."""
     first: 'GateResult | None' = None
+    log_dir: str = ''
 
 
 def _among(f: Finding, findings: list[Finding]) -> bool:
@@ -979,9 +981,12 @@ class GatedScene:
     # only then); not `bool(rounds)`: a later fix can undo an earlier one
     fixed: bool = False
     rounds: list[FixRound] = field(default_factory=list)  # the fixes kept, in order
-    #: later rounds discarded, and why (their prose and verdict are not what's
+    #: rounds discarded, and why (their prose and verdict are not what's
     #: kept): the caller logs these
     notes: list[str] = field(default_factory=list)
+    #: this invocation's logs (`run_log_dir`): the first run's, and each
+    #: re-check's in `recheck/`, `recheck-2/`
+    log_dir: str = ''
 
 
 def _blocking_count(result: GateResult) -> int:
@@ -1118,6 +1123,26 @@ def _worse(n: int, before_run: GateResult, after_run: GateResult, before: str,
     return ''
 
 
+def run_log_dir(log_dir: str, scene_id: str) -> str:
+    """A new directory, created, for one gate invocation's logs of
+    `scene_id`: `log_dir/<scene>/<YYYYMMDD-HHMMSS>-<pid>`, with `-2`, `-3`
+    ... when that is taken. Callers pass a fixed `log_dir` (write's
+    working/logs/gate, check's working/logs/check), and the log files are
+    named by scene alone (gate-check-<scene>.json), so without it a later
+    run of the scene, or a re-check of it in the same run, overwrote the
+    record of what the earlier one was told and changed."""
+    from datetime import datetime
+    base = os.path.join(log_dir, scene_id, f'{datetime.now():%Y%m%d-%H%M%S}-{os.getpid()}')
+    path, n = base, 1
+    while True:
+        try:
+            os.makedirs(path)
+            return path
+        except FileExistsError:
+            n += 1
+            path = f'{base}-{n}'
+
+
 def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                  log_dir: str, extract_model: str | None = None,
                  check_model: str | None = None, fix_model: str | None = None,
@@ -1162,13 +1187,23 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     Raises:
         GateError: from the first gate run, the first fix or its re-gate; it
             carries the first run as `.first` (None when the first run itself
-            failed), so its findings can still be reported.
+            failed), so its findings can still be reported, and the logs as
+            `.log_dir`.
+
+    Logs: each invocation writes to its own `run_log_dir(log_dir,
+    scene_id)` (`.log_dir`), so a later gate of the scene never overwrites
+    this one's.
     """
     from storyforge import api
-    os.makedirs(log_dir, exist_ok=True)
-    first = gate_scene(project_dir, scene_id, command=command, prose=prose, log_dir=log_dir,
-                       extract_model=extract_model, check_model=check_model, before=before)
-    current, result, rounds, notes, run_dir = prose, first, [], [], log_dir
+    logs = run_log_dir(log_dir, scene_id)
+    try:
+        first = gate_scene(project_dir, scene_id, command=command, prose=prose, log_dir=logs,
+                           extract_model=extract_model, check_model=check_model,
+                           before=before)
+    except GateError as e:
+        e.log_dir = logs
+        raise
+    current, result, rounds, notes, run_dir = prose, first, [], [], logs
     try:
         for n in range(1, FIX_ROUNDS + 1):
             if result.passed:
@@ -1203,8 +1238,8 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                              f'("{_one_line(undone)[:80]}"); kept {kept}')
                 break
             # each run's log (and the fix that read it) in its own directory:
-            # log_dir, log_dir/recheck, log_dir/recheck-2
-            next_dir = os.path.join(log_dir, 'recheck' if n == 1 else f'recheck-{n}')
+            # logs, logs/recheck, logs/recheck-2
+            next_dir = os.path.join(logs, 'recheck' if n == 1 else f'recheck-{n}')
             try:
                 again = gate_scene(project_dir, scene_id, command=command, prose=fixed,
                                    log_dir=next_dir, extract_model=extract_model,
@@ -1230,10 +1265,10 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                 rounds.append(FixRound(to_fix, edits))
             current, result, run_dir = fixed, again, next_dir
     except GateError as e:
-        e.first = first
+        e.first, e.log_dir = first, logs
         raise
     return GatedScene(current, result, first, fixed=current != prose, rounds=rounds,
-                      notes=notes)
+                      notes=notes, log_dir=logs)
 
 
 def _one_line(text: str) -> str:
@@ -1641,11 +1676,11 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
                 f'forecast about ${len(queue) * RECHECK_COST_PER_SCENE:.2f}: {", ".join(queue)}')
             announced = True
         sid = queue[0]
-        log(f'Re-checking {sid}...')
+        logs = run_log_dir(os.path.join(log_dir, 'recheck'), sid)
+        log(f'Re-checking {sid} (logs: {os.path.relpath(logs, project_dir)})...')
         run.spent += RECHECK_COST_PER_SCENE   # paid whether or not it finishes
         try:
-            result = gate_scene(project_dir, sid, command='recheck',
-                                log_dir=os.path.join(log_dir, 'recheck', sid),
+            result = gate_scene(project_dir, sid, command='recheck', log_dir=logs,
                                 extract_model=extract_model, check_model=check_model,
                                 introduced_by=_writer(project_dir, sid))
         except GateError as e:

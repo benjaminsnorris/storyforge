@@ -129,6 +129,20 @@ class TestCheck:
             cmd_check.main([SCENE])
         assert e.value.code == 1
 
+    def test_each_check_of_a_scene_keeps_its_own_logs(self, project):
+        """2026-11-03: every check wrote working/logs/check/gate-check-<scene>.json,
+        so checking a scene again overwrote what the last check was told."""
+        project_dir, _ = project
+        for _ in range(2):
+            with _api([[]]):
+                cmd_check.main([SCENE])
+            gate.clear_pending(project_dir, SCENE)
+        root = os.path.join(project_dir, 'working', 'logs', 'check', SCENE)
+        runs = sorted(os.listdir(root))
+        assert len(runs) == 2
+        assert all(os.path.isfile(os.path.join(root, r, f'gate-check-{SCENE}.json'))
+                   for r in runs)
+
     def test_no_scenes_named_is_an_error(self, project):
         with pytest.raises(SystemExit) as e:
             cmd_check.main([])

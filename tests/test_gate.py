@@ -1103,8 +1103,10 @@ class TestSecondFixRound(_FixRounds):
         assert [r.edits for r in out.rounds] == [e1, e2]
         assert seen[0] == ('v0', []) and seen[1][0] == 'v1'
         assert seen[1][1][0].edits == e1 and 'eight' in seen[1][1][0].problems[0]
-        assert dirs == [str(tmp_path), str(tmp_path / 'recheck'), str(tmp_path / 'recheck-2')]
-        assert self.fix_dirs == [str(tmp_path), str(tmp_path / 'recheck')]   # beside its run
+        logs = out.log_dir
+        assert os.path.dirname(os.path.dirname(logs)) == str(tmp_path)   # tmp/<scene>/<run>
+        assert dirs == [logs, os.path.join(logs, 'recheck'), os.path.join(logs, 'recheck-2')]
+        assert self.fix_dirs == [logs, os.path.join(logs, 'recheck')]   # beside its run
 
     def test_it_stops_after_fix_rounds(self, monkeypatch, tmp_path):
         out, dirs, _ = self._run(monkeypatch, tmp_path,
@@ -1184,8 +1186,9 @@ class TestSecondFixRound(_FixRounds):
             monkeypatch, tmp_path,
             [self._result(extraction=True), self._result('a'), self._result('b')],
             [('v1', [{'find': 'x', 'replace': 'y'}])])
-        assert dirs == [str(tmp_path), str(tmp_path / 'recheck'), str(tmp_path / 'recheck-2')]
-        assert self.fix_dirs == [str(tmp_path), str(tmp_path / 'recheck')]
+        logs = out.log_dir
+        assert dirs == [logs, os.path.join(logs, 'recheck'), os.path.join(logs, 'recheck-2')]
+        assert self.fix_dirs == [logs, os.path.join(logs, 'recheck')]
         assert seen[1] == ('v0', [])
         assert len(out.rounds) == 1 and out.fixed and not out.result.passed
 
@@ -1338,6 +1341,69 @@ class TestFirstFixNeverWorse(_FixRounds):
 
 def _blocking_count(result):
     return gate._blocking_count(result)
+
+
+class TestRunLogs:
+    """Callers pass a fixed log dir (working/logs/gate, working/logs/check)
+    and the files are named by scene alone, so a later gate run of a scene,
+    or a re-check of it in the same run, overwrote the earlier run's record
+    (2026-11-03: mended-bridle's first fix log was gone by the time anyone
+    looked)."""
+
+    def test_each_call_gets_its_own_directory_under_the_scene(self, tmp_path):
+        a = gate.run_log_dir(str(tmp_path), SCENE)
+        b = gate.run_log_dir(str(tmp_path), SCENE)
+        assert a != b and os.path.isdir(a) and os.path.isdir(b)
+        assert os.path.dirname(a) == os.path.dirname(b) == str(tmp_path / SCENE)
+        assert os.path.basename(b).startswith(os.path.basename(a))   # same second: -2
+        assert str(os.getpid()) in os.path.basename(a)
+
+    def test_two_gate_and_fix_runs_keep_both_logs(self, monkeypatch, tmp_path):
+        from storyforge.checker import CheckResult, Finding
+        bad = Finding('contradiction', 'TIM', 'q', 'act1-sc01', 'e', '', 'why')
+
+        def gate_run(pd, sid, *, log_dir, prose, **k):
+            with open(os.path.join(log_dir, f'gate-check-{sid}.json'), 'w') as f:
+                f.write(prose)
+            return gate.GateResult(sid, check=CheckResult(sid, findings=[bad]))
+        monkeypatch.setattr(gate, 'gate_scene', gate_run)
+        monkeypatch.setattr(gate, 'fix_scene', lambda sid, prose, *a, **k: prose)
+        one = gate.gate_and_fix('p', SCENE, command='draft', prose='first run',
+                                log_dir=str(tmp_path))
+        two = gate.gate_and_fix('p', SCENE, command='draft', prose='second run',
+                                log_dir=str(tmp_path))
+        assert one.log_dir != two.log_dir
+        for out, text in ((one, 'first run'), (two, 'second run')):
+            with open(os.path.join(out.log_dir, f'gate-check-{SCENE}.json')) as f:
+                assert f.read() == text
+
+    def test_a_gate_error_names_its_logs(self, monkeypatch, tmp_path):
+        def fail(*a, **k):
+            raise gate.GateError('cut off')
+        monkeypatch.setattr(gate, 'gate_scene', fail)
+        with pytest.raises(gate.GateError) as e:
+            gate.gate_and_fix('p', SCENE, command='draft', prose='x', log_dir=str(tmp_path))
+        assert e.value.log_dir.startswith(str(tmp_path / SCENE)) and e.value.first is None
+
+    def test_each_recheck_gets_its_own_directory(self, project_dir, tmp_path, monkeypatch):
+        dirs = []
+
+        def fake(pd, sid, **k):
+            dirs.append(k['log_dir'])
+            if len(dirs) == 1:   # the first re-check lists the scene again
+                gate.mark_pending(pd, sid, gate.RECHECK, 're-check: again')
+            else:
+                gate.clear_pending(pd, sid)
+            r = gate.GateResult(sid, check=None)
+            r.committed = True
+            return r
+        monkeypatch.setattr(gate, 'gate_scene', fake)
+        monkeypatch.setattr(gate, '_writer', lambda pd, sid: 'draft')
+        monkeypatch.setattr('storyforge.costs.check_threshold', lambda cost: True)
+        gate.mark_pending(project_dir, SCENE, gate.RECHECK, 'x')
+        gate.recheck_pending(project_dir, log_dir=str(tmp_path))
+        assert len(dirs) == 2 and dirs[0] != dirs[1]
+        assert all(os.path.dirname(d) == str(tmp_path / 'recheck' / SCENE) for d in dirs)
 
 
 def test_an_unquoted_action_is_not_the_briefs_words(project_dir):

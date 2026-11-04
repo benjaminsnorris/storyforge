@@ -591,6 +591,30 @@ class TestPendingReason480:
         return cmd_write._gate_drafted_scene(project_dir, 'act1-sc01', path, 'revise',
                                              str(project_dir))
 
+    def test_the_runs_logs_are_named(self, project_dir, monkeypatch, capsys):
+        """Each gate run logs to its own directory (`gate.run_log_dir`): the
+        log says which."""
+        r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
+        logs = os.path.join(project_dir, 'working', 'logs', 'gate', 'act1-sc01', '20261103-1')
+        self._out(project_dir, monkeypatch, gate.GatedScene('prose', r, r, log_dir=logs))
+        assert ('Gate logs: ' + os.path.join('working', 'logs', 'gate', 'act1-sc01',
+                                             '20261103-1')) in capsys.readouterr().out
+
+    def test_a_gate_error_names_its_logs(self, project_dir, monkeypatch, capsys):
+        from storyforge import cmd_write
+        err = gate.GateError('cut off')
+        err.log_dir = os.path.join(project_dir, 'working', 'logs', 'gate', 'act1-sc01', 'r')
+
+        def fail(*a, **k):
+            raise err
+        monkeypatch.setattr(gate, 'gate_and_fix', fail)
+        path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        passed, _ = cmd_write._gate_drafted_scene(project_dir, 'act1-sc01', path, 'revise',
+                                                  str(project_dir))
+        assert not passed
+        assert ('Gate logs: ' + os.path.join('working', 'logs', 'gate', 'act1-sc01', 'r')
+                ) in capsys.readouterr().out
+
     def test_two_fix_rounds_say_so(self, project_dir, monkeypatch, capsys):
         r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
         rounds = [gate.FixRound(['a', 'b'], [{}]), gate.FixRound(['c'], [{}, {}])]

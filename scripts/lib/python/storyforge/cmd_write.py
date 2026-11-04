@@ -416,6 +416,8 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
         out = gate.gate_and_fix(project_dir, scene_id, command=command, prose=prose,
                                 log_dir=os.path.join(log_dir, 'gate'), before=before)
     except gate.GateError as e:
+        if e.log_dir:
+            log(f'  Gate logs: {os.path.relpath(e.log_dir, project_dir)}')
         if e.first is not None:
             for line in gate.report_lines(e.first):
                 log(f'  (first check) {line}')
@@ -429,6 +431,8 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
     if out.fixed:
         with open(scene_file, 'w', encoding='utf-8') as f:
             f.write(out.prose)
+    if out.log_dir:
+        log(f'  Gate logs: {os.path.relpath(out.log_dir, project_dir)}')
     for n, r in enumerate(out.rounds, start=1):
         log(f'  Fix round {n}: {len(r.problems)} problem(s) sent, {len(r.edits)} edit(s); '
             f're-checked.')
