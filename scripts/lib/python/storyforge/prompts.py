@@ -1346,17 +1346,22 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
                              project_dir: str, shown: set[str],
                              rewrite: bool = False) -> str:
     """The ledger's binding facts the scene must agree with: for its POV and
-    on-stage characters (pronouns from characters.csv, `fixed` facts, states
-    entering the scene) and its location, and those the scene itself has
-    already established (``ledger.drafting_slice``). Facts in ``shown`` (the
-    brief's ``physical_state_in``, listed above it) are left out. Empty when
-    neither the ledger nor characters.csv's ``pronouns`` has anything for
-    the scene (an empty ledger still gives the pronouns).
+    on-stage characters (pronouns: characters.csv's, or for an adaptation
+    the imported source's, ``source.character_pronouns``; `fixed` facts,
+    states entering the scene) and its location, and those the scene itself
+    has already established (``ledger.drafting_slice``). Facts in ``shown``
+    (the brief's ``physical_state_in``, listed above it) are left out. Empty
+    when neither the ledger nor the pronouns have anything for the scene (an
+    empty ledger still gives the pronouns).
 
     Logs a WARNING for a POV, on-stage or location name that isn't in the
     registries (its facts can't be found), for facts tied to a scene id
     that isn't a scene, and for states left out past
-    ``MAX_STATES_PER_SUBJECT`` (the prompt says so too).
+    ``MAX_STATES_PER_SUBJECT`` (the prompt says so too). In an adaptation,
+    also for a character the source couldn't give pronouns (why: a shared
+    name, an unreadable value, sources that disagree), and once per process
+    for each source-wide note (a source not imported, a registry with no
+    pronouns column).
 
     ``rewrite``: the prompt also shows the scene's current draft as a voice
     reference only, so the scene's own facts are said to hold regardless.
@@ -1364,8 +1369,11 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
     Raises:
         ValueError: if scenes.csv has a scene without a numeric ``seq``
             (``ledger.exit_if_unordered`` stops commands on that first).
+        source.SourceError: for a ``source:`` block or an imported
+            characters.csv that can't be read.
     """
     from . import ledger
+    from . import source as source_mod
     from .common import log
     from .elaborate import _read_csv
     from .enrich import load_alias_map
@@ -1374,11 +1382,21 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
     ref_dir = os.path.join(project_dir, 'reference')
     rows = ledger.load_from(ref_dir)
     char_rows = _read_csv(os.path.join(ref_dir, 'characters.csv'))
-    has_pronouns = any('pronouns' in r for r in char_rows)
+    # the one resolver: without a `source:` block each value is the own
+    # cell, so a project reads as it did before #515
+    cast = source_mod.character_pronouns(project_dir)
+    for note in cast.notes:
+        if note not in _SOURCE_NOTES_LOGGED:
+            _SOURCE_NOTES_LOGGED.add(note)
+            log(f'WARNING: {note}; the drafting prompt has only characters.csv\'s '
+                f'pronouns for its characters')
+    has_pronouns = any('pronouns' in r for r in char_rows) or cast.adaptation
     # an empty ledger still has the characters' pronouns to give (a book
     # whose ledger isn't built yet: the pronouns are the commonest fact the
-    # gate catches a draft getting wrong)
-    if not rows and not any((r.get('pronouns') or '').strip() for r in char_rows):
+    # gate catches a draft getting wrong); an adaptation goes on, so what
+    # the source couldn't give its characters is said
+    if (not rows and not cast.adaptation
+            and not any((r.get('pronouns') or '').strip() for r in char_rows)):
         return ''
     order = ledger.scene_order(project_dir)
     if scene_id not in order:
@@ -1434,14 +1452,20 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
         is_place = sid == place
         row = places.get(sid, {}) if is_place else characters.get(sid, {})
         heading = (row.get('name') or sid).strip()
-        pronouns = '' if is_place else (row.get('pronouns') or '').strip()
+        resolved = None if is_place else cast.by_id.get(sid)
+        pronouns = (resolved.value if resolved
+                    else '' if is_place else (row.get('pronouns') or '').strip())
+        why = resolved and not pronouns and (resolved.note or resolved.problem)
+        if why:
+            log(f'WARNING: {scene_id}: no pronouns for {heading} in characters.csv, '
+                f'and none from the source: {why}; the writer guesses theirs')
         if pronouns and pronoun_key(pronouns) is None:
             # validate blocks it; the writer is never told an unreadable value
             log(f'WARNING: {scene_id}: {heading}\'s pronouns in characters.csv '
                 f'({pronouns!r}) are not a pronoun storyforge knows; left out of the '
                 f'prompt (see `storyforge validate`)')
             pronouns = ''
-        if not is_place and has_pronouns and not pronouns:
+        if not is_place and has_pronouns and not pronouns and not why:
             no_pronouns.append(heading)
         fixed = found.fixed.get(sid, [])
         states = [r for r in found.states.get(sid, []) if r['id'] not in shown]
@@ -1480,14 +1504,20 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
                         'differ, the brief wins.\n'
                         + '\n'.join(line(r) for r in own))
     if no_pronouns:
-        log(f'WARNING: {scene_id}: no pronouns in characters.csv for '
-            f'{", ".join(no_pronouns)}; the writer guesses theirs')
+        log(f'WARNING: {scene_id}: no pronouns in characters.csv '
+            + ('or the source ' if cast.mode else '')
+            + f'for {", ".join(no_pronouns)}; the writer guesses theirs')
     if not sections:
         return ''
     return ('## Established Facts\n\n'
             'What the book has already committed to about the people and place '
             'in this scene. The scene must not contradict it.\n\n'
             + '\n\n'.join(sections))
+
+
+#: `source.character_pronouns` notes already logged in this process (a run
+#: builds many scenes' prompts against the same sources)
+_SOURCE_NOTES_LOGGED: set[str] = set()
 
 
 #: Brief columns whose items name ledger facts (registry ids, names or aliases)

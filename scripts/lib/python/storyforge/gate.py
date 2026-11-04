@@ -350,7 +350,8 @@ class Cast:
     pronouns: dict[str, str] = field(default_factory=dict)
     #: id → name, for the report
     display: dict[str, str] = field(default_factory=dict)
-    #: what about the file keeps speakers from being checked (WARNINGs)
+    #: what about the file, or an adaptation's source, keeps speakers from
+    #: being checked (WARNINGs)
     warnings: tuple[str, ...] = ()
 
     @property
@@ -361,10 +362,13 @@ class Cast:
 def _cast(project_dir: str) -> Cast:
     """The characters (reference/characters.csv): names, aliases and ids,
     and each one's pronouns when the file has a `pronouns` column and the
-    cell is one `schema.pronoun_key` reads. A missing file, or one with no
-    named rows, is no one, and a pronoun cell that can't be read is
-    unknown: each is a `Cast.warnings` line (`_warn_once`), since speakers
-    then go unchecked."""
+    cell is one `schema.pronoun_key` reads, or, for an empty cell in an
+    adaptation, the imported source's (`source.character_pronouns`). A
+    missing file, or one with no named rows, is no one, and a pronoun cell
+    that can't be read is unknown, as is a source that can't be read or
+    whose value can't be used: each is a `Cast.warnings` line
+    (`_warn_once`), since speakers then go unchecked."""
+    from storyforge import source
     from storyforge.elaborate import _read_csv
     from storyforge.schema import pronoun_key
     path = os.path.join(project_dir, 'reference', 'characters.csv')
@@ -372,6 +376,15 @@ def _cast(project_dir: str) -> Cast:
     pronouns: dict[str, str] = {}
     display: dict[str, str] = {}
     warnings: list[str] = []
+    try:
+        resolved = source.character_pronouns(project_dir)
+    except source.SourceError as e:
+        resolved = source.CastPronouns()
+        warnings.append(f"the source's pronouns can't be read ({e}), so the gate doesn't "
+                        f"check a pronoun speech tag of a character with none in "
+                        f"characters.csv")
+    warnings += [f"{n}: the gate doesn't check those characters' pronoun speech tags"
+                 for n in resolved.notes]
     for row in _read_csv(path):
         name = (row.get('name') or '').strip()
         cid = (row.get('id') or '').strip() or name
@@ -382,6 +395,13 @@ def _cast(project_dir: str) -> Cast:
             if _words(n).strip():
                 ids.setdefault(_words(n).strip(), set()).add(cid)
         key = pronoun_key(row.get('pronouns') or '')
+        fallback = resolved.by_id.get(cid)
+        if key == '' and fallback and fallback.origin == source.FROM_SOURCE:
+            key = pronoun_key(fallback.value)
+        elif key == '' and fallback and (fallback.note or fallback.problem):
+            warnings.append(f"{name}: no pronouns in characters.csv or from the source "
+                            f"({fallback.note or fallback.problem}), so the gate doesn't "
+                            f"check a pronoun speech tag on their lines")
         if key:
             pronouns[cid] = key
         elif key is None:

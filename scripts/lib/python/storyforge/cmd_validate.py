@@ -115,6 +115,14 @@ def main(argv=None):
     if source_cfg is not None:
         source_result = source_mod.check_coverage(project_dir, source_cfg)
         source_result['mode'] = source_cfg.mode
+        # Where each character's pronouns come from (#515), so a count of
+        # none is a checked count; a source that can't be read is a blocking
+        # finding in the structural checks (`character-pronouns-source`)
+        try:
+            source_result['lines'].append(
+                source_mod.character_pronouns(project_dir).counts_line())
+        except source_mod.SourceError as e:
+            source_result['lines'].append(f"Pronouns: the source's can't be read ({e})")
 
     structural_scores = None
     scores_previous = None
