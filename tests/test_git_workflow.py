@@ -181,3 +181,83 @@ class TestCommitOnlyThePaths:
         (work / 'x1.md').write_text('decoy\n')
         assert git.commit_and_push(str(work), 'Literal', ['x[1].md'])
         assert self._committed(work) == ['x[1].md']
+
+
+class TestCommitInASubfolder:
+    """A project in a subfolder of its repo (every storyforge-evals book is
+    `projects/<book>/`): `git diff --cached --name-only` printed the staged
+    files relative to the repo root, and `git commit -- files`, run in the
+    project, read them against the project folder, so every commit with
+    paths failed ("pathspec 'projects/telemachy-teen/reference/source/...'
+    did not match", `source import`, 2026-11-03)."""
+
+    _git = staticmethod(TestAFailedCommit._git)
+
+    def _repos(self, tmp_path, prefix):
+        """The upstream repos, with the project at `prefix` inside the work
+        tree ('' for the repo root) and a sibling project beside it."""
+        remote, work = TestCommitAndPushUpstream._repos(self, tmp_path)
+        project = work / prefix if prefix else work
+        sibling = work / 'projects' / 'other'
+        for d in (project / 'scenes', sibling):
+            d.mkdir(parents=True, exist_ok=True)
+        for name in ('gone', 'old', 'kept', 'two words', 'café'):
+            (project / 'scenes' / f'{name}.md').write_text(f'{name}\n' * 20)
+        (sibling / 'notes.md').write_text('sibling\n')
+        self._git(work, 'add', '.')
+        self._git(work, 'commit', '-qm', 'projects')
+        return work, project
+
+    def _committed(self, work):
+        return sorted(self._git(work, 'show', '--name-only', '--no-renames', '-z',
+                                '--format=', 'HEAD').strip('\0\n').split('\0'))
+
+    @pytest.mark.parametrize('prefix', ['projects/book', ''])
+    def test_new_changed_deleted_renamed_and_oddly_named_files(self, tmp_path, prefix):
+        from storyforge import git
+        work, project = self._repos(tmp_path, prefix)
+        top = f'{prefix}/' if prefix else ''
+        (project / 'scenes' / 'gone.md').unlink()
+        self._git(project, 'mv', 'scenes/old.md', 'scenes/new.md')
+        (project / 'scenes' / 'kept.md').write_text('changed\n')
+        (project / 'scenes' / 'two words.md').write_text('changed\n')
+        (project / 'scenes' / 'café.md').write_text('changed\n')
+        (project / 'scenes' / 'añadido.md').write_text('added\n')
+        (work / 'projects' / 'other' / 'notes.md').write_text('sibling edit\n')
+        self._git(work, 'add', 'projects/other/notes.md')   # staged, not ours
+        assert git.commit_and_push(str(project), 'Scenes', ['scenes/', 'missing.csv']), \
+            git.last_commit_error
+        assert self._committed(work) == sorted(
+            f'{top}scenes/{n}.md' for n in
+            ('añadido', 'café', 'gone', 'kept', 'new', 'old', 'two words'))
+        assert self._git(work, 'diff', '--cached', '--name-only').split() == \
+            ['projects/other/notes.md']
+
+    def test_a_subfolder_project_commits_only_its_paths(self, tmp_path):
+        """The real failure: `source import` in `projects/telemachy-teen`."""
+        from storyforge import git
+        work, project = self._repos(tmp_path, 'projects/telemachy-teen')
+        src = project / 'reference' / 'source' / 'odyssey'
+        src.mkdir(parents=True)
+        (src / 'architecture.csv').write_text('id|summary\n')
+        (project / 'storyforge.yaml').write_text('project: x\n')
+        assert git.commit_and_push(str(project), 'Source: import odyssey',
+                                   ['reference/source/odyssey']), git.last_commit_error
+        assert self._committed(work) == [
+            'projects/telemachy-teen/reference/source/odyssey/architecture.csv']
+        assert self._git(work, 'status', '--porcelain', '--',
+                         'projects/telemachy-teen/storyforge.yaml').strip() == \
+            '?? projects/telemachy-teen/storyforge.yaml'
+
+    def test_with_no_paths_a_sibling_project_is_not_swept_in(self, tmp_path):
+        """`git add -A` with no pathspec stages the whole work tree wherever
+        it is run, so a subfolder project's commit took a sibling project's
+        unstaged edits under its own message."""
+        from storyforge import git
+        work, project = self._repos(tmp_path, 'projects/book')
+        (project / 'scenes' / 'kept.md').write_text('changed\n')
+        (work / 'projects' / 'other' / 'notes.md').write_text('sibling edit\n')
+        assert git.commit_and_push(str(project), 'Elaborate'), git.last_commit_error
+        assert self._committed(work) == ['projects/book/scenes/kept.md']
+        assert self._git(work, 'status', '--porcelain', '--',
+                         'projects/other').strip() == 'M projects/other/notes.md'

@@ -29,7 +29,7 @@ Rationale and bug history moved out of `CLAUDE.md` on 2026-10-28 so the agent in
 - `ensure_branch_pushed(project_dir)` — push branch to remote
 - `create_draft_pr(title, body, project_dir, label)` — create draft PR
 - `update_pr_task(task_text, project_dir, pr_number)` — check off a task
-- `commit_and_push(project_dir, message, paths)` — stage, commit, push
+- `commit_and_push(project_dir, message, paths)` — stage, commit, push. The project may be a subfolder of its repo (every storyforge-evals book is `projects/<book>/`). #509 listed the staged files with `git diff --cached --name-only`, which prints them from the repo root, and passed them to `git commit --`, which reads them from the project, so every commit with paths failed there (`source import`, 2026-11-03); the listing now uses `--relative`. With no paths it stages `git add -A -- .`, not a bare `add -A`, which stages the whole work tree wherever it runs and swept a sibling project's edits in. Git's other repo-relative listings: `status --porcelain` is only tested for emptiness; `ls-files` already prints from the current folder; `review_scope` already passes `--relative`.
 - `run_review_phase(review_type, project_dir, pr_number)` — full review workflow
 
 **cli.py:**
