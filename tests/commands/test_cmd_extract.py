@@ -673,6 +673,46 @@ class TestPhaseExecution:
         with open(os.path.join(project_dir, 'working', 'extraction-profile.json')) as f:
             assert json.load(f)['narrative_mode'] == 'third-limited'
 
+    def test_batch_phases_and_the_calendar_reach_the_cost_ledger(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """Phases 1, 2 and 3a run as batches and phase 1 places the calendar:
+        every reply is paid for and must be in the ledger, at the batch price
+        for the batches (Gawain: the ledger held only phase 0 and the acts)."""
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_extract.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setattr('storyforge.cmd_extract._run_hone',
+                            lambda plugin_dir, phase: None)
+        mock_api.set_response_fn(_chain_or_csv_reply)
+        monkeypatch.setattr('storyforge.elaborate.validate_structure', lambda ref_dir: {
+            'passed': True, 'failures': [], 'checks': [],
+        })
+        monkeypatch.setattr('storyforge.cmd_extract.get_coaching_level',
+                            lambda pd: 'full')
+        monkeypatch.setattr('storyforge.extract.run_cleanup', lambda ref_dir: {
+            'total_fixes': 0,
+        })
+        monkeypatch.setattr('storyforge.cmd_extract._run_phase_5', lambda *a, **k: None)
+
+        main(['--force'])
+
+        from storyforge.api import calculate_cost_from_usage
+        batch_ids = {op: [r['custom_id'] for c in mock_api.calls_for('submit_batch')
+                          for r in c['requests'] if marker in r['params']['messages'][0]['content']]
+                     for op, marker in (('extract-skeleton', 'Extract structural metadata'),
+                                        ('extract-intent', 'Extract the narrative intent'),
+                                        ('extract-briefs', 'Extract the drafting contract'))}
+        rows = [o for o in mock_costs.operations if 'fn' not in o]
+        usage = {'input_tokens': 100, 'output_tokens': 50, 'cache_read': 0, 'cache_create': 0}
+        for op, ids in batch_ids.items():
+            assert ids, op
+            logged = [o for o in rows if o['operation'] == op]
+            assert sorted(o['target'] for o in logged) == sorted(ids), op
+            model = logged[0]['model']
+            assert all(abs(o['cost'] - calculate_cost_from_usage(usage, model, batch=True)) < 1e-9
+                       for o in logged), op
+        assert [o for o in rows if o['operation'] == 'timeline-assign']
+
     def test_commits_after_each_phase(self, mock_api, mock_git, mock_costs,
                                        project_dir, monkeypatch):
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')

@@ -1185,8 +1185,10 @@ def scene_items(project_dir: str, cues: dict[str, dict]) -> list[dict]:
     } for r in rows]
 
 
-def _invoke_assignment(model: str):
-    from .api import invoke_to_file, extract_text_from_file, is_truncated, RefusalError
+def _invoke_assignment(model: str, project_dir: str | None = None):
+    from .api import (invoke_to_file, extract_text_from_file, is_truncated, RefusalError,
+                      extract_usage, calculate_cost_from_usage)
+    from . import costs
 
     def invoke(prompt, log_file, label):
         try:
@@ -1199,6 +1201,17 @@ def _invoke_assignment(model: str):
         except Exception as e:  # noqa: BLE001 — one failed batch, not the pass
             log(f'  WARNING: {label} failed ({e})')
             return None
+        if project_dir:
+            # Paid for, cut off or not: into the cost ledger
+            try:
+                usage = extract_usage(response)
+                costs.log_operation(project_dir, 'timeline-assign', model,
+                                    usage['input_tokens'], usage['output_tokens'],
+                                    calculate_cost_from_usage(usage, model), target=label,
+                                    cache_read=usage.get('cache_read', 0),
+                                    cache_create=usage.get('cache_create', 0))
+            except Exception as e:  # noqa: BLE001 — the reply still counts
+                log(f'  WARNING: cost of {label} not recorded: {e}')
         if is_truncated(response):
             log(f'  WARNING: {label} hit the {_BATCH_MAX_TOKENS}-token limit')
             return None
@@ -1222,7 +1235,7 @@ def run_assignment(project_dir: str, model: str, log_dir: str, force: bool) -> d
     items = scene_items(project_dir, cues)
     if not items:
         return {'assigned': 0, 'proposed': 0, 'unplaced': 0, 'findings': 0}
-    placed = assign_calendar(items, _invoke_assignment(model), log_dir)
+    placed = assign_calendar(items, _invoke_assignment(model, project_dir), log_dir)
     placed, spikes = repair_spikes(items, placed)
     if spikes:
         log(f'  Timeline: {len(spikes)} scene(s) far ahead of the scenes around them put back:')
