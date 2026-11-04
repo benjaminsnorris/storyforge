@@ -170,34 +170,82 @@ def exit_if_not_migrated(project_dir: str) -> None:
         raise SystemExit(1)
 
 
+#: How many scenes without a numeric seq `exit_if_unordered` names one by one
+_MAX_UNNUMBERED_NAMED = 20
+
+
 def exit_if_unordered(project_dir: str) -> None:
-    """Stop the command (exit 1) when scenes.csv has a scene without a
-    numeric `seq`, or two scenes sharing one: drafting reads the ledger as
-    of each scene (`drafting_slice`) and the gate checks against the facts
-    in force there, so without one order what came before is a guess.
+    """Stop the command (exit 1), before any model call, when scenes.csv
+    gives no single reading order: drafting reads the ledger as of each
+    scene (`drafting_slice`) and the gate checks against the facts in force
+    there, so without one order what came before is a guess. write, revise
+    and check call it first.
+
+    It names every problem in one pass: a missing, unreadable or empty
+    scenes.csv; no id or seq column; a blank or repeated id
+    (`scene_id_problems`); each scene without a numeric seq (`seq_number`);
+    and each seq two scenes share (`shared_seqs`, the rule validate's
+    `duplicate-seq` reads). A missing scenes.csv stops too: all three
+    commands place scenes by it, and have nothing to place without it.
 
     `scene_order` itself still ranks tied scenes by id, without a word: the
     gate and the evals read it, and E8's thornwall trees carry a tie. The
-    stop is here, at the command entry, before any model call."""
-    path = os.path.join(project_dir, 'reference', 'scenes.csv')
-    if not os.path.isfile(path):
-        return
+    stop is here, at the command entry."""
     from storyforge.common import log
+
+    def stop(*lines: str) -> None:
+        for line in lines:
+            log(f'ERROR: {line}')
+        raise SystemExit(1)
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    if not os.path.isfile(os.path.join(ref_dir, 'scenes.csv')):
+        stop('reference/scenes.csv is missing, so there is no reading order: '
+             'each scene\'s place in the book is its seq there.')
     try:
-        scene_order(project_dir)
-    except ValueError as e:
-        log(f'ERROR: {e}. Give every scene a number in seq.')
-        raise SystemExit(1)
-    shared = shared_seqs(scene_rows(os.path.join(project_dir, 'reference'))[1])
-    if shared:
-        for seq, sids in shared:
-            log(f'ERROR: scenes.csv: {", ".join(sids)} share seq {seq}, so '
-                f'their reading order is undefined.')
-        log('ERROR: Which scene comes first is the author\'s call: decide it, '
-            'then give each scene its own number in the seq column of '
-            'reference/scenes.csv (`storyforge validate` reports these as '
-            'duplicate-seq).')
-        raise SystemExit(1)
+        header, rows = scene_rows(ref_dir)
+    except (OSError, UnicodeDecodeError) as e:
+        stop(f'reference/scenes.csv can\'t be read ({e}), so there is no '
+             f'reading order. Save it as UTF-8 text.')
+    if not header:
+        stop('reference/scenes.csv is empty (no header row), so there is no '
+             'reading order.')
+    problems = [f'scenes.csv: {p}' for p in scene_id_problems(header, rows)]
+    advice = []
+    if problems:
+        advice.append('Give every row of reference/scenes.csv its own id.')
+    if 'id' in header and 'seq' not in header:
+        problems.append('scenes.csv has no seq column, so no scene has a place')
+        advice.append('Add a seq column and give every scene a number in it.')
+    elif 'id' in header:
+        numbered, unnumbered = [], []
+        for row in rows:
+            sid = row.get('id', '').strip()
+            if not sid:
+                continue
+            try:
+                seq_number(row.get('seq', ''))
+                numbered.append(row)
+            except ValueError:
+                unnumbered.append(f'scenes.csv: {sid} has no numeric seq '
+                                  f'({row.get("seq", "")!r})')
+        if len(unnumbered) > _MAX_UNNUMBERED_NAMED:
+            more = len(unnumbered) - _MAX_UNNUMBERED_NAMED
+            unnumbered = unnumbered[:_MAX_UNNUMBERED_NAMED] + [
+                f'scenes.csv: {more} more scene(s) have no numeric seq']
+        problems += unnumbered
+        if unnumbered:
+            advice.append('Give every scene a number in seq.')
+        shared = shared_seqs(numbered)
+        problems += [f'scenes.csv: {", ".join(sids)} share seq {seq}, so their '
+                     f'reading order is undefined.' for seq, sids in shared]
+        if shared:
+            advice.append('Which scene comes first is the author\'s call: decide '
+                          'it, then give each scene its own number in the seq '
+                          'column of reference/scenes.csv (`storyforge validate` '
+                          'reports these as duplicate-seq).')
+    if problems:
+        stop(*problems, *advice)
 
 
 def load_from(ref_dir: str) -> list[dict[str, str]]:

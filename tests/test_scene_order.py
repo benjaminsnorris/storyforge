@@ -161,9 +161,88 @@ class TestSharedSeqs:
         checks = _structure(project_dir)
         assert checks['scene-ids']['passed'] and checks['duplicate-seq']['passed']
 
-    def test_no_id_column(self, project_dir):
+    def test_no_id_column_problem(self, project_dir):
         with open(_scenes_path(project_dir), 'w') as f:
             f.write('slug|seq\na|1\n')
         assert ledger.scene_id_problems(*ledger.scene_rows(
             os.path.join(project_dir, 'reference'))) == [
             'reference/scenes.csv has no id column, so no scene has a place']
+
+
+class TestExitIfUnordered:
+    """Every way scenes.csv gives no single reading order stops write,
+    revise and check, saying what's wrong (SF-6/7/8, CR-1)."""
+
+    def _stop(self, project_dir, capsys) -> str:
+        with pytest.raises(SystemExit) as exc:
+            ledger.exit_if_unordered(project_dir)
+        assert exc.value.code == 1
+        return capsys.readouterr().out
+
+    def test_missing_scenes_csv(self, project_dir, capsys):
+        os.remove(_scenes_path(project_dir))
+        assert 'ERROR: reference/scenes.csv is missing' in self._stop(project_dir, capsys)
+
+    def test_empty_scenes_csv(self, project_dir, capsys):
+        open(_scenes_path(project_dir), 'w').close()
+        assert 'ERROR: reference/scenes.csv is empty' in self._stop(project_dir, capsys)
+
+    def test_a_header_with_no_scenes_passes(self, project_dir):
+        _write_scenes(project_dir, [])
+        ledger.exit_if_unordered(project_dir)
+
+    def test_no_id_column(self, project_dir, capsys):
+        with open(_scenes_path(project_dir), 'w') as f:
+            f.write('slug|seq\na|1\n')
+        out = self._stop(project_dir, capsys)
+        assert 'ERROR: scenes.csv: reference/scenes.csv has no id column' in out
+
+    def test_no_seq_column(self, project_dir, capsys):
+        with open(_scenes_path(project_dir), 'w') as f:
+            f.write('id|title\na|A\n')
+        assert 'scenes.csv has no seq column' in self._stop(project_dir, capsys)
+
+    def test_not_utf8_is_not_called_a_missing_seq(self, project_dir, capsys):
+        with open(_scenes_path(project_dir), 'wb') as f:
+            f.write('id|seq|title\na|1|Café\n'.encode('latin-1'))
+        out = self._stop(project_dir, capsys)
+        assert "can't be read" in out and 'Save it as UTF-8 text' in out
+        assert 'number in seq' not in out
+
+    def test_a_duplicated_id_and_the_tie_it_hid(self, project_dir, capsys):
+        _write_scenes(project_dir, ['x|5|A', 'y|5|B', 'x|9|C'])
+        out = self._stop(project_dir, capsys)
+        assert 'ERROR: scenes.csv: x is on 2 rows' in out
+        assert 'ERROR: scenes.csv: x, y share seq 5,' in out
+        assert 'its own id' in out and "author's call" in out
+
+    def test_a_blank_id(self, project_dir, capsys):
+        _write_scenes(project_dir, ['a|1|A', '|2|Untitled'])
+        assert "ERROR: scenes.csv: a row has no id (seq '2'" in self._stop(project_dir, capsys)
+
+    def test_every_problem_in_one_pass(self, project_dir, capsys):
+        _write_scenes(project_dir, ['a|nan|A', 'b|first|B', 'c|3|C', 'd|3.0|D'])
+        out = self._stop(project_dir, capsys)
+        assert "a has no numeric seq ('nan')" in out
+        assert "b has no numeric seq ('first')" in out
+        assert 'c, d share seq 3 / 3.0' in out
+        assert 'Give every scene a number in seq.' in out
+
+    def test_a_byte_order_mark_still_finds_the_tie(self, project_dir, capsys):
+        with open(_scenes_path(project_dir), 'w', encoding='utf-8') as f:
+            f.write('﻿id|seq|title\r\na|1|A\r\nb|1|B\r\n')
+        assert 'a, b share seq 1' in self._stop(project_dir, capsys)
+
+    def test_a_byte_order_mark_with_unique_seqs_passes(self, project_dir):
+        path = _scenes_path(project_dir)
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('﻿' + text)
+        ledger.exit_if_unordered(project_dir)
+
+    def test_many_unnumbered_scenes_are_capped(self, project_dir, capsys):
+        _write_scenes(project_dir, [f's{n}||T' for n in range(25)])
+        out = self._stop(project_dir, capsys)
+        assert out.count('has no numeric seq') == 20
+        assert '5 more scene(s) have no numeric seq' in out

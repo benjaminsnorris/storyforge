@@ -64,8 +64,14 @@ def test_a_command_stops_on_a_shared_seq_before_any_call(
     with pytest.raises(SystemExit) as exc:
         mod.main([])
     assert exc.value.code == 1
+    # The exit is the stop's own, not a later one the fixture would reach
+    # anyway (each command has other reasons to exit 1 here)
+    assert exc.traceback[-1].name == 'stop'
+    assert exc.traceback[-2].name == 'exit_if_unordered'
+    out = capsys.readouterr().out
     assert (f'{", ".join(sorted([rows[1]["id"], rows[2]["id"]]))} share seq '
-            f'{rows[1]["seq"]}') in capsys.readouterr().out
+            f'{rows[1]["seq"]}') in out
+    assert out.rstrip().endswith('reports these as duplicate-seq).')
 
 
 def test_the_dispatcher_turns_a_late_error_into_a_plain_stop(project_dir, monkeypatch, capsys):
@@ -262,7 +268,7 @@ class TestEstablishedFacts:
         assert '(the 2 most recent; 2 older not shown)' in prompt
         assert 'older states left out' in ''.join(capsys.readouterr())
 
-    def test_a_scene_without_a_number_stops_write_and_revise(self, project_dir):
+    def test_a_scene_without_a_number_stops_write_and_revise(self, project_dir, capsys):
         from storyforge.elaborate import _read_csv, _write_csv
         scenes = os.path.join(project_dir, 'reference', 'scenes.csv')
         rows = _read_csv(scenes)
@@ -271,6 +277,10 @@ class TestEstablishedFacts:
         with pytest.raises(SystemExit) as exc:
             ledger.exit_if_unordered(project_dir)
         assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert "ERROR: scenes.csv: act1-sc01 has no numeric seq ('first')" in out
+        assert 'ERROR: Give every scene a number in seq.' in out
+        assert 'share seq' not in out
 
     def test_scenes_sharing_a_seq_stop_naming_each_seq(self, project_dir, capsys):
         """scene_order put tied scenes in id order without a word, so the
