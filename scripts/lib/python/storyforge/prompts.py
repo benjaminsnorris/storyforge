@@ -1346,12 +1346,13 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
                              project_dir: str, shown: set[str],
                              rewrite: bool = False) -> str:
     """The ledger's binding facts the scene must agree with: for its POV and
-    on-stage characters (pronouns from characters.csv, `fixed` facts, states
-    entering the scene) and its location, and those the scene itself has
-    already established (``ledger.drafting_slice``). Facts in ``shown`` (the
-    brief's ``physical_state_in``, listed above it) are left out. Empty when
-    neither the ledger nor characters.csv's ``pronouns`` has anything for
-    the scene (an empty ledger still gives the pronouns).
+    on-stage characters (pronouns: characters.csv's, or for an adaptation
+    the imported source's, ``source.character_pronouns``; `fixed` facts,
+    states entering the scene) and its location, and those the scene itself
+    has already established (``ledger.drafting_slice``). Facts in ``shown``
+    (the brief's ``physical_state_in``, listed above it) are left out. Empty
+    when neither the ledger nor the pronouns have anything for the scene (an
+    empty ledger still gives the pronouns).
 
     Logs a WARNING for a POV, on-stage or location name that isn't in the
     registries (its facts can't be found), for facts tied to a scene id
@@ -1364,8 +1365,11 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
     Raises:
         ValueError: if scenes.csv has a scene without a numeric ``seq``
             (``ledger.exit_if_unordered`` stops commands on that first).
+        source.SourceError: for a ``source:`` block or an imported
+            characters.csv that can't be read.
     """
     from . import ledger
+    from . import source as source_mod
     from .common import log
     from .elaborate import _read_csv
     from .enrich import load_alias_map
@@ -1374,11 +1378,17 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
     ref_dir = os.path.join(project_dir, 'reference')
     rows = ledger.load_from(ref_dir)
     char_rows = _read_csv(os.path.join(ref_dir, 'characters.csv'))
-    has_pronouns = any('pronouns' in r for r in char_rows)
+    # the own cell wins (as the resolver says), so only source values are
+    # taken from it: a project without a `source:` block reads as before
+    cast = source_mod.character_pronouns(project_dir)
+    from_source = {cid: p for cid, p in cast.by_id.items()
+                   if p.origin == source_mod.FROM_SOURCE}
+    has_pronouns = any('pronouns' in r for r in char_rows) or bool(from_source)
     # an empty ledger still has the characters' pronouns to give (a book
     # whose ledger isn't built yet: the pronouns are the commonest fact the
     # gate catches a draft getting wrong)
-    if not rows and not any((r.get('pronouns') or '').strip() for r in char_rows):
+    if (not rows and not from_source
+            and not any((r.get('pronouns') or '').strip() for r in char_rows)):
         return ''
     order = ledger.scene_order(project_dir)
     if scene_id not in order:
@@ -1435,6 +1445,11 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
         row = places.get(sid, {}) if is_place else characters.get(sid, {})
         heading = (row.get('name') or sid).strip()
         pronouns = '' if is_place else (row.get('pronouns') or '').strip()
+        if not is_place and not pronouns and sid in from_source:
+            pronouns = from_source[sid].value
+        elif not is_place and not pronouns and sid in cast.by_id and cast.by_id[sid].note:
+            log(f'WARNING: {scene_id}: no pronouns for {heading} from the source: '
+                f'{cast.by_id[sid].note}')
         if pronouns and pronoun_key(pronouns) is None:
             # validate blocks it; the writer is never told an unreadable value
             log(f'WARNING: {scene_id}: {heading}\'s pronouns in characters.csv '
@@ -1480,8 +1495,9 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
                         'differ, the brief wins.\n'
                         + '\n'.join(line(r) for r in own))
     if no_pronouns:
-        log(f'WARNING: {scene_id}: no pronouns in characters.csv for '
-            f'{", ".join(no_pronouns)}; the writer guesses theirs')
+        log(f'WARNING: {scene_id}: no pronouns in characters.csv '
+            + ('or the source ' if cast.mode else '')
+            + f'for {", ".join(no_pronouns)}; the writer guesses theirs')
     if not sections:
         return ''
     return ('## Established Facts\n\n'

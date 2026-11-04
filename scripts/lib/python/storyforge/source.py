@@ -1204,6 +1204,186 @@ def catalogue(project_dir: str, cfg: SourceConfig) -> dict[str, dict[str, dict]]
 
 
 # ============================================================================
+# Characters' pronouns (#515)
+# ============================================================================
+
+#: `Pronoun.origin` values
+OWN, FROM_SOURCE, NO_PRONOUNS = 'own', 'source', ''
+
+
+@dataclass(frozen=True)
+class Pronoun:
+    """One project character's pronouns and where they came from
+    (`character_pronouns`)."""
+    #: the cell as written, stripped ('' for none); a source value is used
+    #: only when `schema.pronoun_key` reads it, an own value always
+    value: str
+    #: OWN (the project's characters.csv), FROM_SOURCE, or NO_PRONOUNS
+    origin: str
+    #: the source the matched row is in ('' when none matched)
+    slug: str = ''
+    #: how the source row was matched: 'id', 'name', or '' for none
+    match: str = ''
+    #: the matched source row's value, readable or not, kept when the
+    #: project's own value wins (validate compares the two)
+    source_value: str = ''
+    #: why the source gave nothing usable for a character it could have
+    #: ('' when nothing to say): an unreadable value, a name several source
+    #: characters share, sources that disagree
+    note: str = ''
+
+
+@dataclass(frozen=True)
+class CastPronouns:
+    """`character_pronouns`: {project character id: Pronoun}, and what about
+    the sources kept any of them from being read (`notes`)."""
+    by_id: dict[str, Pronoun] = field(default_factory=dict)
+    #: source-wide problems (not imported, no pronouns column)
+    notes: tuple[str, ...] = ()
+    #: the project's `source.mode` ('' without a `source:` block)
+    mode: str = ''
+
+    def counts_line(self) -> str:
+        """'Pronouns: 29 own, 31 from source odyssey, 2 none (Mentes, Noemon)'."""
+        own = sum(1 for p in self.by_id.values() if p.origin == OWN)
+        parts = [f'{own} own']
+        by_slug: dict[str, int] = {}
+        for p in self.by_id.values():
+            if p.origin == FROM_SOURCE:
+                by_slug[p.slug] = by_slug.get(p.slug, 0) + 1
+        parts += [f'{n} from source {slug}' for slug, n in by_slug.items()]
+        none = [cid for cid, p in self.by_id.items() if p.origin == NO_PRONOUNS]
+        if none:
+            shown = ', '.join(none[:10]) + (f' and {len(none) - 10} more'
+                                             if len(none) > 10 else '')
+            parts.append(f'{len(none)} none ({shown})')
+        else:
+            parts.append('0 none')
+        return 'Pronouns: ' + ', '.join(parts)
+
+
+def _name_keys(row: dict[str, str]) -> list[str]:
+    """A registry row's name and aliases, lowercased and stripped (the ids
+    are matched separately)."""
+    names = [row.get('name') or '', *(row.get('aliases') or '').split(';')]
+    out = []
+    for n in names:
+        n = ' '.join(n.split()).lower()
+        if n and n not in out:
+            out.append(n)
+    return out
+
+
+def character_pronouns(project_dir: str) -> CastPronouns:
+    """Each project character's pronouns (reference/characters.csv, keyed by
+    `id`, or `name` for a row with none; a later row with the same key
+    wins), and where they came from:
+
+    - the project's own `pronouns` cell when it isn't empty (OWN, as written,
+      readable or not: the readers report an unreadable own value as before);
+    - otherwise, for an adaptation, the imported source's
+      (`reference/source/<slug>/characters.csv`, whose ids the import mapped
+      to the project's): the row with the same id in any source, or else the
+      one source character whose name or alias is one of the character's
+      names. A name or alias two source characters share (different ids:
+      the Homer map's Thoas, Laodice, Xanthus) matches neither, so a name
+      match never guesses. One person in several sources has one id there
+      (the map gives it), and is matched once; sources that give that person
+      different pronouns give none. A value `schema.pronoun_key` can't read
+      is not used (`Pronoun.note` says so);
+    - otherwise NO_PRONOUNS.
+
+    The source row is matched even when the own value wins, so validate can
+    compare them (`Pronoun.source_value`). Nothing is written.
+
+    Without a `source:` block every character is OWN or NO_PRONOUNS from its
+    own cell, exactly what the readers read before #515. Raises SourceError
+    for a `source:` block that can't be used, or an imported characters.csv
+    that can't be read; a source not imported yet is a note."""
+    from storyforge.elaborate import _read_csv
+    from storyforge.schema import pronoun_key
+    rows: dict[str, dict[str, str]] = {}
+    for row in _read_csv(os.path.join(project_dir, 'reference', 'characters.csv')):
+        cid = (row.get('id') or '').strip() or (row.get('name') or '').strip()
+        if cid:
+            rows[cid] = row
+    cfg = read_config(project_dir)
+
+    # Every imported source character, by id (the project's id) and by name
+    notes: list[str] = []
+    by_id: dict[str, list[tuple[str, str]]] = {}      # id → [(slug, value)]
+    by_name: dict[str, set[str]] = {}                 # name → {id}
+    for slug in (cfg.slugs() if cfg else []):
+        if not is_imported(project_dir, slug):
+            notes.append(f'source {slug} is not imported, so no pronouns are read '
+                         f'from it (run `storyforge source import`)')
+            continue
+        table = read_table(project_dir, slug, 'characters.csv')
+        if not table:
+            notes.append(f'reference/source/{slug}/characters.csv is missing or empty, '
+                         f'so no pronouns are read from it')
+            continue
+        if 'pronouns' not in table[0]:
+            notes.append(f'reference/source/{slug}/characters.csv has no pronouns '
+                         f'column, so no pronouns are read from it')
+            continue
+        for srow in table:
+            sid = (srow.get('id') or '').strip()
+            if not sid:
+                continue
+            by_id.setdefault(sid, []).append((slug, (srow.get('pronouns') or '').strip()))
+            for n in _name_keys(srow):
+                by_name.setdefault(n, set()).add(sid)
+
+    out: dict[str, Pronoun] = {}
+    for cid, row in rows.items():
+        own = (row.get('pronouns') or '').strip()
+        sid, match, note = (cid, 'id', '') if cid in by_id else (None, '', '')
+        if sid is None and by_id:
+            unique = {next(iter(by_name[n])) for n in _name_keys(row)
+                      if len(by_name.get(n, ())) == 1}
+            shared = [n for n in _name_keys(row) if len(by_name.get(n, ())) > 1]
+            # A source character the project has under its own id is that
+            # person, not this one who shares a name with them
+            taken = sorted(unique & set(rows))
+            unique -= set(taken)
+            if len(unique) == 1:
+                sid, match = unique.pop(), 'name'
+            elif unique:
+                note = (f'its names match {len(unique)} source characters '
+                        f'({", ".join(sorted(unique))}), so none is used')
+            elif shared:
+                note = '; '.join(
+                    f'{n!r} is the name of {len(by_name[n])} source characters '
+                    f'({", ".join(sorted(by_name[n]))})' for n in shared) + ', so none is used'
+            elif taken:
+                note = (f'its name is source character {", ".join(taken)}\'s, who is '
+                        f'another character in characters.csv, so none is used')
+        slug = value = ''
+        if sid is not None:
+            hits = by_id[sid]
+            slug, value = hits[0]
+            keys = {pronoun_key(v) for _, v in hits if v}
+            if len(keys) > 1:
+                note = ('the sources disagree (' + ', '.join(
+                    f'{s}: {v!r}' for s, v in hits if v) + '), so none is used')
+                value = ''
+            elif value == '':
+                # the first source has none: take another's
+                slug, value = next(((s, v) for s, v in hits if v), (slug, ''))
+            if value and pronoun_key(value) is None:
+                note = (f'source {slug} gives {value!r}, which is not a pronoun '
+                        f'storyforge knows, so it is not used')
+        if own:
+            out[cid] = Pronoun(own, OWN, slug, match, value, note)
+        elif value and not note:
+            out[cid] = Pronoun(value, FROM_SOURCE, slug, match, value)
+        else:
+            out[cid] = Pronoun('', NO_PRONOUNS, slug, match, value, note)
+    return CastPronouns(out, tuple(notes), cfg.mode if cfg else '')
+
+
+# ============================================================================
 # The source map
 # ============================================================================
 

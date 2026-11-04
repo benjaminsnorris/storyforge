@@ -1194,7 +1194,20 @@ def _validate_pronouns(ref_dir: str, checks: list[dict]) -> None:
     no column, or a character with none, is advisory (the writer then
     guesses, and a wrong gender is one of the commonest errors the gate
     catches). A file that can't be read blocks; no file, or rows with no
-    `id`, is advisory: nothing could be checked."""
+    `id`, is advisory: nothing could be checked.
+
+    An adaptation's characters with an empty cell take the imported
+    source's pronouns (`source.character_pronouns`, as the drafting prompt
+    and the gate do), so they aren't missing, and the column itself may be
+    absent. Then two more checks: what the source couldn't give
+    (`character-pronouns-source`: an unreadable source value, a name
+    several source characters share, a source not imported; advisory, but
+    a source that can't be read blocks), and an own value that differs from
+    its matched source value (`character-pronouns-source-mismatch`:
+    blocking in `faithful`, advisory in `free`; the same people should have
+    the same pronouns). Without a `source:` block the checks are as before
+    #515."""
+    from . import source
     from .schema import VALID_PRONOUNS, pronoun_key
     allowed = ', '.join(sorted(VALID_PRONOUNS))
     path = os.path.join(ref_dir, 'characters.csv')
@@ -1213,8 +1226,18 @@ def _validate_pronouns(ref_dir: str, checks: list[dict]) -> None:
             'characters', 'character-pronouns-column', False,
             f"characters.csv can't be read ({e}): pronouns not checked"))
         return
+    project_dir = os.path.dirname(os.path.abspath(ref_dir))
+    try:
+        cast = source.character_pronouns(project_dir)
+    except source.SourceError as e:
+        cast = None
+        checks.append(_check(
+            'characters', 'character-pronouns-source', False,
+            f"The source's pronouns can't be read ({e}): characters with none in "
+            f"characters.csv are counted as having none"))
+    adaptation = cast is not None and bool(cast.mode)
     header = [h.strip() for h in first.rstrip('\r\n').split(DELIMITER)]
-    if 'pronouns' not in header:
+    if 'pronouns' not in header and not adaptation:
         checks.append(_check(
             'characters', 'character-pronouns-column', False,
             f"characters.csv has no pronouns column: add one ({allowed}, or a slash form "
@@ -1228,18 +1251,51 @@ def _validate_pronouns(ref_dir: str, checks: list[dict]) -> None:
             "characters.csv has no row with an id: pronouns not checked",
             severity='advisory'))
         return
+    resolved = cast.by_id if cast is not None else {}
+
+    def from_source(cid: str) -> bool:
+        p = resolved.get(cid)
+        return p is not None and p.origin == source.FROM_SOURCE
+
     bad = sorted(f"{r['id'].strip()} ({r['pronouns']!r})" for r in named
                  if pronoun_key(r.get('pronouns', '')) is None)
     checks.append(_check(
         'characters', 'character-pronouns-values', not bad,
         f"characters.csv pronouns not {allowed} or a slash form of one (she/her): "
         f"{', '.join(bad)}" if bad else "Every character's pronouns are valid"))
-    empty = sorted(r['id'].strip() for r in named if pronoun_key(r.get('pronouns', '')) == '')
+    empty = sorted(r['id'].strip() for r in named
+                   if pronoun_key(r.get('pronouns', '')) == '' and not from_source(r['id'].strip()))
     checks.append(_check(
         'characters', 'character-pronouns-missing', not empty,
         f"Characters with no pronouns (the writer guesses): {', '.join(empty)}"
         if empty else "Every character has pronouns",
         severity='advisory'))
+    if not adaptation:
+        return
+    ids = [r['id'].strip() for r in named]
+    unread = list(cast.notes) + [
+        f"{cid}: {resolved[cid].note}" for cid in sorted(set(ids))
+        if cid in resolved and resolved[cid].origin != source.OWN and resolved[cid].note]
+    checks.append(_check(
+        'characters', 'character-pronouns-source', not unread,
+        "Pronouns not read from the source: " + '; '.join(unread) if unread
+        else "Every source pronoun matched is readable",
+        severity='advisory'))
+    differ = []
+    for cid in sorted(set(ids)):
+        p = resolved.get(cid)
+        if p is None or p.origin != source.OWN or not p.source_value:
+            continue
+        own, theirs = pronoun_key(p.value), pronoun_key(p.source_value)
+        if own and theirs and own != theirs:
+            differ.append(f"{cid} ({p.value!r} in characters.csv, {p.source_value!r} "
+                          f"in source {p.slug})")
+    checks.append(_check(
+        'characters', 'character-pronouns-source-mismatch', not differ,
+        "Pronouns that differ from the source's (the same people should have the "
+        "same pronouns: fix one): " + ', '.join(differ) if differ
+        else "No character's pronouns differ from the source's",
+        severity='blocking' if cast.mode == 'faithful' else 'advisory'))
 
 
 def _validate_brief_names(ref_dir: str, checks: list[dict]) -> None:
