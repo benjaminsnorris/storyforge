@@ -1307,7 +1307,7 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             continue
         scene = get_scene(scene_id, ref_dir) or {}
         skeleton = {k: scene.get(k, '') for k in ('title', 'pov', 'location')}
-        names = [scene.get('pov', ''), scene.get('location', '')] \
+        names = [scene.get('pov', '')] + scene.get('location', '').split(';') \
             + scene.get('on_stage', '').split(';')
         scene_subjects = {subjects[n.strip().lower()] for n in names
                           if n.strip().lower() in subjects}
