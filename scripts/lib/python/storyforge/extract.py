@@ -320,11 +320,19 @@ def skeleton_cues(response: str) -> dict[str, str]:
 # Phase 2: Intent (scene-intent.csv fields)
 # ============================================================================
 
-def build_intent_prompt(scene_id: str, scene_text: str,
-                        profile: dict[str, str],
-                        skeleton: dict[str, str],
-                        registries_text: str = '') -> str:
-    """Build prompt for Phase 2: extract scene-intent.csv fields."""
+#: Phase 2's cast instructions (#523), shared word for word by the intent
+#: prompt and the cast-only prompt (`extract --phase 2 --casts-only`), so
+#: the two can't drift apart
+CAST_INSTRUCTIONS = """\
+- characters (list): everyone who is present and acts or speaks (as on_stage), plus anyone whose actions are narrated in this scene or who is discussed at length. Not someone named only in a patronymic, epithet, title, simile, comparison or genealogy
+- on_stage (list): everyone present in the scene who acts or speaks — people, gods, creatures — including a god or other power acting on the scene from afar, and one present in disguise (under their own id, not the disguise's)
+- For each person in either list, use their id from the Characters registry when they are listed there; give anyone not listed a new lowercase-hyphen id from their full name (e.g., kael-davreth)"""
+
+
+def _intent_head(scene_id: str, scene_text: str, profile: dict[str, str],
+                 skeleton: dict[str, str], registries_text: str) -> str:
+    """What the intent and cast prompts share after their first line: the
+    scene's context, its prose and the registries."""
     context = f"""Title: {skeleton.get('title', scene_id)}
 POV: {skeleton.get('pov', 'unknown')}
 Location: {skeleton.get('location', 'unknown')}
@@ -334,15 +342,24 @@ Central conflict: {profile.get('central_conflict', 'unknown')}"""
 
     registries_section = f'\n{registries_text}\n' if registries_text else ''
 
-    return f"""Extract the narrative intent and dynamics from this scene.
-
-## Context
+    return f"""## Context
 {context}
 
 ## Scene: {scene_id}
 
 {scene_text}
-{registries_section}
+{registries_section}"""
+
+
+def build_intent_prompt(scene_id: str, scene_text: str,
+                        profile: dict[str, str],
+                        skeleton: dict[str, str],
+                        registries_text: str = '') -> str:
+    """Build prompt for Phase 2: extract scene-intent.csv fields."""
+    head = _intent_head(scene_id, scene_text, profile, skeleton, registries_text)
+    return f"""Extract the narrative intent and dynamics from this scene.
+
+{head}
 ## Instructions
 
 Answer with a JSON object with these fields (a list field is a JSON array of strings; "unknown" where a value cannot be determined):
@@ -353,11 +370,49 @@ Answer with a JSON object with these fields (a list field is a JSON array of str
 - value_at_stake: the single abstract value being tested, in one or two words: safety, love, justice, truth, freedom, honor, etc. Name only the value, with no explanation; the specifics belong in function
 - value_shift: polarity change, exactly one of these four: +/- means positive to negative, -/+ means negative to positive, +/++ means good to better, -/-- means bad to worse
 - turning_point: action or revelation — action means a character does something that changes the situation; revelation means new information changes the situation
-- characters (list): everyone who is present and acts or speaks (as on_stage), plus anyone whose actions are narrated in this scene or who is discussed at length. Not someone named only in a patronymic, epithet, title, simile, comparison or genealogy
-- on_stage (list): everyone present in the scene who acts or speaks — people, gods, creatures — including a god or other power acting on the scene from afar, and one present in disguise (under their own id, not the disguise's)
-- For each person in either list, use their id from the Characters registry when they are listed there; give anyone not listed a new lowercase-hyphen id from their full name (e.g., kael-davreth)
+{CAST_INSTRUCTIONS}
 - mice_threads (list): MICE threads this scene affects: +thread-name only if this scene is where the thread begins, -thread-name only if this scene resolves it, and the bare thread-name if the scene advances or touches a thread that is already open. Most scenes open or close nothing. Use the thread's canonical name from the registry, not the type prefix.
 - confidence: high / medium / low — your overall confidence in these extractions"""
+
+
+def build_cast_prompt(scene_id: str, scene_text: str,
+                      profile: dict[str, str],
+                      skeleton: dict[str, str],
+                      registries_text: str = '') -> str:
+    """Phase 2's cast alone (`extract --phase 2 --casts-only`): the intent
+    prompt's context, prose, registries and cast instructions, asking for
+    nothing else (`CAST_SCHEMA`)."""
+    head = _intent_head(scene_id, scene_text, profile, skeleton, registries_text)
+    return f"""Name the cast of this scene.
+
+{head}
+## Instructions
+
+Answer with a JSON object with these two fields, each a JSON array of strings:
+
+{CAST_INSTRUCTIONS}"""
+
+
+def parse_cast_response(response: str) -> 'CastAnswer':
+    """The (characters, on_stage) ids in a cast-only reply (`CAST_SCHEMA`),
+    as given: blanks, placeholders ("unknown", "none") and parentheticals
+    dropped, each entry on one line, a `|` made `/` (`_text`) and a `;` a
+    comma, so an entry is one CSV list item. Raises ValueError on an
+    unreadable reply."""
+    from .enrich import strip_parentheticals
+    from .extract_casts import CastAnswer
+    data = _json_answer(response, CAST_SCHEMA)
+    out = []
+    for key in ('characters', 'on_stage'):
+        items = []
+        for raw in data[key]:
+            if not isinstance(raw, str):
+                raise ValueError(f'reply\'s {key} holds a non-string: {raw!r:.80}')
+            item = strip_parentheticals(_text(raw).replace(';', ','))
+            if item and not is_placeholder(item) and item.lower() != 'unknown':
+                items.append(item)
+        out.append(items)
+    return CastAnswer(out[0], out[1])
 
 
 def parse_intent_response(response: str, scene_id: str) -> dict[str, str]:
@@ -656,6 +711,8 @@ CHARACTERIZE_SCHEMA = _object({
     'compression_points': _STR_LIST, 'structural_concerns': _STR_LIST,
 })
 INTENT_SCHEMA = _intent_schema()
+#: The cast-only reply (`build_cast_prompt`): INTENT_SCHEMA's two cast lists
+CAST_SCHEMA = _object({'characters': _STR_LIST, 'on_stage': _STR_LIST})
 
 
 _SKELETON_FIELDS = ('title', 'pov', 'location', 'time_of_day', 'duration', 'type',
