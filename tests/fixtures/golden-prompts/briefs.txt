@@ -41,6 +41,20 @@ new-x1|||||||||||||||archive-key-dorren|archive-key-dorren
 act2-sc03|Convince the council that the eastern anomalies require investigation|Council members see the anomaly as Dorren's procedural fixation, not evidence of erasure|no|Accept the council's dismissal and work within channels, or go outside the institution entirely|Goes outside — shares findings with Kael privately after the meeting|village-vanished;archive-erasure|council-dismisses-evidence|Presents evidence;Council dismisses;Dorren argues;Is overruled;Meets Kael after|Council: "We appreciate your diligence, Cartographer.";Dorren to Kael: "They won't look."|resolve;frustration;bitter-resignation;quiet-defiance|governance-as-weight;blindness/seeing||act1-sc02;new-x1|false|archive-key-dorren;exhaustion-tessa|archive-key-dorren
 ```
 
+## Reference Materials
+
+### Key Decisions
+
+# Key Decisions — The Cartographer's Silence
+
+## KD-001: Magic System
+**Decision:** Maps don't just record reality — they shape it. Erasing something from the map weakens its hold on existence.
+**Rationale:** This inverts the cartographer's assumed neutrality and makes Dorren's profession the source of the conflict.
+
+## KD-002: Institutional Complicity
+**Decision:** The Pressure Cartography Office knows their maps affect reality. The "pressure" in the name is literal.
+**Rationale:** Raises the stakes from personal mystery to institutional horror.
+
 
 REGISTRIES
 
