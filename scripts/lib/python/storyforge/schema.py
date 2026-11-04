@@ -609,6 +609,30 @@ def _validated_files() -> list[tuple[str, list[str], str]]:
 _PHYSICAL_VIEW_PREFIX = 'physical_states_'
 
 
+def describe_schema_error(e: dict) -> str:
+    """One `validate_schema` error as the line `validate` and `migrate`
+    print: "row | column: "value" — why"."""
+    c = e.get('constraint')
+    if c == 'enum':
+        return f'{e["row"]} | {e["column"]}: "{e["value"]}" — not in ({", ".join(e["allowed"])})'
+    if c == 'registry':
+        unresolved = ', '.join(e.get('unresolved', [e['value']]))
+        return f'{e["row"]} | {e["column"]}: "{unresolved}" — not in {e["registry"]}'
+    if c == 'integer':
+        return f'{e["row"]} | {e["column"]}: "{e["value"]}" — expected integer'
+    if c == 'boolean':
+        return f'{e["row"]} | {e["column"]}: "{e["value"]}" — expected true/false'
+    if c == 'mice':
+        return '; '.join(f'{e["row"]} | {e["column"]}: "{p["entry"]}" — {p["reason"]}'
+                         for p in e.get('problems', [])) or f'{e["row"]} | {e["column"]}'
+    if c == 'scene_ids':
+        unresolved = ', '.join(e.get('unresolved', []))
+        return f'{e["row"]} | {e["column"]}: "{unresolved}" — not in scenes.csv'
+    if c == 'ledger':
+        return e.get('reason', '')
+    return f'{e.get("row", "?")} | {e.get("column", "?")}: "{e.get("value", "")}" — {c}'
+
+
 def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
     """Validate all scene CSV values against column schema.
 
