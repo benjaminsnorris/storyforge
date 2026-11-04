@@ -452,7 +452,10 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
              if out.first.plan_conflicts and not gate.problems_to_fix(out.first)
              else f'after {fixes} (what is left is plan conflicts: the author\'s)'
              if left_to_author else f'after {fixes}')
-    if out.notes:
+    if out.notes and not out.rounds:   # the first fix made it worse: the prose is as written
+        tried += (f' (that fix was discarded, the scene left as written: {len(out.notes)} '
+                  f'note(s) in the log)')
+    elif out.notes:
         tried += f' (a later fix was discarded: {len(out.notes)} note(s) in the log)'
     return False, _pend(project_dir, scene_id, command,
                         f'{len(problems)} problem(s) {tried}: '

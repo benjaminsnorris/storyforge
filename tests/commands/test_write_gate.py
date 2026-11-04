@@ -620,6 +620,19 @@ class TestPendingReason480:
         assert 'NOTE: fix round 2 failed (x)' in capsys.readouterr().out
         assert why.startswith('1 problem(s) after one fix (a later fix was discarded')
 
+    def test_a_discarded_first_fix_says_the_scene_is_as_written(self, project_dir,
+                                                                monkeypatch, capsys):
+        """mended-bridle (2026-11-03): a first fix that made the scene worse
+        is discarded; the reason must not say a later one was."""
+        r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[BAD]))
+        note = ('fix round 1 brought in 1 problem(s) in the words it changed (x); kept the '
+                'prose as given and the first verdict')
+        passed, why = self._out(project_dir, monkeypatch,
+                                gate.GatedScene('prose', r, r, fixed=False, notes=[note]))
+        assert not passed and f'NOTE: {note}' in capsys.readouterr().out
+        assert why.startswith('1 problem(s) after one fix (that fix was discarded, the scene '
+                              'left as written')
+
     def test_plan_conflicts_left_after_a_fix_are_the_authors(self, project_dir, monkeypatch):
         """SF-5 (#482): a fix whose re-check left only plan conflicts said
         "after one fix", pointing at the prose."""
