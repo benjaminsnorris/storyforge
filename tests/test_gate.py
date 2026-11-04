@@ -1038,10 +1038,10 @@ class TestGateAndFixRoutes:
         assert out.fixed and calls == ['old', 'old']
 
 
-class TestSecondFixRound:
-    """2026-11-01: of E8's 28 gated replays, 10 still failed after the one
-    fix, most because it half-fixed the finding (He → She with "him" left;
-    "eight days" → "five", still off the calendar)."""
+class _FixRounds:
+    """`gate_and_fix` with `gate_scene` and `fix_scene` replaced (`_run`)."""
+
+    PROSE = 'v0'
 
     def _result(self, *tags, extraction=False):
         from storyforge.checker import CheckResult, Finding
@@ -1079,9 +1079,19 @@ class TestSecondFixRound:
             k['edits_out'].extend(edits)
             return new
         monkeypatch.setattr(gate, 'fix_scene', fix)
-        out = gate.gate_and_fix('p', SCENE, command='revise', prose='v0',
+        self.blocked = []
+        monkeypatch.setattr(gate, '_note_blocked',
+                            lambda pd, sid, cmd, result: self.blocked.append(result))
+        out = gate.gate_and_fix('p', SCENE, command='revise', prose=self.PROSE,
                                 log_dir=str(tmp_path))
         return out, dirs, seen
+
+
+
+class TestSecondFixRound(_FixRounds):
+    """2026-11-01: of E8's 28 gated replays, 10 still failed after the one
+    fix, most because it half-fixed the finding (He → She with "him" left;
+    "eight days" → "five", still off the calendar)."""
 
     def test_a_second_round_sees_the_first_and_can_pass(self, monkeypatch, tmp_path):
         e1 = [{'find': 'eight days', 'replace': 'five days', 'problem': 1}]
@@ -1202,6 +1212,132 @@ class TestSecondFixRound:
         assert '- "eight days" became "five days"' in prompt
         assert "don't guess again" in prompt and 'change the rest' in prompt
         assert '## Earlier fixes' not in gate.build_fix_prompt('s', 'Prose.', ['x'])
+
+
+class TestFirstFixNeverWorse(_FixRounds):
+    """mended-bridle (2026-11-03): the draft gave Cora the left-hand grip its
+    brief and the ledger give. The check reported it against a later scene
+    (the one in error) with two real problems; the first fix made the scene
+    match that scene, and its re-check failed on one broken promise, in the
+    words the fix wrote. Round 1's prose was kept unconditionally, so the
+    worse scene was written."""
+
+    PROSE = ('A man had lain on the shelf for two days. She took the case in her left hand, '
+             'the strap looped between two fingers. Her right hand came up empty to the '
+             'cheekpiece. The coffeepot sat cold on the stove.')
+    FIXED = ('A man had lain on the shelf. She kept the case on her right shoulder, two '
+             'fingers hooked under the strap. Her left hand came up to the cheekpiece. The '
+             'coffeepot was already hot on the stove.')
+    EDITS = [{'problem': 1, 'find': ' for two days', 'replace': ''},
+             {'problem': 3, 'find': 'took the case in her left hand',
+              'replace': 'kept the case on her right shoulder'}]
+
+    def _finding(self, kind, quote, source='cache', established='the case riding her '
+                 'right shoulder the way her father had', fact_id='', code='TRT'):
+        from storyforge.checker import Finding
+        return Finding(kind, code, quote, source, established, fact_id, 'why')
+
+    def _with(self, *findings):
+        from storyforge.checker import CheckResult
+        return gate.GateResult(SCENE, check=CheckResult(SCENE, findings=list(findings)))
+
+    def _first(self):
+        return self._with(
+            self._finding('contradiction', 'A man had lain on the shelf for two days',
+                          source='judges-morning', established='Watch her. Route, methods, '
+                          'schedule.', code='PHY'),
+            self._finding('contradiction', 'The coffeepot sat cold on the stove',
+                          established='He had had it on since he saw the dust', code='PHY'),
+            self._finding('contradiction', 'She took the case in her left hand'))
+
+    def _promise(self, quote):
+        return self._finding('broken-promise', quote, source='',
+                             established='"Left hand on the case. Right hand free."',
+                             fact_id='key_dialogue', code='PRM')
+
+    def test_a_first_fix_that_breaks_a_promise_in_its_own_words_is_discarded(
+            self, monkeypatch, tmp_path):
+        first = self._first()
+        again = self._with(self._promise('She kept the case on her right shoulder'))
+        out, dirs, _ = self._run(monkeypatch, tmp_path, [first, again],
+                                 [(self.FIXED, self.EDITS)])
+        assert _blocking_count(again) < _blocking_count(first)   # fewer, and still worse
+        assert out.prose == self.PROSE and not out.fixed
+        assert out.result is first and out.first is first and out.rounds == []
+        assert len(dirs) == 2   # no second round on the discarded prose
+        assert out.notes[0].startswith('fix round 1 brought in 1 problem(s) in the words it '
+                                       'changed (PRM breaks the brief [key_dialogue]')
+        assert out.notes[0].endswith('kept the prose as given and the first verdict')
+        assert self.blocked == [first]   # gate-blocked.csv is the kept run's again
+
+    def test_a_first_fix_that_leaves_more_problems_is_discarded(self, monkeypatch, tmp_path):
+        first = self._with(self._finding('contradiction', 'The coffeepot sat cold on the '
+                                         'stove', code='PHY'))
+        again = self._with(*[self._finding('contradiction', q, source=s, code='PHY')
+                             for q, s in (('a', 'x'), ('b', 'y'))])
+        out, _, _ = self._run(monkeypatch, tmp_path, [first, again],
+                              [(self.FIXED, self.EDITS)])
+        assert out.prose == self.PROSE and out.result is first
+        assert out.notes[0].startswith('fix round 1 left 2 problem(s), more than the 1')
+
+    def test_a_new_finding_in_words_the_fix_left_alone_is_not_the_fixs(self, monkeypatch,
+                                                                        tmp_path):
+        """Two readings of the same words differ: a re-check finds things the
+        first run didn't, and that doesn't make the fix worse."""
+        first = self._first()
+        again = self._with(self._finding('contradiction', 'A man had lain on the shelf',
+                                         source='arrival', code='PHY'))
+        out, _, _ = self._run(monkeypatch, tmp_path, [first, again],
+                              [(self.FIXED, self.EDITS), (self.FIXED, [])])
+        assert out.prose == self.FIXED and out.result is again and out.notes == []
+        assert len(out.rounds) == 1
+
+    def test_a_problem_the_fix_did_not_clear_is_not_one_it_brought_in(self, monkeypatch,
+                                                                      tmp_path):
+        """A contradiction with the same source in the rewritten words (other
+        established words: a half-fix moved the value): the fix didn't clear
+        it, it didn't make it, and the next round is for it."""
+        first = self._first()
+        again = self._with(self._finding('contradiction', 'She kept the case on her right '
+                                         'shoulder', established='Thomas watched the strap'))
+        out, _, _ = self._run(monkeypatch, tmp_path, [first, again],
+                              [(self.FIXED, self.EDITS), (self.FIXED, [])])
+        assert out.prose == self.FIXED and out.result is again and out.notes == []
+
+    def test_a_quote_across_words_the_fix_took_out_is_the_fixs(self):
+        before = 'He did not see her. She rode on.'
+        after = 'He did see her. She rode on.'
+        changed = gate._changed_ranges(before, after)
+        words = gate._word_list(after)
+        f = self._finding('contradiction', 'He did see her')
+        assert gate._in_edited_text(f, changed, words)
+        assert not gate._in_edited_text(self._finding('contradiction', 'She rode on'),
+                                        changed, words)
+
+    def test_a_quote_found_outside_the_edit_too_is_not_tied_to_it(self):
+        before = 'The river ran high. The road was dry.'
+        after = 'The river ran high. The road was dry. The river ran high.'
+        f = self._finding('contradiction', 'The river ran high')
+        assert not gate._in_edited_text(f, gate._changed_ranges(before, after),
+                                        gate._word_list(after))
+
+    def test_a_reroll_with_no_edit_keeps_its_verdict(self, monkeypatch, tmp_path):
+        """Extraction-only: the same prose gated again, its verdict stands
+        even with more problems (they are the prose's, not a fix's)."""
+        again = self._result('a', 'b')
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result(extraction=True), again, self._result('c')],
+                                 [(self.PROSE, [])])
+        assert out.notes == [] and out.result is again and len(dirs) == 2
+
+    def test_a_pass_after_the_first_fix_is_kept(self, monkeypatch, tmp_path):
+        out, _, _ = self._run(monkeypatch, tmp_path, [self._first(), self._with()],
+                              [(self.FIXED, self.EDITS)])
+        assert out.result.passed and out.prose == self.FIXED and out.fixed
+
+
+def _blocking_count(result):
+    return gate._blocking_count(result)
 
 
 def test_an_unquoted_action_is_not_the_briefs_words(project_dir):

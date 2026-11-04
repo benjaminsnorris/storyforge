@@ -999,6 +999,125 @@ def _undone_edit(earlier: list[FixRound] | tuple, before: str, after: str) -> st
     return None
 
 
+def _word_list(text: str) -> list[str]:
+    from storyforge.checker import normalize
+    return re.findall(r'\w+', normalize(text).lower())
+
+
+def _changed_ranges(before: str, after: str) -> list[tuple[int, int]]:
+    """Where `after` differs from `before`, as word-index ranges of `after`
+    [start, end): words put in or replaced, and an empty range at each place
+    words were only taken out."""
+    from difflib import SequenceMatcher
+    ops = SequenceMatcher(None, _word_list(before), _word_list(after),
+                          autojunk=False).get_opcodes()
+    return [(j1, j2) for tag, _, _, j1, j2 in ops if tag != 'equal']
+
+
+def _quote_ranges(quote: str, words: list[str]) -> list[tuple[int, int]]:
+    """Every place `quote` (its parts, split at an ellipsis, in order) is in
+    `words`, as word-index ranges [start, end)."""
+    parts = [p for p in (_word_list(x) for x in re.split(r'\.\.\.|…', quote)) if p]
+    if not parts:
+        return []
+
+    def at(part: list[str], start: int) -> int:
+        for i in range(start, len(words) - len(part) + 1):
+            if words[i:i + len(part)] == part:
+                return i
+        return -1
+    out, first = [], parts[0]
+    for i in range(len(words) - len(first) + 1):
+        if words[i:i + len(first)] != first:
+            continue
+        end, ok = i + len(first), True
+        for part in parts[1:]:
+            j = at(part, end)
+            if j < 0:
+                ok = False
+                break
+            end = j + len(part)
+        if ok:
+            out.append((i, end))
+    return out
+
+
+def _in_edited_text(f: Finding, changed: list[tuple[int, int]], words: list[str]) -> bool:
+    """Whether `f`'s scene quote lies in text the fix changed: found in the
+    fixed prose, and every place it is found touches a changed range (an
+    empty range, words taken out, when the quote spans it). A quote that
+    isn't found (an unverified one) can't be tied to the fix: no."""
+    places = _quote_ranges(f.scene_quote, words)
+
+    def touches(s: int, e: int) -> bool:
+        return any((a < e and s < b) if a < b else (s < a < e) for a, b in changed)
+    return bool(places) and all(touches(s, e) for s, e in places)
+
+
+def _persists(f: Finding, earlier: list[Finding]) -> bool:
+    """Whether `f` is a problem the run before the fix already had: the same
+    kind against the same thing (a contradiction: the same source, or with
+    none the same ledger fact; a broken promise: `checker._same_finding`'s
+    same promise). The scene quote and code are not compared: the fix
+    changed the one, and readings vary on the other. Nor are a
+    contradiction's established words: a half-fix that moves a wrong value
+    to another wrong one ("eight days" to "five", against another calendar
+    line) is the same problem left, which the next round is for, not one
+    the fix made."""
+    from storyforge.checker import _FIELD_PROMISES, _words_of
+    for g in earlier:
+        if f.kind != g.kind:
+            continue
+        if f.kind == 'contradiction':
+            if (f.established_scene == g.established_scene
+                    and (f.established_scene or f.fact_id == g.fact_id)):
+                return True
+        elif f.fact_id == g.fact_id and (
+                f.fact_id not in _FIELD_PROMISES
+                or (_words_of(f.established_quote)
+                    and _words_of(f.established_quote) == _words_of(g.established_quote))):
+            return True
+    return False
+
+
+def _introduced(before_run: GateResult, after_run: GateResult, before: str,
+                after: str) -> list[Finding]:
+    """The blocking findings of `after_run` (the gate run on `after`, the
+    fixed prose) that the fix brought in: in text the fix changed
+    (`_in_edited_text`) and not a problem `before_run` already had
+    (`_persists`). A finding in text the fix left alone is not the fix's,
+    however new: two readings of the same words differ, so a re-check finds
+    things the first run didn't (E8, 2026-11-01)."""
+    if not after_run.check:
+        return []
+    changed = _changed_ranges(before, after)
+    if not changed:
+        return []
+    words = _word_list(after)
+    earlier = list(before_run.check.findings + before_run.check.unverified
+                   if before_run.check else [])
+    return [f for f in after_run.findings + after_run.unverified
+            if f.scene_quote.strip() and _in_edited_text(f, changed, words)
+            and not _persists(f, earlier)]
+
+
+def _worse(n: int, before_run: GateResult, after_run: GateResult, before: str,
+           after: str) -> str:
+    """Why fix round `n`'s prose (`after`, which failed as `after_run`) is
+    worse than the prose it fixed (`before`, failed as `before_run`), or ''
+    when it isn't: more blocking problems, or a problem in the text it
+    edited that the run before didn't have (`_introduced`)."""
+    then, now = _blocking_count(before_run), _blocking_count(after_run)
+    if now > then:
+        return f'fix round {n} left {now} problem(s), more than the {then} before it'
+    new = _introduced(before_run, after_run, before, after)
+    if new:
+        return (f'fix round {n} brought in {len(new)} problem(s) in the words it changed ('
+                + '; '.join(_one_line(f.message())[:200] for f in new[:3])
+                + (' ...' if len(new) > 3 else '') + ')')
+    return ''
+
+
 def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                  log_dir: str, extract_model: str | None = None,
                  check_model: str | None = None, fix_model: str | None = None,
@@ -1022,8 +1141,18 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     - A later round never leaves things worse than the round before it: its
       fix is discarded, and the earlier prose and verdict kept, when it
       fails (`GateError`), puts back words an earlier fix removed (checked
-      before its gate run, which would commit on a lucky pass), or leaves
-      more blocking problems. Each discard is in `.notes`.
+      before its gate run, which would commit on a lucky pass), or its run
+      fails worse (`_worse`). Each discard is in `.notes`.
+    - Worse, for every round the first included: the run after the fix
+      fails with more blocking problems than the run before it, or with one
+      in the words the fix changed that the run before didn't have
+      (`_introduced`; mended-bridle, 2026-11-03: the first fix made a scene
+      that agreed with its brief match a later scene's error, and the
+      re-check's broken promise, fewer problems in all, was kept). The
+      prose and verdict before it are kept, and `BLOCKED_PATH` is put back
+      to that run's contradictions. A first fix discarded leaves the prose
+      as given (`.fixed` False). A run that passed is always kept (it
+      committed), and so is a re-gate with no edit (the same prose).
     - Otherwise the prose kept is the last gated, with that run's verdict.
 
     The caller must write `.prose` to the scene file at once, whether or not
@@ -1047,7 +1176,8 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             to_fix = problems_to_fix(result)
             if not to_fix and (result.plan_conflicts or n > 1):
                 break
-            kept = 'the prose and verdict before it'
+            kept = ('the prose as given and the first verdict' if n == 1
+                    else 'the prose and verdict before it')
             # the brief's own words the scene has: the fix must keep them
             protected = [p for p in _brief_phrases(project_dir, scene_id)
                          if _quoted_in(p, current)]
@@ -1084,9 +1214,17 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                     raise
                 notes.append(f'the check after fix round {n} failed ({e}); kept {kept}')
                 break
-            if n > 1 and not again.passed and _blocking_count(again) > _blocking_count(result):
-                notes.append(f'fix round {n} left {_blocking_count(again)} problem(s), more '
-                             f'than the {_blocking_count(result)} before it; kept {kept}')
+            # never worse, the first round included (mended-bridle, 2026-11-03:
+            # round 1 made a correct scene match another scene's error, and its
+            # re-check's broken promise, in the words it changed, was kept).
+            # A pass is kept: it committed. A re-roll with no edit is the
+            # same prose, so its verdict stands
+            worse = (_worse(n, result, again, current, fixed)
+                     if fixed != current and not again.passed else '')
+            if worse:
+                notes.append(f'{worse}; kept {kept}')
+                # the blocked list is the kept run's, for `check --accept`
+                _note_blocked(project_dir, scene_id, command, result)
                 break
             if fixed != current:
                 rounds.append(FixRound(to_fix, edits))
