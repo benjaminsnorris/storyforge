@@ -440,6 +440,12 @@ def walk(order: list[str], cues: dict[str, dict], last: int | None = None,
     return days
 
 
+# Outside the f-string below: before Python 3.12 an f-string expression can't
+# hold a backslash, and the CI runs 3.10
+_CALENDAR_LEAD_TERSE = 'Write a line CALENDAR: and nothing before it; after it'
+_CALENDAR_LEAD = ('Write a line DAY 1: with day 1\'s calendar date (or "unknown"). '
+                  'Then write a line CALENDAR: and, after it,')
+
 def build_assignment_prompt(batch: list[dict], present: int | None,
                             last_day: int | None, anchors: list[str],
                             terse: bool = False) -> str:
@@ -491,7 +497,7 @@ Each scene's cues say how it relates to the scene before it. A provisional day w
 - "refers" cues state how far apart two events are ("that June night three months before" puts this scene about 90 days after that night). They are the firmest evidence of distance: where vague gaps ("several weeks", "some time later") add up to something else, stretch or shrink the vague gaps to fit the stated durations, counting back as well as forward.
 - mode: scene (the action plays out on its day), summary (it covers a stretch of time; the day is where the stretch starts), frame, or vision.
 
-{"Write a line CALENDAR: and nothing before it; after it" if terse else "Write a line DAY 1: with day 1's calendar date (or \"unknown\"). Then write a line CALENDAR: and, after it,"} exactly one line per scene, in order:
+{_CALENDAR_LEAD_TERSE if terse else _CALENDAR_LEAD} exactly one line per scene, in order:
 
 scene_id | day | mode | basis
 
