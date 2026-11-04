@@ -72,6 +72,29 @@ def _is_part_heading(line):
     return len(stripped) <= 80 and bool(_PART_HEADING_RE.match(stripped))
 
 
+def _part_titles(units):
+    """The book's part titles, in order, or [] when it has no real parts.
+
+    `units` is split-manuscript's sorted ``(line, kind, text)`` list. A part
+    is a real book part only when a chapter heading follows it before the
+    next part. When any part heading has none (the Iliad's "BOOK I" is the
+    book's chapter, not a container of chapters), the headings are
+    chapters and no titles are kept.
+    """
+    titles, open_part = [], False
+    for _, kind, text in units:
+        if kind == 'part':
+            if open_part:
+                return []
+            titles.append(re.sub(r'^#+\s*', '', text).strip())
+            open_part = True
+        else:
+            open_part = False
+    if open_part:
+        return []
+    return titles
+
+
 def _natural_key(path):
     """Sort key that orders chapter-2 before chapter-10."""
     name = os.path.basename(path).lower()
@@ -997,6 +1020,16 @@ def main(argv=None):
         shutil.rmtree(tmp_chapters_dir, ignore_errors=True)
 
         args.source = original_source
+
+        # Keep the part titles (F-155): scenes-setup found them, but only the
+        # part number reached the scenes, so publish had no title to print.
+        titles = _part_titles(units)
+        if titles and not getattr(args, 'dry_run', False):
+            from storyforge.assembly import write_parts
+            if write_parts(project_dir, titles):
+                log(f'Recorded {len(titles)} part titles in storyforge.yaml')
+            else:
+                log('storyforge.yaml already lists parts: left as it is')
         return result
 
     # ==================================================================
