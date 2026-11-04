@@ -629,3 +629,32 @@ class TestAccept:
         with pytest.raises(SystemExit) as e:
             cmd_check.main(['--accept', SCENE])
         assert e.value.code == 1
+
+
+class TestCheckBudget:
+    def test_a_check_by_name_is_forecast_too(self, project, monkeypatch, capsys):
+        """It skipped the threshold silently."""
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '1')
+        seen = _fake_gate(monkeypatch, {})
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--scenes', f'act1-sc01,{SCENE}'])
+        assert e.value.code == 1 and seen == []
+        assert 'over the cost threshold ($1): nothing checked' in capsys.readouterr().out
+
+    def test_pending_stopped_mid_run_by_the_budget(self, project, monkeypatch, capsys):
+        """T-1: without --keep-going too: exit 1, the rest still pending, no
+        --accept advice, and the report says what wasn't checked."""
+        project_dir, _ = project
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '3')
+        for sid in ('act1-sc01', SCENE, 'act2-sc01'):
+            gate.mark_pending(project_dir, sid, 'draft', 'stale')
+        seen = _fake_gate(monkeypatch, {}, spend=80_000)   # $2.00 a scene
+        with pytest.raises(SystemExit) as e:
+            cmd_check.main(['--pending'])
+        assert e.value.code == 1 and seen == ['act1-sc01']
+        assert set(gate.pending(project_dir)) == {SCENE, 'act2-sc01'}
+        out = capsys.readouterr().out
+        assert f'ERROR: stopped before {SCENE}: the run reached the cost threshold' in out
+        assert '--accept' not in out
+        report = open(os.path.join(project_dir, 'working', 'check-report.md')).read()
+        assert '## Not checked' in report and f'Not checked: {SCENE}, act2-sc01' in report

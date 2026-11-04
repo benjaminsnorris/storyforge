@@ -382,31 +382,45 @@ class RunBudget:
     (#499's review: a run could spend nearly twice the threshold).
 
     `meter` is the run's `api.metered()` meter (None: nothing measured, as
-    for a caller outside a metered run). `record` adds each re-check run's
-    forecast spend (`rechecks`) and, when measured, its actual spend
-    (`rechecks_actual`, also in `meter`). `spent(reserved)` is what the run
-    has spent: the meter's actual cost, with the re-checks counted at their
-    forecast where that is more (a re-check counts even when its calls
-    weren't metered), plus `reserved`: the forecast of the work the run
-    still owes (scenes it has yet to draft or check), which a re-check may
-    not take. Pass it as `spent_before` to `gate.recheck_pending`
+    for a caller outside a metered run); `runner.run_parallel` carries it
+    into its worker threads. Spend the meter can't see (drafting or a pass
+    through the `claude` CLI) is `charge`d at its forecast. `record` adds
+    each re-check run's forecast (`rechecks`) and its measured cost
+    (`rechecks_actual`, also in `meter`). `owed` is a standing reservation
+    the caller keeps current (revise: the passes it still has to run).
+
+    `committed(owed)` is what the run has spent or promised: the meter's
+    cost, with the re-checks counted at their forecast where that is more
+    (a re-check counts even when its calls weren't metered), plus what was
+    charged, plus `self.owed` and `owed` (the work the caller still owes:
+    scenes it has yet to draft or check), which a re-check may not take.
+    Pass it as `spent_before` to `gate.recheck_pending`
     (`cmd_write.budgeted_recheck` does)."""
 
     def __init__(self, meter=None):
         self.meter = meter
         self.rechecks = 0.0
         self.rechecks_actual = 0.0
+        self.charged = 0.0
+        self.owed = 0.0
 
-    def spent(self, reserved: float = 0.0) -> float:
+    def charge(self, amount: float) -> None:
+        """Count spend the meter can't see, at its forecast."""
+        self.charged += max(0.0, amount)
+
+    def committed(self, owed: float = 0.0) -> float:
         actual = self.meter.cost() if self.meter is not None else 0.0
         other = max(0.0, actual - self.rechecks_actual)   # drafting, gating, passes
-        return other + max(self.rechecks, self.rechecks_actual) + reserved
+        return (other + self.charged + max(self.rechecks, self.rechecks_actual)
+                + self.owed + owed)
 
-    def record(self, run, spent_before: float, actual: float = 0.0) -> None:
-        """Count a `gate.Recheck`'s forecast spend and `actual`, what its
-        calls were measured to cost (None: nothing ran)."""
+    def record(self, run, actual: float = 0.0) -> None:
+        """Count a re-check run: `run` (a `gate.Recheck`, or None when
+        nothing was pending) adds its forecast spend, `run.spent` less
+        `run.spent_before`; `actual` is what its calls were measured to
+        cost."""
         if run is not None:
-            self.rechecks += max(0.0, run.spent - spent_before)
+            self.rechecks += max(0.0, run.spent - run.spent_before)
         self.rechecks_actual += actual
 
 

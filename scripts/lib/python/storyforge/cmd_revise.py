@@ -30,7 +30,9 @@ from storyforge.common import (
     select_model, select_revision_model, get_coaching_level,
     install_signal_handlers, get_plugin_dir, csv_safe,
 )
-from storyforge.costs import estimate_cost, log_operation, print_summary
+from storyforge.costs import (
+    check_threshold, cost_threshold, estimate_cost, log_operation, print_summary,
+)
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
     update_pr_task, _git, has_gh, current_branch,
@@ -378,7 +380,8 @@ def _commit(project_dir: str, message: str, paths: list[str] | None = None) -> N
 
 
 #: The revise session's one cost budget (`costs.RunBudget`), metered from
-#: `main`; None outside a revise session (a redraft hone runs)
+#: `main`; None outside it (`_redraft_scenes` and `_redraft_from_briefs`
+#: are also called by hone, whose redrafts aren't metered here)
 _RUN_BUDGET = None
 
 
@@ -389,14 +392,15 @@ def _run_budget():
     return _RUN_BUDGET if _RUN_BUDGET is not None else RunBudget()
 
 
-def _recheck_after(project_dir: str, log_dir: str, skip: set[str], budget) -> None:
+def _recheck_after(project_dir: str, log_dir: str, skip: set[str], budget):
     """After a redraft passed: re-check the later scenes it listed, except
     `skip` (this run redrafts them), as `write` does, under the session's
     one budget: what it has spent, and the gate runs `skip` still owes at
     `gate.RECHECK_COST_PER_SCENE` reserved."""
     from storyforge import cmd_write, gate
-    cmd_write.budgeted_recheck(project_dir, os.path.join(log_dir, 'gate'), skip, budget,
-                               reserved=len(skip) * gate.RECHECK_COST_PER_SCENE)
+    return cmd_write.budgeted_recheck(project_dir, os.path.join(log_dir, 'gate'), skip,
+                                      budget,
+                                      reserved=len(skip) * gate.RECHECK_COST_PER_SCENE)
 
 
 def _gate_redraft(project_dir: str, scene_id: str, scene_file: str, log_dir: str,
@@ -3030,6 +3034,7 @@ def _main(argv=None):
     log('============================================')
 
     # Cost forecast
+    per_pass = 0.0
     if not args.dry_run:
         pending = sum(
             1 for i in range(start_pass, total_passes + 1)
@@ -3045,6 +3050,18 @@ def _main(argv=None):
         log(f'Cost forecast: ~${total_forecast:.2f} ({pending} passes @ ~${per_pass:.2f}), '
             f'plus about ${gate.RECHECK_COST_PER_SCENE:.2f} for the gate on each '
             f'rewritten scene')
+        # One budget for the session (#503's review, CR-1): the passes are
+        # checked against the threshold before anything is spent; the gate
+        # on what they rewrite always runs, and the re-checks get what the
+        # passes' actual spend, the gate and the passes still to run leave
+        if not check_threshold(total_forecast):
+            log(f'ERROR: the forecast (~${total_forecast:.2f}) is over the cost threshold '
+                f'(${cost_threshold():g}): nothing revised. Raise STORYFORGE_COST_THRESHOLD, '
+                f'or run fewer passes (`--pass N`).')
+            sys.exit(1)
+        log(f'  The re-checks after each gated scene get what is left of the '
+            f'${cost_threshold():g} threshold once the passes and the gate are paid for; '
+            f'any left over stay pending for `storyforge check --pending`.')
 
     # Check for deferred redrafting (multiple upstream passes)
     deferred_scenes, upstream_count = _collect_upstream_scenes(plan_rows)
@@ -3071,6 +3088,12 @@ def _main(argv=None):
             continue
 
         log(f'--- Pass {pass_num}/{total_passes}: {pass_name} ---')
+        if _RUN_BUDGET is not None and not args.dry_run:
+            # the passes after this one are forecast-approved: the re-checks
+            # in this one may not take their share
+            _RUN_BUDGET.owed = per_pass * sum(
+                1 for i in range(pass_num + 1, total_passes + 1)
+                if _read_pass_field(plan_rows, i, 'status') != 'completed')
         log(f'  Purpose: {pass_purpose}')
         log(f'  Scope: {pass_scope}')
 
@@ -3355,6 +3378,8 @@ Rules:
                  '--dangerously-skip-permissions'],
                 cwd=project_dir,
             )
+            # no meter sees the CLI's spend: counted at the pass's forecast
+            _run_budget().charge(per_pass)
             unsafe = _unsafe_scene_writes(project_dir, scenes_before)
             if unsafe:
                 for problem in unsafe:

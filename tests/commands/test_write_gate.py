@@ -384,6 +384,49 @@ class TestReview443:
         per_scene = (0.10 + 2 * gate.RECHECK_COST_PER_SCENE) / 2
         assert seen == [pytest.approx(draft + per_scene)]   # act1-sc02 still to draft
 
+    def test_drafting_stops_when_its_spend_passes_the_threshold(
+            self, setup, monkeypatch, capsys):
+        """One budget: the forecast was within the threshold but the first
+        scene cost far more, so drafting the next would go over. It ran on
+        before with nothing said."""
+        from storyforge import cmd_write
+        monkeypatch.setattr(cmd_write, 'check_threshold', _REAL_CHECK_THRESHOLD)
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', '3')
+        calls = self._metered_replies(monkeypatch, {'act1-sc01': _reply(GOOD),
+                                                    'act1-sc02': _reply(GOOD)}, 100_000)
+        _gate(monkeypatch, {'act1-sc01': True, 'act1-sc02': True})   # $2.50 a draft
+        with pytest.raises(SystemExit) as exc:
+            main(['--force', '--scenes', 'act1-sc01,act1-sc02'])
+        assert exc.value.code == 1
+        assert calls == ['act1-sc01']
+        out = capsys.readouterr().out
+        assert 'drafting act1-sc02 and the 0 scene(s) after it would bring this run to about ' \
+            in out and 'over the cost threshold ($3)' in out
+        assert 'act1-sc02 (not attempted: the run reached the cost threshold)' in out
+
+    def test_interactive_drafts_are_charged_at_their_forecast(
+            self, setup, monkeypatch, capsys):
+        """TD-2/CR-4: the claude CLI's spend isn't metered; it was counted
+        as $0 against the re-checks' budget."""
+        from storyforge import cmd_write
+
+        def cli(prompt, model, project_dir):
+            with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md'), 'w') as f:
+                f.write(GOOD)
+            return 0
+        monkeypatch.setattr(cmd_write, '_invoke_interactive', cli)
+        _gate(monkeypatch, {'act1-sc01': True})
+        seen = []
+
+        def recheck(pd, *, spent_before=0.0, **k):
+            seen.append(spent_before)
+            return gate.Recheck(spent=spent_before, spent_before=spent_before)
+        monkeypatch.setattr(gate, 'recheck_pending', recheck)
+        gate.mark_pending(setup, 'new-x1', 'recheck', 're-check: x')
+        main(['--interactive', '--force', '--scenes', 'act1-sc01'])
+        assert seen == [pytest.approx(0.10)]   # mock_costs's drafting forecast
+        assert 'interactive drafting runs through the claude CLI' in capsys.readouterr().out
+
     def test_rechecks_the_drafting_spend_leaves_no_room_for_are_deferred(
             self, setup, monkeypatch, capsys):
         # the gate's own threshold check is real (mock_costs passes everything)

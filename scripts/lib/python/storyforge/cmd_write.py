@@ -178,12 +178,14 @@ def main(argv=None):
         sys.exit(1)
 
     scene_forecast = 0.0   # a scene's share of the forecast: reserved from the re-checks
+    draft_forecast = 0.0   # its drafting part: charged for a draft the CLI writes
     if not args.dry_run:
         model = select_model('drafting')
         avg_words = _avg_word_count(metadata_csv)
         estimated = estimate_cost('draft', len(pending_ids), avg_words, model)
         if write_mode == 'batch':
             estimated *= 0.5  # Batch API 50% discount
+        draft_forecast = estimated / len(pending_ids)
         gated = ''
         if coaching == 'full':
             # Every drafted scene is gated, and the gate (extraction, the
@@ -259,6 +261,10 @@ def main(argv=None):
         log('Prior prose: none (interactive drafting has no system prompt to carry it)')
     else:
         log(f'Prior prose: {prior_prose}')
+    if write_mode == 'interactive' and not args.dry_run:
+        log(f'NOTE: interactive drafting runs through the claude CLI, whose spend this run '
+            f'can\'t meter: each draft counts against the cost threshold at its forecast '
+            f'(~${draft_forecast:.2f}); the gate\'s calls are metered.')
 
     # Main drafting
     from storyforge import git as _gitmod
@@ -279,7 +285,7 @@ def main(argv=None):
                 pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
                 coaching, use_briefs, args.force, filter_mode, write_mode,
                 args.dry_run, prior_prose=prior_prose, budget=RunBudget(meter),
-                scene_forecast=scene_forecast,
+                scene_forecast=scene_forecast, draft_forecast=draft_forecast,
             )
 
     drafted_count, total_words = outcome.drafted, outcome.words
@@ -561,10 +567,10 @@ def budgeted_recheck(project_dir: str, log_dir: str, skip: set[str] | frozenset[
     forecast of the work it still owes) leave of the threshold. Returns
     `run_recheck`'s answer."""
     from storyforge import api
-    before = budget.spent(reserved)
+    before = budget.committed(reserved)
     with api.metered() as meter:   # told apart from the rest of the run's spend
         run = run_recheck(project_dir, log_dir, skip, spent_before=before)
-    budget.record(run, before, actual=meter.cost())
+    budget.record(run, actual=meter.cost())
     return run
 
 
@@ -1053,7 +1059,7 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
 def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                      metadata_csv, coaching, use_briefs, force, filter_mode,
                      write_mode, dry_run, prior_prose='none', budget=None,
-                     scene_forecast: float = 0.0):
+                     scene_forecast: float = 0.0, draft_forecast: float = 0.0):
     """Run direct/interactive mode. Returns a `DraftOutcome`: ``failed``
     names each scene not drafted and why, ``recheck_open`` each re-check
     that didn't pass or wasn't run (over the cost threshold) and is still in
@@ -1075,7 +1081,11 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
     depend on what it changed are re-checked (``budgeted_recheck``; Phase
     4), not those this run redrafts anyway, under the run's one cost budget:
     ``budget`` (``costs.RunBudget``) is what the run has spent, and each
-    scene still to draft reserves ``scene_forecast``. At other coaching levels a bad reply
+    scene still to draft reserves ``scene_forecast``. A draft the CLI writes
+    (interactive) is charged at ``draft_forecast``, since no meter sees it.
+    Before each scene, the run's spend plus the scenes left at
+    ``scene_forecast`` must be within the threshold, or the run stops there
+    (the up-front forecast was too low). At other coaching levels a bad reply
     skips only its scene. At every level a failed commit (the scene's, or
     the re-checks' after it) stops the run: the next scene's commit would
     sweep its files in under the wrong message."""
@@ -1121,6 +1131,17 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             if existing_wc > 200:
                 log(f'Scene file already has {existing_wc} words, skipping')
                 continue
+
+        if not dry_run and scene_forecast:
+            left = [s for s in pending_ids[i:] if force or not _drafted(scenes_dir, s)]
+            due = budget.committed(len(left) * scene_forecast)
+            if not check_threshold(due):
+                log(f'ERROR: drafting {scene_id} and the {len(left) - 1} scene(s) after it '
+                    f'would bring this run to about ${due:.2f}, over the cost threshold '
+                    f'(${cost_threshold():g}): it has cost more than its forecast. Stopping.')
+                stop(i, scene_id, f'{scene_id} (not attempted: the run reached the cost '
+                                  f'threshold)')
+                break
 
         if gated:
             blocking = _gate_blockers(project_dir, scene_id)
@@ -1190,6 +1211,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             # Interactive mode — invoke claude CLI. It writes the file itself,
             # so no reply passes through the guard below.
             exit_code = _invoke_interactive(prompt, model, project_dir)
+            budget.charge(draft_forecast)   # no meter sees the CLI's spend
             if exit_code == 0 and coaching == 'full':
                 reason = _interactive_problem(scene_file, before)
         else:

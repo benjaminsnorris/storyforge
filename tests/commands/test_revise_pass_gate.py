@@ -92,13 +92,13 @@ class TestOneBudget:
         def fake_main(argv=None):
             api._meter({'usage': {'input_tokens': 0, 'output_tokens': 40_000}},
                        'claude-opus-4-6')
-            seen.append(cmd_revise._run_budget().spent())
+            seen.append(cmd_revise._run_budget().committed())
             return 0
         monkeypatch.setattr(cmd_revise, '_main', fake_main)
         assert main([]) == 0
         assert seen and seen[0] > 0.5
         assert cmd_revise._RUN_BUDGET is None   # gone with the session
-        assert cmd_revise._run_budget().spent() == 0.0
+        assert cmd_revise._run_budget().committed() == 0.0
 
 
 class TestGatePassScenes:
@@ -561,3 +561,31 @@ class TestAFailedCommitStopsRevise:
         monkeypatch.setattr('storyforge.git.commit_and_push', nothing)
         _gate_pass(project_dir, ['act1-sc01'])
         assert gated == [('act1-sc01', 'revise')]
+
+
+class TestReviseForecast:
+    """CR-1: the passes had no up-front threshold check, yet their spend
+    came out of the re-checks' budget."""
+
+    def test_passes_over_the_threshold_spend_nothing(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        revise_tests._run_pass_setup(project_dir, monkeypatch, 'craft')
+        mock_costs.threshold_ok = False
+        with pytest.raises(SystemExit) as e:
+            main([])
+        assert e.value.code == 1
+        assert mock_api.call_count == 0 and not mock_git.calls_for('commit_and_push')
+        assert 'is over the cost threshold' in capsys.readouterr().out
+
+    def test_the_redraft_recheck_reserves_the_scenes_still_to_gate(self, monkeypatch):
+        """T-8: `_recheck_after` (revise's redrafts) reserves the gate runs
+        the scenes still to redraft owe, and the passes still to run."""
+        from storyforge.costs import RunBudget
+        seen = []
+        monkeypatch.setattr(cmd_write, 'run_recheck',
+                            lambda pd, ld, skip=frozenset(), spent_before=0.0:
+                            seen.append(spent_before))
+        budget = RunBudget()
+        budget.owed = 4.0
+        cmd_revise._recheck_after('/p', '/l', {'a', 'b'}, budget)
+        assert seen == [pytest.approx(4.0 + 2 * gate.RECHECK_COST_PER_SCENE)]

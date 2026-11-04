@@ -159,14 +159,6 @@ def main(argv=None):
         if not scene_ids:
             log('Nothing in the book is waiting on the gate.')
             return
-        from storyforge.costs import check_threshold, cost_threshold
-        forecast = len(scene_ids) * gate.RECHECK_COST_PER_SCENE
-        log(f'{len(scene_ids)} scene(s) waiting on the gate, forecast about ${forecast:.2f}')
-        if not check_threshold(forecast):
-            log(f'ERROR: that is over the cost threshold (${cost_threshold():g}): nothing '
-                f'checked. Raise STORYFORGE_COST_THRESHOLD, or check them a few at a time '
-                f'with --scenes.')
-            sys.exit(1)
         unknown = []
     else:
         scene_ids = _scene_ids(args, project_dir)
@@ -185,6 +177,16 @@ def main(argv=None):
     if not scene_ids:
         log('ERROR: no scene matches.')
         sys.exit(1)
+    # Every selection is forecast before anything is spent (#503's review:
+    # a check by name, act or range skipped the threshold)
+    from storyforge.costs import check_threshold, cost_threshold
+    forecast = len(scene_ids) * gate.RECHECK_COST_PER_SCENE
+    log(f'{len(scene_ids)} scene(s) to check, forecast about ${forecast:.2f}')
+    if not check_threshold(forecast):
+        log(f'ERROR: that is over the cost threshold (${cost_threshold():g}): nothing '
+            f'checked. Raise STORYFORGE_COST_THRESHOLD, or check them a few at a time '
+            f'with --scenes.')
+        sys.exit(1)
     if not create_branch('check', project_dir):
         log('ERROR: could not create or find a branch to work on; nothing checked.')
         sys.exit(1)
@@ -196,7 +198,7 @@ def main(argv=None):
     from storyforge.costs import RunBudget
     with api.metered() as meter:
         run = _check_scenes(project_dir, scene_ids, log_dir, RunBudget(meter),
-                            keep_going=args.keep_going, budgeted=args.pending)
+                            keep_going=args.keep_going)
 
     report = run.report
     summary = _keep_going_summary(project_dir, run) if args.keep_going else []
@@ -218,7 +220,7 @@ def main(argv=None):
         return
     if run.over_budget:
         log(f'ERROR: stopped before {run.stopped_at}: the run reached the cost threshold; '
-            f'{run.passed} of {len(scene_ids)} scene(s) passed. Not checked, still pending: '
+            f'{run.passed} of {len(scene_ids)} scene(s) passed. Not checked: '
             f'{", ".join(run.unchecked)}.')
         sys.exit(1)
     if run.stopped_at:
@@ -262,14 +264,14 @@ class _Run:
 
 
 def _check_scenes(project_dir: str, scene_ids: list[str], log_dir: str, budget,
-                  keep_going: bool = False, budgeted: bool = False) -> _Run:
+                  keep_going: bool = False) -> _Run:
     """Check `scene_ids` (in reading order) through the gate, re-checking
     after each one that passes what it listed, under the run's one cost
     budget (`budget`, a `costs.RunBudget`: the re-checks get what the run's
     spend and the scenes still to check, at `gate.RECHECK_COST_PER_SCENE`,
-    leave). `budgeted` (--pending, whose forecast was checked up front):
-    before each scene, the run's spend plus the scenes left must still be
-    within the threshold, or it stops there (they stay pending).
+    leave). The forecast was checked up front; before each scene, the run's
+    spend plus the scenes left must still be within the threshold, or it
+    stops there (the rest stay as they were: pending ones pending).
 
     It stops at the first scene that doesn't pass or can't be checked, and
     at a re-check left failed or unrun before a later scene of the run.
@@ -284,18 +286,17 @@ def _check_scenes(project_dir: str, scene_ids: list[str], log_dir: str, budget,
     unsettled: list[str] = []   # scenes that didn't pass (or weren't re-checked)
     for n, scene_id in enumerate(scene_ids):
         rest = scene_ids[n + 1:]
-        if budgeted:
-            due = budget.spent(reserved=(len(rest) + 1) * gate.RECHECK_COST_PER_SCENE)
-            if not check_threshold(due):
-                log(f'ERROR: checking {scene_id} and the {len(rest)} scene(s) after it would '
-                    f'bring this run to about ${due:.2f}, over the cost threshold '
-                    f'(${cost_threshold():g}): stopped. They stay in {gate.PENDING_PATH}.')
-                run.stopped_at, run.over_budget = scene_id, True
-                run.unchecked = scene_ids[n:]
-                report += ['## Not checked', '', f'Stopped before {scene_id}: the run reached '
-                           f'the cost threshold (about ${due:.2f} with the rest). Not '
-                           f'checked: {", ".join(scene_ids[n:])}.', '']
-                break
+        due = budget.committed((len(rest) + 1) * gate.RECHECK_COST_PER_SCENE)
+        if not check_threshold(due):
+            log(f'ERROR: checking {scene_id} and the {len(rest)} scene(s) after it would '
+                f'bring this run to about ${due:.2f}, over the cost threshold '
+                f'(${cost_threshold():g}): stopped.')
+            run.stopped_at, run.over_budget = scene_id, True
+            run.unchecked = scene_ids[n:]
+            report += ['## Not checked', '', f'Stopped before {scene_id}: the run reached '
+                       f'the cost threshold (about ${due:.2f} with the rest). Not '
+                       f'checked: {", ".join(scene_ids[n:])}.', '']
+            break
         log(f'--- Checking {scene_id} ---')
         earlier = [s for s in unsettled if order.get(s, -1) < order.get(scene_id, -1)]
         if earlier:

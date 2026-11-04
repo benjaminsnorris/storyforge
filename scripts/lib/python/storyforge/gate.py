@@ -1419,9 +1419,10 @@ class Recheck:
     #: the forecast was over the cost threshold, so it stopped before a scene
     over_budget: bool = False
     forecast: float = 0.0
-    #: what the run is forecast to have spent, `spent_before` included
+    #: `spent_before` plus this call's re-checks at their forecast: what the
+    #: run has spent or reserved (`costs.RunBudget.committed`) once they ran
     spent: float = 0.0
-    #: what the caller's run had spent (and reserved) before this call
+    #: what the caller's run had spent and reserved before this call
     spent_before: float = 0.0
 
 

@@ -475,10 +475,15 @@ class TestRunBudget:
         def cost(self):
             return self._cost
 
-    def test_spent_is_the_meter_plus_what_is_reserved(self):
+    def test_committed_is_the_meter_plus_what_is_owed_and_charged(self):
         from storyforge.costs import RunBudget
-        assert RunBudget().spent() == 0.0
-        assert RunBudget(self.Meter(12.5)).spent(reserved=3.0) == 15.5
+        assert RunBudget().committed() == 0.0
+        assert RunBudget(self.Meter(12.5)).committed(3.0) == 15.5
+        budget = RunBudget(self.Meter(1.0))
+        budget.charge(2.0)            # a draft the claude CLI wrote, at its forecast
+        budget.charge(-5.0)           # never a credit
+        budget.owed = 4.0             # revise: the passes still to run
+        assert budget.committed(0.5) == pytest.approx(7.5)
 
     def test_the_rechecks_count_at_their_forecast_or_their_cost(self):
         """A re-check counts at its forecast when its calls cost less or
@@ -486,19 +491,20 @@ class TestRunBudget:
         not hidden under it."""
         from storyforge import gate
         from storyforge.costs import RunBudget
+        run = gate.Recheck(spent=5.0 + 2.4, spent_before=5.0)
         budget = RunBudget(self.Meter(1.0))                    # drafting so far
-        budget.record(gate.Recheck(spent=5.0 + 2.4), spent_before=5.0)
+        budget.record(run)
         assert budget.rechecks == pytest.approx(2.4)
-        assert budget.spent() == pytest.approx(1.0 + 2.4)      # unmetered re-check
+        assert budget.committed() == pytest.approx(1.0 + 2.4)  # unmetered re-check
         # a re-check measured at $0.40 against its $2.40 forecast
         budget = RunBudget(self.Meter(1.4))
-        budget.record(gate.Recheck(spent=7.4), spent_before=5.0, actual=0.4)
-        assert budget.spent(reserved=1.0) == pytest.approx(1.0 + 2.4 + 1.0)
+        budget.record(run, actual=0.4)
+        assert budget.committed(1.0) == pytest.approx(1.0 + 2.4 + 1.0)
         # one measured at more than its forecast counts at its cost
         budget = RunBudget(self.Meter(4.0))
-        budget.record(gate.Recheck(spent=7.4), spent_before=5.0, actual=3.0)
-        assert budget.spent() == pytest.approx(4.0)
-        budget.record(None, spent_before=3.0)                  # nothing ran
+        budget.record(run, actual=3.0)
+        assert budget.committed() == pytest.approx(4.0)
+        budget.record(None)                                    # nothing ran
         assert budget.rechecks == pytest.approx(2.4)
 
     def test_the_spend_meter_prices_what_it_saw(self):
@@ -535,4 +541,19 @@ class TestRunBudget:
             cmd_write.budgeted_recheck('/nowhere', '/nowhere', set(), budget, reserved=2.0)
         assert budget.rechecks_actual == pytest.approx(0.5)
         assert budget.rechecks == pytest.approx(0.95)
-        assert budget.spent() == pytest.approx(1.95)
+        assert budget.committed() == pytest.approx(1.95)
+
+    def test_a_metered_runs_worker_threads_are_counted(self):
+        """SF-6: meters are per thread, and `run_parallel`'s workers (the
+        drift check's cue extraction) went uncounted."""
+        from storyforge import api
+        from storyforge.runner import run_parallel
+
+        def worker(item):
+            api._meter({'usage': {'input_tokens': 0, 'output_tokens': 40_000}},
+                       'claude-opus-4-6')
+            return item
+        with api.metered() as meter:
+            run_parallel(['a', 'b', 'c'], worker, max_workers=3)
+        assert meter.cost() == pytest.approx(3.0)
+        assert getattr(api._meters, 'stack', []) == []   # nothing left open here

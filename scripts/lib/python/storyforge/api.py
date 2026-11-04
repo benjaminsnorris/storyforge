@@ -321,6 +321,24 @@ class metered:
         return False
 
 
+def carry_meters(fn):
+    """`fn` wrapped to record into the caller's open meters when it runs on
+    another thread (`runner.run_parallel`): meters are per thread, so a
+    worker's replies were never counted (#503's review, SF-6)."""
+    stack = list(getattr(_meters, 'stack', None) or [])
+    if not stack:
+        return fn
+
+    def run(*args, **kwargs):
+        own = getattr(_meters, 'stack', None)
+        _meters.stack = stack + [m for m in (own or []) if m not in stack]
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _meters.stack = own if own is not None else []
+    return run
+
+
 def _meter(response, model: str) -> None:
     """Record a reply in every open meter on this thread."""
     stack = getattr(_meters, 'stack', None)
