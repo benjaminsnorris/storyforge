@@ -34,6 +34,7 @@ from those files is `docs/plans/2026-10-30-ledger-migration-proposal.md`.
 from __future__ import annotations
 
 import csv
+import math
 import os
 import re
 import threading
@@ -169,18 +170,82 @@ def exit_if_not_migrated(project_dir: str) -> None:
         raise SystemExit(1)
 
 
+#: How many scenes without a numeric seq `exit_if_unordered` names one by one
+_MAX_UNNUMBERED_NAMED = 20
+
+
 def exit_if_unordered(project_dir: str) -> None:
-    """Stop the command (exit 1) when scenes.csv has a scene without a
-    numeric `seq`: drafting reads the ledger as of each scene
-    (`drafting_slice`), and without an order what came before is a guess."""
-    if not os.path.isfile(os.path.join(project_dir, 'reference', 'scenes.csv')):
-        return
-    try:
-        scene_order(project_dir)
-    except ValueError as e:
-        from storyforge.common import log
-        log(f'ERROR: {e}. Give every scene a number in seq.')
+    """Stop the command (exit 1), before any model call, when scenes.csv
+    gives no single reading order: drafting reads the ledger as of each
+    scene (`drafting_slice`) and the gate checks against the facts in force
+    there, so without one order what came before is a guess. write, revise
+    and check call it first.
+
+    It names every problem in one pass: a missing, unreadable or empty
+    scenes.csv; no id or seq column; a blank or repeated id
+    (`scene_id_problems`); each scene without a numeric seq (`seq_number`);
+    and each seq two scenes share (`shared_seqs`, the rule validate's
+    `duplicate-seq` reads). A missing scenes.csv stops too: all three
+    commands place scenes by it, and have nothing to place without it.
+
+    `scene_order` itself still ranks tied scenes by id, without a word: the
+    gate and the evals read it, and E8's thornwall trees carry a tie. The
+    stop is here, at the command entry."""
+    from storyforge.common import log
+
+    def stop(*lines: str) -> None:
+        for line in lines:
+            log(f'ERROR: {line}')
         raise SystemExit(1)
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    if not os.path.isfile(os.path.join(ref_dir, 'scenes.csv')):
+        stop('reference/scenes.csv is missing, so there is no reading order: '
+             'each scene\'s place in the book is its seq there.')
+    try:
+        header, rows = scene_rows(ref_dir)
+    except (OSError, UnicodeDecodeError) as e:
+        stop(f'reference/scenes.csv can\'t be read ({e}), so there is no '
+             f'reading order. Save it as UTF-8 text.')
+    if not header:
+        stop('reference/scenes.csv is empty (no header row), so there is no '
+             'reading order.')
+    problems = [f'scenes.csv: {p}' for p in scene_id_problems(header, rows)]
+    advice = []
+    if problems:
+        advice.append('Give every row of reference/scenes.csv its own id.')
+    if 'id' in header and 'seq' not in header:
+        problems.append('scenes.csv has no seq column, so no scene has a place')
+        advice.append('Add a seq column and give every scene a number in it.')
+    elif 'id' in header:
+        numbered, unnumbered = [], []
+        for row in rows:
+            sid = row.get('id', '').strip()
+            if not sid:
+                continue
+            try:
+                seq_number(row.get('seq', ''))
+                numbered.append(row)
+            except ValueError:
+                unnumbered.append(f'scenes.csv: {sid} has no numeric seq '
+                                  f'({row.get("seq", "")!r})')
+        if len(unnumbered) > _MAX_UNNUMBERED_NAMED:
+            more = len(unnumbered) - _MAX_UNNUMBERED_NAMED
+            unnumbered = unnumbered[:_MAX_UNNUMBERED_NAMED] + [
+                f'scenes.csv: {more} more scene(s) have no numeric seq']
+        problems += unnumbered
+        if unnumbered:
+            advice.append('Give every scene a number in seq.')
+        shared = shared_seqs(numbered)
+        problems += [f'scenes.csv: {", ".join(sids)} share seq {seq}, so their '
+                     f'reading order is undefined.' for seq, sids in shared]
+        if shared:
+            advice.append('Which scene comes first is the author\'s call: decide '
+                          'it, then give each scene its own number in the seq '
+                          'column of reference/scenes.csv (`storyforge validate` '
+                          'reports these as duplicate-seq).')
+    if problems:
+        stop(*problems, *advice)
 
 
 def load_from(ref_dir: str) -> list[dict[str, str]]:
@@ -262,7 +327,9 @@ def _read_rows(path: str) -> tuple[list[str], list[dict[str, str]]]:
     lines, _ = _raw_lines(path)
     if not lines:
         return [], []
-    header = [h.strip() for h in lines[0].split('|')]
+    # A spreadsheet export's byte-order mark would make the first column
+    # `\ufeffid`, and every row would read as having no id
+    header = [h.strip() for h in lines[0].lstrip('\ufeff').split('|')]
     rows = []
     for line in lines[1:]:
         if not line.strip():
@@ -581,6 +648,83 @@ def _split(value: str) -> list[str]:
 # Derived state
 # ============================================================================
 
+def seq_number(text) -> float:
+    """A scene's `seq` as a number: the one conversion `scene_order`,
+    `shared_seqs`, validate and cleanup use, so they can't drift apart.
+
+    Raises:
+        ValueError: if `text` is blank, not a number, or not finite (`nan`
+            and `inf` would sort nowhere in particular).
+    """
+    value = float(str(text if text is not None else '').strip())
+    if not math.isfinite(value):
+        raise ValueError(f'seq {text!r} is not a finite number')
+    return value
+
+
+def scene_rows(ref_dir: str) -> tuple[list[str], list[dict[str, str]]]:
+    """scenes.csv's header and every row as written: split on `|` with no
+    quoting (project CSVs never quote, so a `"` in a title is just a
+    character), the byte-order mark stripped, and a duplicated id kept as
+    two rows. `scene_order`, `shared_seqs` and `scene_id_problems` read
+    scenes.csv this one way. Missing file → ([], [])."""
+    return _read_rows(os.path.join(ref_dir, 'scenes.csv'))
+
+
+def scene_id_problems(header: list[str], rows: list[dict[str, str]]) -> list[str]:
+    """What keeps `scene_rows` from giving each scene one place: no id
+    column, a row with a blank id (`scene_order` skips it), an id on two
+    rows (the later row's seq wins). One string each; [] when clean. validate
+    (`scene-ids`) and `exit_if_unordered` both report these."""
+    if not header:
+        return []
+    if 'id' not in header:
+        return ['reference/scenes.csv has no id column, so no scene has a place']
+    problems = []
+    counts: dict[str, int] = {}
+    for row in rows:
+        sid = row.get('id', '').strip()
+        if sid:
+            counts[sid] = counts.get(sid, 0) + 1
+        else:
+            problems.append(f'a row has no id (seq {row.get("seq", "").strip()!r}, '
+                            f'title {csv_safe(row.get("title", "").strip())!r})')
+    problems += [f'{sid} is on {n} rows' for sid, n in counts.items() if n > 1]
+    return problems
+
+
+def shared_seqs(rows: list[dict[str, str]]) -> list[tuple[str, list[str]]]:
+    """The seqs two or more of `rows` (from `scene_rows`) share, as
+    (each spelling joined by " / ", sorted scene ids), in reading order.
+    validate's `duplicate-seq`, cleanup's `DUPLICATE_SEQ` and the
+    write/revise/check stop (`exit_if_unordered`) all read this one rule.
+
+    Every row with an id counts, whatever its status: `scene_order` ranks
+    every row (a cut scene's facts still sit at its position), so a tie with
+    a cut or unwritten scene is still an order nobody chose. Two rows with
+    one id count as two (`scene_id_problems` reports the id). Seqs compare
+    through `seq_number`, so "4" and "4.0" tie, as they do in `scene_order`;
+    a non-numeric seq ties only with the same text, and a blank seq or a
+    blank id is never part of a tie (`scene_order` and `scene_id_problems`
+    report those).
+    """
+    groups: dict[tuple, tuple[set[str], list[str]]] = {}
+    for row in rows:
+        sid = row.get('id', '').strip()
+        seq = row.get('seq', '').strip()
+        if not sid or not seq:
+            continue
+        try:
+            key: tuple = (0, seq_number(seq))
+        except ValueError:
+            key = (1, seq)
+        spellings, sids = groups.setdefault(key, (set(), []))
+        spellings.add(seq)
+        sids.append(sid)
+    return [(' / '.join(sorted(spellings)), sorted(sids))
+            for _, (spellings, sids) in sorted(groups.items()) if len(sids) > 1]
+
+
 def scene_order(project_dir: str) -> dict[str, int]:
     """Scene id → reading position, from `reference/scenes.csv`'s `seq`.
 
@@ -588,14 +732,14 @@ def scene_order(project_dir: str) -> dict[str, int]:
         ValueError: if a scene's `seq` is missing or not a number (the order
             would be a guess).
     """
-    _, rows = _read_rows(os.path.join(project_dir, 'reference', 'scenes.csv'))
+    _, rows = scene_rows(os.path.join(project_dir, 'reference'))
     keyed = []
     for row in rows:
         sid = row.get('id', '').strip()
         if not sid:
             continue
         try:
-            keyed.append((float(row.get('seq', '')), sid))
+            keyed.append((seq_number(row.get('seq', '')), sid))
         except ValueError:
             raise ValueError(f'scenes.csv: {sid} has no numeric seq '
                              f'({row.get("seq", "")!r})') from None

@@ -613,7 +613,7 @@ def pass_gate_advice(resume: str) -> str:
 
 def _reading_order(project_dir: str, scene_ids: list[str]) -> list[str]:
     """`scene_ids` in reading order (revise stops up front on a scene
-    without a numeric seq, `ledger.exit_if_unordered`)."""
+    without a numeric seq, or scenes sharing one, `ledger.exit_if_unordered`)."""
     from storyforge import ledger
     order = ledger.scene_order(project_dir)
     return sorted(scene_ids, key=lambda s: (s not in order, order.get(s, 0), s))
