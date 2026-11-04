@@ -613,8 +613,10 @@ def _run_acts(project_dir, scenes_dir, ref_dir, log_dir, profile_file):
     """Decide the book's acts once for the whole book (`extract_acts`)."""
     from storyforge.extract_acts import run_acts
     log('  Deciding the acts...')
+    # The synthesis tier, as phase 5: on Sonnet the breaks moved between runs
+    # (Quintus act 2 at seq 32 or 69, act 3 at 119-139); Opus held them (F-162)
     result = run_acts(ref_dir, scenes_dir, log_dir, _load_profile(profile_file),
-                      select_model('evaluation'),
+                      select_model('synthesis'),
                       on_usage=lambda f, op, target, model: _log_api_usage(
                           f, op, target, model, project_dir))
     how = {'model': 'decided over the whole book',

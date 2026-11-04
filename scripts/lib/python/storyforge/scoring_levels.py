@@ -271,6 +271,10 @@ def score_spine(project_dir: str, medium: str = 'novel') -> dict:
 # ============================================================================
 
 _SUMMARY_MAX_WORDS = 35
+#: Anchors and scenes: an anchor's summary is its scene's, and a scene's
+#: summary (extract phase 2) runs up to about 50 words, so 35 failed 12-19
+#: anchors on every extracted book (F-163)
+_SCENE_SUMMARY_MAX_WORDS = 50
 
 
 def _act_order_checks(rows: list[dict], label: str) -> list[CheckResult]:
@@ -317,15 +321,17 @@ def _summary_checks(
 
     Two checks per tier:
       - summary populated for every row
-      - summary ≤ _SUMMARY_MAX_WORDS for every row
+      - summary ≤ _SUMMARY_MAX_WORDS (events) or _SCENE_SUMMARY_MAX_WORDS
+        (anchors, scenes) for every row
     """
     if not rows:
         return []
+    limit = _SUMMARY_MAX_WORDS if label == 'event' else _SCENE_SUMMARY_MAX_WORDS
     missing = [r.get('id', '?') for r in rows if not r.get('summary', '').strip()]
     too_long = []
     for r in rows:
         text = r.get('summary', '').strip()
-        if text and _count_words(text) > _SUMMARY_MAX_WORDS:
+        if text and _count_words(text) > limit:
             too_long.append((r.get('id', '?'), _count_words(text)))
     return [
         _check(
@@ -338,7 +344,7 @@ def _summary_checks(
             severity='medium',
         ),
         _check(
-            f'summary ≤ {_SUMMARY_MAX_WORDS} words for every ' + label,
+            f'summary ≤ {limit} words for every ' + label,
             not too_long,
             (f'{len(too_long)} {label}(s) over the word limit; '
              f'first: {too_long[0][0]} has {too_long[0][1]} words'
