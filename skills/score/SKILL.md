@@ -337,6 +337,25 @@ Verdicts are written to `working/scoring-verdicts.csv`. In `full` coaching the
 LLM persists a `proposed_verdict`; in `coach`/`strict` only the diff is shown
 and the author records the verdict themselves.
 
+### Text fidelity: the upper tiers against the prose (LLM)
+
+`./storyforge score --text-fidelity` checks the logline, synopsis, act-shape,
+theme, spine and architecture against the book's own prose. One call splits
+them into claims, each naming the 1-4 scenes where the text should show it
+(an anchor's summary is a claim about its own scene). Claims are then judged
+in batches against those scenes' prose only: `supported`, `contradicted`,
+`not_shown` or `overreach` (an interpretation the text doesn't bear out, or
+one from another work). Each verdict has a quote and a correction.
+
+The boundary diffs compare each tier with the next. On an extracted book both
+tiers come from the same data, so only this check catches a tier that is wrong
+about the book. Use it on an extracted book, or on a drafted one before trusting
+its pitch. It writes `working/scores/text-fidelity/<timestamp>/report.md` and
+`claims.csv`, and changes nothing. Synthesis tier: about $1 for a 150-scene
+book. The claims pass is forecast up front, and the check pass once the claims
+are known; both go through the cost threshold. `story-architecture.md` isn't
+checked yet.
+
 ### Bible-consistency (LLM, cached)
 
 - `--bible-consistency` — for every drafted scene, check the prose against
