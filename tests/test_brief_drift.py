@@ -373,3 +373,21 @@ class TestHoneDiagnose:
         assert 'None:' not in out
         out = self._diagnose(project_dir, monkeypatch, capsys, '--scenes', 'act1-sc1')
         assert 'Not checked: No brief row for act1-sc1' in out
+
+
+class TestContractionsOfI:
+    """G-022: on the Gawain novel 25 of 42 briefs were flagged for "I'm" and
+    "I've" in key_dialogue: capitalized mid-line, so read as names."""
+
+    @pytest.mark.parametrize('line', ["Gawain: I'm the weakest of us, and I've no lady.",
+                                      'Gawain: I’ll go, and I’d go again.'])
+    def test_i_contractions_are_not_names(self, project_dir, line):
+        _set_brief(project_dir, DRAFTED, key_dialogue=line)
+        report = validate_structure(os.path.join(project_dir, 'reference'))
+        assert not [c for c in report['failures'] if c['category'] == 'briefs']
+
+    def test_a_real_name_in_the_same_line_is_still_found(self, project_dir):
+        _set_brief(project_dir, DRAFTED, key_dialogue="Gawain: I'm Olinsky's man.")
+        report = validate_structure(os.path.join(project_dir, 'reference'))
+        [finding] = [c for c in report['failures'] if c['category'] == 'briefs']
+        assert 'Olinsky' in finding['message'] and "I'm" not in finding['message']
