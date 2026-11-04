@@ -220,7 +220,7 @@ class TestRun:
         tf.write(result, out, 'Ann')
         report = open(os.path.join(out, 'report.md')).read()
         assert '## Contradicted by the text (1)' in report and 'She keeps it.' in report
-        assert '| synopsis | 0 | 1 | 0 | 0 |' in report
+        assert '| synopsis | 0 | 1 | 0 | 0 | 0 |' in report
         assert open(os.path.join(out, 'claims.csv')).readline().strip() == \
             '|'.join(tf.CLAIM_COLUMNS)
 
@@ -262,3 +262,83 @@ class TestCommand:
                             lambda *a, **k: pytest.fail('dry run called the API'))
         cmd_score.main(['--text-fidelity', '--dry-run'])
         assert 'These documents summarize a book' in capsys.readouterr().out
+
+
+class TestReviewEdges:
+    def test_quotes_and_backslashes_read_back_as_written(self, tmp_path):
+        from storyforge.elaborate import _read_csv
+        r = tf.Result([tf.Claim('synopsis', 'event', 'He "finally" lost it \\ all', ['s1'],
+                                'contradicted', '"I kept it," said Joe', 'He keeps some.')])
+        tf.write(r, str(tmp_path))
+        row = _read_csv(str(tmp_path / 'claims.csv'))[0]
+        assert row['claim'] == 'He "finally" lost it \\ all'
+        assert row['evidence'] == '\u201cI kept it," said Joe'   # a leading quote is curled
+
+    def test_batches_cap_claims(self):
+        claims = [tf.Claim('synopsis', 'event', f'c{i}', ['s1']) for i in range(90)]
+        groups = tf.batches(claims, {'s1': 10}, max_claims=40)
+        assert [len(g) for g in groups] == [40, 40, 10]
+
+    def test_a_failed_batch_is_unchecked_and_the_rest_kept(self, book, monkeypatch):
+        payload = _claims_payload()
+
+        def fake(prompt, model, log_file, max_tokens=4096, **kw):
+            if 'Split them' in prompt:
+                reply = _reply(payload)
+            elif 'She burns it' in prompt:
+                raise RuntimeError('HTTP 529')
+            else:
+                lines = [l for l in prompt.split('## Claims')[1].splitlines() if l[:1].isdigit()]
+                reply = _reply({'verdicts': [{'n': int(l.split('.')[0]), 'verdict': 'supported',
+                                              'evidence': '', 'correction': ''} for l in lines]})
+            with open(log_file, 'w') as f:
+                json.dump(reply, f)
+            return reply
+        monkeypatch.setattr(api, 'invoke_to_file', fake)
+        monkeypatch.setattr(tf, 'BATCH_CLAIMS', 1)
+        monkeypatch.setattr(tf.batches, '__defaults__', (tf.BATCH_WORDS, 1))
+        result = tf.run(str(book), 'm', log_dir=str(book / 'logs'))
+        verdicts = {c.claim: c.verdict for c in result.claims}
+        assert verdicts['She burns it'] == tf.UNCHECKED
+        assert verdicts['Secrets cost more'] == 'supported'
+        assert any('not checked' in n for n in result.notes)
+
+    def test_claims_on_prose_less_scenes_are_unchecked_without_a_call(self, book, monkeypatch):
+        (book / 'scenes' / 's3.md').write_text('')
+        prompts = []
+
+        def fake(prompt, model, log_file, max_tokens=4096, **kw):
+            prompts.append(prompt)
+            if 'Split them' in prompt:
+                reply = _reply(_claims_payload())
+            else:
+                lines = [l for l in prompt.split('## Claims')[1].splitlines() if l[:1].isdigit()]
+                reply = _reply({'verdicts': [{'n': int(l.split('.')[0]), 'verdict': 'supported',
+                                              'evidence': '', 'correction': ''} for l in lines]})
+            with open(log_file, 'w') as f:
+                json.dump(reply, f)
+            return reply
+        monkeypatch.setattr(api, 'invoke_to_file', fake)
+        result = tf.run(str(book), 'm', log_dir=str(book / 'logs'))
+        assert {c.claim: c.verdict for c in result.claims}['She burns it'] == tf.UNCHECKED
+        assert not any('She burns it' in p for p in prompts[1:])
+
+    @pytest.mark.parametrize('payload, problem', [
+        ({'claims': ['not a dict']}, 'not an object'),
+        ({'claims': [{'section': 'logline', 'kind': 'event', 'claim': 'x', 'scenes': None}]},
+         'not an object'),
+        ({'claims': [{'section': 'logline', 'kind': 'gossip', 'claim': 'x', 'scenes': ['s1']}]},
+         'kind'),
+    ])
+    def test_malformed_claims_are_problems(self, book, payload, problem):
+        with pytest.raises(tf._Problems, match=problem):
+            tf.parse_claims(json.dumps(payload), tf.read_tiers(str(book)), tf._scenes(str(book)))
+
+    @pytest.mark.parametrize('verdict, problem', [
+        ({'n': True, 'verdict': 'supported'}, 'not in the list'),
+        ({'n': 1, 'verdict': 'maybe'}, 'is not one of'),
+        ('nope', 'not an object'),
+    ])
+    def test_malformed_verdicts_are_problems(self, verdict, problem):
+        with pytest.raises(tf._Problems, match=problem):
+            tf.parse_verdicts(json.dumps({'verdicts': [verdict]}), 1)

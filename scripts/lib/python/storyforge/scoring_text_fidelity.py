@@ -27,7 +27,6 @@ Output: `working/scores/text-fidelity/<timestamp>/claims.csv` and
 
 from __future__ import annotations
 
-import csv
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -36,10 +35,12 @@ from typing import Callable
 from .common import log
 
 VERDICTS = ('supported', 'contradicted', 'not_shown', 'overreach')
+UNCHECKED = 'unchecked'   # a batch that failed, or a claim whose scenes have no prose
 KINDS = ('event', 'cause', 'order', 'outcome', 'interpretation')
 SECTIONS = ('logline', 'synopsis', 'act-shape', 'theme')
 MAX_SCENES_PER_CLAIM = 4
 BATCH_WORDS = 12000          # prose per verify call
+BATCH_CLAIMS = 40            # claims per verify call (a verdict is ~100 output tokens)
 CLAIMS_OUTPUT_TOKENS = 16000
 VERIFY_OUTPUT_TOKENS = 8000
 CLAIM_COLUMNS = ['n', 'section', 'kind', 'claim', 'scenes', 'verdict', 'evidence',
@@ -211,8 +212,13 @@ def parse_claims(reply: str, tiers: Tiers, scenes: list[dict[str, str]]) -> list
         {f'spine:{e["id"]}' for e in tiers.spine}
     claims, problems = [], []
     for i, c in enumerate(data['claims'], 1):
+        if not isinstance(c, dict) or not isinstance(c.get('scenes'), list):
+            problems.append(f'claim {i} is not an object with a list of scenes')
+            continue
         sec = str(c.get('section', '')).strip()
         cited = [str(s).strip() for s in c.get('scenes', []) if str(s).strip()]
+        if c.get('kind') not in KINDS:
+            problems.append(f'claim {i}: kind {c.get("kind")!r} is not one of {", ".join(KINDS)}')
         unknown = [s for s in cited if s not in ids]
         if sec not in sections:
             problems.append(f'claim {i}: section {sec!r} is not one of the documents')
@@ -249,7 +255,7 @@ def anchor_claims(tiers: Tiers, scenes: list[dict[str, str]]) -> list[Claim]:
 # ---------------------------------------------------------------------------
 
 def batches(claims: list[Claim], words: dict[str, int],
-            budget: int = BATCH_WORDS) -> list[list[int]]:
+            budget: int = BATCH_WORDS, max_claims: int = BATCH_CLAIMS) -> list[list[int]]:
     """Claim indexes grouped so each group's scenes stay within `budget`
     words (a claim whose own scenes are over it goes alone). Claims are taken
     in the order of their first scene, so neighbours share passages."""
@@ -263,7 +269,8 @@ def batches(claims: list[Claim], words: dict[str, int],
     scenes_in: set[str] = set()
     for i in order:
         new = scenes_in | set(claims[i].scenes)
-        if current and sum(words.get(s, 0) for s in new) > budget:
+        if current and (sum(words.get(s, 0) for s in new) > budget
+                        or len(current) >= max_claims):
             groups.append(current)
             current, new = [], set(claims[i].scenes)
         current.append(i)
@@ -280,7 +287,7 @@ def build_verify_prompt(claims: list[Claim], group: list[int], passages: dict[st
         for s in claims[i].scenes:
             if s not in cited:
                 cited.append(s)
-    text = '\n\n'.join(f'=== scene {s} ===\n{passages.get(s, "(no prose)")}' for s in cited)
+    text = '\n\n'.join(f'=== scene {s} ===\n{passages.get(s) or "(no prose)"}' for s in cited)
     listed = '\n'.join(f'{n}. [{claims[i].section}; {claims[i].kind}; scenes '
                        f'{", ".join(claims[i].scenes)}] {claims[i].claim}'
                        for n, i in enumerate(group, 1))
@@ -324,8 +331,14 @@ def parse_verdicts(reply: str, count: int) -> list[dict]:
     by_n: dict[int, dict] = {}
     problems = []
     for v in data['verdicts']:
+        if not isinstance(v, dict):
+            problems.append(f'a verdict is not an object: {v!r:.60}')
+            continue
         n = v.get('n')
-        if not isinstance(n, int) or not 1 <= n <= count:
+        if v.get('verdict') not in VERDICTS:
+            problems.append(f'claim {n!r}: verdict {v.get("verdict")!r} is not one of '
+                            + ', '.join(VERDICTS))
+        if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= count:
             problems.append(f'verdict for claim {n!r}, which is not in the list')
         elif n in by_n:
             problems.append(f'claim {n} has two verdicts')
@@ -367,6 +380,8 @@ def _ask(prompt_for: Callable, parse: Callable, schema: dict, model: str, log_fi
             problems = e.problems
         except ValueError as e:
             raise FidelityError(f'{label}: unreadable reply ({e})') from e
+        except (KeyError, TypeError, AttributeError) as e:
+            raise FidelityError(f'{label}: malformed reply ({type(e).__name__}: {e})') from e
     raise AssertionError('unreachable')
 
 
@@ -414,7 +429,14 @@ def run(project_dir: str, model: str, *, log_dir: str,
     log(f'  {len(claims)} claim(s)')
 
     words = {r['id']: len(_prose(project_dir, r['id']).split()) for r in scenes}
-    groups = batches(claims, words)
+    no_prose = [i for i, c in enumerate(claims) if not any(words.get(s) for s in c.scenes)]
+    for i in no_prose:
+        claims[i].verdict = UNCHECKED
+    if no_prose:
+        result.notes.append(f'{len(no_prose)} claim(s) cite only scenes with no prose; '
+                            'not checked')
+    todo = [i for i in range(len(claims)) if i not in set(no_prose)]
+    groups = [[todo[j] for j in g] for g in batches([claims[i] for i in todo], words)]
     cost = forecast_verify(groups, claims, words, model)
     log(f'  Pass 2: {len(groups)} call(s) to check them against the prose, ~${cost:.2f} ({model})')
     if not approve(cost):
@@ -422,10 +444,19 @@ def run(project_dir: str, model: str, *, log_dir: str,
     passages = {sid: _prose(project_dir, sid) for g in groups for i in g
                 for sid in claims[i].scenes}
     for k, g in enumerate(groups, 1):
-        verdicts = _ask(lambda p, g=g: build_verify_prompt(claims, g, passages, p),
-                        lambda r, g=g: parse_verdicts(r, len(g)), VERDICTS_SCHEMA, model,
-                        os.path.join(log_dir, f'text-fidelity-verify-{k}.json'),
-                        VERIFY_OUTPUT_TOKENS, on_usage, 'text-fidelity-verify')
+        try:
+            verdicts = _ask(lambda p, g=g: build_verify_prompt(claims, g, passages, p),
+                            lambda r, g=g: parse_verdicts(r, len(g)), VERDICTS_SCHEMA, model,
+                            os.path.join(log_dir, f'text-fidelity-verify-{k}.json'),
+                            VERIFY_OUTPUT_TOKENS, on_usage, 'text-fidelity-verify')
+        except FidelityError as e:
+            # The other batches' verdicts are paid for: keep them, and say
+            # which claims this one leaves unchecked
+            log(f'  WARNING: batch {k} of {len(groups)} not checked: {e}')
+            result.notes.append(f'batch {k} ({len(g)} claims) not checked: {e}')
+            for i in g:
+                claims[i].verdict = UNCHECKED
+            continue
         for i, v in zip(g, verdicts):
             claims[i].verdict = v['verdict']
             claims[i].evidence = str(v.get('evidence', '')).strip()
@@ -443,15 +474,15 @@ def _group_of(section: str) -> str:
 
 
 def write(result: Result, out_dir: str, title: str = '') -> None:
-    from .common import csv_safe
     os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, 'claims.csv'), 'w', newline='', encoding='utf-8') as f:
-        w = csv.writer(f, delimiter='|', lineterminator='\n', quoting=csv.QUOTE_NONE,
-                       escapechar='\\')
-        w.writerow(CLAIM_COLUMNS)
+    # Pipe CSV as the project writes it (`extract_describe._cell`: one line, no
+    # `|`, unquoted, a leading `"` made `“` so csv.DictReader reads it back)
+    from .extract_describe import _cell as csv_safe
+    with open(os.path.join(out_dir, 'claims.csv'), 'w', encoding='utf-8') as f:
+        f.write('|'.join(CLAIM_COLUMNS) + '\n')
         for n, c in enumerate(result.claims, 1):
-            w.writerow([n, c.section, c.kind, csv_safe(c.claim), ';'.join(c.scenes), c.verdict,
-                        csv_safe(c.evidence), csv_safe(c.correction)])
+            f.write('|'.join([str(n), c.section, c.kind, csv_safe(c.claim), ';'.join(c.scenes),
+                              c.verdict, csv_safe(c.evidence), csv_safe(c.correction)]) + '\n')
     with open(os.path.join(out_dir, 'report.md'), 'w', encoding='utf-8') as f:
         f.write(render_report(result, title))
     result.output_dir = out_dir
@@ -460,7 +491,7 @@ def write(result: Result, out_dir: str, title: str = '') -> None:
 def counts(claims: list[Claim]) -> dict[str, dict[str, int]]:
     out: dict[str, dict[str, int]] = {}
     for c in claims:
-        row = out.setdefault(_group_of(c.section), {v: 0 for v in VERDICTS})
+        row = out.setdefault(_group_of(c.section), {v: 0 for v in (*VERDICTS, UNCHECKED)})
         row[c.verdict] = row.get(c.verdict, 0) + 1
     return out
 
@@ -470,14 +501,15 @@ def render_report(result: Result, title: str = '') -> str:
     lines = [f'# Text fidelity{": " + title if title else ""}', '',
              f'{len(claims)} claims from the upper tiers, each checked against the prose '
              f'of the scenes it cites. Cost ${result.cost:.2f}.', '',
-             '| tier | supported | contradicted | overreach | not shown |', '|---|---|---|---|---|']
+             '| tier | supported | contradicted | overreach | not shown | unchecked |',
+             '|---|---|---|---|---|---|']
     order = ['logline', 'synopsis', 'act-shape', 'theme', 'spine', 'architecture']
     table = counts(claims)
     for g in order:
         if g in table:
             r = table[g]
             lines.append(f'| {g} | {r["supported"]} | {r["contradicted"]} | {r["overreach"]} '
-                         f'| {r["not_shown"]} |')
+                         f'| {r["not_shown"]} | {r[UNCHECKED]} |')
     for verdict, heading in (('contradicted', 'Contradicted by the text'),
                              ('overreach', 'Readings the text does not bear out'),
                              ('not_shown', 'Not shown in the cited scenes')):
