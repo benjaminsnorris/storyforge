@@ -69,13 +69,15 @@ def parse_args(argv):
                         help='Print prompts without invoking Claude')
     parser.add_argument('--casts-only', action='store_true',
                         help='With --phase 2: ask each scene only for its cast (characters, '
-                             'on_stage) and add the ids it names to the existing ones, '
-                             'removing nothing; then add new ids to characters.csv and write '
-                             'working/extract-casts-review.md')
+                             'on_stage) and add the ids it names to the existing ones (the '
+                             'merge removes nothing); then hone --domain characters adds new ids '
+                             'to characters.csv and normalizes names to ids, and '
+                             'working/extract-casts-review.md lists what changed')
     from storyforge.cli import add_scene_filter_args
     add_scene_filter_args(parser)   # --scenes, --act, --from-seq: --casts-only only
     parser.add_argument('--exclude-scenes', type=str, default=None,
-                        help='With --casts-only: comma-separated scene ids to leave as they are')
+                        help='With --casts-only: comma-separated scene ids not to ask or merge '
+                             '(hone\'s registry pass still normalizes every scene\'s cast)')
     args = parser.parse_args(argv)
     for problem in _casts_only_usage_errors(args):
         parser.error(problem)
@@ -790,14 +792,22 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 def _select_cast_scenes(args, ref_dir: str) -> list[str]:
     """The live scenes (`scene_filter.build_scene_list`: not cut or merged;
     a short scene has a cast too, so stubs count) the filter flags select,
-    in reading order, less --exclude-scenes.
-    Exits 1 on a filter that selects nothing or can't be read, and on an
-    excluded id that isn't a live scene (a typo there would ask a scene the
-    author meant to keep out)."""
+    in reading order, less --exclude-scenes. Exits 1, before anything is
+    sent, on a filter that selects nothing or can't be read, and on a
+    --scenes or --exclude-scenes id that isn't a live scene: a typo would
+    leave out a scene the author meant to ask, or ask one meant to be kept
+    out."""
     from storyforge.cli import resolve_filter_args
     from storyforge.scene_filter import apply_scene_filter, build_scene_list
     metadata = os.path.join(ref_dir, 'scenes.csv')
     live = build_scene_list(metadata, min_words=0)
+    for flag, value in (('--scenes', args.scenes), ('--exclude-scenes', args.exclude_scenes)):
+        unknown = [s.strip() for s in (value or '').split(',') if s.strip()
+                   and s.strip() not in live]
+        if unknown:
+            log(f'ERROR: {flag} names {", ".join(unknown)}, not a live scene in scenes.csv '
+                f'(unknown, cut or merged); nothing was asked')
+            sys.exit(1)
     mode, value, value2 = resolve_filter_args(args)
     try:
         selected = apply_scene_filter(metadata, live, mode, value, value2)
@@ -805,14 +815,10 @@ def _select_cast_scenes(args, ref_dir: str) -> list[str]:
         log(f'ERROR: --from-seq {value!r} is not N or N-M ({e})')
         sys.exit(1)
     if args.exclude_scenes:
-        excluded = [s.strip() for s in args.exclude_scenes.split(',') if s.strip()]
-        unknown = [s for s in excluded if s not in live]
-        if unknown:
-            log(f'ERROR: --exclude-scenes names {", ".join(unknown)}, not a live scene in '
-                f'scenes.csv; nothing was asked')
-            sys.exit(1)
-        selected = [s for s in selected if s not in set(excluded)]
-        log(f'  Excluded {len(excluded)} scene(s); {len(selected)} left')
+        excluded = {s.strip() for s in args.exclude_scenes.split(',') if s.strip()}
+        kept = [s for s in selected if s not in excluded]
+        log(f'  Excluded {len(selected) - len(kept)} selected scene(s); {len(kept)} left')
+        selected = kept
     return selected
 
 
@@ -835,37 +841,50 @@ def _batch_spend(batch_file: str, log_dir: str, model: str) -> float | None:
     return total
 
 
+def _povs(ref_dir: str) -> dict[str, str]:
+    from storyforge.elaborate import _read_csv
+    return {r['id']: r.get('pov', '') for r in _read_csv(os.path.join(ref_dir, 'scenes.csv'))
+            if r.get('id')}
+
+
 def _hone_characters(project_dir: str, ref_dir: str) -> tuple[str, bool]:
     """Hone's character registry pass (`hone --domain characters`: the
-    character part of phase 2's registry pass, so no other column is
-    normalized), which adds each new id to characters.csv with the role
-    hone gives it and no pronouns (the author's to fill: #513). Returns a
-    note for the review and whether it failed."""
+    character part of phase 2's registry pass, so no value or MICE cell is
+    normalized). It adds each new id to characters.csv, with the role hone
+    gives it and no pronouns (the author's to fill: #513), or maps it to
+    an existing one; it rewrites names as ids in every scene's casts and
+    pov, and may drop a reference it decides is no character. Returns a
+    note for the review and whether it failed. What it changed but could
+    not commit is committed with the review."""
     from storyforge.elaborate import _read_csv
     from storyforge.hone import find_unresolved
     path = os.path.join(ref_dir, 'characters.csv')
     before = len([r for r in _read_csv(path) if r.get('id')])
     log('')
     log('--- Registry: hone characters ---')
+    rerun = 'Check characters.csv, then run ./storyforge hone --domain characters'
     try:
         from storyforge.cmd_hone import main as hone_main
         hone_main(['--domain', 'characters'])
     except SystemExit as e:
         if e.code not in (None, 0):
             log(f'ERROR: hone --domain characters exited {e.code}')
-            return (f'FAILED: hone --domain characters exited {e.code}; the new ids are not '
-                    f'in characters.csv yet. Run ./storyforge hone --domain characters'), True
+            return (f'FAILED: hone --domain characters exited {e.code}, so some new ids may '
+                    f'not be in characters.csv. {rerun}'), True
     except Exception as e:   # noqa: BLE001 - named, and the run exits 1
         log(f'ERROR: hone --domain characters failed: {e}')
-        return (f'FAILED: hone --domain characters raised {type(e).__name__}: {csv_safe(str(e))}; '
-                f'the new ids are not in characters.csv yet. Run ./storyforge hone '
-                f'--domain characters'), True
+        return (f'FAILED: hone --domain characters raised {type(e).__name__} '
+                f'({csv_safe(str(e))}) partway, so some new ids may not be in '
+                f'characters.csv. {rerun}'), True
     added = len([r for r in _read_csv(path) if r.get('id')]) - before
     left = find_unresolved('characters', ref_dir)
     note = (f'hone --domain characters added {added} character(s) to characters.csv '
             f'(role as hone gives it; pronouns left blank for the author).')
     if left:
-        note += (f' {len(left)} cast reference(s) are still not in the registry: '
+        log(f'  WARNING: {len(left)} cast reference(s) are still not in the registry '
+            f'(see hone\'s log above: a mapping call cut off, or answered with no id)')
+        note += (f' {len(left)} cast reference(s) are still not in the registry (a mapping '
+                 f'call cut off, or answered with no id; see the run log): '
                  f'{csv_safe(", ".join(left[:20]))}{" ..." if len(left) > 20 else ""}')
     return note, False
 
@@ -874,9 +893,14 @@ def _run_casts_only(args, project_dir, scenes_dir, ref_dir, log_dir, profile_fil
                     title, session_start) -> int:
     """`extract --phase 2 --casts-only`: ask each selected scene for its cast
     alone, merge the answers in by union (`extract_casts`), add the new ids
-    to the registry, and write the review. Returns the exit status: 1 when
-    a scene couldn't be asked or merged, the batch or a commit failed, or
-    the registry pass failed."""
+    to the registry, and write the review. Returns the exit status, 1 when:
+    scene-intent.csv can't be merged into; no selected scene can be asked;
+    a selected scene can't be asked (no prose, no row, several rows, a row
+    with too many fields) or merged (no usable reply, an unreadable one,
+    its row changed while the batch ran), dry run included; the forecast
+    is over the cost threshold; the branch, the batch, a commit or the
+    registry pass fails. (A bad --scenes, --exclude-scenes or --from-seq
+    exits 1 in `_select_cast_scenes`.)"""
     import shutil
     from storyforge import extract_casts as casts
     from storyforge.costs import check_threshold, cost_threshold, exit_if_bad_threshold
@@ -884,12 +908,14 @@ def _run_casts_only(args, project_dir, scenes_dir, ref_dir, log_dir, profile_fil
     from storyforge.enrich import _PROMPT_REGISTRIES, format_registries_for_prompt, load_alias_map
     from storyforge.extract import CAST_SCHEMA, build_cast_prompt, parse_cast_response
     from storyforge.git import CommitError, commit_or_raise
+    from storyforge.hone import find_alias_collisions
 
     log('')
     log('--- Phase 2, casts only (scene-intent.csv: characters, on_stage) ---')
     intent_path = os.path.join(ref_dir, 'scene-intent.csv')
     try:
         before = casts.read_casts(intent_path)
+        overlong = set(casts.overlong_rows(intent_path))
     except casts.CastFileError as e:
         log(f'ERROR: {e}; nothing was asked')
         return 1
@@ -904,6 +930,9 @@ def _run_casts_only(args, project_dir, scenes_dir, ref_dir, log_dir, profile_fil
             not_merged[sid] = 'no row in scene-intent.csv (run extract --phase 2 for it)'
         elif len(rows) > 1:
             not_merged[sid] = f'on {len(rows)} rows of scene-intent.csv; make it one first'
+        elif sid in overlong:
+            not_merged[sid] = ('its scene-intent.csv row has more fields than the header '
+                               '(a stray |?), so its cast cells can\'t be found')
         elif not os.path.isfile(scene_path):
             not_merged[sid] = f'no scenes/{sid}.md'
         else:
@@ -932,7 +961,7 @@ def _run_casts_only(args, project_dir, scenes_dir, ref_dir, log_dir, profile_fil
     forecast = casts.forecast(list(prompts.values()), model)
     log(f'  {len(prompts)} scene(s) to ask, one Batch API request each ({model}): '
         f'forecast ${forecast:.2f}, plus hone\'s mapping calls for the ids no registry '
-        f'entry resolves (one call per 60, not forecast)')
+        f'entry resolves (at least one call per 60, not forecast)')
 
     if args.dry_run:
         first = next(iter(prompts))
@@ -956,48 +985,67 @@ def _run_casts_only(args, project_dir, scenes_dir, ref_dir, log_dir, profile_fil
             f'(${cost_threshold():.2f}, STORYFORGE_COST_THRESHOLD); nothing was sent')
         return 1
 
-    create_branch('extract', project_dir)
+    if not create_branch('extract', project_dir):
+        log('ERROR: no branch to work on (see above); nothing was sent')
+        return 1
     ensure_branch_pushed(project_dir)
-    create_draft_pr(f'Extract: casts for {title} ({len(prompts)} scenes)',
-                    f"""## Extraction: casts only
+    pr = create_draft_pr(f'Extract: casts for {title} ({len(prompts)} scenes)',
+                         f"""## Extraction: casts only
 
 **Project:** {title}
 **Scenes asked:** {len(prompts)}
 
-Each scene's characters and on_stage were asked again and merged in by union: nothing is
-removed. See `{casts.REVIEW_FILE}` for what each scene gained.
+Each scene's characters and on_stage were asked again and merged in by union: the merge
+removes nothing. See `{casts.REVIEW_FILE}` for what each scene gained, and for anything
+the registry pass changed.
 
 ### Tasks
 - [ ] Casts merged (scene-intent.csv)
 - [ ] Registry (characters.csv)
 - [ ] Review""", project_dir, 'extraction')
 
+    # The last run's review describes the last run: gone, so a run that
+    # stops before writing its own leaves none to misread (git has it)
+    review_path = os.path.join(project_dir, casts.REVIEW_FILE)
+    if os.path.isfile(review_path):
+        os.remove(review_path)
     casts_log = os.path.join(log_dir, casts.LOG_SUBDIR)
-    shutil.rmtree(casts_log, ignore_errors=True)   # no earlier run's reply is read
-    os.makedirs(casts_log, exist_ok=True)
+    try:   # no earlier run's reply may be read as this one's
+        if os.path.lexists(casts_log):
+            shutil.rmtree(casts_log)
+        os.makedirs(casts_log)
+    except OSError as e:
+        log(f'ERROR: could not clear {casts_log} ({e}); an earlier run\'s replies could be '
+            f'read as this one\'s. Nothing was sent')
+        return 1
     batch_file = os.path.join(casts_log, 'batch.jsonl')
     with open(batch_file, 'w') as f:
         for sid, prompt in prompts.items():
             f.write(json.dumps(build_batch_request(sid, prompt, model, casts.MAX_TOKENS,
                                                    output_schema=CAST_SCHEMA)) + '\n')
+    batch_id = ''
     try:
         log('  Submitting batch...')
-        results_url = poll_batch(submit_batch(batch_file), log_fn=log)
+        batch_id = submit_batch(batch_file)
+        log(f'  Batch {batch_id} submitted')
+        results_url = poll_batch(batch_id, log_fn=log)
         download_batch_results(results_url, os.path.join(casts_log, 'output'), casts_log)
     except (RuntimeError, OSError, ValueError) as e:
-        log(f'ERROR: the cast batch failed ({e}); nothing was merged. Any reply already '
-            f'downloaded is in {casts_log}')
+        where = (f'batch {batch_id} may still be running (and billed): check or cancel it '
+                 f'in the Anthropic console' if batch_id else 'the batch was not submitted')
+        log(f'ERROR: the cast batch failed ({e}); nothing was merged; {where}')
         _log_batch_usage(batch_file, casts_log, 'extract-casts', model, project_dir)
         return 1
     _log_batch_usage(batch_file, casts_log, 'extract-casts', model, project_dir)
     spent = _batch_spend(batch_file, casts_log, model)
 
-    answers: dict[str, tuple[list[str], list[str]]] = {}
+    answers: dict[str, casts.CastAnswer] = {}
     empty: list[str] = []
     for sid in prompts:
         txt = os.path.join(casts_log, f'{sid}.txt')
         if not os.path.isfile(txt):
-            not_merged[sid] = 'no usable reply (failed, refused or cut off: see the WARNING)'
+            not_merged[sid] = ('no usable reply (failed, refused, cut off or missing from '
+                               'the results)')
             continue
         with open(txt, encoding='utf-8') as f:
             try:
@@ -1009,8 +1057,17 @@ removed. See `{casts.REVIEW_FILE}` for what each scene gained.
             answers[sid] = answer
         else:
             empty.append(sid)
+    if empty:
+        log(f'  WARNING: {len(empty)} reply(ies) named no one, so those casts are as they '
+            f'were: {", ".join(empty)}')
 
     alias_map = load_alias_map(os.path.join(ref_dir, 'characters.csv'))
+    # An alias two characters share names neither (hone won't route
+    # through one either): matching by it could put the wrong person in
+    shared = find_alias_collisions('characters', ref_dir)
+    for alias in shared:
+        alias_map.pop(alias, None)
+    povs_before = _povs(ref_dir)
     try:
         merges = casts.apply_casts(intent_path, answers, alias_map)
     except casts.CastFileError as e:
@@ -1018,7 +1075,8 @@ removed. See `{casts.REVIEW_FILE}` for what each scene gained.
         return 1
     for sid in answers:
         if sid not in merges:
-            not_merged[sid] = 'its scene-intent.csv row went, or was doubled, while the batch ran'
+            not_merged[sid] = ('its scene-intent.csv row went, was doubled or changed shape '
+                               'while the batch ran')
     changed = [sid for sid, m in merges.items() if m.changed]
     n_chars = sum(len(merges[s].added_characters) for s in changed)
     n_on = sum(len(merges[s].added_on_stage) for s in changed)
@@ -1031,39 +1089,50 @@ removed. See `{casts.REVIEW_FILE}` for what each scene gained.
             commit_or_raise(project_dir, f'Extract: Phase 2 casts — {n_chars + n_on} id(s) '
                             f'added in {len(changed)} scene(s)',
                             ['reference/scene-intent.csv', 'working/'])
-            update_pr_task('Casts merged (scene-intent.csv)', project_dir)
+            update_pr_task('Casts merged (scene-intent.csv)', project_dir, pr)
             registry_note, hone_failed = _hone_characters(project_dir, ref_dir)
             failed |= hone_failed
             if not hone_failed:
-                update_pr_task('Registry (characters.csv)', project_dir)
+                update_pr_task('Registry (characters.csv)', project_dir, pr)
         else:
             registry_note = 'not run: no scene gained anyone'
-
-        after = casts.read_casts(intent_path)
-        characters = _read_csv(os.path.join(ref_dir, 'characters.csv'))
-        names = {r['id'].strip().lower(): r.get('name', '').strip()
-                 for r in characters if (r.get('id') or '').strip()}
-        review = casts.review_text(
-            selected=list(prompts), before=before, after=after, names=names,
-            alias_map=load_alias_map(os.path.join(ref_dir, 'characters.csv')),
-            not_merged=not_merged, empty=empty, cost=spent, forecast_cost=forecast,
-            registry_note=registry_note)
-        review_path = os.path.join(project_dir, casts.REVIEW_FILE)
-        with open(review_path, 'w', encoding='utf-8', newline='\n') as f:
-            f.write(review)
-        commit_or_raise(project_dir, 'Extract: Phase 2 casts review',
-                        [casts.REVIEW_FILE, 'working/'])
-        update_pr_task('Review', project_dir)
     except CommitError as e:
-        log(f'ERROR: {e}')
+        log(f'ERROR: {e}. The merged casts are in reference/scene-intent.csv but not '
+            f'committed, and the registry pass did not run. Commit the file (a re-run '
+            f'finds nothing to add), then run ./storyforge hone --domain characters')
         return 1
+
+    try:
+        after = casts.read_casts(intent_path)
     except casts.CastFileError as e:
         log(f'ERROR: {e}; the review was not written')
         return 1
+    povs_after = _povs(ref_dir)
+    characters = _read_csv(os.path.join(ref_dir, 'characters.csv'))
+    names = {r['id'].strip().lower(): r.get('name', '').strip()
+             for r in characters if (r.get('id') or '').strip()}
+    review = casts.review_text(
+        selected=list(prompts), before=before, after=after, names=names,
+        alias_map=load_alias_map(os.path.join(ref_dir, 'characters.csv')),
+        not_merged=not_merged, empty=empty, cost=spent, forecast_cost=forecast,
+        registry_note=registry_note, shared_aliases=shared,
+        pov_changes={sid: (old, povs_after.get(sid, '')) for sid, old in povs_before.items()
+                     if povs_after.get(sid, '') != old})
+    with open(review_path, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(review)
+    try:
+        # With the registry pass's files, in case its own commit failed
+        commit_or_raise(project_dir, 'Extract: Phase 2 casts review',
+                        [casts.REVIEW_FILE, 'reference/scene-intent.csv',
+                         'reference/characters.csv', 'reference/scenes.csv', 'working/'])
+        update_pr_task('Review', project_dir, pr)
+    except CommitError as e:
+        log(f'ERROR: {e}. The review is at {casts.REVIEW_FILE}, not committed')
+        failed = True
 
     log('')
     log(f'Casts: {len(changed)} of {len(prompts)} scene(s) gained someone; {n_chars} id(s) '
-        f'added to characters, {n_on} to on_stage. Cost '
+        f'added to characters, {n_on} to on_stage. Batch cost '
         f'{"$%.2f" % spent if spent is not None else "not known"} (forecast ${forecast:.2f}). '
         f'Review: {casts.REVIEW_FILE}')
     log(f'Registry: {registry_note}')

@@ -107,9 +107,50 @@ class TestSceneFilter:
 
     def test_an_act(self, run, mock_api):
         mock_api.set_response(_cast())
-        with pytest.raises(SystemExit):   # act2-sc02 and act2-sc03 have no prose
+        with pytest.raises(SystemExit) as e:   # act2-sc02 and act2-sc03 have no prose
             main(['--phase', '2', '--casts-only', '--act', '2'])
+        assert e.value.code == 1
         assert list(_prompts(mock_api)) == ['act2-sc01']
+
+    def test_a_scenes_id_that_isnt_a_scene_stops_the_run(self, run, mock_api, capsys):
+        """SF-9: --scenes act1-sc1 used to warn and ask the rest, exit 0."""
+        with pytest.raises(SystemExit) as e:
+            main(['--phase', '2', '--casts-only', '--scenes', 'act1-sc01,act1-sc1'])
+        assert e.value.code == 1
+        assert mock_api.call_count == 0
+        assert '--scenes names act1-sc1' in capsys.readouterr().out
+
+    def test_a_cut_scene_named_is_refused(self, run, mock_api, project_dir):
+        path = os.path.join(project_dir, 'reference', 'scenes.csv')
+        rows = open(path).read().split('\n')
+        rows = [r.replace('|briefed|', '|cut|') if r.startswith('act1-sc02|') else r
+                for r in rows]
+        open(path, 'w').write('\n'.join(rows))
+        with pytest.raises(SystemExit) as e:   # act1-sc02 is cut now
+            main(['--phase', '2', '--casts-only', '--scenes', 'act1-sc02'])
+        assert e.value.code == 1
+
+    def test_a_bad_from_seq_stops_the_run(self, run, mock_api):
+        with pytest.raises(SystemExit) as e:
+            main(['--phase', '2', '--casts-only', '--from-seq', 'two'])
+        assert e.value.code == 1
+        assert mock_api.call_count == 0
+
+    def test_a_short_scene_is_asked(self, run, mock_api, project_dir):
+        """Stubs have casts too: build_scene_list's 50-word floor is off."""
+        path = os.path.join(project_dir, 'reference', 'scenes.csv')
+        lines = open(path).read().split('\n')
+        header = lines[0].split('|')
+        wc = header.index('word_count')
+        for i, line in enumerate(lines[1:], 1):
+            fields = line.split('|')
+            if fields[0] == 'act1-sc02':
+                fields[wc] = '12'
+                lines[i] = '|'.join(fields)
+        open(path, 'w').write('\n'.join(lines))
+        mock_api.set_response(_cast())
+        main(['--phase', '2', '--casts-only', '--scenes', 'act1-sc02'])
+        assert list(_prompts(mock_api)) == ['act1-sc02']
 
     def test_excluded_scenes_are_not_asked_or_touched(self, run, mock_api, project_dir):
         mock_api.set_response(_cast(['zed-orlo'], ['zed-orlo']))
@@ -136,7 +177,7 @@ class TestMerge:
 
         def reply(prompt):
             if '## Scene: act1-sc01' in prompt:
-                # Tessa (an alias) is already there; Pell leaves on_stage out
+                # Tessa (an alias) is already there; Pell, in characters only, isn't named
                 return _cast(['Tessa', 'old-mother-vey', 'Kael'], ['old-mother-vey', 'Kael'])
             return _cast(['dorren-hayle'], ['dorren-hayle'])
         mock_api.set_response_fn(reply)
@@ -148,6 +189,7 @@ class TestMerge:
             'Dorren Hayle;Tessa Merrin;Pell;old-mother-vey;kael-maren'
         assert rows['act1-sc01']['on_stage'] == 'Dorren Hayle;Tessa Merrin;old-mother-vey;kael-maren'
         after_lines = open(path).read().split('\n')
+        assert len(after_lines) == len(before_lines)
         header = before_lines[0].split('|')
         cast_cols = {header.index('characters'), header.index('on_stage')}
         for old, new in zip(before_lines, after_lines):
@@ -159,14 +201,19 @@ class TestMerge:
         # scenes not asked are as they were
         assert after_lines[5:] == before_lines[5:]
 
-        commits = [c[1] for c in mock_git.calls_for('commit_and_push')]
-        assert commits[0].startswith('Extract: Phase 2 casts — ')
-        assert commits[-1] == 'Extract: Phase 2 casts review'
+        commits = mock_git.calls_for('commit_and_push')
+        assert commits[0][1].startswith('Extract: Phase 2 casts — ')
+        assert 'reference/scene-intent.csv' in commits[0][2]
+        assert commits[-1][1] == 'Extract: Phase 2 casts review'
+        # with whatever the registry pass changed and couldn't commit (SF-2)
+        assert {'reference/characters.csv', 'reference/scene-intent.csv'} <= set(commits[-1][2])
         assert run == [['--domain', 'characters']]   # the registry pass, characters only
+        assert mock_git.calls_for('create_branch')   # never on main (SF-4)
 
-    def test_extraction_records_are_left_as_they_were(self, run, mock_api, project_dir):
-        """No cast cell is in phase 5's cell record or the provenance record;
-        the merge only adds, so it writes neither."""
+    def test_extraction_records_are_left_as_they_were(self, run, mock_api, mock_git,
+                                                     project_dir):
+        """The casts-only path never writes extraction-cells.csv or
+        extraction-provenance.csv; neither holds a cast column."""
         working = os.path.join(project_dir, 'working')
         cells = os.path.join(working, 'extraction-cells.csv')
         prov = os.path.join(working, 'extraction-provenance.csv')
@@ -174,11 +221,14 @@ class TestMerge:
             f.write('file|scene_id|column|value\n'
                     'scene-intent.csv|act1-sc01|theme_threads|audit\n')
         with open(prov, 'w') as f:
-            f.write('file|version|step|written_at|sha256\n')
+            f.write('file|version|step|written_at|sha256\n'
+                    'reference/spine.csv|1.0|5a|2026-11-01T00:00:00Z|abc\n')
         before = (open(cells).read(), open(prov).read())
         mock_api.set_response(_cast(['zed-orlo'], []))
         main(['--phase', '2', '--casts-only', '--scenes', ASKABLE])
         assert (open(cells).read(), open(prov).read()) == before
+        assert all(not any('extraction-' in p for p in (c[2] or []))
+                   for c in mock_git.calls_for('commit_and_push'))
 
     def test_the_review_lists_each_scenes_additions(self, run, mock_api, project_dir, capsys):
         mock_api.set_response_fn(lambda p: _cast(['zed-orlo', 'Kael'], ['Kael'])
@@ -231,12 +281,16 @@ class TestFailures:
     def test_an_unreadable_reply_is_named(self, run, mock_api, project_dir):
         mock_api.set_response_fn(lambda p: 'not json' if '## Scene: new-x1' in p
                                  else _cast(['zed-orlo'], []))
-        with pytest.raises(SystemExit):
+        before = _rows(project_dir)['new-x1']
+        with pytest.raises(SystemExit) as e:
             main(['--phase', '2', '--casts-only', '--scenes', ASKABLE])
+        assert e.value.code == 1
+        assert _rows(project_dir)['new-x1'] == before
         review = open(os.path.join(project_dir, 'working', 'extract-casts-review.md')).read()
         assert '- new-x1: unreadable reply' in review
 
-    def test_a_failed_batch_merges_nothing(self, run, mock_api, project_dir, monkeypatch):
+    def test_a_failed_batch_merges_nothing(self, run, mock_api, mock_git, project_dir,
+                                           monkeypatch):
         def boom(batch_file):
             raise RuntimeError('HTTP 529 overloaded')
         monkeypatch.setattr('storyforge.cmd_extract.submit_batch', boom)
@@ -246,6 +300,8 @@ class TestFailures:
         assert e.value.code == 1
         assert open(os.path.join(project_dir, 'reference', 'scene-intent.csv')).read() == before
         assert run == []
+        assert not mock_git.calls_for('commit_and_push')
+        assert not os.path.exists(os.path.join(project_dir, 'working', 'extract-casts-review.md'))
 
     def test_over_the_threshold_sends_nothing(self, run, mock_api, mock_costs):
         mock_costs.threshold_ok = False
@@ -267,12 +323,138 @@ class TestFailures:
         # the casts are still merged: they are right, the registry is behind
         assert _rows(project_dir)['act1-sc01']['characters'].endswith(';zed-orlo')
 
-    def test_a_failed_commit_is_an_error(self, run, mock_api, mock_git):
+    def test_a_failed_commit_is_an_error_and_says_what_is_on_disk(
+            self, run, mock_api, mock_git, capsys):
+        """SF-1: the merge commit fails: the error says the casts are on disk
+        uncommitted and the registry pass didn't run, and it stops there."""
         mock_git.commit_success = False
         mock_api.set_response(_cast(['zed-orlo'], []))
         with pytest.raises(SystemExit) as e:
             main(['--phase', '2', '--casts-only', '--scenes', ASKABLE])
         assert e.value.code == 1
+        assert [c[1] for c in mock_git.calls_for('commit_and_push')] == [
+            mock_git.calls_for('commit_and_push')[0][1]]
+        assert mock_git.calls_for('commit_and_push')[0][1].startswith('Extract: Phase 2 casts —')
+        assert run == []
+        assert 'not committed' in capsys.readouterr().out
+
+    def test_no_branch_sends_nothing(self, run, mock_api, monkeypatch):
+        """SF-4: create_branch failing returned '' and the run committed to main."""
+        monkeypatch.setattr('storyforge.cmd_extract.create_branch', lambda *a: '')
+        with pytest.raises(SystemExit) as e:
+            main(['--phase', '2', '--casts-only', '--scenes', ASKABLE])
+        assert e.value.code == 1
+        assert not mock_api.calls_for('submit_batch')
+
+    def test_no_scene_intent_csv_sends_nothing(self, run, mock_api, project_dir):
+        os.remove(os.path.join(project_dir, 'reference', 'scene-intent.csv'))
+        with pytest.raises(SystemExit) as e:
+            main(['--phase', '2', '--casts-only', '--scenes', ASKABLE])
+        assert e.value.code == 1
+        assert mock_api.call_count == 0
+
+    def test_an_earlier_runs_reply_is_never_read(self, run, mock_api, project_dir,
+                                                 monkeypatch):
+        """SF-6/T-1: a reply left from a run before is cleared, so a scene
+        whose item fails now isn't merged from it."""
+        old = os.path.join(project_dir, 'working', 'logs', 'extract-casts')
+        os.makedirs(old, exist_ok=True)
+        with open(os.path.join(old, 'act1-sc02.txt'), 'w') as f:
+            f.write(_cast(['stale-id'], ['stale-id']))
+        mock_api.set_response(_cast())
+        real = mock_api._download_batch_results
+
+        def download(url, output_dir, log_dir, keep_incomplete=False):
+            done = real(url, output_dir, log_dir, keep_incomplete)
+            os.remove(os.path.join(log_dir, 'act1-sc02.txt'))   # this run's item failed
+            return [d for d in done if d != 'act1-sc02']
+        monkeypatch.setattr('storyforge.cmd_extract.download_batch_results', download)
+        with pytest.raises(SystemExit):
+            main(['--phase', '2', '--casts-only', '--scenes', ASKABLE])
+        assert 'stale-id' not in _rows(project_dir)['act1-sc02']['characters']
+
+    def test_a_row_removed_while_the_batch_ran_is_named(self, run, mock_api, project_dir,
+                                                         monkeypatch):
+        """T-2: the file is read again to merge; an answered scene whose row
+        went is not merged, and says so."""
+        mock_api.set_response(_cast(['zed-orlo'], []))
+        path = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+        real = mock_api._download_batch_results
+
+        def download(url, output_dir, log_dir, keep_incomplete=False):
+            lines = open(path).read().split('\n')
+            open(path, 'w').write('\n'.join(l for l in lines if not l.startswith('new-x1|')))
+            return real(url, output_dir, log_dir, keep_incomplete)
+        monkeypatch.setattr('storyforge.cmd_extract.download_batch_results', download)
+        with pytest.raises(SystemExit) as e:
+            main(['--phase', '2', '--casts-only', '--scenes', ASKABLE])
+        assert e.value.code == 1
+        review = open(os.path.join(project_dir, 'working', 'extract-casts-review.md')).read()
+        assert '- new-x1: its scene-intent.csv row went' in review
+
+    def test_an_edit_made_while_the_batch_ran_is_kept(self, run, mock_api, project_dir,
+                                                      monkeypatch):
+        """T-5: an edit to the scene's row during the run survives the merge."""
+        mock_api.set_response(_cast(['zed-orlo'], []))
+        path = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+        real = mock_api._download_batch_results
+
+        def download(url, output_dir, log_dir, keep_incomplete=False):
+            text = open(path).read().replace('act1-sc02|', 'act1-sc02|EDITED ', 1)
+            open(path, 'w').write(text.replace('|Dorren Hayle|Dorren Hayle|',
+                                               '|Dorren Hayle;Tessa Merrin|Dorren Hayle|', 1))
+            return real(url, output_dir, log_dir, keep_incomplete)
+        monkeypatch.setattr('storyforge.cmd_extract.download_batch_results', download)
+        main(['--phase', '2', '--casts-only', '--scenes', ASKABLE])
+        row = _rows(project_dir)['act1-sc02']
+        assert row['function'].startswith('EDITED ')
+        assert row['characters'] == 'Dorren Hayle;Tessa Merrin;zed-orlo'
+
+    def test_a_reply_naming_no_one_is_warned_about(self, run, mock_api, capsys):
+        """SF-8: an empty cast isn't an error (nothing to add), but it is said."""
+        mock_api.set_response(_cast())
+        main(['--phase', '2', '--casts-only', '--scenes', 'act1-sc01'])
+        assert 'WARNING: 1 reply(ies) named no one' in capsys.readouterr().out
+
+    def test_a_shared_alias_matches_no_one(self, run, mock_api, project_dir):
+        """SF-3: an alias two characters share names neither; the answer's
+        entry is added as given, for hone and the author, not as either id."""
+        path = os.path.join(project_dir, 'reference', 'characters.csv')
+        text = open(path).read()
+        text = text.replace('Kael;the Archivist', 'Kael;the Archivist;the keeper')
+        text = text.replace('pell|Pell||', 'pell|Pell|the keeper|')
+        open(path, 'w').write(text)
+        mock_api.set_response_fn(lambda p: _cast(['the keeper'], [])
+                                 if '## Scene: act1-sc02' in p else _cast())
+        main(['--phase', '2', '--casts-only', '--scenes', ASKABLE])
+        assert _rows(project_dir)['act1-sc02']['characters'] == 'Dorren Hayle;the keeper'
+        review = open(os.path.join(project_dir, 'working', 'extract-casts-review.md')).read()
+        assert '- the keeper: kael-maren, pell' in review
+
+    def test_the_cost_is_logged_and_reported(self, run, mock_api, mock_costs, project_dir):
+        """T-6: each reply's cost reaches the ledger and the review."""
+        from storyforge.costs import calculate_cost
+        mock_api.set_response(_cast())   # 100 in, 50 out per reply
+        main(['--phase', '2', '--casts-only', '--scenes', ASKABLE])
+        logged = [o for o in mock_costs.operations if o.get('operation') == 'extract-casts']
+        assert len(logged) == 4
+        each = calculate_cost(logged[0]['model'], 100, 50, batch=True)
+        review = open(os.path.join(project_dir, 'working', 'extract-casts-review.md')).read()
+        assert f'Cost of the batch: ${4 * each:.2f}' in review
+
+    def test_an_unreadable_cost_is_said(self, run, mock_api, project_dir, monkeypatch, capsys):
+        mock_api.set_response(_cast())
+        real = mock_api._download_batch_results
+
+        def download(url, output_dir, log_dir, keep_incomplete=False):
+            done = real(url, output_dir, log_dir, keep_incomplete)
+            open(os.path.join(log_dir, 'act1-sc01.json'), 'w').write('{not json')
+            return done
+        monkeypatch.setattr('storyforge.cmd_extract.download_batch_results', download)
+        main(['--phase', '2', '--casts-only', '--scenes', ASKABLE])
+        review = open(os.path.join(project_dir, 'working', 'extract-casts-review.md')).read()
+        assert 'Cost of the batch: not known' in review
+        assert "WARNING: the batch's cost could not be read" in capsys.readouterr().out
 
 
 class TestWithHone:

@@ -12,22 +12,31 @@ the answer in by union:
   as written, in their order; ids the answer adds go after them. A cell
   that gains nothing is left byte for byte as it was.
 - **Ids are compared through the character registry's aliases**
-  (`enrich.load_alias_map`): an answer's "Eumaeus" is the cast's
-  `eumaeus`, and a new entry is written as the registry id it resolves to
-  (unknown ids as given, for hone to add).
+  (`enrich.load_alias_map`, less any alias two characters share, which
+  names neither: `hone.find_alias_collisions`): an answer's "Eumaeus" is
+  the cast's `eumaeus`, and every entry added is written as the registry
+  id it resolves to (unknown ids as given, for hone to add).
 - **`on_stage` stays inside `characters`.** An id added to `on_stage` is
   added to `characters` too, and so is one `on_stage` already listed that
   `characters` left out.
-- **No other column, and no other row, is touched**: the file is edited
-  line by line, only the two cells changed (`apply_casts`).
+- **The merge touches no other column or row** (`apply_casts`): only the
+  two cells of rows that gain someone change. Writing the file makes it LF
+  throughout, as every CSV we write is.
 
 The author's edits: phase 2 keeps no per-cell record of what it wrote
 (`working/extraction-cells.csv` and `extraction-provenance.csv` are phase
 5's, and hold neither cast column), so an author-edited cast can't be told
 from an extracted one. A union can't undo an edit, since it only adds, so
-every scene the filter selects is merged; a scene whose cast the author
-wants left exactly as it is goes in `--exclude-scenes` (or out of the
-selection). Both records are left as they are.
+every scene the filter selects is merged; a scene the author wants kept
+out of the merge goes in `--exclude-scenes` (or out of the selection).
+Both records are left as they are.
+
+After the merge, hone's character pass (`hone --domain characters`, run by
+`cmd_extract`) works on the whole book, as it does after phase 2: it
+rewrites names as ids in every scene's casts and `scenes.csv:pov`, excluded
+scenes included, and may drop a reference it decides is no character. The
+review (`review_text`) lists every entry that went and every pov that
+changed, so nothing it does goes unseen.
 """
 
 from __future__ import annotations
@@ -52,6 +61,12 @@ LOG_SUBDIR = 'extract-casts'
 #: room above that
 OUTPUT_TOKENS_PER_SCENE = 250
 MAX_TOKENS = 1024
+
+
+class CastAnswer(NamedTuple):
+    """A reply's cast (`extract.parse_cast_response`), entries as given."""
+    characters: list[str]
+    on_stage: list[str]
 
 
 class CastMerge(NamedTuple):
@@ -80,7 +95,8 @@ def _canonical(entry: str, alias_map: dict[str, str]) -> str:
 
 def _append(cell: str, added: list[str]) -> str:
     """`cell` with `added` after its entries, its own text kept as written
-    (a trailing `;` or space is dropped so the list stays well formed)."""
+    but for surrounding spaces and a trailing `;`, dropped so the list
+    stays well formed."""
     if not added:
         return cell
     base = cell.strip()
@@ -93,7 +109,7 @@ def merge_cast(characters: str, on_stage: str, new_characters: list[str],
                new_on_stage: list[str], alias_map: dict[str, str]) -> CastMerge:
     """Union an answered cast into a scene's existing one (see the module
     docstring). Entries match case-insensitively through `alias_map`
-    (lowercased name, id or alias → id); each new one is written as its
+    (lowercased name, id or alias → id); each entry added is written as its
     registry id, deduplicated, in the answer's order. `characters` gains,
     in this order, the entries `on_stage` already held that it lacked, the
     answer's characters, and the answer's on_stage ids."""
@@ -109,7 +125,7 @@ def merge_cast(characters: str, on_stage: str, new_characters: list[str],
             added_on.append(cid)
 
     added_chars: list[str] = []
-    candidates = ([strip_parentheticals(p) for p in present]
+    candidates = ([_canonical(p, alias_map) for p in present]
                   + [_canonical(e, alias_map) for e in new_characters] + added_on)
     for cid in candidates:
         key = _canonical(cid, alias_map).lower()
@@ -140,6 +156,15 @@ def _columns(path: str) -> tuple[list[str], int, int, int]:
     return lines, header.index('id'), header.index('characters'), header.index('on_stage')
 
 
+def overlong_rows(path: str) -> list[str]:
+    """Ids of rows with more fields than the header: a stray `|` has moved
+    their cells, so the cast columns can't be found. Raises CastFileError."""
+    lines, id_i, _, _ = _columns(path)
+    width = len(lines[0].split(DELIMITER))
+    return [f[id_i].strip() for f in (line.split(DELIMITER) for line in lines[1:])
+            if len(f) > width and id_i < len(f) and f[id_i].strip()]
+
+
 def read_casts(path: str) -> dict[str, list[tuple[str, str]]]:
     """Every row's (characters, on_stage) by scene id, a list per id (more
     than one entry: the id is on several rows). Raises CastFileError."""
@@ -156,16 +181,18 @@ def read_casts(path: str) -> dict[str, list[tuple[str, str]]]:
     return casts
 
 
-def apply_casts(path: str, answers: dict[str, tuple[list[str], list[str]]],
+def apply_casts(path: str, answers: dict[str, CastAnswer],
                 alias_map: dict[str, str]) -> dict[str, CastMerge]:
     """Merge each scene's answered (characters, on_stage) into its row of
     scene-intent.csv, read now (not when the batch was sent), so an edit
     made while it ran is kept. Only the two cells of the rows that gain an
     id change; the file is written only when one does (LF, atomically,
     `csv_cli._write_lines`). Returns each answered scene's merge; a scene
-    with no row, or on several rows, is left out (the caller names it).
-    Raises CastFileError."""
+    with no row, on several rows, or on a row with more fields than the
+    header (`overlong_rows`), is left out (the caller names it). Raises
+    CastFileError."""
     lines, id_i, ch_i, on_i = _columns(path)
+    width = len(lines[0].split(DELIMITER))
     rows_per_id: dict[str, int] = {}
     for line in lines[1:]:
         fields = line.split(DELIMITER)
@@ -177,12 +204,14 @@ def apply_casts(path: str, answers: dict[str, tuple[list[str], list[str]]],
     for line in lines[1:]:
         fields = line.split(DELIMITER)
         sid = fields[id_i].strip() if id_i < len(fields) else ''
-        if sid not in answers or rows_per_id.get(sid) != 1:
+        if sid not in answers or rows_per_id.get(sid) != 1 or len(fields) > width:
             out.append(line)
             continue
         while len(fields) <= max(ch_i, on_i):
             fields.append('')
-        merge = merge_cast(fields[ch_i], fields[on_i], *answers[sid], alias_map)
+        answer = answers[sid]
+        merge = merge_cast(fields[ch_i], fields[on_i], answer.characters, answer.on_stage,
+                           alias_map)
         merges[sid] = merge
         if merge.changed:
             fields[ch_i], fields[on_i] = merge.characters, merge.on_stage
@@ -195,13 +224,15 @@ def apply_casts(path: str, answers: dict[str, tuple[list[str], list[str]]],
 
 
 def forecast(prompts: list[str], model: str) -> float:
-    """The batch's cost: each prompt at `extract._CHARS_PER_TOKEN` characters
-    a token, plus `OUTPUT_TOKENS_PER_SCENE`, at the Batch API's price. No
-    shared system context is sent, so there is no cache to assume."""
+    """The batch's cost: each prompt priced as its own request (so a
+    long-prompt rate applies per request, not to the total), at
+    `extract._CHARS_PER_TOKEN` characters a token plus
+    `OUTPUT_TOKENS_PER_SCENE`, at the Batch API's price. No shared system
+    context is sent, so there is no cache to assume."""
     from .costs import calculate_cost
     from .extract import _CHARS_PER_TOKEN
-    tokens_in = sum(len(p) for p in prompts) // _CHARS_PER_TOKEN
-    return calculate_cost(model, tokens_in, OUTPUT_TOKENS_PER_SCENE * len(prompts), batch=True)
+    return sum(calculate_cost(model, len(p) // _CHARS_PER_TOKEN, OUTPUT_TOKENS_PER_SCENE,
+                              batch=True) for p in prompts)
 
 
 def _entry(cid: str, names: dict[str, str]) -> str:
@@ -219,7 +250,9 @@ def _difference(cell: str, other: str, alias_map: dict[str, str]) -> list[str]:
 def review_text(*, selected: list[str], before: dict[str, list[tuple[str, str]]],
                 after: dict[str, list[tuple[str, str]]], names: dict[str, str],
                 alias_map: dict[str, str], not_merged: dict[str, str], empty: list[str],
-                cost: float | None, forecast_cost: float, registry_note: str) -> str:
+                cost: float | None, forecast_cost: float, registry_note: str,
+                pov_changes: dict[str, tuple[str, str]] | None = None,
+                shared_aliases: dict[str, list[str]] | None = None) -> str:
     """The review file: per scene, the ids each column gained since the run
     began (read after hone's registry pass, so they are the ids that
     stayed), each with its registry name; any entry that went missing (hone
@@ -229,13 +262,17 @@ def review_text(*, selected: list[str], before: dict[str, list[tuple[str, str]]]
     `before` and `after` are `read_casts` results; `names` maps lowercased
     id to name; `alias_map` is the registry's after the run, so an entry
     hone only rewrote as its id counts as neither added nor lost;
-    `not_merged` maps scene id to the reason."""
+    `not_merged` maps scene id to the reason; `pov_changes` maps scene id
+    to the (old, new) `scenes.csv:pov` after the registry pass;
+    `shared_aliases` are aliases several characters share, not matched."""
     added: dict[str, tuple[list[str], list[str]]] = {}
     lost: dict[str, tuple[list[str], list[str]]] = {}
+    several: list[str] = []
     for sid in dict.fromkeys([*selected, *after, *before]):
         old_rows, new_rows = before.get(sid) or [('', '')], after.get(sid) or [('', '')]
         if len(old_rows) > 1 or len(new_rows) > 1:
-            continue   # on several rows: never merged, named in not_merged
+            several.append(sid)   # never merged, so not compared
+            continue
         (old_ch, old_on), (new_ch, new_on) = old_rows[0], new_rows[0]
         gained = (_difference(new_ch, old_ch, alias_map), _difference(new_on, old_on, alias_map))
         gone = (_difference(old_ch, new_ch, alias_map), _difference(old_on, new_on, alias_map))
@@ -249,15 +286,27 @@ def review_text(*, selected: list[str], before: dict[str, list[tuple[str, str]]]
     lines = ['# Extract: cast-only re-extraction review', '',
              f'Scenes asked: {len(selected)}. Scenes that gained someone: {len(added)}. '
              f'Ids added: {n_chars} to characters, {n_on} to on_stage.',
-             f'Cost: {"$%.2f" % cost if cost is not None else "not known (see the WARNINGs)"} '
-             f'(forecast ${forecast_cost:.2f}).', '',
+             f'Cost of the batch: '
+             f'{"$%.2f" % cost if cost is not None else "not known (see the WARNINGs)"} '
+             f'(forecast ${forecast_cost:.2f}); the registry pass\'s calls are in the cost '
+             f'ledger.', '',
              f'Registry: {registry_note}', '',
              'Entries already in a cast were kept as written; nothing below was removed by '
              'the merge. Check each addition against the scene: an id named here that the '
              'scene only mentions in passing belongs in neither column.', '']
+    if shared_aliases:
+        lines += ['## Aliases shared by several characters', '',
+                  'Not used to match an answer to a cast, since they name no one character:', '']
+        lines += [f'- {alias}: {", ".join(ids)}' for alias, ids in shared_aliases.items()] + ['']
     if not_merged:
         lines += ['## Not merged', '']
         lines += [f'- {sid}: {why}' for sid, why in not_merged.items()] + ['']
+    several = [s for s in several if s not in not_merged]
+    if several:
+        lines += ['## Not compared', '',
+                  'On several rows of scene-intent.csv, so what changed in their casts is not '
+                  'listed:', '']
+        lines += [f'- {sid}' for sid in several] + ['']
     if empty:
         lines += ['## Answered with no one', '',
                   'The reply listed nobody for these scenes; their casts are as they were.', '']
@@ -282,5 +331,9 @@ def review_text(*, selected: list[str], before: dict[str, list[tuple[str, str]]]
             parts = [f'{col}: {", ".join(ids)}' for col, ids in
                      (('characters', gone_chars), ('on_stage', gone_on)) if ids]
             lines.append(f'- {sid}: ' + '; '.join(parts))
+        lines.append('')
+    if pov_changes:
+        lines += ['## POV changed by the registry pass', '']
+        lines += [f'- {sid}: {old} → {new or "(blank)"}' for sid, (old, new) in pov_changes.items()]
         lines.append('')
     return '\n'.join(lines)

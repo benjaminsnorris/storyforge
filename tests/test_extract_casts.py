@@ -15,6 +15,8 @@ from storyforge.extract import (
     parse_cast_response,
 )
 
+A = casts.CastAnswer
+
 ALIASES = {
     'eumaeus': 'eumaeus', 'the swineherd': 'eumaeus', 'eumaeus the swineherd': 'eumaeus',
     'ulysses': 'ulysses', 'odysseus': 'ulysses', 'minerva': 'minerva', 'athena': 'minerva',
@@ -103,6 +105,16 @@ class TestMergeCast:
         assert m.characters == 'Irus'
         assert m.on_stage == 'irus'
 
+    def test_existing_entries_with_notes_in_parentheses_match(self):
+        """T-8: an existing `Ulysses (disguised)` is ulysses; the answer's
+        ulysses is not added again, and on_stage copied into characters is
+        written as its id (TD-2)."""
+        m = casts.merge_cast('Ulysses (disguised)', 'Athena (as Mentor)', ['ulysses'],
+                             ['minerva'], ALIASES)
+        assert m.characters == 'Ulysses (disguised);minerva'
+        assert m.on_stage == 'Athena (as Mentor)'
+        assert m.added_characters == ['minerva'] and m.added_on_stage == []
+
     def test_an_unchanged_cell_keeps_its_exact_text(self):
         m = casts.merge_cast(' ulysses ; eumaeus ', 'ulysses', ['eumaeus'], ['ulysses'], ALIASES)
         assert m.characters == ' ulysses ; eumaeus '
@@ -144,7 +156,7 @@ class TestApplyCasts:
                 'third|Asked, gains nothing.|sequel|ulysses|ulysses||']
         path = _intent(tmp_path, *rows)
         merges = casts.apply_casts(str(path), {
-            'hut': (['eumaeus'], ['eumaeus']), 'third': (['Odysseus'], [])}, ALIASES)
+            'hut': A(['eumaeus'], ['eumaeus']), 'third': A(['Odysseus'], [])}, ALIASES)
         lines = path.read_text().split('\n')
         assert lines[1] == ('hut|He arrives; "Ah," says the swineherd.|action|'
                             'narrator;ulysses;eumaeus|ulysses;eumaeus|+home|hospitality')
@@ -157,18 +169,48 @@ class TestApplyCasts:
         path = _intent(tmp_path, 'hut|f|action|ulysses|ulysses||')
         path.write_bytes(path.read_bytes().replace(b'\n', b'\r\n'))
         before = path.read_bytes()
-        casts.apply_casts(str(path), {'hut': (['ulysses'], [])}, ALIASES)
+        casts.apply_casts(str(path), {'hut': A(['ulysses'], [])}, ALIASES)
         assert path.read_bytes() == before
+
+    def test_a_crlf_file_that_gains_someone_is_written_lf(self, tmp_path):
+        path = _intent(tmp_path, 'hut|f|action|ulysses|ulysses||', 'b|g|x|||')
+        path.write_bytes(path.read_bytes().replace(b'\n', b'\r\n'))
+        casts.apply_casts(str(path), {'hut': A(['eumaeus'], [])}, ALIASES)
+        data = path.read_bytes()
+        assert b'\r' not in data and b'hut|f|action|ulysses;eumaeus|ulysses||\n' in data
+
+    def test_a_bom_header_still_finds_the_columns(self, tmp_path):
+        path = _intent(tmp_path, 'hut|f|action|ulysses|ulysses||')
+        path.write_bytes(b'\xef\xbb\xbf' + path.read_bytes())
+        casts.apply_casts(str(path), {'hut': A(['eumaeus'], [])}, ALIASES)
+        assert path.read_bytes().startswith(b'\xef\xbb\xbfid|')
+        assert 'ulysses;eumaeus' in path.read_text(encoding='utf-8-sig')
+
+    def test_the_answers_columns_land_in_their_own_cells(self, tmp_path):
+        """TD-1: the two lists are named, so they can't be swapped."""
+        path = _intent(tmp_path, 'hut|f|action||||')
+        casts.apply_casts(str(path), {'hut': A(characters=['argos'], on_stage=['eumaeus'])},
+                          ALIASES)
+        assert path.read_text().split('\n')[1] == 'hut|f|action|argos;eumaeus|eumaeus||'
+
+    def test_a_row_with_too_many_fields_is_left_alone_and_named(self, tmp_path):
+        """SF-10: a stray | moves the cells; merging would write into the
+        wrong column."""
+        row = 'hut|He says | no|action|ulysses|ulysses||'
+        path = _intent(tmp_path, row)
+        assert casts.overlong_rows(str(path)) == ['hut']
+        assert casts.apply_casts(str(path), {'hut': A(['eumaeus'], [])}, ALIASES) == {}
+        assert path.read_text().split('\n')[1] == row
 
     def test_a_short_row_is_padded_to_hold_the_cast(self, tmp_path):
         path = _intent(tmp_path, 'hut|f|action')
-        casts.apply_casts(str(path), {'hut': (['eumaeus'], [])}, ALIASES)
+        casts.apply_casts(str(path), {'hut': A(['eumaeus'], [])}, ALIASES)
         assert path.read_text().split('\n')[1] == 'hut|f|action|eumaeus|'
 
     def test_a_scene_on_two_rows_is_left_alone(self, tmp_path):
         path = _intent(tmp_path, 'hut|a|action|ulysses|ulysses||', 'hut|b|action|x|x||')
         before = path.read_text()
-        merges = casts.apply_casts(str(path), {'hut': (['eumaeus'], [])}, ALIASES)
+        merges = casts.apply_casts(str(path), {'hut': A(['eumaeus'], [])}, ALIASES)
         assert merges == {} and path.read_text() == before
 
     @pytest.mark.parametrize('content,problem', [
@@ -179,7 +221,7 @@ class TestApplyCasts:
         if content is not None:
             path.write_text(content)
         with pytest.raises(casts.CastFileError, match=problem):
-            casts.apply_casts(str(path), {'hut': (['a'], [])}, {})
+            casts.apply_casts(str(path), {'hut': A(['a'], [])}, {})
 
     def test_read_casts_lists_every_row_per_id(self, tmp_path):
         path = _intent(tmp_path, 'a|f|x|p;q|p||', 'b|f|x|||', 'a|g|x|r|r||')
@@ -204,7 +246,7 @@ class TestReviewText:
         assert '### hut\n- characters: eumaeus (Eumaeus), argos (not in characters.csv)\n' \
                '- on_stage: eumaeus (Eumaeus)\n' in text
         assert 'Ids added: 2 to characters, 1 to on_stage.' in text
-        assert 'Cost: $0.42 (forecast $0.50).' in text
+        assert 'Cost of the batch: $0.42 (forecast $0.50)' in text
         assert '- gone: no row in scene-intent.csv' in text
         assert '## Answered with no one' in text and '- palace' in text
         assert 'Registry: hone added 1' in text
@@ -217,12 +259,34 @@ class TestReviewText:
         assert 'far: characters' not in text
 
     def test_an_unknown_cost_is_said(self):
-        assert 'Cost: not known' in self._review(cost=None)
+        assert 'Cost of the batch: not known' in self._review(cost=None)
+
+    def test_pov_changes_shared_aliases_and_uncompared_scenes_are_listed(self):
+        text = self._review(pov_changes={'hut': ('Odysseus', 'ulysses')},
+                            shared_aliases={'the guide': ['naseka', 'thomas']},
+                            before={'hut': [('a', 'a'), ('b', 'b')]}, after={})
+        assert '- hut: Odysseus → ulysses' in text
+        assert '- the guide: naseka, thomas' in text
+        assert '## Not compared' in text and '- hut' in text
+
+    def test_a_scene_not_asked_that_the_registry_pass_changed_is_labelled(self):
+        text = self._review(before={'far': [('', '')]}, after={'far': [('irus', '')]},
+                            selected=[])
+        assert '### far (not asked; changed by the registry pass)' in text
 
 
 class TestForecast:
     def test_priced_from_the_prompts_at_the_batch_price(self):
         from storyforge.costs import calculate_cost
         model = 'claude-sonnet-4-5'
-        expected = calculate_cost(model, 2000, 2 * casts.OUTPUT_TOKENS_PER_SCENE, batch=True)
+        expected = 2 * calculate_cost(model, 1000, casts.OUTPUT_TOKENS_PER_SCENE, batch=True)
         assert casts.forecast(['x' * 4000, 'y' * 4000], model) == pytest.approx(expected)
+
+    def test_each_prompt_is_priced_as_its_own_request(self, monkeypatch):
+        """C: a long-prompt rate is per request; pricing the batch's total
+        as one prompt crossed it (Haiku's 100k threshold, ~5x too high)."""
+        seen = []
+        monkeypatch.setattr('storyforge.costs.calculate_cost',
+                            lambda model, i, o, batch=False: seen.append(i) or 0.0)
+        casts.forecast(['x' * 400] * 3, 'm')
+        assert seen == [100, 100, 100]

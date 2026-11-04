@@ -393,13 +393,14 @@ Answer with a JSON object with these two fields, each a JSON array of strings:
 {CAST_INSTRUCTIONS}"""
 
 
-def parse_cast_response(response: str) -> tuple[list[str], list[str]]:
+def parse_cast_response(response: str) -> 'CastAnswer':
     """The (characters, on_stage) ids in a cast-only reply (`CAST_SCHEMA`),
     as given: blanks, placeholders ("unknown", "none") and parentheticals
     dropped, each entry on one line, a `|` made `/` (`_text`) and a `;` a
     comma, so an entry is one CSV list item. Raises ValueError on an
     unreadable reply."""
     from .enrich import strip_parentheticals
+    from .extract_casts import CastAnswer
     data = _json_answer(response, CAST_SCHEMA)
     out = []
     for key in ('characters', 'on_stage'):
@@ -411,7 +412,7 @@ def parse_cast_response(response: str) -> tuple[list[str], list[str]]:
             if item and not is_placeholder(item) and item.lower() != 'unknown':
                 items.append(item)
         out.append(items)
-    return out[0], out[1]
+    return CastAnswer(out[0], out[1])
 
 
 def parse_intent_response(response: str, scene_id: str) -> dict[str, str]:
