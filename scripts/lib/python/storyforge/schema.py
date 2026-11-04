@@ -287,12 +287,17 @@ COLUMN_SCHEMA = {
     'characters': {
         'type': 'registry', 'registry': 'characters.csv', 'array': True,
         'file': 'scene-intent.csv', 'stage': 'map',
-        'description': 'All characters present or referenced. Normalized against reference/characters.csv.',
+        'description': ('Everyone on stage, plus anyone whose actions are narrated in the scene '
+                        'or who is discussed at length; not a name only in a patronymic, '
+                        'epithet, title, simile, comparison or genealogy. Normalized against '
+                        'reference/characters.csv.'),
     },
     'on_stage': {
         'type': 'registry', 'registry': 'characters.csv', 'array': True,
         'file': 'scene-intent.csv', 'stage': 'map',
-        'description': 'Characters physically present (subset of characters).',
+        'description': ('Everyone present who acts or speaks, including a god or other power '
+                        'acting on the scene from afar, or present in disguise (under their '
+                        'own id). A subset of characters.'),
     },
     'mice_threads': {
         'type': 'mice', 'registry': 'mice-threads.csv',
