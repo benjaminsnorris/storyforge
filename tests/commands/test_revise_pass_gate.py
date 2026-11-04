@@ -69,6 +69,38 @@ def _gate_pass(project_dir, ids):
     return cmd_revise._gate_pass_scenes(project_dir, ids, 'polish', str(project_dir))
 
 
+class TestOneBudget:
+    """The threshold is one budget for the revise session (#499's review)."""
+
+    def test_the_rechecks_reserve_the_gate_runs_the_pass_still_owes(
+            self, project_dir, monkeypatch):
+        _scenes(project_dir, 'act1-sc01', 'act1-sc02', 'act2-sc01')
+        seen = []
+        monkeypatch.setattr(cmd_write, '_gate_drafted_scene', lambda *a, **k: (True, ''))
+        monkeypatch.setattr(cmd_write, 'run_recheck',
+                            lambda pd, ld, skip=frozenset(), spent_before=0.0:
+                            seen.append(spent_before))
+        _gate_pass(project_dir, ['act1-sc01', 'act1-sc02', 'act2-sc01'])
+        per = gate.RECHECK_COST_PER_SCENE
+        assert seen == [pytest.approx(2 * per), pytest.approx(per), pytest.approx(0.0)]
+
+    def test_the_session_is_metered(self, monkeypatch):
+        """What the passes spent counts against the re-checks after them."""
+        from storyforge import api
+        seen = []
+
+        def fake_main(argv=None):
+            api._meter({'usage': {'input_tokens': 0, 'output_tokens': 40_000}},
+                       'claude-opus-4-6')
+            seen.append(cmd_revise._run_budget().committed())
+            return 0
+        monkeypatch.setattr(cmd_revise, '_main', fake_main)
+        assert main([]) == 0
+        assert seen and seen[0] > 0.5
+        assert cmd_revise._RUN_BUDGET is None   # gone with the session
+        assert cmd_revise._run_budget().committed() == 0.0
+
+
 class TestGatePassScenes:
 
     def test_every_scene_gets_the_passs_one_baseline(self, project_dir, monkeypatch):
@@ -324,7 +356,7 @@ class TestMainPassLoopIsGated:
         assert '`storyforge check --pending`' in out
         assert "re-run `storyforge revise` for the plan's passes left" in out
         # the pass's scenes and its completed status are committed before the stop
-        assert len(committed) == 2
+        assert len(committed) == 3   # the pass, before the gate, the stop
         assert _read_csv_plan(plan_file)[0]['status'] == 'completed'
         assert set(gate.pending(project_dir)) == {'act1-sc01', 'act1-sc02'}
 
@@ -402,8 +434,8 @@ class TestInteractivePass:
             return sp.CompletedProcess(args, 0, stdout=out, stderr='')
         monkeypatch.setattr(cmd_revise, '_git', git)
         commits = []
-        monkeypatch.setattr(cmd_revise, 'commit_and_push',
-                            lambda d, msg, paths=None: commits.append((msg, paths)))
+        monkeypatch.setattr('storyforge.git.commit_and_push',
+                            lambda d, msg, paths=None: commits.append((msg, paths)) or True)
         main(['--interactive'])
         return gated, commits
 
@@ -495,3 +527,65 @@ class TestPolishLoopPassIsGated:
         with pytest.raises(SystemExit):
             cmd_revise._execute_single_pass(project_dir, plan_file, rows, 1)
         assert calls == []
+
+
+class TestAFailedCommitStopsRevise:
+    """SF-3 (#503's review): revise ignored every `commit_and_push` result,
+    so a failed commit was silent and the session went on (and paid)."""
+
+    def test_the_gate_is_not_run_after_a_failed_commit(self, project_dir, monkeypatch,
+                                                       capsys):
+        _scenes(project_dir, 'act1-sc01')
+        gated, _ = _stub_gate(monkeypatch)
+        import storyforge.git as sfgit
+
+        def fail(*a, **k):
+            sfgit.last_commit_error = 'error: unable to create index.lock'
+            return False
+        monkeypatch.setattr('storyforge.git.commit_and_push', fail)
+        with pytest.raises(SystemExit) as e:
+            _gate_pass(project_dir, ['act1-sc01'])
+        assert e.value.code == 1 and gated == []
+        out = capsys.readouterr().out
+        assert 'ERROR: the commit "Revision: polish, before the gate" failed: error: unable ' \
+            'to create index.lock' in out
+
+    def test_nothing_to_commit_carries_on(self, project_dir, monkeypatch):
+        _scenes(project_dir, 'act1-sc01')
+        gated, _ = _stub_gate(monkeypatch)
+        import storyforge.git as sfgit
+
+        def nothing(*a, **k):
+            sfgit.last_commit_error = sfgit.NOTHING_TO_COMMIT
+            return False
+        monkeypatch.setattr('storyforge.git.commit_and_push', nothing)
+        _gate_pass(project_dir, ['act1-sc01'])
+        assert gated == [('act1-sc01', 'revise')]
+
+
+class TestReviseForecast:
+    """CR-1: the passes had no up-front threshold check, yet their spend
+    came out of the re-checks' budget."""
+
+    def test_passes_over_the_threshold_spend_nothing(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        revise_tests._run_pass_setup(project_dir, monkeypatch, 'craft')
+        mock_costs.threshold_ok = False
+        with pytest.raises(SystemExit) as e:
+            main([])
+        assert e.value.code == 1
+        assert mock_api.call_count == 0 and not mock_git.calls_for('commit_and_push')
+        assert 'is over the cost threshold' in capsys.readouterr().out
+
+    def test_the_redraft_recheck_reserves_the_scenes_still_to_gate(self, monkeypatch):
+        """T-8: `_recheck_after` (revise's redrafts) reserves the gate runs
+        the scenes still to redraft owe, and the passes still to run."""
+        from storyforge.costs import RunBudget
+        seen = []
+        monkeypatch.setattr(cmd_write, 'run_recheck',
+                            lambda pd, ld, skip=frozenset(), spent_before=0.0:
+                            seen.append(spent_before))
+        budget = RunBudget()
+        budget.owed = 4.0
+        cmd_revise._recheck_after('/p', '/l', {'a', 'b'}, budget)
+        assert seen == [pytest.approx(4.0 + 2 * gate.RECHECK_COST_PER_SCENE)]

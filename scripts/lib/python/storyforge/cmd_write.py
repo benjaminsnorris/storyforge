@@ -41,12 +41,16 @@ from storyforge.git import (
     update_pr_task, run_review_phase,
 )
 from storyforge.cli import apply_coaching_override
+from typing import NamedTuple
 from storyforge.api import (
     invoke_to_file, extract_text, extract_text_from_file, extract_usage,
     calculate_cost_from_usage, submit_batch, poll_batch, download_batch_results,
     stop_problem, fallback_model, is_refusal, RefusalError, report_fallback_replies,
 )
-from storyforge.costs import estimate_cost, check_threshold, log_operation, print_summary
+from storyforge.costs import (
+    estimate_cost, check_threshold, cost_threshold, exit_if_bad_threshold, log_operation,
+    print_summary,
+)
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.csv_cli import get_field, update_field
 
@@ -95,6 +99,7 @@ def main(argv=None):
     apply_coaching_override(args)
 
     project_dir = detect_project_root()
+    exit_if_bad_threshold()   # a bad value crashed the forecast check with a traceback
     from storyforge.ledger import exit_if_not_migrated, exit_if_unordered
     exit_if_not_migrated(project_dir)  # the registries live in the ledger
     exit_if_unordered(project_dir)  # drafting reads the ledger as of each scene
@@ -172,12 +177,15 @@ def main(argv=None):
         log(f'ERROR: {e}')
         sys.exit(1)
 
+    scene_forecast = 0.0   # a scene's share of the forecast: reserved from the re-checks
+    draft_forecast = 0.0   # its drafting part: charged for a draft the CLI writes
     if not args.dry_run:
         model = select_model('drafting')
         avg_words = _avg_word_count(metadata_csv)
         estimated = estimate_cost('draft', len(pending_ids), avg_words, model)
         if write_mode == 'batch':
             estimated *= 0.5  # Batch API 50% discount
+        draft_forecast = estimated / len(pending_ids)
         gated = ''
         if coaching == 'full':
             # Every drafted scene is gated, and the gate (extraction, the
@@ -189,12 +197,12 @@ def main(argv=None):
             gated = f', ~${gate_cost:.2f} of it the gate'
         log(f'Cost forecast: ~${estimated:.2f} for {len(pending_ids)} scenes '
             f'(avg {avg_words} words, model {model}, mode {write_mode}{gated})')
+        scene_forecast = estimated / len(pending_ids)
         if not check_threshold(estimated):
             # Nothing was drafted: exit 1, so a script or chained command
             # doesn't read the stop as a finished run
-            limit = os.environ.get('STORYFORGE_COST_THRESHOLD', '100')
             log(f'ERROR: the forecast (~${estimated:.2f}) is over the cost threshold '
-                f'(${limit}): nothing written. Set STORYFORGE_COST_THRESHOLD higher, '
+                f'(${cost_threshold():g}): nothing written. Set STORYFORGE_COST_THRESHOLD higher, '
                 f'or write fewer scenes.')
             sys.exit(1)
 
@@ -253,25 +261,35 @@ def main(argv=None):
         log('Prior prose: none (interactive drafting has no system prompt to carry it)')
     else:
         log(f'Prior prose: {prior_prose}')
+    if write_mode == 'interactive' and not args.dry_run:
+        log(f'NOTE: interactive drafting runs through the claude CLI, whose spend this run '
+            f'can\'t meter: each draft counts against the cost threshold at its forecast '
+            f'(~${draft_forecast:.2f}); the gate\'s calls are metered.')
 
     # Main drafting
-    drafted_count = 0
-    total_words = 0
-
-    failed: list[str] = []
-    recheck_open: list[str] = []   # re-checks this run owed and didn't finish
-
+    from storyforge import git as _gitmod
+    pushes_failed_before = len(_gitmod.unpushed)
     if write_mode == 'batch' and not args.dry_run:
-        drafted_count, total_words, failed = _run_batch_mode(
+        outcome = _run_batch_mode(
             pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
             coaching, use_briefs, args.force, filter_mode,
         )
     else:
-        drafted_count, total_words, failed, recheck_open = _run_direct_mode(
-            pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
-            coaching, use_briefs, args.force, filter_mode, write_mode,
-            args.dry_run, prior_prose=prior_prose,
-        )
+        # The threshold is one budget for the run: the re-checks get what
+        # drafting actually spent (metered) and the scenes still to draft
+        # leave (`costs.RunBudget`)
+        from storyforge import api
+        from storyforge.costs import RunBudget
+        with api.metered() as meter:
+            outcome = _run_direct_mode(
+                pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
+                coaching, use_briefs, args.force, filter_mode, write_mode,
+                args.dry_run, prior_prose=prior_prose, budget=RunBudget(meter),
+                scene_forecast=scene_forecast, draft_forecast=draft_forecast,
+            )
+
+    drafted_count, total_words = outcome.drafted, outcome.words
+    failed, recheck_open, uncommitted = outcome.failed, outcome.recheck_open, outcome.uncommitted
 
     # Session summary
     elapsed = int(time.time() - session_start)
@@ -284,8 +302,14 @@ def main(argv=None):
     log(f'Total time: {mins}m{secs}s')
     log('============================================')
 
-    if not args.dry_run and drafted_count > 0:
+    if not args.dry_run and (drafted_count > 0 or uncommitted):
         print_summary(project_dir, ('draft', 'gate', 'gate-fix'), session_start=session_start_iso)
+    if not args.dry_run and uncommitted:
+        # The review phase commits (and is paid for), and the drift check
+        # pays too: neither runs on a branch whose commits are failing
+        log('Skipping the timeline drift check and the review phase: a commit failed '
+            '(see below).')
+    elif not args.dry_run and drafted_count > 0:
         # Does the new prose agree with the calendar? Reported, never fixed.
         from storyforge.timeline import drift_check
         drift_check(project_dir, [sid for sid in pending_ids
@@ -300,6 +324,20 @@ def main(argv=None):
             log(f'  {entry}')
         log('Re-run them with `storyforge write --scenes <id>[,<id>...]` '
             '(add --force for a scene already drafted, revised or final).')
+    if uncommitted:
+        # Drafted and paid for: committing by hand is all they need, not a
+        # redraft
+        log(f'ERROR: {len(uncommitted)} written but not committed (the files are on disk; '
+            f'do not redraft them):')
+        for entry in uncommitted:
+            log(f'  {entry}')
+        log('Fix what stopped the commit (`git status`), then commit them by hand, e.g. '
+            '`git add scenes/ reference/ working/ && git commit -m "Draft scenes"`, '
+            'and push.')
+    unpushed = _gitmod.unpushed[pushes_failed_before:]
+    if unpushed:
+        log(f'WARNING: the push failed for {", ".join(unpushed)}: the commits are only '
+            f'local. Push by hand (`git push -u origin HEAD`).')
     if recheck_open:
         # The drafts are in, but later scenes that depend on what they
         # changed are unchecked: not a finished run (revise and check say
@@ -307,13 +345,25 @@ def main(argv=None):
         log('ERROR: re-checks this run owed and did not finish:')
         for entry in recheck_open:
             log(f'  {entry}')
-    if failed or recheck_open:
+    if failed or recheck_open or uncommitted:
         sys.exit(1)
 
 
 # ============================================================================
 # Internal helpers
 # ============================================================================
+
+class DraftOutcome(NamedTuple):
+    """What `_run_direct_mode` / `_run_batch_mode` did."""
+    drafted: int
+    words: int
+    #: each scene not drafted, and why
+    failed: list
+    #: each re-check this run owed and didn't finish
+    recheck_open: list = []
+    #: each scene (or re-check) written but whose commit failed: it needs a
+    #: commit by hand, not a redraft
+    uncommitted: list = []
 
 def _check_voice_guide(project_dir: str) -> None:
     """Warn if no voice guide is found."""
@@ -505,8 +555,25 @@ def run_recheck(project_dir: str, log_dir: str, skip: set[str] | frozenset[str] 
     if run.failed:
         log(f'  ERROR: the re-check of {run.failed} did not pass: {run.why}. It stays in '
             f'{gate_pending_path()}' + (f', and so do {", ".join(run.left)}' if run.left else '')
-            + f'; fix it with revise or by hand, or accept its contradictions '
-            f'(`storyforge check --accept {run.failed}`), then `storyforge check --pending`.')
+            + '; fix it with revise or by hand'
+            + (f', or accept its contradictions (`storyforge check --accept {run.failed}`)'
+               if run.result is not None
+               and any(f.kind == 'contradiction' for f in run.result.findings) else '')
+            + ', then `storyforge check --pending`.')
+    return run
+
+
+def budgeted_recheck(project_dir: str, log_dir: str, skip: set[str] | frozenset[str],
+                     budget, reserved: float = 0.0):
+    """`run_recheck` under the run's one cost budget (`costs.RunBudget`):
+    the re-checks get what the run's spend so far and `reserved` (the
+    forecast of the work it still owes) leave of the threshold. Returns
+    `run_recheck`'s answer."""
+    from storyforge import api
+    before = budget.committed(reserved)
+    with api.metered() as meter:   # told apart from the rest of the run's spend
+        run = run_recheck(project_dir, log_dir, skip, spent_before=before)
+    budget.record(run, actual=meter.cost())
     return run
 
 
@@ -727,16 +794,32 @@ def gate_pending_path() -> str:
     return PENDING_PATH
 
 
+from storyforge.git import CommitError  # noqa: E402  (raised by `_commit`)
+
+
+def _commit(project_dir: str, message: str, paths: list[str]) -> None:
+    """`git.commit_or_raise`: a failed commit raises `CommitError` with
+    git's reason (and leaves nothing staged), and the caller stops
+    committing, since the next commit's paths (`reference/`,
+    `working/logs/`, `working/coaching/`) would sweep these files in under
+    the wrong message. Nothing to commit is not a failure; a failed push
+    stays a WARNING (the commit is made) and goes in the closing summary."""
+    from storyforge import git
+    git.commit_or_raise(project_dir, message, paths)
+
+
 def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
                              metadata_csv: str, coaching: str,
                              head_before: str, written_by: str = '',
-                             gate_failed: bool = False) -> tuple:
+                             gate_failed: bool = False, commit: bool = True) -> tuple:
     """Verify and commit a drafted scene. Returns (word_count, success).
     ``written_by`` names the model the refusal fallback used, for the commit
     message. ``gate_failed``: the scene didn't pass the gate, which the
     commit message says, and its PR task stays unticked. When something else
     already committed (the interactive CLI), the gate's files are committed
-    on their own."""
+    on their own. A commit that fails raises `CommitError` (the scene is
+    verified and its files written); ``commit=False`` (batch mode after a
+    failed commit) verifies and writes without committing."""
     scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
     word_count = 0
 
@@ -780,13 +863,15 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
         if gate_failed:
             msg += f' (did not pass the gate; listed in {gate_pending_path()})'
 
-        from storyforge.git import commit_and_push
-        commit_and_push(project_dir, msg, paths)
+        if not commit:
+            return word_count, True
+        _commit(project_dir, msg, paths)
     elif coaching == 'full':
-        from storyforge.git import commit_and_push
-        commit_and_push(project_dir, f'Gate scene {scene_id}',
-                        [f'scenes/{scene_id}.md', 'reference/', 'working/audit-log.csv',
-                         'working/.audit-snapshot.csv', gate_pending_path()])
+        if not commit:
+            return word_count, True
+        _commit(project_dir, f'Gate scene {scene_id}',
+                [f'scenes/{scene_id}.md', 'reference/', 'working/audit-log.csv',
+                 'working/.audit-snapshot.csv', gate_pending_path()])
 
     # Push
     _git(project_dir, 'push', check=False)
@@ -803,8 +888,9 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
 
 def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
                     metadata_csv, coaching, use_briefs, force, filter_mode):
-    """Run batch API mode. Returns (drafted_count, total_words, failed),
-    ``failed`` naming each scene not drafted and why. A bad reply skips only
+    """Run batch API mode. Returns a `DraftOutcome`: ``failed`` names each
+    scene not drafted and why, ``uncommitted`` each written but not
+    committed. A bad reply skips only
     its scene; its response is kept in ``log_dir``. A refused scene is
     retried once directly with the refusal fallback, which the Batches API
     does not accept."""
@@ -851,7 +937,7 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
     if not batch_scene_ids:
         log('No scenes to submit in batch.')
-        return 0, 0, []
+        return DraftOutcome(0, 0, [])
 
     log(f'Submitting batch with {len(batch_scene_ids)} scenes...')
 
@@ -875,6 +961,8 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
     drafted_count = 0
     total_words = 0
     failed: list[str] = []
+    uncommitted: list[str] = []
+    commit_failed = ''   # the scene whose commit failed: later ones are written, not committed
     from storyforge.git import _git
 
     for scene_id in batch_scene_ids:
@@ -904,6 +992,13 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
         _log_api_usage(scene_json, 'draft', scene_id, model, project_dir,
                        batch=True)
 
+        if _is_refusal(scene_json) and commit_failed:
+            # a retry is paid for, and its reply couldn't be committed
+            log(f'ERROR: Scene {scene_id} was refused in the batch; not retried, since the '
+                f'commit of {commit_failed} failed.')
+            failed.append(f'{scene_id} (refused in the batch; not retried after the commit '
+                          f'of {commit_failed} failed)')
+            continue
         if _is_refusal(scene_json):
             retry_log = os.path.join(log_dir, f'drafting-{scene_id}.json')
             log(f'Scene {scene_id} was refused in the batch; retrying it directly '
@@ -934,12 +1029,24 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
             failed.append(f'{scene_id} ({reason.rstrip(".")})')
             continue
 
-        # Verify and commit
-        wc, ok = _verify_and_commit_scene(
-            scene_id, project_dir, scenes_dir, metadata_csv, coaching,
-            head_before, written_by=_written_by(scene_json),
-        )
-        if ok:
+        # Verify and commit. Every reply is already paid for, so after a
+        # failed commit the rest are still written, but not committed: their
+        # commits would sweep in the earlier scene's files
+        try:
+            wc, ok = _verify_and_commit_scene(
+                scene_id, project_dir, scenes_dir, metadata_csv, coaching,
+                head_before, written_by=_written_by(scene_json), commit=not commit_failed,
+            )
+        except CommitError as e:
+            log(f'ERROR: {scene_id} is written, but {e}. The rest of the batch is written '
+                f'without committing.')
+            commit_failed = scene_id
+            uncommitted.append(f'{scene_id} ({e})')
+            continue
+        if ok and commit_failed:
+            uncommitted.append(f'{scene_id} (not committed: the commit of {commit_failed} '
+                               f'failed first)')
+        elif ok:
             drafted_count += 1
             total_words += wc
         else:
@@ -949,16 +1056,18 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
     _safe_remove(batch_file)
     _safe_rmdir(batch_output_dir)
 
-    return drafted_count, total_words, failed
+    return DraftOutcome(drafted_count, total_words, failed, uncommitted=uncommitted)
 
 
 def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                      metadata_csv, coaching, use_briefs, force, filter_mode,
-                     write_mode, dry_run, prior_prose='none'):
-    """Run direct/interactive mode. Returns (drafted_count, total_words,
-    failed, recheck_open), ``failed`` naming each scene not drafted and why,
-    ``recheck_open`` each re-check that didn't pass or wasn't run (over the
-    cost threshold) and is still in ``gate.pending``. An API failure
+                     write_mode, dry_run, prior_prose='none', budget=None,
+                     scene_forecast: float = 0.0, draft_forecast: float = 0.0):
+    """Run direct/interactive mode. Returns a `DraftOutcome`: ``failed``
+    names each scene not drafted and why, ``recheck_open`` each re-check
+    that didn't pass or wasn't run (over the cost threshold) and is still in
+    ``gate.pending``, ``uncommitted`` what was written but whose commit
+    failed. An API failure
     ends the loop, and that scene and every later one go into ``failed``.
     Interactive replies are written by the CLI and are not checked for
     safety.
@@ -972,12 +1081,21 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
     pass the gate (committed for the author and listed in ``gate.pending``),
     or an earlier scene still in ``gate.pending`` (a failed re-check
     included). After a scene passes and is committed, the later scenes that
-    depend on what it changed are re-checked (``run_recheck``; Phase 4),
-    not those this run redrafts anyway. At other coaching levels a bad reply
-    skips only its scene."""
+    depend on what it changed are re-checked (``budgeted_recheck``; Phase
+    4), not those this run redrafts anyway, under the run's one cost budget:
+    ``budget`` (``costs.RunBudget``) is what the run has spent, and each
+    scene still to draft reserves ``scene_forecast``. A draft the CLI writes
+    (interactive) is charged at ``draft_forecast``, since no meter sees it.
+    Before each scene, the run's spend plus the scenes left at
+    ``scene_forecast`` must be within the threshold, or the run stops there
+    (the up-front forecast was too low). At other coaching levels a bad reply
+    skips only its scene. At every level a failed commit (the scene's, or
+    the re-checks' after it) stops the run: the next scene's commit would
+    sweep its files in under the wrong message."""
     drafted_count = 0
     total_words = 0
     failed: list[str] = []
+    uncommitted: list[str] = []
     recheck_failed: list[str] = []   # each re-check that didn't pass
     recheck_deferred: list[str] = []   # the latest re-check's queue left over budget
     from storyforge import gate
@@ -985,7 +1103,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
     gated = coaching == 'full' and not dry_run
 
     def stop(i, scene_id, entry):
-        failed.append(entry)
+        if entry:
+            failed.append(entry)
         failed.extend(f'{sid} (not attempted: the run stopped at {scene_id})'
                       for sid in pending_ids[i + 1:])
 
@@ -997,7 +1116,9 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
         model = select_model('drafting')
         system = build_shared_context(project_dir, model=model)
 
-    recheck_spent = 0.0   # what this run's re-checks are forecast to cost so far
+    if budget is None:
+        from storyforge.costs import RunBudget
+        budget = RunBudget()
     # the book before this run, once: what the gate counts as already there
     baseline = gate.snapshot(project_dir) if gated else None
     for i, scene_id in enumerate(pending_ids):
@@ -1013,6 +1134,17 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             if existing_wc > 200:
                 log(f'Scene file already has {existing_wc} words, skipping')
                 continue
+
+        if not dry_run and scene_forecast:
+            left = [s for s in pending_ids[i:] if force or not _drafted(scenes_dir, s)]
+            due = budget.committed(len(left) * scene_forecast)
+            if not check_threshold(due):
+                log(f'ERROR: drafting {scene_id} and the {len(left) - 1} scene(s) after it '
+                    f'would bring this run to about ${due:.2f}, over the cost threshold '
+                    f'(${cost_threshold():g}): it has cost more than its forecast. Stopping.')
+                stop(i, scene_id, f'{scene_id} (not attempted: the run reached the cost '
+                                  f'threshold)')
+                break
 
         if gated:
             blocking = _gate_blockers(project_dir, scene_id)
@@ -1082,6 +1214,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             # Interactive mode — invoke claude CLI. It writes the file itself,
             # so no reply passes through the guard below.
             exit_code = _invoke_interactive(prompt, model, project_dir)
+            budget.charge(draft_forecast)   # no meter sees the CLI's spend
             if exit_code == 0 and coaching == 'full':
                 reason = _interactive_problem(scene_file, before)
         else:
@@ -1133,10 +1266,24 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
         # The prose is committed either way: a scene the gate stopped is kept
         # for the author and listed in gate.pending
-        wc, ok = _verify_and_commit_scene(
-            scene_id, project_dir, scenes_dir, metadata_csv, coaching,
-            head_before, written_by=_written_by(scene_log), gate_failed=bool(gate_problem),
-        )
+        try:
+            wc, ok = _verify_and_commit_scene(
+                scene_id, project_dir, scenes_dir, metadata_csv, coaching,
+                head_before, written_by=_written_by(scene_log),
+                gate_failed=bool(gate_problem),
+            )
+        except CommitError as e:
+            # The next scene's commit would sweep this one's ledger and
+            # metadata changes in under its own message, and a run whose
+            # commits fail shouldn't keep paying: stop here
+            log(f'ERROR: Scene {scene_id} is written, but {e}.')
+            log('Stopping: commit it by hand, then run again.')
+            uncommitted.append(f'{scene_id} ({e}'
+                               + (f'; it also did not pass the gate and is listed in '
+                                  f'{gate_pending_path()}: {gate_problem}'
+                                  if gate_problem else '') + ')')
+            stop(i, scene_id, None)
+            break
         if gate_problem:
             log(f'ERROR: Scene {scene_id} did not pass the gate: {gate_problem}')
             log('Stopping: later scenes would be drafted without its facts in the ledger.')
@@ -1152,8 +1299,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             # The scene is committed; now the later scenes that depend on
             # what it changed (not those this run redrafts anyway)
             later = {s for s in pending_ids[i + 1:] if force or not _drafted(scenes_dir, s)}
-            run = run_recheck(project_dir, os.path.join(log_dir, 'gate'), later,
-                              spent_before=recheck_spent)
+            run = budgeted_recheck(project_dir, os.path.join(log_dir, 'gate'), later,
+                                   budget, reserved=len(later) * scene_forecast)
             # The latest run's queue is what's still owed: an earlier
             # deferral is either in it again or was re-checked since
             recheck_deferred = list(run.left) if run is not None and run.over_budget else []
@@ -1161,13 +1308,18 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                 recheck_failed.append(f'{run.failed} (re-checked after {scene_id} and did not '
                                       f'pass: {run.why})')
             if run is not None:
-                recheck_spent = run.spent
-                from storyforge.git import commit_and_push
-                commit_and_push(project_dir, f'Re-check after {scene_id}: '
-                                f'{len(run.passed)} passed'
-                                + (f', {run.failed} did not' if run.failed else ''),
-                                ['reference/', 'working/logs/', 'working/audit-log.csv',
-                                 'working/.audit-snapshot.csv', gate_pending_path()])
+                try:
+                    _commit(project_dir, f'Re-check after {scene_id}: '
+                            f'{len(run.passed)} passed'
+                            + (f', {run.failed} did not' if run.failed else ''),
+                            ['reference/', 'working/logs/', 'working/audit-log.csv',
+                             'working/.audit-snapshot.csv', gate_pending_path()])
+                except CommitError as e:
+                    log(f'ERROR: the re-checks after {scene_id} ran, but {e}.')
+                    log('Stopping: commit them by hand, then run again.')
+                    uncommitted.append(f'the re-checks after {scene_id} ({e})')
+                    stop(i, scene_id, None)
+                    break
 
         log(f'  Time: {mins}m{secs}s')
 
@@ -1182,7 +1334,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             f'{len(recheck_deferred)} scene(s) listed for a re-check, not run: over the cost '
             f'threshold ({", ".join(recheck_deferred)}). They stay in {gate_pending_path()}; '
             f'run `storyforge check --pending`, with STORYFORGE_COST_THRESHOLD raised if needed.')
-    return drafted_count, total_words, failed, recheck_open
+    return DraftOutcome(drafted_count, total_words, failed, recheck_open, uncommitted)
 
 
 def _invoke_interactive(prompt: str, model: str, project_dir: str) -> int:

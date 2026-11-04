@@ -233,6 +233,34 @@ class TestBatchMode:
         assert _brief(setup, 'act1-sc02').strip() == GOOD
         assert reason in capsys.readouterr().out
 
+    def test_a_failed_commit_writes_the_rest_without_committing(
+            self, setup, monkeypatch, capsys, mock_git):
+        """The batch is paid for, so after a failed commit the later replies
+        are still written, but not committed (their commits would sweep in
+        the earlier scene's files), and the run exits 1."""
+        mock_git.commit_success = False
+        self._run(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
+        assert _brief(setup, 'act1-sc01').strip() == GOOD
+        assert _brief(setup, 'act1-sc02').strip() == GOOD
+        commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']
+        assert commits == ['Coach: act1-sc01']
+        out = capsys.readouterr().out
+        assert '2 written but not committed' in out
+        assert 'act1-sc01 (the commit "Coach: act1-sc01" failed' in out
+        assert 'act1-sc02 (not committed: the commit of act1-sc01 failed first)' in out
+        assert 'scene(s) not drafted' not in out          # nothing to redraft
+        assert not mock_git.calls_for('run_review_phase')
+
+    def test_no_refusal_retry_is_paid_for_after_a_failed_commit(
+            self, setup, monkeypatch, capsys, mock_git):
+        """CR-5: a retry is paid for and its reply couldn't be committed."""
+        calls = _direct_replies(monkeypatch, {'act1-sc02': _reply(GOOD)})
+        mock_git.commit_success = False
+        self._run(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': self.REFUSAL})
+        assert calls == []
+        assert 'act1-sc02 (refused in the batch; not retried after the commit of ' \
+            'act1-sc01 failed)' in capsys.readouterr().out
+
     def test_failed_reply_is_kept_for_the_author(self, setup, monkeypatch, capsys):
         """I2: the batch directory is removed; the paid reply is not."""
         self._run(monkeypatch, {'act1-sc01': _reply(CUT_OFF, 'max_tokens'),

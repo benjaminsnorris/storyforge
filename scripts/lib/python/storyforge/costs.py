@@ -334,14 +334,104 @@ def format_duration(seconds: int) -> str:
     return f'{h}h {m}m {s}s'
 
 
-def check_threshold(estimated_cost: float, threshold: float = 100.0) -> bool:
+#: The environment variable that sets the cost threshold, in US dollars
+THRESHOLD_ENV = 'STORYFORGE_COST_THRESHOLD'
+DEFAULT_THRESHOLD = 100.0
+
+
+class ThresholdError(ValueError):
+    """`STORYFORGE_COST_THRESHOLD` is set to something that isn't a cost."""
+
+
+def cost_threshold(default: float = DEFAULT_THRESHOLD) -> float:
+    """The cost threshold in effect: `STORYFORGE_COST_THRESHOLD` when set,
+    else `default`. A value that isn't a finite, non-negative number
+    (blank included) raises `ThresholdError` naming the variable and the
+    value, never a fallback to the default: a typo must not quietly become
+    $100 of spending."""
+    raw = os.environ.get(THRESHOLD_ENV)
+    if raw is None:
+        return default
+    try:
+        value = float(raw.strip())
+    except ValueError:
+        value = float('nan')
+    if value != value or value in (float('inf'), float('-inf')) or value < 0:
+        raise ThresholdError(
+            f'{THRESHOLD_ENV} is {raw!r}, which is not a cost threshold: set it to a '
+            f'number of US dollars (e.g. 25 or 150.50), or unset it for the default '
+            f'(${default:g}).')
+    return value
+
+
+def exit_if_bad_threshold() -> None:
+    """Exit 1 with an ERROR when `STORYFORGE_COST_THRESHOLD` isn't a number.
+    Commands that check the threshold call it before anything is spent, so
+    a bad value stops the run up front, not after the first paid calls."""
+    try:
+        cost_threshold()
+    except ThresholdError as e:
+        from storyforge.common import log
+        log(f'ERROR: {e} Nothing run.')
+        sys.exit(1)
+
+
+class RunBudget:
+    """The cost threshold as one budget for a whole run: drafting, gating
+    and re-checks together, not each forecast checked against it on its own
+    (#499's review: a run could spend nearly twice the threshold).
+
+    `meter` is the run's `api.metered()` meter (None: nothing measured, as
+    for a caller outside a metered run); `runner.run_parallel` carries it
+    into its worker threads. Spend the meter can't see (drafting or a pass
+    through the `claude` CLI) is `charge`d at its forecast. `record` adds
+    each re-check run's forecast (`rechecks`) and its measured cost
+    (`rechecks_actual`, also in `meter`). `owed` is a standing reservation
+    the caller keeps current (revise: the passes it still has to run).
+
+    `committed(owed)` is what the run has spent or promised: the meter's
+    cost, with the re-checks counted at their forecast where that is more
+    (a re-check counts even when its calls weren't metered), plus what was
+    charged, plus `self.owed` and `owed` (the work the caller still owes:
+    scenes it has yet to draft or check), which a re-check may not take.
+    Pass it as `spent_before` to `gate.recheck_pending`
+    (`cmd_write.budgeted_recheck` does)."""
+
+    def __init__(self, meter=None):
+        self.meter = meter
+        self.rechecks = 0.0
+        self.rechecks_actual = 0.0
+        self.charged = 0.0
+        self.owed = 0.0
+
+    def charge(self, amount: float) -> None:
+        """Count spend the meter can't see, at its forecast."""
+        self.charged += max(0.0, amount)
+
+    def committed(self, owed: float = 0.0) -> float:
+        actual = self.meter.cost() if self.meter is not None else 0.0
+        other = max(0.0, actual - self.rechecks_actual)   # drafting, gating, passes
+        return (other + self.charged + max(self.rechecks, self.rechecks_actual)
+                + self.owed + owed)
+
+    def record(self, run, actual: float = 0.0) -> None:
+        """Count a re-check run: `run` (a `gate.Recheck`, or None when
+        nothing was pending) adds its forecast spend, `run.spent` less
+        `run.spent_before`; `actual` is what its calls were measured to
+        cost."""
+        if run is not None:
+            self.rechecks += max(0.0, run.spent - run.spent_before)
+        self.rechecks_actual += actual
+
+
+def check_threshold(estimated_cost: float, threshold: float = DEFAULT_THRESHOLD) -> bool:
     """Check whether estimated cost is within threshold.
 
     Returns True if OK to proceed, False if over threshold.
-    Uses STORYFORGE_COST_THRESHOLD env var if set.
+    Uses STORYFORGE_COST_THRESHOLD env var if set (`cost_threshold`; a value
+    that isn't a number raises `ThresholdError`).
     """
-    threshold = float(os.environ.get('STORYFORGE_COST_THRESHOLD', threshold))
-    return estimated_cost <= threshold
+    return estimated_cost <= cost_threshold(threshold)
 
 
 # ============================================================================
@@ -402,8 +492,12 @@ def main():
             print('Usage: ... check <estimated_cost> [threshold]', file=sys.stderr)
             sys.exit(1)
         estimated = float(sys.argv[2])
-        threshold = float(sys.argv[3]) if len(sys.argv) > 3 else 100.0
-        ok = check_threshold(estimated, threshold)
+        threshold = float(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_THRESHOLD
+        try:
+            ok = check_threshold(estimated, threshold)
+        except ThresholdError as e:
+            print(f'ERROR: {e}', file=sys.stderr)
+            sys.exit(2)
         print('ok' if ok else 'over')
         sys.exit(0 if ok else 1)
 

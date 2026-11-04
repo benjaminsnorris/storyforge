@@ -30,10 +30,12 @@ from storyforge.common import (
     select_model, select_revision_model, get_coaching_level,
     install_signal_handlers, get_plugin_dir, csv_safe,
 )
-from storyforge.costs import estimate_cost, log_operation, print_summary
+from storyforge.costs import (
+    check_threshold, cost_threshold, estimate_cost, log_operation, print_summary,
+)
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
-    update_pr_task, commit_and_push, _git, has_gh, current_branch,
+    update_pr_task, _git, has_gh, current_branch,
     get_pr_body, set_pr_body, add_pr_comment,
 )
 from storyforge.api import (
@@ -299,7 +301,8 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
     log(f'  Redrafting {len(scene_ids)} scenes from updated briefs (prior prose: '
         f'{prior_prose})...')
     served_before = len(fallback_replies())
-    spent = 0.0   # this run's re-checks, forecast
+    budget = _run_budget()
+    rechecks_open: list[str] = []   # re-checks after a redraft that failed or didn't run
     scenes_dir = os.path.join(project_dir, 'scenes')
     failed: list[str] = []
     written = 0
@@ -348,9 +351,10 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
             if why:
                 failed += _stopped_at(sid, why, scene_ids[i:])
                 break
-            spent = _recheck_after(project_dir, log_dir, set(scene_ids[i:]), spent)
+            _note_recheck(rechecks_open, sid,
+                          _recheck_after(project_dir, log_dir, set(scene_ids[i:]), budget))
 
-    commit_and_push(
+    _commit(
         project_dir,
         f'Revision: redraft {written} scenes from corrected briefs'
         + fallback_note(served_before),
@@ -358,16 +362,70 @@ def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
 
     if failed:
         raise RedraftError(f'{len(failed)} scene(s) not re-drafted: {"; ".join(failed)}')
+    _raise_if_rechecks_open(rechecks_open)
 
 
-def _recheck_after(project_dir: str, log_dir: str, skip: set[str], spent: float) -> float:
+def _commit(project_dir: str, message: str, paths: list[str] | None = None) -> None:
+    """Commit and push, or stop the session: a failed commit is an ERROR
+    with git's reason and exit 1 (#503's review, SF-3), as in `write`.
+    Carrying on would pay for more passes on a branch whose commits aren't
+    landing, and the next commit would sweep these files in under its own
+    message; `git.commit_and_push` unstages what it staged. Nothing to
+    commit is not a failure; a failed push stays a WARNING."""
+    from storyforge import git
+    try:
+        git.commit_or_raise(project_dir, message, paths)
+    except git.CommitError as e:
+        log(f'ERROR: {e}. The files are written but not committed: fix what stopped the '
+            f'commit (`git status`), commit them by hand, then run revise again (a pass '
+            f'already marked completed is skipped).')
+        sys.exit(1)
+
+
+#: The revise session's one cost budget (`costs.RunBudget`), metered from
+#: `main`; None outside it (a helper called directly, as the tests do)
+_RUN_BUDGET = None
+
+
+def _run_budget():
+    """The session's cost budget, or a fresh unmetered one when a helper is
+    called outside `main`."""
+    from storyforge.costs import RunBudget
+    return _RUN_BUDGET if _RUN_BUDGET is not None else RunBudget()
+
+
+def _note_recheck(rechecks_open: list[str], after: str, run) -> None:
+    """Keep what a re-check after `after`'s redraft left undone: one that
+    failed, or scenes the threshold kept from running (the latest such
+    queue is what is still owed)."""
+    if run is None:
+        return
+    rechecks_open[:] = [x for x in rechecks_open if not x.startswith('over the threshold')]
+    if run.failed:
+        rechecks_open.append(f'{run.failed} (re-checked after {after} and did not pass: '
+                             f'{run.why})')
+    if run.over_budget and run.left:
+        rechecks_open.append(f'over the threshold, not run: {", ".join(run.left)}')
+
+
+def _raise_if_rechecks_open(rechecks_open: list[str]) -> None:
+    """A re-check a redraft owed and didn't finish fails the run, wherever
+    it falls (#503's review: one after the last redraft didn't)."""
+    if rechecks_open:
+        raise RedraftError(f'the redrafts are in, but re-checks they owed did not finish '
+                           f'(listed in working/gate-pending.csv; `storyforge check '
+                           f'--pending`): {"; ".join(rechecks_open)}')
+
+
+def _recheck_after(project_dir: str, log_dir: str, skip: set[str], budget):
     """After a redraft passed: re-check the later scenes it listed, except
-    `skip` (this run redrafts them), as `write` does; returns the re-checks'
-    forecast spend so far, which bounds the next call."""
-    from storyforge import cmd_write
-    run = cmd_write.run_recheck(project_dir, os.path.join(log_dir, 'gate'), skip,
-                                spent_before=spent)
-    return run.spent if run is not None else spent
+    `skip` (this run redrafts them), as `write` does, under the session's
+    one budget: what it has spent, and the gate runs `skip` still owes at
+    `gate.RECHECK_COST_PER_SCENE` reserved."""
+    from storyforge import cmd_write, gate
+    return cmd_write.budgeted_recheck(project_dir, os.path.join(log_dir, 'gate'), skip,
+                                      budget,
+                                      reserved=len(skip) * gate.RECHECK_COST_PER_SCENE)
 
 
 def _gate_redraft(project_dir: str, scene_id: str, scene_file: str, log_dir: str,
@@ -477,10 +535,10 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
     ordered = _reading_order(project_dir, scene_ids)
     _pend_ungated(project_dir, ordered, pass_name, 'not gated yet', announce=False)
     from storyforge import git
-    git.commit_and_push(project_dir, f'Revision: {pass_name}, before the gate',
-                        ['scenes/', 'reference/', 'working/'])
+    _commit(project_dir, f'Revision: {pass_name}, before the gate',
+            ['scenes/', 'reference/', 'working/'])
     log(f'  Gating {len(ordered)} revised scene(s) in reading order...')
-    spent = 0.0   # this run's re-checks, forecast
+    budget = _run_budget()
     trouble = ''  # a re-check that didn't pass or wasn't run
     scenes_dir = os.path.join(project_dir, 'scenes')
     for i, sid in enumerate(ordered):
@@ -511,10 +569,12 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
             log(f'  ERROR: the gate did not pass the revision of {sid}: {why}')
             return ([f'{sid} (the gate did not pass it: {why})']
                     + _pend_ungated(project_dir, rest, pass_name, f'the gate stopped at {sid}'))
-        run = cmd_write.run_recheck(project_dir, os.path.join(log_dir, 'gate'), set(rest),
-                                    spent_before=spent)
+        # one budget for the session: the pass's spend and the gate runs
+        # still owed (the rest of this pass) come first
+        run = cmd_write.budgeted_recheck(project_dir, os.path.join(log_dir, 'gate'),
+                                         set(rest), budget,
+                                         reserved=len(rest) * gate.RECHECK_COST_PER_SCENE)
         if run is not None:
-            spent = run.spent
             if run.failed:
                 trouble = (f'{run.failed} (re-checked after {sid} and did not pass: '
                            f'{run.why}; listed in {gate.PENDING_PATH})')
@@ -1882,7 +1942,8 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     system = build_shared_context(project_dir, model=model)
 
     log_dir = os.path.join(project_dir, 'working', 'logs')
-    spent = 0.0   # this run's re-checks, forecast
+    budget = _run_budget()
+    rechecks_open: list[str] = []   # re-checks after a redraft that failed or didn't run
     scene_ids = _reading_order(project_dir, scene_ids)
     from storyforge import gate
     baseline = gate.snapshot(project_dir)   # the book before this run
@@ -1963,10 +2024,12 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
         if why:
             failed += _stopped_at(scene_id, why, scene_ids[i:])
             break
-        spent = _recheck_after(project_dir, log_dir, set(scene_ids[i:]), spent)
+        _note_recheck(rechecks_open, scene_id,
+                      _recheck_after(project_dir, log_dir, set(scene_ids[i:]), budget))
 
     if failed:
         raise RedraftError(f'{len(failed)} scene(s) not re-drafted: {"; ".join(failed)}')
+    _raise_if_rechecks_open(rechecks_open)
     return count
 
 
@@ -2039,7 +2102,7 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         log(f'    High: {", ".join(p.replace("_", " ") for p in baseline_summary["high_principles"])}')
 
     # Commit initial scores and create PR
-    commit_and_push(project_dir, 'Polish: initial deterministic scores', ['working/'])
+    _commit(project_dir, 'Polish: initial deterministic scores', ['working/'])
     pr_body = _build_polish_pr_body(title, len(scene_ids), max_loops, baseline_diag)
     pr_number = create_draft_pr(f'Polish: {title}', pr_body, project_dir,
                                 work_type='polish')
@@ -2080,7 +2143,7 @@ def _run_polish_loop(project_dir: str, max_loops: int,
             fixed, skipped = _fix_and_redraft(project_dir, upstream_scenes)
             brief_fix_skipped.update(skipped)
             if fixed:
-                commit_and_push(project_dir,
+                _commit(project_dir,
                                 f'Polish: upstream brief fixes for {len(fixed)} scenes',
                                 ['reference/', 'scenes/', 'working/'])
 
@@ -2124,7 +2187,7 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         log(f'\n  Reached max iterations ({max_loops})')
 
     # Commit deterministic phase results
-    commit_and_push(project_dir, 'Polish: deterministic phase complete', ['working/'])
+    _commit(project_dir, 'Polish: deterministic phase complete', ['working/'])
 
     # ------------------------------------------------------------------
     # Phase 2: Full LLM scoring (one run for the complete picture)
@@ -2137,7 +2200,7 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         log(f'\n=== Phase 2: Full Score ===')
         _, final_llm_diag = _run_lightweight_score(project_dir, scene_ids)
         final_summary = _summarize_diagnosis(final_llm_diag)
-        commit_and_push(project_dir, 'Polish: full score after deterministic loop',
+        _commit(project_dir, 'Polish: full score after deterministic loop',
                         ['working/'])
 
     # Post summary comment
@@ -2239,7 +2302,6 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
                          model_override: str | None = None) -> None:
     """Execute a single revision pass from a plan. Subset of main pass loop."""
     from storyforge.common import select_revision_model, get_coaching_level, build_shared_context
-    from storyforge.git import commit_and_push
     from storyforge.api import invoke_to_file, extract_text, fallback_replies, fallback_note
 
     pass_name = plan_rows[0].get('name', 'polish')
@@ -2358,7 +2420,7 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
     # some is not marked completed
     if not skipped:
         _update_pass_field(plan_rows, 1, 'status', 'completed', csv_plan_file)
-    commit_and_push(
+    _commit(
         project_dir,
         f'Polish: loop iteration {iteration} — {pass_name}' + fallback_note(served_before),
         ['scenes/', 'reference/', 'working/'],
@@ -2742,12 +2804,31 @@ def _register_new_scenes(project_dir, targets, pass_name):
 # ============================================================================
 
 def main(argv=None):
+    """`_main`, metered: the cost threshold is one budget for the session
+    (`costs.RunBudget`), so the re-checks after each gated scene get only
+    what the passes, redrafts and gate runs before them left."""
+    global _RUN_BUDGET
+    from storyforge import api
+    from storyforge.costs import RunBudget
+    with api.metered() as meter:
+        _RUN_BUDGET = RunBudget(meter)
+        try:
+            return _main(argv)
+        finally:
+            _RUN_BUDGET = None
+
+
+def _main(argv=None):
     from datetime import datetime
     args = parse_args(argv or [])
     install_signal_handlers()
     session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     project_dir = detect_project_root()
+    # the re-checks after each gated scene check the threshold: a bad value
+    # stops the run here, not after the passes were paid for
+    from storyforge.costs import exit_if_bad_threshold
+    exit_if_bad_threshold()
     from storyforge.ledger import exit_if_not_migrated, exit_if_unordered
     exit_if_not_migrated(project_dir)  # the registries live in the ledger
     exit_if_unordered(project_dir)  # drafting reads the ledger as of each scene
@@ -2820,7 +2901,7 @@ def main(argv=None):
             log(f'Upstream issues in {len(upstream_scenes)} scenes — fixing briefs')
             fixed, _ = _fix_and_redraft(project_dir, upstream_scenes)
             if fixed:
-                commit_and_push(project_dir,
+                _commit(project_dir,
                                 f'Naturalness: upstream brief fixes for {len(fixed)} scenes',
                                 ['reference/', 'scenes/', 'working/'])
         plan_rows = _generate_naturalness_plan(csv_plan_file, project_dir)
@@ -2981,6 +3062,7 @@ def main(argv=None):
     log('============================================')
 
     # Cost forecast
+    per_pass = 0.0
     if not args.dry_run:
         pending = sum(
             1 for i in range(start_pass, total_passes + 1)
@@ -2996,6 +3078,18 @@ def main(argv=None):
         log(f'Cost forecast: ~${total_forecast:.2f} ({pending} passes @ ~${per_pass:.2f}), '
             f'plus about ${gate.RECHECK_COST_PER_SCENE:.2f} for the gate on each '
             f'rewritten scene')
+        # One budget for the session (#503's review, CR-1): the passes are
+        # checked against the threshold before anything is spent; the gate
+        # on what they rewrite always runs, and the re-checks get what the
+        # passes' actual spend, the gate and the passes still to run leave
+        if not check_threshold(total_forecast):
+            log(f'ERROR: the forecast (~${total_forecast:.2f}) is over the cost threshold '
+                f'(${cost_threshold():g}): nothing revised. Raise STORYFORGE_COST_THRESHOLD, '
+                f'or run fewer passes (`--pass N`).')
+            sys.exit(1)
+        log(f'  The re-checks after each gated scene get what is left of the '
+            f'${cost_threshold():g} threshold once the passes and the gate are paid for; '
+            f'any left over stay pending for `storyforge check --pending`.')
 
     # Check for deferred redrafting (multiple upstream passes)
     deferred_scenes, upstream_count = _collect_upstream_scenes(plan_rows)
@@ -3022,6 +3116,12 @@ def main(argv=None):
             continue
 
         log(f'--- Pass {pass_num}/{total_passes}: {pass_name} ---')
+        if _RUN_BUDGET is not None and not args.dry_run:
+            # the passes after this one are forecast-approved: the re-checks
+            # in this one may not take their share
+            _RUN_BUDGET.owed = per_pass * sum(
+                1 for i in range(pass_num + 1, total_passes + 1)
+                if _read_pass_field(plan_rows, i, 'status') != 'completed')
         log(f'  Purpose: {pass_purpose}')
         log(f'  Scope: {pass_scope}')
 
@@ -3170,7 +3270,7 @@ def main(argv=None):
             _log_usage(project_dir, '', 'revise', pass_name, pass_model, duration)
 
             # Git commit if needed
-            commit_and_push(project_dir, f'Revision: {pass_name}', ['.'])
+            _commit(project_dir, f'Revision: {pass_name}', ['.'])
             _git(project_dir, 'push', check=False)
 
             # Mark completed
@@ -3306,6 +3406,8 @@ Rules:
                  '--dangerously-skip-permissions'],
                 cwd=project_dir,
             )
+            # no meter sees the CLI's spend: counted at the pass's forecast
+            _run_budget().charge(per_pass)
             unsafe = _unsafe_scene_writes(project_dir, scenes_before)
             if unsafe:
                 for problem in unsafe:
@@ -3454,18 +3556,18 @@ Rules:
         if head_before == head_after:
             log('  No commit from Claude. Creating manual commit...')
             if effective_coaching in ('coach', 'strict') and not rewritten:
-                commit_and_push(
+                _commit(
                     project_dir,
                     f'{effective_coaching.capitalize()}: {pass_name}',
                     ['working/coaching/', 'working/logs/', 'working/costs/', 'working/pipeline.csv'],
                 )
             else:
-                commit_and_push(project_dir,
+                _commit(project_dir,
                                 f'Revision: {pass_name}' + fallback_note(served_before), ['.'])
         elif rewritten:
             # the session committed its own prose; the gate's fixes and
             # ledger came after
-            commit_and_push(project_dir, f'Revision: gate the scenes of {pass_name}',
+            _commit(project_dir, f'Revision: gate the scenes of {pass_name}',
                             ['scenes/', 'reference/', 'working/'])
 
         # Does the revised prose still agree with the calendar? Reported in
@@ -3489,7 +3591,7 @@ Rules:
         _update_pass_field(plan_rows, pass_num, 'owed', '', csv_plan_file)
         _update_pass_field(plan_rows, pass_num, 'status', 'completed', csv_plan_file)
         if gate_failures:
-            commit_and_push(project_dir, f'Revision: {pass_name} done, stopped at the gate',
+            _commit(project_dir, f'Revision: {pass_name} done, stopped at the gate',
                             [csv_plan_file])
             _fail_gated_pass(pass_name, gate_failures, PLAN_RESUME,
                              redraft_needed if defer_redraft else frozenset())
@@ -3570,7 +3672,7 @@ Rules:
     if completed == total_passes:
         log('All revision passes are done!')
         os.makedirs(os.path.join(project_dir, 'working', 'reviews'), exist_ok=True)
-        commit_and_push(
+        _commit(
             project_dir,
             'Revision complete: advance phase to review',
             ['storyforge.yaml', 'working/pipeline.csv'],
