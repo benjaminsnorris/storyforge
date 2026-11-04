@@ -83,6 +83,26 @@ class TestInit:
         assert code == 1
         assert not (tmp_path / 'book').exists()
 
+    def test_title_fills_the_reference_templates(self, tmp_path, git_env):
+        # beowulf B-001: key-decisions.md kept its "PROJECT_TITLE" heading
+        project = tmp_path / 'book'
+        assert cmd_init.main([str(project), '--title', 'Beowulf', '--no-commit']) == 0
+        text = (project / 'reference' / 'key-decisions.md').read_text()
+        assert 'Key Decisions — Beowulf' in text
+        for f in (project / 'reference').iterdir():
+            assert 'PROJECT_TITLE' not in f.read_text(), f.name
+
+    def test_the_translator_is_named(self, tmp_path, git_env):
+        # beowulf B-001: "Beowulf by Anonymous (1909)" for Gummere's translation
+        meta = tmp_path / 'meta.json'
+        meta.write_text(json.dumps({'title': 'Beowulf', 'author': 'Anonymous',
+                                    'translator': 'Francis Barton Gummere', 'year': 1909,
+                                    'chapter_heading': '^([IVXL]+)$'}))
+        project = tmp_path / 'book'
+        assert cmd_init.main([str(project), '--meta', str(meta), '--no-commit']) == 0
+        assert ('Beowulf by Anonymous, translated by Francis Barton Gummere (1909)'
+                in (project / 'CLAUDE.md').read_text())
+
     def test_title_is_required(self, tmp_path, git_env):
         assert cmd_init.main([str(tmp_path / 'book'), '--no-commit']) == 1
         assert cmd_init.main([str(tmp_path / 'b2'), '--title', 'T', '--no-commit']) == 0
