@@ -560,14 +560,18 @@ class TestErrorHandling:
 
     def test_cost_threshold_exceeded_aborts(self, mock_api, mock_git,
                                             mock_costs, project_dir,
-                                            monkeypatch):
+                                            monkeypatch, capsys):
         """When cost threshold is exceeded, drafting aborts."""
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_write.detect_project_root',
                             lambda: project_dir)
         mock_costs.threshold_ok = False
 
-        # Should return early without API calls
-        main(['--direct', '--scenes', 'act1-sc01'])
-        api_calls = mock_api.calls_for('invoke_to_file')
-        assert len(api_calls) == 0
+        # Nothing was done, so the run didn't finish: exit 1, or a script
+        # reads the stop as success
+        with pytest.raises(SystemExit) as exc:
+            main(['--direct', '--scenes', 'act1-sc01'])
+        assert exc.value.code == 1
+        assert mock_api.call_count == 0
+        assert mock_git.calls == []   # no branch, PR or commit either
+        assert 'over the cost threshold' in capsys.readouterr().out

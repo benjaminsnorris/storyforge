@@ -190,8 +190,13 @@ def main(argv=None):
         log(f'Cost forecast: ~${estimated:.2f} for {len(pending_ids)} scenes '
             f'(avg {avg_words} words, model {model}, mode {write_mode}{gated})')
         if not check_threshold(estimated):
-            log('Aborting — cost threshold exceeded.')
-            return
+            # Nothing was drafted: exit 1, so a script or chained command
+            # doesn't read the stop as a finished run
+            limit = os.environ.get('STORYFORGE_COST_THRESHOLD', '100')
+            log(f'ERROR: the forecast (~${estimated:.2f}) is over the cost threshold '
+                f'(${limit}): nothing written. Set STORYFORGE_COST_THRESHOLD higher, '
+                f'or write fewer scenes.')
+            sys.exit(1)
 
     # Session start
     from datetime import datetime
@@ -254,6 +259,7 @@ def main(argv=None):
     total_words = 0
 
     failed: list[str] = []
+    recheck_open: list[str] = []   # re-checks this run owed and didn't finish
 
     if write_mode == 'batch' and not args.dry_run:
         drafted_count, total_words, failed = _run_batch_mode(
@@ -261,7 +267,7 @@ def main(argv=None):
             coaching, use_briefs, args.force, filter_mode,
         )
     else:
-        drafted_count, total_words, failed = _run_direct_mode(
+        drafted_count, total_words, failed, recheck_open = _run_direct_mode(
             pending_ids, project_dir, scenes_dir, log_dir, metadata_csv,
             coaching, use_briefs, args.force, filter_mode, write_mode,
             args.dry_run, prior_prose=prior_prose,
@@ -294,6 +300,14 @@ def main(argv=None):
             log(f'  {entry}')
         log('Re-run them with `storyforge write --scenes <id>[,<id>...]` '
             '(add --force for a scene already drafted, revised or final).')
+    if recheck_open:
+        # The drafts are in, but later scenes that depend on what they
+        # changed are unchecked: not a finished run (revise and check say
+        # the same)
+        log('ERROR: re-checks this run owed and did not finish:')
+        for entry in recheck_open:
+            log(f'  {entry}')
+    if failed or recheck_open:
         sys.exit(1)
 
 
@@ -942,7 +956,9 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                      metadata_csv, coaching, use_briefs, force, filter_mode,
                      write_mode, dry_run, prior_prose='none'):
     """Run direct/interactive mode. Returns (drafted_count, total_words,
-    failed), ``failed`` naming each scene not drafted and why. An API failure
+    failed, recheck_open), ``failed`` naming each scene not drafted and why,
+    ``recheck_open`` each re-check that didn't pass or wasn't run (over the
+    cost threshold) and is still in ``gate.pending``. An API failure
     ends the loop, and that scene and every later one go into ``failed``.
     Interactive replies are written by the CLI and are not checked for
     safety.
@@ -962,6 +978,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
     drafted_count = 0
     total_words = 0
     failed: list[str] = []
+    recheck_failed: list[str] = []   # each re-check that didn't pass
+    recheck_deferred: list[str] = []   # the latest re-check's queue left over budget
     from storyforge import gate
     from storyforge.git import _git
     gated = coaching == 'full' and not dry_run
@@ -1136,6 +1154,12 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             later = {s for s in pending_ids[i + 1:] if force or not _drafted(scenes_dir, s)}
             run = run_recheck(project_dir, os.path.join(log_dir, 'gate'), later,
                               spent_before=recheck_spent)
+            # The latest run's queue is what's still owed: an earlier
+            # deferral is either in it again or was re-checked since
+            recheck_deferred = list(run.left) if run is not None and run.over_budget else []
+            if run is not None and run.failed:
+                recheck_failed.append(f'{run.failed} (re-checked after {scene_id} and did not '
+                                      f'pass: {run.why})')
             if run is not None:
                 recheck_spent = run.spent
                 from storyforge.git import commit_and_push
@@ -1152,7 +1176,13 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             log('Pausing 10s before next scene...')
             time.sleep(10)
 
-    return drafted_count, total_words, failed
+    recheck_open = list(recheck_failed)
+    if recheck_deferred:
+        recheck_open.append(
+            f'{len(recheck_deferred)} scene(s) listed for a re-check, not run: over the cost '
+            f'threshold ({", ".join(recheck_deferred)}). They stay in {gate_pending_path()}; '
+            f'run `storyforge check --pending`, with STORYFORGE_COST_THRESHOLD raised if needed.')
+    return drafted_count, total_words, failed, recheck_open
 
 
 def _invoke_interactive(prompt: str, model: str, project_dir: str) -> int:
