@@ -41,7 +41,7 @@ SECTIONS = ('logline', 'synopsis', 'act-shape', 'theme')
 MAX_SCENES_PER_CLAIM = 4
 BATCH_WORDS = 12000          # prose per verify call
 BATCH_CLAIMS = 40            # claims per verify call (a verdict is ~100 output tokens)
-CLAIMS_OUTPUT_TOKENS = 16000
+CLAIMS_OUTPUT_TOKENS = 32000   # story-architecture.md's motif table alone can hold 50 claims
 VERIFY_OUTPUT_TOKENS = 8000
 CLAIM_COLUMNS = ['n', 'section', 'kind', 'claim', 'scenes', 'verdict', 'evidence',
                  'correction']
@@ -106,9 +106,73 @@ class Tiers:
     spine: list[dict[str, str]]
     anchors: dict[str, list[str]]           # spine id -> anchor scene ids
     architecture: list[dict[str, str]]
+    story_architecture: list[tuple[str, str]] = field(default_factory=list)   # (section, text)
 
     def empty(self) -> bool:
-        return not (any(self.summary.values()) or self.spine or self.architecture)
+        return not (any(self.summary.values()) or self.spine or self.architecture
+                    or self.story_architecture)
+
+    def summary_docs(self) -> list[tuple[str, str]]:
+        """The story summary's sections and the spine events, as (section, text)."""
+        docs = [(s, self.summary[s]) for s in SECTIONS if self.summary.get(s)]
+        for e in self.spine:
+            anchors = ', '.join(self.anchors.get(e['id'], [])) or 'none'
+            docs.append((f'spine:{e["id"]}', f'{e.get("summary", "").strip()} '
+                                             f'(its anchor scenes: {anchors})'))
+        return docs
+
+
+#: story-architecture.md sections that are counted from the CSVs, not read
+#: from the book, so there is nothing in the prose to check them against
+_COUNTED_SECTIONS = frozenset({'length', 'novel identity summary'})
+
+
+def story_architecture_sections(path: str) -> list[tuple[str, str]]:
+    """`story-architecture.md` as (section, text): one section per `##` or
+    `###` heading, named `story-architecture:<heading>` (`<## heading> /
+    <### heading>` under a `##`), with what the CSVs count left out (the
+    length sections, each act's share line, a table of numbers) and a
+    two-column table's rows as `cell: cell` lines."""
+    import re
+    if not os.path.isfile(path):
+        return []
+    with open(path, encoding='utf-8') as f:
+        text = re.sub(r'<!--.*?-->', '', f.read(), flags=re.S)
+    sections: list[tuple[str, list[str]]] = []
+    top = ''
+    for line in text.splitlines():
+        m = re.match(r'^(#{2,3})\s+(.*?)\s*$', line)
+        if m:
+            if len(m.group(1)) == 2:
+                top = m.group(2)
+                name = top
+            else:
+                name = f'{top} / {m.group(2)}' if top else m.group(2)
+            sections.append((name, []))
+            continue
+        if not sections or line.startswith('# ') or line.strip() == '---':
+            continue
+        if re.match(r'^\*\*[^*]*% of the novel', line.strip()):
+            continue
+        if line.lstrip().startswith('|'):
+            cells = [c.strip() for c in line.strip().strip('|').split('|')]
+            if all(re.fullmatch(r':?-+:?', c) for c in cells if c):
+                continue
+            if any(re.fullmatch(r'[\d,.%~]+', c) for c in cells):
+                continue                       # a counted table (POV scenes, words)
+            if len(cells) == 2 and cells[0].lower() not in ('motif',):
+                line = f'- {cells[0]}: {cells[1]}'
+            elif len(cells) == 2:
+                continue                       # the header row
+        sections[-1][1].append(line)
+    out = []
+    for name, lines in sections:
+        last = name.split(' / ')[-1].lower()
+        body = '\n'.join(lines).strip()
+        if last in _COUNTED_SECTIONS or name.lower() in _COUNTED_SECTIONS or not body:
+            continue
+        out.append((f'story-architecture:{name}', body))
+    return out
 
 
 def read_tiers(project_dir: str) -> Tiers:
@@ -126,8 +190,11 @@ def read_tiers(project_dir: str) -> Tiers:
     for r in arch:
         if r.get('spine_event', '').strip():
             anchors.setdefault(r['spine_event'].strip(), []).append(r['id'])
+    sa_path = os.path.join(project_dir, 'reference', 'story-architecture.md')
+    sa = ([] if os.path.isfile(sa_path) and is_unfilled_template(sa_path)
+          else story_architecture_sections(sa_path))
     return Tiers({k: v.strip() for k, v in summary.items()}, _rows(project_dir, 'spine.csv'),
-                 anchors, arch)
+                 anchors, arch, sa)
 
 
 # ---------------------------------------------------------------------------
@@ -159,20 +226,14 @@ def _retry_block(problems: list[str] | None) -> str:
             + '\n'.join(f'- {p}' for p in problems) + '\n\nAnswer again with these fixed.\n')
 
 
-def build_claims_prompt(tiers: Tiers, scenes: list[dict[str, str]],
+def build_claims_prompt(docs: list[tuple[str, str]], scenes: list[dict[str, str]],
                         problems: list[str] | None = None) -> str:
-    docs = []
-    for s in SECTIONS:
-        if tiers.summary.get(s):
-            docs.append(f'### {s}\n\n{tiers.summary[s]}')
-    for e in tiers.spine:
-        anchors = ', '.join(tiers.anchors.get(e['id'], [])) or 'none'
-        docs.append(f'### spine:{e["id"]}\n\n{e.get("summary", "").strip()} '
-                    f'(its anchor scenes: {anchors})')
+    """`docs` is (section, text) pairs: `Tiers.summary_docs()` or
+    `Tiers.story_architecture`, one claims call each."""
+    docs = [f'### {name}\n\n{text}' for name, text in docs]
     scene_lines = '\n'.join(f'{r.get("seq", "")}. {r["id"]} | {r.get("title", "").strip()} | '
                             f'{r.get("summary", "").strip()}' for r in scenes)
-    return f"""These documents summarize a book: its logline, synopsis, act-shape and theme,
-and its spine events. Each will be checked against the book's prose. Split them
+    return f"""These documents summarize a book. Each will be checked against the book's prose. Split them
 into claims that can be checked.
 
 ## The documents
@@ -192,24 +253,29 @@ things; don't split one thing into several claims. Leave out nothing a reader
 could get wrong, including small words that carry weight ("finally", "all",
 "the last", "because", "after").
 
-- `section`: the document it comes from, exactly as headed above (`synopsis`,
-  `spine:<id>`, ...).
+- `section`: the document it comes from, exactly as headed above.
 - `kind`: `event` (what happens), `cause` (why), `order` (before or after),
   `outcome` (how it ends), or `interpretation` (what it means: theme, motive,
   judgment).
 - `claim`: the claim in the document's own words, as far as possible.
-- `scenes`: the ids of the 1-{MAX_SCENES_PER_CLAIM} scenes where the text shows
-  it, from the list above. For a claim about a process ("loses all his gold"),
+- `scenes`: the ids (not the seq numbers) of the 1-{MAX_SCENES_PER_CLAIM} scenes
+  where the text shows it, from the list above. For a claim about a process ("loses all his gold"),
   give the scenes where it starts and where it ends. For an interpretation,
   give the scenes that bear on it most directly."""
 
 
-def parse_claims(reply: str, tiers: Tiers, scenes: list[dict[str, str]]) -> list[Claim]:
+def parse_claims(reply: str, docs: list[tuple[str, str]], scenes: list[dict[str, str]],
+                 every_section: bool = True) -> list[Claim]:
+    """The claims in a reply about `docs`. With `every_section`, a document
+    with no claim is sent back (story-architecture.md's sections, some of
+    which describe the prose rather than the story, may have none)."""
     from .extract import _json_answer
     data = _json_answer(reply, CLAIMS_SCHEMA)
     ids = {r['id'] for r in scenes}
-    sections = {s for s in SECTIONS if tiers.summary.get(s)} | \
-        {f'spine:{e["id"]}' for e in tiers.spine}
+    # A reply may cite a scene by its seq, the number before the id in the
+    # list (Eighty Days: 213 such citations in one reply); read it as the id
+    by_seq = {r.get('seq', '').strip(): r['id'] for r in scenes if r.get('seq', '').strip()}
+    sections = {name for name, _ in docs}
     claims, problems = [], []
     for i, c in enumerate(data['claims'], 1):
         if not isinstance(c, dict) or not isinstance(c.get('scenes'), list):
@@ -217,6 +283,7 @@ def parse_claims(reply: str, tiers: Tiers, scenes: list[dict[str, str]]) -> list
             continue
         sec = str(c.get('section', '')).strip()
         cited = [str(s).strip() for s in c.get('scenes', []) if str(s).strip()]
+        cited = [s if s in ids else by_seq.get(s, s) for s in cited]
         if c.get('kind') not in KINDS:
             problems.append(f'claim {i}: kind {c.get("kind")!r} is not one of {", ".join(KINDS)}')
         unknown = [s for s in cited if s not in ids]
@@ -235,7 +302,7 @@ def parse_claims(reply: str, tiers: Tiers, scenes: list[dict[str, str]]) -> list
         claims.append(Claim(sec, str(c.get('kind', 'event')), str(c.get('claim', '')).strip(),
                             cited))
     missing = sections - {c.section for c in claims}
-    if missing:
+    if missing and every_section:
         problems.append('no claims from: ' + ', '.join(sorted(missing)))
     if problems:
         raise _Problems(problems)
@@ -387,9 +454,13 @@ def _ask(prompt_for: Callable, parse: Callable, schema: dict, model: str, log_fi
 
 def forecast_claims(tiers: Tiers, scenes: list[dict[str, str]], model: str) -> float:
     from .costs import _get_price
-    words = len(build_claims_prompt(tiers, scenes).split())
-    return (words * 1.3 * _get_price(model, 'input')
-            + CLAIMS_OUTPUT_TOKENS / 2 * _get_price(model, 'output')) / 1_000_000
+    total = 0.0
+    for docs in (tiers.summary_docs(), tiers.story_architecture):
+        if docs:
+            words = len(build_claims_prompt(docs, scenes).split())
+            total += (words * 1.3 * _get_price(model, 'input')
+                      + CLAIMS_OUTPUT_TOKENS / 2 * _get_price(model, 'output')) / 1_000_000
+    return total
 
 
 def forecast_verify(groups: list[list[int]], claims: list[Claim], words: dict[str, int],
@@ -419,12 +490,16 @@ def run(project_dir: str, model: str, *, log_dir: str,
     os.makedirs(log_dir, exist_ok=True)
 
     claims: list[Claim] = []
-    if any(tiers.summary.values()) or tiers.spine:
-        log('  Pass 1: splitting the tiers into claims...')
-        claims = _ask(lambda p: build_claims_prompt(tiers, scenes, p),
-                      lambda r: parse_claims(r, tiers, scenes), CLAIMS_SCHEMA, model,
-                      os.path.join(log_dir, 'text-fidelity-claims.json'),
-                      CLAIMS_OUTPUT_TOKENS, on_usage, 'text-fidelity-claims')
+    for label, docs, every in (('claims', tiers.summary_docs(), True),
+                               ('claims-architecture', tiers.story_architecture, False)):
+        if not docs:
+            continue
+        log(f'  Pass 1: splitting {"story-architecture.md" if not every else "the summary and spine"} '
+            'into claims...')
+        claims += _ask(lambda p, d=docs: build_claims_prompt(d, scenes, p),
+                       lambda r, d=docs, e=every: parse_claims(r, d, scenes, e),
+                       CLAIMS_SCHEMA, model, os.path.join(log_dir, f'text-fidelity-{label}.json'),
+                       CLAIMS_OUTPUT_TOKENS, on_usage, f'text-fidelity-{label}')
     claims += anchor_claims(tiers, scenes)
     log(f'  {len(claims)} claim(s)')
 
@@ -503,7 +578,8 @@ def render_report(result: Result, title: str = '') -> str:
              f'of the scenes it cites. Cost ${result.cost:.2f}.', '',
              '| tier | supported | contradicted | overreach | not shown | unchecked |',
              '|---|---|---|---|---|---|']
-    order = ['logline', 'synopsis', 'act-shape', 'theme', 'spine', 'architecture']
+    order = ['logline', 'synopsis', 'act-shape', 'theme', 'spine', 'architecture',
+             'story-architecture']
     table = counts(claims)
     for g in order:
         if g in table:
