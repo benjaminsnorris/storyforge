@@ -58,6 +58,17 @@ Based on the author's request and project state:
 **"How's my data?" / "What needs work?" / no specific direction:**
 → Run `--diagnose` to get the full picture first. This runs structural scoring (8 dimensions), brief quality detection (abstract/overspecified/verbose), brief names found nowhere in the book, and gap detection in one read-only pass. **Read the actual output before recommending anything.**
 
+### Brief names found nowhere in the book: report and ask, at every coaching level
+
+`--diagnose` lists them (and `storyforge validate` reports each as an advisory finding): names in a brief's fact fields that no scene's prose and no reference file uses (scene-briefs.csv and scene-intent.csv don't count). A draft takes its facts from the brief, so it would write those people into the book. These are the author's to decide, so this is not an "act, don't ask" fix, even in full coaching mode. `--domain briefs` doesn't fix them on its own (its detectors look for abstract, overspecified and verbose fields).
+
+- Show the author each scene's names, read against the prose and registries, and ask which are real.
+- A real character or place missing from `characters.csv` / `locations.csv` goes there (or into an alias), with the author's go-ahead; the check then passes it.
+- A stray comes out of the brief, by hand with the author, or, once the author has confirmed which names are strays, through `storyforge hone --domain briefs --findings FILE` with one row per scene (`scene_id|target_file|fields|guidance`, target `scene-briefs.csv`, guidance naming what to take out): a paid model rewrite of just those fields.
+- Re-extracting briefs from the prose (`storyforge extract --phase 3 --force`) is a last resort to mention, not recommend: it is a paid run, it rewrites every scene's briefs and their ledger facts, not just the drifted ones, and it can't help a scene with no prose yet.
+- Drug and brand names and words capitalized for emphasis show up too; say so rather than changing anything.
+- A "Not checked" line (a missing column, an unreadable file, a filter that matched no brief) means the check is incomplete: say what wasn't checked.
+
 ### Full coaching mode: Act, don't ask
 
 In full coaching mode, you are a **proactive creative partner**. That means:
@@ -65,8 +76,6 @@ In full coaching mode, you are a **proactive creative partner**. That means:
 - **Data quality issues → fix them immediately.** Don't present a menu and ask "What would you like to tackle?" — that's coach mode behavior. Instead, tell the author what you're about to fix and why, then do it. "You have 27 overspecified briefs — I'm going to trim those now" not "Want me to run the briefs domain?"
 - **Run fixes in sequence, not as a menu.** If diagnose reveals gaps + brief issues + stale registries, run them all: registries first, then gaps, then briefs. Report results as you go.
 - **If a domain is clean, say so in one line** and move on. Don't pad with praise.
-
-**Brief names found nowhere in the book** (also an advisory finding in `storyforge validate`) are names in a brief that no prose and no reference file uses: a draft from that brief would write those people into the book (shared-dark's briefs named about 100 after a brief rewrite drifted). They are not something `--domain briefs` fixes. Read each against the prose and registries: a real character missing from `characters.csv` goes there (or into an alias); a stray is taken out of the brief, by hand or by re-extracting the briefs from the prose (`storyforge extract --phase 3 --force`, a paid run). Drug and brand names show up too; say so rather than "fixing" them.
 
 Execution order when multiple issues exist:
 1. If registries are missing or stale → run `storyforge hone --domain registries` (normalization first)
