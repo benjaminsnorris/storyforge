@@ -91,6 +91,51 @@ class TestValidateSchema:
         assert report['failed'] is not None
         assert report['skipped'] is not None
 
+    def test_an_empty_registry_is_reported_unchecked(self, project_dir):
+        """Beowulf B-019/B-020: with mice-threads.csv and the ledger empty,
+        every thread and fact id was skipped and validate said nothing."""
+        from storyforge.schema import validate_schema, unchecked_lines
+        ref = os.path.join(project_dir, 'reference')
+        full = validate_schema(ref, project_dir)
+        assert full['unchecked'] == {}
+        with open(os.path.join(ref, 'mice-threads.csv')) as f:
+            header = f.readline()
+        with open(os.path.join(ref, 'mice-threads.csv'), 'w') as f:
+            f.write(header)
+        with open(os.path.join(ref, 'commitments.csv')) as f:
+            header = f.readline()
+        with open(os.path.join(ref, 'commitments.csv'), 'w') as f:
+            f.write(header)
+        report = validate_schema(ref, project_dir)
+        assert report['unchecked'].get('mice-threads.csv', 0) > 0
+        assert report['unchecked'].get('commitments.csv (knowledge)', 0) > 0
+        lines = unchecked_lines(report)
+        assert any('reference/mice-threads.csv, which has no rows: not checked' in l
+                   for l in lines)
+
+    def test_validate_prints_the_unchecked_registry(self, project_dir):
+        import subprocess, sys
+        ref = os.path.join(project_dir, 'reference')
+        with open(os.path.join(ref, 'mice-threads.csv')) as f:
+            header = f.readline()
+        with open(os.path.join(ref, 'mice-threads.csv'), 'w') as f:
+            f.write(header)
+        from storyforge.cmd_validate import main
+        import io, contextlib
+        buf = io.StringIO()
+        old = os.getcwd()
+        os.chdir(project_dir)
+        try:
+            with contextlib.redirect_stdout(buf):
+                try:
+                    main([])
+                except SystemExit:
+                    pass
+        finally:
+            os.chdir(old)
+        assert ('[advisory] ' in buf.getvalue()
+                and 'reference/mice-threads.csv, which has no rows: not checked' in buf.getvalue())
+
     def test_without_project_dir_skips_registry(self, fixture_dir):
         from storyforge.schema import validate_schema
         report = validate_schema(os.path.join(fixture_dir, 'reference'))

@@ -211,6 +211,9 @@ def _print_human_readable(combined):
     if schema is not None:
         print()
         print('--- Schema validation ---')
+        from storyforge.schema import unchecked_lines
+        for line in unchecked_lines(schema):
+            print(f'  [advisory] {line}')
         if schema['failed'] == 0:
             print(f'  Passed ({schema["passed"]} cells validated, {schema["skipped"]} skipped)')
         else:
