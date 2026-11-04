@@ -738,6 +738,58 @@ def plan_import(project_dir: str, cfg: SourceConfig, slug: str) -> ImportResult:
     return result
 
 
+# The registries `seed_registries` fills from the source (B-013): an
+# adaptation starts from the source's cast and places, so the architecture
+# and map stages have canonical ids to use instead of coining them.
+SEEDED_REGISTRIES = ('characters.csv', 'locations.csv', 'values.csv')
+
+
+def seed_registries(project_dir: str, cfg: SourceConfig) -> list[tuple[str, int]]:
+    """Fill each of the project's own registries (`SEEDED_REGISTRIES`) that
+    is missing or has no rows from the imported sources' copies, which
+    already carry the name map. A registry with any row is the author's and
+    is never touched. The project's header is kept (a column the source
+    lacks, such as `pronouns`, is left empty; one only the source has is
+    dropped); with no project file, the source's header is used. With
+    several sources the first to give an id wins. Returns (file, rows
+    written) for each registry seeded."""
+    seeded = []
+    ref = os.path.join(project_dir, 'reference')
+    for name in SEEDED_REGISTRIES:
+        own = os.path.join(ref, name)
+        header: list[str] = []
+        if os.path.isfile(own):
+            try:
+                header, rows, _problem = _read_rows(own)
+            except (OSError, UnicodeDecodeError):
+                continue  # unreadable: leave it for validate to report
+            if rows:
+                continue
+        merged: dict[str, dict[str, str]] = {}
+        src_header: list[str] = []
+        for slug in cfg.slugs():
+            path = os.path.join(source_dir(project_dir, slug), name)
+            if not os.path.isfile(path):
+                continue
+            h, rows, problem = _read_rows(path)
+            if problem or 'id' not in h:
+                continue
+            src_header = src_header or h
+            for r in rows:
+                row = dict(zip(h, r))
+                if row['id'].strip() and row['id'] not in merged:
+                    merged[row['id']] = row
+        if not merged:
+            continue
+        header = header or src_header
+        out = [[row.get(col, '') for col in header] for row in merged.values()]
+        os.makedirs(ref, exist_ok=True)
+        with open(own, 'w', encoding='utf-8', newline='') as f:
+            f.write(_render_csv(header, out))
+        seeded.append((f'reference/{name}', len(out)))
+    return seeded
+
+
 def write_import(result: ImportResult) -> None:
     """Swap a planned import in (only when it changes something)."""
     if result.changed:

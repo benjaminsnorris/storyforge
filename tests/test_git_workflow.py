@@ -384,6 +384,10 @@ class TestCommitInASubfolder:
         assert self._git(work, 'rev-parse', '--abbrev-ref', 'HEAD').startswith(
             'storyforge/source-import-')
         committed = self._committed(work)
+        # the import, plus the empty registries it seeds from the source (B-013)
+        seeded = {f'projects/telemachus/reference/{n}' for n in ('characters.csv', 'locations.csv')}
         assert committed and all(
-            f.startswith('projects/telemachus/reference/source/odyssey/') for f in committed)
+            f.startswith('projects/telemachus/reference/source/odyssey/') or f in seeded
+            for f in committed)
+        assert seeded <= set(committed)
         assert self._git(work, 'status', '--porcelain', '--', 'projects/telemachus/reference/source') == ''
