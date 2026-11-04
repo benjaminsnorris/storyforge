@@ -114,3 +114,70 @@ class TestAFailedCommit:
         cmd_write._commit(str(work), 'Re-check after x: 0 passed',
                           ['reference/', 'working/logs/', 'working/gate-pending.csv'])
         assert self._git(work, 'rev-parse', 'HEAD') == before
+
+
+class TestCommitOnlyThePaths:
+    """#509 CR-1: `git add <paths>` then a bare `git commit` took the whole
+    index, so a file the author had staged rode along in the command's
+    commit under its message."""
+
+    _repos = TestCommitAndPushUpstream._repos
+    _git = staticmethod(TestAFailedCommit._git)
+
+    def _committed(self, work):
+        return self._git(work, 'show', '--name-only', '--no-renames', '--format=',
+                         'HEAD').split()
+
+    def test_a_pre_staged_file_stays_staged_and_out(self, tmp_path):
+        from storyforge import git
+        remote, work = self._repos(tmp_path)
+        (work / 'reference').mkdir()
+        (work / 'reference' / 'scenes.csv').write_text('id|seq\n')
+        (work / 'storyforge.yaml').write_text('project: x\n')
+        self._git(work, 'add', 'storyforge.yaml')
+        assert git.commit_and_push(str(work), 'Renumber', ['reference/scenes.csv'])
+        assert self._committed(work) == ['reference/scenes.csv']
+        assert self._git(work, 'diff', '--cached', '--name-only').split() == ['storyforge.yaml']
+
+    def test_directories_missing_and_ignored_paths(self, tmp_path):
+        """A directory takes in new, changed, deleted and renamed files
+        under it; a listed path that doesn't exist or is ignored doesn't
+        fail the commit (a pathspec git doesn't know would)."""
+        from storyforge import git
+        remote, work = self._repos(tmp_path)
+        (work / 'scenes').mkdir()
+        for name in ('gone', 'old', 'kept'):
+            (work / 'scenes' / f'{name}.md').write_text(f'{name}\n' * 20)
+        (work / '.gitignore').write_text('ignored.csv\n')
+        self._git(work, 'add', '.')
+        self._git(work, 'commit', '-qm', 'scenes')
+        (work / 'scenes' / 'gone.md').unlink()
+        self._git(work, 'mv', 'scenes/old.md', 'scenes/new.md')
+        (work / 'scenes' / 'kept.md').write_text('changed\n')
+        (work / 'scenes' / 'added.md').write_text('added\n')
+        (work / 'ignored.csv').write_text('x\n')
+        (work / 'a.txt').write_text('outside\n')
+        assert git.commit_and_push(str(work), 'Scenes',
+                                   ['scenes/', 'missing.csv', 'ignored.csv'])
+        assert sorted(self._committed(work)) == [
+            'scenes/added.md', 'scenes/gone.md', 'scenes/kept.md',
+            'scenes/new.md', 'scenes/old.md']
+        assert self._git(work, 'status', '--porcelain', '--', 'a.txt').strip() == 'M a.txt'
+
+    def test_only_other_files_staged_is_nothing_to_commit(self, tmp_path):
+        from storyforge import git
+        remote, work = self._repos(tmp_path)
+        before = self._git(work, 'rev-parse', 'HEAD')
+        (work / 'storyforge.yaml').write_text('project: x\n')
+        self._git(work, 'add', 'storyforge.yaml')
+        assert git.commit_and_push(str(work), 'Nothing', ['a.txt']) is False
+        assert git.last_commit_error == git.NOTHING_TO_COMMIT
+        assert self._git(work, 'rev-parse', 'HEAD') == before
+
+    def test_a_filename_with_pathspec_magic_is_taken_literally(self, tmp_path):
+        from storyforge import git
+        remote, work = self._repos(tmp_path)
+        (work / 'x[1].md').write_text('x\n')
+        (work / 'x1.md').write_text('decoy\n')
+        assert git.commit_and_push(str(work), 'Literal', ['x[1].md'])
+        assert self._committed(work) == ['x[1].md']

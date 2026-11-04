@@ -109,7 +109,7 @@ print(dump_schema_markdown())
 | `knowledge_in` | registry: commitments.csv, type knowledge (array) | brief | Fact IDs the POV character knows entering. Normalized against the knowledge facts in reference/commitments.csv (the commitments ledger). See knowledge-guidelines.md for fact selection criteria. |
 | `knowledge_out` | registry: commitments.csv, type knowledge (array) | brief | Fact IDs the POV character knows leaving. Includes knowledge_in plus new facts learned. Target 0.5-1.5 new facts per scene. See knowledge-guidelines.md. |
 | `key_actions` | free_text | brief | Concrete things that happen in this scene. |
-| `key_dialogue` | free_text | brief | Specific lines or exchanges that must appear. |
+| `key_dialogue` | free_text | brief | Specific lines or exchanges that must appear. Label each quoted line's speaker (`Name: "line"`); see scene-column-guide.md. |
 | `emotions` | free_text | brief | Emotional beats in sequence as they occur through the scene. |
 | `motifs` | registry: motif-taxonomy.csv (array) | brief | Recurring images/symbols deployed. Normalized against reference/motif-taxonomy.csv. |
 | `continuity_deps` | scene_ids | brief | Scene IDs this scene depends on (for parallel drafting). Each entry must exist in scenes.csv. |

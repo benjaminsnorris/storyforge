@@ -80,7 +80,7 @@ Work through each phase in this conversation:
 
 **Phase 0: Characterize.** Read the full manuscript (concatenate scene files) and produce a structural profile — narrative mode, POV characters, timeline, act structure, central conflict, compression points. Present the profile to the author for confirmation.
 
-**Phase 1: Skeleton.** For each scene, extract: title, POV, location, timeline day, time of day, duration, part assignment. Then decide the three acts for the whole book at once: each act is a run of consecutive scenes, so `act` never steps back as `seq` rises. Write to `reference/scenes.csv`. This can be done in batches — present a batch of 10 scenes at a time for the author to review.
+**Phase 1: Skeleton.** For each scene, extract: title, POV, location, timeline day, time of day, duration, part assignment. Then decide the three acts for the whole book at once, with the printed parts and chapters marked: each act is a run of consecutive scenes, so `act` never steps back as `seq` rises. Write to `reference/scenes.csv`. This can be done in batches — present a batch of 10 scenes at a time for the author to review.
 
 **Phase 2: Intent.** For each scene, extract: function, scene type (action/sequel), emotional arc, value at stake, value shift, turning point, characters, on-stage characters, MICE threads. Write to `reference/scene-intent.csv`.
 
