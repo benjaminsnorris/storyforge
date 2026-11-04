@@ -1563,3 +1563,13 @@ class TestVerseManuscript:
                            'SCENE: 1 | something-happens-here | a')
         assert [_opening(project_dir, r['id']) for r in rows] == [
             '# Prelude', '# Chapter I', '# Finale']
+
+    def test_a_prose_backslash_ending_a_paragraph_is_kept(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """Review of #525: only a hard break that ran on into the next scene
+        is dropped; a backslash ending a paragraph is the author's text."""
+        text = '# Chapter One\n\nC:\\\n\nNext paragraph.\n'
+        rows = self._split(project_dir, monkeypatch, mock_api, text,
+                           'SCENE: 1 | path-is-typed-out | a\nSCENE: 5 | next-thing-happens | b')
+        with open(os.path.join(project_dir, 'scenes', f'{rows[0]["id"]}.md')) as f:
+            assert f.read().rstrip('\n').endswith('C:\\')

@@ -25,8 +25,11 @@ def normalize(text: str) -> str:
     for old, new in _SUBSTITUTIONS:
         text = text.replace(old, new)
     # A verse line's hard break (a backslash ending the line, `source fetch
-    # --verse`): a quote running across two lines matches without it
-    text = re.sub(r'\\(?=[ \t]*(?:\n|$))', '', text)
+    # --verse`): a quote running across two lines matches without it, as it
+    # does written with the break on one line ("kings\\ of") or with a
+    # slash between the lines ("kings / of")
+    text = re.sub(r'\\(?=\s|$)', '', text)
+    text = re.sub(r'(?<=\S)\s+/\s+(?=\S)', ' ', text)
     text = re.sub(r'[*_]+', '', text)
     return ' '.join(text.split()).lower()
 

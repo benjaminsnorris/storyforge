@@ -188,6 +188,9 @@ def _fetch(project_dir: str, args) -> int:
         return 0
     verb = 'Would write' if args.dry_run else 'Wrote'
     log(f'{verb}: {", ".join(sorted(changes))}')
+    for rel in gutenberg.replaced(project_dir, changes):
+        log(f'WARNING: {"would replace" if args.dry_run else "replaced"} {rel}, '
+            'which differed (git has the old one)')
     if args.dry_run:
         return 0
     gutenberg.write_files(project_dir, changes)

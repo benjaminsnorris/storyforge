@@ -71,6 +71,7 @@ spaces would start a markdown code block).
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -120,6 +121,7 @@ def check_config(meta: dict) -> dict:
             f'{", ".join(sorted(TEXT_KEYS | DESCRIPTIVE_KEYS))})')
     if not meta.get('chapter_heading'):
         raise GutenbergError('the config has no chapter_heading regex')
+    _check_types(meta)
     regexes = [('chapter_heading', meta['chapter_heading'])]
     for key in ('part_heading', 'section_heading', 'note_marker', 'note_paragraph'):
         if meta.get(key):
@@ -140,7 +142,53 @@ def check_config(meta: dict) -> dict:
         raise GutenbergError(f'drop_cap_case must be "title", not {meta["drop_cap_case"]!r}')
     if meta.get('heading_case') not in (None, '', 'title'):
         raise GutenbergError(f'heading_case must be "title", not {meta["heading_case"]!r}')
+    _check_format(meta, 'heading', 'Chapter {}', 'chapter_heading')
+    _check_format(meta, 'part_format', 'Part {}', 'part_heading')
     return meta
+
+
+_STRING_KEYS = ('chapter_heading', 'heading', 'part_heading', 'part_format',
+                'section_heading', 'note_marker', 'note_paragraph')
+_BOOL_KEYS = ('part_title', 'drop_argument', 'chapter_title', 'verse', 'verse_blocks',
+              'strip_brackets', 'strip_unmatched_underscore')
+
+
+def _check_types(meta: dict) -> None:
+    """Each text key's value has its type: a string `skip_from` was read
+    letter by letter and emptied the manuscript without an error."""
+    for key in _STRING_KEYS:
+        if meta.get(key) is not None and not isinstance(meta[key], str):
+            raise GutenbergError(f'{key} must be a string, not {meta[key]!r}')
+    for key in _BOOL_KEYS:
+        if key in meta and not isinstance(meta[key], bool):
+            raise GutenbergError(f'{key} must be true or false, not {meta[key]!r}')
+    skip = meta.get('skip_from')
+    if skip is not None and not (isinstance(skip, list)
+                                 and all(isinstance(r, str) for r in skip)):
+        raise GutenbergError(f'skip_from must be a list of regexes, not {skip!r}')
+    others = meta.get('other_headings')
+    if others is not None and not (isinstance(others, dict) and all(
+            isinstance(k, str) and isinstance(v, str) for k, v in others.items())):
+        raise GutenbergError('other_headings must be an object of {regex: heading}, '
+                             f'not {others!r}')
+    ebook_id = meta.get('gutenberg_id')
+    if ebook_id is not None and (isinstance(ebook_id, bool)
+                                 or not re.fullmatch(r'\d+', str(ebook_id))):
+        raise GutenbergError(f'gutenberg_id must be an ebook number, not {ebook_id!r}')
+
+
+def _check_format(meta: dict, key: str, default: str, regex_key: str) -> None:
+    """The heading format takes the regex's groups (or the whole line when
+    it has none)."""
+    if not meta.get(regex_key):
+        return
+    groups = re.compile(meta[regex_key]).groups or 1
+    fmt = meta.get(key, default)
+    try:
+        fmt.format(*(['x'] * groups))
+    except (IndexError, KeyError, ValueError) as e:
+        raise GutenbergError(f'{key} {fmt!r} does not fit {regex_key}\'s {groups} '
+                             f'group(s): {e}')
 
 
 def read_config(path: str) -> dict:
@@ -166,8 +214,9 @@ def download(ebook_id) -> bytes:
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             return resp.read()
-    except OSError as e:
-        raise GutenbergError(f'cannot download {url}: {e}')
+    except (OSError, http.client.HTTPException) as e:
+        # HTTPException: a cut-off download (IncompleteRead) isn't an OSError
+        raise GutenbergError(f'cannot download {url}: {e!r}')
 
 
 # ============================================================================
@@ -419,8 +468,10 @@ class Fetched:
     """A manuscript built for a project, not yet written: the config that
     made it, the raw text and where it is cached, and the manuscript."""
 
-    def __init__(self, meta: dict, raw: bytes, raw_rel: str, manuscript: str):
+    def __init__(self, meta: dict, raw: bytes, raw_rel: str, manuscript: str,
+                 downloaded: bool = False):
         self.meta = meta
+        self.downloaded = downloaded
         self.raw = raw
         self.raw_rel = raw_rel
         self.manuscript = manuscript
@@ -453,7 +504,8 @@ def build(project_dir: str, meta: dict, input_path: str | None = None,
     else:
         src = GUTENBERG_URL.format(id=ebook_id)
         raw = download(ebook_id)
-    return Fetched(meta, raw, raw_rel, normalize(_decode(raw, src), meta))
+    return Fetched(meta, raw, raw_rel, normalize(_decode(raw, src), meta),
+                   downloaded=input_path is None and src != cached)
 
 
 def _decode(raw: bytes, where) -> str:
@@ -470,8 +522,11 @@ def config_text(meta: dict) -> str:
 
 def plan_writes(project_dir: str, fetched: Fetched, force: bool = False) -> dict:
     """`{rel_path: bytes}` for each file the fetch would change. Raises
-    GutenbergError, before anything is written, when it would replace a
-    manuscript.md it didn't make (one that differs) without `force`."""
+    GutenbergError, before anything is written, when without `force` it
+    would replace a manuscript.md that differs, or a cached raw text with a
+    different `--input` file (a fresh download, `--refresh`, replaces the
+    cache: that is what it is for). A changed config is the caller's to
+    report (`replaced`)."""
     files = {
         MANUSCRIPT_REL: fetched.manuscript.encode('utf-8'),
         CONFIG_REL: config_text(fetched.meta).encode('utf-8'),
@@ -488,8 +543,17 @@ def plan_writes(project_dir: str, fetched: Fetched, force: bool = False) -> dict
                 raise GutenbergError(
                     'manuscript.md exists and differs from the fetched text; '
                     '--force replaces it (scene files are never touched)')
+            if rel == fetched.raw_rel and not force and not fetched.downloaded:
+                raise GutenbergError(
+                    f'{rel} holds a different raw text than --input; --force '
+                    'replaces it')
         changes[rel] = data
     return changes
+
+
+def replaced(project_dir: str, changes: dict) -> list[str]:
+    """The files in `changes` that exist now: what a write replaces."""
+    return sorted(rel for rel in changes if os.path.isfile(os.path.join(project_dir, rel)))
 
 
 def write_files(project_dir: str, changes: dict) -> None:

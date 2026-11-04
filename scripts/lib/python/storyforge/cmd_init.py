@@ -192,7 +192,6 @@ def main(argv=None):
             words = len(f.read().split())
     target = args.target_words or (max(1000, round(words, -3)) if words else None)
 
-    created_dir = not os.path.exists(project)
     for sub in DIRS:
         os.makedirs(os.path.join(project, sub), exist_ok=True)
     runner = os.path.join(project, 'storyforge')
@@ -227,10 +226,20 @@ def main(argv=None):
     if args.no_commit:
         log('Written, not committed (--no-commit).')
         return 0
-    return _commit(project, details['title'], created_dir)
+    return _commit(project, details['title'])
 
 
-def _commit(project: str, title: str, created_dir: bool) -> int:
+def _written(project: str) -> list[str]:
+    """Every file the scaffold wrote, relative to the project (it began
+    empty), for a commit that takes only these."""
+    out = []
+    for root, dirs, files in os.walk(project):
+        dirs[:] = [d for d in dirs if d != '.git']
+        out += [os.path.relpath(os.path.join(root, f), project) for f in files]
+    return sorted(out)
+
+
+def _commit(project: str, title: str) -> int:
     message = f'Initialize Storyforge project: {title}'
     if not _in_git_repo(project):
         # A new repository: the project is its first commit, on main, as the
@@ -246,7 +255,9 @@ def _commit(project: str, title: str, created_dir: bool) -> int:
         return 0
     from storyforge.git import commit_and_push, ensure_on_branch
     ensure_on_branch('init', project)
-    if not commit_and_push(project, message):
+    # Only what init wrote: anything the author had staged elsewhere in the
+    # repo stays staged and out of this commit
+    if not commit_and_push(project, message, _written(project)):
         log('ERROR: the project is written but the commit failed; commit it yourself')
         return 1
     log(f'Next: cd {project} && ./storyforge scenes-setup --split-manuscript')

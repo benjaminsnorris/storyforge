@@ -206,3 +206,85 @@ def test_every_evals_corpus_gives_the_same_manuscript(slug):
         text = f.read().decode('utf-8-sig')
     with open(os.path.join(d, 'manuscript.md')) as f:
         assert g.normalize(text, meta) == f.read()
+
+
+class TestConfigTypes:
+    """Review of #525: a wrongly typed value failed silently or crashed."""
+
+    @pytest.mark.parametrize('extra, match', [
+        ({'skip_from': '^THE END$'}, 'skip_from must be a list'),
+        ({'other_headings': ['^PRELUDE$']}, 'other_headings must be an object'),
+        ({'heading': 'Book {} {}'}, 'does not fit chapter_heading'),
+        ({'heading': 'Book {name}'}, 'does not fit'),
+        ({'verse': 'yes'}, 'verse must be true or false'),
+        ({'chapter_heading': 3}, 'chapter_heading must be a string'),
+        ({'gutenberg_id': 'abc'}, 'gutenberg_id'),
+        ({'part_heading': '^PART ([IV]+)$', 'part_format': 'Part {} {}'}, 'part_format'),
+    ])
+    def test_bad_types_are_errors(self, extra, match):
+        with pytest.raises(g.GutenbergError, match=match):
+            g.check_config(dict({'chapter_heading': r'^([IVX]+)$'}, **extra))
+
+    def test_a_heading_with_no_groups_takes_the_line(self):
+        g.check_config({'chapter_heading': r'^STAVE ONE$', 'heading': '{}'})
+
+
+class TestDownload:
+    def test_network_failure_is_a_clean_error(self, monkeypatch):
+        import urllib.error
+        def fail(*a, **kw):
+            raise urllib.error.URLError('no route')
+        monkeypatch.setattr(g.urllib.request, 'urlopen', fail)
+        with pytest.raises(g.GutenbergError, match='cannot download'):
+            g.download(981)
+
+    def test_a_cut_off_download_is_a_clean_error(self, monkeypatch):
+        import http.client
+
+        class Resp:
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+            def read(self):
+                raise http.client.IncompleteRead(b'partial', 100)
+        monkeypatch.setattr(g.urllib.request, 'urlopen', lambda *a, **kw: Resp())
+        with pytest.raises(g.GutenbergError, match='IncompleteRead'):
+            g.download(981)
+
+
+class TestBuildSources:
+    META = dict(PROSE_META, gutenberg_id=7)
+
+    def _cache(self, tmp_path, text):
+        d = tmp_path / 'working' / 'gutenberg'
+        d.mkdir(parents=True)
+        (d / 'pg7.txt').write_text(text)
+
+    def test_a_missing_cache_downloads(self, tmp_path, monkeypatch):
+        calls = []
+        monkeypatch.setattr(g, 'download', lambda i: calls.append(i) or raw(PROSE).encode())
+        f = g.build(str(tmp_path), self.META)
+        assert calls == [7] and f.downloaded
+        assert 'stormy night' in f.manuscript
+
+    def test_the_cache_is_used_and_refresh_downloads_again(self, tmp_path, monkeypatch):
+        self._cache(tmp_path, raw(PROSE))
+        monkeypatch.setattr(g, 'download', lambda i: pytest.fail('downloaded'))
+        assert not g.build(str(tmp_path), self.META).downloaded
+        monkeypatch.setattr(g, 'download', lambda i: raw('I\n\n\nNew text.\n').encode())
+        f = g.build(str(tmp_path), self.META, refresh=True)
+        assert f.downloaded and 'New text.' in f.manuscript
+        # a fresh download replaces the cache without --force
+        assert 'working/gutenberg/pg7.txt' in g.plan_writes(str(tmp_path), f, force=True)
+        (tmp_path / 'manuscript.md').unlink(missing_ok=True)
+        assert os.path.join('working', 'gutenberg', 'pg7.txt') in g.plan_writes(str(tmp_path), f)
+
+    def test_input_over_a_different_cache_needs_force(self, tmp_path):
+        self._cache(tmp_path, raw(PROSE))
+        other = tmp_path / 'other.txt'
+        other.write_text(raw('I\n\n\nOther text.\n'))
+        f = g.build(str(tmp_path), self.META, input_path=str(other))
+        with pytest.raises(g.GutenbergError, match='different raw text'):
+            g.plan_writes(str(tmp_path), f)
+        assert g.plan_writes(str(tmp_path), f, force=True)

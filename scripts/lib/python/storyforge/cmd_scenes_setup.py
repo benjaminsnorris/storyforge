@@ -559,9 +559,15 @@ def main(argv=None):
             # ends the scene, and its hard break (`\` before the newline,
             # source fetch --verse) has nothing to break to: pandoc would
             # print it as a backslash
+            # Only a real hard break: the scene's last line ran straight on
+            # into the next scene's first, with no blank line between. A
+            # backslash ending a paragraph, or the chapter, is text.
             last = next((k for k in range(len(cleaned) - 1, -1, -1)
                          if cleaned[k].strip()), None)
-            if last is not None and re.search(r'[^\\]\\$', cleaned[last].rstrip()):
+            runs_on = (end_line < total_lines and lines_list[end_line].strip()
+                       and lines_list[end_line - 1].strip())
+            if (last is not None and runs_on
+                    and re.search(r'[^\\]\\$', cleaned[last].rstrip())):
                 cleaned[last] = cleaned[last].rstrip()[:-1]
             scene_text = '\n'.join(cleaned)
 

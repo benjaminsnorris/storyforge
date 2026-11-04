@@ -45,3 +45,12 @@ def test_a_quote_across_verse_lines_matches():
     assert normalize('guests\\\nto folk') == 'guests to folk'
     # a backslash that isn't a line's end is left alone
     assert normalize('a\\b') == 'a\\b'
+
+
+@pytest.mark.parametrize('quote', [
+    'they are welcome guests\\ to folk',
+    'they are welcome guests / to folk',
+])
+def test_a_verse_quote_written_on_one_line_matches(quote):
+    verse = 'and add this word, -- they are welcome guests\\\nto folk of the Danes."\n'
+    assert quote_in(verse, quote)

@@ -136,3 +136,42 @@ def test_init_inside_a_repo_commits_on_its_branch(tmp_path, files, git_env):
     log = subprocess.run(['git', 'log', '--format=%s', 'stage-1'], cwd=tmp_path,
                          capture_output=True, text=True).stdout.split('\n')
     assert log[0] == 'Initialize Storyforge project: X'
+
+
+def test_init_inside_a_repo_leaves_other_staged_files_out(tmp_path, files, git_env):
+    subprocess.run(['git', 'init', '-q', '-b', 'main'], cwd=tmp_path, check=True)
+    subprocess.run(['git', 'commit', '-q', '--allow-empty', '-m', 'root'], cwd=tmp_path, check=True)
+    subprocess.run(['git', 'checkout', '-q', '-b', 'stage-1'], cwd=tmp_path, check=True)
+    (tmp_path / 'notes.md').write_text('mine')
+    subprocess.run(['git', 'add', 'notes.md'], cwd=tmp_path, check=True)
+    code, _ = _init(tmp_path, files)
+    assert code == 0
+    committed = subprocess.run(['git', 'show', '--name-only', '--format=', 'HEAD'],
+                               cwd=tmp_path, capture_output=True, text=True).stdout.split()
+    assert 'notes.md' not in committed and 'book/manuscript.md' in committed
+    staged = subprocess.run(['git', 'diff', '--cached', '--name-only'], cwd=tmp_path,
+                            capture_output=True, text=True).stdout.split()
+    assert staged == ['notes.md']
+
+
+def test_fetch_says_when_it_replaces_the_config(tmp_path, files, git_env, monkeypatch, capsys):
+    code, project = _init(tmp_path, files, '--no-commit')
+    assert code == 0
+    monkeypatch.setattr(cmd_source, 'detect_project_root', lambda: str(project))
+    other = tmp_path / 'other.json'
+    other.write_text(json.dumps(dict(META, heading='Book {}')))
+    assert cmd_source.main(['fetch', '--meta', str(other), '--force', '--no-commit']) == 0
+    out = capsys.readouterr().out
+    assert 'WARNING: replaced reference/gutenberg.json' in out
+    assert json.loads((project / 'reference/gutenberg.json').read_text())['heading'] == 'Book {}'
+
+
+def test_fetch_with_a_bad_config_writes_nothing(tmp_path, files, git_env, monkeypatch, capsys):
+    code, project = _init(tmp_path, files, '--no-commit')
+    monkeypatch.setattr(cmd_source, 'detect_project_root', lambda: str(project))
+    bad = tmp_path / 'bad.json'
+    bad.write_text(json.dumps(dict(META, other_headings=['^X$'])))
+    before = (project / 'manuscript.md').read_text()
+    assert cmd_source.main(['fetch', '--meta', str(bad), '--no-commit']) == 1
+    assert 'Nothing was written' in capsys.readouterr().out
+    assert (project / 'manuscript.md').read_text() == before
