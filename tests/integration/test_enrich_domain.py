@@ -459,6 +459,12 @@ class TestFormatRegistriesForPrompt:
             '### Characters (reference/characters.csv)\n',
             f'### Characters (reference/characters.csv) — {PARTIAL_REGISTRY_NOTE}\n')
 
+    @pytest.mark.parametrize('partial', [('character.csv',), ('knowledge',), 'characters.csv'])
+    def test_partial_naming_no_registry_file_raises(self, project_dir, partial):
+        """A typo would silently restore the unlabelled list (#523)."""
+        with pytest.raises(ValueError, match='partial'):
+            format_registries_for_prompt(project_dir, partial=partial)
+
 
 # ============================================================================
 # load_registry_alias_maps

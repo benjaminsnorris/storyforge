@@ -353,9 +353,9 @@ Answer with a JSON object with these fields (a list field is a JSON array of str
 - value_at_stake: the single abstract value being tested, in one or two words: safety, love, justice, truth, freedom, honor, etc. Name only the value, with no explanation; the specifics belong in function
 - value_shift: polarity change, exactly one of these four: +/- means positive to negative, -/+ means negative to positive, +/++ means good to better, -/-- means bad to worse
 - turning_point: action or revelation — action means a character does something that changes the situation; revelation means new information changes the situation
-- characters (list): everyone in on_stage, plus anyone whose actions are narrated in this scene or who is discussed at length. Not someone named only in a patronymic, epithet, title, simile, comparison or genealogy
+- characters (list): everyone who is present and acts or speaks (as on_stage), plus anyone whose actions are narrated in this scene or who is discussed at length. Not someone named only in a patronymic, epithet, title, simile, comparison or genealogy
 - on_stage (list): everyone present in the scene who acts or speaks — people, gods, creatures — including a god or other power acting on the scene from afar, and one present in disguise (under their own id, not the disguise's)
-- For each person in either list, use their id from the Characters registry when they are listed there. That list is not complete: give anyone not in it a new lowercase-hyphen id from their full name (e.g., kael-davreth)
+- For each person in either list, use their id from the Characters registry when they are listed there; give anyone not listed a new lowercase-hyphen id from their full name (e.g., kael-davreth)
 - mice_threads (list): MICE threads this scene affects: +thread-name only if this scene is where the thread begins, -thread-name only if this scene resolves it, and the bare thread-name if the scene advances or touches a thread that is already open. Most scenes open or close nothing. Use the thread's canonical name from the registry, not the type prefix.
 - confidence: high / medium / low — your overall confidence in these extractions"""
 
