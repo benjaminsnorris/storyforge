@@ -1009,14 +1009,15 @@ def _word_list(text: str) -> list[str]:
     return re.findall(r'\w+', normalize(text).lower())
 
 
-def _changed_ranges(before: str, after: str) -> list[tuple[int, int]]:
-    """Where `after` differs from `before`, as word-index ranges of `after`
-    [start, end): words put in or replaced, and an empty range at each place
-    words were only taken out."""
+def _changed_ranges(before: str, after: str, side: int = 1) -> list[tuple[int, int]]:
+    """Where `after` differs from `before`, as word-index ranges [start,
+    end) of `after` (`side` 1) or of `before` (`side` 0): words put in,
+    replaced or taken out, and an empty range at each place words were only
+    added on the other side."""
     from difflib import SequenceMatcher
     ops = SequenceMatcher(None, _word_list(before), _word_list(after),
                           autojunk=False).get_opcodes()
-    return [(j1, j2) for tag, _, _, j1, j2 in ops if tag != 'equal']
+    return [(j1, j2) if side else (i1, i2) for tag, i1, i2, j1, j2 in ops if tag != 'equal']
 
 
 def _quote_ranges(quote: str, words: list[str]) -> list[tuple[int, int]]:
@@ -1047,16 +1048,48 @@ def _quote_ranges(quote: str, words: list[str]) -> list[tuple[int, int]]:
     return out
 
 
-def _in_edited_text(f: Finding, changed: list[tuple[int, int]], words: list[str]) -> bool:
-    """Whether `f`'s scene quote lies in text the fix changed: found in the
-    fixed prose, and every place it is found touches a changed range (an
-    empty range, words taken out, when the quote spans it). A quote that
-    isn't found (an unverified one) can't be tied to the fix: no."""
-    places = _quote_ranges(f.scene_quote, words)
+#: How many words from a change a quote must be to count as away from it
+#: (`_touches(near=True)`): a word diff can line a change up a word or two
+#: off where the edit was ("forty-one, the morning after. The coffee" against
+#: "forty-one. The coffee" matches the two "the"s)
+_NEAR_WORDS = 4
 
-    def touches(s: int, e: int) -> bool:
-        return any((a < e and s < b) if a < b else (s < a < e) for a, b in changed)
-    return bool(places) and all(touches(s, e) for s, e in places)
+
+def _touches(s: int, e: int, changed: list[tuple[int, int]], near: bool = False) -> bool:
+    """Whether the words [s, e) overlap a changed range (an empty one: lies
+    strictly inside them); with `near`, whether one comes within
+    `_NEAR_WORDS` words of them."""
+    if near:
+        return any(a - _NEAR_WORDS <= e and s <= b + _NEAR_WORDS for a, b in changed)
+    return any((a < e and s < b) if a < b else (s < a < e) for a, b in changed)
+
+
+def _in_edited_text(f: Finding, changed: list[tuple[int, int]], words: list[str]) -> bool:
+    """Whether `f`'s scene quote lies in text the fix changed: found in
+    `words`, and every place it is found touches a changed range (an empty
+    range, words taken out, when the quote spans it). A quote that isn't
+    found (an unverified one) can't be tied to the fix: no."""
+    places = _quote_ranges(f.scene_quote, words)
+    return bool(places) and all(_touches(s, e, changed) for s, e in places)
+
+
+def _in_untouched_text(f: Finding, changed: list[tuple[int, int]], words: list[str]) -> bool:
+    """Whether `f`'s scene quote lies only in text the fix left alone: found
+    in `words`, and no place it is found comes near a changed range
+    (`_touches(near=True)`: words put in right after a quote may be its
+    fix). A quote that isn't found: no (it may be about the change)."""
+    places = _quote_ranges(f.scene_quote, words)
+    return bool(places) and not any(_touches(s, e, changed, near=True) for s, e in places)
+
+
+def _near_the_fix(run: GateResult, prose: str, changed: list[tuple[int, int]]) -> tuple[int, int]:
+    """(`run`'s blocking problems, how many of its findings lie only in text
+    the fix left alone): those are in both proses, so they don't count for
+    or against the fix."""
+    words = _word_list(prose)
+    alone = [f for f in run.findings + run.unverified
+             if f.scene_quote.strip() and _in_untouched_text(f, changed, words)]
+    return _blocking_count(run), len(alone)
 
 
 def _persists(f: Finding, earlier: list[Finding]) -> bool:
@@ -1111,10 +1144,21 @@ def _worse(n: int, before_run: GateResult, after_run: GateResult, before: str,
     """Why fix round `n`'s prose (`after`, which failed as `after_run`) is
     worse than the prose it fixed (`before`, failed as `before_run`), or ''
     when it isn't: more blocking problems, or a problem in the text it
-    edited that the run before didn't have (`_introduced`)."""
-    then, now = _blocking_count(before_run), _blocking_count(after_run)
+    edited that the run before didn't have (`_introduced`).
+
+    The count leaves out, on each side, the findings whose quotes lie only
+    in words the fix left alone (`_near_the_fix`): those words are in both
+    proses, and two readings of them differ. E4's missing-persons
+    (2026-11-03): a fix cleared both first findings, the re-check found
+    four new ones, every one in words it hadn't touched, and a plain count
+    would have thrown the fix away."""
+    then_all, then_alone = _near_the_fix(before_run, before, _changed_ranges(before, after, 0))
+    now_all, now_alone = _near_the_fix(after_run, after, _changed_ranges(before, after))
+    then, now = then_all - then_alone, now_all - now_alone
     if now > then:
-        return f'fix round {n} left {now} problem(s), more than the {then} before it'
+        alone = (f' (not counting {then_alone} and {now_alone} in words it left alone)'
+                 if then_alone or now_alone else '')
+        return f'fix round {n} left {now} problem(s), more than the {then} before it{alone}'
     new = _introduced(before_run, after_run, before, after)
     if new:
         return (f'fix round {n} brought in {len(new)} problem(s) in the words it changed ('

@@ -1225,12 +1225,14 @@ class TestFirstFixNeverWorse(_FixRounds):
     words the fix wrote. Round 1's prose was kept unconditionally, so the
     worse scene was written."""
 
+    TAIL = (' Out on the flat the wind had dropped. Emmett walked the roan along the fence '
+            'line and counted the posts, and the sun stood a hand above the ridge.')
     PROSE = ('A man had lain on the shelf for two days. She took the case in her left hand, '
              'the strap looped between two fingers. Her right hand came up empty to the '
-             'cheekpiece. The coffeepot sat cold on the stove.')
+             'cheekpiece. The coffeepot sat cold on the stove.' + TAIL)
     FIXED = ('A man had lain on the shelf. She kept the case on her right shoulder, two '
              'fingers hooked under the strap. Her left hand came up to the cheekpiece. The '
-             'coffeepot was already hot on the stove.')
+             'coffeepot was already hot on the stove.' + TAIL)
     EDITS = [{'problem': 1, 'find': ' for two days', 'replace': ''},
              {'problem': 3, 'find': 'took the case in her left hand',
               'replace': 'kept the case on her right shoulder'}]
@@ -1277,11 +1279,49 @@ class TestFirstFixNeverWorse(_FixRounds):
         first = self._with(self._finding('contradiction', 'The coffeepot sat cold on the '
                                          'stove', code='PHY'))
         again = self._with(*[self._finding('contradiction', q, source=s, code='PHY')
-                             for q, s in (('a', 'x'), ('b', 'y'))])
+                             for q, s in (('words not in the scene', 'x'),
+                                          ('other words not in it', 'y'))])
         out, _, _ = self._run(monkeypatch, tmp_path, [first, again],
                               [(self.FIXED, self.EDITS)])
         assert out.prose == self.PROSE and out.result is first
         assert out.notes[0].startswith('fix round 1 left 2 problem(s), more than the 1')
+
+    def test_findings_in_words_the_fix_left_alone_do_not_count_against_it(self, monkeypatch,
+                                                                          tmp_path):
+        """E4's missing-persons (2026-11-03): the fix cleared both first
+        findings and the re-check found four new ones, all in words it
+        hadn't touched. They are in the prose as given too: a plain count
+        threw away a good fix."""
+        first = self._first()
+        alone = ['the wind had dropped', 'Emmett walked the roan', 'counted the posts',
+                 'a hand above the ridge']
+        again = self._with(*[self._finding('contradiction', q, source=f's{i}', code='TIM')
+                             for i, q in enumerate(alone)])
+        out, _, _ = self._run(monkeypatch, tmp_path, [first, again],
+                              [(self.FIXED, self.EDITS), (self.FIXED, [])])
+        assert out.prose == self.FIXED and out.result is again and out.notes == []
+
+    def test_a_finding_next_to_the_words_a_fix_put_in_counts(self, monkeypatch, tmp_path):
+        """E4's missing-persons, round 2: the fix added words right after
+        "Seven forty-one." and the re-check still found the calendar wrong.
+        The first quote, untouched but next to the insert, was what it
+        fixed: it counts, so two findings after against four before is not
+        worse."""
+        before, after = 'She picked up the phone. Seven forty-one. The coffee was cold.', (
+            'She picked up the phone. Seven forty-one, the morning after. The coffee was cold.')
+        f = self._finding('contradiction', 'She picked up the phone. Seven forty-one.',
+                          source='scenes.csv')
+        assert not gate._in_untouched_text(f, gate._changed_ranges(before, after, 0),
+                                           gate._word_list(before))
+        assert not gate._in_untouched_text(self._finding('contradiction', 'The coffee was '
+                                                         'cold'),
+                                           gate._changed_ranges(before, after, 0),
+                                           gate._word_list(before))
+        far = before + ' ' + 'Nothing else moved in the house that morning.'
+        assert gate._in_untouched_text(self._finding('contradiction', 'in the house that '
+                                                     'morning'),
+                                       gate._changed_ranges(far, after + far[len(before):], 0),
+                                       gate._word_list(far))
 
     def test_a_new_finding_in_words_the_fix_left_alone_is_not_the_fixs(self, monkeypatch,
                                                                         tmp_path):
