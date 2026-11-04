@@ -38,7 +38,7 @@ class ActsProblems(ValueError):
 def _schema() -> dict:
     from .extract import _object, _STR
     return _object({'acts': {'type': 'array', 'items': _object({
-        'first_scene': _STR, 'title': _STR, 'reason': _STR})}})
+        'first_scene': _STR, 'last_scene': _STR, 'title': _STR, 'reason': _STR})}})
 
 
 ACTS_SCHEMA = _schema()
@@ -153,10 +153,12 @@ and its scene numbers were estimates; the scene list below is the real one.
 {retry}
 ## Answer
 
-`acts`: exactly {ACT_COUNT} entries, in order. For each act, `first_scene` is
-the id of its first scene (act 1's is the first scene above, `{scenes[0]['id']}`),
-`title` names the act in a few words, and `reason` says in one sentence what
-turn opens it."""
+`acts`: exactly {ACT_COUNT} entries, in order. For each act, `first_scene` and
+`last_scene` are the ids of its first and last scenes: act 1 begins with the
+first scene above (`{scenes[0]['id']}`), each later act begins with the scene
+right after the previous act's last scene, and act {ACT_COUNT} ends with the last
+scene (`{scenes[-1]['id']}`). `title` names the act in a few words, and `reason`
+says in one sentence what turn opens it, which happens in its `first_scene`."""
 
 
 def parse_acts(reply: str, scenes: list[dict[str, str]]) -> list[str]:
@@ -166,21 +168,37 @@ def parse_acts(reply: str, scenes: list[dict[str, str]]) -> list[str]:
     data = _json_answer(reply, ACTS_SCHEMA)
     order = {row['id']: i for i, row in enumerate(scenes)}
     starts = [str(a.get('first_scene', '')).strip() for a in data['acts']]
+    ends = [str(a.get('last_scene', '')).strip() for a in data['acts']]
     problems = []
     if len(starts) != ACT_COUNT:
         problems.append(f'acts has {len(starts)} entries; expected exactly {ACT_COUNT}')
-    unknown = [s for s in starts if s not in order]
+    unknown = [s for s in starts + ends if s not in order]
     if unknown:
-        problems.append('first_scene names scene(s) not in the list: '
+        problems.append('first_scene/last_scene name scene(s) not in the list: '
                         + ', '.join(repr(s) for s in unknown))
     if not problems:
+        seq = lambda sid: scenes[order[sid]].get('seq', '?')
         if starts[0] != scenes[0]['id']:
             problems.append(f"act 1 must begin with the first scene, {scenes[0]['id']!r}, "
                             f'not {starts[0]!r}')
-        idx = [order[s] for s in starts]
-        if any(b <= a for a, b in zip(idx, idx[1:])):
-            problems.append('acts must begin at scenes later than the act before them '
-                            '(got ' + ', '.join(starts) + ')')
+        if ends[-1] != scenes[-1]['id']:
+            problems.append(f"act {ACT_COUNT} must end with the last scene, "
+                            f"{scenes[-1]['id']!r}, not {ends[-1]!r}")
+        for n, (first, last) in enumerate(zip(starts, ends), 1):
+            if order[last] < order[first]:
+                problems.append(f'act {n} ends ({last}, seq {seq(last)}) before it begins '
+                                f'({first}, seq {seq(first)})')
+        # Each act must begin right after the one before ends. A gap or an
+        # overlap means an id doesn't match the turn the answer describes
+        # (Five Weeks: act 2's reason was the launch, its first_scene 75 scenes later)
+        for n in range(1, len(starts)):
+            last, first = ends[n - 1], starts[n]
+            if order[first] != order[last] + 1:
+                problems.append(
+                    f'act {n} ends at {last} (seq {seq(last)}) but act {n + 1} begins at '
+                    f'{first} (seq {seq(first)}): each act must begin with the scene right '
+                    f'after the previous act ends. Check which scene the turn you describe '
+                    f'happens in')
     if problems:
         raise ActsProblems(problems)
     return starts
