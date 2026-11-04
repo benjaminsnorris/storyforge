@@ -1,12 +1,15 @@
 """storyforge scenes-setup — Prepare manuscript into formatted scene files.
 
-Handles three input scenarios:
+Handles three input scenarios, plus a renumber:
   --rename           Rename existing scene files to proper slugs
   --split-chapters   Split chapter files into individual scenes
   --split-manuscript Split a single manuscript file into scenes
+  --renumber         Renumber scenes.csv's seq to 1..N in reading order
+                     (no model call; cleanup's `seq_needs_renumber` fix)
 
 Usage:
     storyforge scenes-setup --rename
+    storyforge scenes-setup --renumber [--dry-run]
     storyforge scenes-setup --split-chapters --source chapters/
     storyforge scenes-setup --split-manuscript --source manuscript.md
     storyforge scenes-setup --split-chapters --dry-run
@@ -26,7 +29,7 @@ from storyforge.common import (
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
-    commit_and_push, _git,
+    commit_and_push, commit_or_raise, CommitError, _git,
 )
 from storyforge.api import (
     invoke_to_file, extract_text, extract_usage, calculate_cost_from_usage,
@@ -41,7 +44,7 @@ from storyforge.scenes import (
     build_boundary_prompt, scenes_header, intent_header,
     keep_epigraph_with_opening, _title_from_file,
 )
-from storyforge.csv_cli import get_field, get_column, append_row
+from storyforge.csv_cli import get_field, get_column, append_row, renumber_seq
 
 
 # A part (or book, or volume) heading: "Part One", "PART II",
@@ -133,6 +136,125 @@ def _row_for_header(csv_path, values):
     return '|'.join(str(values.get(col, '')) for col in header)
 
 
+# ============================================================================
+# --renumber
+# ============================================================================
+
+def _seq_scoped_passes(project_dir):
+    """Names of revision-plan passes not yet completed whose scope is a list
+    of seq numbers ("1,5,12"): `revision.resolve_scope` maps those to scenes
+    when the pass runs, so a renumber retargets them."""
+    plan = os.path.join(project_dir, 'working', 'plans', 'revision-plan.csv')
+    try:
+        with open(plan, newline='', encoding='utf-8') as f:
+            raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    except (OSError, UnicodeDecodeError):
+        return []
+    import csv
+    names = []
+    for row in csv.DictReader(raw.splitlines(), delimiter='|'):
+        if (row.get('status') or '').strip() == 'completed':
+            continue
+        scope = (row.get('scope') or '').strip()
+        if scope.startswith('[') and scope.endswith(']'):
+            scope = scope[1:-1].replace(' ', '')
+        parts = [p.strip() for p in scope.replace(';', ',').split(',') if p.strip()]
+        if parts and all(p.isdigit() for p in parts):
+            names.append((row.get('name') or row.get('pass') or '?').strip())
+    return names
+
+
+def renumber_scenes(project_dir, dry_run=False):
+    """Renumber reference/scenes.csv's seq to 1..N in the current reading
+    order (`csv_cli.renumber_seq`), then commit and push it. Returns the exit
+    code: 1 when the file is missing or has no seq column, when a seq is
+    shared or not a number (choosing their order is the author's call; the
+    file is left as it was), or when the commit fails.
+
+    The renumber runs on a copy first, so a refusal, a seq that is already
+    1..N, a dry run, or a branch that can't be made leaves the file's bytes
+    untouched. A real renumber writes what `renumber_seq` writes: rows in seq
+    order, LF endings, a BOM kept, blank lines dropped.
+    """
+    import shutil
+    import tempfile
+    from storyforge.ledger import seq_number
+
+    rel = os.path.join('reference', 'scenes.csv')
+    path = os.path.join(project_dir, rel)
+    try:
+        with open(path, 'rb') as f:
+            original = f.read()
+        text = original.decode('utf-8')
+    except (OSError, UnicodeDecodeError) as e:
+        log(f'ERROR: cannot read {rel}: {e}. Nothing was renumbered.')
+        return 1
+    lines = text.replace('\r\n', '\n').replace('\r', '').splitlines()
+    header = lines[0].split('|') if lines else []
+    if 'seq' not in header:
+        log(f'ERROR: {rel} has no seq column. Nothing was renumbered.')
+        return 1
+    seq_col = header.index('seq')
+
+    tmp_dir = tempfile.mkdtemp(prefix='storyforge-renumber-')
+    try:
+        tmp = os.path.join(tmp_dir, 'scenes.csv')
+        with open(tmp, 'wb') as f:
+            f.write(original)
+        try:
+            renumber_seq(tmp)
+        except ValueError as e:
+            log(f'ERROR: {e}')
+            return 1
+        with open(tmp, 'rb') as f:
+            renumbered = f.read()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    # renumber_seq succeeded, so every row has its own numeric seq; its stable
+    # sort puts the old rows in this order, and row i gets seq i
+    old_seqs = []
+    for ln in lines[1:]:
+        if ln.strip():
+            cells = ln.split('|')
+            old_seqs.append(cells[seq_col].strip() if seq_col < len(cells) else '')
+    old_seqs.sort(key=seq_number)
+    changed = sum(1 for i, s in enumerate(old_seqs, 1) if s != str(i))
+    total = len(old_seqs)
+
+    if changed == 0:
+        log(f'{rel}: seq is already 1..{total} in reading order. Nothing to change.')
+        return 0
+
+    verb = 'Would renumber' if dry_run else 'Renumbered'
+    log(f'{verb} {changed} of {total} scenes in {rel} (seq now 1..{total}, '
+        f'reading order unchanged).')
+    for name in _seq_scoped_passes(project_dir):
+        log(f'WARNING: revision pass "{name}" in working/plans/revision-plan.csv is '
+            f'scoped by seq numbers, which now name different scenes. Re-scope it '
+            f'by scene id before running revise.')
+    if dry_run:
+        log('Dry run: scenes.csv was not changed.')
+        return 0
+
+    if not create_branch('scenes-setup', project_dir):
+        log(f'ERROR: could not get off the main branch, so {rel} was not changed.')
+        return 1
+    tmp_path = f'{path}.tmp.{os.getpid()}'
+    with open(tmp_path, 'wb') as f:
+        f.write(renumbered)
+    os.replace(tmp_path, path)
+    try:
+        commit_or_raise(project_dir,
+                        f'Scenes setup: renumber seq to 1..{total} ({changed} changed)',
+                        [rel])
+    except CommitError as e:
+        log(f'ERROR: {e}. {rel} is renumbered on disk but not committed.')
+        return 1
+    log('Committed and pushed the renumber.')
+    return 0
+
+
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         prog='storyforge scenes-setup',
@@ -146,6 +268,9 @@ def parse_args(argv):
                             help='Split chapter files into scenes')
     mode_group.add_argument('--split-manuscript', action='store_true',
                             help='Split a single manuscript file')
+    mode_group.add_argument('--renumber', action='store_true',
+                            help="Renumber reference/scenes.csv's seq to 1..N in "
+                                 'reading order (no model call)')
 
     parser.add_argument('--source', type=str, default='',
                         help='Source directory (for chapters) or file (for manuscript)')
@@ -166,10 +291,10 @@ def main(argv=None):
     session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     # Validate mode
-    modes = sum([args.rename, args.split_chapters, args.split_manuscript])
+    modes = sum([args.rename, args.split_chapters, args.split_manuscript, args.renumber])
     if modes == 0:
-        print('ERROR: Must specify one of --rename, --split-chapters, or --split-manuscript',
-              file=sys.stderr)
+        print('ERROR: Must specify one of --rename, --split-chapters, --split-manuscript, '
+              'or --renumber', file=sys.stderr)
         sys.exit(1)
     if modes > 1:
         print('ERROR: Only one mode may be specified', file=sys.stderr)
@@ -177,6 +302,11 @@ def main(argv=None):
 
     install_signal_handlers()
     project_dir = detect_project_root()
+
+    if args.renumber:
+        # No model call: no cost check, no API key, none of the setup below
+        sys.exit(renumber_scenes(project_dir, dry_run=args.dry_run))
+
     exit_if_bad_threshold()   # before anything is spent
     log(f'Project root: {project_dir}')
 

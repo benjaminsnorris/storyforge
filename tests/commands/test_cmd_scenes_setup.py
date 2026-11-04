@@ -1,6 +1,6 @@
 """Tests for storyforge scenes-setup — scene file and metadata setup.
 
-Covers parse_args, rename mode, split-chapters mode, dry-run mode,
+Covers parse_args, rename mode, split-chapters mode, renumber mode, dry-run mode,
 error handling for missing modes and source directories, and
 metadata CSV creation.
 """
@@ -1159,3 +1159,162 @@ class TestEpigraphStaysWithOpeningScene:
         assert [r['id'] for r in rows] == ['carriage-comes-for-elizabeth',
                                           'lady-catherine-receives-them']
         assert 'epigraph' not in capsys.readouterr().out
+
+
+# ============================================================================
+# main — renumber mode
+# ============================================================================
+
+
+class TestRenumberMode:
+    """--renumber: the command cleanup's `seq_needs_renumber` finding names.
+    It didn't exist, so the finding's fix was a command that failed."""
+
+    def _write(self, project_dir, text):
+        path = os.path.join(project_dir, 'reference', 'scenes.csv')
+        with open(path, 'wb') as f:
+            f.write(text.encode('utf-8'))
+        return path
+
+    def _run(self, project_dir, monkeypatch, *flags):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        with pytest.raises(SystemExit) as exc:
+            main(['--renumber', *flags])
+        return exc.value.code
+
+    def _log(self, monkeypatch):
+        logged = []
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.log', logged.append)
+        return logged
+
+    def test_flag_parses(self):
+        assert parse_args(['--renumber']).renumber is True
+        assert parse_args([]).renumber is False
+
+    def test_renumbers_in_reading_order_and_commits(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """No API key and a refusing cost check: neither is consulted, and
+        no model is called."""
+        monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+        mock_costs.threshold_ok = False
+
+        def no_cost_check():
+            raise AssertionError('renumber consulted the cost threshold')
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.exit_if_bad_threshold',
+                            no_cost_check)
+        logged = self._log(monkeypatch)
+        path = self._write(project_dir,
+                           'id|seq|title\nc|7|C\na|1|A\nb|2.5|B\nd|2|D\n')
+        assert self._run(project_dir, monkeypatch) == 0
+        assert open(path).read() == 'id|seq|title\na|1|A\nd|2|D\nb|3|B\nc|4|C\n'
+        assert any('Renumbered 2 of 4 scenes' in m for m in logged)
+        assert mock_git.calls_for('create_branch') == [('create_branch', 'scenes-setup')]
+        commits = mock_git.calls_for('commit_and_push')
+        assert len(commits) == 1
+        assert commits[0][2] == [os.path.join('reference', 'scenes.csv')]
+        assert '1..4' in commits[0][1]
+        assert mock_api.calls == []
+
+    def test_already_sequential_changes_nothing(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """Already 1..N: no write (not even CRLF -> LF or a reorder), no
+        branch, no commit."""
+        logged = self._log(monkeypatch)
+        text = 'id|seq|title\r\nb|2|B\r\na|1|A\r\n'
+        path = self._write(project_dir, text)
+        assert self._run(project_dir, monkeypatch) == 0
+        assert open(path, 'rb').read() == text.encode()
+        assert any('already 1..2' in m for m in logged)
+        assert not mock_git.calls_for('create_branch')
+        assert not mock_git.calls_for('commit_and_push')
+
+    @pytest.mark.parametrize('rows', [
+        'a|1|A\nb|4|B\nc|4.0|C\n',     # a tie spelled two ways
+        'a|1|A\nb|3|B\nc||C\n',        # unnumbered
+    ])
+    def test_refuses_ties_and_unnumbered(self, mock_api, mock_git, mock_costs,
+                                         project_dir, monkeypatch, rows):
+        logged = self._log(monkeypatch)
+        text = 'id|seq|title\n' + rows
+        path = self._write(project_dir, text)
+        assert self._run(project_dir, monkeypatch) == 1
+        assert open(path, 'rb').read() == text.encode()
+        assert any('not renumbering scenes.csv' in m
+                   and 'Decide their order' in m for m in logged)
+        assert not mock_git.calls_for('create_branch')
+        assert not mock_git.calls_for('commit_and_push')
+
+    def test_dry_run_writes_nothing(self, mock_api, mock_git, mock_costs,
+                                    project_dir, monkeypatch):
+        logged = self._log(monkeypatch)
+        text = 'id|seq|title\na|1|A\nb|9|B\n'
+        path = self._write(project_dir, text)
+        assert self._run(project_dir, monkeypatch, '--dry-run') == 0
+        assert open(path).read() == text
+        assert any('Would renumber 1 of 2' in m for m in logged)
+        assert not mock_git.calls_for('create_branch')
+        assert not mock_git.calls_for('commit_and_push')
+
+    def test_keeps_bom_and_writes_lf(self, mock_api, mock_git, mock_costs,
+                                     project_dir, monkeypatch):
+        path = self._write(project_dir, '﻿id|seq|title\r\nb|4|B\r\na|2|A\r\n')
+        assert self._run(project_dir, monkeypatch) == 0
+        assert open(path, 'rb').read() == '﻿id|seq|title\na|1|A\nb|2|B\n'.encode()
+
+    def test_failed_commit_exits_1(self, mock_api, mock_git, mock_costs,
+                                   project_dir, monkeypatch):
+        logged = self._log(monkeypatch)
+        mock_git.commit_success = False
+        self._write(project_dir, 'id|seq|title\na|1|A\nb|9|B\n')
+        assert self._run(project_dir, monkeypatch) == 1
+        assert any('not committed' in m for m in logged)
+
+    def test_no_branch_leaves_file_alone(self, mock_api, mock_git, mock_costs,
+                                         project_dir, monkeypatch):
+        """create_branch failing ('') must not leave a renumber on main."""
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.create_branch',
+                            lambda name, d: '')
+        text = 'id|seq|title\na|1|A\nb|9|B\n'
+        path = self._write(project_dir, text)
+        assert self._run(project_dir, monkeypatch) == 1
+        assert open(path).read() == text
+        assert not mock_git.calls_for('commit_and_push')
+
+    @pytest.mark.parametrize('text', ['id|title\na|A\n', None])
+    def test_missing_file_or_seq_column_exits_1(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, text):
+        logged = self._log(monkeypatch)
+        if text is None:
+            os.remove(os.path.join(project_dir, 'reference', 'scenes.csv'))
+        else:
+            self._write(project_dir, text)
+        assert self._run(project_dir, monkeypatch) == 1
+        assert any('Nothing was renumbered' in m for m in logged)
+
+    def test_warns_about_seq_scoped_revision_passes(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """A pending pass scoped "2,3" resolves seqs when it runs, so the
+        renumber retargets it; a completed one or an id scope does not."""
+        logged = self._log(monkeypatch)
+        plans = os.path.join(project_dir, 'working', 'plans')
+        os.makedirs(plans, exist_ok=True)
+        with open(os.path.join(plans, 'revision-plan.csv'), 'w') as f:
+            f.write('pass|name|purpose|scope|status\n'
+                    '1|tighten|p|2,3|pending\n'
+                    '2|done-one|p|[1, 2]|completed\n'
+                    '3|by-id|p|a;b|pending\n'
+                    '4|listed|p|[4, 5]|pending\n')
+        self._write(project_dir, 'id|seq|title\na|1|A\nb|5|B\n')
+        assert self._run(project_dir, monkeypatch) == 0
+        warned = [m for m in logged if m.startswith('WARNING: revision pass')]
+        assert len(warned) == 2
+        assert '"tighten"' in warned[0] and '"listed"' in warned[1]
+
+    def test_cleanup_finding_names_this_command(self):
+        """The finding's command must be one scenes-setup accepts."""
+        from storyforge.cmd_cleanup import _classify_issue
+        finding = _classify_issue('SEQ_NEEDS_RENUMBER:gaps', {})
+        argv = finding['command'].split()
+        assert argv[:2] == ['storyforge', 'scenes-setup']
+        assert parse_args(argv[2:]).renumber is True

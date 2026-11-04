@@ -141,7 +141,7 @@ Commands (`storyforge <name>`; full flag notes in `docs/history.md`):
 | `publish`, `annotations`, `visualize` | Bookshelf publish, reader annotations, dashboard data (see Dashboard data). Each chapter's manifest entry carries its book part (`{number, title}`, from `storyforge.yaml`'s `parts:`, which `scenes-setup` fills from the manuscript's part headings when they hold chapters). A successful publish writes and commits `production/publish-record.json` (`publish_record.py`: each chapter's title, heading and part and a SHA-256 of each scene's `content_html`, no prose); `publish --verify` compares Bookshelf's `GET /api/books/{slug}/digest` with it (exit 1 on a difference) and lists what the project would change |
 | `export` | The book's structured state as one versioned JSON bundle (see Export bundle) |
 | `cover`, `illustrate` | Cover; interior illustrations (prose only) |
-| `scenes-setup` (`scenes`), `scenes-export`, `scenes-import`, `sync` | Scene files and CSV ↔ `scenes-review.md` round-trip |
+| `scenes-setup` (`scenes`), `scenes-export`, `scenes-import`, `sync` | Scene files and CSV ↔ `scenes-review.md` round-trip. `scenes-setup --renumber` (cleanup's `seq_needs_renumber` fix) renumbers `scenes.csv`'s `seq` to 1..N in reading order through `csv_cli.renumber_seq` — no model call, no API key; refuses (exit 1, file untouched) a shared or non-numeric seq; already 1..N writes nothing; otherwise commits `reference/scenes.csv` (a failed commit exits 1) and warns about pending revision passes scoped by seq numbers, which it retargets |
 | `migrate`, `migrate-medium` | Idempotent project migrations; novel ↔ graphic-novel conversion |
 | `review` | Pipeline review |
 
