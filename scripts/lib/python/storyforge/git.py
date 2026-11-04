@@ -277,24 +277,60 @@ def commit_and_push(project_dir: str, message: str, paths: list[str] | None = No
     staged and out of this commit. A bare `git commit` took the whole
     index, so a pre-staged file rode along under this message (#509 CR-1).
     Paths are literal, never globs: `x[1].md` doesn't also take `x1.md`.
+
+    project_dir may be a subfolder of its repo (`projects/<book>/`). Paths
+    are relative to it and must lie inside it: one outside is refused before
+    anything is staged (the listing below can't see it, so it would be
+    staged and left out). A `git add` that fails for any reason but a
+    missing or ignored path fails the call, and nothing is committed.
+
+    With no paths, only changes inside project_dir are staged (a sibling
+    folder's unstaged edits stay out), but the whole index is committed, so
+    a file already staged anywhere in the repo goes in too. Cleanup relies
+    on that: its `git rm --cached` removals are only in the index, and
+    `commit -- .` would drop them.
     """
     global last_commit_error
+
+    def fail(reason: str, what: str = '') -> bool:
+        """Keep git's reason, unstage what this call staged, and say so."""
+        global last_commit_error
+        last_commit_error = ' '.join(reason.split())[:300]
+        _git(project_dir, '--literal-pathspecs', 'reset', '-q', '--', *(paths or ['.']),
+             check=False)
+        log(f'WARNING: git commit "{message}" failed: {what + ": " if what else ""}'
+            f'{last_commit_error}. Nothing was committed; what it staged is unstaged '
+            f'again.')
+        return False
+
     if paths:
+        root = os.path.realpath(project_dir)
+        outside = [p for p in paths
+                   if os.path.commonpath([root, os.path.realpath(
+                       os.path.join(project_dir, p))]) != root]
+        if outside:
+            last_commit_error = f'outside the project folder: {", ".join(outside)}'
+            log(f'WARNING: git commit "{message}" failed: {last_commit_error} '
+                f'({project_dir}). Nothing was staged or committed.')
+            return False
         for p in paths:
-            _git(project_dir, '--literal-pathspecs', 'add', p, check=False)
+            a = _git(project_dir, '--literal-pathspecs', 'add', p, check=False)
+            if a.returncode != 0 and not re.search(
+                    r'did not match any files|paths are ignored', a.stderr or ''):
+                return fail(a.stderr or f'git add exited {a.returncode}',
+                            f'could not stage {p}')
         # The staged files under `paths`, each named (old and new side of a
         # rename too): a pathspec git doesn't know, such as a listed file that
-        # doesn't exist or is ignored, would fail the whole commit
+        # doesn't exist or is ignored, would fail the whole commit. Named
+        # relative to project_dir (`--relative`), as `commit` reads them:
+        # without it git prints them from the repo root, so a project in a
+        # subfolder of its repo (`projects/<book>/`) failed every commit
         staged = _git(project_dir, '--literal-pathspecs', 'diff', '--cached',
-                      '--name-only', '--no-renames', '-z', '--', *paths, check=False)
+                      '--name-only', '--relative', '--no-renames', '-z', '--',
+                      *paths, check=False)
         if staged.returncode != 0:
-            last_commit_error = (' '.join((staged.stderr or '').split())[:300]
-                                 or f'git diff --cached exited {staged.returncode}')
-            _git(project_dir, '--literal-pathspecs', 'reset', '-q', '--', *paths,
-                 check=False)
-            log(f'WARNING: git commit "{message}" failed: could not list what is '
-                f'staged: {last_commit_error}. Nothing was committed.')
-            return False
+            return fail(staged.stderr or f'git diff --cached exited {staged.returncode}',
+                        'could not list what is staged')
         files = [f for f in staged.stdout.split('\0') if f]
         if not files:
             last_commit_error = NOTHING_TO_COMMIT
@@ -302,20 +338,22 @@ def commit_and_push(project_dir: str, message: str, paths: list[str] | None = No
         r = _git(project_dir, '--literal-pathspecs', 'commit', '-m', message,
                  '--', *files, check=False)
     else:
-        _git(project_dir, 'add', '-A', check=False)
+        # `-- .`: a bare `add -A` stages the whole work tree wherever it
+        # runs, so a subfolder project took a sibling project's unstaged edits.
+        # A failed add (an unreadable file) stages nothing, and the commit's
+        # "no changes added" would read as nothing to commit
+        a = _git(project_dir, 'add', '-A', '--', '.', check=False)
+        if a.returncode != 0:
+            return fail(a.stderr or f'git add exited {a.returncode}',
+                        'could not stage the project')
         r = _git(project_dir, 'commit', '-m', message, check=False)
     if r.returncode != 0 and re.search(r'nothing (added )?to commit|no changes added to commit',
                                        r.stdout or ''):
         last_commit_error = NOTHING_TO_COMMIT
         return False
     if r.returncode != 0:
-        last_commit_error = (' '.join(((r.stderr or '') + ' ' + (r.stdout or '')).split())[:300]
-                             or f'git commit exited {r.returncode}')
-        _git(project_dir, '--literal-pathspecs', 'reset', '-q', '--', *(paths or ['.']),
-             check=False)
-        log(f'WARNING: git commit "{message}" failed: {last_commit_error}. Nothing was '
-            f'committed; what it staged is unstaged again.')
-        return False
+        return fail(((r.stderr or '') + ' ' + (r.stdout or '')).strip()
+                    or f'git commit exited {r.returncode}')
 
     last_commit_error = ''
     _push(project_dir)
