@@ -1217,6 +1217,7 @@ class TestSecondFixRound(_FixRounds):
         assert out.prose == 'v1' and out.result is r1 and len(out.rounds) == 1
         assert out.notes[0].startswith('fix round 2 left 3 problem(s), more than the 1')
         assert out.discarded == 2
+        assert self.blocked == [r1]   # T-1 (#504's review): the kept run's again
 
     def test_extraction_only_then_a_fix(self, monkeypatch, tmp_path):
         """T-1: the re-gate counts as round 1; round 2's fix reads the re-gate."""
@@ -1498,6 +1499,86 @@ class TestFirstFixNeverWorse(_FixRounds):
 
 def _blocking_count(result):
     return gate._blocking_count(result)
+
+
+class TestDiscardKeepsTheBlockedList:
+    """T-1/SF-1 (#504's review): after a discard, working/gate-blocked.csv
+    lists the kept run's contradictions, written for real; when it can't be
+    written, the discard still returns the kept prose, says so, and
+    `check --accept` refuses rows for prose not on disk."""
+
+    PROSE = TestFirstFixNeverWorse.PROSE
+    FIXED = TestFirstFixNeverWorse.FIXED
+
+    def _runs(self, monkeypatch, project_dir, first, again):
+        runs = iter([first, again])
+
+        def gate_run(pd, sid, *, command, **k):
+            r = next(runs)
+            gate._note_blocked(pd, sid, command, r)   # as the real gate does on a fail
+            return r
+        monkeypatch.setattr(gate, 'gate_scene', gate_run)
+        monkeypatch.setattr(gate, 'fix_scene', lambda sid, prose, result, **k: (
+            k['edits_out'].append({'find': 'x', 'replace': 'y'}) or self.FIXED))
+        monkeypatch.setattr(gate, '_brief_phrases', lambda *a: [])
+
+    def _first_and_worse(self):
+        t = TestFirstFixNeverWorse()
+        first = t._with(t._finding('contradiction', 'The coffeepot sat cold on the stove',
+                                   code='PHY'))
+        again = t._with(t._finding('contradiction', 'She kept the case on her right shoulder',
+                                   established='Thomas watched the strap go slack in her '
+                                   'fingers'))
+        return first, again
+
+    def test_the_file_is_put_back_to_the_kept_run(self, project_dir, monkeypatch, tmp_path):
+        first, again = self._first_and_worse()
+        self._runs(monkeypatch, project_dir, first, again)
+        out = gate.gate_and_fix(project_dir, SCENE, command='draft', prose=self.PROSE,
+                                log_dir=str(tmp_path))
+        assert out.discarded == 1 and out.blocked_stale == ''
+        assert [r['quote'] for r in gate.blocked(project_dir)[SCENE]] == [
+            'The coffeepot sat cold on the stove']
+
+    def test_a_file_that_cannot_be_written_is_said_and_the_prose_kept(
+            self, project_dir, monkeypatch, tmp_path):
+        first, again = self._first_and_worse()
+        self._runs(monkeypatch, project_dir, first, again)
+        real = gate.record_blocked
+        calls = []
+
+        def flaky(pd, sid, command, findings):
+            calls.append(findings)
+            if len(calls) == 3:   # the put-back after the discard
+                raise PermissionError('read-only')
+            return real(pd, sid, command, findings)
+        monkeypatch.setattr(gate, 'record_blocked', flaky)
+        out = gate.gate_and_fix(project_dir, SCENE, command='draft', prose=self.PROSE,
+                                log_dir=str(tmp_path))
+        assert out.prose == self.PROSE and out.discarded == 1
+        assert 'read-only' in out.blocked_stale
+        assert any(n.startswith('WARNING: ') and 'check --accept' in n for n in out.notes)
+        # the file still describes the discarded fix's prose: accept refuses it
+        with open(os.path.join(project_dir, 'scenes', f'{SCENE}.md'), 'w') as f:
+            f.write(self.PROSE)
+        with pytest.raises(gate.GateError, match='describes other prose; nothing accepted'):
+            gate.accept_blocked(project_dir, SCENE)
+        assert gate.reported(project_dir) == {}
+
+    @pytest.mark.real_gate
+    def test_write_names_a_stale_list_in_the_pending_reason(self, project_dir, monkeypatch):
+        from storyforge import cmd_write
+        from storyforge.checker import CheckResult, Finding
+        bad = Finding('contradiction', 'TIM', 'q', 'act1-sc01', 'e', '', 'why')
+        r = gate.GateResult('act1-sc01', check=CheckResult('act1-sc01', findings=[bad]))
+        monkeypatch.setattr(gate, 'gate_and_fix', lambda *a, **k: gate.GatedScene(
+            'prose', r, r, discarded=1, blocked_stale='working/gate-blocked.csv could not '
+            'be updated: read-only'))
+        path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        passed, why = cmd_write._gate_drafted_scene(project_dir, 'act1-sc01', path, 'draft',
+                                                    str(project_dir))
+        assert not passed and 'could not be updated: read-only' in why
+        assert '`storyforge check act1-sc01`' in why
 
 
 class TestRunLogs:

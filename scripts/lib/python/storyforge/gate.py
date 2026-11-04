@@ -279,6 +279,19 @@ _MIN_QUOTE_WORDS = 4
 _MIN_PART_WORDS = 3
 
 
+def _found_in(quote: str, text: str) -> bool:
+    """Whether `quote`'s parts (split at an ellipsis) are in `text`, in
+    order, ignoring case, punctuation and spacing; no minimum length."""
+    words, at = _words(text), 0
+    parts = [p for p in (_words(x) for x in re.split(r'\.\.\.|…', quote)) if p.strip()]
+    for p in parts:
+        found = words.find(p, at)
+        if found < 0:
+            return False
+        at = found + len(p) - 1
+    return bool(parts)
+
+
 def _quoted_in(quote: str, text: str) -> bool:
     """Whether `quote` is in `text`, ignoring case, punctuation and spacing:
     its parts (split at an ellipsis, as quotes are verified) in order, each
@@ -1038,6 +1051,9 @@ class GatedScene:
     #: the fix round whose fix was discarded (0: none); `rounds` holds the
     #: ones kept, so 1 with no rounds means the scene is as given
     discarded: int = 0
+    #: why `BLOCKED_PATH` couldn't be put back to the kept run's
+    #: contradictions after a discard ('' when it was): the caller says so
+    blocked_stale: str = ''
     #: this invocation's logs (`run_log_dir`): the first run's, and each
     #: re-check's in `recheck/`, `recheck-2/`
     log_dir: str = ''
@@ -1278,21 +1294,24 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     - A fix that changes nothing (every problem judged a false alarm) is not
       re-gated: the last verdict stands, and a re-roll of the same prose
       won't overturn it.
-    - A later round never leaves things worse than the round before it: its
-      fix is discarded, and the earlier prose and verdict kept, when it
-      fails (`GateError`), puts back words an earlier fix removed (checked
-      before its gate run, which would commit on a lucky pass), or its run
-      fails worse (`_worse`). Each discard is in `.notes`.
-    - Worse, for every round the first included: the run after the fix
-      fails with more blocking problems than the run before it, or with one
-      in the words the fix changed that the run before didn't have
-      (`_introduced`; mended-bridle, 2026-11-03: the first fix made a scene
-      that agreed with its brief match a later scene's error, and the
-      re-check's broken promise, fewer problems in all, was kept). The
-      prose and verdict before it are kept, and `BLOCKED_PATH` is put back
-      to that run's contradictions. A first fix discarded leaves the prose
-      as given (`.fixed` False). A run that passed is always kept (it
-      committed), and so is a re-gate with no edit (the same prose).
+    - Every round, the first included: a fix whose run fails worse than
+      the run before it (`_worse`: more blocking problems near the change,
+      or a problem it brought in, `_introduced`) is discarded (mended-bridle,
+      2026-11-03: the first fix made a scene that agreed with its brief
+      match a later scene's error, and its re-check, fewer problems in all,
+      was kept). The prose and verdict before it are kept, `BLOCKED_PATH`
+      is put back to that run's contradictions (`.blocked_stale` when it
+      can't be), and `.discarded` names the round. A first fix discarded
+      leaves the prose as given (`.fixed` False). A run that passed is
+      always kept (it committed), and so is a re-gate with no edit (the
+      same prose).
+    - Round 2 on: the fix is also discarded, the earlier prose and verdict
+      kept, when the fix or its check fails (`GateError`; in round 1 that
+      raises, there being no fixed prose to keep) or it puts back words an
+      earlier fix removed (checked before its gate run, which would commit
+      on a lucky pass).
+    - Each discard, and each round's findings it couldn't place, is in
+      `.notes` for the caller to log.
     - Otherwise the prose kept is the last gated, with that run's verdict.
 
     The caller must write `.prose` to the scene file at once, whether or not
@@ -1311,15 +1330,13 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     """
     from storyforge import api
     logs = run_log_dir(log_dir, scene_id)
+    first = None
     try:
         first = gate_scene(project_dir, scene_id, command=command, prose=prose, log_dir=logs,
                            extract_model=extract_model, check_model=check_model,
                            before=before)
-    except GateError as e:
-        e.log_dir = logs
-        raise
-    current, result, rounds, notes, run_dir, discarded = prose, first, [], [], logs, 0
-    try:
+        current, result, rounds, notes, run_dir = prose, first, [], [], logs
+        discarded, blocked_stale = 0, ''
         for n in range(1, FIX_ROUNDS + 1):
             if result.passed:
                 break
@@ -1393,7 +1410,10 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                 if loose:
                     notes.append(loose)
                 # the blocked list is the kept run's, for `check --accept`
-                _note_blocked(project_dir, scene_id, command, result)
+                blocked_stale = _note_blocked(project_dir, scene_id, command, result)
+                if blocked_stale:
+                    notes.append(f'WARNING: {blocked_stale}; it lists the discarded fix\'s '
+                                 f'contradictions, which `check --accept` refuses')
                 break
             if loose:
                 notes.append(loose)
@@ -1404,7 +1424,8 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
         e.first, e.log_dir = first, logs
         raise
     return GatedScene(current, result, first, fixed=current != prose, rounds=rounds,
-                      notes=notes, log_dir=logs, discarded=discarded)
+                      notes=notes, log_dir=logs, discarded=discarded,
+                      blocked_stale=blocked_stale)
 
 
 def _one_line(text: str) -> str:
@@ -1589,7 +1610,8 @@ ACCEPTED = 'accepted'
 #: rows `storyforge check --accept` moves to `REPORTED_PATH` (Ben,
 #: 2026-11-02: a stop on an error in the book is the author's to fix or
 #: accept). Same columns; replaced by each gate run of the scene that gets
-#: to the check, and cleared when it commits.
+#: to the check, put back to the kept run's when `gate_and_fix` discards a
+#: fix, and cleared when it commits.
 BLOCKED_PATH = 'working/gate-blocked.csv'
 
 
@@ -1684,17 +1706,22 @@ def record_blocked(project_dir: str, scene_id: str, command: str,
     _write_rows(project_dir, BLOCKED_PATH, rows)
 
 
-def _note_blocked(project_dir: str, scene_id: str, command: str, result: 'GateResult') -> None:
+def _note_blocked(project_dir: str, scene_id: str, command: str, result: 'GateResult') -> str:
     """Record the verified contradictions that stopped `result`, for
-    `storyforge check --accept`; a file that can't be written is said, the
-    gate's verdict unchanged."""
+    `storyforge check --accept`. A file that can't be read or written
+    (malformed, or an OS error: SF-1, #504's review) is said, the gate's
+    verdict unchanged, and returned ('' when written): its rows may then
+    describe another run's prose, which `accept_blocked` refuses."""
     try:
         record_blocked(project_dir, scene_id, command,
                        [f for f in result.findings if f.kind == 'contradiction'])
-    except GateError as e:
+    except (GateError, OSError) as e:
         from storyforge.common import log
-        log(f'WARNING: {scene_id} did not pass, and {BLOCKED_PATH} could not be updated: '
-            f'{e}. Its contradictions can\'t be accepted until a check records them.')
+        why = f'{BLOCKED_PATH} could not be updated: {e}'
+        log(f'WARNING: {scene_id} did not pass, and {why}. Its contradictions can\'t be '
+            f'accepted until a check records them.')
+        return why
+    return ''
 
 
 def accept_blocked(project_dir: str, scene_id: str) -> list[dict[str, str]]:
@@ -1711,6 +1738,21 @@ def accept_blocked(project_dir: str, scene_id: str) -> list[dict[str, str]]:
     rows = stopped.pop(scene_id, [])
     if not rows:
         return []
+    # SF-1 (#504's review): a run whose rows couldn't be replaced leaves
+    # another prose's findings; accept only what the scene on disk says
+    try:
+        with open(os.path.join(project_dir, 'scenes', f'{scene_id}.md'),
+                  encoding='utf-8') as f:
+            prose = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        raise GateError(f'{scene_id}: can\'t read the scene to match its recorded '
+                        f'contradictions: {e}') from e
+    gone = [r['quote'] for r in rows if not _found_in(r['quote'], prose)]
+    if gone:
+        raise GateError(f'{scene_id}: {len(gone)} recorded contradiction(s) quote words not '
+                        f'in the scene ("{gone[0][:80]}"): {BLOCKED_PATH} describes other '
+                        f'prose; nothing accepted. Run `storyforge check {scene_id}` to '
+                        f'record what this prose has.')
     kept = reported(project_dir)
     mine = kept.setdefault(scene_id, [])
     for r in rows:

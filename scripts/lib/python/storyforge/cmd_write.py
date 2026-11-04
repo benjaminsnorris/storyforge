@@ -461,6 +461,9 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
                  'says why)')
     elif out.discarded:
         tried += f' (fix round {out.discarded} was discarded; the log says why)'
+    if out.blocked_stale:   # SF-1 (#504's review): said where the author looks
+        tried += (f' [{out.blocked_stale}: `check --accept` refuses this scene until '
+                  f'`storyforge check {scene_id}` records it again]')
     return False, _pend(project_dir, scene_id, command,
                         f'{len(problems)} problem(s) {tried}: '
                         + ' / '.join(problems[:3]) + ('; ...' if len(problems) > 3 else '')
