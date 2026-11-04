@@ -299,7 +299,8 @@ Use these to gate progression: a level should pass its own floor before the
 author elaborates downward.
 
 Levels 3 (spine), 4 (architecture), and 5 (scene-map) require a one-sentence
-`summary` column on every row (≤ 35 words). The summaries form an expanding
+`summary` column on every row (≤ 35 words for a spine event, ≤ 50 for an
+architecture anchor or a scene). The summaries form an expanding
 outline of the story, rendered together in `reference/outline.md`. Author
 edits live in the CSVs; sync regenerates outline.md.
 

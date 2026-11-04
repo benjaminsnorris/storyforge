@@ -353,3 +353,56 @@ class TestSpineEventSpansActs:
             {'id': 'b', 'seq': '5', 'act': '2', 'spine_event': 'fix'},
             {'id': 'c', 'seq': '14', 'act': '2', 'spine_event': 'fix'}])
         assert check['passed']
+
+
+class TestDivisions:
+    """The act call sees where the printed book's parts and chapters begin (F-162)."""
+
+    def test_from_the_chapter_map_and_the_part_column(self, book):
+        rows = _read_csv(str(book / 'reference' / 'scenes.csv'))
+        for r, part in zip(rows, ['1', '1', '1', '2', '2', '2', '2', '3', '3']):
+            r['part'] = part
+        _write(str(book / 'reference' / 'chapter-map.csv'),
+               [{'chapter': '1', 'title': 'Book I', 'scenes': 's01;s02;s03'},
+                {'chapter': '2', 'title': 'Book II', 'scenes': 's04;s05;s06;s07'},
+                {'chapter': '3', 'title': '', 'scenes': 's08;s09'}],
+               ['chapter', 'title', 'heading', 'part', 'scenes'])
+        from storyforge.extract_acts import divisions
+        marks = divisions(str(book / 'reference'), str(book / 'scenes'), rows)
+        assert marks == {'s01': 'part 1; Book I', 's04': 'part 2; Book II',
+                         's08': 'part 3; chapter 3'}
+
+    def test_from_headings_when_there_is_no_chapter_map(self, book):
+        (book / 'scenes' / 's05.md').write_text('---\ntitle: x\n---\n\n# Stave II: The Ghost\n\nText.')
+        rows = _read_csv(str(book / 'reference' / 'scenes.csv'))
+        from storyforge.extract_acts import divisions
+        assert divisions(str(book / 'reference'), str(book / 'scenes'), rows) == \
+            {'s05': 'Stave II: The Ghost'}
+
+    def test_the_prompt_marks_them(self, book):
+        rows = _read_csv(str(book / 'reference' / 'scenes.csv'))
+        prompt = build_acts_prompt({}, rows, str(book / 'scenes'),
+                                   marks={'s04': 'part 2; Book II'})
+        assert '[part 2; Book II begins]\n4. s04' in prompt
+        assert 'printed book' in prompt
+        assert '[' not in build_acts_prompt({}, rows, str(book / 'scenes')).split('## The scenes')[1]
+
+
+class TestSummaryLimits:
+    def _check(self, result):
+        return next(c for c in result['checks'] if c['check'].startswith('summary ≤'))
+
+    def test_anchors_and_scenes_allow_50_words_events_35(self, tmp_path):
+        forty = ' '.join(['word'] * 40)
+        _write(str(tmp_path / 'reference' / 'scenes.csv'),
+               _scenes(['1'], {'status': 'mapped', 'summary': forty}))
+        _write(str(tmp_path / 'reference' / 'architecture.csv'),
+               [{'id': 's01', 'seq': '1', 'act': '1', 'summary': forty}],
+               ['id', 'seq', 'act', 'summary'])
+        _write(str(tmp_path / 'reference' / 'spine.csv'),
+               [{'id': 'e1', 'seq': '1', 'summary': forty, 'function': 'f', 'act': '1'}],
+               ['id', 'seq', 'summary', 'function', 'act'])
+        assert self._check(score_scene_map(str(tmp_path)))['passed']
+        assert self._check(score_architecture(str(tmp_path)))['passed']
+        spine = self._check(score_spine(str(tmp_path)))
+        assert not spine['passed'] and '35' in spine['check']
