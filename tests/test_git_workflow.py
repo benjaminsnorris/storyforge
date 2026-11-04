@@ -4,6 +4,8 @@ The git workflow tests rely on bash functions (create_branch, ensure_branch_push
 select_model, etc.) from common.sh. We test what is available in Python.
 """
 
+import os
+
 import pytest
 
 
@@ -195,7 +197,8 @@ class TestCommitInASubfolder:
 
     def _repos(self, tmp_path, prefix):
         """The upstream repos, with the project at `prefix` inside the work
-        tree ('' for the repo root) and a sibling project beside it."""
+        tree ('' for the repo root) and another project at `projects/other`
+        (beside it in a subfolder, inside it at the repo root)."""
         remote, work = TestCommitAndPushUpstream._repos(self, tmp_path)
         project = work / prefix if prefix else work
         sibling = work / 'projects' / 'other'
@@ -261,3 +264,126 @@ class TestCommitInASubfolder:
         assert self._committed(work) == ['projects/book/scenes/kept.md']
         assert self._git(work, 'status', '--porcelain', '--',
                          'projects/other').strip() == 'M projects/other/notes.md'
+
+    def test_with_no_paths_a_file_already_staged_elsewhere_goes_in(self, tmp_path):
+        """Documented, not a guarantee: no paths commits the whole index,
+        which cleanup's `git rm --cached` sweep needs (`commit -- .` would
+        drop its removals)."""
+        from storyforge import git
+        work, project = self._repos(tmp_path, 'projects/book')
+        (project / 'scenes' / 'kept.md').write_text('changed\n')
+        (work / 'projects' / 'other' / 'notes.md').write_text('sibling edit\n')
+        self._git(work, 'add', 'projects/other/notes.md')
+        (project / 'working.log').write_text('log\n')
+        self._git(work, 'add', 'projects/book/working.log')
+        self._git(work, 'commit', '-qm', 'log', '--', 'projects/book/working.log')
+        (project / '.gitignore').write_text('working.log\n')
+        self._git(project, 'rm', '--cached', '-q', 'working.log')
+        assert git.commit_and_push(str(project), 'Cleanup'), git.last_commit_error
+        assert self._committed(work) == [
+            'projects/book/.gitignore', 'projects/book/scenes/kept.md',
+            'projects/book/working.log', 'projects/other/notes.md']
+        assert 'working.log' not in self._git(project, 'ls-files')
+
+    @pytest.mark.parametrize('outside', ['../other/notes.md', '../../a.txt', 'ABS'])
+    def test_a_path_outside_the_project_is_refused_and_nothing_staged(
+            self, tmp_path, capsys, outside):
+        """`--relative` can't list a path outside project_dir, so it was
+        staged, left out, and reported as nothing to commit."""
+        from storyforge import git
+        work, project = self._repos(tmp_path, 'projects/book')
+        if outside == 'ABS':
+            outside = str(work / 'projects' / 'other' / 'notes.md')
+        (work / 'projects' / 'other' / 'notes.md').write_text('sibling edit\n')
+        (work / 'a.txt').write_text('root edit\n')
+        (project / 'scenes' / 'kept.md').write_text('changed\n')
+        before = self._git(work, 'rev-parse', 'HEAD')
+        assert git.commit_and_push(str(project), 'Mixed', ['scenes/', outside]) is False
+        assert git.last_commit_error.startswith('outside the project folder')
+        assert 'WARNING: git commit "Mixed" failed: outside the project folder' in \
+            capsys.readouterr().out
+        assert self._git(work, 'rev-parse', 'HEAD') == before
+        assert self._git(work, 'diff', '--cached', '--name-only').strip() == ''
+        with pytest.raises(git.CommitError, match='outside the project folder'):
+            git.commit_or_raise(str(project), 'Mixed', [outside])
+
+    def test_an_absolute_path_inside_the_project_is_committed(self, tmp_path):
+        """cmd_revise passes `os.path.join(project_dir, ...)`."""
+        from storyforge import git
+        work, project = self._repos(tmp_path, 'projects/book')
+        (project / 'scenes' / 'kept.md').write_text('changed\n')
+        assert git.commit_and_push(str(project), 'Abs',
+                                   [str(project / 'scenes' / 'kept.md')])
+        assert self._committed(work) == ['projects/book/scenes/kept.md']
+
+    @pytest.mark.skipif(not hasattr(os, 'geteuid') or os.geteuid() == 0,
+                        reason='root reads an unreadable file')
+    @pytest.mark.parametrize('paths', [['scenes/'], None])
+    def test_a_failed_add_is_a_failure_not_nothing_to_commit(self, tmp_path, capsys, paths):
+        """`git add` exited 128 on an unreadable file, staged nothing, and the
+        empty listing (or commit's "no changes added") read as nothing to
+        commit, so `commit_or_raise` called it success."""
+        from storyforge import git
+        work, project = self._repos(tmp_path, 'projects/book')
+        (project / 'scenes' / 'kept.md').write_text('changed\n')
+        locked = project / 'scenes' / 'locked.md'
+        locked.write_text('x\n')
+        locked.chmod(0)
+        try:
+            assert git.commit_and_push(str(project), 'Add', paths) is False
+            assert git.last_commit_error != git.NOTHING_TO_COMMIT
+            assert 'WARNING: git commit "Add" failed: could not stage' in capsys.readouterr().out
+            with pytest.raises(git.CommitError):
+                git.commit_or_raise(str(project), 'Add', paths)
+        finally:
+            locked.chmod(0o644)
+        assert self._git(work, 'diff', '--cached', '--name-only').strip() == ''
+
+    def test_nothing_under_the_paths_with_a_sibling_staged(self, tmp_path):
+        from storyforge import git
+        work, project = self._repos(tmp_path, 'projects/book')
+        before = self._git(work, 'rev-parse', 'HEAD')
+        (work / 'projects' / 'other' / 'notes.md').write_text('sibling edit\n')
+        self._git(work, 'add', 'projects/other/notes.md')
+        assert git.commit_and_push(str(project), 'Nothing', ['scenes/']) is False
+        assert git.last_commit_error == git.NOTHING_TO_COMMIT
+        assert self._git(work, 'rev-parse', 'HEAD') == before
+        assert self._git(work, 'diff', '--cached', '--name-only').split() == \
+            ['projects/other/notes.md']
+
+    @pytest.mark.parametrize('paths', [['scenes/'], None])
+    def test_a_rejected_commit_unstages_only_its_own(self, tmp_path, capsys, paths):
+        from storyforge import git
+        work, project = self._repos(tmp_path, 'projects/book')
+        hook = work / '.git' / 'hooks' / 'pre-commit'
+        hook.write_text('#!/bin/sh\necho "hook says no" >&2\nexit 1\n')
+        hook.chmod(0o755)
+        (work / 'a.txt').write_text('root edit\n')
+        self._git(work, 'add', 'a.txt')
+        (project / 'scenes' / 'kept.md').write_text('changed\n')
+        with pytest.raises(git.CommitError, match='hook says no'):
+            git.commit_or_raise(str(project), 'Add', paths)
+        assert 'WARNING: git commit "Add" failed: hook says no' in capsys.readouterr().out
+        assert self._git(work, 'diff', '--cached', '--name-only').split() == ['a.txt']
+
+    def test_source_import_in_a_subfolder_project(self, tmp_path, monkeypatch):
+        """End to end: the command that failed (telemachy-teen, 2026-11-03)."""
+        import subprocess
+        import sys
+        sys.path.insert(0, os.path.dirname(__file__))
+        from source_helpers import make_adaptation
+        from storyforge import cmd_source
+        work = tmp_path / 'evals'
+        work.mkdir()
+        project = make_adaptation(work / 'projects')
+        for a in (('init', '-q', '-b', 'main'), ('config', 'user.email', 't@e.st'),
+                  ('config', 'user.name', 'T'), ('add', '.'), ('commit', '-qm', 'init')):
+            subprocess.run(['git', '-C', str(work), *a], check=True, capture_output=True)
+        monkeypatch.chdir(project)
+        assert cmd_source.main(['import']) == 0
+        assert self._git(work, 'rev-parse', '--abbrev-ref', 'HEAD').startswith(
+            'storyforge/source-import-')
+        committed = self._committed(work)
+        assert committed and all(
+            f.startswith('projects/telemachus/reference/source/odyssey/') for f in committed)
+        assert self._git(work, 'status', '--porcelain', '--', 'projects/telemachus/reference/source') == ''
