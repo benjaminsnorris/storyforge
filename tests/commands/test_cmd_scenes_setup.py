@@ -1512,3 +1512,64 @@ def test_scenes_alias_renumber_dry_run_needs_no_api_key(project_dir):
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     assert 'Would renumber 1 of 2' in r.stdout + r.stderr
+
+
+class TestVerseManuscript:
+    """`source fetch --verse` manuscripts: verse lines end in a hard break
+    (`\\`), and Beowulf's chapters are a Prelude and "# Fitt" headings."""
+
+    def _split(self, project_dir, monkeypatch, mock_api, text, reply):
+        monkeypatch.setattr('storyforge.cmd_scenes_setup.detect_project_root',
+                            lambda: project_dir)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        mock_api.set_response(reply)
+        with open(os.path.join(project_dir, 'manuscript.md'), 'w') as f:
+            f.write(text)
+        main(['--split-manuscript', '--yes', '--direct'])
+        _, rows = _new_rows(project_dir, 'scenes.csv')
+        return sorted(rows, key=lambda r: int(r['seq']))
+
+    def test_a_scene_split_mid_stanza_drops_its_last_hard_break(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        # Line 5 (the third verse line) opens the second scene, mid-stanza: the first
+        # scene's last line kept its `\`, which pandoc prints
+        text = ('# Fitt I\n\nThe first line\\\nthe second line\\\nthe third line\\\n'
+                'the fourth line.\n')
+        rows = self._split(project_dir, monkeypatch, mock_api, text,
+                           'SCENE: 1 | hero-sails-out | a\nSCENE: 5 | hero-lands-ashore | b')
+        assert len(rows) == 2
+        with open(os.path.join(project_dir, 'scenes', f'{rows[0]["id"]}.md')) as f:
+            first = f.read()
+        with open(os.path.join(project_dir, 'scenes', f'{rows[1]["id"]}.md')) as f:
+            second = f.read()
+        assert first.rstrip('\n').endswith('the second line')
+        assert 'The first line\\\nthe second line' in first
+        assert second == 'the third line\\\nthe fourth line.\n'
+
+    def test_a_prelude_does_not_hide_the_other_headings(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        text = ('# Prelude: Of the Founder\n\nLo, praise.\n\n'
+                '# Fitt I\n\nNow Beowulf bode.\n\n# Fitt II\n\nWent he forth.\n')
+        rows = self._split(project_dir, monkeypatch, mock_api, text,
+                           'SCENE: 1 | something-happens-here | a')
+        assert [_opening(project_dir, r['id']) for r in rows] == [
+            '# Prelude: Of the Founder', '# Fitt I', '# Fitt II']
+
+    def test_a_prelude_among_chapter_headings_is_unchanged(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        text = ('# Prelude\n\nWho that cares much.\n\n# Chapter I\n\nMiss Brooke.\n\n'
+                '# Finale\n\nEvery limit.\n')
+        rows = self._split(project_dir, monkeypatch, mock_api, text,
+                           'SCENE: 1 | something-happens-here | a')
+        assert [_opening(project_dir, r['id']) for r in rows] == [
+            '# Prelude', '# Chapter I', '# Finale']
+
+    def test_a_prose_backslash_ending_a_paragraph_is_kept(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """Review of #525: only a hard break that ran on into the next scene
+        is dropped; a backslash ending a paragraph is the author's text."""
+        text = '# Chapter One\n\nC:\\\n\nNext paragraph.\n'
+        rows = self._split(project_dir, monkeypatch, mock_api, text,
+                           'SCENE: 1 | path-is-typed-out | a\nSCENE: 5 | next-thing-happens | b')
+        with open(os.path.join(project_dir, 'scenes', f'{rows[0]["id"]}.md')) as f:
+            assert f.read().rstrip('\n').endswith('C:\\')

@@ -35,3 +35,22 @@ def test_not_found(quote):
 def test_normalize_and_count():
     assert normalize('A—B -- *c*') == 'a-b - c'
     assert word_count('the old man’s') == 4
+
+
+def test_a_quote_across_verse_lines_matches():
+    """`source fetch --verse` ends each verse line but a stanza's last with a
+    hard break (`\\`); a quote spanning two lines didn't match."""
+    verse = 'and add this word, -- they are welcome guests\\\nto folk of the Danes."\n'
+    assert quote_in(verse, 'they are welcome guests to folk of the Danes')
+    assert normalize('guests\\\nto folk') == 'guests to folk'
+    # a backslash that isn't a line's end is left alone
+    assert normalize('a\\b') == 'a\\b'
+
+
+@pytest.mark.parametrize('quote', [
+    'they are welcome guests\\ to folk',
+    'they are welcome guests / to folk',
+])
+def test_a_verse_quote_written_on_one_line_matches(quote):
+    verse = 'and add this word, -- they are welcome guests\\\nto folk of the Danes."\n'
+    assert quote_in(verse, quote)

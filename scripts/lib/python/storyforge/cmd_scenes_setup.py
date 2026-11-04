@@ -555,6 +555,20 @@ def main(argv=None):
             # Trim leading blank lines
             while cleaned and not cleaned[0].strip():
                 cleaned.pop(0)
+            # A verse scene can start mid-stanza; the line before it then
+            # ends the scene, and its hard break (`\` before the newline,
+            # source fetch --verse) has nothing to break to: pandoc would
+            # print it as a backslash
+            # Only a real hard break: the scene's last line ran straight on
+            # into the next scene's first, with no blank line between. A
+            # backslash ending a paragraph, or the chapter, is text.
+            last = next((k for k in range(len(cleaned) - 1, -1, -1)
+                         if cleaned[k].strip()), None)
+            runs_on = (end_line < total_lines and lines_list[end_line].strip()
+                       and lines_list[end_line - 1].strip())
+            if (last is not None and runs_on
+                    and re.search(r'[^\\]\\$', cleaned[last].rstrip())):
+                cleaned[last] = cleaned[last].rstrip()[:-1]
             scene_text = '\n'.join(cleaned)
 
             # Scene id: a slug of the scene's event, never its position. When
@@ -1051,6 +1065,7 @@ def main(argv=None):
         chapter_starts = []
         chapter_names = []
         part_starts = []
+        other_starts = set()  # chapter starts that are a prelude, epilogue, ...
 
         for line_num, line in enumerate(ms_lines, 1):
             stripped = line.strip()
@@ -1071,6 +1086,7 @@ def main(argv=None):
                 if before and after:
                     chapter_starts.append(line_num)
                     chapter_names.append(re.sub(r'^#+\s*', '', stripped))
+                    other_starts.add(line_num)
                     continue
 
             # Markdown chapter headings
@@ -1102,8 +1118,12 @@ def main(argv=None):
         # No chapter headings: fall back to any standalone markdown heading,
         # so books divided into staves, books or letters keep their divisions.
         # A heading with no prose before the next one (a title) is skipped and
-        # left as front matter.
-        if not chapter_starts:
+        # left as front matter. A prelude or epilogue alone isn't a chapter
+        # scheme: Beowulf's "# Prelude" made its 41 "# Fitt" headings run on
+        # inside one chapter. The fallback finds the prelude as a heading too.
+        if set(chapter_starts) <= other_starts:
+            kept = (chapter_starts, chapter_names)
+            chapter_starts, chapter_names = [], []
             part_lines = {n for n, _ in part_starts}
             headings = [
                 n for n, line in enumerate(ms_lines, 1)
@@ -1118,6 +1138,11 @@ def main(argv=None):
                 if any(l.strip() for l in ms_lines[n:end - 1]):
                     chapter_starts.append(n)
                     chapter_names.append(re.sub(r'^#+\s*', '', ms_lines[n - 1].strip()))
+            # A plain-text "PRELUDE." the fallback can't see stays a chapter
+            merged = dict(zip(*kept))
+            merged.update(zip(chapter_starts, chapter_names))
+            chapter_starts = sorted(merged)
+            chapter_names = [merged[n] for n in chapter_starts]
 
         if chapter_starts:
             log(f'Found {len(chapter_starts)} chapter boundaries')
