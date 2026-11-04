@@ -350,7 +350,8 @@ class Cast:
     pronouns: dict[str, str] = field(default_factory=dict)
     #: id → name, for the report
     display: dict[str, str] = field(default_factory=dict)
-    #: what about the file keeps speakers from being checked (WARNINGs)
+    #: what about the file, or an adaptation's source, keeps speakers from
+    #: being checked (WARNINGs)
     warnings: tuple[str, ...] = ()
 
     @property
@@ -397,9 +398,10 @@ def _cast(project_dir: str) -> Cast:
         fallback = resolved.by_id.get(cid)
         if key == '' and fallback and fallback.origin == source.FROM_SOURCE:
             key = pronoun_key(fallback.value)
-        elif key == '' and fallback and fallback.note:
-            warnings.append(f"{name}: no pronouns from the source ({fallback.note}), so "
-                            f"the gate doesn't check a pronoun speech tag on their lines")
+        elif key == '' and fallback and (fallback.note or fallback.problem):
+            warnings.append(f"{name}: no pronouns in characters.csv or from the source "
+                            f"({fallback.note or fallback.problem}), so the gate doesn't "
+                            f"check a pronoun speech tag on their lines")
         if key:
             pronouns[cid] = key
         elif key is None:
