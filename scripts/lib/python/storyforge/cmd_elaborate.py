@@ -1910,9 +1910,23 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
             elif label in ('story-architecture', 'character-bible', 'world-bible', 'voice-guide'):
                 filename = label + '.md'
                 path = os.path.join(ref_dir, filename)
-                with open(path, 'w', encoding='utf-8') as f:
-                    f.write(content + '\n')
-                written.append(filename)
+                from storyforge.common import is_unfilled_template
+                # Only the spine writes the character bible whole; later
+                # stages are asked for additional entries, which replacing
+                # the file would turn into the whole bible (G-016)
+                append = (label == 'character-bible' and stage != 'spine'
+                          and os.path.isfile(path) and not is_unfilled_template(path)
+                          and open(path, encoding='utf-8').read().strip())
+                if append:
+                    with open(path, encoding='utf-8') as f:
+                        existing = f.read().rstrip('\n')
+                    with open(path, 'w', encoding='utf-8') as f:
+                        f.write(existing + '\n\n' + content.strip() + '\n')
+                    written.append(f'{filename} (entries added)')
+                else:
+                    with open(path, 'w', encoding='utf-8') as f:
+                        f.write(content + '\n')
+                    written.append(filename)
 
         # The stage's tier file (spine.csv, architecture.csv), from the rows it
         # just wrote
