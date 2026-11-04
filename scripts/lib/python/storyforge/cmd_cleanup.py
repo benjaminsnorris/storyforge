@@ -1596,9 +1596,24 @@ def report_csv_integrity(project_dir: str) -> list[str]:
     # Sequence gaps
     if os.path.isfile(meta_csv):
         seqs = _read_csv_column(meta_csv, 'seq')
+        # A shared seq is reported, never renumbered: which scene comes first
+        # is the author's call (thornwall seq 58). ledger.shared_seqs is the
+        # rule validate's duplicate-seq and write/revise/check's stop read,
+        # so "4" and "4.0" tie here too. Unreadable → no finding here, for
+        # the reason _read_csv_column gives.
+        try:
+            shared = ledger.shared_seqs(ledger.scene_rows(os.path.dirname(meta_csv))[1])
+        except (OSError, UnicodeDecodeError):
+            shared = []
+
+        def seq_key(text: str) -> float:
+            try:
+                return ledger.seq_number(text)
+            except ValueError:
+                return 0
         needs_renumber = False
         prev = 0
-        for s in sorted(seqs, key=lambda x: float(x) if re.match(r'^[\d.]+$', x) else 0):
+        for s in sorted(seqs, key=seq_key):
             if '.' in s:
                 needs_renumber = True
             elif s.isdigit():
@@ -1606,14 +1621,11 @@ def report_csv_integrity(project_dir: str) -> list[str]:
                 if val > prev + 1:
                     needs_renumber = True
                 prev = val
-        if needs_renumber:
+        # A renumber would pick an order for the tied scenes
+        if needs_renumber and not shared:
             issues.append('SEQ_NEEDS_RENUMBER:gaps or non-integer seq values found')
-        # A shared seq is reported, never renumbered: which scene comes first
-        # is the author's call (thornwall seq 58).
-        from collections import Counter
-        shared = [s for s, n in Counter(seqs).items() if n > 1]
-        for s in sorted(shared, key=lambda x: float(x) if re.match(r'^[\d.]+$', x) else 0):
-            issues.append(f'DUPLICATE_SEQ:{s}')
+        for seq, _ in shared:
+            issues.append(f'DUPLICATE_SEQ:{seq}')
 
     # Unknown characters — build known set from id + aliases columns
     if os.path.isfile(intent_csv) and os.path.isfile(chars_csv):

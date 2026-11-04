@@ -722,6 +722,32 @@ class TestReportCsvIntegrity:
         assert finding['severity'] == 'error'
         assert 'command' not in finding
 
+    def test_reports_a_tie_spelled_two_ways(self, tmp_path):
+        """Cleanup compared seqs as text, so 4.0 and 4 were no tie, and its
+        renumber advice would have picked their order (CR-3). It reads the
+        rule validate and write/revise/check read (ledger.shared_seqs)."""
+        ref_dir = tmp_path / 'reference'
+        ref_dir.mkdir()
+        (tmp_path / 'scenes').mkdir()
+        (ref_dir / 'scenes.csv').write_text(
+            'id|seq|title\n'
+            'sc-a|1|A\n'
+            'sc-b|4.0|B\n'
+            'sc-c|4|C\n'
+            'sc-d|5|D\n'
+        )
+        issues = report_csv_integrity(str(tmp_path))
+        assert 'DUPLICATE_SEQ:4 / 4.0' in issues
+        assert not any(i.startswith('SEQ_NEEDS_RENUMBER') for i in issues)
+        assert 'seq 4 / 4.0' in _classify_issue('DUPLICATE_SEQ:4 / 4.0', {})['detail']
+
+    def test_a_duplicated_id_does_not_hide_a_tie(self, tmp_path):
+        ref_dir = tmp_path / 'reference'
+        ref_dir.mkdir()
+        (tmp_path / 'scenes').mkdir()
+        (ref_dir / 'scenes.csv').write_text('id|seq|title\nx|5|A\ny|5|B\nx|9|C\n')
+        assert 'DUPLICATE_SEQ:5' in report_csv_integrity(str(tmp_path))
+
     def test_no_issues_for_clean_project(self, project_dir):
         """The fixture project should have mostly clean integrity."""
         issues = report_csv_integrity(project_dir)
