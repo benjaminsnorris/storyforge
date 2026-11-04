@@ -730,16 +730,39 @@ def gate_pending_path() -> str:
     return PENDING_PATH
 
 
+class CommitError(Exception):
+    """A scene's files (or a re-check's) were written but `git commit`
+    failed: the caller stops committing, since the next commit's paths
+    (`reference/`, `working/logs/`, `working/coaching/`) would sweep these
+    files in under the wrong message, and says so."""
+
+
+def _commit(project_dir: str, message: str, paths: list[str]) -> None:
+    """`commit_and_push` that raises `CommitError` when the commit fails.
+    Nothing to commit under `paths` (a re-check that ran nothing, say) is
+    not a failure: `git commit` refuses it too, so it is checked first. A
+    failed push stays `commit_and_push`'s WARNING: the commit is made."""
+    from storyforge.git import _git, commit_and_push
+    status = _git(project_dir, 'status', '--porcelain', '--', *paths, check=False)
+    if status.returncode == 0 and not status.stdout.strip():
+        return
+    if not commit_and_push(project_dir, message, paths):
+        raise CommitError(f'the commit "{message}" failed (see `git status` in '
+                          f'{project_dir})')
+
+
 def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
                              metadata_csv: str, coaching: str,
                              head_before: str, written_by: str = '',
-                             gate_failed: bool = False) -> tuple:
+                             gate_failed: bool = False, commit: bool = True) -> tuple:
     """Verify and commit a drafted scene. Returns (word_count, success).
     ``written_by`` names the model the refusal fallback used, for the commit
     message. ``gate_failed``: the scene didn't pass the gate, which the
     commit message says, and its PR task stays unticked. When something else
     already committed (the interactive CLI), the gate's files are committed
-    on their own."""
+    on their own. A commit that fails raises `CommitError` (the scene is
+    verified and its files written); ``commit=False`` (batch mode after a
+    failed commit) verifies and writes without committing."""
     scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
     word_count = 0
 
@@ -783,13 +806,15 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
         if gate_failed:
             msg += f' (did not pass the gate; listed in {gate_pending_path()})'
 
-        from storyforge.git import commit_and_push
-        commit_and_push(project_dir, msg, paths)
+        if not commit:
+            return word_count, True
+        _commit(project_dir, msg, paths)
     elif coaching == 'full':
-        from storyforge.git import commit_and_push
-        commit_and_push(project_dir, f'Gate scene {scene_id}',
-                        [f'scenes/{scene_id}.md', 'reference/', 'working/audit-log.csv',
-                         'working/.audit-snapshot.csv', gate_pending_path()])
+        if not commit:
+            return word_count, True
+        _commit(project_dir, f'Gate scene {scene_id}',
+                [f'scenes/{scene_id}.md', 'reference/', 'working/audit-log.csv',
+                 'working/.audit-snapshot.csv', gate_pending_path()])
 
     # Push
     _git(project_dir, 'push', check=False)
@@ -878,6 +903,7 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
     drafted_count = 0
     total_words = 0
     failed: list[str] = []
+    commit_failed = ''   # the scene whose commit failed: later ones are written, not committed
     from storyforge.git import _git
 
     for scene_id in batch_scene_ids:
@@ -937,12 +963,24 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
             failed.append(f'{scene_id} ({reason.rstrip(".")})')
             continue
 
-        # Verify and commit
-        wc, ok = _verify_and_commit_scene(
-            scene_id, project_dir, scenes_dir, metadata_csv, coaching,
-            head_before, written_by=_written_by(scene_json),
-        )
-        if ok:
+        # Verify and commit. Every reply is already paid for, so after a
+        # failed commit the rest are still written, but not committed: their
+        # commits would sweep in the earlier scene's files
+        try:
+            wc, ok = _verify_and_commit_scene(
+                scene_id, project_dir, scenes_dir, metadata_csv, coaching,
+                head_before, written_by=_written_by(scene_json), commit=not commit_failed,
+            )
+        except CommitError as e:
+            log(f'ERROR: {scene_id} is written, but {e}. The rest of the batch is written '
+                f'without committing.')
+            commit_failed = scene_id
+            failed.append(f'{scene_id} (written but not committed: {e})')
+            continue
+        if ok and commit_failed:
+            failed.append(f'{scene_id} (written but not committed: the commit of '
+                          f'{commit_failed} failed first)')
+        elif ok:
             drafted_count += 1
             total_words += wc
         else:
@@ -977,7 +1015,9 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
     included). After a scene passes and is committed, the later scenes that
     depend on what it changed are re-checked (``run_recheck``; Phase 4),
     not those this run redrafts anyway. At other coaching levels a bad reply
-    skips only its scene."""
+    skips only its scene. At every level a failed commit (the scene's, or
+    the re-checks' after it) stops the run: the next scene's commit would
+    sweep its files in under the wrong message."""
     drafted_count = 0
     total_words = 0
     failed: list[str] = []
@@ -1136,10 +1176,22 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
         # The prose is committed either way: a scene the gate stopped is kept
         # for the author and listed in gate.pending
-        wc, ok = _verify_and_commit_scene(
-            scene_id, project_dir, scenes_dir, metadata_csv, coaching,
-            head_before, written_by=_written_by(scene_log), gate_failed=bool(gate_problem),
-        )
+        try:
+            wc, ok = _verify_and_commit_scene(
+                scene_id, project_dir, scenes_dir, metadata_csv, coaching,
+                head_before, written_by=_written_by(scene_log),
+                gate_failed=bool(gate_problem),
+            )
+        except CommitError as e:
+            # The next scene's commit would sweep this one's ledger and
+            # metadata changes in under its own message, and a run whose
+            # commits fail shouldn't keep paying: stop here
+            log(f'ERROR: Scene {scene_id} is written, but {e}.')
+            log('Stopping: commit it by hand, then run again.')
+            stop(i, scene_id, f'{scene_id} (written but not committed: {e}'
+                              + (f'; it also did not pass the gate: {gate_problem}'
+                                 if gate_problem else '') + ')')
+            break
         if gate_problem:
             log(f'ERROR: Scene {scene_id} did not pass the gate: {gate_problem}')
             log('Stopping: later scenes would be drafted without its facts in the ledger.')
@@ -1165,12 +1217,18 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                                       f'pass: {run.why})')
             if run is not None:
                 recheck_spent = run.spent
-                from storyforge.git import commit_and_push
-                commit_and_push(project_dir, f'Re-check after {scene_id}: '
-                                f'{len(run.passed)} passed'
-                                + (f', {run.failed} did not' if run.failed else ''),
-                                ['reference/', 'working/logs/', 'working/audit-log.csv',
-                                 'working/.audit-snapshot.csv', gate_pending_path()])
+                try:
+                    _commit(project_dir, f'Re-check after {scene_id}: '
+                            f'{len(run.passed)} passed'
+                            + (f', {run.failed} did not' if run.failed else ''),
+                            ['reference/', 'working/logs/', 'working/audit-log.csv',
+                             'working/.audit-snapshot.csv', gate_pending_path()])
+                except CommitError as e:
+                    log(f'ERROR: the re-checks after {scene_id} ran, but {e}.')
+                    log('Stopping: commit them by hand, then run again.')
+                    stop(i, scene_id, f're-checks after {scene_id} (written but not '
+                                      f'committed: {e})')
+                    break
 
         log(f'  Time: {mins}m{secs}s')
 

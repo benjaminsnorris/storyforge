@@ -223,6 +223,63 @@ class TestReview443:
         assert commits.index('Draft scene act1-sc01') < commits.index(
             'Re-check after act1-sc01: 1 passed')
 
+    def test_a_failed_commit_stops_the_run_and_exits_1(self, setup, monkeypatch, capsys,
+                                                         mock_git):
+        """`write` ignored a failed `commit_and_push` and went on drafting
+        (#499's review): the next scene's commit would have swept this one's
+        ledger changes in under its message. Now it stops, exit 1."""
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
+        calls = _gate(monkeypatch, {'act1-sc01': True, 'act1-sc02': True})
+        mock_git.commit_success = False
+        with pytest.raises(SystemExit) as exc:
+            main(['--scenes', 'act1-sc01,act1-sc02'])
+        assert exc.value.code == 1
+        assert calls == [('act1-sc01', 'draft')]
+        assert _scene(setup, 'act1-sc02') is None            # never drafted
+        assert _scene(setup, 'act1-sc01') is not None        # written, kept
+        out = capsys.readouterr().out
+        assert 'act1-sc01 (written but not committed: the commit "Draft scene act1-sc01" ' \
+            'failed' in out
+        assert 'act1-sc02 (not attempted: the run stopped at act1-sc01)' in out
+        commits = [c[1] for c in mock_git.calls if c[0] == 'commit_and_push']
+        assert commits == ['Draft scene act1-sc01']
+
+    def test_a_failed_recheck_commit_stops_the_run(self, setup, monkeypatch, capsys,
+                                                   mock_git):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
+        calls = _gate(monkeypatch, {'act1-sc01': True, 'act1-sc02': True})
+
+        def recheck(pd, *, log_dir, skip=frozenset(), **k):
+            gate.clear_pending(pd, 'new-x1')
+            return gate.Recheck(passed=['new-x1'])
+        monkeypatch.setattr(gate, 'recheck_pending', recheck)
+        gate.mark_pending(setup, 'new-x1', 'recheck', 're-check: x')
+        commits = []
+
+        def commit(pd, msg, paths=None):
+            commits.append(msg)
+            return not msg.startswith('Re-check')
+        monkeypatch.setattr('storyforge.git.commit_and_push', commit)
+        with pytest.raises(SystemExit) as exc:
+            main(['--scenes', 'act1-sc01,act1-sc02'])
+        assert exc.value.code == 1
+        assert calls == [('act1-sc01', 'draft')]
+        assert commits == ['Draft scene act1-sc01', 'Re-check after act1-sc01: 1 passed']
+        out = capsys.readouterr().out
+        assert 're-checks after act1-sc01 (written but not committed' in out
+        assert 'act1-sc02 (not attempted: the run stopped at act1-sc01)' in out
+
+    def test_nothing_to_commit_is_not_a_failed_commit(self, setup, monkeypatch):
+        """A re-check that ran nothing (over the threshold) leaves nothing to
+        commit; `git commit` refuses that, which isn't a failure."""
+        import subprocess
+        from storyforge import cmd_write
+        monkeypatch.setattr('storyforge.git._git', lambda pd, *a, check=True:
+                            subprocess.CompletedProcess(a, 0, stdout='', stderr=''))
+        monkeypatch.setattr('storyforge.git.commit_and_push',
+                            lambda *a, **k: pytest.fail('committed nothing'))
+        cmd_write._commit(setup, 'Re-check after x: 0 passed', ['reference/'])
+
     def test_a_failed_recheck_blocks_drafting_past_it(self, setup, monkeypatch, capsys):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
         _gate(monkeypatch, {'act1-sc01': True})
