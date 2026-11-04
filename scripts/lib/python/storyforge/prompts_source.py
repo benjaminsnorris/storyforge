@@ -6,7 +6,10 @@ their prompts stay byte for byte what they were. With a block, a source not
 imported yet raises SourceError before any prompt is built. With a block, they give the spine the source's events to
 select from, the architecture its cast and POV distribution, the map every
 source scene to account for in `reference/source-map.csv`, and the briefs
-each scene's source briefs and the source prose itself.
+each scene's source briefs and the source prose itself. A source with a
+`range:` gives each of them only the range's scenes (`source.adapted_scenes`);
+the rest of the source reaches the model only through the Source Bible, as
+context.
 """
 
 from __future__ import annotations
@@ -69,6 +72,9 @@ def spine_section(project_dir: str) -> str:
              'order unless a version rule says otherwise. Each spine event\'s function names '
              'the source event it comes from.']
     for slug in cfg.slugs():
+        if cfg.project(slug).range is not None:
+            parts.append(_span_events(project_dir, cfg, slug))
+            continue
         spine = source.read_table(project_dir, slug, 'spine.csv')
         if spine:
             rows = '\n'.join(f'{r.get("seq", "")}|{r.get("id", "")}|{r.get("title", "")}|'
@@ -82,6 +88,24 @@ def spine_section(project_dir: str) -> str:
     return '\n\n'.join(parts) + rules_block(project_dir, cfg)
 
 
+def _span_events(project_dir: str, cfg: source.SourceConfig, slug: str) -> str:
+    """A ranged source's events for the spine: the span's scenes. The
+    source's own spine.csv isn't shown: its rows name no scenes, so it can't
+    be cut to the span, and the whole book's turning points would pull the
+    spine past it."""
+    everything = source.source_scenes(project_dir, slug)
+    scenes = source.adapted_scenes(project_dir, cfg, slug, everything)
+    rng = cfg.project(slug).range
+    rows = '\n'.join(f'{s.get("seq", "")}|{s.get("id", "")}|{s.get("title", "")}|'
+                     f'{s.get("summary", "")}' for s in scenes)
+    return (f'### The adapted span ({slug}: {rng.describe()}, {len(scenes)} of '
+            f'{len(everything)} scenes)\n\n'
+            f'This version adapts only these scenes of `{slug}`; choose its spine from their '
+            f'events. The source\'s own spine covers the whole source, so it isn\'t shown; '
+            f'the events before and after the span are context in the Source Bible.\n\n'
+            f'```\nseq|id|title|summary\n{rows}\n```')
+
+
 # ----------------------------------------------------------------------------
 # Architecture
 # ----------------------------------------------------------------------------
@@ -90,12 +114,16 @@ def architecture_section(project_dir: str) -> str:
     cfg = _cfg(project_dir)
     if not cfg:
         return ''
+    ranged = any(p.range is not None for p in cfg.projects)
     parts = [f'## Source\n\n{_header(cfg)}',
              'Build the architecture from the source\'s cast. The POV distribution below is '
-             'the source\'s; keep it, or change it where the version rules or a POV shift '
+             + ('the adapted span\'s' if ranged else 'the source\'s')
+             + '; keep it, or change it where the version rules or a POV shift '
              'call for it.']
     for slug in cfg.slugs():
-        scenes = source.source_scenes(project_dir, slug)
+        rng = cfg.project(slug).range
+        scenes = source.adapted_scenes(project_dir, cfg, slug)
+        in_span = {s.get('id', '') for s in scenes}
         chars = {c.get('id', ''): c for c in source.read_table(project_dir, slug, 'characters.csv')}
         pov: dict[str, int] = {}
         for s in scenes:
@@ -104,14 +132,20 @@ def architecture_section(project_dir: str) -> str:
                 pov[p] = pov.get(p, 0) + 1
         on_stage: dict[str, int] = {}
         for r in source.read_table(project_dir, slug, 'scene-intent.csv'):
+            if rng is not None and r.get('id', '') not in in_span:
+                continue
             for cid in source.split_ids(r.get('on_stage', '')):
                 on_stage[cid] = on_stage.get(cid, 0) + 1
-        lines = [f'### {slug}: POV distribution ({len(scenes)} scenes)', '']
+        span = f', {rng.describe()}' if rng else ''
+        lines = [f'### {slug}: POV distribution ({len(scenes)} scenes{span})', '']
         for cid, n in sorted(pov.items(), key=lambda kv: -kv[1]):
             name = chars.get(cid, {}).get('name', '') or cid
             lines.append(f'- {name} (`{cid}`): {n} scenes ({n / max(1, len(scenes)):.0%})')
         cast = sorted(chars.values(), key=lambda c: -on_stage.get(c.get('id', ''), 0))
-        lines += ['', f'### {slug}: principal cast (by scenes on stage)', '']
+        if rng is not None:
+            # Who the span puts on stage or in POV; the rest are in the Source Bible
+            cast = [c for c in cast if on_stage.get(c.get('id', '')) or pov.get(c.get('id', ''))]
+        lines += ['', f'### {slug}: principal cast (by scenes on stage{span})', '']
         for c in cast[:30]:
             cid = c.get('id', '')
             role = c.get('role', '').strip()
@@ -120,6 +154,9 @@ def architecture_section(project_dir: str) -> str:
                          + f': on stage in {on_stage.get(cid, 0)}')
         if len(cast) > 30:
             lines.append(f'- ... {len(cast) - 30} more in the Source Bible')
+        if rng is not None and len(cast) < len(chars):
+            lines.append(f'- ({len(chars) - len(cast)} of the source\'s characters are not '
+                         f'on stage in the adapted span; they are in the Source Bible)')
         parts.append('\n'.join(lines))
     return '\n\n'.join(parts) + rules_block(project_dir, cfg)
 
@@ -134,16 +171,28 @@ def map_section(project_dir: str) -> str:
         return ''
     multi = len(cfg.slugs()) > 1
     parts = [f'## Source\n\n{_header(cfg)}']
+    ranged = []
     for slug in cfg.slugs():
-        scenes = source.source_scenes(project_dir, slug)
+        everything = source.source_scenes(project_dir, slug)
+        scenes = source.adapted_scenes(project_dir, cfg, slug, everything)
+        rng = cfg.project(slug).range
         intent = {r.get('id', ''): r for r in source.read_table(project_dir, slug, 'scene-intent.csv')}
         rows = '\n'.join(
             f'{s.get("seq", "")}|{s.get("id", "")}|{s.get("title", "")}|'
             f'{s.get("timeline_day", "")}|{s.get("pov", "")}|'
             f'{intent.get(s.get("id", ""), {}).get("function", "") or s.get("summary", "")}'
             for s in scenes)
-        parts.append(f'### Source scenes: {slug} ({len(scenes)})\n\n'
+        count = (f'{len(scenes)}' if rng is None else
+                 f'{len(scenes)} of {len(everything)}: {rng.describe()}')
+        if rng is not None:
+            ranged.append(f'`{slug}` ({rng.describe()})')
+        parts.append(f'### Source scenes: {slug} ({count})\n\n'
                      f'```\nseq|id|title|timeline_day|pov|function\n{rows}\n```')
+    if ranged:
+        parts.append(f'This novel adapts only part of {", ".join(ranged)}: the scenes listed '
+                     f'above. The source\'s other scenes are context in the Source Bible '
+                     f'(what came before, and what comes after); give them no row, adapted '
+                     f'or cut.')
     cut_rule = ('a cut needs a reason in its note (a version rule, or why the event '
                 'isn\'t needed)')
     ids = ('write each source scene as slug:id, since this novel has more than one source'
@@ -259,6 +308,7 @@ def briefs_section(project_dir: str, scene_ids: list[str] | None) -> str:
     rows = source.read_source_map(project_dir) or []
     by_scene = source.map_rows_by_scene(rows)
     cat = source.catalogue(project_dir, cfg)
+    spans = source.spans(project_dir, cfg)
     targets = _scenes_to_brief(project_dir, scene_ids)
 
     parts = [f'## Source\n\n{_header(cfg)}',
@@ -276,6 +326,7 @@ def briefs_section(project_dir: str, scene_ids: list[str] | None) -> str:
     no_prose: list[str] = []
     unmapped: list[str] = []
     unresolved: list[str] = []
+    outside: list[str] = []
     blocks = []
     for sid in targets:
         row = by_scene.get(sid)
@@ -297,6 +348,11 @@ def briefs_section(project_dir: str, scene_ids: list[str] | None) -> str:
                 unresolved.append(f'{sid} ({ref})')
                 body.append(f'#### Source scene {ref}: not found in the imported source')
                 continue
+            if source.outside_range(hit, spans):
+                outside.append(f'{sid} ({ref})')
+                body.append(f'#### Source scene {ref}: outside the adapted range '
+                            f'({source.range_note(cfg, hit[0])}), so not shown')
+                continue
             words = len((source.source_prose(project_dir, *hit) or '').split())
             show = words <= budget
             if show:
@@ -316,6 +372,9 @@ def briefs_section(project_dir: str, scene_ids: list[str] | None) -> str:
     if unresolved:
         log(f'WARNING: source scenes not found in the imported source (run validate): '
             f'{", ".join(unresolved)}')
+    if outside:
+        log(f'WARNING: source scenes outside the adapted range, not shown (run validate): '
+            f'{", ".join(outside)}')
     if no_prose:
         log(f'WARNING: source prose left out of the briefs prompt (over '
             f'{SOURCE_PROSE_MAX_WORDS:,} words): {", ".join(no_prose)}; brief fewer '

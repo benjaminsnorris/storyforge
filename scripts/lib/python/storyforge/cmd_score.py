@@ -1719,12 +1719,14 @@ def _run_source_fidelity_only(args) -> None:
     by_scene = source_mod.map_rows_by_scene(rows)
     try:
         source_mod.require_imported(project_dir, cfg)
+        spans = source_mod.spans(project_dir, cfg)
     except source_mod.SourceError as e:
         log(f'ERROR: {e}')
         sys.exit(1)
     cat = source_mod.catalogue(project_dir, cfg)
     plans = [source_fidelity.plan_scene(project_dir, sid, target, plugin_dir, cfg,
-                                        by_scene, rules, cat=cat) for sid in scene_ids]
+                                        by_scene, rules, cat=cat, spans=spans)
+             for sid in scene_ids]
     todo = [p for p in plans if not p.skip]
     words = (sum(len(p.prompt.split()) for p in todo) // len(todo)) if todo else 0
     cost = estimate_cost('fidelity', len(todo), words, model)

@@ -99,7 +99,8 @@ def _status(project_dir: str, cfg) -> int:
     for p in cfg.projects:
         state = 'imported' if source.is_imported(project_dir, p.slug) else 'not imported'
         log(f'Source {p.slug}: {p.path} ({state})'
-            + (f', name map {p.name_map}' if p.name_map else ''))
+            + (f', name map {p.name_map}' if p.name_map else '')
+            + (f', adapting {p.range.describe()}' if p.range else ''))
     result = source.check_coverage(project_dir, cfg)
     for line in result['lines']:
         log(line)
