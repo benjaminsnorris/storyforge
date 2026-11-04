@@ -974,7 +974,7 @@ def build_pitch_prompt(profile: dict, scenes: list[dict[str, str]], ev: PitchEvi
 
 ## The book
 
-- title: {ev.title or '(none recorded: leave title_meaning\'s fields empty)'}
+- title: {ev.title or "(none recorded: leave title_meaning's fields empty)"}
 - genre: {ev.genre or '(not recorded)'}
 {_profile_lines(profile, ('narrative_mode', 'timeline', 'act_structure', 'central_conflict',
                           'protagonist_arc', 'major_threads', 'tone'))}
