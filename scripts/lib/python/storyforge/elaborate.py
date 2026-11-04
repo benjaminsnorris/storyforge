@@ -11,6 +11,7 @@ All files are pipe-delimited with 'id' as the join key.
 import csv
 import math
 import os
+import re
 from typing import Any
 
 # Time modes that are never the story's present: frame narration from after
@@ -1177,6 +1178,7 @@ def validate_structure(ref_dir: str) -> dict:
     _validate_acts(scenes_map, checks)
     _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_dir=ref_dir)
     _validate_pronouns(ref_dir, checks)
+    _validate_cast_named(scenes_map, intent_map, ref_dir, checks)
     _validate_brief_names(ref_dir, checks)
 
     failures = [c for c in checks if not c['passed']]
@@ -1309,6 +1311,178 @@ def _validate_pronouns(ref_dir: str, checks: list[dict]) -> None:
         "same pronouns: fix one): " + ', '.join(differ) if differ
         else "No character's pronouns differ from the source's",
         severity='blocking' if cast.mode == 'faithful' else 'advisory'))
+
+
+#: Words too common in scene ids to read as a name there, even when they
+#: are someone's one-word name or alias ("the king", "Mother"). A key made
+#: only of these is never matched.
+_CAST_ID_STOPWORDS = frozenset({
+    'a', 'an', 'the', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'by', 'for',
+    'from', 'with', 'into', 'over', 'under', 'after', 'before', 'his', 'her',
+    'hers', 'its', 'their', 'him', 'them', 'he', 'she', 'they', 'we', 'you',
+    'all', 'one', 'two', 'old', 'young', 'new', 'man', 'men', 'woman', 'women',
+    'boy', 'girl', 'child', 'baby', 'king', 'queen', 'prince', 'princess',
+    'lord', 'lady', 'sir', 'god', 'gods', 'goddess', 'father', 'mother', 'son',
+    'sons', 'daughter', 'wife', 'husband', 'brother', 'sister', 'uncle',
+    'aunt', 'friend', 'stranger', 'master', 'captain', 'doctor', 'nurse',
+    'priest', 'servant', 'guard', 'guards', 'chief', 'will', 'may', 'hope',
+    'grace', 'faith', 'joy', 'dawn', 'night', 'death', 'fate', 'war',
+    # personifications, whose names are also everyday words
+    'sleep', 'love', 'fear', 'panic', 'strife', 'discord', 'victory',
+    'justice', 'rumour', 'rumor', 'terror', 'earth', 'sun', 'moon', 'sky',
+    'sea', 'wind', 'winds', 'river',
+})
+
+#: A one-word key shorter than this is never matched (Io, Ed)
+_CAST_ID_MIN_LETTERS = 3
+
+
+def _slug_tokens(text: str) -> tuple[str, ...]:
+    return tuple(t for t in re.split(r'[^a-z0-9]+', text.lower()) if t)
+
+
+def _cast_name_keys(row: dict[str, str]) -> set[tuple[str, ...]]:
+    """The word runs a scene id can name this character by: its id, and
+    its name and each alias slugged, less the ones `_CAST_ID_STOPWORDS`
+    and `_CAST_ID_MIN_LETTERS` rule out."""
+    texts = [row.get('id', ''), row.get('name', '')] + (row.get('aliases') or '').split(';')
+    keys = set()
+    for text in texts:
+        key = _slug_tokens(text)
+        if not key or all(t in _CAST_ID_STOPWORDS for t in key):
+            continue
+        if len(key) == 1 and len(key[0]) < _CAST_ID_MIN_LETTERS:
+            continue
+        keys.add(key)
+    return keys
+
+
+def _holds_run(words: tuple[str, ...], key: tuple[str, ...], possessive: bool = False) -> bool:
+    """*key* is a run of whole *words*; with *possessive*, the last word may
+    carry a possessive ``s`` (a scene id's ``wins-with-minervas``)."""
+    n = len(key)
+    for i in range(len(words) - n + 1):
+        run = words[i:i + n]
+        if run[:-1] == key[:-1] and (run[-1] == key[-1]
+                                     or (possessive and run[-1] == key[-1] + 's')):
+            return True
+    return False
+
+
+def cast_named_gaps(scenes_map: dict, intent_map: dict,
+                    characters: list[dict[str, str]]) -> tuple[dict[str, list[str]], int, int]:
+    """Scenes whose own id names a registry character that neither cast
+    column lists (#523): the extraction that left Eumaeus out of
+    ``ulysses-reaches-eumaeus-hut``. The scene's POV counts as present.
+
+    A character is named by a whole run of the id's words matching its id,
+    or its name or an alias slugged (``_cast_name_keys``). Cast entries are
+    resolved through the registry's ids, names and aliases. A name is
+    answered by anyone in the cast whose own id, name or alias holds it
+    (``aias`` by ``aias-son-of-oileus``), and a name two characters share is
+    reported, as ``a or b``, only when no one holding it is in the cast.
+    Cut, merged and archived scenes, and scenes with no cast yet, are not
+    checked.
+
+    Returns ``(gaps, checked, uncast)``: scene id → the missing characters,
+    the number of scenes checked, and the number left unchecked because
+    they have no cast."""
+    from .source import INACTIVE_STATUSES
+    owners: dict[tuple[str, ...], list[str]] = {}
+    lookup: dict[str, set[str]] = {}
+    for row in characters:
+        cid = (row.get('id') or '').strip()
+        if not cid:
+            continue
+        for key in _cast_name_keys(row):
+            owners.setdefault(key, [])
+            if cid not in owners[key]:
+                owners[key].append(cid)
+        for text in [cid, row.get('name', '')] + (row.get('aliases') or '').split(';'):
+            if text.strip():
+                lookup.setdefault(text.strip().lower(), set()).add(cid)
+
+    keys_of: dict[str, set[tuple[str, ...]]] = {}
+    for key, ids in owners.items():
+        for cid in ids:
+            keys_of.setdefault(cid, set()).add(key)
+    holders = {key: {cid for cid, keys in keys_of.items()
+                     if any(_holds_run(k, key) for k in keys)}
+               for key in owners}
+
+    def resolve(entry: str) -> set[str]:
+        entry = entry.strip().lower()
+        return lookup.get(entry) or {entry}
+
+    gaps: dict[str, list[str]] = {}
+    checked = uncast = 0
+    for sid, scene in scenes_map.items():
+        if (scene.get('status') or '').strip() in INACTIVE_STATUSES:
+            continue
+        intent = intent_map.get(sid, {})
+        entries = [e for col in ('characters', 'on_stage')
+                   for e in (intent.get(col) or '').split(';') if e.strip()]
+        if not entries:
+            uncast += 1
+            continue
+        checked += 1
+        present: set[str] = set()
+        for entry in entries + [scene.get('pov') or '']:
+            if entry.strip():
+                present |= resolve(entry)
+        words = _slug_tokens(sid)
+        missing = []
+        for key, ids in owners.items():
+            if holders[key] & present or not _holds_run(words, key, possessive=True):
+                continue
+            name = ' or '.join(ids)
+            if name not in missing:
+                missing.append(name)
+        if missing:
+            gaps[sid] = sorted(missing)
+    return gaps, checked, uncast
+
+
+def _validate_cast_named(scenes_map: dict, intent_map: dict, ref_dir: str,
+                         checks: list[dict]) -> None:
+    """A scene whose own id names a character its casts leave out (category
+    `characters`, advisory, #523): `cast_named_gaps`. Advisory: the scene
+    may only mention them, and the casts are the author's to fix; nothing
+    is added. One finding per scene; a characters.csv that can't be read,
+    or has no character in it while scenes have casts, is a finding too, so
+    a pass means checked and clean."""
+    from .common import csv_safe
+    has_cast = any((r.get('characters') or '').strip() or (r.get('on_stage') or '').strip()
+                   for r in intent_map.values())
+    path = os.path.join(ref_dir, 'characters.csv')
+    try:
+        characters = _read_csv(path) if os.path.isfile(path) else []
+    except (OSError, UnicodeDecodeError) as e:
+        checks.append(_check(
+            'characters', 'scene-cast-named-unchecked', False,
+            f"characters.csv can't be read ({csv_safe(str(e))}): scene ids not checked "
+            f"against the casts", severity='advisory'))
+        return
+    if not any((r.get('id') or '').strip() for r in characters):
+        checks.append(_check(
+            'characters', 'scene-cast-named', not has_cast,
+            "No character in characters.csv: scene ids not checked against the casts"
+            if has_cast else "No scene has a cast yet: nothing to check",
+            severity='advisory'))
+        return
+    gaps, checked, uncast = cast_named_gaps(scenes_map, intent_map, characters)
+    for sid, missing in sorted(gaps.items()):
+        checks.append(_check(
+            'characters', f'scene-cast-named-{sid}', False,
+            f"Scene {sid}'s id names {csv_safe(', '.join(missing))}, but neither its "
+            f"characters nor its on_stage lists them: the cast may be short",
+            severity='advisory', scene_id=sid, fields=['characters', 'on_stage']))
+    if not gaps:
+        note = f' ({uncast} with no cast yet not checked)' if uncast else ''
+        checks.append(_check(
+            'characters', 'scene-cast-named', True,
+            f"Every character a scene id names is in its cast: {checked} scene(s) "
+            f"checked{note}", severity='advisory'))
 
 
 def _validate_brief_names(ref_dir: str, checks: list[dict]) -> None:
