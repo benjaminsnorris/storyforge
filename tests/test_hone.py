@@ -482,6 +482,12 @@ def _set_column(ref_dir, filename, column, values):
         w.writerows(rows)
 
 
+def _read_rows(path):
+    import csv as _csv
+    with open(path) as f:
+        return list(_csv.DictReader(f, delimiter='|'))
+
+
 def _column(ref_dir, filename, column):
     from storyforge.elaborate import _read_csv_as_map
     return {sid: row.get(column, '') for sid, row in
@@ -1109,6 +1115,40 @@ class TestReviewFixes:
         assert _column(ref_dir, 'scenes.csv', 'pov')['act1-sc01'] == 'the Merrins'
         assert _column(ref_dir, 'scene-intent.csv', 'characters')['act1-sc01'] == \
             'tessa-merrin;dorren-hayle'
+
+    def test_phase_2_new_cast_ids_become_registry_rows(self, project_dir, monkeypatch,
+                                                       tmp_path):
+        """#523: phase 2 now gives a new lowercase-hyphen id to anyone the
+        POV-only registry doesn't list. Hone's phase-2 pass asks about each,
+        adds the NEW rows under those very ids, and leaves the casts as
+        written."""
+        from storyforge.hone import find_unresolved, reconcile_domain
+        ref_dir = os.path.join(project_dir, 'reference')
+        path = os.path.join(ref_dir, 'characters.csv')
+        with open(path) as f:
+            lines = f.read().splitlines()
+        with open(path, 'w') as f:  # after phase 1: the POV character alone
+            f.write('\n'.join(lines[:2]) + '\n')
+        _set_column(ref_dir, 'scenes.csv', 'pov', ['dorren-hayle'] * 6)
+        _set_column(ref_dir, 'scene-intent.csv', 'characters',
+                    {'act1-sc01': 'dorren-hayle;old-mother-vey;tessa-merrin'})
+        _set_column(ref_dir, 'scene-intent.csv', 'on_stage',
+                    {'act1-sc01': 'dorren-hayle;old-mother-vey'})
+        calls = _mock_api(monkeypatch, [
+            '1 | NEW | old-mother-vey | Old Mother Vey | minor\n'
+            '2 | NEW | tessa-merrin | Tessa Merrin | supporting\n'])
+        reconcile_domain('characters', ref_dir, 'test-model', str(tmp_path))
+        assert len(calls) == 1
+        assert 'old-mother-vey' in calls[0] and 'tessa-merrin' in calls[0]
+        rows = {r['id']: r for r in _read_rows(path)}
+        assert set(rows) == {'dorren-hayle', 'old-mother-vey', 'tessa-merrin'}
+        assert (rows['old-mother-vey']['name'], rows['old-mother-vey']['role']) == (
+            'Old Mother Vey', 'minor')
+        assert _column(ref_dir, 'scene-intent.csv', 'characters')['act1-sc01'] == \
+            'dorren-hayle;old-mother-vey;tessa-merrin'
+        assert _column(ref_dir, 'scene-intent.csv', 'on_stage')['act1-sc01'] == \
+            'dorren-hayle;old-mother-vey'
+        assert find_unresolved('characters', ref_dir) == []
 
     def test_new_ids_are_slugged_or_rejected(self):
         from storyforge.hone import parse_mapping_response
