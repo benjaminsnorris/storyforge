@@ -13,7 +13,10 @@ title, author, year, genre and logline it reads; the config is kept as
 `reference/gutenberg.json`) or the flags, which win. `--fetch` then runs
 `source fetch` (the manuscript from Project Gutenberg) and sets
 `project.target_words` from it; `--manuscript FILE` copies a manuscript in
-instead.
+instead. `--source PATH` makes an adaptation instead: it writes the
+`source:` block (the source project's path and slug, `mode: faithful` unless
+`--source-mode free`), and the project's CLAUDE.md lists the adaptation's
+commands; a project with neither lists the elaboration commands.
 
 Git: a directory outside any repository becomes one, and the project is its
 first commit on `main`. Inside a repository (a book repo's `source/`), the
@@ -24,6 +27,7 @@ Usage:
     storyforge init DIR --title T [--author A] [--genre G] [--logline L]
                         [--year Y] [--target-words N] [--meta FILE]
                         [--fetch [--verse] [--input RAW]] [--manuscript FILE]
+                        [--source PATH [--source-slug S] [--source-mode M]]
                         [--no-commit]
 """
 
@@ -75,11 +79,67 @@ def parse_args(argv):
     mode.add_argument('--prose', dest='verse', action='store_false',
                       help='With --fetch: one paragraph per line (the default)')
     p.add_argument('--input', help='With --fetch: read the raw text from this file')
+    p.add_argument('--source', metavar='PATH',
+                   help='Make an adaptation of the Storyforge project at PATH (an '
+                        'extraction): writes the `source:` block')
+    p.add_argument('--source-slug', help='With --source: the source\'s slug '
+                                         '(default: its directory name)')
+    p.add_argument('--source-mode', choices=['faithful', 'free'], default=None,
+                   help='With --source: faithful (the default) or free')
     p.add_argument('--no-commit', action='store_true', help='Write, do not commit')
     args = p.parse_args(argv)
     if not args.fetch and (args.gutenberg or args.input or args.verse is not None):
         p.error('--gutenberg, --input, --verse and --prose go with --fetch')
+    if not args.source and (args.source_slug or args.source_mode):
+        p.error('--source-slug and --source-mode go with --source')
+    if args.source and (args.fetch or args.manuscript):
+        p.error('--source makes a new novel from a source project; it has no manuscript '
+                '(--fetch, --manuscript)')
     return args
+
+
+def _kind(args, meta: dict) -> str:
+    """What the project is: `extraction` (a manuscript to extract, or a
+    fetch config to make one), `adaptation` (--source) or `novel`."""
+    if args.source:
+        return 'adaptation'
+    if args.fetch or args.manuscript or meta:
+        return 'extraction'
+    return 'novel'
+
+
+def _source_block(project: str, source_path: str, slug: str, mode: str) -> str:
+    """storyforge.yaml's `source:` block for one source project (#553,
+    Beowulf B-014: written by hand), its path relative to the project."""
+    rel = os.path.relpath(os.path.abspath(source_path), project)
+    return (f'\nsource:\n  projects:\n    - slug: {slug}\n      path: {rel}\n'
+            f'  mode: {mode}\n')
+
+
+#: The commands CLAUDE.md lists and the next step init names, by kind of
+#: project (#553; Beowulf B-014, Gawain G-013: a new novel was told to split
+#: a manuscript it doesn't have)
+_COMMANDS = {
+    'extraction': [
+        '- `./storyforge scenes-setup --split-manuscript` — split `manuscript.md` into scenes',
+        '- `./storyforge extract` — extract the scene data from existing prose',
+    ],
+    'adaptation': [
+        '- `./storyforge source import` — copy the source project into `reference/source/`',
+        '- `./storyforge elaborate --stage spine` (then `architecture`, `voice`, `map`, '
+        '`briefs`) — build the novel from the source',
+        '- `./storyforge score --source-fidelity` — check briefs or prose against the source',
+    ],
+    'novel': [
+        '- `./storyforge elaborate --stage spine` (then `architecture`, `voice`, `map`, '
+        '`briefs`) — build the novel',
+    ],
+}
+_NEXT = {
+    'extraction': './storyforge scenes-setup --split-manuscript',
+    'adaptation': './storyforge source import',
+    'novel': './storyforge elaborate --stage spine',
+}
 
 
 def yaml_str(value) -> str:
@@ -111,7 +171,7 @@ def _storyforge_yaml(plugin: str, d: dict, target_words: int | None) -> str:
     return yaml
 
 
-def _claude_md(d: dict, meta: dict) -> str:
+def _claude_md(d: dict, meta: dict, kind: str = 'extraction') -> str:
     about = d['title']
     if d['author']:
         about += f' by {d["author"]}'
@@ -131,8 +191,7 @@ def _claude_md(d: dict, meta: dict) -> str:
     lines += [
         '', '## Working with Storyforge', '',
         '- `/storyforge:forge` — main hub, recommends what to work on next',
-        '- `./storyforge scenes-setup --split-manuscript` — split `manuscript.md` into scenes',
-        '- `./storyforge extract` — extract the scene data from existing prose',
+        *_COMMANDS[kind],
         '- `./storyforge score`, `evaluate`, `revise`, `write` — craft scoring, '
         'evaluation, revision, drafting',
         '', '## Where to Find Things', '',
@@ -166,6 +225,9 @@ def main(argv=None):
             raise InitError(f'no manuscript at {args.manuscript}')
         if args.fetch and not args.meta:
             raise InitError('--fetch needs --meta (the config: chapter_heading at least)')
+        if args.source and not os.path.isfile(os.path.join(args.source, 'storyforge.yaml')):
+            raise InitError(f'--source {args.source} is not a Storyforge project '
+                            f'(no storyforge.yaml)')
     except (InitError, gutenberg.GutenbergError) as e:
         log(f'ERROR: {e}')
         return 1
@@ -208,10 +270,16 @@ def main(argv=None):
                 text = f.read()
             with open(os.path.join(project, 'reference', name), 'w', encoding='utf-8') as f:
                 f.write(text.replace('PROJECT_TITLE', details['title']))
+    kind = _kind(args, meta)
     with open(os.path.join(project, 'storyforge.yaml'), 'w') as f:
         f.write(_storyforge_yaml(plugin, details, target))
+        if args.source:
+            f.write(_source_block(project, args.source,
+                                  args.source_slug or os.path.basename(
+                                      os.path.normpath(os.path.abspath(args.source))),
+                                  args.source_mode or 'faithful'))
     with open(os.path.join(project, 'CLAUDE.md'), 'w') as f:
-        f.write(_claude_md(details, fetched.meta if fetched else meta))
+        f.write(_claude_md(details, fetched.meta if fetched else meta, kind))
     with open(os.path.join(project, 'working', 'pipeline.csv'), 'w') as f:
         f.write(PIPELINE_HEADER + '\n')
 
@@ -231,7 +299,7 @@ def main(argv=None):
     if args.no_commit:
         log('Written, not committed (--no-commit).')
         return 0
-    return _commit(project, details['title'])
+    return _commit(project, details['title'], _NEXT[kind])
 
 
 def _written(project: str) -> list[str]:
@@ -244,7 +312,7 @@ def _written(project: str) -> list[str]:
     return sorted(out)
 
 
-def _commit(project: str, title: str) -> int:
+def _commit(project: str, title: str, next_step: str) -> int:
     message = f'Initialize Storyforge project: {title}'
     if not _in_git_repo(project):
         # A new repository: the project is its first commit, on main, as the
@@ -255,8 +323,7 @@ def _commit(project: str, title: str) -> int:
             if r.returncode != 0:
                 log(f'ERROR: {" ".join(cmd)} failed: {(r.stderr or r.stdout).strip()}')
                 return 1
-        log(f'Committed on main in a new repository. Next: cd {project} && '
-            './storyforge scenes-setup --split-manuscript')
+        log(f'Committed on main in a new repository. Next: cd {project} && {next_step}')
         return 0
     from storyforge.git import commit_and_push, ensure_on_branch
     ensure_on_branch('init', project)
@@ -265,5 +332,5 @@ def _commit(project: str, title: str) -> int:
     if not commit_and_push(project, message, _written(project)):
         log('ERROR: the project is written but the commit failed; commit it yourself')
         return 1
-    log(f'Next: cd {project} && ./storyforge scenes-setup --split-manuscript')
+    log(f'Next: cd {project} && {next_step}')
     return 0
