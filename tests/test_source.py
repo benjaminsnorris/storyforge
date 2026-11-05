@@ -442,6 +442,19 @@ class TestImportFixes:
         assert '|Athena;telemachus|Athena;Pell|' in text
         assert any('scene-intent.csv:on_stage (Pell)' in n for n in r.notes)
 
+    def test_a_subject_that_is_a_ledger_id_is_not_noted(self, adaptation, tmp_path):
+        """#554 (Gawain G-014): a physical detail names its parent state in
+        `subject`; an unknown name there is still noted."""
+        ledger = tmp_path / 'odyssey' / 'reference' / 'commitments.csv'
+        ledger.write_text(ledger.read_text()
+                          + 'bow-unstrung|gods-debate|physical|ulysses|The bow||\n'
+                          + 'bow-detail|gods-debate|physical|bow-unstrung|Horn tips||\n'
+                          + 'oar-detail|gods-debate|physical|Elpenor|An oar||\n')
+        r = _import(adaptation)
+        notes = ' '.join(r.notes)
+        assert 'bow-unstrung' not in notes
+        assert 'commitments.csv:subject (Elpenor)' in notes
+
     def test_ambiguous_names_are_noted(self, adaptation):
         with open(os.path.join(adaptation, 'reference', 'names.csv'), 'a') as f:
             f.write('||Harbor|Haven\n')
