@@ -55,9 +55,34 @@ def _header(cfg: source.SourceConfig) -> str:
     return head
 
 
-def rules_block(project_dir: str, cfg: source.SourceConfig) -> str:
+def _rules_in_key_decisions(project_dir: str, cfg: source.SourceConfig) -> bool:
+    """Whether `source.rules` names reference/key-decisions.md (or a section
+    of it), which every stage prompt carries whole (`_existing_refs`)."""
+    rel = (cfg.rules or '').partition('#')[0]
+    return bool(rel) and os.path.normpath(source.resolve(project_dir, rel)) == \
+        os.path.normpath(os.path.join(project_dir, 'reference', 'key-decisions.md'))
+
+
+def _rules_text(rules: str) -> str:
+    """The rules under a `### Version rules` heading, unless they open with
+    their own heading (a `file.md#section` keeps it): wrapping that one put
+    `## Version rules` under `### Version rules` (B-015)."""
+    return f'\n{rules}\n' if rules.startswith('#') else f'\n### Version rules\n\n{rules}\n'
+
+
+def rules_block(project_dir: str, cfg: source.SourceConfig, *,
+                in_prompt: bool = True) -> str:
+    """The version rules for a prompt. `in_prompt`: the prompt also carries
+    Key Decisions whole (the elaborate stages), so rules kept there are
+    pointed to, not repeated (B-015: about 900 words twice in every stage
+    prompt). Raises SourceError as `source.read_rules` does."""
     rules = source.read_rules(project_dir, cfg)
-    return f'\n### Version rules\n\n{rules}\n' if rules else ''
+    if not rules:
+        return ''
+    if in_prompt and _rules_in_key_decisions(project_dir, cfg):
+        return ('\nThe version rules are in Key Decisions (its version rules section): '
+                'they bind every choice here.\n')
+    return _rules_text(rules)
 
 
 def bibles_text(project_dir: str) -> list[tuple[str, str]]:
@@ -405,3 +430,84 @@ def briefs_section(project_dir: str, scene_ids: list[str] | None) -> str:
                      f'(--scene a,b,c) to see it.')
     parts += blocks
     return '\n\n'.join(parts) + rules_block(project_dir, cfg)
+
+
+# ----------------------------------------------------------------------------
+# Drafting (#561)
+# ----------------------------------------------------------------------------
+
+#: Source prose a drafting prompt may carry for its scene, in words. Past it,
+#: the source scenes that don't fit are named, not shown.
+DRAFT_SOURCE_MAX_WORDS = 12000
+
+
+def drafting_section(project_dir: str, scene_id: str) -> str:
+    """The `## Source` section of an adaptation's drafting prompt (B-025):
+    the mode, the scene's source-map row (treatment and note), the prose of
+    the source scenes it adapts (up to `DRAFT_SOURCE_MAX_WORDS`), and the
+    version rules. '' with no `source:` block, so other projects' prompts
+    are unchanged. Logs a WARNING for a scene not in the map, a source
+    scene not found, and source prose left out; raises SourceError as
+    `_cfg` and `source.read_rules` do."""
+    cfg = _cfg(project_dir)
+    if not cfg:
+        return ''
+    rows = source.read_source_map(project_dir) or []
+    row = source.map_rows_by_scene(rows).get(scene_id)
+    parts = [f'## Source\n\n{_header(cfg)}']
+    note = names_note(project_dir, cfg)
+    if note:
+        parts.append(note)
+    if not row:
+        log(f'WARNING: {scene_id} is not in reference/source-map.csv: its drafting prompt '
+            f'has no source passage, only the Source Bible')
+        parts.append('This scene is not in the source map, so no source passage is shown: '
+                     'draft from the brief, and keep to the Source Bible and the version '
+                     'rules.')
+        return '\n\n'.join(parts) + rules_block(project_dir, cfg, in_prompt=False)
+    treatment = row.get('treatment', '').strip()
+    head = f'This scene\'s treatment of its source: **{treatment or "(none given)"}**'
+    if row.get('note', '').strip():
+        head += f' ({row["note"].strip()})'
+    parts.append(head + '.')
+    refs = source.split_ids(row.get('source_scenes', ''))
+    if not refs:
+        parts.append('An invented scene: it has no source passage. Invent only what the '
+                     'brief and the version rules allow.' if treatment == 'invent'
+                     else 'The map gives no source scene for it.')
+        return '\n\n'.join(parts) + rules_block(project_dir, cfg, in_prompt=False)
+    parts.append('Draft it while looking at the source passage below. The brief is still '
+                 'the contract: where the brief, its treatment or the version rules depart '
+                 'from the source, they win. Everywhere else the source wins over memory '
+                 'and over any earlier scene\'s retelling: its events, their order, who '
+                 'does what, and the substance of every speech. Never copy the '
+                 'translation\'s wording; write it in this novel\'s voice.')
+    cat = source.catalogue(project_dir, cfg)
+    budget = DRAFT_SOURCE_MAX_WORDS
+    missing, left_out = [], []
+    for ref in refs:
+        hit = source.resolve_source_id(ref, cat)
+        if hit is None:
+            missing.append(ref)
+            continue
+        text = source.source_prose(project_dir, *hit) or ''
+        words = len(text.split())
+        if not text.strip():
+            parts.append(f'#### Source scene {hit[0]}:{hit[1]}\n\n(no source prose for '
+                         f'this scene)')
+        elif words > budget:
+            left_out.append(f'{hit[0]}:{hit[1]}')
+        else:
+            budget -= words
+            parts.append(f'<source-prose scene="{hit[1]}">\n{text.strip()}\n</source-prose>')
+    if missing:
+        log(f'WARNING: {scene_id}: source scenes not found in the imported source (run '
+            f'validate): {", ".join(missing)}')
+        parts.append(f'Not found in the imported source: {", ".join(missing)}.')
+    if left_out:
+        log(f'WARNING: {scene_id}: source prose left out of the drafting prompt (over '
+            f'{DRAFT_SOURCE_MAX_WORDS:,} words): {", ".join(left_out)}')
+        parts.append(f'Source prose left out to keep this prompt under '
+                     f'{DRAFT_SOURCE_MAX_WORDS:,} words of source text: '
+                     f'{", ".join(left_out)}; they are in the Source Bible.')
+    return '\n\n'.join(parts) + rules_block(project_dir, cfg, in_prompt=False)
