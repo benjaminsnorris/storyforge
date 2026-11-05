@@ -56,8 +56,9 @@ class TestFormatsLoadThePartStylesheet:
             getattr(assembly, fn)(proj, 'm.md', 'out', PLUGIN_DIR)
         cmd = run.call_args_list[0].args[0]
         css = [cmd[i + 1] for i, a in enumerate(cmd) if a == '--css']
-        assert css[-1] == assembly.get_parts_css(PLUGIN_DIR)
-        assert os.path.isfile(css[-1])
+        # Right after the genre CSS (the PDF loads its overrides last)
+        assert css[1] == assembly.get_parts_css(PLUGIN_DIR)
+        assert os.path.isfile(css[1])
 
 
 @pytest.mark.skipif(not shutil.which('pandoc'), reason='pandoc not installed')
