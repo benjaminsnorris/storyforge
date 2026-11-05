@@ -694,6 +694,13 @@ def plan_import(project_dir: str, cfg: SourceConfig, slug: str) -> ImportResult:
         tables[name] = (header, rows)
         files[name] = _render_csv(header, rows).encode('utf-8')
     if nm is not EMPTY_MAP:
+        # A physical detail names its parent state in `subject`: a ledger id,
+        # not a name the map could hold (#554, Gawain G-014)
+        if 'commitments.csv' in tables and 'commitments.csv:subject' in unknown:
+            header, rows = tables['commitments.csv']
+            if 'id' in header:
+                ids = {r[header.index('id')].strip() for r in rows}
+                unknown['commitments.csv:subject'] -= ids
         unmapped = {k: v for k, v in unknown.items() if v}
         if unmapped:
             result.notes.append(

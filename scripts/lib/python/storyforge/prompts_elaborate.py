@@ -324,6 +324,7 @@ If the world needs a bible, output:
 - No flat polarity stretches: 3+ consecutive scenes with no value shift (+/+) is a red flag
 - Vary scene types: no 4+ consecutive action or sequel scenes
 - Vary turning point types: no 4+ consecutive action or revelation turning points
+- An enum cell holds only its value: `action_sequel` is action or sequel, `turning_point` is action or revelation, never "action: she strikes" (what turns the scene goes in `function`)
 - Every thread introduced must have a planned resolution
 - Acts should hit roughly: first act ~25%, midpoint ~50%, climax ~75-85%
 - Character arcs need structural progression: lie reinforced → challenged → confronted → truth/refusal
@@ -391,7 +392,7 @@ def build_map_prompt(project_dir: str, plugin_dir: str,
 {refs_section}{registries_section}
 ## Instructions
 
-Expand the architecture into {lo}-{hi} scenes. Prefer **more, shorter scenes** (1500-2000 words each) over fewer, longer ones. This is important for drafting quality — Claude follows brief constraints more reliably in focused scenes under 2500 words, and scoring/revision are more precise on smaller units.
+Expand the architecture into {lo}-{hi} scenes (when Key Decisions records a scene count for the book, that count wins over this estimate). Prefer **more, shorter scenes** (1500-2000 words each) over fewer, longer ones. This is important for drafting quality — Claude follows brief constraints more reliably in focused scenes under 2500 words, and scoring/revision are more precise on smaller units.
 
 For each scene:
 
@@ -404,10 +405,12 @@ For each scene:
 ### Output Format
 
 ```scenes-csv
-id|seq|title|summary|act|part|pov|location|timeline_day|time_mode|time_of_day|duration|target_words|status
+id|seq|title|summary|act|part|pov|location|timeline_day|time_mode|time_of_day|duration|target_words|status|architecture_scene
 (all scenes — status is "mapped" for new/updated scenes)
 ```
 
+- `architecture_scene`: the architecture scene each scene comes from: its own id for an architecture scene, and for a scene split off one (or added to play out part of it) that scene's id. Empty only for a new scene that serves no architecture scene
+- `time_of_day`: exactly one of morning, afternoon, evening, night, dawn, dusk; or unstated when the scene gives none (never "midday" or a description)
 - `summary`: what happens in the scene, in at most 50 words. Rewrite an existing scene's summary when the map splits it or moves part of it elsewhere
 - `part`: the book part the scene falls in, by number (storyforge.yaml `parts:`); leave it empty for a book without parts
 - `target_words`: the scene's planned length; together they come to about the target word count, and uneven lengths are fine
@@ -425,6 +428,7 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 - time_mode: scene (the action plays out on its day; the default), summary (it covers a stretch of time; timeline_day is where the stretch starts), frame (narration from after the story, looking back), or vision (events a character is shown that the story doesn't treat as fixed, such as a future that may be; never the story's present)
 - Say how each scene sits in time in its summary when it isn't simply the same day as the scene before: "the next morning", "three weeks later", "flashback to 1917". The timeline check reads this, and drafting carries it into the prose
 - Every character referenced must exist in the character bible
+- An enum cell holds only its value (`turning_point` is action or revelation, never "action: she strikes"; what turns the scene goes in `function`)
 - MICE threads: each opens once and closes at most once; they may interleave (nesting is guidance, not a rule)
 - No thread dormant for more than 8-10 scenes without acknowledgment
 - Every scene must have at least one on-stage character
