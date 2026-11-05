@@ -241,9 +241,11 @@ author.
 ### Scene Map Stage (Interactive)
 
 1. Read architecture scenes and reference materials
-2. Compute target scene count from `project.target_words`: `target_words / 2000` (lower) to `target_words / 1500` (upper), minimum 40. For an 80k novel this is 40-53; for 100k it's 50-67. **Prefer more, shorter scenes** (1500-2000 words each) — Claude follows brief constraints more reliably in focused scenes, and scoring/revision are more precise on smaller units.
+2. Compute target scene count from `project.target_words`: `target_words / 2000` (lower) to `target_words / 1500` (upper), minimum 40. For an 80k novel this is 40-53; for 100k it's 50-67. A scene count the author recorded in key-decisions.md wins over this estimate. **Prefer more, shorter scenes** (1500-2000 words each) — Claude follows brief constraints more reliably in focused scenes, and scoring/revision are more precise on smaller units.
 3. Expand to that range: fill gaps, add transitions, subplot scenes, breathing room
 4. Assign locations, timeline, characters, MICE threads — **all registry-backed fields must use canonical IDs** (characters, locations, values, mice_threads). Add new registry entries for anything introduced at this stage.
+   - Set `architecture_scene` on every scene: its own id for an architecture scene, the anchor's id for a scene split off one (`score --all-boundaries` gathers an anchor's map scenes by it). Leave it empty only for a new scene that serves no architecture scene.
+   - An enum cell holds only its value (`turning_point` `action`, never `action: she strikes`; `time_of_day` one of morning, afternoon, evening, night, dawn, dusk or unstated). The CLI stage splits a `value: description` cell and keeps the description in `function`.
 5. Write updates
 6. Run validation — MICE nesting, timeline, character references
 7. Commit: `git add -A && git commit -m "Elaborate: scene map" && git push`

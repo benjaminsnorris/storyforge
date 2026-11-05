@@ -1559,6 +1559,44 @@ def _run_page_prompt_handler_gn(project_dir: str, *,
 # Main stage execution (spine/architecture/map/briefs)
 # ============================================================================
 
+_ENUM_WITH_TEXT = re.compile(r'^\s*([A-Za-z][\w-]*)\s*(?::|—|–|\s-\s)\s*(.+)$', re.S)
+
+
+def split_enum_descriptions(row: dict, filename: str) -> list[str]:
+    """An enum cell written as its value plus a description ("action: Arthur,
+    stung by the laughter, rises") holds only the value; the description goes
+    to the row's `function` when the reply's row has that column
+    (scene-intent.csv), and is otherwise dropped (logged either way). A cell whose leading word isn't a valid value is left
+    for validate to report. Gawain G-021: 67 cells, which validate rejected
+    (#552). Returns a log line per cell changed."""
+    from storyforge.schema import COLUMN_SCHEMA
+    changed = []
+    for col, val in list(row.items()):
+        spec = COLUMN_SCHEMA.get(col)
+        if not val or not spec or spec.get('type') != 'enum' or spec.get('file') != filename:
+            continue
+        values = {v.lower() for v in spec['values']}
+        if val.strip().lower() in values:
+            continue
+        m = _ENUM_WITH_TEXT.match(val)
+        if not m or m.group(1).lower() not in values:
+            continue
+        row[col] = m.group(1).lower()
+        text = m.group(2).strip()
+        if 'function' in row:
+            fn = (row.get('function') or '').strip()
+            if text.lower() not in fn.lower():
+                row['function'] = f'{fn} ({col}: {text})' if fn else text
+            where = 'kept in function'
+        else:
+            where = 'dropped'
+        changed.append(f'{row.get("id", "?")} {col}: "{val[:60]}" -> {row[col]} '
+                       f'(the description {where})')
+    for line in changed:
+        log(f'  enum cell normalized: {line}')
+    return changed
+
+
 def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     dry_run: bool, interactive: bool, seed: str,
                     args=None,
@@ -1849,6 +1887,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     existing = _read_csv_as_map(path)
                     for row in rows:
                         normalize_fields(row, alias_maps)
+                        split_enum_descriptions(row, 'scenes.csv')
                         sid = row.get('id', '')
                         if not sid:
                             continue
@@ -1869,6 +1908,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     existing = _read_csv_as_map(path)
                     for row in rows:
                         normalize_fields(row, alias_maps)
+                        split_enum_descriptions(row, 'scene-intent.csv')
                         sid = row.get('id', '')
                         if not sid:
                             continue
