@@ -1554,6 +1554,15 @@ def _read_csv_column(csv_path: str, column: str) -> list[str]:
     return values
 
 
+def _drafted_ids(meta_csv: str) -> set[str]:
+    """The scenes.csv ids whose status says the scene is drafted (a status
+    outside the elaboration ladder counts, so nothing unknown goes unchecked)."""
+    from storyforge.elaborate import _read_csv
+    pre_draft = {'', 'spine', 'architecture', 'mapped', 'briefed'}
+    return {r['id'] for r in _read_csv(meta_csv)
+            if r.get('id') and (r.get('status') or '').strip().lower() not in pre_draft}
+
+
 def report_csv_integrity(project_dir: str) -> list[str]:
     """Check CSV integrity. Returns list of issue strings."""
     issues = []
@@ -1572,7 +1581,11 @@ def report_csv_integrity(project_dir: str) -> list[str]:
                 file_ids.add(f[:-3])
         for fid in sorted(file_ids - meta_ids):
             issues.append(f'ORPHAN_FILE:{fid}')
-        for mid in sorted(meta_ids - file_ids):
+        # A scene not drafted yet has no file by design: only one marked
+        # drafted or later is missing its prose (#554, Beowulf B-024: 49
+        # warnings at the briefs stage, each suggesting its rows go)
+        drafted = _drafted_ids(meta_csv)
+        for mid in sorted((meta_ids - file_ids) & drafted):
             issues.append(f'ORPHAN_META:{mid}')
 
     # Metadata vs intent
