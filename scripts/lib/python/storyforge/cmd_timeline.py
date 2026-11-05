@@ -20,6 +20,8 @@ Usage:
     storyforge timeline --phase1-only       # Read cues only
     storyforge timeline --embedded          # Called from enrich (no branch/PR)
     storyforge timeline --dry-run           # Show plan without invoking Claude
+    storyforge timeline --solve             # Compute days from the stored cues in code
+                                            # (no API call; report-only, #351)
 """
 
 import argparse
@@ -79,6 +81,10 @@ def parse_args(argv):
                         help='Skip cue extraction; reuse working/timeline-cues.csv')
     parser.add_argument('--phase1-only', action='store_true',
                         help='Read and store cues only; assign nothing')
+    parser.add_argument('--solve', action='store_true',
+                        help='Compute the calendar from the stored cues in code, with no API '
+                             'call, and write it beside the current days to '
+                             'working/timeline-solved.csv; change nothing in scenes.csv')
     parser.add_argument('--embedded', action='store_true',
                         help='Called as subprocess (skip branch/PR/commit)')
 
@@ -91,6 +97,14 @@ def main(argv=None):
 
     install_signal_handlers()
     project_dir = detect_project_root()
+    if args.solve:
+        # Code only: no API key, no cost, no branch
+        from storyforge.timeline_solve import run_solve
+        if not read_cues(project_dir):
+            log(f'ERROR: no stored cues in {CUES_FILE}; run storyforge timeline --phase1-only first')
+            sys.exit(1)
+        run_solve(project_dir)
+        return
     exit_if_bad_threshold()   # before anything is spent
 
     parallel = args.parallel or int(os.environ.get('STORYFORGE_TIMELINE_PARALLEL', '6'))

@@ -1,0 +1,120 @@
+"""The calendar computed in code from the cues (#351): the model labels, code counts."""
+
+import csv
+import os
+
+import pytest
+
+from storyforge.timeline_solve import Link, anchor_for, link_for, run_solve, solve
+
+
+def _items(*rows):
+    """(id, relation, gap, anchor, date, span) rows as scene_items."""
+    out = []
+    for row in rows:
+        sid, relation, gap, anchor, date, span = (list(row) + [''] * 6)[:6]
+        out.append({'id': sid, 'duration': '', 'cues': {
+            'relation': relation, 'gap': gap, 'anchor': anchor, 'date': date, 'span': span}})
+    return out
+
+
+class TestLinks:
+    def test_continues_is_the_same_day(self):
+        assert link_for('continues', '') == Link(0, 0, 0, True)
+
+    def test_a_counted_gap_holds_with_a_little_slack(self):
+        assert link_for('later', 'the next morning') == Link(1, 1, 1, True)
+        three = link_for('later', 'three weeks')
+        assert three.counted and three.pref == 21 and three.lo < 21 < three.hi <= 25
+
+    def test_vague_gaps_are_ranges(self):
+        weeks = link_for('later', 'some weeks later')
+        assert not weeks.counted and weeks.lo < weeks.pref < weeks.hi
+        # "the summer" is a season, not a year (Plastic Age)
+        assert link_for('later', 'the summer').hi < 365
+
+    def test_anchors(self):
+        assert anchor_for({'date': 'XXXX-07-04'}).first == 184
+        assert anchor_for({'anchor': 'early in May'}).words == 'early May'
+        assert anchor_for({'anchor': 'a warm evening'}) is None
+        assert anchor_for({'date': '1922-07-04'}).year_date.year == 1922
+
+
+class TestSolve:
+    def test_counted_gaps_count(self):
+        s = solve(_items(('a', 'unclear'), ('b', 'later', 'the next morning'),
+                         ('c', 'later', 'three days'), ('d', 'continues')))
+        assert [s.days[x] for x in 'abcd'] == [1, 2, 5, 5]
+        assert s.conflicts == []
+
+    def test_a_month_anchor_stretches_the_vague_gap_not_the_counted_one(self):
+        """F-071: the prom "early in May" landed in January. The vague gap
+        before it takes up the distance; the stated "the next day" doesn't."""
+        s = solve(_items(('opening', 'unclear', '', '', 'XXXX-09-20'),
+                         ('later-on', 'later', 'some months later'),
+                         ('prom', 'later', 'the next day', 'early in May')))
+        assert s.days['prom'] - s.days['later-on'] == 1
+        # September 20 + the days to early May
+        assert 222 <= s.days['prom'] - 1 <= 232
+        assert s.conflicts == []
+
+    def test_an_anchor_no_gap_can_reach_is_a_conflict(self):
+        s = solve(_items(('a', 'unclear', '', '', 'XXXX-03-01'),
+                         ('b', 'later', 'the next day', '', 'XXXX-06-01')))
+        assert s.days['b'] == 2
+        assert [sid for sid, _m in s.conflicts] == ['b']
+
+    def test_stated_years_fix_the_distance(self):
+        s = solve(_items(('a', 'unclear', '', '', '1920-01-10'),
+                         ('b', 'later', 'years later', '', '1922-01-10')))
+        assert s.days['b'] - s.days['a'] == 731   # 1920 is a leap year
+
+    def test_flashbacks_frames_and_visions(self):
+        s = solve(_items(('frame', 'frame'), ('a', 'earlier'), ('b', 'later', 'a week'),
+                         ('memory', 'earlier', 'five years'), ('memory2', 'continues'),
+                         ('back', 'later', 'the next morning'), ('dream', 'vision')))
+        # after a frame, "earlier" is the story starting, not a flashback
+        assert s.days['a'] == 1 and s.modes['a'] == 'scene'
+        assert s.days['b'] == 8
+        assert s.days['memory'] == 8 - 5 * 365 and s.days['memory2'] == s.days['memory']
+        assert s.days['back'] == 9
+        assert s.days['dream'] == 9 and s.modes['dream'] == 'vision'
+        assert s.modes['frame'] == 'frame' and s.days['frame'] > 9
+
+
+def test_run_solve_writes_the_proposal_and_leaves_scenes_alone(project_dir):
+    from storyforge.timeline import write_cues
+    scenes = os.path.join(project_dir, 'reference', 'scenes.csv')
+    with open(scenes) as f:
+        before = f.read()
+    ids = [r['id'] for r in csv.DictReader(open(scenes), delimiter='|')]
+    write_cues(project_dir, {sid: {'id': sid, 'relation': 'later', 'gap': 'the next day'}
+                             for sid in ids})
+    result = run_solve(project_dir)
+    assert result['solved'] >= 1
+    with open(scenes) as f:
+        assert f.read() == before
+    with open(os.path.join(project_dir, 'working', 'timeline-solved.csv')) as f:
+        assert f.readline().startswith('id|current_day|solved_day|mode|basis|conflict')
+
+
+EVALS = os.path.expanduser('~/Developer/evals/projects')
+BOOKS = ['age-of-innocence', 'around-the-world', 'brimming-cup', 'five-weeks-in-a-balloon',
+         'gatsby', 'iliad', 'middlemarch', 'odyssey', 'plastic-age', 'pride-and-prejudice',
+         'self-control']
+
+
+@pytest.mark.skipif(not os.path.isdir(EVALS), reason='needs the storyforge-evals projects')
+@pytest.mark.parametrize('slug', BOOKS)
+def test_every_evals_book_is_placed_from_its_recorded_cues(slug):
+    """The recorded cues of each evals book give a day for every scene, and
+    the present never steps back."""
+    from storyforge.timeline import read_cues, scene_items
+    proj = os.path.join(EVALS, slug)
+    if not os.path.isfile(os.path.join(proj, 'working', 'timeline-cues.csv')):
+        pytest.skip('no recorded cues')
+    items = scene_items(proj, read_cues(proj))
+    s = solve(items)
+    assert set(s.days) == {it['id'] for it in items}
+    present = [s.days[it['id']] for it in items if s.basis.get(it['id']) == 'from cues']
+    assert present == sorted(present)
