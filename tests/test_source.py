@@ -442,6 +442,19 @@ class TestImportFixes:
         assert '|Athena;telemachus|Athena;Pell|' in text
         assert any('scene-intent.csv:on_stage (Pell)' in n for n in r.notes)
 
+    def test_a_subject_that_is_a_ledger_id_is_not_noted(self, adaptation, tmp_path):
+        """#554 (Gawain G-014): a physical detail names its parent state in
+        `subject`; an unknown name there is still noted."""
+        ledger = tmp_path / 'odyssey' / 'reference' / 'commitments.csv'
+        ledger.write_text(ledger.read_text()
+                          + 'bow-unstrung|gods-debate|physical|ulysses|The bow||\n'
+                          + 'bow-detail|gods-debate|physical|bow-unstrung|Horn tips||\n'
+                          + 'oar-detail|gods-debate|physical|Elpenor|An oar||\n')
+        r = _import(adaptation)
+        notes = ' '.join(r.notes)
+        assert 'bow-unstrung' not in notes
+        assert 'commitments.csv:subject (Elpenor)' in notes
+
     def test_ambiguous_names_are_noted(self, adaptation):
         with open(os.path.join(adaptation, 'reference', 'names.csv'), 'a') as f:
             f.write('||Harbor|Haven\n')
@@ -603,14 +616,15 @@ class TestSeedRegistries:
 
     def _seed(self, proj):
         _import(proj)
-        return source.seed_registries(proj, source.read_config(proj))
+        seeded, _notes = source.seed_registries(proj, source.read_config(proj))
+        return {sd.path: (sd.written, sd.available) for sd in seeded}
 
     def test_empty_registries_get_the_sources_mapped_rows(self, adaptation):
         ref = os.path.join(adaptation, 'reference')
         with open(os.path.join(ref, 'characters.csv'), 'w') as f:
             f.write('id|name|aliases|role|death_scene|pronouns\n')   # init's header, no rows
-        seeded = dict(self._seed(adaptation))
-        assert seeded == {'reference/characters.csv': 5, 'reference/locations.csv': 3}
+        seeded = self._seed(adaptation)
+        assert seeded == {'reference/characters.csv': (5, 5), 'reference/locations.csv': (3, 3)}
         chars = open(os.path.join(ref, 'characters.csv')).read().splitlines()
         assert chars[0] == 'id|name|aliases|role|death_scene|pronouns'   # the project's header
         assert 'zeus|Zeus|son of Cronus|supporting||' in chars
@@ -623,7 +637,7 @@ class TestSeedRegistries:
         path = os.path.join(adaptation, 'reference', 'characters.csv')
         with open(path, 'w') as f:
             f.write('id|name\nmentor|Mentor\n')
-        seeded = dict(self._seed(adaptation))
+        seeded = self._seed(adaptation)
         assert 'reference/characters.csv' not in seeded
         assert open(path).read() == 'id|name\nmentor|Mentor\n'
 
@@ -634,4 +648,4 @@ class TestSeedRegistries:
         chars = open(os.path.join(adaptation, 'reference', 'characters.csv')).read()
         assert 'odysseus|Odysseus' in chars
         # a second run seeds nothing more: the registry now has rows
-        assert source.seed_registries(adaptation, source.read_config(adaptation)) == []
+        assert source.seed_registries(adaptation, source.read_config(adaptation)) == ([], [])

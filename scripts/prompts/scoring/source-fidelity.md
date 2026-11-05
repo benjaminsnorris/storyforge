@@ -35,12 +35,14 @@ For each element, compare the adaptation's {TARGET_KIND} with the source scenes'
 - **key_actions:** the events that happen
 - **key_dialogue:** the substance of what is said (not the wording)
 - **on_stage:** who is present
-- **knowledge_out:** what characters know by the end
+- **knowledge_out:** what characters learn in the scene. Both sides show only the facts each scene adds (`knowledge_out (new in this scene)`); facts carried in from earlier scenes are left out, so a fact missing here is not a departure
 
 List every departure: something the source has that the adaptation drops or changes, or something the adaptation adds that the source doesn't have. Tag each one:
 
 - `deliberate`: the treatment or its note explains it, or a version rule calls for it. Name which in `authority` (e.g. `treatment: compress`, `note`, `rule: the YA version softens the killing`)
 - `drift`: nothing above authorizes it. `authority` is `none`
+
+A departure belongs to one of those six elements. If it is only in the brief's `title`, `pov`, `conflict`, `crisis` or `decision`, name that field as its element: it is listed, not scored.
 
 Then score each element 1-5 on **drift only**. A deliberate departure never lowers a score.
 

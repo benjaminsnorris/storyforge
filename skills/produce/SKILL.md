@@ -183,7 +183,7 @@ Then tell the author the command to run:
 
 Explain the available options:
 - `--format epub` (default) — generate epub3
-- `--format pdf` — generate PDF (requires LaTeX or weasyprint)
+- `--format pdf` — generate PDF (requires weasyprint, or LaTeX as the fallback; in the PDF the drop cap is a raised initial, since WeasyPrint cannot lay out a floated one. If WeasyPrint fails, the log shows its error before the fallback runs)
 - `--format html` — generate single-file HTML
 - `--format web` — generate multi-page web book for hosting (beautiful reading experience with dark mode, reading position, chapter navigation)
 - `--format markdown` — assembled markdown only, no external tools needed
