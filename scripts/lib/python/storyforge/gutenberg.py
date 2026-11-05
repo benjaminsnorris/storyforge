@@ -56,6 +56,12 @@ evals repo's `corpus/<slug>/meta.json`). Text keys (see `TEXT_KEYS`):
   verse_blocks     prose only: true keeps the line breaks of a paragraph whose
                    lines are all indented (a poem quoted in prose: Weston's
                    closing bob-and-wheel), as verse mode does
+  replace          {old: new}: text corrections (a transcription's typos:
+                   Beowulf's "opended", B-003), applied in order to the built
+                   manuscript, so a re-fetch keeps them. Each old text must
+                   occur, or the fetch fails: a correction that no longer
+                   matches would otherwise silently do nothing. Match the
+                   manuscript as built (a verse line ends in `\\`)
 
 Descriptive keys (`DESCRIPTIVE_KEYS`: title, author, year, genre, ...) are
 read by `storyforge init`; fetch ignores them. Any other key is an error, so
@@ -90,7 +96,7 @@ TEXT_KEYS = frozenset({
     'part_title', 'section_heading', 'skip_from', 'other_headings',
     'drop_argument', 'note_marker', 'note_paragraph', 'chapter_title',
     'heading_case', 'verse', 'section_break', 'verse_blocks', 'drop_cap_case',
-    'strip_brackets', 'strip_unmatched_underscore',
+    'strip_brackets', 'strip_unmatched_underscore', 'replace',
 })
 DESCRIPTIVE_KEYS = frozenset({
     'slug', 'title', 'author', 'year', 'genre', 'subgenre', 'logline',
@@ -172,6 +178,11 @@ def _check_types(meta: dict) -> None:
             isinstance(k, str) and isinstance(v, str) for k, v in others.items())):
         raise GutenbergError('other_headings must be an object of {regex: heading}, '
                              f'not {others!r}')
+    fixes = meta.get('replace')
+    if fixes is not None and not (isinstance(fixes, dict) and all(
+            isinstance(k, str) and k and isinstance(v, str) for k, v in fixes.items())):
+        raise GutenbergError('replace must be an object of {"old text": "new text"}, '
+                             f'not {fixes!r}')
     ebook_id = meta.get('gutenberg_id')
     if ebook_id is not None and (isinstance(ebook_id, bool)
                                  or not re.fullmatch(r'\d+', str(ebook_id))):
@@ -443,7 +454,25 @@ def normalize(raw: str, meta: dict) -> str:
     # A break rule left at the very end (before dropped end matter) ends nothing.
     while out and (not out[-1] or re.fullmatch(r'(?:[*\-]\s*){3,}', out[-1])):
         out.pop()
-    return '\n'.join(out).rstrip() + '\n'
+    return apply_replace('\n'.join(out).rstrip() + '\n', meta.get('replace') or {})
+
+
+def apply_replace(text: str, fixes: dict) -> str:
+    """`text` with each of the config's corrections applied, in order (every
+    occurrence). Raises GutenbergError naming the corrections that match
+    nothing."""
+    unmatched = []
+    for old, new in fixes.items():
+        if old not in text:
+            unmatched.append(old)
+            continue
+        text = text.replace(old, new)
+    if unmatched:
+        raise GutenbergError(
+            'replace: no match in the manuscript for '
+            + ', '.join(repr(o) for o in unmatched)
+            + ' (match the text as built; a verse line ends in a backslash)')
+    return text
 
 
 def summarize(manuscript: str, meta: dict) -> dict:
@@ -457,6 +486,7 @@ def summarize(manuscript: str, meta: dict) -> dict:
         'words': len(manuscript.split()),
         'chapters': len(headings) - len(parts),
         'parts': len(parts),
+        'corrections': len(meta.get('replace') or {}),
         'breaks': sum(1 for l in lines if re.fullmatch(r'-{10,}|(?:\*\s*){3,}', l)),
         # in verse, every text line is a verse line
         'verse_lines': (sum(1 for l in lines if l.strip() and not l.startswith('# ')
@@ -579,4 +609,6 @@ def describe(stats: dict) -> str:
             + f', {stats["breaks"]} scene breaks')
     if stats['verse_lines']:
         text += f', {stats["verse_lines"]} verse lines'
+    if stats.get('corrections'):
+        text += f', {stats["corrections"]} text correction(s)'
     return text
