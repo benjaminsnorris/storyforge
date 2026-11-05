@@ -43,6 +43,21 @@ _BRIEF_FIELDS = ('goal', 'conflict', 'outcome', 'crisis', 'decision', 'key_actio
                  'key_dialogue', 'knowledge_out')
 # The source fields compared (plus summary, pov and on_stage for orientation)
 _SOURCE_FIELDS = ('goal', 'outcome', 'key_actions', 'key_dialogue', 'knowledge_out')
+# Brief fields the target shows that aren't scored elements: a departure on
+# one is kept in the rationale under its own name, never a failed scene. The
+# model comments on what it is shown (Beowulf B-023: 3 of 48 scenes lost)
+NOTED_FIELDS = ('title', 'pov', 'conflict', 'crisis', 'decision')
+# How knowledge_out is shown on both sides: what the scene adds. The briefs
+# prompt makes knowledge_out knowledge_in plus the scene's new facts, so the
+# whole list compared with a source scene's own facts read every carried
+# fact as drift (Gawain G-024: 36 of 95 drift items)
+KNOWLEDGE_LABEL = 'knowledge_out (new in this scene)'
+
+
+def new_facts(brief: dict) -> list[str]:
+    """The fact ids a brief's knowledge_out adds to its knowledge_in."""
+    carried = set(source.split_ids(brief.get('knowledge_in', '')))
+    return [f for f in source.split_ids(brief.get('knowledge_out', '')) if f not in carried]
 
 
 class SourceFidelityError(Exception):
@@ -117,7 +132,10 @@ def target_text(project_dir: str, scene_id: str, target: str,
             continue
         if key == 'knowledge_out':
             val = '; '.join(f'{f} ({facts[f]["statement"]})' if facts.get(f, {}).get('statement')
-                            else f for f in source.split_ids(val))
+                            else f for f in new_facts(brief))
+            if not val:
+                continue
+            key = KNOWLEDGE_LABEL
         lines.append(f'**{key}:** {val}')
     return '\n'.join(lines)
 
@@ -147,7 +165,10 @@ def _source_side(project_dir: str, refs: list[tuple[str, str]], tables=None) -> 
                 continue
             if key == 'knowledge_out':
                 val = '; '.join(f'{f} ({facts[f]})' if facts.get(f) else f
-                                for f in source.split_ids(val))
+                                for f in new_facts(brief))
+                if not val:
+                    continue
+                key = KNOWLEDGE_LABEL
             lines.append(f'**{key}:** {val}')
         blocks.append('\n'.join(lines))
     return '\n\n'.join(blocks)
@@ -269,7 +290,7 @@ def parse_response(response: str, scene_id: str, target: str, hash_: str) -> Res
                 problems.append(f'a DEPARTURES row with {len(parts)} cells, not 5')
                 continue
             element, tag, evidence, authority = parts[1], parts[2].lower(), parts[3], parts[4]
-            if element not in ELEMENTS:
+            if element not in ELEMENTS and element not in NOTED_FIELDS:
                 problems.append(f'departure element {element!r}')
             elif tag not in TAGS:
                 problems.append(f'departure tag {tag!r} (deliberate or drift)')

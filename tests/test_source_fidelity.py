@@ -408,3 +408,39 @@ class TestScoreCommand:
         with pytest.raises(SystemExit) as e:
             cmd_score.main(['--source-fidelity', 'prose', '--dry-run'])
         assert e.value.code == 1
+
+
+class TestKnowledgeAndNotedFields:
+    """#549: the briefs' knowledge carry-forward is not drift (Gawain G-024),
+    and a departure on a brief field the target shows doesn't lose the scene
+    (Beowulf B-023)."""
+
+    def test_only_the_scenes_new_facts_are_compared(self, adapted):
+        _write(adapted, {'reference/scene-briefs.csv': (
+            'id|goal|conflict|outcome|crisis|decision|key_actions|key_dialogue|'
+            'knowledge_in|knowledge_out\n'
+            'olympus-council-meets|g|c|yes|c|d|a|"x"||odysseus-on-ogygia\n'
+            'athena-at-the-door|Athena wants to rouse him|suitors|yes|c|d|she knocks|"Go"|'
+            'odysseus-on-ogygia|odysseus-on-ogygia;suitors-waste-the-house\n'
+            'telemachus-sails-at-night|He wants news|night|yes|c|d|sails|"Cast off"||\n')})
+        text = sf.target_text(adapted, 'athena-at-the-door', 'brief')
+        assert '**knowledge_out (new in this scene):** suitors-waste-the-house' in text
+        assert 'odysseus-on-ogygia' not in text
+
+    def test_a_scene_that_adds_no_fact_shows_none(self, adapted):
+        _write(adapted, {'reference/scene-briefs.csv': (
+            'id|goal|conflict|outcome|crisis|decision|key_actions|key_dialogue|'
+            'knowledge_in|knowledge_out\n'
+            'athena-at-the-door|g|c|yes|c|d|a|"x"|odysseus-on-ogygia|odysseus-on-ogygia\n')})
+        assert 'knowledge_out' not in sf.target_text(adapted, 'athena-at-the-door', 'brief')
+
+    def test_the_prompt_says_carried_facts_are_left_out(self, adapted):
+        assert 'facts carried in from earlier scenes are left out' in \
+            _plan(adapted, 'athena-at-the-door').prompt
+
+    @pytest.mark.parametrize('field', sf.NOTED_FIELDS)
+    def test_a_departure_on_a_shown_brief_field_is_kept(self, field):
+        text = REPLY.replace('|outcome|drift|', f'|{field}|drift|')
+        r = sf.parse_response(text, 'athena-at-the-door', 'brief', 'h')
+        assert [d['element'] for d in r.departures] == ['key_actions', field]
+        assert set(r.scores) == set(sf.ELEMENTS)
