@@ -494,7 +494,7 @@ Answer with a JSON object with these fields (a list field is a JSON array of str
 - crisis: the key dilemma — a best bad choice or irreconcilable goods that the character faces
 - decision: what the character actively chooses in response to the crisis
 - key_actions (list): concrete things that happen in this scene, as the page shows them. Do not name a motive or meaning the scene leaves unstated (write "takes a phone call he cuts short", not "takes a call about criminal business")
-- key_dialogue (list): specific lines or exchanges that are essential to the scene — quote directly from the text
+- key_dialogue (list): specific lines or exchanges that are essential to the scene — quote directly from the text, each item labelled with its speaker as `Name: "line"`, the name as the character registry writes it (no title, no possessive); label each item, and leave the label off only when the text doesn't say who speaks
 - emotions (list): emotional beats in sequence as they occur through the scene
 - motifs (list): recurring images, symbols, or sensory details that carry thematic weight, described as they appear in this scene. Never gloss an image with facts or meanings the reader learns only in later scenes: the drafter will write them
 - subtext: ONE sentence, max 150 characters. The gap between what a character says/does and what they mean. Format: "X says/does A but means B; don't state B." If no subtext, write "none". Do NOT write multiple clauses or a paragraph."""
