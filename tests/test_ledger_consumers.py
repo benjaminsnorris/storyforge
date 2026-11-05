@@ -275,18 +275,37 @@ class TestEstablishedFacts:
 
     def test_states_past_the_limit_are_trimmed_and_said(
             self, project_dir, plugin_dir, monkeypatch, capsys):
-        from storyforge import prompts
+        from storyforge import gate, prompts
         monkeypatch.setattr(prompts, 'MAX_STATES_PER_SUBJECT', 2)
+        monkeypatch.setattr(prompts, '_STATES_LEFT_OUT', {})
+        monkeypatch.setattr(gate, 'OFFER_LEFT_OUT', {})
         self._add(project_dir, *[dict(id=f's{n}', scene_id='act1-sc01', type='physical',
                                       subject='dorren-hayle', statement=f'State {n}')
                                  for n in range(4)])
         prompt = self._prompt(project_dir, plugin_dir, 'act1-sc02')
         assert 'State 0' not in prompt and 'State 3' in prompt
         assert ('(2 shown: those that gate an action or say when they end, then the '
-                'most recent; 2 older not shown)') in prompt
-        assert 'older states left out' in ''.join(capsys.readouterr())
-        assert any('of Dorren Hayle\'s at act1-sc02' in n
-                   for n in prompts.ledger_window_summary())
+                'most recent; 2 not shown: lower priority)') in prompt
+        assert 'states left out of the prompt' in ''.join(capsys.readouterr())
+        [line] = prompts.ledger_window_summary()
+        assert line.startswith('1 scene(s)') and "2 of Dorren Hayle's at act1-sc02" in line
+
+    def test_a_rebuilt_prompt_replaces_the_scenes_count(
+            self, project_dir, plugin_dir, monkeypatch):
+        """#570's review: a redraft in the same process kept the first
+        build's count; a scene no longer cut drops out of the summary."""
+        from storyforge import gate, prompts
+        monkeypatch.setattr(prompts, 'MAX_STATES_PER_SUBJECT', 2)
+        monkeypatch.setattr(prompts, '_STATES_LEFT_OUT', {})
+        monkeypatch.setattr(gate, 'OFFER_LEFT_OUT', {})
+        self._add(project_dir, *[dict(id=f's{n}', scene_id='act1-sc01', type='physical',
+                                      subject='dorren-hayle', statement=f'State {n}')
+                                 for n in range(4)])
+        self._prompt(project_dir, plugin_dir, 'act1-sc02')
+        assert prompts.ledger_window_summary()
+        monkeypatch.setattr(prompts, 'MAX_STATES_PER_SUBJECT', 25)
+        self._prompt(project_dir, plugin_dir, 'act1-sc02')
+        assert prompts.ledger_window_summary() == []
 
     def test_the_window_keeps_states_that_end_later_or_gate_an_action(
             self, project_dir, plugin_dir, monkeypatch):
@@ -295,6 +314,7 @@ class TestEstablishedFacts:
         this scene's trivia."""
         from storyforge import prompts
         monkeypatch.setattr(prompts, 'MAX_STATES_PER_SUBJECT', 3)
+        monkeypatch.setattr(prompts, '_STATES_LEFT_OUT', {})
         self._add(project_dir,
                   dict(id='wound', scene_id='act1-sc01', type='physical',
                        subject='dorren-hayle', statement='Dorren\'s knee is wounded',

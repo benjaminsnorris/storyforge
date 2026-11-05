@@ -1471,6 +1471,7 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
     sections = []
     trimmed = []
     no_pronouns: list[str] = []
+    _STATES_LEFT_OUT.pop(scene_id, None)   # this build's count, not a redraft's earlier one
     for sid in subjects + found_places:
         is_place = sid in found_places
         row = places.get(sid, {}) if is_place else characters.get(sid, {})
@@ -1508,12 +1509,12 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
                     _STATES_LEFT_OUT[scene_id] = (heading, left_out)
             parts.append('True entering this scene'
                          + (f' ({MAX_STATES_PER_SUBJECT} shown: those that gate an action '
-                            f'or say when they end, then the most recent; {left_out} older '
-                            f'not shown)' if left_out > 0 else '')
+                            f'or say when they end, then the most recent; {left_out} not '
+                            f'shown: lower priority)' if left_out > 0 else '')
                          + ':\n' + '\n'.join(line(r) for r in states))
         sections.append('\n'.join(parts))
     if trimmed:
-        log(f'WARNING: {scene_id}: older states left out of the prompt '
+        log(f'WARNING: {scene_id}: states left out of the prompt '
             f'(more than {MAX_STATES_PER_SUBJECT} in force; the brief\'s '
             f'physical_state_in still reaches the writer): {", ".join(trimmed)}')
     own = [r for r in found.scene if r['id'] not in shown]
@@ -1559,7 +1560,7 @@ def ledger_window_summary() -> list[str]:
     lines = []
     if _STATES_LEFT_OUT:
         sid, (who, n) = max(_STATES_LEFT_OUT.items(), key=lambda kv: kv[1][1])
-        lines.append(f'{len(_STATES_LEFT_OUT)} scene(s) were drafted with older states left '
+        lines.append(f'{len(_STATES_LEFT_OUT)} scene(s) were drafted with states left '
                      f'out (over {MAX_STATES_PER_SUBJECT} in force for a subject; the most: '
                      f'{n} of {who}\'s at {sid})')
     if gate.OFFER_LEFT_OUT:

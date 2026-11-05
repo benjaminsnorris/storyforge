@@ -591,3 +591,17 @@ class TestErrorHandling:
         assert mock_api.call_count == 0
         assert mock_git.calls == []
         assert "ERROR: STORYFORGE_COST_THRESHOLD is '100usd'" in capsys.readouterr().out
+
+
+class TestLedgerWindowSummary:
+    """#564: `write` ends with one NOTE per ledger window that cut a scene's
+    prompt or gate offer (`prompts.ledger_window_summary`)."""
+
+    def test_write_prints_the_summary(self, mock_api, mock_git, mock_costs, project_dir,
+                                      monkeypatch, capsys):
+        monkeypatch.setattr('storyforge.cmd_write.detect_project_root', lambda: project_dir)
+        monkeypatch.setattr('storyforge.prompts.ledger_window_summary',
+                            lambda: ['3 scene(s) were drafted with states left out'])
+        main(['--dry-run', '--scenes', 'act1-sc01'])
+        assert ('NOTE: ledger window: 3 scene(s) were drafted with states left out'
+                in capsys.readouterr().out)

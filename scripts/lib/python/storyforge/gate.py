@@ -217,6 +217,7 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
              + scene.get('on_stage', '').split(';'))
     scene_subjects = {subjects[n.strip().lower()] for n in names if n.strip().lower() in subjects}
     known, recorded, left_out = known_for_scene(rows, scene_id, order, scene_subjects)
+    OFFER_LEFT_OUT.pop(scene_id, None)   # this run's count, not an earlier gate run's
     if left_out:
         problems['cap'].append(f'{scene_id} ({left_out})')
         OFFER_LEFT_OUT[scene_id] = left_out
