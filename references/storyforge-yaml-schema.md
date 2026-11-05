@@ -193,23 +193,21 @@ A map of back matter items to their file paths. Common keys: `acknowledgments`, 
 
 ## `parts`
 
-Optional part or act groupings for multi-part books. Each entry defines a named part that groups a range of chapters.
+Optional book parts: the real divisions of the book, each with its own part page ("Part One: The Signal"). A chapter belongs to a part through the `part` column of `reference/chapter-map.csv`, which holds the part's `number`. Every format prints a part page before the first chapter of each titled part: the web book's interstitial page, a part heading on a page of its own in the epub, HTML and PDF (styled by `templates/production/css/parts.css`), and Bookshelf through the publish manifest. A part number with no entry here (or no title) prints nothing, so a book can number its chapters' parts without part pages.
 
 | Field | Type | Required | Description | Default | Example |
 |-------|------|----------|-------------|---------|---------|
+| `number` | integer | required | The part's number, as the chapter map's `part` column gives it. | — | `1` |
 | `title` | string | required | The part title as it appears in the book. | — | `"Part One: The Signal"` |
-| `chapters` | list | required | List of chapter numbers (from chapter-map.csv) that belong to this part. | — | `[1, 2, 3, 4]` |
 
 ### Example
 
 ```yaml
 parts:
-  - title: "Part One: The Signal"
-    chapters: [1, 2, 3, 4]
-  - title: "Part Two: First Contact"
-    chapters: [5, 6, 7, 8, 9]
-  - title: "Part Three: The Reckoning"
-    chapters: [10, 11, 12]
+  - number: 1
+    title: "Part One: The Signal"
+  - number: 2
+    title: "Part Two: First Contact"
 ```
 
 ## `source`
@@ -271,7 +269,7 @@ Every character and location in the source's registries needs a row, even an unc
 
 | Command | What it does with the source |
 |---|---|
-| `source import` | Copies `scenes.csv`, `scene-intent.csv`, `scene-briefs.csv`, `characters.csv`, `locations.csv`, `values.csv`, `mice-threads.csv`, `commitments.csv`, `spine.csv`, `architecture.csv` (and `chapter-map.csv` for a chapters `range`), the reference docs (story summary and architecture, character, world and systems bibles, timeline; a template copy is skipped) and `scenes/*.md` into `reference/source/<slug>/`, applies the name map, and writes `source-bible.md` (the events in reading order with outcomes and value shifts, the cast, places, threads and timeline). It replaces `reference/source/<slug>/` wholesale (staged beside it, then swapped in), so keep nothing of your own there: a name map or rules file inside it is refused. A re-run that changes nothing writes nothing; with several sources, every one is built before any is written. The source's ledger is context, never merged into this project's. Then it **seeds the project's own `characters.csv`, `locations.csv` and `values.csv`** when one is missing or has no rows, from the imported (name-mapped) copies, so the stages start from the source's ids: the project's header is kept (a column the source lacks, such as `pronouns`, stays empty), the first source to give an id wins, and a registry with any row is never touched (`--dry-run` seeds nothing) |
+| `source import` | Copies `scenes.csv`, `scene-intent.csv`, `scene-briefs.csv`, `characters.csv`, `locations.csv`, `values.csv`, `mice-threads.csv`, `commitments.csv`, `spine.csv`, `architecture.csv` (and `chapter-map.csv` for a chapters `range`), the reference docs (story summary and architecture, character, world and systems bibles, timeline; a template copy is skipped) and `scenes/*.md` into `reference/source/<slug>/`, applies the name map, and writes `source-bible.md` (the events in reading order with outcomes and value shifts, the cast, places, threads and timeline). It replaces `reference/source/<slug>/` wholesale (staged beside it, then swapped in), so keep nothing of your own there: a name map or rules file inside it is refused. A re-run that changes nothing writes nothing; with several sources, every one is built before any is written. The source's ledger is context, never merged into this project's. Then it **seeds the project's own `characters.csv`, `locations.csv` and `values.csv`** when one is missing or has no rows, from the imported (name-mapped) copies, so the stages start from the source's ids: the project's header is kept (a column the source lacks, such as `pronouns`, stays empty), the first source to give an id wins, and a registry with any row is never touched (`--dry-run` seeds nothing). A source with a `range:` gives only the rows its adapted scenes use: characters named in `pov`, `characters` or `on_stage` (by id, name or alias) or in the ledger's `subject` and `known_by`, the scenes' `location`s and `value_at_stake`s. The import says how many rows it left out, lists cast names no row has, and seeds the whole registry, with a warning, when a scene table or column it needs is missing |
 | `elaborate` | The source bible joins the reference materials. Spine: the source's events to select and reframe. Architecture: the source's cast and POV distribution. Map: every source scene, which the reply must account for in `reference/source-map.csv`. Briefs: each scene's source briefs and source prose. With a `range`, each uses only the span's scenes |
 | `validate` | Source coverage (see `reference/source-map.csv`), and where each character's pronouns come from (`Pronouns: 29 own, 31 from source odyssey, 2 none (...)`). A character whose own `pronouns` differ from any of the matched source values blocks in `faithful` and is advisory in `free`; a source value that can't be read, sources that disagree, a name several source characters share, or a source registry without the column is advisory |
 | `write`, `revise`, the gate | A character with an empty `pronouns` cell in `characters.csv` gets the source's when a source row matches: the row with the same id when any source has one (its value, or none); only when no source has the id, the one source character (across every source) with that name or alias. A name several source characters share, sources that disagree, or a value that isn't a pronoun gives none, with a WARNING. Nothing is copied into `characters.csv`: fill the cell to override, and a fix to the source arrives on re-import |
@@ -380,8 +378,8 @@ production:
     description:
 
 parts:
-  - title: "Part One: The Signal"
-    chapters: [1, 2, 3, 4]
-  - title: "Part Two: First Contact"
-    chapters: [5, 6, 7, 8, 9]
+  - number: 1
+    title: "Part One: The Signal"
+  - number: 2
+    title: "Part Two: First Contact"
 ```
