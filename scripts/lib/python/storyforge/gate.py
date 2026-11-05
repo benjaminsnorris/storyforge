@@ -172,6 +172,9 @@ class GateResult:
     #: on commit: source-backed findings whose earlier fact wasn't found
     #: (its commitments are held back instead)
     source_unmatched: list[Finding] = field(default_factory=list)
+    #: the source check ruled on every fact new to the scene (#557's third
+    #: review: only then can a fix toward the source retire anything)
+    source_ruled: bool = False
     #: committed without a pass (`commit_provisional`, `write --keep-going`)
     provisional: bool = False
     #: what `_commit` needs from the run (`_CommitContext`); None until the
@@ -1069,6 +1072,7 @@ def _apply_source(result: GateResult, project_dir: str, scene_id: str, prose: st
         result.source_notes.append(f'not checked against the source: {e}')
         return
     result.source_notes.extend(review.notes)
+    result.source_ruled = bool(fresh) and review.ruled >= set(range(len(fresh)))
     gone = {fresh[i] for i, _ in review.dropped}
     result.source_dropped = [(result.proposed[fresh[i]].get('statement', ''), why)
                              for i, why in review.dropped]
@@ -1535,14 +1539,18 @@ def source_fix_waits(project_dir: str, scene_id: str, prose: str | None = None) 
 
 def _keep_superseded(project_dir: str, result: GateResult, rows: list[dict[str, str]],
                      prose: str) -> bool:
-    """#557's second review. While the scene's prose is the one listed to
-    fix toward the source (or isn't listed), a proposed row restating one
-    of its `superseded` commitments (the same fact, or a quote holding or
-    held by its quote) is dropped: the source ruled it wrong, and a
-    re-check must never bind it again, whatever the source call does this
-    time. Once the scene is listed and its prose changed, its superseded
-    commitments are retired (taken out of `rows`), and True is returned so
-    the row comes off after the commit."""
+    """#557's second and third reviews: a scene's `superseded` commitments
+    (the source ruled them wrong) are never bound again. A proposed row
+    restating one is dropped: the same fact, a quote holding or held by its
+    quote, or the same subject and a value it states (`_values`: "300
+    people" from another sentence, filed under another type). One is
+    retired (taken out of `rows`) only when the scene is listed to fix
+    toward the source and its prose was fixed: the words its quote came
+    from are gone from the prose, nothing proposed restates it, and the
+    source check ruled on every new fact (a failed call, or one that gave
+    no verdict, retires nothing: a one-word edit elsewhere or an added
+    newline isn't a fix). Returns True when every one was retired, so the
+    listing comes off after the commit."""
     mine = [r for r in rows if r.get('status') == 'superseded'
             and (r.get('scene_id') or '').strip() == result.scene_id
             and ledger.is_commitment(r)]
@@ -1551,31 +1559,41 @@ def _keep_superseded(project_dir: str, result: GateResult, rows: list[dict[str, 
     except GateError as e:
         result.source_notes.append(str(e))
         listed = None
-    if listed and listed['prose'] != _prose_sha(prose):
-        gone = {r['id'] for r in mine}
-        rows[:] = [r for r in rows if r.get('id') not in gone]
-        if gone:
-            result.source_notes.append(f'retired, the prose fixed toward the source: '
-                                       f'{", ".join(sorted(gone))}')
-        return True
     if not mine:
-        return False
-    keys = {ledger.fact_key(r) for r in mine}
-    quotes = [_words(r.get('quote') or '') for r in mine]
+        return bool(listed) and listed['prose'] != _prose_sha(prose) and result.source_ruled
 
-    def restates(p: dict[str, str]) -> bool:
-        q = _words(p.get('quote') or '')
-        return ledger.fact_key(p) in keys or (_count(q) >= _MIN_QUOTE_WORDS and any(
-            q in o or o in q for o in quotes if o.strip()))
-    again = [p for p in result.proposed if restates(p)]
+    def subject(r: dict[str, str]) -> str:
+        return (r.get('subject') or '').strip().casefold()
+
+    def restates(p: dict[str, str], r: dict[str, str]) -> bool:
+        q, o = _words(p.get('quote') or ''), _words(r.get('quote') or '')
+        if ledger.fact_key(p) == ledger.fact_key(r):
+            return True
+        if _count(q) >= _MIN_QUOTE_WORDS and o.strip() and (q in o or o in q):
+            return True
+        values = _values(r.get('statement', ''))
+        return bool(subject(r) and subject(p) == subject(r) and values
+                    and values & _values(p.get('statement', '')))
+    again = [p for p in result.proposed if any(restates(p, r) for r in mine)]
     if again:
-        result.proposed = [p for p in result.proposed if not restates(p)]
+        result.proposed = [p for p in result.proposed if p not in again]
         result.source_notes.append('not recorded, the source ruled them wrong (superseded): '
                                    + '; '.join(_one_line(p.get('statement', ''))[:100]
                                                for p in again))
-    return False
-
-
+    if not listed or listed['prose'] == _prose_sha(prose):
+        return False
+    if not result.source_ruled:
+        result.source_notes.append('superseded rows kept and the source fix left open: the '
+                                   'source check gave no ruling on this prose')
+        return False
+    fixed = [r for r in mine if not (r.get('quote') and _found_in(r['quote'], prose))
+             and not any(restates(p, r) for p in again)]
+    if fixed:
+        gone = {r['id'] for r in fixed}
+        rows[:] = [r for r in rows if r.get('id') not in gone]
+        result.source_notes.append(f'retired, the prose fixed toward the source: '
+                                   f'{", ".join(sorted(gone))}')
+    return len(fixed) == len(mine)
 
 
 #: The prose each committed scene's commitments were read from, as the git

@@ -90,6 +90,8 @@ class SourceReviewError(RuntimeError):
 class SourceReview:
     #: (index into the proposed rows, why) for each fact the source contradicts
     dropped: list[tuple[int, str]] = field(default_factory=list)
+    #: the indexes of the facts the reply ruled on (any verdict)
+    ruled: set[int] = field(default_factory=set)
     #: (index into the contradictions sent, why) for each the source backs
     #: this scene on
     backs_scene: list[tuple[int, str]] = field(default_factory=list)
@@ -278,6 +280,8 @@ def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, st
         reply = json.loads(extract_text(response))
         for item in reply['facts']:
             n = int(item['n'])
+            if 1 <= n <= len(facts):
+                out.ruled.add(n - 1)
             if item['verdict'] == 'contradicts' and 1 <= n <= len(facts):
                 out.dropped.append((n - 1, str(item.get('why', ''))))
         for item in reply['contradictions']:

@@ -190,19 +190,82 @@ def test_a_regate_of_the_unchanged_earlier_scene_never_rebinds_the_wrong_fact(
     assert any('superseded' in n for n in result.source_notes)
 
 
+def _rewrite_earlier(project_dir, old, new):
+    import os
+    path = os.path.join(project_dir, 'scenes', f'{EARLIER}.md')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    assert old in text
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text.replace(old, new, 1))
+
+
+AGREES = {'facts': [{'n': 1, 'verdict': 'agrees', 'why': 'w'}], 'contradictions': []}
+RIGHT = _commitment(statement='The Hollow had 412 people', subject='tarrens-hollow',
+                    quote='Dorren Hayle set the brass calipers against the census')
+
+
+def _early(project_dir):
+    return sorted((r['statement'], r['status']) for r in ledger.load(project_dir)
+                  if r['scene_id'] == EARLIER and ledger.is_commitment(r))
+
+
 def test_fixing_the_earlier_prose_retires_its_superseded_rows_and_the_row(
         project_dir, tmp_path, adaptation):
     _earlier_fact(project_dir)
     _backs(project_dir, tmp_path)
-    _edit_earlier(project_dir)
-    right = _commitment(statement='The Hollow had 412 people', subject='tarrens-hollow',
-                        quote='A new line toward the source')
-    result = _run(project_dir, tmp_path, [right], scene=EARLIER)
+    _rewrite_earlier(project_dir, 'Dorren Hayle pressed the brass calipers against the vellum',
+                     'Dorren Hayle set the brass calipers against the census')
+    gate_source._MEMO.clear()
+    result = _run(project_dir, tmp_path, [RIGHT], scene=EARLIER, source=AGREES)
     assert result.committed
-    early = [(r['statement'], r['status']) for r in ledger.load(project_dir)
-             if r['scene_id'] == EARLIER and ledger.is_commitment(r)]
-    assert early == [('The Hollow had 412 people', 'binding')]
+    assert _early(project_dir) == [('The Hollow had 412 people', 'binding')]
     assert EARLIER not in gate.source_fixes(project_dir)
+
+
+@pytest.mark.parametrize('edit', [('morning', 'mornin'), ('vellum', 'vellum\n')])
+@pytest.mark.parametrize('source', [AGREES, RuntimeError('HTTP 500'),
+                                    {'facts': [], 'contradictions': []}])
+def test_an_edit_elsewhere_is_not_a_fix(project_dir, tmp_path, adaptation, edit, source):
+    """#557's third review: a one-word edit elsewhere, or an added newline,
+    counted as a fix toward the source, retired the superseded row, and the
+    wrong fact was bound again when the source call failed or gave no
+    verdict."""
+    _earlier_fact(project_dir)
+    _backs(project_dir, tmp_path)
+    _rewrite_earlier(project_dir, *edit)
+    gate_source._MEMO.clear()
+    result = _run(project_dir, tmp_path, [WRONG], scene=EARLIER, source=source)
+    assert result.committed
+    assert _early(project_dir) == [('The Hollow had 300 people', 'superseded')]
+    assert EARLIER in gate.source_fixes(project_dir)
+
+
+def test_a_fix_the_source_check_did_not_rule_on_retires_nothing(
+        project_dir, tmp_path, adaptation):
+    _earlier_fact(project_dir)
+    _backs(project_dir, tmp_path)
+    _rewrite_earlier(project_dir, 'Dorren Hayle pressed the brass calipers against the vellum',
+                     'Dorren Hayle set the brass calipers against the census')
+    gate_source._MEMO.clear()
+    _run(project_dir, tmp_path, [RIGHT], scene=EARLIER, source=RuntimeError('HTTP 500'))
+    assert ('The Hollow had 300 people', 'superseded') in _early(project_dir)
+    assert EARLIER in gate.source_fixes(project_dir)
+
+
+def test_the_wrong_claim_from_another_sentence_and_type_is_not_bound(
+        project_dir, tmp_path, adaptation):
+    """#557's third review (minor): the same claim, quoted from another
+    sentence and filed under another type, was bound beside the
+    superseded row."""
+    _earlier_fact(project_dir)
+    _backs(project_dir, tmp_path)
+    gate_source._MEMO.clear()
+    other = _commitment(statement='The census counted 300 people', subject='tarrens-hollow',
+                        type='knowledge', quote='measuring the distance between the river '
+                                                'fork and the ridgeline')
+    _run(project_dir, tmp_path, [other], scene=EARLIER)
+    assert _early(project_dir) == [('The Hollow had 300 people', 'superseded')]
 
 
 def test_a_second_source_fix_adds_its_reason(project_dir, adaptation):
