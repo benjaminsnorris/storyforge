@@ -768,14 +768,21 @@ def test_scene_map_exempts_frame_narration(tmp_path):
              'time_of_day, duration)']['passed'] is True
     assert c['POV is on-stage in every scene with on_stage populated']['passed'] is True
 
-    # The same row as an ordinary scene fails both checks.
+    # The same row as an ordinary scene fails the metadata check; its
+    # narrator POV still needs no place on stage (#555: the exemption is the
+    # narrator's, not frame narration's)
     text = (ref / 'scenes.csv').read_text().replace('|frame\n', '|scene\n', 1)
     (ref / 'scenes.csv').write_text(text)
     c = checks()
     meta = c['operational metadata populated (location, timeline_day, '
              'time_of_day, duration)']
     assert meta['passed'] is False and 'frame-1' in meta['detail']
-    pov = c['POV is on-stage in every scene with on_stage populated']
+    assert c['POV is on-stage in every scene with on_stage populated']['passed'] is True
+
+    # A character POV off stage fails it, frame or not
+    text = (ref / 'scenes.csv').read_text().replace('|narrator|', '|villain|', 1)
+    (ref / 'scenes.csv').write_text(text)
+    pov = checks()['POV is on-stage in every scene with on_stage populated']
     assert pov['passed'] is False and 'frame-1' in pov['detail']
 
 
@@ -815,13 +822,13 @@ def test_scene_map_accepts_unstated_time_of_day(tmp_path):
     assert meta['detail'] == '1 row(s) missing metadata; first: sc-2 missing time_of_day'
 
 
-def _frame_map(tmp_path, mode, on_stage):
+def _frame_map(tmp_path, mode, on_stage, pov='narrator'):
     ref = tmp_path / 'reference'
-    ref.mkdir(parents=True)
+    ref.mkdir(parents=True, exist_ok=True)
     (ref / 'scenes.csv').write_text(
         'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
         'duration|type|status|word_count|target_words|time_mode\n'
-        f'f|1|t|S.|1|narrator|loc|1|||character|mapped|0|800|{mode}\n')
+        f'f|1|t|S.|1|{pov}|loc|1|||character|mapped|0|800|{mode}\n')
     (ref / 'scene-intent.csv').write_text(f'id|on_stage\nf|{on_stage}\n')
     from storyforge.scoring_levels import score_scene_map
     return {c['check']: c for c in score_scene_map(str(tmp_path))['checks']}
@@ -830,19 +837,38 @@ def _frame_map(tmp_path, mode, on_stage):
 def test_scene_map_names_the_frame_scenes_it_exempts(tmp_path):
     """#488 review SF-1: the exemption is said, in a passing check."""
     c = _frame_map(tmp_path, ' Frame ', 'hero')    # T-5: case and spaces
-    exempt = c['frame scenes exempt from time_of_day, duration and POV on stage']
+    exempt = c['frame scenes exempt from time_of_day and duration']
     assert exempt['passed'] is True and 'f' in exempt['detail']
     assert c['operational metadata populated (location, timeline_day, time_of_day, '
              'duration)']['passed'] is True
 
 
-def test_scene_map_frame_with_empty_on_stage_raises_no_finding(tmp_path):
-    """T-3: a frame narrator has no body, so an empty on_stage is no gap;
-    an ordinary scene's empty on_stage is still reported."""
+def test_scene_map_narrator_with_empty_on_stage_raises_no_finding(tmp_path):
+    """T-3, #555: a narrator has no body, so an empty on_stage is no gap,
+    frame or not; a character POV's empty on_stage is still reported."""
     c = _frame_map(tmp_path / 'frame', 'frame', '')
     assert 'on_stage data populated for every POV scene' not in c
     c = _frame_map(tmp_path / 'scene', 'scene', '')
+    assert 'on_stage data populated for every POV scene' not in c
+    c = _frame_map(tmp_path / 'hero', 'scene', '', pov='hero')
     assert c['on_stage data populated for every POV scene']['passed'] is False
+
+
+def test_scene_map_names_the_narrator_scenes_it_exempts(tmp_path):
+    """#555 (Gawain G-007: 7 of 8 narrator scenes failed the floor check)."""
+    c = _frame_map(tmp_path, 'scene', 'hero')
+    assert c['POV is on-stage in every scene with on_stage populated']['passed'] is True
+    exempt = c['narrator scenes exempt from POV on stage']
+    assert exempt['passed'] is True and 'f' in exempt['detail']
+
+
+def test_scene_map_flags_narrator_scenes_when_the_setting_is_off(tmp_path):
+    (tmp_path / 'reference').mkdir()
+    (tmp_path / 'reference' / 'key-decisions.md').write_text(
+        '# Key Decisions\n\n- narrator_pov: off\n')
+    c = _frame_map(tmp_path, 'scene', 'hero')
+    off = c['no narrator POV (key-decisions.md: narrator_pov: off)']
+    assert off['passed'] is False and 'f' in off['detail']
 
 
 def test_scene_map_does_not_exempt_a_vision(tmp_path):

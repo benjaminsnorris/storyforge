@@ -249,7 +249,7 @@ Key locations: {profile.get('key_locations', 'unknown')}"""
 Answer with a JSON object with these fields (a list field is a JSON array of strings; "unknown" where a value cannot be determined, and an empty string for a time cue the text doesn't give, except time_relation, which is "unclear" then):
 
 - title: a short evocative title for this scene, 3-7 words
-- pov: the POV character's full name
+- pov: the POV character's full name; "narrator" when the book's narrator tells the scene through no one character's eyes (an omniscient or epic narrator), never a stand-in such as a herald or a blank
 - location (list): the places where this scene's action happens on the page, in order — usually just one. Use consistent canonical names. Only places the action is in, not places mentioned or remembered; a journey lists the places it passes through, never "X to Y" as one place
 {cues}
 - time_of_day: when in the day the scene happens; "unstated" when the text doesn't say (never a guess)
@@ -303,6 +303,10 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
         value = _text(answer, ';')
         if value and value.lower() != 'unknown':
             result[key] = value
+    if result.get('pov'):
+        # "Omniscient narrator" and the like: the reserved `narrator` (#555)
+        from .narrator import normalize_pov
+        result['pov'] = normalize_pov(result['pov'])
     date = skeleton_cues(response)['date']
     if date:
         result['timeline_date'] = date

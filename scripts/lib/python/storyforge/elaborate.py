@@ -20,8 +20,9 @@ from typing import Any, NamedTuple
 OFF_PRESENT_MODES = frozenset({'frame', 'vision'})
 # Time modes whose scene has no clock of its own: frame narration is told
 # from outside the story's time, so it has no time of day or duration to
-# give (a vision keeps its own). Nothing asks such a scene for CLOCK_FIELDS,
-# and its narrator, who has no body, need not be on stage (#488)
+# give (a vision keeps its own). Nothing asks such a scene for CLOCK_FIELDS
+# (#488). Whether its teller must be on stage is the POV's business: a
+# `narrator` POV never is (#555, `narrator.py`)
 CLOCKLESS_MODES = frozenset({'frame'})
 CLOCK_FIELDS = ('time_of_day', 'duration')
 
@@ -836,7 +837,8 @@ def present_in_scene(scene: dict, intent: dict) -> set[str]:
     raw = intent.get('on_stage', '') or intent.get('characters', '')
     present = {c.strip().lower() for c in raw.split(';') if c.strip()}
     pov = (scene.get('pov') or '').strip().lower()
-    if pov:
+    from .narrator import is_narrator
+    if pov and not is_narrator(pov):   # the narrator has no body (#555)
         present.add(pov)
     return present
 
@@ -1221,6 +1223,7 @@ def validate_structure(ref_dir: str) -> dict:
     _validate_pronouns(ref_dir, checks)
     _validate_cast_named(scenes_map, intent_map, ref_dir, checks)
     _validate_brief_names(ref_dir, checks)
+    _validate_narrator(ref_dir, scenes_map, checks)
 
     failures = [c for c in checks if not c['passed']]
     blocking_failures = [c for c in failures if c.get('severity', 'blocking') != 'advisory']
@@ -1229,6 +1232,18 @@ def validate_structure(ref_dir: str) -> dict:
         'checks': checks,
         'failures': failures,
     }
+
+
+def _validate_narrator(ref_dir: str, scenes_map: dict, checks: list[dict]) -> None:
+    """The narrator as POV against key-decisions.md's `narrator_pov`
+    (#555): narrator scenes when it is `off`, or more than its cap when it is
+    `limited N`. Advisory: the author's setting, not broken data."""
+    from .narrator import setting_problem
+    problem = setting_problem(os.path.dirname(os.path.abspath(ref_dir)),
+                              list(scenes_map.values()))
+    checks.append(_check('pov', 'narrator-pov-setting', not problem,
+                         problem or 'Narrator POV scenes are within the project setting',
+                         severity='advisory'))
 
 
 def _validate_pronouns(ref_dir: str, checks: list[dict]) -> None:

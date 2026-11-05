@@ -14,6 +14,7 @@ import os
 import re
 
 from storyforge.brief_names import REWRITTEN_FILES
+from storyforge.narrator import NARRATOR_POV, is_narrator
 from storyforge.common import log
 
 from storyforge.elaborate import (
@@ -262,6 +263,8 @@ def _unresolved_references(domain: str, ref_dir: str) -> dict[str, dict]:
         rows.sort(key=lambda r: order.get(r.get('id', ''), len(order)))
         for row in rows:
             for col in columns:
+                if domain == 'characters' and col == 'pov' and is_narrator(row.get(col)):
+                    continue   # the reserved narrator (#555)
                 for part in _split_entries(domain, row.get(col)):
                     ref = _reference_key(domain, part)
                     if not ref or ref[0] in lookup:
@@ -428,7 +431,10 @@ def apply_registry_normalization(
                 if not old_val:
                     continue
 
-                if domain == 'mice-threads' and col == 'mice_threads':
+                if domain == 'characters' and col == 'pov' and is_narrator(old_val):
+                    # The reserved narrator, never a registry entry (#555)
+                    new_val = NARRATOR_POV
+                elif domain == 'mice-threads' and col == 'mice_threads':
                     new_val = normalize_mice_threads(old_val, alias_map, type_map)
                 elif domain in _PLACEHOLDER_DOMAINS:
                     new_val = normalize_aliases(alias_map, strip_placeholders(old_val))

@@ -658,6 +658,10 @@ def normalize_fields(result: dict[str, str],
     Returns:
         The result dict, modified in place and returned for convenience.
     """
+    if result.get('pov'):
+        # "Omniscient narrator", "the narrator": the reserved `narrator` (#555)
+        from .narrator import normalize_pov
+        result['pov'] = normalize_pov(result['pov'])
     if not alias_maps:
         return result
 
