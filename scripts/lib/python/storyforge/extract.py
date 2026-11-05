@@ -329,6 +329,16 @@ CAST_INSTRUCTIONS = """\
 - For each person in either list, use their id from the Characters registry when they are listed there; give anyone not listed a new lowercase-hyphen id from their full name (e.g., kael-davreth)"""
 
 
+# Phases 2 and 3a read one scene at a time, and the model knows the classics
+# well enough to fill a row from the rest of the book: Gawain's second
+# exchange got the girdle that only the third day brings (storyforge-evals
+# G-006, #545)
+EVIDENCE_RULE = (
+    "Only this scene's text is evidence. Do not use your knowledge of the work, of other "
+    "scenes, or of what happens later: a person, object or event that this scene's text "
+    "doesn't show or mention isn't in any field.")
+
+
 def _intent_head(scene_id: str, scene_text: str, profile: dict[str, str],
                  skeleton: dict[str, str], registries_text: str) -> str:
     """What the intent and cast prompts share after their first line: the
@@ -361,6 +371,8 @@ def build_intent_prompt(scene_id: str, scene_text: str,
 
 {head}
 ## Instructions
+
+{EVIDENCE_RULE}
 
 Answer with a JSON object with these fields (a list field is a JSON array of strings; "unknown" where a value cannot be determined):
 
@@ -471,6 +483,8 @@ Emotional arc: {intent.get('emotional_arc', 'unknown')}"""
 {scene_text}
 {registries_section}
 ## Instructions
+
+{EVIDENCE_RULE} Where the context above says otherwise (its function), the scene's text wins.
 
 Answer with a JSON object with these fields (a list field is a JSON array of strings; "unknown" where a value cannot be determined):
 
