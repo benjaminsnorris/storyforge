@@ -302,3 +302,35 @@ class TestBuildSources:
         with pytest.raises(g.GutenbergError, match='different raw text'):
             g.plan_writes(str(tmp_path), f)
         assert g.plan_writes(str(tmp_path), f, force=True)
+
+
+class TestReplace:
+    """B-003: the config records text corrections, so a re-fetch keeps them."""
+
+    BODY = 'I\n\n\nThe portal opended wide,\nand her sons wereplaced there.\n'
+    META = {'chapter_heading': r'^([IVX]+)$', 'verse': True}
+
+    def test_corrections_are_applied_in_the_built_manuscript(self):
+        meta = dict(self.META, replace={'opended': 'opened', 'wereplaced': 'were placed'})
+        out = g.normalize(raw(self.BODY), g.check_config(meta))
+        assert out == '# Chapter I\n\nThe portal opened wide,\\\nand her sons were placed there.\n'
+        assert 'text correction' in g.describe(g.summarize(out, meta))
+
+    def test_a_correction_that_matches_nothing_is_an_error(self):
+        meta = dict(self.META, replace={'opended': 'opened', 'no such words': 'x'})
+        with pytest.raises(g.GutenbergError, match='no such words'):
+            g.normalize(raw(self.BODY), meta)
+
+    @pytest.mark.parametrize('bad', [['opended', 'opened'], {'': 'x'}, {'a': 1}])
+    def test_replace_must_be_an_object_of_strings(self, bad):
+        with pytest.raises(g.GutenbergError, match='replace must be'):
+            g.check_config(dict(self.META, replace=bad))
+
+    def test_a_forced_refetch_keeps_the_correction(self, tmp_path):
+        meta = dict(self.META, gutenberg_id=981, replace={'opended': 'opened'})
+        src = tmp_path / 'raw.txt'
+        src.write_text(raw(self.BODY))
+        fetched = g.build(str(tmp_path), meta, input_path=str(src))
+        g.write_files(str(tmp_path), g.plan_writes(str(tmp_path), fetched, force=True))
+        again = g.build(str(tmp_path), g.read_config(str(tmp_path / g.CONFIG_REL)))
+        assert 'opened' in again.manuscript and 'opended' not in again.manuscript
