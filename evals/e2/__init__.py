@@ -72,8 +72,12 @@ FLOORS = {
                          'recall_REL': 0.8, 'recall_TRT': 0.5, 'precision': 0.7742,
                          'flags': 31},
     # neither corpus suite has a REL case (E1 is thin on REL)
+    # precision 0.4 -> 0.3333, flags 5 -> 6 (#542, v1.146.4, a decision):
+    # continues_not_same_day flags lantern-folk-019's tree, where a02 (day 2)
+    # continues a01's evening (day 1). A real calendar error there, but not
+    # that case's labeled one (a PHY slip), so it scores as a false flag
     'e2-corpus-drift': {'recall_PHY': 0.0, 'recall_TIM': 0.1667, 'recall_KNO': 0.0,
-                        'recall_TRT': 0.0, 'precision': 0.4, 'flags': 5},
+                        'recall_TRT': 0.0, 'precision': 0.3333, 'flags': 6},
     'e2-corpus-validate': {'recall_PHY': 0.4286, 'recall_TIM': 0.0, 'recall_KNO': 0.0,
                            'recall_TRT': 0.0, 'precision': 0.0305, 'flags': 753},
 }
