@@ -1419,9 +1419,13 @@ def score_function_variety(intent_map, briefs_map, source_fixed=None):
         intent_map: dict from _read_csv_as_map on scene-intent.csv
         briefs_map: dict from _read_csv_as_map on scene-briefs.csv
         source_fixed: in a `faithful` adaptation, the scenes whose outcome is
-            the source's (`source_fidelity.source_fixed_outcomes`). The score
-            is unchanged; a dominant-outcome finding says how many of its
-            scenes the source fixes and to vary only the rest (#550)
+            the source's (`source_fidelity.source_fixed_outcomes`). Outcome
+            variety and the dominant-outcome finding count only the other
+            scenes, the ones the author can vary: a book whose outcomes are
+            its source's isn't marked down for them (#550, Ben's call). With
+            none of those left, the score is action/sequel balance and
+            turning-point variety alone. Empty or None: every scene counts,
+            exactly as before.
 
     Returns:
         {'score': float 0-1, 'findings': [...]}
@@ -1465,8 +1469,11 @@ def score_function_variety(intent_map, briefs_map, source_fixed=None):
         type_balance = 0.5  # No data — neutral
 
     # --- 2. Outcome variety (Shannon entropy) ---
+    fixed_ids = set(source_fixed or ())
     outcome_freq = {}
     for sid in scene_ids:
+        if sid in fixed_ids:
+            continue   # the source's outcome, not the author's to vary
         brief = briefs_map.get(sid) or {}
         outcome = _s(brief.get('outcome')).strip().lower()
         if outcome:
@@ -1489,13 +1496,10 @@ def score_function_variety(intent_map, briefs_map, source_fixed=None):
             dominant = [k for k, v in outcome_freq.items() if v == max_outcome_count][0]
             message = (f"Dominant outcome '{dominant}' in {max_outcome_count}/{outcome_total} "
                        f"scenes ({dominant_ratio:.0%})")
-            if source_fixed:
-                fixed = [sid for sid in source_fixed
-                         if _s((briefs_map.get(sid) or {}).get('outcome')).strip().lower()
-                         == dominant]
-                message += (f"; {len(fixed)} of them keep the source's outcome (faithful "
-                            f"mode) and stay: vary only the other "
-                            f"{max_outcome_count - len(fixed)}")
+            if fixed_ids:
+                message += (f" of those the source leaves open; the {len(fixed_ids)} "
+                            f"that keep the source's outcome (faithful mode) are not "
+                            f"counted")
             findings.append({
                 'message': message,
                 'severity': 'minor',
@@ -1503,6 +1507,8 @@ def score_function_variety(intent_map, briefs_map, source_fixed=None):
             })
     elif outcome_total > 0:
         outcome_variety = 0.0  # Only one distinct outcome
+    elif fixed_ids:
+        outcome_variety = None  # every outcome is the source's: not scored
     else:
         outcome_variety = 0.5  # No data — neutral
 
@@ -1533,7 +1539,10 @@ def score_function_variety(intent_map, briefs_map, source_fixed=None):
         tp_variety = 0.5  # No data — neutral
 
     # Composite
-    score = type_balance * 0.35 + outcome_variety * 0.35 + tp_variety * 0.30
+    if outcome_variety is None:
+        score = (type_balance * 0.35 + tp_variety * 0.30) / 0.65
+    else:
+        score = type_balance * 0.35 + outcome_variety * 0.35 + tp_variety * 0.30
     score = max(0.0, min(1.0, score))
 
     return {'score': score, 'findings': findings}

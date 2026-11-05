@@ -9,6 +9,7 @@ import re
 
 from .elaborate import _read_csv, _FILE_MAP
 from .enrich import load_alias_map, load_mice_registry, VALID_MICE_TYPES
+from .narrator import NARRATOR_POV
 
 
 # ============================================================================
@@ -162,7 +163,9 @@ COLUMN_SCHEMA = {
     'pov': {
         'type': 'registry', 'registry': 'characters.csv', 'array': False,
         'file': 'scenes.csv', 'stage': 'architecture',
-        'description': 'POV character. Normalized against reference/characters.csv.',
+        'description': 'POV character. Normalized against reference/characters.csv; '
+                       '`narrator` (reserved, never a character) when the book\'s '
+                       'narrator tells the scene.',
     },
     'location': {
         'type': 'registry', 'registry': 'locations.csv', 'array': True,
@@ -788,6 +791,10 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                         })
 
                 elif constraint == 'registry':
+                    if key_prefix + col == 'pov' and value == NARRATOR_POV:
+                        # A reserved value, never a characters.csv entry (#555)
+                        passed += 1
+                        continue
                     csv_name = _registry_key(schema)
                     alias_map = registries.get(csv_name, {})
                     if not alias_map:
