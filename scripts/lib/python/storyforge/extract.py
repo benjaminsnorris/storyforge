@@ -333,6 +333,16 @@ CAST_INSTRUCTIONS = """\
 - For each person in either list, use their id from the Characters registry when they are listed there; give anyone not listed a new lowercase-hyphen id from their full name (e.g., kael-davreth)"""
 
 
+# Phases 2 and 3a read one scene at a time, and the model knows the classics
+# well enough to fill a row from the rest of the book: Gawain's second
+# exchange got the girdle that only the third day brings (storyforge-evals
+# G-006, #545)
+EVIDENCE_RULE = (
+    "Only this scene's text is evidence. Do not use your knowledge of the work, of other "
+    "scenes, or of what happens later: a person, object or event that this scene's text "
+    "doesn't show or mention isn't in any field.")
+
+
 def _intent_head(scene_id: str, scene_text: str, profile: dict[str, str],
                  skeleton: dict[str, str], registries_text: str) -> str:
     """What the intent and cast prompts share after their first line: the
@@ -365,6 +375,8 @@ def build_intent_prompt(scene_id: str, scene_text: str,
 
 {head}
 ## Instructions
+
+{EVIDENCE_RULE}
 
 Answer with a JSON object with these fields (a list field is a JSON array of strings; "unknown" where a value cannot be determined):
 
@@ -476,6 +488,8 @@ Emotional arc: {intent.get('emotional_arc', 'unknown')}"""
 {registries_section}
 ## Instructions
 
+{EVIDENCE_RULE} Where the context above says otherwise (its function), the scene's text wins.
+
 Answer with a JSON object with these fields (a list field is a JSON array of strings; "unknown" where a value cannot be determined):
 
 - goal: the POV character's concrete objective entering this scene — what are they trying to do?
@@ -484,7 +498,7 @@ Answer with a JSON object with these fields (a list field is a JSON array of str
 - crisis: the key dilemma — a best bad choice or irreconcilable goods that the character faces
 - decision: what the character actively chooses in response to the crisis
 - key_actions (list): concrete things that happen in this scene, as the page shows them. Do not name a motive or meaning the scene leaves unstated (write "takes a phone call he cuts short", not "takes a call about criminal business")
-- key_dialogue (list): specific lines or exchanges that are essential to the scene — quote directly from the text
+- key_dialogue (list): specific lines or exchanges that are essential to the scene — quote directly from the text, each item labelled with its speaker as `Name: "line"`, the name as the character registry writes it (no title, no possessive); label each item, and leave the label off only when the text doesn't say who speaks
 - emotions (list): emotional beats in sequence as they occur through the scene
 - motifs (list): recurring images, symbols, or sensory details that carry thematic weight, described as they appear in this scene. Never gloss an image with facts or meanings the reader learns only in later scenes: the drafter will write them
 - subtext: ONE sentence, max 150 characters. The gap between what a character says/does and what they mean. Format: "X says/does A but means B; don't state B." If no subtext, write "none". Do NOT write multiple clauses or a paragraph."""

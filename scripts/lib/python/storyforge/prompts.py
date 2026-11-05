@@ -1863,6 +1863,14 @@ def build_scene_prompt_from_briefs(
         if dep_parts:
             dep_block = "## Dependency Scenes\n\nThese scenes happen before this one. Their outcomes and knowledge states are your starting context.\n\n" + '\n\n'.join(dep_parts)
 
+    # An adaptation's source passage, mode and version rules (#561, B-025):
+    # after the brief and its dependencies; nothing without a `source:`
+    # block, so other prompts are byte for byte what they were
+    from .prompts_source import drafting_section
+    source_block = drafting_section(project_dir, scene_id)
+    if source_block:
+        dep_block = f'{dep_block}\n\n{source_block}' if dep_block else source_block
+
     # Voice guide (skipped when system_context provides it)
     voice_guide = ''
     if not system_context:

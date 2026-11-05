@@ -803,3 +803,23 @@ class TestContinuityDepsResolved:
         from storyforge import cmd_extract
         src = inspect.getsource(cmd_extract._run_phase_3)
         assert src.index('resolve_scene_deps(') < src.index('_update_chain_fields(scene_id, ref_dir, result, force,\n                             (\'knowledge_in\'')
+
+
+class TestEvidenceRule:
+    """#545 (storyforge-evals G-006): phase 2 gave Gawain's second exchange
+    the girdle, which only the third day brings, from the model's knowledge
+    of the poem; phase 3a built the brief on it."""
+
+    def test_intent_prompt_says_only_the_scene_is_evidence(self):
+        from storyforge.extract import build_intent_prompt
+        prompt = build_intent_prompt('s1', 'Prose.', {}, {'title': 'T'})
+        assert "Only this scene's text is evidence" in prompt
+        assert 'knowledge of the work' in prompt
+
+    def test_brief_prompt_lets_the_text_beat_the_function(self):
+        from storyforge.extract import build_brief_parallel_prompt
+        prompt = build_brief_parallel_prompt(
+            's1', 'Prose.', {}, {'title': 'T'},
+            {'function': 'Gawain conceals the girdle'})
+        assert "Only this scene's text is evidence" in prompt
+        assert "the scene's text wins" in prompt
