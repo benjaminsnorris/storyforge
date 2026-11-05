@@ -1637,7 +1637,10 @@ def scene_when(scene: Mapping[str, str]) -> str:
     how = {'summary': 'a summary: covers a stretch from that day',
            'frame': "frame narration: not the story's present",
            'vision': "a vision: not the story's present"}.get(mode, '')
-    return ', '.join(filter(None, [f'day {day}' if day else '', time, how]))
+    # An embedded tale's day is when its events happened (#548)
+    told = (scene.get('told_by') or '').strip()
+    told = f'told in {told}' if told else ''
+    return ', '.join(filter(None, [f'day {day}' if day else '', time, how, told]))
 
 
 def is_dated(scene: Mapping[str, str]) -> bool:
@@ -2044,12 +2047,21 @@ def build_scene_prompt_from_briefs(
                         f'{facts.removesuffix(" above")}, the voice from the current '
                         f'draft.\n')
 
+    # An embedded tale (#548): who tells it, and where
+    told_line = ''
+    frame = (scene.get('told_by') or '').strip()
+    if frame:
+        teller = (scene.get('pov') or '').strip()
+        told_line = (f'\nThis scene is told{f" by {teller}" if teller else ""} in {frame}: a tale '
+                     f'inside that scene, of events that happened on their own day. Tell it as '
+                     f'the brief and the source frame it.\n')
+
     # Coaching-specific instructions
     if coaching_level == 'full':
         task_block = f"""## Task
 
 Write the complete prose for scene **{scene_id}** ("{scene.get('title', '')}").
-{word_target_line}{rewrite_line}
+{word_target_line}{told_line}{rewrite_line}
 
 The brief is your contract. Deliver:
 - The value shift specified ({scene.get('value_shift', '')})

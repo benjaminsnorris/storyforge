@@ -405,7 +405,7 @@ For each scene:
 ### Output Format
 
 ```scenes-csv
-id|seq|title|summary|act|part|pov|location|timeline_day|time_mode|time_of_day|duration|target_words|status|architecture_scene
+id|seq|title|summary|act|part|pov|location|timeline_day|time_mode|time_of_day|duration|target_words|status|architecture_scene|told_by
 (all scenes — status is "mapped" for new/updated scenes)
 ```
 
@@ -426,6 +426,7 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 
 - timeline_day is when a scene's action happens; a flashback keeps the earlier day it depicts (0 or negative before day 1). Flashbacks are a device, not an error: use one where the past changes what the present means
 - time_mode: scene (the action plays out on its day; the default), summary (it covers a stretch of time; timeline_day is where the stretch starts), frame (narration from after the story, looking back), or vision (events a character is shown that the story doesn't treat as fixed, such as a future that may be; never the story's present)
+- told_by: for an embedded tale (a story, song or report a character gives inside another scene), the id of the scene that tells it; its pov is the teller, its timeline_day the day its events happened. Empty for a scene lived on the page
 - Say how each scene sits in time in its summary when it isn't simply the same day as the scene before: "the next morning", "three weeks later", "flashback to 1917". The timeline check reads this, and drafting carries it into the prose
 - Every character referenced must exist in the character bible
 - An enum cell holds only its value (`turning_point` is action or revelation, never "action: she strikes"; what turns the scene goes in `function`)
@@ -544,6 +545,7 @@ id|status
 - States persist until explicitly resolved — do not silently drop them
 - continuity_deps should also list scenes whose physical_state_out this scene needs
 - Every scene must have goal/conflict/outcome filled
+- A scene with told_by is a tale told inside that scene: brief the tale's own events, and the telling scene's brief says who tells it to whom
 - Key dialogue should sound like the character, not the author
 - Scenes with no continuity_deps can be drafted in parallel — maximize these
 - The crisis must be a genuine dilemma (two bad choices or two good choices that conflict), not "do the obvious thing or don't"

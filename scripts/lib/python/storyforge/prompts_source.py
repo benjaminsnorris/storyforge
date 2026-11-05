@@ -326,7 +326,8 @@ def source_scene_block(project_dir: str, slug: str, sid: str, *, prose: bool,
     lines = [f'#### Source scene {slug}:{sid}' + (f': {scene["title"]}' if scene.get('title') else '')]
     for key, val in (('summary', scene.get('summary', '') or intent.get('function', '')),
                      ('pov', scene.get('pov', '')), ('on_stage', intent.get('on_stage', '')),
-                     ('timeline_day', scene.get('timeline_day', ''))):
+                     ('timeline_day', scene.get('timeline_day', '')),
+                     ('told_by', scene.get('told_by', ''))):
         if val.strip():
             lines.append(f'**{key}:** {val.strip()}')
     for key in _BRIEF_FIELDS:
