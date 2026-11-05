@@ -725,6 +725,25 @@ def rederive_columns(domain: str, ref_dir: str, ids: set[str]) -> None:
     write_registry(ref_dir, domain, registry)
 
 
+# A reference to several people ("the sons of Ohthere", "ohtere-sons",
+# "men of Wessex") is never one person's alias: Beowulf's registry
+# filed Ohthere's sons under Eadgils (B-007, #546)
+_GROUP_REFERENCE = re.compile(
+    # Kin in the plural, anywhere but after "of" ("best of the sons" is an
+    # epithet of one man)
+    r"(?<!\bof\s)(?<!\bof\sthe\s)(?:^|(?<=[\s\-_]))"
+    r"(sons|daughters|brothers|sisters|children|kinsmen|kinsfolk|heirs|twins)(?=$|[\s\-_])"
+    # A collective noun only at the start: "men of Wessex", "the people of
+    # Ithaca", not "Agamemnon king of men" or "shepherd of the people"
+    r"|^(?:the\s+)?(men|people|folk|house|family|clan|tribe|kin|both|pair)(?=$|[\s\-_])",
+    re.I)
+
+
+def is_group_reference(text: str) -> bool:
+    """Whether a cast reference names a group rather than one person."""
+    return bool(_GROUP_REFERENCE.search((text or '').strip()))
+
+
 def apply_mapping(domain: str, ref_dir: str, batch: list[dict],
                   mapping: dict[int, list[str]], new_rows: list[dict[str, str]],
                   skipped: set[int] = frozenset()) -> int:
@@ -751,6 +770,10 @@ def apply_mapping(domain: str, ref_dir: str, batch: list[dict],
             text = batch[n - 1]['text']
             row = rows_by_id.get(ids[0])
             if len(ids) != 1 or row is None or '|' in text:
+                continue
+            if domain == 'characters' and is_group_reference(text):
+                log(f'  characters: "{text}" names a group; not adding it as an alias '
+                    f'of {row["id"]}')
                 continue
             existing = {a.strip().lower() for a in (row.get('aliases') or '').split(';')}
             if text.lower() in existing | {row['id'].lower(), row.get('name', '').lower()}:
