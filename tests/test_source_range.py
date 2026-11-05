@@ -709,30 +709,45 @@ class TestTwoSources:
             prompts_source.briefs_section(two, None)
 
 
+
+def _seed(proj):
+    seeded, notes = source.seed_registries(proj, source.read_config(proj))
+    return {sd.path: (sd.written, sd.available) for sd in seeded}, notes
+
+
+def _ids(proj, name):
+    with open(os.path.join(proj, 'reference', name)) as f:
+        return [l.split('|')[0] for l in f.read().splitlines()[1:]]
+
+
 class TestSeedRegistriesRange:
     """A ranged source seeds only the registry rows its adapted scenes use
     (Telemachy pilot: Books I-IV was seeded with the whole Odyssey's 195)."""
 
-    def _seed(self, proj):
-        return {rel: (n, total) for rel, n, total
-                in source.seed_registries(proj, source.read_config(proj))}
-
-    def _ids(self, proj, name):
-        with open(os.path.join(proj, 'reference', name)) as f:
-            return [l.split('|')[0] for l in f.read().splitlines()[1:]]
-
     def test_only_rows_the_range_uses(self, tmp_path):
         proj = _ranged(tmp_path, rng='chapters 2-3')   # assembly-called, ship-sails
-        assert self._seed(proj) == {'reference/characters.csv': (2, 5),
-                                    'reference/locations.csv': (2, 3)}
-        assert sorted(self._ids(proj, 'characters.csv')) == ['athena', 'telemachus']
-        assert sorted(self._ids(proj, 'locations.csv')) == ['harbor', 'ithaca-hall']
+        seeded, notes = _seed(proj)
+        assert seeded == {'reference/characters.csv': (2, 5),
+                          'reference/locations.csv': (2, 3)}
+        assert notes == []
+        assert sorted(_ids(proj, 'characters.csv')) == ['athena', 'telemachus']
+        assert sorted(_ids(proj, 'locations.csv')) == ['harbor', 'ithaca-hall']
 
-    def test_pov_and_characters_columns_count(self, ranged):
-        # chapters 1-2: narrator is a pov only; ulysses is in `characters`, not on stage
-        assert self._seed(ranged)['reference/characters.csv'] == (5, 5)
-        assert 'olympus' in self._ids(ranged, 'locations.csv')
-        assert 'harbor' not in self._ids(ranged, 'locations.csv')
+    def test_characters_only_and_pov_only_count(self, tmp_path):
+        proj = make_adaptation(tmp_path)
+        _write(str(tmp_path / 'odyssey'), {
+            'reference/chapter-map.csv': CHAPTER_MAP,
+            'reference/scene-intent.csv': (
+                'id|function|value_at_stake|value_shift|characters|on_stage|mice_threads\n'
+                'gods-debate|x|homecoming|-/+|jove|jove|\n'
+                'minerva-visits|x|courage|-/+|minerva|minerva|\n'
+                'assembly-called|x|authority|-/+| ulysses ;;|telemachus|\n'   # told of only
+                'ship-sails|x|courage|+/++|telemachus|telemachus|\n')})
+        _set_range(proj, 'chapters 2-2')   # assembly-called: pov telemachus
+        import_source(proj)
+        seeded, notes = _seed(proj)
+        assert sorted(_ids(proj, 'characters.csv')) == ['odysseus', 'telemachus']
+        assert seeded['reference/characters.csv'] == (2, 5) and notes == []
 
     def test_values_follow_value_at_stake(self, tmp_path):
         proj = make_adaptation(tmp_path)
@@ -742,8 +757,67 @@ class TestSeedRegistriesRange:
                                     'courage|Courage|\nauthority|Authority|\n'})
         _set_range(proj, 'chapters 3-3')   # ship-sails: courage
         import_source(proj)
-        assert self._seed(proj)['reference/values.csv'] == (1, 3)
-        assert self._ids(proj, 'values.csv') == ['courage']
+        assert _seed(proj)[0]['reference/values.csv'] == (1, 3)
+        assert _ids(proj, 'values.csv') == ['courage']
+
+    def test_cast_cells_holding_names_or_aliases_count(self, tmp_path):
+        """CR-2: a project that keeps names in the cast columns."""
+        proj = make_adaptation(tmp_path)
+        _write(str(tmp_path / 'odyssey'), {
+            'reference/chapter-map.csv': CHAPTER_MAP,
+            'reference/scene-intent.csv': (
+                'id|function|value_at_stake|value_shift|characters|on_stage|mice_threads\n'
+                'gods-debate|x|Homecoming|-/+|jove|jove|\n'
+                'minerva-visits|x|courage|-/+|minerva|minerva|\n'
+                'assembly-called|x|authority|-/+|Pallas;Nobody|Telemachus|\n'
+                'ship-sails|x|courage|+/++|telemachus|telemachus|\n')})
+        _set_range(proj, 'chapters 2-2')
+        import_source(proj)
+        _seeded, notes = _seed(proj)
+        assert sorted(_ids(proj, 'characters.csv')) == ['athena', 'telemachus']
+        assert notes == ['NOTE: source odyssey: characters.csv: the range\'s scenes name '
+                         'Nobody, which no row has as its id, name or alias; not seeded']
+
+    def test_the_ledger_counts_for_the_cast(self, tmp_path):
+        """CR-4: someone the range knows only from its ledger is kept."""
+        proj = make_adaptation(tmp_path)
+        _write(str(tmp_path / 'odyssey'), {
+            'reference/chapter-map.csv': CHAPTER_MAP,
+            'reference/commitments.csv': (
+                'id|scene_id|type|subject|statement|quote|known_by\n'
+                'a|assembly-called|knowledge|suitors-plot|x|"y"|ulysses\n')})
+        _set_range(proj, 'chapters 2-2')
+        import_source(proj)
+        _seeded, notes = _seed(proj)
+        assert sorted(_ids(proj, 'characters.csv')) == ['odysseus', 'telemachus']
+        assert notes == []   # a topic subject isn't a missing person
+
+    def test_a_missing_column_seeds_everything_and_says_so(self, tmp_path):
+        """SF-1/SF-2: a range that can't be checked doesn't quietly shrink."""
+        proj = make_adaptation(tmp_path)
+        _write(str(tmp_path / 'odyssey'), {
+            'reference/chapter-map.csv': CHAPTER_MAP,
+            'reference/scene-intent.csv': 'id|function\ngods-debate|x\nminerva-visits|x\n'
+                                          'assembly-called|x\nship-sails|x\n'})
+        _set_range(proj, 'chapters 2-2')
+        import_source(proj)
+        seeded, notes = _seed(proj)
+        assert seeded['reference/characters.csv'] == (5, 5)
+        assert ('WARNING: source odyssey: characters.csv: reference/source/odyssey/'
+                'scene-intent.csv has no `characters` column (or is missing), so the '
+                'range can\'t be checked; every row is seeded') in notes
+
+    def test_a_range_using_none_of_a_registry_says_so(self, tmp_path):
+        proj = make_adaptation(tmp_path)
+        _write(str(tmp_path / 'odyssey'), {
+            'reference/chapter-map.csv': CHAPTER_MAP,
+            'reference/values.csv': 'id|name|aliases\nhope|Hope|\n'})
+        _set_range(proj, 'chapters 2-2')
+        import_source(proj)
+        seeded, notes = _seed(proj)
+        assert 'reference/values.csv' not in seeded
+        assert ('NOTE: source odyssey: no scene in its range (chapter 2) names any of '
+                'values.csv\'s 1 row(s), so it gives none') in notes
 
     def test_cli_says_what_was_left_out(self, tmp_path, monkeypatch, capsys):
         from storyforge import cmd_source
@@ -753,6 +827,41 @@ class TestSeedRegistriesRange:
         monkeypatch.setattr(cmd_source, 'detect_project_root', lambda: proj)
         assert cmd_source.main(['import', '--no-commit']) == 0
         out = capsys.readouterr()
-        text = out.out + out.err
         assert ('Seeded reference/characters.csv with 2 row(s) from the source (it had '
-                'none) (3 of its 5 are used only outside the range, so left out)') in text
+                'none) (3 of its 5 aren\'t named by any scene in the range, so left '
+                'out)') in out.out + out.err
+
+    def test_cli_stops_when_the_range_cant_be_resolved(self, ranged, monkeypatch, capsys):
+        """T-2: written, not committed, and said so."""
+        from storyforge import cmd_source
+
+        def broken(*_a, **_k):
+            raise source.SourceError('source odyssey: range broken')
+        monkeypatch.setattr(cmd_source, 'detect_project_root', lambda: ranged)
+        monkeypatch.setattr(source, 'adapted_ids', broken)
+        assert cmd_source.main(['import', '--no-commit']) == 1
+        out = capsys.readouterr()
+        text = out.out + out.err
+        assert 'ERROR: source odyssey: range broken' in text
+        assert 'written but not committed' in text
+        assert not os.path.exists(os.path.join(ranged, 'reference', 'characters.csv'))
+
+
+class TestSeedTwoSources:
+    def test_each_source_uses_its_own_range(self, two):
+        """T-1: odyssey (chapter 1) leaves the harbor out; the unranged iliad
+        gives it, and the first source still wins for shared ids."""
+        seeded, notes = _seed(two)
+        assert seeded['reference/locations.csv'] == (3, 3) and notes == []
+        assert _ids(two, 'locations.csv') == ['olympus', 'ithaca-hall', 'harbor']
+
+    def test_importing_one_source_while_the_other_isnt(self, tmp_path):
+        """CR-1: a ranged source not imported yet is passed over, not an error."""
+        proj = make_adaptation(tmp_path)
+        _write(str(tmp_path / 'odyssey'), {'reference/chapter-map.csv': CHAPTER_MAP})
+        _write(str(tmp_path / 'iliad'), SOURCE_FILES)
+        _write(proj, {'storyforge.yaml': TWO_YAML})
+        cfg = source.read_config(proj)
+        source.write_import(source.import_source(proj, cfg, 'iliad'))
+        seeded, notes = _seed(proj)
+        assert seeded['reference/characters.csv'] == (5, 5) and notes == []

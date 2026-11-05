@@ -603,8 +603,8 @@ class TestSeedRegistries:
 
     def _seed(self, proj):
         _import(proj)
-        return {rel: (n, total) for rel, n, total
-                in source.seed_registries(proj, source.read_config(proj))}
+        seeded, _notes = source.seed_registries(proj, source.read_config(proj))
+        return {sd.path: (sd.written, sd.available) for sd in seeded}
 
     def test_empty_registries_get_the_sources_mapped_rows(self, adaptation):
         ref = os.path.join(adaptation, 'reference')
@@ -635,4 +635,4 @@ class TestSeedRegistries:
         chars = open(os.path.join(adaptation, 'reference', 'characters.csv')).read()
         assert 'odysseus|Odysseus' in chars
         # a second run seeds nothing more: the registry now has rows
-        assert source.seed_registries(adaptation, source.read_config(adaptation)) == []
+        assert source.seed_registries(adaptation, source.read_config(adaptation)) == ([], [])

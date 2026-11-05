@@ -111,16 +111,21 @@ def main(argv=None):
     changed = [r.slug for r in results if r.changed]
     if args.dry_run:
         return 0
-    # An adaptation's empty registries start as the source's cast and places (B-013)
+    # An adaptation's empty registries start as the source's cast, places
+    # and values (B-013); a ranged source gives only what its range uses
     try:
-        seeded = source.seed_registries(project_dir, cfg)
+        seeded, notes = source.seed_registries(project_dir, cfg)
     except source.SourceError as e:
-        log(f'ERROR: the import is written but the registries were not seeded: {e}')
+        log(f'ERROR: {e}')
+        log('The import is written but not committed, and the registries '
+            'were not seeded; fix this and re-run `storyforge source import`')
         return 1
-    for rel, n, total in seeded:
-        part = (f' ({total - n} of its {total} are used only outside the range, so left out)'
-                if total > n else '')
-        log(f'Seeded {rel} with {n} row(s) from the source (it had none){part}')
+    for sd in seeded:
+        part = (f' ({sd.available - sd.written} of its {sd.available} aren\'t named by '
+                f'any scene in the range, so left out)' if sd.available > sd.written else '')
+        log(f'Seeded {sd.path} with {sd.written} row(s) from the source (it had none){part}')
+    for note in notes:
+        log(f'  {note}')
     if not changed and not seeded:
         return 0
     if args.no_commit:
@@ -132,7 +137,7 @@ def main(argv=None):
                else 'Source: seed the registries')
     if not commit_and_push(project_dir, message,
                            [f'reference/source/{s}' for s in changed]
-                           + [rel for rel, _n, _t in seeded]):
+                           + [sd.path for sd in seeded]):
         log('ERROR: the import is written but the commit failed; commit '
             'reference/source/ yourself')
         return 1
