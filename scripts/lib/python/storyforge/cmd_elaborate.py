@@ -1654,6 +1654,9 @@ def _prune_brief_rows(ref_dir: str, before: set[str]) -> None:
         ledger.save_to(ref_dir, out, command='elaborate-briefs')
 
 
+_ENUM_WITH_TEXT = re.compile(r'^\s*([A-Za-z][\w-]*)\s*(?::|—|–|\s-\s)\s*(.+)$', re.S)
+
+
 def split_enum_descriptions(row: dict, filename: str) -> list[str]:
     """An enum cell written as its value plus a description ("action: Arthur,
     stung by the laughter, rises") holds only the value; the description goes
