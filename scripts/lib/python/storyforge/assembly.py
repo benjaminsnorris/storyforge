@@ -238,6 +238,35 @@ def chapter_part(chapter_num: int, project_dir: str) -> dict | None:
     return {'number': int(part_str), 'title': title} if title else None
 
 
+def part_openings(project_dir: str) -> dict[int, dict]:
+    """The chapters that open a book part: ``{chapter_num: chapter_part}``.
+
+    The first chapter of each titled part (by ``chapter_part``, so only real
+    book parts, as in the publish manifest, F-155). Every format prints its
+    part page before these chapters: the web book's interstitial, and the
+    part heading in the epub, HTML and PDF (G-031).
+    """
+    openings: dict[int, dict] = {}
+    seen: set[int] = set()
+    for ch in range(1, count_chapters(project_dir) + 1):
+        part = chapter_part(ch, project_dir)
+        if part and part['number'] not in seen:
+            seen.add(part['number'])
+            openings[ch] = part
+    return openings
+
+
+def part_page_markdown(part: dict) -> str:
+    """The part page for the epub, HTML and PDF: a level-1 heading of its own.
+
+    A level-1 heading so the epub gives the part its own file and the
+    stylesheets break the page before it (and, by ``part.css``, after it).
+    The title alone, as Bookshelf prints it; the class carries the styling.
+    """
+    return (f'# {part["title"]} {{#part-{part["number"]} .part-title '
+            f'epub:type=part}}')
+
+
 def write_parts(project_dir: str, titles: list[str]) -> bool:
     """Write ``parts:`` (number 1..N, in order) to storyforge.yaml.
 
@@ -704,8 +733,12 @@ def assemble_manuscript(project_dir: str, output_file: str) -> int:
         parts.append(epigraph)
         parts.append('')
 
-    # Chapters
+    # Chapters, each book part opening on its own page (G-031)
+    openings = part_openings(project_dir)
     for i in range(1, total + 1):
+        if i in openings:
+            parts.append(part_page_markdown(openings[i]))
+            parts.append('')
         parts.append(assemble_chapter(i, project_dir, break_style))
         parts.append('')
 
@@ -778,6 +811,12 @@ def get_genre_css(plugin_dir: str, genre: str) -> str:
                         'default.css')
 
 
+def get_parts_css(plugin_dir: str) -> str:
+    """The part-page stylesheet every format loads after its genre CSS (G-031)."""
+    return os.path.join(plugin_dir, 'templates', 'production', 'css',
+                        'parts.css')
+
+
 # ============================================================================
 # Format generation (epub, html, pdf)
 # ============================================================================
@@ -831,6 +870,7 @@ def generate_epub(project_dir: str, manuscript_file: str,
         '-o', epub_file,
         '--metadata-file', meta_file,
         '--css', css_file,
+        '--css', get_parts_css(plugin_dir),
         '--toc', '--toc-depth=1',
         '--epub-chapter-level=1',
         # Interior illustration paths are project-relative (#278).
@@ -860,6 +900,7 @@ def generate_html(project_dir: str, manuscript_file: str,
         '-o', html_file,
         '--standalone',
         '--css', css_file,
+        '--css', get_parts_css(plugin_dir),
         '--toc', '--toc-depth=1',
         f'--metadata=title:{title}',
         # Interior illustration paths are project-relative (#278).
@@ -868,10 +909,31 @@ def generate_html(project_dir: str, manuscript_file: str,
     subprocess.run(cmd, check=True)
 
 
+def get_pdf_css(plugin_dir: str) -> str:
+    """The PDF-only overrides loaded after the genre CSS (G-030)."""
+    return os.path.join(plugin_dir, 'templates', 'production', 'css',
+                        'pdf.css')
+
+
+def _stderr_tail(stderr: bytes | str | None, lines: int = 8) -> str:
+    """The last lines of a subprocess's stderr, for a log line."""
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode('utf-8', errors='replace')
+    tail = [line for line in (stderr or '').strip().split('\n') if line.strip()]
+    return '\n'.join(tail[-lines:])
+
+
 def generate_pdf(project_dir: str, manuscript_file: str,
                  pdf_file: str, plugin_dir: str) -> None:
-    """Generate a PDF from an assembled manuscript via pandoc + weasyprint."""
+    """Generate a PDF from an assembled manuscript via pandoc + weasyprint.
+
+    Falls back to pandoc's default engine (LaTeX) when WeasyPrint fails,
+    logging WeasyPrint's error first. When both fail, raises RuntimeError
+    naming both causes (G-030: the fallback's "pdflatex not found" once hid
+    a WeasyPrint crash).
+    """
     import subprocess
+    from storyforge.common import log as _log
 
     genre = _yaml_field(project_dir, 'project.genre', 'genre') or 'default'
     css_file = get_genre_css(plugin_dir, genre)
@@ -883,21 +945,33 @@ def generate_pdf(project_dir: str, manuscript_file: str,
         '-o', pdf_file,
         '--pdf-engine=weasyprint',
         '--css', css_file,
+        '--css', get_parts_css(plugin_dir),
+        # Last: what WeasyPrint can't lay out (the drop cap)
+        '--css', get_pdf_css(plugin_dir),
         f'--metadata=title:{title}',
         # Interior illustration paths are project-relative (#278).
         '--resource-path', project_dir,
     ]
     r = subprocess.run(cmd, capture_output=True)
+    if r.returncode == 0:
+        return
+    weasy_error = _stderr_tail(r.stderr) or f'exit {r.returncode}'
+    _log(f'WARNING: WeasyPrint failed to build the PDF:\n{weasy_error}')
+    _log('Falling back to pandoc\'s default PDF engine (LaTeX)')
+    cmd = [
+        'pandoc', manuscript_file,
+        '-o', pdf_file,
+        f'--metadata=title:{title}',
+        '-V', 'geometry:margin=1in',
+        '--resource-path', project_dir,
+    ]
+    r = subprocess.run(cmd, capture_output=True)
     if r.returncode != 0:
-        # Fall back to default pdf engine (pdflatex/xelatex)
-        cmd = [
-            'pandoc', manuscript_file,
-            '-o', pdf_file,
-            f'--metadata=title:{title}',
-            '-V', 'geometry:margin=1in',
-            '--resource-path', project_dir,
-        ]
-        subprocess.run(cmd, check=True)
+        raise RuntimeError(
+            'PDF not built. WeasyPrint failed:\n'
+            f'{weasy_error}\n'
+            'and the LaTeX fallback failed:\n'
+            f'{_stderr_tail(r.stderr) or f"exit {r.returncode}"}')
 
 
 # ============================================================================
@@ -1059,23 +1133,22 @@ def generate_web_book(project_dir: str, plugin_dir: str,
     # Build chapter map for resume feature and TOC
     chapter_map = {}
     toc_entries = []
-    # Track which chapters start a new part
+    # Each chapter's part title, and the chapters that open a part: the same
+    # parts the epub, HTML, PDF and publish manifest print (G-031, F-155)
     chapter_parts = {}
     if total_parts > 0:
         for ch in range(1, total_chapters + 1):
-            part_title = get_chapter_part_title(ch, project_dir)
-            if part_title:
-                chapter_parts[ch] = part_title
+            part = chapter_part(ch, project_dir)
+            if part:
+                chapter_parts[ch] = part['title']
+    openings = part_openings(project_dir) if total_parts > 0 else {}
 
     # Navigation pages to generate (chapters + part interstitials)
     pages = []  # list of (slug, type, chapter_num_or_part_num)
 
-    seen_parts = set()
     for ch in range(1, total_chapters + 1):
-        if ch in chapter_parts and chapter_parts[ch] not in seen_parts:
-            part_title = chapter_parts[ch]
-            seen_parts.add(part_title)
-            part_num = len(seen_parts)
+        if ch in openings:
+            part_num = openings[ch]['number']
             pages.append((f'part-{part_num}', 'part', part_num))
         pages.append((f'chapter-{ch}', 'chapter', ch))
 
