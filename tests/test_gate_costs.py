@@ -117,7 +117,7 @@ class TestWriteCountsTheGate:
         logged = []
         monkeypatch.setattr(cmd_write, 'log', lambda m: logged.append(m))
         monkeypatch.setattr(cmd_write, 'check_threshold', lambda c: False)  # stop there
-        monkeypatch.setattr(cmd_write, '_exit_if_gate_pending', lambda *a: None)
+        monkeypatch.setattr(cmd_write, '_exit_if_gate_pending', lambda *a, **k: None)
         monkeypatch.setattr(cmd_write, 'detect_project_root', lambda: project_dir)
         try:
             cmd_write.main(['--force', '--coaching', 'full', '--scenes', SCENE])
@@ -127,7 +127,7 @@ class TestWriteCountsTheGate:
         assert forecast, logged
         assert 'of it the gate' in forecast[0]
         gate_part = float(forecast[0].split('~$')[2].split(' ')[0])
-        assert gate_part == round(gate.RECHECK_COST_PER_SCENE, 2)
+        assert gate_part == round(gate.WRITE_GATE_COST_PER_SCENE, 2)
 
 
 class TestSpendLoggingEdges:

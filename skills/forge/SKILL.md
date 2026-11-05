@@ -105,8 +105,9 @@ Invoke the `elaborate` skill. This handles all creative development work — fro
 **"Start drafting" / "Write scenes":**
 Check that `reference/scenes.csv` exists with scenes, and `reference/voice-guide.md` exists. If ready, provide the command:
 ```bash
-./storyforge write [options]
+./storyforge write --keep-going [options]
 ```
+A full draft runs unattended, so pass `--keep-going` (Ben, 2026-11-04): a scene the gate can't pass after its fixes is committed provisionally for the author instead of ending the run (see "Draft overnight" below). Leave it off only when the author wants the run to stop at the first gate failure.
 If prerequisites are missing, route to `elaborate` to build them.
 
 **"Evaluate" / "Run evaluation":**
@@ -214,7 +215,12 @@ Provide `storyforge audit`: the per-act digest of new ledger facts (`reference/c
 **"The gate stopped on an error" / "Accept this error" / "This contradiction is fine":**
 A gate stop (write, revise, `check`, a re-check) is the author's to fix or accept. To fix it, revise the scene (or its brief, or the calendar in `scenes.csv`) and run `storyforge check --pending`. To accept it as written, run `storyforge check --accept SCENE` (no model call): its contradictions are reported from then on instead of stopping, and `storyforge check --pending` carries on. Only contradictions can be accepted; a broken promise, an unverified quote or a halt still has to be fixed.
 
+In a faithful adaptation the gate also checks a scene against its source. A fact the source contradicts isn't recorded. When a scene contradicts an earlier one and the source backs the later scene, the later scene passes (`SOURCE BACKS THIS SCENE`). The earlier scene's wrong fact stops binding, so later scenes follow the source, and that scene is listed in `working/gate-source-fix.csv`. So is a scene a fact was dropped from. Tell the author each one is theirs to fix toward the source, then run `storyforge check --pending`. The row stays until that scene's prose changes; a passing re-check never clears it, and it doesn't stop drafting.
+
 With many scenes waiting (after a redraft early in the book, say), `storyforge check --pending --keep-going` checks them all in reading order instead of stopping at the first that fails, so the author decides once: it ends with every scene that didn't pass, its findings, and the exact `storyforge check --accept a,b,c` for those with contradictions to accept, and exits 1 if any failed. Tell the author that results for scenes after one that failed are provisional (they were checked without that scene's current facts in the ledger); once it passes, the later scenes depending on facts it changed are listed for a re-check, and its own check reads its new facts against them. Offer `--accept` only for the scenes the summary names in that command; the others have nothing to accept and must be fixed. The cost threshold (`STORYFORGE_COST_THRESHOLD`) is one budget for the whole run: it forecasts first, and stops with exit 1 (the rest still pending) when the run would go over.
+
+**"Draft overnight" / "Don't stop at every gate failure":**
+Every unattended draft Storyforge recommends passes `--keep-going` (Ben, 2026-11-04); `write` without it still stops at the first gate failure. `storyforge write --keep-going` doesn't stop at a scene the gate still fails after its fixes, as long as only the check's findings stopped it (contradictions, broken promises, plan conflicts). It commits that scene **provisionally**: its facts go in the ledger, except those stating the findings, and it's listed `provisional` in `working/gate-pending.csv`. Then drafting goes on. A halt (a fixed fact changed), an extraction problem or a bad reply still stops the run. At the end, the run lists the provisional scenes and exits 1; `storyforge status` puts `storyforge check --pending` first while any scene waits, and `validate` warns. Tell the author each one is theirs to fix and run `storyforge check --pending`, or to accept a contradiction with `storyforge check --accept SCENE`. Without the flag, a provisional scene stops later drafting, as any pending scene does.
 
 **"What should I do next?":**
 Use the `storyforge status --json` verdict from Step 1 and recommend its `next.command`. Also: if scoring was recently run, publishing (`./storyforge publish`) refreshes the dashboard in Bookshelf; if scene metadata is sparse, `storyforge enrich` is high value.
@@ -286,7 +292,7 @@ Determine the single highest-value next action based on project state. Work thro
 
 **1.7. Structural scoring:** If briefs are populated AND no `working/scores/structural-latest.csv` exists (or it's older than the CSVs) → "Check your story structure before drafting." → Provide `./storyforge validate --structural`. Review scores and proposals. Address any below-target dimensions before drafting.
 
-**2. Ready to draft:** If briefs are complete and validated → "Draft your scenes" → provide `./storyforge write` command.
+**2. Ready to draft:** If briefs are complete and validated → "Draft your scenes" → provide `./storyforge write --keep-going` command.
 
 **3. Drafted, not evaluated:** If scenes exist but no evaluation → "Run evaluation" → provide `./storyforge evaluate` command.
 

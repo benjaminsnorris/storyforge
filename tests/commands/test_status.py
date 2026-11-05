@@ -165,7 +165,7 @@ def test_recommend_prose_and_terminal_stages():
         assert nxt['command'] == f'storyforge score --level {level}'
         assert then['stage'] == 'story-power'   # story-power is then-only
     nxt, then = status._recommend('draft')
-    assert nxt['command'] == 'storyforge write'
+    assert nxt['command'] == 'storyforge write --keep-going'
     assert then['stage'] == 'evaluate'
     nxt, then = status._recommend('evaluate')
     assert nxt['command'] == 'storyforge evaluate'
@@ -267,7 +267,7 @@ def test_all_solid_some_drafted_recommends_draft(tmp_path, monkeypatch):
                         lambda pd_, medium='novel': _all_solid_ladder())
     v = status.build_status(pd)
     assert v['phase'] == 'draft'
-    assert v['next']['command'] == 'storyforge write'
+    assert v['next']['command'] == 'storyforge write --keep-going'
     assert v['then']['stage'] == 'evaluate'
 
 

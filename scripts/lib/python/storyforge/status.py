@@ -196,11 +196,11 @@ def _recommend(stage: str) -> tuple[dict, dict | None]:
                     'reason': ''}
         else:
             then = {'stage': 'draft', 'action': 'Draft scenes',
-                    'command': 'storyforge write', 'reason': ''}
+                    'command': 'storyforge write --keep-going', 'reason': ''}
         return nxt, then
     if stage == 'draft':
         return ({'stage': 'draft', 'action': 'Draft scenes',
-                 'command': 'storyforge write',
+                 'command': 'storyforge write --keep-going',
                  'reason': 'Briefs are complete; scenes are ready to draft'},
                 {'stage': 'evaluate', 'action': 'Evaluate drafted scenes',
                  'command': 'storyforge evaluate', 'reason': ''})
@@ -213,6 +213,29 @@ def _recommend(stage: str) -> tuple[dict, dict | None]:
     # (which is mirrored by hand and could drift, e.g. the scene-map↔map
     # spelling) instead of shipping a wrong verdict.
     raise ValueError(f'_recommend: unrecognized stage {stage!r}')
+
+
+def gate_waiting(project_dir: str) -> list[dict[str, str]]:
+    """The rows of working/gate-pending.csv, in reading order where known
+    (an unreadable file is one row saying so)."""
+    from storyforge import gate, ledger
+    try:
+        rows = gate.pending(project_dir)
+    except gate.GateError as e:
+        return [{'scene_id': gate.PENDING_PATH, 'command': 'unreadable', 'reason': str(e)}]
+    try:
+        order = ledger.scene_order(project_dir)
+    except Exception:
+        order = {}
+    out = [rows[s] for s in sorted(rows, key=lambda s: (order.get(s, 10**9), s))]
+    # #557: the scenes listed to fix toward the source (their own file)
+    try:
+        fixes = gate.source_fixes(project_dir)
+    except gate.GateError as e:
+        fixes = {gate.SOURCE_FIX_PATH: {'scene_id': gate.SOURCE_FIX_PATH, 'reason': str(e)}}
+    out += [{'scene_id': s, 'command': 'source-fix', 'reason': fixes[s]['reason']}
+            for s in sorted(fixes, key=lambda s: (order.get(s, 10**9), s))]
+    return out
 
 
 def build_status(project_dir: str, medium: str = 'novel') -> dict:
@@ -261,6 +284,20 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
         })
 
     nxt, then = _recommend(phase)
+    # #556's review: scenes waiting on the gate (a provisional commit from
+    # `write --keep-going` among them) come before the next rung
+    waiting = gate_waiting(project_dir)
+    for row in waiting:
+        blockers.append({'source': 'gate', 'level': -1,
+                         'detail': f"{row['scene_id']} ({row['command']}): {row['reason']}"})
+    if waiting:
+        provisional = sum(r['command'] == 'provisional' for r in waiting)
+        then = nxt
+        nxt = {'stage': phase, 'action': 'Clear the scenes waiting on the gate',
+               'command': 'storyforge check --pending',
+               'reason': (f'{len(waiting)} scene(s) in working/gate-pending.csv'
+                          + (f', {provisional} committed provisionally' if provisional else '')
+                          + ': fix them (or `storyforge check --accept`), then check')}
     return {
         'phase': phase,
         'phase_declared': declared,
