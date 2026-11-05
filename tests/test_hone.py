@@ -706,9 +706,17 @@ class TestReconcileByDeltas:
         assert aliases['tess'] == 'tessa-merrin'
 
     @pytest.mark.parametrize('text, group', [
-        ('ohtere-sons', True), ('the sons of Ohthere', True), ('the Buchanans', True),
-        ('both-brothers', True), ('son of Ecgtheow', False), ('Eadgils', False),
-        ('women', False), ('ongentheow-son', False),
+        # groups
+        ('ohtere-sons', True), ('the sons of Ohthere', True), ('both-brothers', True),
+        ('men of Wessex', True), ('the people of Ithaca', True), ('sons-of-atreus', True),
+        ('house-of-atreus', True),
+        # one person: titles, epithets, patronymics (review of #591)
+        ('the Countess', False), ('the Goddess', False), ('the Princess', False),
+        ('the Marquis', False), ('the Boss', False), ('the Atrides', False),
+        ('Agamemnon king of men', False), ('shepherd of the people', False),
+        ('All-Father', False), ('best of the sons of Atreus', False),
+        ('son of Ecgtheow', False), ('Eadgils', False), ('women', False),
+        ('ongentheow-son', False),
     ])
     def test_is_group_reference(self, text, group):
         from storyforge.hone import is_group_reference

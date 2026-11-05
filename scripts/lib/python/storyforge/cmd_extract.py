@@ -707,7 +707,8 @@ def _run_census(project_dir, log_dir):
         return result
     names = ', '.join(r['name'] for r in result.added) or 'none'
     log(f'  Census: {result.candidates} capitalized word(s) not in the registries, '
-        f'{result.asked} asked about; {len(result.added)} person(s) added as referenced: '
+        f'{result.remembered} answered before, {result.asked} asked about (used '
+        f'{result.min_mentions}+ times); {len(result.added)} person(s) added as referenced: '
         f'{names}. Every word and answer: {CENSUS_FILE}')
     if result.failed:
         log(f'  WARNING: census: {len(result.failed)} word(s) not checked (a call failed)')

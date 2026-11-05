@@ -8,17 +8,23 @@ poem that is how the fathers are named: Beowulf's registry missed Ecgtheow
 throughout ("son of Atreus", "son of Peleus"). Their stories matter to an
 adaptation: Ecgtheow's feud is why Beowulf owes Hrothgar.
 
-1. **Count** (code): every capitalized word the scenes use mid-sentence,
-   with the scenes it is in, less every word of the registries' names, ids
-   and aliases (characters and locations) and the common capitalized words
-   (`_COMMON`). A word used only at the start of sentences is not a name.
-2. **Ask** (one call, the extraction tier): for the words used at least
-   `MIN_MENTIONS` times, each with two short passages, which name a person
-   (or god, creature, people's founder) and under which id. Peoples, places,
-   ships, weapons and the like are not.
+1. **Count** (code): every capitalized word the scenes use mid-sentence
+   (Unicode letters: Hæreth, Zoë, McTavish), with the scenes it is in, less
+   the words of the character registry's ids and names, its one-word
+   aliases, the head nouns of the location names (not the person in
+   "Laertes' Farm"), and the common capitalized words (`_COMMON`). A word
+   used only at the start of sentences is not a name.
+2. **Ask** (one call per `BATCH` words, the evaluation tier): the words
+   used at least `MIN_MENTIONS` times, raised for a long book until at most
+   `MAX_ASKED` are left, each with two short passages: which name a person
+   (or god, creature, people's founder) and under which id. Peoples,
+   places, ships, weapons and the like are not. A word answered on an
+   earlier run is not asked again, so a row the author deleted stays
+   deleted.
 3. **Add**: each person becomes a `characters.csv` row with role
    `referenced`, aliases from the answer; nothing else is changed. Every
-   candidate and answer goes into `working/census.csv`.
+   candidate and answer goes into `working/census.csv`, which is also the
+   record of what was answered.
 """
 
 from __future__ import annotations
@@ -30,11 +36,14 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 MIN_MENTIONS = 2
-MAX_CANDIDATES = 150
+# At most this many words are asked about (the Iliad has about 800 candidates)
+MAX_ASKED = 300
 PASSAGE_WORDS = 14
 CENSUS_FILE = os.path.join('working', 'census.csv')
 
-_WORD = re.compile(r"[A-Z][a-z]+(?:[-'][A-Za-z]+)*|[A-Z][a-z]*[A-Z][a-z]+")
+# A word of Unicode letters, hyphens and apostrophes inside it; it counts
+# as a name when it starts with a capital and isn't all capitals
+_WORD = re.compile(r"[^\W\d_]+(?:[-'’][^\W\d_]+)*")
 # Capitalized words that are rarely a person's name, in English prose and in
 # the translations the evals use
 _COMMON = frozenset('''
@@ -61,18 +70,32 @@ class Candidate:
     passages: list[str] = field(default_factory=list)
 
 
+def _location_head(name: str) -> str:
+    """A location name without the person it may hold: "Laertes' Farm" ->
+    "Farm", "House of Hades" -> "House"."""
+    name = re.sub(r"^.*?\b[^\W\d_]+(?:['’]s|s['’]|['’])\s+", '', name.strip())
+    return re.split(r"\s+of\s+", name, maxsplit=1)[0]
+
+
 def _registry_words(ref_dir: str) -> set[str]:
-    """Every word of the characters' and locations' ids, names and aliases,
-    lowercased."""
+    """The words the registries already account for, lowercased: every word
+    of a character's id and name, a one-word alias, and the head of a
+    location's name."""
     words: set[str] = set()
+
+    def split(text):
+        return {w.lower() for w in re.split(r"[\s\-_'’]+", text) if w}
+
     for name in ('characters.csv', 'locations.csv'):
         path = os.path.join(ref_dir, name)
         if not os.path.isfile(path):
             continue
         with open(path, newline='', encoding='utf-8') as f:
             for row in csv.DictReader(f, delimiter='|'):
-                text = ' '.join([row.get('id') or '', row.get('name') or ''])
-                words.update(w.lower() for w in re.split(r"[\s\-_'’]+", text) if w)
+                if name == 'locations.csv':
+                    words |= split(_location_head(row.get('name') or ''))
+                    continue
+                words |= split(' '.join([row.get('id') or '', row.get('name') or '']))
                 # An alias counts whole: "ohtere-sons" on Eadgils says
                 # nothing about Ohthere himself (B-007)
                 for alias in (row.get('aliases') or '').split(';'):
@@ -102,7 +125,9 @@ def count_names(texts: dict[str, str], known: set[str]) -> list[Candidate]:
         text = text.replace('\\\n', '\n')
         starts = _sentences_starts(text)
         for m in _WORD.finditer(text):
-            word = re.sub(r"['’]s$", '', m.group(0))
+            word = re.sub(r"['’]s?$", '', m.group(0))
+            if not word[:1].isupper() or word.isupper():
+                continue
             if word in _COMMON or word.lower() in known or len(word) < 3:
                 continue
             total[word] += 1
@@ -190,6 +215,34 @@ class CensusResult:
     added: list[dict] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
     note: str = ''
+    min_mentions: int = MIN_MENTIONS
+    remembered: int = 0       # words answered on an earlier run, not asked again
+
+
+ANSWERED = ('person', 'not a new person')
+
+
+def previous_answers(project_dir: str) -> dict[str, str]:
+    """The words an earlier census answered (`working/census.csv`): word ->
+    answer. A word answered once isn't asked again, so a person the author
+    deleted from characters.csv stays deleted."""
+    path = os.path.join(project_dir, CENSUS_FILE)
+    if not os.path.isfile(path):
+        return {}
+    with open(path, newline='', encoding='utf-8') as f:
+        return {r['word']: r['answer'] for r in csv.DictReader(f, delimiter='|')
+                if r.get('word') and r.get('answer') in ANSWERED}
+
+
+def threshold(found: list[Candidate], least: int = MIN_MENTIONS,
+              most: int = MAX_ASKED) -> int:
+    """The fewest mentions a word needs to be asked about: *least*, raised
+    until at most *most* words are left (a long book's tail of names said
+    twice would otherwise fill the asking)."""
+    m = least
+    while sum(1 for c in found if c.mentions >= m) > most:
+        m += 1
+    return m
 
 
 def run_census(project_dir: str, model: str, log_dir: str, on_usage=None,
@@ -216,11 +269,15 @@ def run_census(project_dir: str, model: str, log_dir: str, on_usage=None,
         return result
     found = count_names(texts, _registry_words(ref_dir))
     result.candidates = len(found)
-    ask = [c for c in found if c.mentions >= min_mentions][:MAX_CANDIDATES * 2]
+    before = previous_answers(project_dir)
+    fresh = [c for c in found if c.word not in before]
+    result.remembered = len(found) - len(fresh)
+    min_mentions = result.min_mentions = threshold(fresh, min_mentions)
+    ask = [c for c in fresh if c.mentions >= min_mentions][:MAX_ASKED]
     result.asked = len(ask)
     registry = read_registry(ref_dir, 'characters')
     ids = {r['id'] for r in registry if r.get('id')}
-    answered: dict[str, str] = {}
+    answered: dict[str, str] = dict(before)
     os.makedirs(log_dir, exist_ok=True)
     for n in range(0, len(ask), BATCH):
         chunk = ask[n:n + BATCH]
@@ -258,4 +315,10 @@ def run_census(project_dir: str, model: str, log_dir: str, on_usage=None,
                       f'below {min_mentions} mentions' if c.mentions < min_mentions else
                       'not asked (over the limit)'))
             w.writerow([c.word, c.mentions, len(c.scenes), answer])
+        # Answers from earlier runs for words now in the registry (or gone
+        # from the text) stay on record
+        counted = {c.word for c in found}
+        for word, answer in before.items():
+            if word not in counted:
+                w.writerow([word, '', '', answer])
     return result

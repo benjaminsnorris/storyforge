@@ -718,12 +718,17 @@ def rederive_columns(domain: str, ref_dir: str, ids: set[str]) -> None:
 
 
 # A reference to several people ("the sons of Ohthere", "ohtere-sons",
-# "the Buchanans") is never one person's alias: Beowulf's registry
+# "men of Wessex") is never one person's alias: Beowulf's registry
 # filed Ohthere's sons under Eadgils (B-007, #546)
 _GROUP_REFERENCE = re.compile(
-    r"(?:^|[\s\-_])(sons|daughters|brothers|sisters|children|kin|kinsmen|men|folk|family|"
-    r"clan|tribe|house|heirs|twins|pair|both|all|people)(?:$|[\s\-_])"
-    r"|^the\s+\w+s$", re.I)
+    # Kin in the plural, anywhere but after "of" ("best of the sons" is an
+    # epithet of one man)
+    r"(?<!\bof\s)(?<!\bof\sthe\s)(?:^|(?<=[\s\-_]))"
+    r"(sons|daughters|brothers|sisters|children|kinsmen|kinsfolk|heirs|twins)(?=$|[\s\-_])"
+    # A collective noun only at the start: "men of Wessex", "the people of
+    # Ithaca", not "Agamemnon king of men" or "shepherd of the people"
+    r"|^(?:the\s+)?(men|people|folk|house|family|clan|tribe|kin|both|pair)(?=$|[\s\-_])",
+    re.I)
 
 
 def is_group_reference(text: str) -> bool:
