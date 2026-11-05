@@ -1692,14 +1692,20 @@ def _prose_from_history(project_dir: str, scene_id: str) -> str | None:
         out = _git_out(project_dir, 'show', f'{sha}:./{rel}')
         return _scene_rows(out.decode('utf-8', errors='replace'), scene_id) if out else []
 
+    rows = rows_at(shas[0]) if shas else None
+    if rows != current:
+        return None
     for k, sha in enumerate(shas):
-        rows = rows_at(sha)
-        if k == 0 and rows != current:
-            return None
-        earlier = rows_at(shas[k + 1]) if k + 1 < len(shas) else []
+        if k + 1 < len(shas):
+            earlier = rows_at(shas[k + 1])
+        elif len(shas) == _HISTORY_DEPTH:
+            return None   # the change lies further back than we looked
+        else:
+            earlier = []   # the ledger's first commit
         if rows != earlier:
             out = _git_out(project_dir, 'show', f'{sha}:./scenes/{scene_id}.md')
             return out.decode('utf-8', errors='replace') if out is not None else None
+        rows = earlier
     return None
 
 
