@@ -55,7 +55,10 @@ TYPES = ('physical', 'timeline', 'knowledge', 'relationship', 'trait',
 #: `migrated`: moved from knowledge.csv / physical-states.csv, where plan and
 #: prose can't be told apart after the fact
 ORIGINS = ('plan', 'prose', 'author', 'migrated')
-STATUSES = ('binding', 'pending', 'rejected', 'superseded')
+#: `planned`: a fact a brief plans (the briefs stage's own rows, #568): not
+#: established, so the checker never holds prose to it; the gate makes it
+#: binding when the prose establishes it (`fill_quote`)
+STATUSES = ('binding', 'pending', 'rejected', 'superseded', 'planned')
 MUTABLE = ('state', 'fixed')
 
 #: Free-text columns; `;`-joined id lists are the array columns
@@ -557,9 +560,14 @@ def fill_quote(rows: list[dict[str, str]], fact_id: str, quote: str) -> bool:
     if is_commitment(row):
         raise ValueError(f'{fact_id}: a commitment, not a registry fact; its quote '
                          f'is the one extraction recorded')
-    if row.get('status') != 'binding' or row.get('type') not in VIEW_COLUMNS:
+    if row.get('status') not in ('binding', 'planned') or row.get('type') not in VIEW_COLUMNS:
         raise ValueError(f'{fact_id}: not a binding knowledge or physical registry fact '
                          f'(status {row.get("status")!r}, type {row.get("type")!r})')
+    if row.get('status') == 'planned':
+        # the prose established the plan: it is a fact now (#568)
+        row['status'] = 'binding'
+        row['quote'] = ' '.join(quote.split())
+        return True
     if (row.get('quote') or '').strip():
         return False
     row['quote'] = ' '.join(quote.split())

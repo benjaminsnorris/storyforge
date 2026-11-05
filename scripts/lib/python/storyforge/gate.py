@@ -1834,6 +1834,11 @@ def report_lines(result: GateResult) -> list[str]:
         if result.check.unknown_brief_items:
             lines.append('NOTE (brief items in words, no ledger fact; checked as words): '
                          + _one_line('; '.join(result.check.unknown_brief_items)))
+        if result.check.plan_departures:
+            lines.append('NOTE (the prose departs from planned facts; not an error, they '
+                         'stay planned): ' + _one_line('; '.join(
+                             f'{f.fact_id}: {f.explanation or f.kind}'
+                             for f in result.check.plan_departures)))
         if result.check.stale_brief_items:
             lines.append('NOTE (brief items naming a fact that is not binding; not checked, '
                          'fix the brief): ' + _one_line('; '.join(result.check.stale_brief_items)))
