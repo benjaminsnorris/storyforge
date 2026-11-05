@@ -125,8 +125,8 @@ class TestGatedWrite:
         ran = []
         monkeypatch.setattr('storyforge.cmd_write._run_batch_mode',
                             lambda *a, **k: ran.append(1) or cmd_write.DraftOutcome(0, 0, []))
-        monkeypatch.setattr('storyforge.cmd_write.estimate_cost',
-                            lambda *a, **k: ran.append('cost') or 0.0)
+        monkeypatch.setattr('storyforge.cmd_write._forecast',
+                            lambda *a, **k: ran.append('cost'))
         with pytest.raises(SystemExit) as exc:
             main(['--batch', '--scenes', 'act1-sc01'])
         assert exc.value.code == 1 and ran == []
@@ -377,11 +377,16 @@ class TestReview443:
                                 spent_before=spent_before)
         monkeypatch.setattr(gate, 'recheck_pending', recheck)
         gate.mark_pending(setup, 'new-x1', 'recheck', 're-check: x')
+        # the forecast: mock_costs's $0.10 drafting, the context it reads
+        # from cache (#563), plus the gate, per scene
+        forecast = cmd_write._forecast(
+            setup, ['act1-sc01', 'act1-sc02'], os.path.join(setup, 'reference', 'scenes.csv'),
+            'direct', 'full', 'full')
         main(['--scenes', 'act1-sc01,act1-sc02'])
         draft = api.calculate_cost_from_usage(
             {'input_tokens': 0, 'output_tokens': 10_000}, 'claude-opus-4-6')
-        # the forecast: mock_costs's $0.10 drafting plus the gate, per scene
-        per_scene = (0.10 + 2 * gate.RECHECK_COST_PER_SCENE) / 2
+        per_scene = forecast.total / 2
+        assert forecast.gate == pytest.approx(2 * gate.RECHECK_COST_PER_SCENE)
         assert seen == [pytest.approx(draft + per_scene)]   # act1-sc02 still to draft
 
     def test_drafting_stops_when_its_spend_passes_the_threshold(

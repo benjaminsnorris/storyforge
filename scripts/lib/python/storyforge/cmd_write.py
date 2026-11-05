@@ -21,7 +21,7 @@ Usage:
     storyforge write act1-sc01              # Draft a single scene
     storyforge write act1-sc01 act1-sc15    # Draft a range (by position)
     storyforge write --act 2                # Draft all scenes in act 2
-    storyforge write --dry-run act1-sc01    # Build prompt without invoking
+    storyforge write --dry-run act1-sc01    # Build prompt and forecast, no API call
     storyforge write --keep-going           # Don't stop at a gate failure: commit it provisionally
     storyforge write --coaching coach --batch --act 2   # briefs via the Batch API
 """
@@ -51,7 +51,7 @@ from storyforge.api import (
     stop_problem, fallback_model, is_refusal, RefusalError, report_fallback_replies,
 )
 from storyforge.costs import (
-    estimate_cost, check_threshold, cost_threshold, exit_if_bad_threshold, log_operation,
+    check_threshold, cost_threshold, exit_if_bad_threshold, log_operation,
     print_summary,
 )
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
@@ -188,29 +188,25 @@ def main(argv=None):
 
     scene_forecast = 0.0   # a scene's share of the forecast: reserved from the re-checks
     draft_forecast = 0.0   # its drafting part: charged for a draft the CLI writes
-    if not args.dry_run:
-        model = select_model('drafting')
-        avg_words = _avg_word_count(metadata_csv)
-        estimated = estimate_cost('draft', len(pending_ids), avg_words, model)
-        if write_mode == 'batch':
-            estimated *= 0.5  # Batch API 50% discount
-        draft_forecast = estimated / len(pending_ids)
-        gated = ''
-        if coaching == 'full':
-            # Every drafted scene is gated, and the gate (extraction, the
-            # persistence check, the check's readings, a fix) costs several
-            # times the draft (F-151): a gate run is what a re-check costs
-            from storyforge import gate
-            gate_cost = len(pending_ids) * gate.RECHECK_COST_PER_SCENE
-            estimated += gate_cost
-            gated = f', ~${gate_cost:.2f} of it the gate'
-        log(f'Cost forecast: ~${estimated:.2f} for {len(pending_ids)} scenes '
-            f'(avg {avg_words} words, model {model}, mode {write_mode}{gated})')
-        scene_forecast = estimated / len(pending_ids)
-        if not check_threshold(estimated):
+    # A dry run forecasts too (G-027): it is how the author learns what a
+    # draft will cost before spending anything
+    forecast = _forecast(project_dir, pending_ids, metadata_csv, write_mode, coaching,
+                         prior_prose)
+    gated = f', ~${forecast.gate:.2f} of it the gate' if forecast.gate else ''
+    log(f'Cost forecast: ~${forecast.total:.2f} for {len(pending_ids)} scenes '
+        f'(mode {write_mode}{gated}; {forecast.basis})')
+    if args.dry_run:
+        if not check_threshold(forecast.total):
+            log(f'NOTE: that is over the cost threshold (${cost_threshold():g}): a real run '
+                f'would stop before drafting. Set STORYFORGE_COST_THRESHOLD higher, or '
+                f'write fewer scenes.')
+    else:
+        draft_forecast = forecast.draft / len(pending_ids)
+        scene_forecast = forecast.total / len(pending_ids)
+        if not check_threshold(forecast.total):
             # Nothing was drafted: exit 1, so a script or chained command
             # doesn't read the stop as a finished run
-            log(f'ERROR: the forecast (~${estimated:.2f}) is over the cost threshold '
+            log(f'ERROR: the forecast (~${forecast.total:.2f}) is over the cost threshold '
                 f'(${cost_threshold():g}): nothing written. Set STORYFORGE_COST_THRESHOLD higher, '
                 f'or write fewer scenes.')
             sys.exit(1)
@@ -687,6 +683,70 @@ def _filter_pending(filtered_ids, project_dir, metadata_csv, force, filter_mode)
             pending.append(sid)
 
     return pending, skipped
+
+
+def _forecast(project_dir: str, pending_ids: list[str], metadata_csv: str,
+              write_mode: str, coaching: str, prior_prose: str):
+    """`costs.forecast_write` for this run (#563). Every drafted scene is
+    gated at `full` coaching, and the gate (extraction, the persistence
+    check, the check's readings, a fix) costs several times the draft
+    (F-151): a gate run is priced as a re-check. A direct draft is sent
+    the shared context and, by `prior_prose`, the earlier prose, both read
+    from cache: the token model counts them (on Gawain, about 133k
+    cache-read tokens a draft)."""
+    from storyforge import costs, gate
+    try:
+        model = select_model('drafting')
+    except RuntimeError as e:
+        # a dry run without an API key can't ask the Models API for the
+        # newest model (a real run has stopped on the key already): price
+        # at the tier's newest listed one
+        from storyforge.common import _TASK_TIER
+        model = costs._TIER_FALLBACK[_TASK_TIER['drafting']]
+        log(f'NOTE: the forecast prices drafts at {model} ({e})')
+    avg_words = _avg_word_count(metadata_csv)
+    earlier: dict[str, int] = {}
+    shared = 0
+    if write_mode == 'direct':
+        earlier = _forecast_earlier_words(project_dir, pending_ids, prior_prose, avg_words)
+        from storyforge.common import build_shared_context
+        from storyforge.source import SourceError
+        try:
+            shared = sum(len(b.get('text', '')) for b in
+                         build_shared_context(project_dir, model)) // 4
+        except (OSError, SourceError) as e:   # a source not imported, ...
+            log(f'WARNING: the forecast leaves out the shared context ({e})')
+    return costs.forecast_write(
+        project_dir, pending_ids, avg_words, model,
+        gate_per_scene=gate.RECHECK_COST_PER_SCENE if coaching == 'full' else 0.0,
+        earlier_words=earlier, shared_tokens=shared, batch=write_mode == 'batch')
+
+
+def _forecast_earlier_words(project_dir: str, pending_ids: list[str], prior_prose: str,
+                            avg_words: int) -> dict[str, int]:
+    """The words of earlier prose each pending scene will be drafted with,
+    for the forecast: in `full` mode the manuscript before it (a scene
+    still to draft at `avg_words`), up to `prompts.FULL_MAX_WORDS`; in
+    `window` mode about two scenes."""
+    if prior_prose == 'none':
+        return {}
+    if prior_prose == 'window':
+        return {s: 2 * avg_words for s in pending_ids}
+    from storyforge import ledger
+    from storyforge.prompts import FULL_MAX_WORDS
+    order = ledger.scene_order(project_dir)
+    pending = set(pending_ids)
+    out, words = {}, 0
+    for sid in sorted(order, key=order.get):
+        if sid in pending:
+            out[sid] = min(words, FULL_MAX_WORDS)
+        path = os.path.join(project_dir, 'scenes', f'{sid}.md')
+        if sid in pending or not os.path.isfile(path):
+            words += avg_words if sid in pending else 0
+        else:
+            with open(path, encoding='utf-8') as f:
+                words += len(f.read().split())
+    return out
 
 
 def _avg_word_count(metadata_csv: str) -> int:
