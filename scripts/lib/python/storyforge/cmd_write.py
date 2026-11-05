@@ -432,9 +432,7 @@ def _gate_blockers(project_dir: str, scene_id: str, keep_going: bool = False) ->
     at = order.get(scene_id, 0)
     return [f'{s}: {waiting[s]["reason"]}' for s in sorted(
         (s for s in waiting if s in order and s != scene_id and order[s] < at
-         and not (keep_going and waiting[s]['command'] == gate.PROVISIONAL)
-         # its facts are in the ledger; the source disagrees (#557): the author's
-         and waiting[s]['command'] != gate.SOURCE_FIX),
+         and not (keep_going and waiting[s]['command'] == gate.PROVISIONAL)),
         key=order.get)]
 
 
@@ -923,6 +921,11 @@ def _extract_scene_from_response(log_file: str, out_file: str,
 _MIN_SCENE_WORDS = 100
 
 
+def gate_source_fix_path() -> str:
+    from storyforge import gate
+    return gate.SOURCE_FIX_PATH
+
+
 def gate_pending_path() -> str:
     from storyforge.gate import PENDING_PATH
     return PENDING_PATH
@@ -990,7 +993,7 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
         else:
             paths = [f'scenes/{scene_id}.md', 'reference/', 'working/logs/',
                      'working/audit-log.csv', 'working/.audit-snapshot.csv',
-                     gate_pending_path()]
+                     gate_pending_path(), gate_source_fix_path()]
             msg = f'Draft scene {scene_id}'
         if written_by:
             msg += f' (refusal fallback: written by {written_by})'
@@ -1005,7 +1008,8 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
             return word_count, True
         _commit(project_dir, f'Gate scene {scene_id}',
                 [f'scenes/{scene_id}.md', 'reference/', 'working/audit-log.csv',
-                 'working/.audit-snapshot.csv', gate_pending_path()])
+                 'working/.audit-snapshot.csv', gate_pending_path(),
+                 gate_source_fix_path()])
 
     # Push
     _git(project_dir, 'push', check=False)
@@ -1460,7 +1464,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                             f'{len(run.passed)} passed'
                             + (f', {run.failed} did not' if run.failed else ''),
                             ['reference/', 'working/logs/', 'working/audit-log.csv',
-                             'working/.audit-snapshot.csv', gate_pending_path()])
+                             'working/.audit-snapshot.csv', gate_pending_path(),
+                             gate_source_fix_path()])
                 except CommitError as e:
                     log(f'ERROR: the re-checks after {scene_id} ran, but {e}.')
                     log('Stopping: commit them by hand, then run again.')

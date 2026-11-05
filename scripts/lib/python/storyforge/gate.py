@@ -1311,6 +1311,7 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
     except ledger.LedgerError as e:
         raise GateError(f'{scene_id}: {e}') from e
     _source_supersede(result, rows)
+    fixed_toward_source = _keep_superseded(project_dir, result, rows, prose)
     _hold_back(result, holding, prose=prose if holding else '', rows=rows)
     _carry_ids(result.proposed, old_rows, rows, scene_id)
     new = rows + result.proposed
@@ -1345,6 +1346,12 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
                            for ref in ledger._split(r.get(col, '')) if ref in removed]
     ledger.save(project_dir, new, command=command)
     result.committed = True
+    if fixed_toward_source:
+        try:
+            clear_source_fix(project_dir, scene_id)
+        except GateError as e:
+            result.source_notes.append(f'{SOURCE_FIX_PATH} could not be updated ({e}); '
+                                       f'remove {scene_id}\'s row by hand')
     try:
         record_reported(project_dir, scene_id, command, result.inherited, prose=prose)
         if holding is None:
@@ -1356,7 +1363,7 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
     try:
         if holding is not None:
             mark_pending(project_dir, scene_id, PROVISIONAL, pending_reason)
-        elif not _source_fix_waits(project_dir, scene_id, prose):
+        else:
             clear_pending(project_dir, scene_id)
         waiting = pending(project_dir)
         for sid in result.recheck:
@@ -1419,7 +1426,13 @@ def _source_supersede(result: GateResult, rows: list[dict[str, str]]) -> None:
         result.source_superseded += [i for i in ids if i not in result.source_superseded]
 
 
-_SOURCE_FIX_TAG = re.compile(r'\s*\[prose: ([0-9a-f]{40}|none)\]')
+#: The scenes listed for the author to fix toward the source (#557), apart
+#: from working/gate-pending.csv so a re-check's pass there never clears
+#: one (#557's second review): `scene_id|prose|reason`, `prose` the sha1 of
+#: the scene's prose when listed. Only a commit of that scene with other
+#: prose takes a row off (`_keep_superseded`, `clear_source_fix`)
+SOURCE_FIX_PATH = 'working/gate-source-fix.csv'
+_SOURCE_FIX_COLUMNS = ['scene_id', 'prose', 'reason']
 
 
 def _prose_sha(text: str) -> str:
@@ -1435,45 +1448,123 @@ def _scene_sha(project_dir: str, scene_id: str) -> str:
         return 'none'
 
 
+def source_fixes(project_dir: str) -> dict[str, dict[str, str]]:
+    """Scene id → its `SOURCE_FIX_PATH` row.
+
+    Raises:
+        GateError: the file is malformed or unreadable."""
+    path = os.path.join(project_dir, SOURCE_FIX_PATH)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding='utf-8') as f:
+            lines = [line.rstrip('\n') for line in f if line.strip()]
+    except (OSError, UnicodeDecodeError) as e:
+        raise GateError(f'{SOURCE_FIX_PATH}: {e}') from e
+    if not lines or lines[0].split('|') != _SOURCE_FIX_COLUMNS:
+        raise GateError(f'{SOURCE_FIX_PATH}: the header must be {"|".join(_SOURCE_FIX_COLUMNS)}')
+    out = {}
+    for line in lines[1:]:
+        cells = line.split('|', 2)
+        if len(cells) != 3:
+            raise GateError(f'{SOURCE_FIX_PATH}: a bad row: {line[:80]!r}')
+        out[cells[0]] = dict(zip(_SOURCE_FIX_COLUMNS, cells))
+    return out
+
+
+def _write_source_fixes(project_dir: str, rows: dict[str, dict[str, str]]) -> None:
+    path = os.path.join(project_dir, SOURCE_FIX_PATH)
+    if not rows:
+        if os.path.isfile(path):
+            os.remove(path)
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        f.write('|'.join(_SOURCE_FIX_COLUMNS) + '\n')
+        for sid in sorted(rows):
+            f.write('|'.join(rows[sid][c] for c in _SOURCE_FIX_COLUMNS) + '\n')
+
+
 def mark_source_fix(project_dir: str, scene_id: str, why: str, prose: str | None = None) -> None:
-    """List `scene_id` for the author to fix toward the source (#557):
-    command `SOURCE_FIX`, `why`, and the prose it was listed for
-    (`[prose: sha1]`; `prose`, else the scene file), so the row stays until
-    the prose changes (`source_fix_waits`). A scene already listed keeps its
-    row and command, with `why` added to its reason (#557's review: never
-    dropped silently)."""
-    rows = pending(project_dir)
-    old = rows.get(scene_id)
+    """List `scene_id` for the author to fix toward the source (#557), in
+    `SOURCE_FIX_PATH`, with the prose it has now (`prose`, else the scene
+    file): the row stays until a commit of the scene with other prose. A
+    scene listed already gets `why` added."""
+    from storyforge.common import csv_safe
+    rows = source_fixes(project_dir)
     sha = _prose_sha(prose) if prose is not None else _scene_sha(project_dir, scene_id)
-    if old is None:
-        mark_pending(project_dir, scene_id, SOURCE_FIX, f'source: {why} [prose: {sha}]')
+    why = csv_safe(_one_line(why))
+    old = rows.get(scene_id)
+    if old and why in old['reason']:
         return
-    if why in old['reason']:
-        return
-    reason = _SOURCE_FIX_TAG.sub('', old['reason'])
-    reason += f' / source: {why}'
-    if old['command'] == SOURCE_FIX:
-        m = _SOURCE_FIX_TAG.search(old['reason'])
-        reason += f' [prose: {m.group(1) if m else sha}]'
-    mark_pending(project_dir, scene_id, old['command'], reason)
+    reason = f"{old['reason']} / {why}" if old else why
+    rows[scene_id] = {'scene_id': scene_id, 'prose': sha, 'reason': reason}
+    _write_source_fixes(project_dir, rows)
+
+
+def clear_source_fix(project_dir: str, scene_id: str) -> None:
+    rows = source_fixes(project_dir)
+    if rows.pop(scene_id, None) is not None:
+        _write_source_fixes(project_dir, rows)
 
 
 def source_fix_waits(project_dir: str, scene_id: str, prose: str | None = None) -> bool:
-    """Whether `scene_id` is listed `SOURCE_FIX` for the prose it has now
-    (`prose`, else the scene file): the author hasn't changed it, so
-    checking it again can't clear the row."""
+    """Whether `scene_id` is listed to fix toward the source and its prose
+    (`prose`, else the scene file) hasn't changed since: checking it again
+    can't clear the row."""
     try:
-        row = pending(project_dir).get(scene_id)
+        row = source_fixes(project_dir).get(scene_id)
     except GateError:
         return False
-    if not row or row['command'] != SOURCE_FIX:
+    if not row:
         return False
-    m = _SOURCE_FIX_TAG.search(row['reason'])
     sha = _prose_sha(prose) if prose is not None else _scene_sha(project_dir, scene_id)
-    return bool(m) and m.group(1) == sha
+    return row['prose'] == sha
 
 
-_source_fix_waits = source_fix_waits
+def _keep_superseded(project_dir: str, result: GateResult, rows: list[dict[str, str]],
+                     prose: str) -> bool:
+    """#557's second review. While the scene's prose is the one listed to
+    fix toward the source (or isn't listed), a proposed row restating one
+    of its `superseded` commitments (the same fact, or a quote holding or
+    held by its quote) is dropped: the source ruled it wrong, and a
+    re-check must never bind it again, whatever the source call does this
+    time. Once the scene is listed and its prose changed, its superseded
+    commitments are retired (taken out of `rows`), and True is returned so
+    the row comes off after the commit."""
+    mine = [r for r in rows if r.get('status') == 'superseded'
+            and (r.get('scene_id') or '').strip() == result.scene_id
+            and ledger.is_commitment(r)]
+    try:
+        listed = source_fixes(project_dir).get(result.scene_id)
+    except GateError as e:
+        result.source_notes.append(str(e))
+        listed = None
+    if listed and listed['prose'] != _prose_sha(prose):
+        gone = {r['id'] for r in mine}
+        rows[:] = [r for r in rows if r.get('id') not in gone]
+        if gone:
+            result.source_notes.append(f'retired, the prose fixed toward the source: '
+                                       f'{", ".join(sorted(gone))}')
+        return True
+    if not mine:
+        return False
+    keys = {ledger.fact_key(r) for r in mine}
+    quotes = [_words(r.get('quote') or '') for r in mine]
+
+    def restates(p: dict[str, str]) -> bool:
+        q = _words(p.get('quote') or '')
+        return ledger.fact_key(p) in keys or (_count(q) >= _MIN_QUOTE_WORDS and any(
+            q in o or o in q for o in quotes if o.strip()))
+    again = [p for p in result.proposed if restates(p)]
+    if again:
+        result.proposed = [p for p in result.proposed if not restates(p)]
+        result.source_notes.append('not recorded, the source ruled them wrong (superseded): '
+                                   + '; '.join(_one_line(p.get('statement', ''))[:100]
+                                               for p in again))
+    return False
+
+
 
 
 def _gone_scenes(project_dir: str) -> set[str]:
@@ -2592,9 +2683,6 @@ RECHECK, RECHECK_FAILED = 'recheck', 'recheck-failed'
 #: it; when it passes the gate, the scenes depending on the rejection are
 #: listed (its reason carries `[rejected: ids]`, kept by `mark_pending`)
 REVISE_REJECTED = 'revise-rejected'
-#: An earlier scene the source contradicts where a later one follows it
-#: (#557): the author's to fix; it doesn't stop drafting
-from storyforge.gate_source import SOURCE_FIX  # noqa: E402
 
 
 @dataclass

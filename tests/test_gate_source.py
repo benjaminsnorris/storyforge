@@ -37,7 +37,8 @@ def adaptation(monkeypatch):
     return ctx
 
 
-def _run(project_dir, tmp_path, commitments, findings=(), source=None, sent=None):
+def _run(project_dir, tmp_path, commitments, findings=(), source=None, sent=None,
+         scene=SCENE):
     def fake(path, body, **k):
         if _is_persistence(body):
             return _persistence_reply(body)
@@ -51,7 +52,7 @@ def _run(project_dir, tmp_path, commitments, findings=(), source=None, sent=None
             return _text({'findings': list(findings), 'kept': []})
         return _text({'commitments': list(commitments)})
     with patch('storyforge.api._api_request', side_effect=fake):
-        return gate.gate_scene(project_dir, SCENE, command='draft',
+        return gate.gate_scene(project_dir, scene, command='draft',
                                log_dir=str(tmp_path / 'logs'), extract_model='m',
                                check_model='m')
 
@@ -108,8 +109,9 @@ def test_a_contradiction_the_source_backs_this_scene_on_does_not_block(
                   if r['scene_id'] == SCENE and ledger.is_commitment(r))
     assert mine == sorted([SECOND, "Tarren's Hollow had 412 people"])
     assert result.source_superseded == ['early-wrong']
-    row = gate.pending(project_dir)[EARLIER]
-    assert row['command'] == gate.SOURCE_FIX and SCENE in row['reason']
+    assert EARLIER not in gate.pending(project_dir)   # its own file, not a gate stop
+    row = gate.source_fixes(project_dir)[EARLIER]
+    assert SCENE in row['reason'] and gate.source_fix_waits(project_dir, EARLIER)
     lines = gate.report_lines(result)
     assert any(line.startswith('SOURCE BACKS THIS SCENE') for line in lines)
     assert any('no longer binding' in line and 'early-wrong' in line for line in lines)
@@ -125,40 +127,95 @@ def test_with_no_earlier_fact_found_its_commitments_are_held_back(
     assert mine == [SECOND]
 
 
-def test_the_source_fix_row_stays_until_the_earlier_prose_changes(
-        project_dir, tmp_path, adaptation, monkeypatch):
-    import os
-    _earlier_fact(project_dir)
-    _backs(project_dir, tmp_path)
-    assert gate.source_fix_waits(project_dir, EARLIER)
-    # a pass of the unchanged earlier scene doesn't clear it
+def _cmd_check(project_dir, monkeypatch):
     from storyforge import cmd_check
     monkeypatch.setattr(cmd_check, 'detect_project_root', lambda: project_dir)
     monkeypatch.setattr('storyforge.git.create_branch', lambda *a: 'b')
     monkeypatch.setattr('storyforge.git.commit_and_push', lambda *a, **k: True)
-    cmd_check.main(['--pending'])   # nothing else waits: it is skipped, said
-    assert gate.pending(project_dir)[EARLIER]['command'] == gate.SOURCE_FIX
+    return cmd_check
+
+
+WRONG = _commitment(statement='The Hollow had 300 people', subject='tarrens-hollow',
+                    quote='Dorren Hayle pressed the brass calipers against the vellum')
+
+
+def _edit_earlier(project_dir):
+    import os
     path = os.path.join(project_dir, 'scenes', f'{EARLIER}.md')
     with open(path, encoding='utf-8') as f:
         text = f.read()
     with open(path, 'w', encoding='utf-8') as f:
-        f.write(text.replace('Dorren', 'Dorren', 1) + '\n\nA new line toward the source.\n')
+        f.write(text + '\n\nA new line toward the source.\n')
+
+
+def test_the_source_fix_row_stays_until_the_earlier_prose_changes(
+        project_dir, tmp_path, adaptation, monkeypatch):
+    _earlier_fact(project_dir)
+    _backs(project_dir, tmp_path)
+    assert gate.source_fix_waits(project_dir, EARLIER)
+    _cmd_check(project_dir, monkeypatch).main(['--pending'])   # skipped, said
+    assert EARLIER in gate.source_fixes(project_dir)
+    _edit_earlier(project_dir)
     assert not gate.source_fix_waits(project_dir, EARLIER)
 
 
-def test_a_scene_already_waiting_gets_the_source_fix_added(project_dir, adaptation):
-    gate.mark_pending(project_dir, EARLIER, 'draft', '2 problem(s)')
+def test_a_passing_recheck_of_the_earlier_scene_keeps_its_source_fix(
+        project_dir, tmp_path, adaptation):
+    """#557's second review: the earlier scene was already listed for a
+    re-check; its pass cleared the row and the source fix with it."""
+    _earlier_fact(project_dir)
+    gate.mark_pending(project_dir, EARLIER, gate.RECHECK, 're-check: x changed 1 fact(s)')
+    _backs(project_dir, tmp_path)
+    result = _run(project_dir, tmp_path, [WRONG], scene=EARLIER)   # the re-check passes
+    assert result.passed and EARLIER not in gate.pending(project_dir)
+    assert gate.source_fix_waits(project_dir, EARLIER)
+
+
+@pytest.mark.parametrize('source', [RuntimeError('HTTP 500'),
+                                    {'facts': [], 'contradictions': []}])
+def test_a_regate_of_the_unchanged_earlier_scene_never_rebinds_the_wrong_fact(
+        project_dir, tmp_path, adaptation, source):
+    """#557's second review: re-gated with its prose unchanged, the earlier
+    scene's wrong fact was read again as new and committed binding beside
+    the superseded row (the source call failed, or gave no verdict)."""
+    _earlier_fact(project_dir)
+    _backs(project_dir, tmp_path)
+    gate_source._MEMO.clear()
+    result = _run(project_dir, tmp_path, [WRONG], scene=EARLIER, source=source)
+    assert result.committed
+    early = [r for r in ledger.load(project_dir)
+             if r['scene_id'] == EARLIER and ledger.is_commitment(r)]
+    assert [(r['statement'], r['status']) for r in early] == [
+        ('The Hollow had 300 people', 'superseded')]
+    assert any('superseded' in n for n in result.source_notes)
+
+
+def test_fixing_the_earlier_prose_retires_its_superseded_rows_and_the_row(
+        project_dir, tmp_path, adaptation):
+    _earlier_fact(project_dir)
+    _backs(project_dir, tmp_path)
+    _edit_earlier(project_dir)
+    right = _commitment(statement='The Hollow had 412 people', subject='tarrens-hollow',
+                        quote='A new line toward the source')
+    result = _run(project_dir, tmp_path, [right], scene=EARLIER)
+    assert result.committed
+    early = [(r['statement'], r['status']) for r in ledger.load(project_dir)
+             if r['scene_id'] == EARLIER and ledger.is_commitment(r)]
+    assert early == [('The Hollow had 412 people', 'binding')]
+    assert EARLIER not in gate.source_fixes(project_dir)
+
+
+def test_a_second_source_fix_adds_its_reason(project_dir, adaptation):
+    gate.mark_source_fix(project_dir, EARLIER, 'first reason')
     gate.mark_source_fix(project_dir, EARLIER, 'the source tells it otherwise')
-    row = gate.pending(project_dir)[EARLIER]
-    assert row['command'] == 'draft'
-    assert '2 problem(s)' in row['reason'] and 'the source tells it otherwise' in row['reason']
+    row = gate.source_fixes(project_dir)[EARLIER]
+    assert 'first reason' in row['reason'] and 'the source tells it otherwise' in row['reason']
 
 
 def test_a_dropped_fact_lists_the_scene_for_the_author(project_dir, tmp_path, adaptation):
     _run(project_dir, tmp_path, _two(), source={
         'facts': [{'n': 2, 'verdict': 'contradicts', 'why': 'w'}], 'contradictions': []})
-    row = gate.pending(project_dir)[SCENE]
-    assert row['command'] == gate.SOURCE_FIX and 'contradicts 1 fact' in row['reason']
+    assert 'contradicts 1 fact' in gate.source_fixes(project_dir)[SCENE]['reason']
 
 
 def test_an_unchanged_recheck_makes_no_call_and_a_repeat_reuses_the_ruling(
@@ -223,10 +280,12 @@ def test_free_mode_and_unmapped_scenes_say_why(project_dir, tmp_path, monkeypatc
     assert 'invented or not mapped' in result.source_notes[0]
 
 
-def test_source_fix_rows_do_not_stop_drafting(project_dir):
+def test_source_fixes_do_not_stop_drafting_and_status_shows_them(project_dir):
     from storyforge import cmd_write
-    gate.mark_pending(project_dir, EARLIER, gate.SOURCE_FIX, 'source: later scene')
+    from storyforge.status import gate_waiting
+    gate.mark_source_fix(project_dir, EARLIER, 'later scene')
     assert cmd_write._gate_blockers(project_dir, 'act2-sc01') == []
+    assert [r['command'] for r in gate_waiting(project_dir)] == ['source-fix']
 
 
 def test_setup_reads_a_real_adaptation(tmp_path):
