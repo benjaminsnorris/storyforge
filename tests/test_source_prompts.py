@@ -108,8 +108,8 @@ class TestWithSource:
             'storyforge.yaml': YAML.format(
                 extra='  mode: faithful\n  rules: reference/version-rules.md#version-rules')})
         p = pe.build_spine_prompt(adapted, PLUGIN, 'seed', system_context=True)
-        assert '\n## Version rules\n\nNo gods cut.' in p
-        assert '### Version rules' not in p
+        assert '\n### Version rules\n\nNo gods cut.' in p     # demoted under ## Source
+        assert '\n## Version rules\n\nNo gods cut.' not in p
 
     def test_spine_lists_the_source_spine_when_there_is_one(self, adapted, tmp_path):
         _write(adapted, {'reference/source/odyssey/spine.csv':
@@ -244,3 +244,55 @@ class TestDraftingPrompt:
         from storyforge.prompts import build_scene_prompt_from_briefs
         p = build_scene_prompt_from_briefs('act1-sc01', project_dir, PLUGIN, 'full')
         assert '## Source' not in p and '<source-prose' not in p
+
+
+class TestDraftingPromptBranches:
+    """#571's review: the drafting section's other branches."""
+
+    def _prompt(self, project, scene_id):
+        from storyforge.prompts import build_scene_prompt_from_briefs
+        return build_scene_prompt_from_briefs(scene_id, project, PLUGIN, 'full',
+                                              system_context=True)
+
+    def _map(self, adapted, row):
+        _write(adapted, {'reference/source-map.csv':
+                         'scene_id|source_scenes|treatment|note\n' + row + '\n'})
+
+    def test_a_source_scene_not_found_is_named(self, adapted, capsys):
+        self._map(adapted, 'athena-at-the-door|minerva-visits;no-such-scene|compress|')
+        p = self._prompt(adapted, 'athena-at-the-door')
+        assert 'Not found in the imported source: no-such-scene.' in p
+        assert '<source-prose scene="minerva-visits">' in p
+        assert 'source scenes not found in the imported source' in capsys.readouterr().out
+
+    def test_a_source_scene_with_no_prose_says_so(self, adapted, monkeypatch):
+        monkeypatch.setattr(source, 'source_prose', lambda *a: '')
+        self._map(adapted, 'athena-at-the-door|minerva-visits|compress|')
+        p = self._prompt(adapted, 'athena-at-the-door')
+        assert '#### Source scene odyssey:minerva-visits\n\n(no source prose for this scene)' in p
+        assert '<source-prose' not in p
+
+    def test_a_mapped_scene_with_no_source_scenes_says_so(self, adapted):
+        self._map(adapted, 'athena-at-the-door||dramatize|')
+        p = self._prompt(adapted, 'athena-at-the-door')
+        assert 'The map gives no source scene for it.' in p
+        assert '<source-prose' not in p and 'softens the killing' in p
+
+    def test_rules_from_a_file_section_sit_under_source(self, adapted):
+        _write(adapted, {
+            'homer/version-rules.md': '# Rules\n\n## Teen\n\nNo gore.\n\n### Detail\n\nx\n',
+            'storyforge.yaml': YAML.format(
+                extra='  mode: faithful\n  rules: homer/version-rules.md#teen')})
+        section = self._prompt(adapted, 'athena-at-the-door').split('## Source\n', 1)[1]
+        assert '\n### Teen\n\nNo gore.' in section and '\n#### Detail' in section
+        assert '\n## Teen' not in section
+
+
+def test_a_drafting_prompt_without_a_source_block_is_unchanged(project_dir):
+    """#561: generated from main's builder before the drafting section; a
+    deliberate prompt change regenerates the file."""
+    from storyforge.prompts import build_scene_prompt_from_briefs
+    golden = os.path.join(PLUGIN, 'tests', 'fixtures', 'golden-prompts', 'drafting.txt')
+    with open(golden, encoding='utf-8', newline='') as f:
+        assert build_scene_prompt_from_briefs('act1-sc02', project_dir, PLUGIN, 'full',
+                                              system_context=True) == f.read()

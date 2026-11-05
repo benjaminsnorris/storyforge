@@ -19,6 +19,7 @@ SourceError before any prompt is built.
 from __future__ import annotations
 
 import os
+import re
 
 from storyforge import source
 from storyforge.common import log
@@ -66,8 +67,15 @@ def _rules_in_key_decisions(project_dir: str, cfg: source.SourceConfig) -> bool:
 def _rules_text(rules: str) -> str:
     """The rules under a `### Version rules` heading, unless they open with
     their own heading (a `file.md#section` keeps it): wrapping that one put
-    `## Version rules` under `### Version rules` (B-015)."""
-    return f'\n{rules}\n' if rules.startswith('#') else f'\n### Version rules\n\n{rules}\n'
+    `## Version rules` under `### Version rules` (B-015). Their own headings
+    are demoted so the top one is `###`, under the prompt's `## Source`."""
+    if not rules.startswith('#'):
+        return f'\n### Version rules\n\n{rules}\n'
+    lines = rules.splitlines()
+    top = min(len(m.group(1)) for m in (re.match(r'^(#+)\s', ln) for ln in lines) if m)
+    shift = max(0, 3 - top)
+    out = [('#' * shift + ln) if re.match(r'^#+\s', ln) else ln for ln in lines]
+    return '\n' + '\n'.join(out) + '\n'
 
 
 def rules_block(project_dir: str, cfg: source.SourceConfig, *,

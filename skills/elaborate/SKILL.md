@@ -30,7 +30,7 @@ Read the following files to understand where the project stands:
 
 When `storyforge.yaml` has a `source:` block, this novel adapts another Storyforge project (a retelling, an expansion, a rewrite). Before any stage:
 
-1. Check `reference/source/<slug>/` exists for each source. If not, the source isn't imported: offer `storyforge source import` (deterministic, no cost). It copies the source's CSVs, bibles and prose there with the name map applied and writes `source-bible.md`, and seeds the project's empty `characters.csv`, `locations.csv` and `values.csv` from the source's (a registry with rows is never touched). Never edit `reference/source/`; re-run the import. Fill the seeded cast's `pronouns` and `death_scene` as the novel needs.
+1. Check `reference/source/<slug>/` exists for each source. If not, the source isn't imported: offer `storyforge source import` (deterministic, no cost). It copies the source's CSVs, bibles and prose there with the name map applied and writes `source-bible.md`, and seeds the project's empty `characters.csv`, `locations.csv` and `values.csv` from the source's (a registry with rows is never touched; a source with a `range:` gives only the cast, places and values its adapted scenes use). Never edit `reference/source/`; re-run the import. Fill the seeded cast's `pronouns` and `death_scene` as the novel needs.
 2. Read `reference/source/<slug>/source-bible.md`, `source.mode` (`faithful`: every source scene is adapted or cut with a reason, or validate blocks, and revise fixes source drift; `free`: a source scene left out or cut without a reason is advisory, and drift is reported but not fixed) and the version rules `source.rules` names (usually a section of `reference/key-decisions.md`).
 3. Spine: select and reframe the source's events; don't invent the spine. Architecture: start from the source's cast and POV distribution. Map: write `reference/source-map.csv` (`scene_id|source_scenes|treatment|note`) accounting for every source scene; treatments `dramatize`, `compress`, `expand`, `pov-shift`, `reorder`, `invent`, `cut` (a `cut` row has an empty `scene_id` and a reason in `note`). Briefs: write each brief looking at its source scenes' briefs and prose (`reference/source/<slug>/scenes/`); the source prose keeps the translator's names, so write the name map's names.
 4. `storyforge validate` reports coverage ("Source odyssey: 170 scenes, 162 mapped, ..."); `storyforge score --source-fidelity briefs` checks the briefs against the source before any prose, tagging each departure `deliberate` (the treatment, note or a version rule allows it) or `drift`.
@@ -241,9 +241,11 @@ author.
 ### Scene Map Stage (Interactive)
 
 1. Read architecture scenes and reference materials
-2. Compute target scene count from `project.target_words`: `target_words / 2000` (lower) to `target_words / 1500` (upper), minimum 40. For an 80k novel this is 40-53; for 100k it's 50-67. **Prefer more, shorter scenes** (1500-2000 words each) — Claude follows brief constraints more reliably in focused scenes, and scoring/revision are more precise on smaller units.
+2. Compute target scene count from `project.target_words`: `target_words / 2000` (lower) to `target_words / 1500` (upper), minimum 40. For an 80k novel this is 40-53; for 100k it's 50-67. A scene count the author recorded in key-decisions.md wins over this estimate. **Prefer more, shorter scenes** (1500-2000 words each) — Claude follows brief constraints more reliably in focused scenes, and scoring/revision are more precise on smaller units.
 3. Expand to that range: fill gaps, add transitions, subplot scenes, breathing room
 4. Assign locations, timeline, characters, MICE threads — **all registry-backed fields must use canonical IDs** (characters, locations, values, mice_threads). Add new registry entries for anything introduced at this stage.
+   - Set `architecture_scene` on every scene: its own id for an architecture scene, the anchor's id for a scene split off one (`score --all-boundaries` gathers an anchor's map scenes by it). Leave it empty only for a new scene that serves no architecture scene.
+   - An enum cell holds only its value (`turning_point` `action`, never `action: she strikes`; `time_of_day` one of morning, afternoon, evening, night, dawn, dusk or unstated). The CLI stage splits a `value: description` cell and keeps the description in `function`.
 5. Write updates
 6. Run validation — MICE nesting, timeline, character references
 7. Commit: `git add -A && git commit -m "Elaborate: scene map" && git push`
@@ -333,7 +335,9 @@ Reference images upload alongside the prompt, labeled by role: **Image 1** chara
 
 ### Voice Stage (Interactive)
 
-Voice development typically happens after architecture (you know your POV characters and scene types) and before briefs (the briefs need voice rules). Can also run standalone at any point.
+Voice development typically happens after architecture (you know your POV characters and scene types) and before briefs (the briefs need voice rules). Can also run standalone at any point. Unattended, `./storyforge elaborate --stage voice` writes `reference/voice-guide.md` and `reference/voice-profile.csv` in one call; it advances no phase.
+
+Every CLI stage sets `exists: true` and `updated` on the `storyforge.yaml` artifacts it writes (story architecture, bibles, voice guide, scene index).
 
 1. Read existing reference materials (character bible for voice fingerprints, story architecture for tone)
 2. If voice guide doesn't exist: explore the author's influences, genre voice expectations, POV rules, prose register. Build `reference/voice-guide.md` through conversation.
@@ -476,6 +480,11 @@ This mode activates when Scene Function Variety is below target — typically on
 4. **Apply changes.** Update `outcome` in scene-briefs.csv. If the outcome changes, the brief's crisis/decision may also need adjustment — offer to update those too.
 
 5. **Verify.** Re-run scoring to confirm improvement.
+
+**In a `faithful` adaptation** (`source:` block, `mode: faithful`), the source fixes most outcomes, and a relabelled one is drift that `score --source-fidelity` will flag. Before step 1, read `reference/source-map.csv`:
+- A scene **keeps the source's outcome** when it is the last scene (by `seq`) whose `source_scenes` ends on a given source scene: every single-source scene, and the last part of a source scene split in several. `storyforge validate --structural` names how many of the dominant type these are.
+- Only the others are open: invented scenes (`treatment` `invent`) and the earlier parts of a split source scene. Propose changes to those alone, and give a split scene's earlier part a map `note` when its outcome is its own.
+- The source's mix is the target, not "no type over 40%". Show the distribution as fixed and open counts, and say so when the source itself leans one way (Gawain ends 50% `yes-but`, which is the poem: every win costs him).
 
 **Coaching level adaptation:**
 - **Full:** Propose 3-5 specific outcome changes with dramatic reasoning.

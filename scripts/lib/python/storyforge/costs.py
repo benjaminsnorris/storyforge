@@ -12,6 +12,7 @@ import os
 import sys
 import threading
 from datetime import datetime
+from typing import NamedTuple
 
 #: Serializes ledger writes. Commands that fan API calls out across a thread
 #: pool (`runner.run_parallel` — cmd_illustrate --prompts, cmd_write_gn,
@@ -67,7 +68,9 @@ LEDGER_HEADER = 'timestamp|operation|target|model|input_tokens|output_tokens|cac
 
 # Output tokens per scope item, by operation type (for estimates)
 _OUTPUT_PER_ITEM = {
-    'draft': 1500,
+    # a draft's prose and the model's thinking before it: about 3,700-4,000
+    # on the Beowulf and Gawain runs (G-027, #563)
+    'draft': 4000,
     'write': 1500,
     'evaluate': 2000,
     'revise': 1000,
@@ -180,6 +183,86 @@ def estimate_cost(operation: str, scope_count: int, avg_words: int,
     price_out = _get_price(model, 'output')
 
     return (input_tokens * price_in + output_tokens * price_out) / 1_000_000
+
+
+#: Draft rows in the cost ledger from which `write` prices its forecast by
+#: what this book's drafts and gates actually cost (#563)
+LEDGER_FORECAST_MIN_DRAFTS = 3
+
+
+class WriteForecast(NamedTuple):
+    """`write`'s forecast: `draft` and `gate` (the gate's runs, its fixes and
+    the re-checks they set off) in US dollars, and `basis`, said in the log."""
+    draft: float
+    gate: float
+    basis: str
+
+    @property
+    def total(self) -> float:
+        return self.draft + self.gate
+
+
+def ledger_rows(project_dir: str, operations: tuple[str, ...]) -> list[dict[str, str]]:
+    """The cost ledger's rows for `operations`, as dicts ([] with no ledger)."""
+    path = os.path.join(project_dir, 'working', 'costs', 'ledger.csv')
+    try:
+        with open(path, encoding='utf-8') as f:
+            lines = [ln.rstrip('\n') for ln in f if ln.strip()]
+    except OSError:
+        return []
+    if not lines:
+        return []
+    header = lines[0].split('|')
+    rows = [dict(zip(header, ln.split('|'))) for ln in lines[1:]]
+    return [r for r in rows if r.get('operation') in operations]
+
+
+def _row_cost(row: dict[str, str]) -> float:
+    try:
+        return float(row.get('cost_usd') or 0)
+    except ValueError:
+        return 0.0
+
+
+def forecast_write(project_dir: str, scene_ids: list[str], avg_words: int, model: str, *,
+                   gate_per_scene: float = 0.0, earlier_words: dict[str, int] | None = None,
+                   shared_tokens: int = 0, batch: bool = False) -> WriteForecast:
+    """What drafting `scene_ids` (and gating them, when `gate_per_scene`)
+    will cost (G-027, B-026).
+
+    With at least `LEDGER_FORECAST_MIN_DRAFTS` `draft` rows in the project's
+    cost ledger, each scene is priced at their average, and the gate at the
+    ledger's `gate` and `gate-fix` spend per draft: what this book's scenes
+    have cost. Otherwise each draft is priced by tokens: its brief and words
+    (`estimate_cost`'s model), plus the shared context (`shared_tokens`) and
+    the earlier prose it is sent with (`earlier_words`, by scene id) read
+    from cache; and the gate at `gate_per_scene`. `batch` halves the token
+    model's draft (the ledger's rows already cost what they cost)."""
+    n = len(scene_ids)
+    drafts = ledger_rows(project_dir, ('draft',))
+    if len(drafts) >= LEDGER_FORECAST_MIN_DRAFTS:
+        per_draft = sum(_row_cost(r) for r in drafts) / len(drafts)
+        gate = 0.0
+        if gate_per_scene:
+            gate = n * sum(_row_cost(r) for r in ledger_rows(
+                project_dir, ('gate', 'gate-fix'))) / len(drafts)
+        return WriteForecast(n * per_draft, gate,
+                             f'priced from this book\'s {len(drafts)} drafts so far: '
+                             f'~${per_draft:.2f} a draft'
+                             + (f', ~${gate / n:.2f} a scene for the gate' if gate_per_scene
+                                else ''))
+    draft = estimate_cost('draft', n, avg_words, model)
+    earlier = earlier_words or {}
+    cached = sum(shared_tokens + earlier.get(s, 0) * 1.3 for s in scene_ids)
+    draft += cached * _get_price(model, 'cache_read') / 1_000_000
+    if batch:
+        draft *= BATCH_DISCOUNT
+    return WriteForecast(draft, n * gate_per_scene,
+                         f'priced by tokens: avg {avg_words} words a scene, model {model}'
+                         + (', the earlier prose and shared context read from cache'
+                            if cached else '')
+                         + f' (the ledger prices it once it has '
+                           f'{LEDGER_FORECAST_MIN_DRAFTS} drafts)')
 
 
 def _accumulate(rows: list, col_map: dict) -> dict:
