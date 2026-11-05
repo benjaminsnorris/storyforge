@@ -193,23 +193,21 @@ A map of back matter items to their file paths. Common keys: `acknowledgments`, 
 
 ## `parts`
 
-Optional part or act groupings for multi-part books. Each entry defines a named part that groups a range of chapters.
+Optional book parts: the real divisions of the book, each with its own part page ("Part One: The Signal"). A chapter belongs to a part through the `part` column of `reference/chapter-map.csv`, which holds the part's `number`. Every format prints a part page before the first chapter of each titled part: the web book's interstitial page, a part heading on a page of its own in the epub, HTML and PDF (styled by `templates/production/css/parts.css`), and Bookshelf through the publish manifest. A part number with no entry here (or no title) prints nothing, so a book can number its chapters' parts without part pages.
 
 | Field | Type | Required | Description | Default | Example |
 |-------|------|----------|-------------|---------|---------|
+| `number` | integer | required | The part's number, as the chapter map's `part` column gives it. | — | `1` |
 | `title` | string | required | The part title as it appears in the book. | — | `"Part One: The Signal"` |
-| `chapters` | list | required | List of chapter numbers (from chapter-map.csv) that belong to this part. | — | `[1, 2, 3, 4]` |
 
 ### Example
 
 ```yaml
 parts:
-  - title: "Part One: The Signal"
-    chapters: [1, 2, 3, 4]
-  - title: "Part Two: First Contact"
-    chapters: [5, 6, 7, 8, 9]
-  - title: "Part Three: The Reckoning"
-    chapters: [10, 11, 12]
+  - number: 1
+    title: "Part One: The Signal"
+  - number: 2
+    title: "Part Two: First Contact"
 ```
 
 ## `source`
@@ -380,8 +378,8 @@ production:
     description:
 
 parts:
-  - title: "Part One: The Signal"
-    chapters: [1, 2, 3, 4]
-  - title: "Part Two: First Contact"
-    chapters: [5, 6, 7, 8, 9]
+  - number: 1
+    title: "Part One: The Signal"
+  - number: 2
+    title: "Part Two: First Contact"
 ```
