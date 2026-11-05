@@ -109,8 +109,10 @@ class TestParseSkeletonResponse:
         cues = skeleton_cues(_reply('SKELETON_SCHEMA', time_relation='later',
                                     time_gap='three weeks', time_anchor='none',
                                     time_date='1922-07-04'))
+        # The skeleton doesn't ask the timeline's link labels (#351): empty
         assert cues == {'relation': 'later', 'gap': 'three weeks', 'anchor': '',
-                        'refers': '', 'span': '', 'date': '1922-07-04'}
+                        'refers': '', 'span': '', 'date': '1922-07-04',
+                        'link': '', 'bound': ''}
 
 
 class TestParseIntentResponse:
