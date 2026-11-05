@@ -743,18 +743,43 @@ def plan_import(project_dir: str, cfg: SourceConfig, slug: str) -> ImportResult:
 # and map stages have canonical ids to use instead of coining them.
 SEEDED_REGISTRIES = ('characters.csv', 'locations.csv', 'values.csv')
 
+# Where a source scene names a registry's ids: a ranged source seeds only the
+# ids its adapted scenes use. (file, column) pairs; `;` separates ids.
+_SEED_USES = {
+    'characters.csv': (('scenes.csv', 'pov'), ('scene-intent.csv', 'characters'),
+                       ('scene-intent.csv', 'on_stage')),
+    'locations.csv': (('scenes.csv', 'location'),),
+    'values.csv': (('scene-intent.csv', 'value_at_stake'),),
+}
 
-def seed_registries(project_dir: str, cfg: SourceConfig) -> list[tuple[str, int]]:
+
+def _ids_in_range(project_dir: str, slug: str, name: str,
+                  span: frozenset[str]) -> set[str]:
+    """The ids of registry `name` that the source's scenes in `span` use."""
+    used: set[str] = set()
+    for table, col in _SEED_USES[name]:
+        for row in read_table(project_dir, slug, table):
+            if row.get('id', '').strip() in span:
+                used.update(v.strip() for v in row.get(col, '').split(';') if v.strip())
+    return used
+
+
+def seed_registries(project_dir: str, cfg: SourceConfig) -> list[tuple[str, int, int]]:
     """Fill each of the project's own registries (`SEEDED_REGISTRIES`) that
     is missing or has no rows from the imported sources' copies, which
-    already carry the name map. A registry with any row is the author's and
-    is never touched. The project's header is kept (a column the source
-    lacks, such as `pronouns`, is left empty; one only the source has is
-    dropped); with no project file, the source's header is used. With
-    several sources the first to give an id wins. Returns (file, rows
-    written) for each registry seeded."""
+    already carry the name map. A source with a `range:` gives only the rows
+    its adapted scenes use (`_SEED_USES`: the cast, the location, the value
+    at stake), so a novel of Books I-IV doesn't start with the whole epic's
+    cast. A registry with any row is the author's and is never touched. The
+    project's header is kept (a column the source lacks, such as `pronouns`,
+    is left empty; one only the source has is dropped); with no project
+    file, the source's header is used. With several sources the first to
+    give an id wins. Returns (file, rows written, rows the sources' copies
+    have) for each registry seeded; the two counts differ only for a range.
+    Raises SourceError as `spans` does."""
     seeded = []
     ref = os.path.join(project_dir, 'reference')
+    spans_ = spans(project_dir, cfg)
     for name in SEEDED_REGISTRIES:
         own = os.path.join(ref, name)
         header: list[str] = []
@@ -766,6 +791,7 @@ def seed_registries(project_dir: str, cfg: SourceConfig) -> list[tuple[str, int]
             if rows:
                 continue
         merged: dict[str, dict[str, str]] = {}
+        everything: set[str] = set()
         src_header: list[str] = []
         for slug in cfg.slugs():
             path = os.path.join(source_dir(project_dir, slug), name)
@@ -775,10 +801,16 @@ def seed_registries(project_dir: str, cfg: SourceConfig) -> list[tuple[str, int]
             if problem or 'id' not in h:
                 continue
             src_header = src_header or h
+            span = spans_.get(slug)
+            keep = None if span is None else _ids_in_range(project_dir, slug, name, span)
             for r in rows:
                 row = dict(zip(h, r))
-                if row['id'].strip() and row['id'] not in merged:
-                    merged[row['id']] = row
+                rid = row['id'].strip()
+                if not rid:
+                    continue
+                everything.add(rid)
+                if (keep is None or rid in keep) and rid not in merged:
+                    merged[rid] = row
         if not merged:
             continue
         header = header or src_header
@@ -786,7 +818,7 @@ def seed_registries(project_dir: str, cfg: SourceConfig) -> list[tuple[str, int]
         os.makedirs(ref, exist_ok=True)
         with open(own, 'w', encoding='utf-8', newline='') as f:
             f.write(_render_csv(header, out))
-        seeded.append((f'reference/{name}', len(out)))
+        seeded.append((f'reference/{name}', len(out), len(everything)))
     return seeded
 
 

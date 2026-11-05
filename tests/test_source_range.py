@@ -707,3 +707,52 @@ class TestTwoSources:
         assert '#### Source scene iliad:ship-sails' in p
         with pytest.raises(source.SourceError, match='athena-at-the-door \\(odyssey:ship-sails'):
             prompts_source.briefs_section(two, None)
+
+
+class TestSeedRegistriesRange:
+    """A ranged source seeds only the registry rows its adapted scenes use
+    (Telemachy pilot: Books I-IV was seeded with the whole Odyssey's 195)."""
+
+    def _seed(self, proj):
+        return {rel: (n, total) for rel, n, total
+                in source.seed_registries(proj, source.read_config(proj))}
+
+    def _ids(self, proj, name):
+        with open(os.path.join(proj, 'reference', name)) as f:
+            return [l.split('|')[0] for l in f.read().splitlines()[1:]]
+
+    def test_only_rows_the_range_uses(self, tmp_path):
+        proj = _ranged(tmp_path, rng='chapters 2-3')   # assembly-called, ship-sails
+        assert self._seed(proj) == {'reference/characters.csv': (2, 5),
+                                    'reference/locations.csv': (2, 3)}
+        assert sorted(self._ids(proj, 'characters.csv')) == ['athena', 'telemachus']
+        assert sorted(self._ids(proj, 'locations.csv')) == ['harbor', 'ithaca-hall']
+
+    def test_pov_and_characters_columns_count(self, ranged):
+        # chapters 1-2: narrator is a pov only; ulysses is in `characters`, not on stage
+        assert self._seed(ranged)['reference/characters.csv'] == (5, 5)
+        assert 'olympus' in self._ids(ranged, 'locations.csv')
+        assert 'harbor' not in self._ids(ranged, 'locations.csv')
+
+    def test_values_follow_value_at_stake(self, tmp_path):
+        proj = make_adaptation(tmp_path)
+        _write(str(tmp_path / 'odyssey'), {
+            'reference/chapter-map.csv': CHAPTER_MAP,
+            'reference/values.csv': 'id|name|aliases\nhomecoming|Homecoming|\n'
+                                    'courage|Courage|\nauthority|Authority|\n'})
+        _set_range(proj, 'chapters 3-3')   # ship-sails: courage
+        import_source(proj)
+        assert self._seed(proj)['reference/values.csv'] == (1, 3)
+        assert self._ids(proj, 'values.csv') == ['courage']
+
+    def test_cli_says_what_was_left_out(self, tmp_path, monkeypatch, capsys):
+        from storyforge import cmd_source
+        proj = make_adaptation(tmp_path)
+        _write(str(tmp_path / 'odyssey'), {'reference/chapter-map.csv': CHAPTER_MAP})
+        _set_range(proj, 'chapters 2-3')
+        monkeypatch.setattr(cmd_source, 'detect_project_root', lambda: proj)
+        assert cmd_source.main(['import', '--no-commit']) == 0
+        out = capsys.readouterr()
+        text = out.out + out.err
+        assert ('Seeded reference/characters.csv with 2 row(s) from the source (it had '
+                'none) (3 of its 5 are used only outside the range, so left out)') in text

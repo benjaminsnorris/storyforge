@@ -603,14 +603,15 @@ class TestSeedRegistries:
 
     def _seed(self, proj):
         _import(proj)
-        return source.seed_registries(proj, source.read_config(proj))
+        return {rel: (n, total) for rel, n, total
+                in source.seed_registries(proj, source.read_config(proj))}
 
     def test_empty_registries_get_the_sources_mapped_rows(self, adaptation):
         ref = os.path.join(adaptation, 'reference')
         with open(os.path.join(ref, 'characters.csv'), 'w') as f:
             f.write('id|name|aliases|role|death_scene|pronouns\n')   # init's header, no rows
-        seeded = dict(self._seed(adaptation))
-        assert seeded == {'reference/characters.csv': 5, 'reference/locations.csv': 3}
+        seeded = self._seed(adaptation)
+        assert seeded == {'reference/characters.csv': (5, 5), 'reference/locations.csv': (3, 3)}
         chars = open(os.path.join(ref, 'characters.csv')).read().splitlines()
         assert chars[0] == 'id|name|aliases|role|death_scene|pronouns'   # the project's header
         assert 'zeus|Zeus|son of Cronus|supporting||' in chars
@@ -623,7 +624,7 @@ class TestSeedRegistries:
         path = os.path.join(adaptation, 'reference', 'characters.csv')
         with open(path, 'w') as f:
             f.write('id|name\nmentor|Mentor\n')
-        seeded = dict(self._seed(adaptation))
+        seeded = self._seed(adaptation)
         assert 'reference/characters.csv' not in seeded
         assert open(path).read() == 'id|name\nmentor|Mentor\n'
 
