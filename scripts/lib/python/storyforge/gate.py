@@ -1643,11 +1643,64 @@ def gated_prose(project_dir: str, scene_id: str) -> tuple[str | None, str]:
     except (OSError, UnicodeDecodeError, ValueError) as e:
         return None, f'{PROSE_PATH} can\'t be read ({e})'
     if not blob:
+        earlier = _prose_from_history(project_dir, scene_id)
+        if earlier is not None:
+            return earlier, ''
         return None, f'{PROSE_PATH} doesn\'t record the prose its facts were read from'
     out = _git_out(project_dir, 'cat-file', 'blob', blob)
     if out is None:
         return None, f'git has no blob {blob[:12]} (the prose its facts were read from)'
     return out.decode('utf-8', errors='replace'), ''
+
+
+#: How far back `_prose_from_history` looks through the ledger's commits.
+_HISTORY_DEPTH = 300
+
+
+def _scene_rows(text: str, scene_id: str) -> list[str] | None:
+    """The ledger lines of `scene_id` in a ledger's text, sorted; None when
+    the text has no scene_id column."""
+    lines = text.splitlines()
+    if not lines or 'scene_id' not in lines[0].split('|'):
+        return None
+    at = lines[0].split('|').index('scene_id')
+    return sorted(line for line in lines[1:]
+                  if (cells := line.split('|')) and len(cells) > at and cells[at] == scene_id)
+
+
+def _prose_from_history(project_dir: str, scene_id: str) -> str | None:
+    """The prose `scene_id`'s commitments were read from, for a book gated
+    before `PROSE_PATH` existed (Beowulf B-033): the scene file as it stood at
+    the latest commit that changed the scene's ledger rows. The gate commits
+    a scene's facts with the prose it read; revise's commit of the prose
+    alone, before its gate, doesn't touch the ledger and is passed over.
+    None when the working ledger's rows for the scene differ from the last
+    committed ones (a fact not yet committed: history can't say what it was
+    read from), or git has nothing to say."""
+    rel = f'reference/{ledger.LEDGER_FILE}'
+    try:
+        with open(os.path.join(project_dir, rel), encoding='utf-8') as f:
+            current = _scene_rows(f.read(), scene_id)
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not current:
+        return None
+    log = _git_out(project_dir, 'log', '--format=%H', '-n', str(_HISTORY_DEPTH), '--', rel)
+    shas = log.decode().split() if log else []
+
+    def rows_at(sha: str) -> list[str] | None:
+        out = _git_out(project_dir, 'show', f'{sha}:./{rel}')
+        return _scene_rows(out.decode('utf-8', errors='replace'), scene_id) if out else []
+
+    for k, sha in enumerate(shas):
+        rows = rows_at(sha)
+        if k == 0 and rows != current:
+            return None
+        earlier = rows_at(shas[k + 1]) if k + 1 < len(shas) else []
+        if rows != earlier:
+            out = _git_out(project_dir, 'show', f'{sha}:./scenes/{scene_id}.md')
+            return out.decode('utf-8', errors='replace') if out is not None else None
+    return None
 
 
 def record_prose(project_dir: str, scene_id: str, prose: str) -> str:
