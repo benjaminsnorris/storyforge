@@ -27,9 +27,14 @@ from dataclasses import dataclass
 
 NARRATOR_POV = 'narrator'
 
-_VARIANT = re.compile(
-    r'^(?:the\s+)?(?:(?:omniscient|epic|third[- ]person)\s+)*(?:narrator|narration)$'
-    r'|^omniscient$')
+# Words that may precede "narrator" in a variant: "the intrusive omniscient
+# narrator", Carol's registered `intrusive-omniscient-narrator`. Anything
+# else ("Nick's narrator", "narrator-of-troy") is not the reserved value
+_QUALIFIERS = frozenset({
+    'the', 'an', 'a', 'omniscient', 'epic', 'intrusive', 'third', 'person',
+    'unnamed', 'anonymous', 'external', 'authorial', 'frame', 'framing',
+    'heterodiegetic', 'poem', "poem's", 'book', "book's",
+})
 
 _SETTING = re.compile(r'narrator_pov\s*`?\s*:\s*`?\s*(allowed|off|limited\s+(\d+))\b', re.I)
 
@@ -38,8 +43,12 @@ ALLOWED, LIMITED, OFF = 'allowed', 'limited', 'off'
 
 def is_narrator(value: str | None) -> bool:
     """True for `narrator` and the variants that mean it."""
-    text = re.sub(r'\s+', ' ', (value or '').strip().lower())
-    return bool(text) and bool(_VARIANT.match(text))
+    words = re.split(r'[\s_-]+', (value or '').strip().lower())
+    words = [w for w in words if w]
+    if words == ['omniscient']:
+        return True
+    return (bool(words) and words[-1] in ('narrator', 'narration')
+            and all(w in _QUALIFIERS for w in words[:-1]))
 
 
 def normalize_pov(value: str | None) -> str:

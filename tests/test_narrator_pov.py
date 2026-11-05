@@ -14,13 +14,15 @@ from storyforge.schema import validate_schema
 
 @pytest.mark.parametrize('value', ['narrator', 'Narrator', 'Omniscient narrator',
                                    'the narrator', 'omniscient', 'Omniscient epic narrator',
-                                   ' The  Narrator '])
+                                   ' The  Narrator ', 'intrusive-omniscient-narrator',
+                                   'third-person omniscient narration'])
 def test_variants_are_the_narrator(value):
     assert narrator.is_narrator(value)
     assert narrator.normalize_pov(value) == 'narrator'
 
 
-@pytest.mark.parametrize('value', ['', 'herald', 'narrator-of-troy', 'Nick Carraway'])
+@pytest.mark.parametrize('value', ['', 'herald', 'narrator-of-troy', 'Nick Carraway',
+                                   "nick's narrator", 'omniscient-zeus'])
 def test_others_are_not(value):
     assert not narrator.is_narrator(value)
     assert narrator.normalize_pov(value) == value
