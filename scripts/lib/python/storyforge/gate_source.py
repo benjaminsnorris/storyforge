@@ -18,10 +18,13 @@ with an earlier scene, the source scenes behind that scene. It rules:
   (`GateResult.source_backed`): on commit the earlier scene's commitments
   stating it become `superseded` and this scene's are committed, so later
   scenes follow the source (`gate._source_supersede`; one whose earlier fact
-  can't be found is held back instead), and the earlier scene is listed
-  `SOURCE_FIX` in working/gate-pending.csv for the author (`mark_source_fix`:
-  a row that doesn't stop drafting, and stays until that scene's prose
-  changes). A scene a fact was dropped from is listed the same way.
+  can't be found is held back instead), and the earlier scene is listed in
+  working/gate-source-fix.csv for the author (`gate.mark_source_fix`: apart
+  from gate-pending.csv, so it never stops drafting and a re-check never
+  clears it; only a commit of that scene with other prose does, which also
+  retires its superseded rows, and until then a re-gate never binds a
+  superseded fact again, `gate._keep_superseded`). A scene a fact was
+  dropped from is listed the same way.
 
 Cost: only facts new to the scene are sent, an unchanged re-check makes no
 call, a fix round with the same facts reuses the ruling (`_MEMO`), source

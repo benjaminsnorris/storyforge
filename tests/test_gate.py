@@ -2453,6 +2453,43 @@ class TestSteadyParagraphs:
         assert result.changed == [] and result.recheck == []
         assert {r['id'] for r in self._mine(project_dir)} == {r['id'] for r in old.values()}
 
+    def test_a_new_fact_from_a_changed_paragraph_is_never_matched_to_a_kept_one(
+            self, project_dir, tmp_path):
+        """#558's second review: a changed paragraph's new fact sharing four
+        words with a fact kept from an unchanged paragraph was dropped, and
+        never reached the ledger."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        self._edit(project_dir, 'She returned to the new map. Nothing.',
+                   'She returned to the new map. Nothing. Still four hundred and twelve at '
+                   'last census, the clerk insisted.')
+        echo = _commitment(subject='tarrens-hollow', type='knowledge',
+                           statement='The clerk insists the census still counts 412',
+                           quote='Still four hundred and twelve at last census, the clerk '
+                                 'insisted')
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                               self._temple(), echo], command='redraft')
+        assert result.committed
+        assert 'The clerk insists the census still counts 412' in [
+            r['statement'] for r in self._mine(project_dir)]
+
+    def test_a_kept_fact_stating_an_accepted_contradiction_is_held_back(
+            self, project_dir, tmp_path):
+        """#558's second review: kept facts were added after the hold-back,
+        so one stating a held-back contradiction was committed anyway."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)
+        gate.record_reported(project_dir, SCENE, 'draft', [gate.Finding(
+            'contradiction', 'TIM', HERE, 'act1-sc01',
+            'Dorren Hayle pressed the brass calipers against the vellum', '', 'why')])
+        self._edit(project_dir, 'Roads, wells, the little', 'Roads and wells, the little')
+        result = _gate(project_dir, tmp_path, [self._temple()],
+                       findings=[_contradiction()], command='redraft')
+        assert result.committed and result.inherited
+        ids = {r['id'] for r in self._mine(project_dir)}
+        assert old['tarrens-hollow']['id'] not in ids
+        assert [st for st, _ in result.held_back] == [old['tarrens-hollow']['statement']]
+
     def test_a_moved_paragraph_is_not_steady(self):
         earlier = 'One para here.\n\nTwo para here.\n\nThree para here.'
         assert gate.steady_paragraphs(earlier, earlier) == {0, 1, 2}
@@ -2465,7 +2502,7 @@ class TestSteadyParagraphs:
         # "She hit him" now follows a new paragraph: "him" may be the stranger
         assert gate.steady_paragraphs(earlier, prose) == {0, 2}
         assert gate.steady_facts([{'id': 'a', 'quote': 'She hit him'},
-                                  {'id': 'b', 'quote': 'He came in'}], earlier, prose) == {'b'}
+                                  {'id': 'b', 'quote': 'He came in'}], earlier, prose) == {'b': 0}
 
     def test_without_git_a_rewording_still_counts_and_is_said(self, project_dir, tmp_path):
         old = self._first(project_dir, tmp_path)

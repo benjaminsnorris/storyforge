@@ -227,7 +227,15 @@ def gate_waiting(project_dir: str) -> list[dict[str, str]]:
         order = ledger.scene_order(project_dir)
     except Exception:
         order = {}
-    return [rows[s] for s in sorted(rows, key=lambda s: (order.get(s, 10**9), s))]
+    out = [rows[s] for s in sorted(rows, key=lambda s: (order.get(s, 10**9), s))]
+    # #557: the scenes listed to fix toward the source (their own file)
+    try:
+        fixes = gate.source_fixes(project_dir)
+    except gate.GateError as e:
+        fixes = {gate.SOURCE_FIX_PATH: {'scene_id': gate.SOURCE_FIX_PATH, 'reason': str(e)}}
+    out += [{'scene_id': s, 'command': 'source-fix', 'reason': fixes[s]['reason']}
+            for s in sorted(fixes, key=lambda s: (order.get(s, 10**9), s))]
+    return out
 
 
 def build_status(project_dir: str, medium: str = 'novel') -> dict:
