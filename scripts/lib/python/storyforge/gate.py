@@ -879,24 +879,65 @@ def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
             result.speaker_notes.append((f, note))
 
 
-def _hold_back(result: GateResult, also: list[Finding] | None = None) -> None:
+def _hold_back(result: GateResult, also: list[Finding] | None = None,
+               prose: str = '', rows: list[dict[str, str]] | None = None) -> None:
     """Take out of `proposed` each commitment stating an inherited
     contradiction (its quote and the finding's overlap), so the ledger never
     records a fact the check showed contradicts the book (#480's review).
-    `also`: more findings to hold back for (a provisional commit's, #556).
-    They go to `held_back`, reported."""
+    `also`: more findings to hold back for (a provisional commit's, #556),
+    matched wider, since the checker's quote and the fact's need not share
+    words ("he seized thirty sleepers" against a fact quoting "thirty of the
+    thanes"): a commitment is held back for one when its quote overlaps the
+    finding's, lies in the same paragraph of `prose` as the finding's quote,
+    or has the subject and type of the fact the finding says it
+    contradicts (`_finding_subjects` over `rows`, the ledger). They go to `held_back`,
+    reported."""
+    def overlaps(quote: str, f: Finding) -> bool:
+        return bool(f.scene_quote) and _count(quote) >= _MIN_BRIEF_WORDS and (
+            quote in _words(f.scene_quote) or _words(f.scene_quote) in quote)
+
+    paras = [p for p in re.split(r'\n\s*\n', prose) if p.strip()] if prose else []
+
+    def paragraph(quote: str) -> set[int]:
+        return {i for i, p in enumerate(paras) if quote and _found_in(quote, p)}
+
+    wide = [(f, paragraph(f.scene_quote), _finding_subjects(f, rows or []))
+            for f in (also or [])]
     keep = []
-    against = result.inherited + list(also or [])
     for row in result.proposed:
         quote = _words(row.get('quote') or '')
-        hit = next((f for f in against if f.scene_quote and _count(quote) >= _MIN_BRIEF_WORDS
-                    and (quote in _words(f.scene_quote) or _words(f.scene_quote) in quote)),
-                   None)
+        hit = next((f for f in result.inherited if overlaps(quote, f)), None)
+        if hit is None and wide:
+            where = paragraph(row.get('quote') or '')
+            key = ((row.get('subject') or '').strip().casefold(), row.get('type') or '')
+            hit = next((f for f, at, subjects in wide
+                        if overlaps(quote, f) or (where & at)
+                        or (key[0] and key in subjects)), None)
         if hit is None:
             keep.append(row)
         else:
             result.held_back.append((row.get('statement', ''), hit))
     result.proposed = keep
+
+
+def _finding_subjects(f: Finding, rows: list[dict[str, str]]) -> set[tuple[str, str]]:
+    """The (subject casefolded, type) of the ledger facts `f` says the
+    scene contradicts: the one its `fact_id` names, or the commitments of
+    its established scene whose quote holds the established words (or is
+    held by them)."""
+    out = set()
+    for r in rows:
+        subject = (r.get('subject') or '').strip().casefold()
+        if not subject:
+            continue
+        if f.fact_id and r.get('id') == f.fact_id:
+            out.add((subject, r.get('type') or ''))
+        elif (f.established_scene and (r.get('scene_id') or '').strip() == f.established_scene
+              and f.established_quote and r.get('quote')
+              and (_found_in(r['quote'], f.established_quote)
+                   or _found_in(f.established_quote, r['quote']))):
+            out.add((subject, r.get('type') or ''))
+    return out
 
 
 def has_commitments(project_dir: str, scene_id: str) -> bool:
@@ -1137,7 +1178,7 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
                             f'scene was being gated; nothing written, gate it again')
     except ledger.LedgerError as e:
         raise GateError(f'{scene_id}: {e}') from e
-    _hold_back(result, holding)
+    _hold_back(result, holding, prose=prose if holding else '', rows=rows)
     _carry_ids(result.proposed, old_rows, rows, scene_id)
     new = rows + result.proposed
     for rid, quote in result.check.kept:
@@ -2067,6 +2108,10 @@ def mark_pending(project_dir: str, scene_id: str, command: str, reason: str) -> 
     old = rows.get(scene_id)
     ids = rejected_ids(old) + (rejected_ids({'command': command, 'reason': reason})
                                if command == REVISE_REJECTED else [])
+    if old and old.get('command') == PROVISIONAL and command == 'advisor':
+        # #556's review: a failed check of a provisional scene leaves its
+        # provisional facts in the ledger; it is still provisional
+        command = PROVISIONAL
     if ids:
         command = REVISE_REJECTED
         reason = re.sub(r'\s*\[rejected: [^\]]*\]', '', reason) \
@@ -2278,6 +2323,15 @@ def accept_blocked(project_dir: str, scene_id: str) -> list[dict[str, str]]:
 #: shared-dark, and a second reading about $0.35 more against a cold cache
 #: (E8, 2026-11-01); rounded up.
 RECHECK_COST_PER_SCENE = 0.6 + 0.35 * (GATE_READINGS - 1)
+
+
+#: What `write`'s token-model forecast prices one drafted scene's gate at
+#: (#556's review): a gate run (`RECHECK_COST_PER_SCENE`), plus a share for
+#: the fixes, their re-gates and the partial-fix retry (`_partial_fix`), which
+#: run only on the scenes that fail. A quarter more is an estimate, not
+#: measured; the ledger-priced forecast (`costs.forecast_write`) counts
+#: what this book's gates actually cost, retries included
+WRITE_GATE_COST_PER_SCENE = RECHECK_COST_PER_SCENE * 1.25
 
 
 #: A pending row's command for a scene listed for a re-check, and for one

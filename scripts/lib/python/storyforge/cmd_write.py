@@ -718,7 +718,7 @@ def _forecast(project_dir: str, pending_ids: list[str], metadata_csv: str,
             log(f'WARNING: the forecast leaves out the shared context ({e})')
     return costs.forecast_write(
         project_dir, pending_ids, avg_words, model,
-        gate_per_scene=gate.RECHECK_COST_PER_SCENE if coaching == 'full' else 0.0,
+        gate_per_scene=gate.WRITE_GATE_COST_PER_SCENE if coaching == 'full' else 0.0,
         earlier_words=earlier, shared_tokens=shared, batch=write_mode == 'batch')
 
 

@@ -386,7 +386,7 @@ class TestReview443:
         draft = api.calculate_cost_from_usage(
             {'input_tokens': 0, 'output_tokens': 10_000}, 'claude-opus-4-6')
         per_scene = forecast.total / 2
-        assert forecast.gate == pytest.approx(2 * gate.RECHECK_COST_PER_SCENE)
+        assert forecast.gate == pytest.approx(2 * gate.WRITE_GATE_COST_PER_SCENE)
         assert seen == [pytest.approx(draft + per_scene)]   # act1-sc02 still to draft
 
     def test_drafting_stops_when_its_spend_passes_the_threshold(
