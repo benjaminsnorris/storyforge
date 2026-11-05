@@ -53,7 +53,7 @@ Read all registry files in `reference/` to know the canonical IDs for normalized
 
 | CSV field(s) | Registry |
 |---|---|
-| `pov`, `characters`, `on_stage` | characters.csv |
+| `pov`, `characters`, `on_stage` | characters.csv (`pov` may also be the reserved `narrator`) |
 | `location` | locations.csv |
 | `value_at_stake` | values.csv |
 | `knowledge_in`, `knowledge_out` | commitments.csv, `type` `knowledge` |
@@ -62,6 +62,8 @@ Read all registry files in `reference/` to know the canonical IDs for normalized
 | `mice_threads` | mice-threads.csv (format: `+type:id` or `-type:id`) |
 
 **When the author introduces a new character, location, value, knowledge fact, motif, or MICE thread that does not exist in a registry:** add it to the appropriate registry CSV first, then use the new ID in scene data.
+
+**The narrator as POV.** A scene the book's narrator tells, through no one character's eyes (an epic's omniscient voice, a frame narrator), has `pov` `narrator`. It is reserved: never add it to characters.csv, and it never needs to be in `on_stage`. A narrator who is a person (a first-person teller, named or not) is a character with an id like any other, never `narrator`. Whether the narrator may hold scenes is the author's call, on a line of `reference/key-decisions.md`: `narrator_pov: allowed` (the default), `limited N` (validate flags more than N narrator scenes) or `off` (validate and the scene-map floor check flag every narrator scene). Ask the author when the book has narrated scenes and key-decisions.md doesn't say.
 
 ## Scene IDs
 
@@ -342,6 +344,7 @@ Every CLI stage sets `exists: true` and `updated` on the `storyforge.yaml` artif
 1. Read existing reference materials (character bible for voice fingerprints, story architecture for tone)
 2. If voice guide doesn't exist: explore the author's influences, genre voice expectations, POV rules, prose register. Build `reference/voice-guide.md` through conversation.
 3. If voice guide exists: refine it. Test against sample scenes. Develop POV-specific rules. Identify areas where voice drifts.
+   - **The narrator.** When scenes have `pov` `narrator` (the book's narrator tells them, through no character's eyes), or key-decisions.md says `narrator_pov: limited N`, the voice guide defines the narrator like a POV character: who they are (an omniscient voice, a bard, a later teller, a character looking back) and their stance (how far into minds they see, whether they judge, foreshadow or address the reader, how close they stand to the action), with a `narrator` row in `voice-profile.csv`. An adaptation's narrator is the novel's, not the translator's.
 4. For each POV character, define: their unique speech patterns, what metaphors they reach for, what they notice first, what they never say, their sentence rhythm.
 5. Commit: `git add -A && git commit -m "Elaborate: voice guide" && git push`
 
