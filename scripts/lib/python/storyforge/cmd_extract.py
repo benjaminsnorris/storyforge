@@ -56,6 +56,10 @@ def parse_args(argv):
                         help='Decide the book\'s three acts again (one call over the whole '
                              'scene list) and rewrite scenes.csv:act; phase 1 runs this step '
                              'itself')
+    parser.add_argument('--census', action='store_true',
+                        help='Add to characters.csv the people the text names often but '
+                             'no scene cast lists (fathers named in lineages, the dead, '
+                             'gods); phase 2 runs this step itself')
     parser.add_argument('--cleanup', action='store_true',
                         help='Run cleanup after extraction')
     parser.add_argument('--cleanup-only', action='store_true',
@@ -96,7 +100,7 @@ def _casts_only_usage_errors(args) -> list[str]:
     errors = []
     if args.phase != 2:
         errors.append('--casts-only re-asks phase 2\'s casts: run extract --phase 2 --casts-only')
-    for flag, on in (('--force', args.force), ('--acts', args.acts),
+    for flag, on in (('--force', args.force), ('--acts', args.acts), ('--census', args.census),
                      ('--cleanup', args.cleanup), ('--cleanup-only', args.cleanup_only),
                      ('--expand', args.expand)):
         if on:
@@ -189,6 +193,17 @@ def main(argv=None):
     validate_failures = 0
     _unanswered.clear()
 
+    if args.census:
+        if args.dry_run:
+            log('Dry run: the census counts names in code, then asks about the most '
+                'mentioned in one call per 100; nothing is sent.')
+            return
+        _run_census(project_dir, log_dir)
+        commit_and_push(project_dir, 'Extract: census of named people (characters.csv)',
+                        ['reference/characters.csv', 'working/'])
+        print_summary(project_dir, 'extract', session_start=session_start)
+        return
+
     if args.acts:
         if args.dry_run:
             log('Dry run: the act step makes one call over the scene list; nothing is sent.')
@@ -240,6 +255,9 @@ def main(argv=None):
                 log('')
                 log('--- Reconciling Phase 2 registries ---')
                 _run_hone(plugin_dir, phase=2)
+                _run_census(project_dir, log_dir)
+                commit_and_push(project_dir, 'Extract: census of named people (characters.csv)',
+                                ['reference/characters.csv', 'working/'])
 
         # Phase 3: Briefs
         if args.phase is None or args.phase == 3:
@@ -674,6 +692,26 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     _safe_remove(batch_file)
     _safe_rmdir(skel_output)
+
+
+def _run_census(project_dir, log_dir):
+    """The people the text names that no cast lists (`extract_census`, #546)."""
+    from storyforge.extract_census import CENSUS_FILE, run_census
+    log('  Census: the people the text names...')
+    model = select_model('evaluation')
+    result = run_census(project_dir, model, log_dir,
+                        on_usage=lambda f, op, target, m: _log_api_usage(f, op, target, m,
+                                                                         project_dir))
+    if result.note:
+        log(f'  Census: not run ({result.note})')
+        return result
+    names = ', '.join(r['name'] for r in result.added) or 'none'
+    log(f'  Census: {result.candidates} capitalized word(s) not in the registries, '
+        f'{result.asked} asked about; {len(result.added)} person(s) added as referenced: '
+        f'{names}. Every word and answer: {CENSUS_FILE}')
+    if result.failed:
+        log(f'  WARNING: census: {len(result.failed)} word(s) not checked (a call failed)')
+    return result
 
 
 def _run_acts(project_dir, scenes_dir, ref_dir, log_dir, profile_file):

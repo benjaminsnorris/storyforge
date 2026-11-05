@@ -4,6 +4,8 @@ import json
 import os
 import shutil
 
+import pytest
+
 from ledger_helpers import read_facts, write_facts
 
 
@@ -687,6 +689,30 @@ class TestReconcileByDeltas:
             text = f.read()
         assert 'death_scene' in text.split('\n')[0]
         assert 'nick-carraway|Nick Carraway|protagonist' in text
+
+    def test_a_group_is_never_one_persons_alias(self, project_dir, monkeypatch, tmp_path):
+        """B-007 (#546): Beowulf's registry filed "ohtere-sons" under Eadgils.
+        The scene still maps, but the group never becomes the alias."""
+        from storyforge.hone import reconcile_domain
+        from storyforge.enrich import load_alias_map
+        ref_dir = os.path.join(project_dir, 'reference')
+        _set_column(ref_dir, 'scenes.csv', 'pov', ['tessa-sons', 'Tess'])
+        _mock_api(monkeypatch, ['1 | tessa-merrin\n2 | tessa-merrin\n3 | SKIP\n'] * 3)
+
+        reconcile_domain('characters', ref_dir, 'test-model', str(tmp_path))
+
+        aliases = load_alias_map(os.path.join(ref_dir, 'characters.csv'))
+        assert 'tessa-sons' not in aliases
+        assert aliases['tess'] == 'tessa-merrin'
+
+    @pytest.mark.parametrize('text, group', [
+        ('ohtere-sons', True), ('the sons of Ohthere', True), ('the Buchanans', True),
+        ('both-brothers', True), ('son of Ecgtheow', False), ('Eadgils', False),
+        ('women', False), ('ongentheow-son', False),
+    ])
+    def test_is_group_reference(self, text, group):
+        from storyforge.hone import is_group_reference
+        assert is_group_reference(text) is group
 
     def test_dry_run_counts_calls(self, project_dir, capsys):
         from storyforge.cmd_hone import _run_registry_domain
