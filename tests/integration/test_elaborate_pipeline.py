@@ -60,7 +60,7 @@ class TestElaborateValidStages:
     """Verify stage name validation."""
 
     def test_valid_stages_set(self):
-        expected = {'spine', 'architecture', 'map', 'briefs',
+        expected = {'spine', 'architecture', 'voice', 'map', 'briefs',
                     'gap-fill', 'mice-fill', 'page-architecture',
                     'prompts'}
         assert VALID_STAGES == expected

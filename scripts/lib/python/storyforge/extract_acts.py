@@ -188,13 +188,33 @@ aftermath, a battle) belongs to one act.
     return f"""Divide this book into its {ACT_COUNT} acts.
 
 An act is a run of consecutive scenes in reading order: every scene belongs to
-exactly one act, and the acts never interleave. Act 1 sets up the situation
-and ends at the turn that commits the story to its central conflict. Act 2
-develops and complicates that conflict. Act 3 begins at the turn that sets up
-the resolution and runs to the end. These are the book's dramatic acts, not
-its printed parts, volumes or books, which may or may not line up with them.
-Judge where the turns fall from what happens, not from how many scenes each
-act gets: acts are often uneven.
+exactly one act, and the acts never interleave. An act is one of the story's
+major movements, and each act begins where a new movement turns: a new
+antagonist or threat, a new quest, contest or journey, or the turn that
+commits the story to its central conflict or sets up its resolution. Find the
+book's movements first, from what happens, then place the breaks between
+them.
+
+- A book built as one rising conflict moves through its setup, its
+  development and its resolution: act 1 sets up the situation and ends at the
+  turn that commits the story to its central conflict, act 2 develops and
+  complicates that conflict, and act 3 begins at the turn that sets up the
+  resolution.
+- An episodic book (an epic, a romance of trials, a book of separate
+  contests or voyages) moves through its episodes: each act is one major
+  contest, quest or stage, from the scene where it begins through its
+  aftermath. A threat that comes before the hero does (the monster's raids,
+  the challenge issued) opens that contest's act; it is not an act of setup
+  on its own. With more movements than {ACT_COUNT}, group them where the
+  largest turns fall.
+- The aftermath of a movement (the celebration, the reward, the report, the
+  homecoming, the funeral) belongs to the movement it closes. The next act
+  begins where the new movement does.
+
+These are the book's acts, not its printed parts, volumes, books, cantos or
+fitts, which may or may not line up with them. Don't place the breaks at
+proportional points (a quarter in, three quarters in), and don't judge them
+from how many scenes each act gets: acts are often uneven.
 {divisions_note}
 ## What a first reading of the book noted
 
@@ -216,8 +236,9 @@ and its scene numbers were estimates; the scene list below is the real one.
 `last_scene` are the ids of its first and last scenes: act 1 begins with the
 first scene above (`{scenes[0]['id']}`), each later act begins with the scene
 right after the previous act's last scene, and act {ACT_COUNT} ends with the last
-scene (`{scenes[-1]['id']}`). `title` names the act in a few words, and `reason`
-says in one sentence what turn opens it, which happens in its `first_scene`."""
+scene (`{scenes[-1]['id']}`). `title` names the act's movement in a few words,
+and `reason` says in one sentence what turn opens it, which happens in its
+`first_scene`."""
 
 
 def parse_acts(reply: str, scenes: list[dict[str, str]]) -> list[str]:
