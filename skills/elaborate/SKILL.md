@@ -333,7 +333,9 @@ Reference images upload alongside the prompt, labeled by role: **Image 1** chara
 
 ### Voice Stage (Interactive)
 
-Voice development typically happens after architecture (you know your POV characters and scene types) and before briefs (the briefs need voice rules). Can also run standalone at any point.
+Voice development typically happens after architecture (you know your POV characters and scene types) and before briefs (the briefs need voice rules). Can also run standalone at any point. Unattended, `./storyforge elaborate --stage voice` writes `reference/voice-guide.md` and `reference/voice-profile.csv` in one call; it advances no phase.
+
+Every CLI stage sets `exists: true` and `updated` on the `storyforge.yaml` artifacts it writes (story architecture, bibles, voice guide, scene index).
 
 1. Read existing reference materials (character bible for voice fingerprints, story architecture for tone)
 2. If voice guide doesn't exist: explore the author's influences, genre voice expectations, POV rules, prose register. Build `reference/voice-guide.md` through conversation.
