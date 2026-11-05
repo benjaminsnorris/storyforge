@@ -210,6 +210,9 @@ class CheckResult:
     #: brief items naming a ledger fact that isn't binding (rejected,
     #: superseded, pending): an author problem, not checked
     stale_brief_items: list[str] = field(default_factory=list)
+    #: findings that name a planned fact (status `planned`): the prose departs
+    #: from the plan, which is not an error (#568); reported, never blocking
+    plan_departures: list[Finding] = field(default_factory=list)
     #: disputes the checker ruled out (no contradiction)
     cleared: list[Dispute] = field(default_factory=list)
     #: disputes it neither reported as a contradiction nor cleared: they
@@ -602,6 +605,10 @@ class Brief:
     entering: dict[str, list[str]] = field(default_factory=dict)
     unknown: list[str] = field(default_factory=list)        # brief items in words, no ledger fact
     stale: list[str] = field(default_factory=list)          # brief items naming a non-binding fact
+    #: registry id → statement for the brief's planned facts (status
+    #: `planned`, #568): shown as plan, never a contradiction or a broken
+    #: promise; one the scene establishes may be `kept`
+    planned: dict[str, str] = field(default_factory=dict)
 
 
 def _brief(book: Book, project_dir: str, at: str) -> Brief:
@@ -633,6 +640,9 @@ def _brief(book: Book, project_dir: str, at: str) -> Brief:
                 if col == 'physical_state_out' and state_key(item, physical) in carried:
                     continue
                 rid = aliases.get(item.lower())
+                if rid is not None and by_id[rid].get('status') == 'planned':
+                    brief.planned[rid] = by_id[rid]['statement']
+                    continue
                 if rid is not None and by_id[rid].get('status') != 'binding':
                     brief.stale.append(f'{col}: {item} ({rid} is {by_id[rid].get("status")})')
                     continue
@@ -660,6 +670,13 @@ def _brief(book: Book, project_dir: str, at: str) -> Brief:
                      + '\n'.join(entering) + '\n')
     if promises:
         parts.append("\n## The brief's promises\n\n" + '\n'.join(promises) + '\n')
+    if brief.planned:
+        parts.append('\n## Planned, not yet established\n\n'
+                     'The brief plans these; the prose may depart from them, and a departure '
+                     'is never a contradiction or a broken promise. If the scene establishes '
+                     'one, add it to `kept` with the scene\'s words that establish it, copied '
+                     'verbatim (a full clause or sentence).\n\n'
+                     + '\n'.join(f'- {rid}: {st}' for rid, st in brief.planned.items()) + '\n')
     brief.text = ''.join(parts)
     return brief
 
@@ -870,12 +887,16 @@ def _check_once(book: Book, brief: Brief, project_dir: str, scene_id: str, *,
         f = Finding(**{k: (item.get(k) or '').strip() for k in
                        ('kind', 'code', 'scene_quote', 'established_scene',
                         'established_quote', 'fact_id', 'explanation')})
+        if f.fact_id in brief.planned:
+            # a departure from the plan, not an error (#568)
+            result.plan_departures.append(f)
+            continue
         f.problem = _verify(f, book, scene_id, brief)
         f.reading = reading
         (result.unverified if f.problem else result.findings).append(f)
     for k in kept:
         rid, quote = (k.get('fact_id') or '').strip(), (k.get('quote') or '').strip()
-        if rid not in brief.promised:
+        if rid not in brief.promised and rid not in brief.planned:
             result.kept_unverified.append((rid, quote, 'not a fact the brief promises'))
         elif not _contains(book.prose[scene_id], quote):
             result.kept_unverified.append((rid, quote, 'the quote is not in the scene'))
@@ -985,6 +1006,7 @@ def merge_readings(results: list[CheckResult],
                       run=first.run, unknown_brief_items=first.unknown_brief_items,
                       stale_brief_items=first.stale_brief_items)
     out.findings, out.unverified = list(first.findings), list(first.unverified)
+    out.plan_departures = [f for r in results for f in r.plan_departures]
     for r in results[1:]:
         earlier_found, earlier_unverified = list(out.findings), list(out.unverified)
         for f in r.findings:

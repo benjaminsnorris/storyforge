@@ -1606,52 +1606,80 @@ def _register_brief_ledger(project_dir: str, ref_dir: str, log_dir: str) -> str:
 BRIEFS_WRITER = 'briefs'
 _BRIEF_LEDGER_COLUMNS = {'knowledge': ('knowledge_in', 'knowledge_out'),
                          'physical': ('physical_state_in', 'physical_state_out')}
+#: What each briefs row held when the stage last wrote it (id → hash): a row
+#: that differs since is someone else's now (the author's edit, or the gate's
+#: promotion) and the stage leaves it alone
+BRIEF_ROWS_FILE = os.path.join('working', 'briefs-ledger-rows.json')
+
+
+def _row_hash(row: dict) -> str:
+    import hashlib
+    return hashlib.sha256(json.dumps(row, sort_keys=True).encode('utf-8')).hexdigest()[:16]
 
 
 def _prune_brief_rows(ref_dir: str, before: set[str]) -> None:
     """Keep the briefs stage's own ledger rows in step with the briefs (#568
-    review). Rows new since *before* are marked `introduced_by` `briefs`. A
-    `briefs` row no active scene's brief names any more (a re-run dropped the
-    fact, or only cut or merged scenes named it) is removed, so it can't reach
-    the gate as a binding fact; one whose `scene_id` is an inactive scene is
-    moved to the first active scene that establishes it (blank, backstory,
-    when none does). Rows any other writer made are left alone."""
+    review).
+
+    Rows new since *before* are the stage's: `introduced_by` `briefs` and
+    status `planned`, so the checker never holds the prose to them (a
+    departure from the plan is not a contradiction) and the gate makes one
+    binding when the prose establishes it (`ledger.fill_quote`). For each of
+    the stage's rows still as it wrote it (`BRIEF_ROWS_FILE`): one no active
+    scene's brief names any more (a re-run dropped it, or only cut or merged
+    scenes named it) is removed; otherwise its `scene_id` follows the first
+    active scene whose brief sets it up (blank, backstory, when none does).
+    A row changed since the stage wrote it, and every other writer's row, is
+    left alone."""
     from storyforge import ledger
     from storyforge.elaborate import _read_csv
     from storyforge.source import INACTIVE_STATUSES
+    project_dir = os.path.dirname(os.path.abspath(ref_dir))
+    marks_path = os.path.join(project_dir, BRIEF_ROWS_FILE)
+    try:
+        with open(marks_path, encoding='utf-8') as f:
+            marks = json.load(f)
+    except (OSError, ValueError):
+        marks = {}
     scenes = sorted(_read_csv(os.path.join(ref_dir, 'scenes.csv')),
                     key=lambda r: int(r['seq']) if (r.get('seq') or '').isdigit() else 0)
     active = [r['id'] for r in scenes if r.get('id')
               and (r.get('status') or '').strip() not in INACTIVE_STATUSES]
-    inactive = {r['id'] for r in scenes if r.get('id')} - set(active)
     briefs = {r.get('id', ''): r for r in _read_csv(os.path.join(ref_dir, 'scene-briefs.csv'))}
 
     def ids(sid: str, col: str) -> set[str]:
         return {x.strip() for x in (briefs.get(sid, {}).get(col) or '').split(';') if x.strip()}
 
     rows = ledger.load_from(ref_dir)
-    out = []
+    out, new_marks, dropped = [], {}, 0
     for row in rows:
-        type_ = row.get('type', '')
-        cols = _BRIEF_LEDGER_COLUMNS.get(type_)
-        if cols and row.get('id') not in before and not ledger.is_commitment(row):
-            row = dict(row, introduced_by=BRIEFS_WRITER)
-        if not cols or (row.get('introduced_by') or '').strip() != BRIEFS_WRITER:
+        cols = _BRIEF_LEDGER_COLUMNS.get(row.get('type', ''))
+        rid = row.get('id', '')
+        if cols and rid not in before and not ledger.is_commitment(row):
+            row = dict(row, introduced_by=BRIEFS_WRITER, status='planned')
+            marks[rid] = _row_hash(row)
+        ours = (cols and (row.get('introduced_by') or '').strip() == BRIEFS_WRITER
+                and marks.get(rid) == _row_hash(row))
+        if not ours:
             out.append(row)
             continue
-        rid = row.get('id', '')
         named = [sid for sid in active if any(rid in ids(sid, c) for c in cols)]
         if not named:
+            dropped += 1
             continue   # stale: no active brief names it
-        if (row.get('scene_id') or '').strip() in inactive:
-            sets_up = [sid for sid in named if rid in ids(sid, cols[1])]
-            row = dict(row, scene_id=sets_up[0] if sets_up else '')
+        sets_up = [sid for sid in active if rid in ids(sid, cols[1])
+                   and rid not in ids(sid, cols[0])]
+        row = dict(row, scene_id=sets_up[0] if sets_up else '')
+        new_marks[rid] = _row_hash(row)
         out.append(row)
     if out != rows:
-        dropped = len(rows) - len(out)
         if dropped:
             log(f'  ledger: removed {dropped} planned fact(s) no active brief names')
         ledger.save_to(ref_dir, out, command='elaborate-briefs')
+    os.makedirs(os.path.dirname(marks_path), exist_ok=True)
+    with open(marks_path, 'w', encoding='utf-8') as f:
+        json.dump(new_marks, f, indent=1, sort_keys=True)
+        f.write('\n')
 
 
 _ENUM_WITH_TEXT = re.compile(r'^\s*([A-Za-z][\w-]*)\s*(?::|—|–|\s-\s)\s*(.+)$', re.S)

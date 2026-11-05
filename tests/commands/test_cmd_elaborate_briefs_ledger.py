@@ -77,10 +77,11 @@ def test_the_new_ids_land_in_the_ledger_as_planned_rows(novel, mock_api):
     _run(mock_api, _briefs(_row('new-x1', 'archivist-knows-village', 'torn-sleeve-kael')))
     rows = _rows(novel)
     fact, state = rows['archivist-knows-village'], rows['torn-sleeve-kael']
-    assert (fact['type'], fact['scene_id'], fact['status']) == ('knowledge', 'new-x1', 'binding')
+    assert (fact['type'], fact['scene_id'], fact['status']) == ('knowledge', 'new-x1', 'planned')
     assert (state['type'], state['scene_id']) == ('physical', 'new-x1')
     for row in (fact, state):
         assert (row['introduced_by'], row['origin']) == ('briefs', 'plan')
+        assert row['status'] == 'planned'
         assert not ledger.is_commitment(row)   # the gate reads it as plan
     # rows other writers made are untouched
     assert rows['map-anomaly-exists']['introduced_by'] == 'migration'
@@ -123,3 +124,35 @@ def test_the_architecture_stage_does_not_touch_the_ledger(novel, mock_api):
     _run(mock_api, _briefs(_row('new-x1', 'x')).replace('briefs-csv', 'intent-csv'),
          stage='architecture')
     assert _rows(novel) == before
+
+
+def test_a_rerun_moves_a_fact_to_the_scene_that_now_sets_it_up(novel, mock_api):
+    _run(mock_api, _briefs(_row('new-x1', 'archivist-knows-village')))
+    assert _rows(novel)['archivist-knows-village']['scene_id'] == 'new-x1'
+    _run(mock_api, _briefs(_row('new-x1', 'archivist-fears-council'),
+                           _row('act2-sc01', 'archivist-knows-village')))
+    assert _rows(novel)['archivist-knows-village']['scene_id'] == 'act2-sc01'
+
+
+def test_a_row_the_author_edited_is_left_alone(novel, mock_api):
+    _run(mock_api, _briefs(_row('new-x1', 'archivist-knows-village')))
+    ref = os.path.join(novel, 'reference')
+    rows = ledger.load_from(ref)
+    for r in rows:
+        if r['id'] == 'archivist-knows-village':
+            r['statement'] = 'The archivist knows where the village went'
+    ledger.save_to(ref, rows, command='test')
+    _run(mock_api, _briefs(_row('new-x1', 'archivist-fears-council')))
+    rows = _rows(novel)
+    assert rows['archivist-knows-village']['statement'] == \
+        'The archivist knows where the village went'
+    assert 'archivist-fears-council' in rows
+
+
+def test_the_gate_makes_a_planned_fact_binding_when_the_prose_establishes_it():
+    rows = [dict({c: '' for c in ledger.COLUMNS}, id='f', type='knowledge',
+                 statement='The archivist knows', status='planned', origin='plan',
+                 mutable='state', introduced_by='briefs')]
+    assert ledger.fill_quote(rows, 'f', 'the archivist knew where it went')
+    assert rows[0]['status'] == 'binding'
+    assert rows[0]['quote'] == 'the archivist knew where it went'
