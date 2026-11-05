@@ -919,8 +919,18 @@ def _hold_back(result: GateResult, also: list[Finding] | None = None,
     def paragraph(quote: str) -> set[int]:
         return {i for i, p in enumerate(paras) if quote and _found_in(quote, p)}
 
-    wide = [(f, paragraph(f.scene_quote), _finding_subjects(f, rows or []))
-            for f in (also or [])]
+    def subject(row: dict[str, str]) -> str:
+        return (row.get('subject') or '').strip().casefold()
+
+    wide = []
+    for f in also or []:
+        at = paragraph(f.scene_quote)
+        # the finding's claim: its values, about the subjects of the facts
+        # stating it (a quote overlapping it, or in its paragraph)
+        stating = {subject(r) for r in result.proposed
+                   if overlaps(_words(r.get('quote') or ''), f)
+                   or (paragraph(r.get('quote') or '') & at)} - {''}
+        wide.append((f, at, _finding_subjects(f, rows or []), _values(f.scene_quote), stating))
     keep = []
     # a source-backed contradiction whose earlier fact couldn't be found to
     # supersede is held back like an inherited one (`_source_supersede`)
@@ -930,15 +940,63 @@ def _hold_back(result: GateResult, also: list[Finding] | None = None,
         hit = next((f for f in strict if overlaps(quote, f)), None)
         if hit is None and wide:
             where = paragraph(row.get('quote') or '')
-            key = ((row.get('subject') or '').strip().casefold(), row.get('type') or '')
-            hit = next((f for f, at, subjects in wide
+            key = (subject(row), row.get('type') or '')
+            values = _values(f"{row.get('statement', '')} {row.get('quote', '')}")
+            hit = next((f for f, at, subjects, claim, stating in wide
                         if overlaps(quote, f) or (where & at)
-                        or (key[0] and key in subjects)), None)
+                        or (key[0] and key in subjects)
+                        # #556's review: the claim restated elsewhere ("412
+                        # residents" three paragraphs on)
+                        or (values & claim and (not stating or key[0] in stating))),
+                       None)
         if hit is None:
             keep.append(row)
         else:
             result.held_back.append((row.get('statement', ''), hit))
     result.proposed = keep
+
+
+_UNITS = {w: n for n, w in enumerate(
+    'zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen '
+    'fifteen sixteen seventeen eighteen nineteen'.split())}
+_TENS = {w: 10 * n for n, w in enumerate(
+    'twenty thirty forty fifty sixty seventy eighty ninety'.split(), start=2)}
+_SCALES = {'hundred': 100, 'thousand': 1000, 'million': 1_000_000}
+
+
+def _values(text: str) -> set[int]:
+    """The numbers `text` states, in digits or words ("four hundred and
+    twelve" and "412" are both 412), for matching a claim restated in other
+    words."""
+    out: set[int] = set()
+    total = current = 0
+    seen = False
+    for w in re.findall(r"[a-z]+|\d[\d,]*", text.lower()):
+        if w[0].isdigit():
+            out.add(int(w.replace(',', '')))
+            continue
+        if w in _UNITS:
+            current += _UNITS[w]
+        elif w in _TENS:
+            current += _TENS[w]
+        elif w in _SCALES:
+            if _SCALES[w] == 100:
+                current = max(current, 1) * 100
+            else:
+                total += max(current, 1) * _SCALES[w]
+                current = 0
+        elif w == 'and' and seen:
+            continue
+        else:
+            if seen:
+                out.add(total + current)
+            total = current = 0
+            seen = False
+            continue
+        seen = True
+    if seen:
+        out.add(total + current)
+    return out
 
 
 def _finding_subjects(f: Finding, rows: list[dict[str, str]]) -> set[tuple[str, str]]:
