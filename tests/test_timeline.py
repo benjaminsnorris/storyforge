@@ -63,7 +63,7 @@ class TestCues:
                           'TIME_GAP: "five years"\nTIME_ANCHOR: (none)\n'
                           'TIME_SPAN:\nTIME_DATE: 1917\n')
         assert cues == {'relation': 'earlier', 'gap': 'five years', 'anchor': '',
-                        'refers': '', 'span': '', 'date': '1917'}
+                        'refers': '', 'span': '', 'date': '1917', 'link': '', 'bound': ''}
 
     def test_refers_cue_reaches_the_assignment_prompt(self):
         """Gatsby VII: "that June night three months before" pins the
@@ -136,7 +136,8 @@ class TestCues:
                                        'time_gap': '"three weeks"', 'time_anchor': '(none)',
                                        'time_date': 'not a date'})
         assert labeled == structured == {'relation': 'later', 'gap': 'three weeks',
-                                         'anchor': '', 'refers': '', 'span': '', 'date': ''}
+                                         'anchor': '', 'refers': '', 'span': '', 'date': '',
+                                         'link': '', 'bound': ''}
 
     def test_skeleton_parser_keeps_only_the_date(self):
         from storyforge.extract import parse_skeleton_response

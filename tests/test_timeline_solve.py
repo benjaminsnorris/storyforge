@@ -118,3 +118,63 @@ def test_every_evals_book_is_placed_from_its_recorded_cues(slug):
     assert set(s.days) == {it['id'] for it in items}
     present = [s.days[it['id']] for it in items if s.basis.get(it['id']) == 'from cues']
     assert present == sorted(present)
+
+
+class TestLinks351:
+    """#351 step 2: the cue read names the scene a stated distance counts
+    from, and code counts it (the Iliad's "upon the tenth day")."""
+
+    def test_the_cue_prompt_lists_earlier_scenes_and_asks_for_links(self):
+        from storyforge.timeline import build_cue_prompt
+        prompt = build_cue_prompt('s3', 'Text.', 'tail', earlier=[('s1', 'Plague'), ('s2', 'Quarrel')])
+        assert '## Earlier Scenes (id | title)' in prompt and 's1 | Plague' in prompt
+        assert 'TIME_LINK:' in prompt and 'TIME_BOUND:' in prompt
+        assert 'nine days after' in prompt      # ordinal days counted as distances
+
+    def test_link_and_bound_parse(self):
+        from storyforge.timeline import parse_cues
+        from storyforge.timeline_solve import bound_for, link_ref
+        cues = parse_cues('TIME_RELATION: later\nTIME_LINK: plague | nine days after\n'
+                          'TIME_BOUND: before XXXX-09-29\n')
+        assert link_ref(cues) == ('plague', 9)
+        assert link_ref({'link': 'x | three days before'}) == ('x', -3)
+        assert link_ref({'link': 'x | some time after'}) is None
+        b = bound_for(cues)
+        assert b.last == 270 and b.first == 211
+
+    def test_a_link_sets_the_day_over_vague_gaps(self):
+        """Iliad I: the assembly is "upon the tenth day" of the plague; the
+        gaps in between are vague."""
+        s = solve(_items(('plague', 'unclear'), ('prayer', 'continues'),
+                         ('assembly', 'later')))
+        assert s.days['assembly'] == 3        # "later", no gap: a couple of days
+        items = _items(('plague', 'unclear'), ('prayer', 'continues'), ('assembly', 'later'))
+        items[2]['cues']['link'] = 'plague | nine days after'
+        s = solve(items)
+        assert s.days['assembly'] == 10 and s.conflicts == []
+
+    def test_a_link_to_a_scene_inside_the_open_stretch(self):
+        items = _items(('a', 'unclear'), ('b', 'later', 'some days'), ('c', 'later'),
+                       ('d', 'later', 'some weeks', 'early in May'))
+        items[2]['cues']['link'] = 'b | twelve days after'
+        s = solve(items)
+        assert s.days['c'] - s.days['b'] == 12
+
+    def test_a_link_back_past_the_present_is_a_conflict(self):
+        items = _items(('a', 'unclear'), ('b', 'later', 'three weeks'), ('c', 'later'))
+        items[2]['cues']['link'] = 'a | two days after'
+        s = solve(items)
+        assert [sid for sid, _m in s.conflicts] == ['c']
+        assert s.days['c'] >= s.days['b']
+
+
+def test_a_told_tale_keeps_its_own_time():
+    """#548: a tale told inside a scene (told_by) is placed like a
+    flashback, and the story's present goes on from its telling."""
+    items = _items(('feast', 'unclear'), ('finnsburh', 'earlier', 'many years'),
+                   ('next-day', 'later', 'the next day'))
+    items[1]['told_by'] = 'feast'
+    items[1]['cues']['relation'] = 'continues'     # read as continuing, but told
+    s = solve(items)
+    assert s.days['finnsburh'] < s.days['feast']
+    assert s.days['next-day'] == s.days['feast'] + 1

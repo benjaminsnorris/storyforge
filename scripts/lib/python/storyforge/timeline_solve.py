@@ -150,6 +150,41 @@ def anchor_for(cue: dict) -> Anchor | None:
     return None
 
 
+def link_ref(cue: dict) -> tuple[str, int] | None:
+    """The first ``TIME_LINK`` with a counted distance: (scene id, days
+    after it; negative for before)."""
+    for part in (cue.get('link') or '').split(';'):
+        sid, _, distance = part.partition('|')
+        sid, distance = sid.strip(), distance.strip().lower()
+        if not sid or not distance:
+            continue
+        n = gap_to_days(re.sub(r'\b(after|later|before|since|from)\b', '', distance).strip())
+        if n is None:
+            continue
+        return sid, -n if re.search(r'\bbefore\b', distance) else n
+    return None
+
+
+_BOUND_DAYS = 60
+# How far past their range vague gaps stretch to keep an anchor
+STRETCH_DAYS = 45
+
+
+def bound_for(cue: dict) -> Anchor | None:
+    """A ``TIME_BOUND`` ("before XXXX-09-29") as a window of the
+    ``_BOUND_DAYS`` before (or after) that date."""
+    m = re.match(r'\s*(before|after)\s+(\S+)', cue.get('bound') or '', re.I)
+    if not m:
+        return None
+    md = _month_day(m.group(2))
+    if not md:
+        return None
+    doy = _doy(md[1], md[2])
+    if m.group(1).lower() == 'before':
+        return Anchor((doy - _BOUND_DAYS) % YEAR, (doy - 1) % YEAR, 0, f'before {m.group(2)}')
+    return Anchor((doy + 1) % YEAR, (doy + _BOUND_DAYS) % YEAR, 0, f'after {m.group(2)}')
+
+
 def _doy(month: int, day: int) -> int:
     """Day of the year, 0 = January 1, on 2001's calendar."""
     try:
@@ -191,9 +226,11 @@ def _place(base: int, links: list[Link], anchor: Anchor | None, day_one: int,
         day = _nearest_in_window(lo, hi, pref, day_one, anchor, slack)
         if day is not None:
             return day, True
-    # Vague gaps give way to an anchor: past their range, up to a year on
+    # Vague gaps give way to an anchor: a little past their range (a
+    # stretch of a year turned Around the World's stated dates into leaps)
     if any(not l.counted for l in links):
-        day = _nearest_in_window(lo, hi + YEAR, hi, day_one, anchor, anchor.slack)
+        room = max(STRETCH_DAYS, (hi - lo) // 2)
+        day = _nearest_in_window(lo, hi + room, hi, day_one, anchor, anchor.slack)
         if day is not None:
             return day, True
     return pref, False
@@ -269,12 +306,12 @@ def _spread(start: int, end: int, links: list[Link]) -> list[int]:
     return days
 
 
-def _walk_present(present: list[tuple[str, Link, Anchor | None]], day_one: int):
+def _walk_present(present: list[tuple], day_one: int):
     """Place the present scenes for one start of the year. Returns (days,
     kept, missed ids, stretch)."""
     days: dict[str, int] = {}
     if not present:
-        return days, 0, [], 0
+        return days, 0, [], 0, []
     first_id = present[0][0]
     days[first_id] = 1
     kept, missed, stretch = 0, [], 0
@@ -289,9 +326,51 @@ def _walk_present(present: list[tuple[str, Link, Anchor | None]], day_one: int):
             missed.append(first_id)
     base_id, base_day = first_id, 1
     pending: list[tuple[str, Link]] = []
-    for sid, link, anchor in present[1:]:
+    conflicts: list[tuple[str, str]] = []
+
+    def close(end_day):
+        nonlocal base_id, base_day, pending
+        links = [l for _s, l in pending]
+        for (s, _l), d in zip(pending, _spread(base_day, end_day, links)):
+            days[s] = d
+        base_id, base_day, pending = pending[-1][0], end_day, []
+
+    for sid, link, anchor, ref in present[1:]:
         pending.append((sid, link))
-        if anchor is None:
+        target = None
+        if ref is not None:
+            tid, distance = ref
+            # Only a link to a scene on the present counts: one to a told
+            # tale or a flashback isn't a step in the sequence
+            if tid in days or any(s == tid for s, _l in pending[:-1]):
+                target = (tid, distance)
+        if anchor is None and target is None:
+            continue
+        if target is not None:
+            tid, distance = target
+            if tid not in days:
+                # Close the segment at the scene the link counts from, at
+                # the links' preferred sizes
+                k = next(i for i, (s, _l) in enumerate(pending) if s == tid)
+                head, pending = pending[:k + 1], pending[k + 1:]
+                rest, pending = pending, head
+                close(base_day + sum(l.pref for _s, l in head))
+                pending = rest
+            want = days[tid] + distance
+            links = [l for _s, l in pending]
+            lo = base_day + sum(l.lo for l in links)
+            day = want
+            if want < lo:
+                conflicts.append((sid, f'{distance:+d} day(s) from {tid}, as stated, is '
+                                       f'before the gaps since allow (day {lo})'))
+                day = lo
+            if anchor is not None:
+                if _off((day_one + day - 1) % YEAR, anchor) <= anchor.slack:
+                    kept += 1
+                else:
+                    missed.append(sid)
+            stretch += abs(day - (base_day + sum(l.pref for l in links)))
+            close(day)
             continue
         links = [l for _s, l in pending]
         day, held = _place(base_day, links, anchor, day_one, year_ref)
@@ -301,17 +380,14 @@ def _walk_present(present: list[tuple[str, Link, Anchor | None]], day_one: int):
                 year_ref = (day, anchor.year_date)
         else:
             missed.append(sid)
-        placed = _spread(base_day, day, links)
         stretch += abs(day - (base_day + sum(l.pref for l in links)))
-        for (s, _l), d in zip(pending, placed):
-            days[s] = d
-        base_id, base_day, pending = sid, day, []
+        close(day)
     if pending:
         placed = _spread(base_day, base_day + sum(l.pref for _s, l in pending),
                          [l for _s, l in pending])
         for (s, _l), d in zip(pending, placed):
             days[s] = d
-    return days, kept, missed, stretch
+    return days, kept, missed, stretch, conflicts
 
 
 def solve(items: list[dict]) -> Solved:
@@ -319,7 +395,7 @@ def solve(items: list[dict]) -> Solved:
     rows (id, duration, cues) in reading order."""
     out = Solved()
     # 1. Sort the scenes into the present chain and the scenes off it
-    present: list[tuple[str, Link, Anchor | None]] = []
+    present: list[tuple] = []   # (id, link, anchor, (linked id, days) or None)
     role: dict[str, tuple] = {}     # sid -> ('present',) | ('earlier', ...) | ...
     last_present_span = None
     in_flashback = False
@@ -330,6 +406,13 @@ def solve(items: list[dict]) -> Solved:
         cue = it.get('cues') or {}
         relation = (cue.get('relation') or 'unclear').strip().lower()
         gap = cue.get('gap', '')
+        # A tale told inside another scene (#548's told_by) keeps its own
+        # story time, like a flashback; the telling isn't a step in the
+        # present
+        if (it.get('told_by') or '').strip():
+            role[sid] = ('earlier', link_for('later', gap), gap)
+            in_flashback = True
+            continue
         if relation in ('frame', 'vision'):
             role[sid] = (relation,)
             after_frame = True
@@ -342,7 +425,7 @@ def solve(items: list[dict]) -> Solved:
         if not started:
             started = True
             if relation != 'earlier':
-                present.append((sid, Link(0, 0, 0, True), anchor_for(cue)))
+                present.append((sid, Link(0, 0, 0, True), anchor_for(cue), None))
                 role[sid] = ('present',)
                 last_present_span = _span_days(cue.get('span', '')) if _is_summary(it) else None
                 continue
@@ -363,22 +446,23 @@ def solve(items: list[dict]) -> Solved:
         elif last_present_span and link.counted:
             link = Link(link.lo + last_present_span, link.hi + last_present_span,
                         link.pref + last_present_span, True)
-        present.append((sid, link, anchor_for(cue)))
+        present.append((sid, link, anchor_for(cue) or bound_for(cue), link_ref(cue)))
         role[sid] = ('present',)
         last_present_span = _span_days(cue.get('span', '')) if _is_summary(it) else None
 
     # 2. The start of the year that keeps the most anchors, then stretches least
-    anchored = sum(1 for _s, _l, a in present if a is not None)
+    anchored = sum(1 for _s, _l, a, _r in present if a is not None)
     best = None
     for day_one in (range(YEAR) if anchored else [0]):
-        days, kept, missed, stretch = _walk_present(present, day_one)
+        days, kept, missed, stretch, linked = _walk_present(present, day_one)
         key = (-kept, stretch, day_one)
         if best is None or key < best[0]:
-            best = (key, day_one, days, missed)
-    _key, day_one, days, missed = best
+            best = (key, day_one, days, missed, linked)
+    _key, day_one, days, missed, linked = best
+    out.conflicts.extend(linked)
     out.day_one = day_one if anchored else None
     for sid in missed:
-        a = next(a for s, _l, a in present if s == sid)
+        a = next(a for s, _l, a, _r in present if s == sid)
         out.conflicts.append((sid, f'no day the gaps before it allow falls in {a.words}'))
 
     # 3. The present, then the scenes off it, in reading order

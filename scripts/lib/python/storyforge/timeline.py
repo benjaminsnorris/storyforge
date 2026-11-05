@@ -31,7 +31,7 @@ from .scenes import match_scene_id
 RELATIONS = ('continues', 'later', 'earlier', 'frame', 'vision', 'unclear')
 TIME_MODES = ('scene', 'summary', 'frame', 'vision')
 
-CUE_COLUMNS = ['id', 'relation', 'gap', 'anchor', 'refers', 'span', 'date']
+CUE_COLUMNS = ['id', 'relation', 'gap', 'anchor', 'refers', 'span', 'date', 'link', 'bound']
 CUES_FILE = os.path.join('working', 'timeline-cues.csv')
 # What the last `timeline --check` read, kept apart from the cues the
 # calendar was built from, so a check can be inspected and replayed
@@ -65,6 +65,16 @@ CUE_FIELDS = {
 
 CUE_INSTRUCTIONS = '\n'.join(f'{label}: [{text}]' for label, text in CUE_FIELDS.items())
 
+# What only the timeline's own cue read asks (#351): it lists the scenes
+# before this one, so a stated distance can name the scene it counts from,
+# and code computes the day (timeline_solve). Extraction's skeleton doesn't
+# ask these: it has no list of earlier scenes
+LINK_FIELDS = {
+    'TIME_LINK': 'when the text states how far this scene is from an earlier scene in the list of earlier scenes above (not only the one just before), that scene\'s id and the distance, as "<scene id> | <distance>": "assembly-quarrel-of-achilles | twelve days after", "collins-arrives | a fortnight after". Count an ordinal day as a distance from the day it counts from: "upon the tenth day", counted from the first day of the plague, is "nine days after" the scene where the plague began. Several, separated by semicolons; empty if none',
+    'TIME_BOUND': 'a stated limit on when this scene happens, as "before" or "after" and an EDTF date or a named day: "before XXXX-09-29" for "before Michaelmas", "after XXXX-12-25"; empty if none',
+}
+LINK_INSTRUCTIONS = '\n'.join(f'{label}: [{text}]' for label, text in LINK_FIELDS.items())
+
 _CUE_LABELS = {
     'TIME_RELATION': 'relation',
     'TIME_GAP': 'gap',
@@ -72,6 +82,8 @@ _CUE_LABELS = {
     'TIME_REFERS': 'refers',
     'TIME_SPAN': 'span',
     'TIME_DATE': 'date',
+    'TIME_LINK': 'link',
+    'TIME_BOUND': 'bound',
 }
 
 _EMPTY_ANSWERS = {'', 'none', 'n/a', 'unknown', 'empty', '-', '(none)', '(empty)'}
@@ -138,16 +150,27 @@ def write_cues(project_dir: str, cues: dict[str, dict[str, str]],
         w.writerows(merged.values())
 
 
+# Earlier scenes listed for TIME_LINK: most stated distances are to a
+# scene not far back
+LINK_WINDOW = 40
+
+
 def build_cue_prompt(scene_id: str, text: str, previous_tail: str = '',
-                     is_summary: bool = False) -> str:
+                     is_summary: bool = False,
+                     earlier: list[tuple[str, str]] | None = None) -> str:
     """Prompt for one scene's time cues, from its prose or (for a project not
-    yet drafted) its summary and function."""
+    yet drafted) its summary and function. *earlier*: (id, title) of the
+    scenes before it, nearest last, for the link labels."""
     what = 'scene summary' if is_summary else 'scene'
+    listed = ''
+    if earlier:
+        listed = ('## Earlier Scenes (id | title), in reading order\n\n'
+                  + '\n'.join(f'{sid} | {title}' for sid, title in earlier) + '\n\n')
     previous = (f'## End of the Previous Scene\n\n{previous_tail}\n\n' if previous_tail
                 else '## Previous Scene\n\n(this is the first scene)\n\n')
     return f"""Read this {what} from a novel and say what it tells us about time. Don't work out a day number: only what the text says.
 
-{previous}## {'Summary' if is_summary else 'Scene'}: {scene_id}
+{listed}{previous}## {'Summary' if is_summary else 'Scene'}: {scene_id}
 
 {text}
 
@@ -155,7 +178,8 @@ def build_cue_prompt(scene_id: str, text: str, previous_tail: str = '',
 
 Output each field on its own labeled line.
 
-{CUE_INSTRUCTIONS}"""
+{CUE_INSTRUCTIONS}
+{LINK_INSTRUCTIONS}"""
 
 
 def tail_words(text: str, n: int = 300) -> str:
@@ -1202,6 +1226,7 @@ def scene_items(project_dir: str, cues: dict[str, dict]) -> list[dict]:
         'id': r['id'], 'title': r.get('title', ''),
         'summary': (r.get('summary') or intent.get(r['id'], {}).get('function') or '')[:300],
         'time_of_day': r.get('time_of_day', ''), 'duration': r.get('duration', ''),
+        'told_by': (r.get('told_by') or '').strip(),
         'cues': cues.get(r['id'], {}),
     } for r in rows]
 
@@ -1367,7 +1392,10 @@ def reading_order(project_dir: str) -> list[str]:
 def cue_prompts(project_dir: str, scene_ids: list[str]) -> dict[str, str]:
     """Cue prompts for *scene_ids*, each with the end of the scene before it
     in the book's reading order."""
+    from .elaborate import _read_csv
     order = reading_order(project_dir)
+    titles = {r['id']: (r.get('title') or '').strip()
+              for r in _read_csv(os.path.join(project_dir, 'reference', 'scenes.csv'))}
     prompts = {}
     for sid in scene_ids:
         text, is_summary = scene_text(project_dir, sid)
@@ -1375,7 +1403,9 @@ def cue_prompts(project_dir: str, scene_ids: list[str]) -> dict[str, str]:
             continue
         i = order.index(sid) if sid in order else -1
         previous = scene_text(project_dir, order[i - 1])[0] if i > 0 else ''
-        prompts[sid] = build_cue_prompt(sid, text, tail_words(previous), is_summary)
+        earlier = [(e, titles.get(e, '')) for e in order[max(0, i - LINK_WINDOW):i]] if i > 0 else []
+        prompts[sid] = build_cue_prompt(sid, text, tail_words(previous), is_summary,
+                                        earlier=earlier)
     return prompts
 
 
