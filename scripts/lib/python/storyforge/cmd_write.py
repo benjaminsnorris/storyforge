@@ -316,6 +316,9 @@ def main(argv=None):
                                   if os.path.isfile(os.path.join(scenes_dir, f'{sid}.md'))])
         run_review_phase('drafting', project_dir)
 
+    from storyforge.prompts import ledger_window_summary
+    for note in ledger_window_summary():
+        log(f'NOTE: ledger window: {note}')
     report_fallback_replies()
 
     if failed:

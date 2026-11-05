@@ -2277,3 +2277,23 @@ class TestAccepted:
                        command='recheck')
         assert not result.passed
         assert f'{gate.BLOCKED_PATH} could not be updated' in capsys.readouterr().out
+
+
+class TestOfferCapSaid:
+    """#564 (B-008, G-029): a scene offered only part of the facts in force
+    was reported as `NOTE (cap): scene (62)`; the line now says what was
+    cut, and the run's summary counts the scenes."""
+
+    def test_the_cap_note_says_what_it_means_and_the_summary_counts_it(
+            self, project_dir, tmp_path, monkeypatch):
+        from storyforge import extract, prompts
+        monkeypatch.setattr(extract, 'MAX_KNOWN_COMMITMENTS', 1)
+        monkeypatch.setattr(gate, 'OFFER_LEFT_OUT', {})
+        monkeypatch.setattr(prompts, '_STATES_LEFT_OUT', {})
+        result = _gate(project_dir, tmp_path, [_commitment()])
+        assert SCENE in gate.OFFER_LEFT_OUT
+        note = next(x for x in gate.report_lines(result) if 'over the cap' in x)
+        assert note.startswith('NOTE (facts in force left out of what extraction was offered')
+        assert f'{SCENE} ({gate.OFFER_LEFT_OUT[SCENE]})' in note
+        [line] = prompts.ledger_window_summary()
+        assert line.startswith('the gate offered 1 scene(s) only 1 of the facts in force')
