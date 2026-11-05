@@ -1995,6 +1995,15 @@ def build_scene_prompt_from_briefs(
     char_voice_section = ''
     if char_voice_block:
         char_voice_section = f"## Character Voice\n\n{char_voice_block}"
+    from .narrator import is_narrator, prompt_line
+    if is_narrator(pov_char):
+        # The reserved narrator POV (#555): no character's eyes, the book's
+        # narrator, as the voice guide gives it
+        char_voice_section = (
+            "## Narrator\n\nThis scene's POV is the narrator: tell it in the book's "
+            "narrating voice, as the voice guide describes the narrator, through no "
+            f"character's eyes. {prompt_line(project_dir, always=True)}"
+            + (f"\n\n{char_voice_block}" if char_voice_block else ''))
 
     register_line = ''
     if voice_profile_project.get('register'):

@@ -9,3 +9,7 @@
 <!-- Decisions are appended as they are made. Each entry records what was decided,
      why, and when. Skills must check this file before asking any question that
      might already be answered here. -->
+
+## Settings
+
+- narrator_pov: allowed — whether the book's narrator may hold scenes as their POV (`pov` = `narrator`): `allowed`, `limited N` (at most N scenes) or `off` (every scene has a character POV)

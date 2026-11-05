@@ -43,6 +43,7 @@ from typing import NamedTuple
 from storyforge.common import (
     csv_safe, is_unfilled_template, parse_yaml_scalar,
 )
+from storyforge.narrator import NARRATOR_POV, is_narrator
 
 MODES = ('faithful', 'free')
 DEFAULT_MODE = 'faithful'
@@ -580,7 +581,10 @@ def _map_csv(name: str, header: list[str], rows: list[list[str]],
         new = []
         source_id = row[id_idx].strip() if id_idx is not None else ''
         for col, cell in zip(header, row):
-            if (name in _REGISTRIES and col == 'id') or col in _ID_COLUMNS:
+            if col == 'pov' and is_narrator(cell):
+                # The reserved narrator POV, which no name map lists (#555)
+                new.append(NARRATOR_POV)
+            elif (name in _REGISTRIES and col == 'id') or col in _ID_COLUMNS:
                 new.append(nm.map_ids(cell, unknown.setdefault(f'{name}:{col}', set())))
             else:
                 new.append(nm.apply_text(cell))
