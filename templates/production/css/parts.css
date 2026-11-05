@@ -1,0 +1,17 @@
+/* Storyforge — book part pages (G-031), for the epub, HTML and PDF.
+ * Loaded after the genre stylesheet. A part title is a level-1 heading of
+ * its own; the genre's h1 rule already breaks the page before it.
+ * Pandoc puts the class on the heading (HTML, PDF) or on its section (epub).
+ */
+
+h1.part-title,
+section.part-title > h1 {
+  font-size: 2em;
+  font-variant: small-caps;
+  letter-spacing: 0.12em;
+  text-align: center;
+  margin-top: 30%;
+  margin-bottom: 0;
+  page-break-after: always;
+  break-after: page;
+}

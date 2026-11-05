@@ -727,8 +727,8 @@ class TestGeneratePdf:
         with patch('subprocess.run') as mock_run:
             # Simulate weasyprint failure, then fallback success
             mock_run.side_effect = [
-                type('Result', (), {'returncode': 1})(),  # weasyprint fails
-                None,  # fallback succeeds
+                type('Result', (), {'returncode': 1, 'stderr': b'crash'})(),  # weasyprint fails
+                type('Result', (), {'returncode': 0, 'stderr': b''})(),  # fallback succeeds
             ]
             generate_pdf(project_dir, ms_file, pdf_file, plugin_dir)
             assert mock_run.call_count == 2

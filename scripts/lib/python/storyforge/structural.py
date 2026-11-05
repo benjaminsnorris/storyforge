@@ -1412,12 +1412,16 @@ def score_physical_state_chain(scenes_map, briefs_map, ref_dir=''):
 # Function Variety
 # ---------------------------------------------------------------------------
 
-def score_function_variety(intent_map, briefs_map):
+def score_function_variety(intent_map, briefs_map, source_fixed=None):
     """Score variety of scene functions — action/sequel balance, outcome variety, turning point variety.
 
     Args:
         intent_map: dict from _read_csv_as_map on scene-intent.csv
         briefs_map: dict from _read_csv_as_map on scene-briefs.csv
+        source_fixed: in a `faithful` adaptation, the scenes whose outcome is
+            the source's (`source_fidelity.source_fixed_outcomes`). The score
+            is unchanged; a dominant-outcome finding says how many of its
+            scenes the source fixes and to vary only the rest (#550)
 
     Returns:
         {'score': float 0-1, 'findings': [...]}
@@ -1483,8 +1487,17 @@ def score_function_variety(intent_map, briefs_map):
         dominant_ratio = max_outcome_count / outcome_total
         if dominant_ratio > 0.60:
             dominant = [k for k, v in outcome_freq.items() if v == max_outcome_count][0]
+            message = (f"Dominant outcome '{dominant}' in {max_outcome_count}/{outcome_total} "
+                       f"scenes ({dominant_ratio:.0%})")
+            if source_fixed:
+                fixed = [sid for sid in source_fixed
+                         if _s((briefs_map.get(sid) or {}).get('outcome')).strip().lower()
+                         == dominant]
+                message += (f"; {len(fixed)} of them keep the source's outcome (faithful "
+                            f"mode) and stay: vary only the other "
+                            f"{max_outcome_count - len(fixed)}")
             findings.append({
-                'message': f"Dominant outcome '{dominant}' in {max_outcome_count}/{outcome_total} scenes ({dominant_ratio:.0%})",
+                'message': message,
                 'severity': 'minor',
                 'fix_location': 'intent',
             })
@@ -1571,6 +1584,17 @@ _DIMENSION_TARGETS = {
 # Orchestrator
 # ---------------------------------------------------------------------------
 
+def _source_fixed_outcomes(ref_dir):
+    """The scenes a faithful adaptation keeps the source's outcome on, for
+    the project that holds *ref_dir* ([] for none). A source block or map that
+    can't be read is validate's to report; here it reads as no adaptation."""
+    from storyforge import source, source_fidelity
+    try:
+        return source_fidelity.source_fixed_outcomes(os.path.dirname(os.path.abspath(ref_dir)))
+    except source.SourceError:
+        return []
+
+
 def structural_score(ref_dir, weights=None):
     """Run all 8 structural scoring dimensions and compute weighted average.
 
@@ -1605,7 +1629,8 @@ def structural_score(ref_dir, weights=None):
         'character_presence': score_character_presence(scenes_map, intent_map, ref_dir),
         'mice_health': score_mice_health(scenes_map, intent_map, ref_dir=ref_dir),
         'knowledge_chain': score_knowledge_chain(scenes_map, briefs_map),
-        'function_variety': score_function_variety(intent_map, briefs_map),
+        'function_variety': score_function_variety(intent_map, briefs_map,
+                                                   _source_fixed_outcomes(ref_dir)),
         'physical_state': score_physical_state_chain(scenes_map, briefs_map, ref_dir),
     }
 

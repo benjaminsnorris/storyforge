@@ -664,15 +664,21 @@ class TestReportCsvIntegrity:
         orphans = [i for i in issues if i == 'ORPHAN_FILE:orphan-scene']
         assert len(orphans) == 1
 
+    def _drop_file_with_status(self, project_dir, status):
+        os.remove(os.path.join(project_dir, 'scenes', 'act2-sc01.md'))
+        meta_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+        text = open(meta_csv).read().replace('|world|architecture|', f'|world|{status}|')
+        open(meta_csv, 'w').write(text)
+        return [i for i in report_csv_integrity(project_dir) if i.startswith('ORPHAN_META:')]
+
     def test_detects_orphan_metadata(self, project_dir):
-        # Remove a scene file that has metadata
-        scene_path = os.path.join(project_dir, 'scenes', 'act2-sc01.md')
-        if os.path.isfile(scene_path):
-            os.remove(scene_path)
-        # But act2-sc01 has metadata — check if it's flagged
-        issues = report_csv_integrity(project_dir)
-        orphan_meta = [i for i in issues if 'ORPHAN_META:act2-sc01' in i]
-        assert len(orphan_meta) == 1
+        # A drafted scene whose file is gone is flagged
+        assert self._drop_file_with_status(project_dir, 'drafted') == ['ORPHAN_META:act2-sc01']
+
+    @pytest.mark.parametrize('status', ['', 'spine', 'architecture', 'mapped', 'briefed'])
+    def test_an_undrafted_scene_needs_no_file(self, project_dir, status):
+        """#554 (Beowulf B-024): before drafting, a missing scene file is expected."""
+        assert self._drop_file_with_status(project_dir, status) == []
 
     def test_detects_missing_intent(self, project_dir):
         # Add a scene to metadata that is not in intent
