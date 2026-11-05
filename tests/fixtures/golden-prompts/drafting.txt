@@ -1,0 +1,162 @@
+You are drafting a scene for "The Cartographer's Silence" (fantasy).
+
+## CRITICAL PROSE RULES — Read These First
+
+These rules override everything else in this prompt. Violations are the single most common failure mode.
+
+### Absolute Prohibitions
+
+1. **NO antithesis framing.** Never write "Not X. It's Y." or "It wasn't X — it was Y." or "This isn't about X. It's about Y." If you need contrast, let it emerge from content, not rhetorical formula. ZERO instances per scene.
+
+2. **NO tricolon by default.** Do not list three things when two or one will do. Three-part structures must feel necessary, not habitual. Before writing any list of three, ask: would two items make the point? If yes, stop at two.
+
+3. **NO scene-ending summary or philosophical pivot.** Do not end scenes with a sentence that restates the scene's theme, meaning, or emotional content. End on action, image, or dialogue. The scene already said what it means.
+
+4. **NO doubled emotional statements.** Do not describe an emotion, then describe it again with greater intensity in the same paragraph. State it once, at the right pitch. "She went still" does not need "— a stillness born of..." One statement. Move on.
+
+5. **NO silence annotation.** Do not describe a silence and then explain what kind of silence it was. Show what happens in the silence instead.
+
+6. **NO hedging stacks.** Do not pile "perhaps," "almost as if," "a kind of," "something like." Commit to the observation.
+
+7. **NO performative noticing.** Never write "He noticed that..." or "She became aware that..." Just render what they perceive.
+
+### Motif Discipline
+
+Recurring thematic language (signature phrases, recurring images, thematic keywords) may appear AT MOST ONCE per scene, and only if it earns its place. These words gain power through scarcity.
+
+Functional vocabulary — names of instruments, equipment, locations, and procedures — is exempt from the motif cap. Use them as the action requires, but vary phrasing where natural.
+
+### Scene Endings
+
+End every scene with ONE of these and nothing else:
+- A physical action (someone moves, picks something up, turns away)
+- A line of dialogue (the last word spoken)
+- A concrete image (what the POV character sees, not what they think about it)
+
+Do NOT end with: a reflection on what just happened, a thematic restatement, a landscape-as-metaphor sentence, or a philosophical observation. The scene is over. Stop.
+
+### Technical Detail Is Not Ornamentation
+
+Technical and procedural detail — how instruments work, how schemes are executed, how professional skills are applied — is load-bearing content, not decoration. Preserve it. Cut lyrical excess, not specificity.
+
+### POV Restraint Level: MAXIMUM (Protagonist)
+
+This POV character withholds. Their interiority is sparse, physical, professional. Emotions are shown through action and observation, rarely named. Do not editorialize their feelings. Let the reader infer from what the character does and what they notice.
+
+
+
+## Scene Brief: act1-sc02
+
+**seq:** 2
+**title:** The Missing Village
+**part:** 1
+**act:** 1
+**pov:** Dorren Hayle
+**location:** Dorren's private study
+**timeline_day:** 1
+**time_of_day:** evening
+**duration:** 1 hour
+**type:** plot
+**status:** briefed
+**word_count:** 0
+**target_words:** 3000
+**function:** Dorren discovers a village has vanished from the pressure maps
+**action_sequel:** sequel
+**emotional_arc:** Routine giving way to dread
+**value_at_stake:** safety
+**value_shift:** -/--
+**turning_point:** revelation
+**characters:** Dorren Hayle
+**on_stage:** Dorren Hayle
+**goal:** Understand the anomaly by cross-referencing historical archives
+**conflict:** The village that should appear on the 40-year map is simply absent — no record of removal
+**outcome:** no-and
+**crisis:** Accept the archive is incomplete and move on, or pursue an explanation that has no institutional support
+**decision:** Decides to pursue quietly, outside protocol
+**knowledge_in:** map-anomaly-exists
+**knowledge_out:** village-vanished;archive-erasure
+**key_actions:** Cross-references maps;Discovers missing village;Searches removal logs;Finds nothing
+**key_dialogue:** It was there forty years ago. It isn't there now. There is no note.
+**emotions:** routine;confusion;dread;determination
+**motifs:** depth/descent;maps/cartography
+**continuity_deps:** act1-sc01
+**has_overflow:** false
+**physical_state_out:** archive-key-dorren;exhaustion-tessa
+
+
+
+
+
+## Established Facts
+
+What the book has already committed to about the people and place in this scene. The scene must not contradict it.
+
+### Established in this scene so far
+From the scene's plan or its current draft. Keep each of these unless the brief says otherwise: where they differ, the brief wins.
+- holds the restricted archive key *(action-gating)*
+- physically exhausted from 4-hour eastern trek
+
+## The Calendar
+
+Each dated scene's day in the story's calendar (scenes.csv), in reading order; this scene is day 1, evening. Every elapsed time, day count or date the scene states ("a week ago", "ten days since", "three nights out") must fit these days and the days of the scenes whose events it counts from. Where the brief doesn't need a span, don't name one: a vaguer phrase is better than a number that breaks the calendar. A summary scene's day is where its stretch starts; a frame or vision scene is not the story's present.
+
+act1-sc01: day 1, morning
+act1-sc02: day 1, evening  <- this scene
+new-x1: day 2, afternoon
+act2-sc01: day 3, morning
+act2-sc02: day 3, afternoon
+act2-sc03: day 4, evening
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Task
+
+Write the complete prose for scene **act1-sc02** ("The Missing Village").
+
+**Target length: ~3000 words.** Prefer economy — achieve through implication what would take twice the words in exposition. Do not pad to reach the target; stop when the scene is complete.
+
+The brief is your contract. Deliver:
+- The value shift specified (-/--)
+- The outcome specified (no-and)
+- The emotional arc from Routine giving way to dread
+- The POV character must know village-vanished;archive-erasure by scene end
+
+
+**Key dialogue checklist — every line below MUST appear in the scene (verbatim or close paraphrase). Do not end the scene until all are delivered:**
+  - [ ] It was there forty years ago. It isn't there now. There is no note.
+
+**Physical states checklist — the scene ends with each of these, and each MUST be on the page (in action, sensation, dialogue or a stated fact), not left for the reader to infer:**
+  - [ ] Dorren Hayle: holds the restricted archive key
+  - [ ] Tessa Merrin: physically exhausted from 4-hour eastern trek
+
+**Prose rules:**
+- Em dashes rare (max one per scene)
+- Vary sentence and paragraph length — follow thought patterns, not templates
+- Contractions in interiority and dialogue
+- Enter late, leave early
+- Match the voice guide exactly
+
+**Scene ending — choose ONE, then stop:**
+- A physical action
+- A line of dialogue
+- A concrete image
+Do NOT follow it with a reflection, a thematic echo, or a landscape-as-metaphor sentence.
+
+**Guardrails:**
+- Do NOT invent character relationships, history, or backstory not present in the brief, knowledge chain, established facts, or character bible
+- Interpretive brief fields (function, motifs, motif_details, subtext, emotions, and how key_actions are phrased) are notes to you, written with hindsight. The narration may reveal only what knowledge_in and knowledge_out allow: never state a fact, motive or meaning that appears only in those notes
+- Do NOT add characters not listed in on_stage
+- Do NOT resolve threads not listed in mice_threads for this scene
+- Acknowledge all action-gating physical states — characters cannot use injured limbs, don't have lost equipment — unless the brief has them do it
+
+Output the scene prose only. No metadata, no frontmatter, no commentary.

@@ -1866,6 +1866,14 @@ def build_scene_prompt_from_briefs(
         if dep_parts:
             dep_block = "## Dependency Scenes\n\nThese scenes happen before this one. Their outcomes and knowledge states are your starting context.\n\n" + '\n\n'.join(dep_parts)
 
+    # An adaptation's source passage, mode and version rules (#561, B-025):
+    # after the brief and its dependencies; nothing without a `source:`
+    # block, so other prompts are byte for byte what they were
+    from .prompts_source import drafting_section
+    source_block = drafting_section(project_dir, scene_id)
+    if source_block:
+        dep_block = f'{dep_block}\n\n{source_block}' if dep_block else source_block
+
     # Voice guide (skipped when system_context provides it)
     voice_guide = ''
     if not system_context:
@@ -1990,6 +1998,15 @@ def build_scene_prompt_from_briefs(
     char_voice_section = ''
     if char_voice_block:
         char_voice_section = f"## Character Voice\n\n{char_voice_block}"
+    from .narrator import is_narrator, prompt_line
+    if is_narrator(pov_char):
+        # The reserved narrator POV (#555): no character's eyes, the book's
+        # narrator, as the voice guide gives it
+        char_voice_section = (
+            "## Narrator\n\nThis scene's POV is the narrator: tell it in the book's "
+            "narrating voice, as the voice guide describes the narrator, through no "
+            f"character's eyes. {prompt_line(project_dir, always=True)}"
+            + (f"\n\n{char_voice_block}" if char_voice_block else ''))
 
     register_line = ''
     if voice_profile_project.get('register'):

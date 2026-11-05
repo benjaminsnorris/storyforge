@@ -20,8 +20,9 @@ from typing import Any, NamedTuple
 OFF_PRESENT_MODES = frozenset({'frame', 'vision'})
 # Time modes whose scene has no clock of its own: frame narration is told
 # from outside the story's time, so it has no time of day or duration to
-# give (a vision keeps its own). Nothing asks such a scene for CLOCK_FIELDS,
-# and its narrator, who has no body, need not be on stage (#488)
+# give (a vision keeps its own). Nothing asks such a scene for CLOCK_FIELDS
+# (#488). Whether its teller must be on stage is the POV's business: a
+# `narrator` POV never is (#555, `narrator.py`)
 CLOCKLESS_MODES = frozenset({'frame'})
 CLOCK_FIELDS = ('time_of_day', 'duration')
 
@@ -821,7 +822,7 @@ def _validate_timeline(scenes_map, checks):
         checks.append(_check('timeline', 'timeline-order', True, 'Timeline order is consistent'))
 
 
-def _validate_told(scenes_map, intent_map, checks):
+def _validate_told(scenes_map, intent_map, checks, ref_dir=''):
     """Check `told_by`, which marks an embedded tale with the scene that
     tells it (#548).
 
@@ -832,7 +833,8 @@ def _validate_told(scenes_map, intent_map, checks):
     `scene_ids` check, so it is skipped here. Advisory: the told scene's
     pov is its teller, who should be in the telling scene's cast
     (`characters` or `on_stage`); an empty pov, an unknown one, or the
-    narrator (who has no body) is not checked.
+    narrator (`narrator.is_narrator`, #555: no body) is not checked. A
+    narrator-told scene still counts toward `narrator_pov: limited N`.
     """
     told = {sid: told_by(row) for sid, row in scenes_map.items() if told_by(row)}
     if not told:
@@ -876,11 +878,17 @@ def _validate_told(scenes_map, intent_map, checks):
         'Told in a scene that comes later in reading order: ' + '; '.join(ahead)
         if ahead else 'Every tale comes after the scene that tells it',
         severity='advisory'))
+    # The narrator (#555) has no body to be in a cast; a first-person
+    # narrator in characters.csv is a character and is checked
+    from .narrator import is_narrator
+    from .enrich import load_alias_map
+    path = os.path.join(ref_dir, 'characters.csv') if ref_dir else ''
+    registry = set(load_alias_map(path)) if path and os.path.isfile(path) else set()
     absent = []
     for sid, frame in sorted(told.items()):
         teller = (scenes_map[sid].get('pov') or '').strip()
         if (frame not in scenes_map or frame == sid or not teller
-                or teller.lower() in ('narrator', 'unknown')):
+                or is_narrator(teller, registry) or teller.lower() == 'unknown'):
             continue
         cast = intent_map.get(frame, {})
         names = {c.strip() for col in ('characters', 'on_stage')
@@ -939,7 +947,10 @@ def present_in_scene(scene: dict, intent: dict) -> set[str]:
     raw = intent.get('on_stage', '') or intent.get('characters', '')
     present = {c.strip().lower() for c in raw.split(';') if c.strip()}
     pov = (scene.get('pov') or '').strip().lower()
-    if pov and not told_by(scene):
+    from .narrator import is_narrator
+    # The narrator has no body (#555); a told scene's teller is in the
+    # telling scene (#548)
+    if pov and not is_narrator(pov) and not told_by(scene):
         present.add(pov)
     return present
 
@@ -1317,7 +1328,7 @@ def validate_structure(ref_dir: str) -> dict:
     # --- Thread, timeline, knowledge, pacing ---
     _validate_threads(scenes_map, intent_map, checks, ref_dir=ref_dir)
     _validate_timeline(scenes_map, checks)
-    _validate_told(scenes_map, intent_map, checks)
+    _validate_told(scenes_map, intent_map, checks, ref_dir)
     _validate_knowledge(scenes_map, briefs_map, checks)
     _validate_pacing(scenes_map, intent_map, checks)
     _validate_acts(scenes_map, checks)
@@ -1325,6 +1336,7 @@ def validate_structure(ref_dir: str) -> dict:
     _validate_pronouns(ref_dir, checks)
     _validate_cast_named(scenes_map, intent_map, ref_dir, checks)
     _validate_brief_names(ref_dir, checks)
+    _validate_narrator(ref_dir, scenes_map, checks)
 
     failures = [c for c in checks if not c['passed']]
     blocking_failures = [c for c in failures if c.get('severity', 'blocking') != 'advisory']
@@ -1333,6 +1345,18 @@ def validate_structure(ref_dir: str) -> dict:
         'checks': checks,
         'failures': failures,
     }
+
+
+def _validate_narrator(ref_dir: str, scenes_map: dict, checks: list[dict]) -> None:
+    """The narrator as POV against key-decisions.md's `narrator_pov`
+    (#555): narrator scenes when it is `off`, or more than its cap when it is
+    `limited N`. Advisory: the author's setting, not broken data."""
+    from .narrator import setting_problem
+    problem = setting_problem(os.path.dirname(os.path.abspath(ref_dir)),
+                              list(scenes_map.values()))
+    checks.append(_check('pov', 'narrator-pov-setting', not problem,
+                         problem or 'Narrator POV scenes are within the project setting',
+                         severity='advisory'))
 
 
 def _validate_pronouns(ref_dir: str, checks: list[dict]) -> None:

@@ -48,12 +48,15 @@ def _project_context(project_dir: str) -> str:
     if subgenre:
         genre_str = f"{genre} / {subgenre}"
 
+    from .narrator import prompt_line
+    narrator = prompt_line(project_dir)
+    narrator = f"\n**{narrator.replace(':', ':**', 1)}" if narrator else ''
     return f"""## Project
 
 **Title:** {title}
 **Genre:** {genre_str}
 **Logline:** {logline}
-**Target word count:** {target}"""
+**Target word count:** {target}{narrator}"""
 
 
 # The reference docs the stage prompts carry, in order. The shared system
@@ -580,6 +583,26 @@ def build_voice_prompt(project_dir: str, plugin_dir: str,
 
     medium_label = 'graphic novel' if medium == 'graphic-novel' else 'novel'
 
+    # A book whose narrator holds scenes needs that narrator defined (#555)
+    from .narrator import LIMITED, narrator_scenes, read_setting
+    scenes_rows = []
+    scenes_path = os.path.join(ref_dir, 'scenes.csv')
+    if os.path.isfile(scenes_path):
+        from .elaborate import _read_csv
+        scenes_rows = _read_csv(scenes_path)
+    narrated = narrator_scenes(scenes_rows)
+    narrator_section = ''
+    if narrated or read_setting(project_dir).mode == LIMITED:
+        narrator_section = (
+            '- **The narrator**: ' + (f'{len(narrated)} scene(s) have `narrator` as their '
+                                      f'POV. ' if narrated else 'The narrator may hold scenes. ')
+            + 'Say who the narrator is (an omniscient voice, a bard, a later teller, a '
+            'character looking back) and their stance: how far they know into minds, '
+            'whether they judge, foreshadow or address the reader, and how close they '
+            'stand to the action. Give the narrator a voice fingerprint like a POV '
+            'character\'s, and a voice-profile row with character `narrator` (the one row '
+            'that is not a characters.csv id).\n')
+
     return f"""You are developing the voice of a {medium_label} — the prose register, per-character voice fingerprints, and style rules that every scene must embody.
 
 {context}
@@ -608,7 +631,7 @@ Write a comprehensive voice guide as a markdown document covering:
   - How they speak in dialogue vs. how they narrate
 - **Style rules**: Specific rules the prose must follow (e.g., "no weather openings", "interiority in present tense", "never name emotions directly")
 - **Prohibited patterns**: Constructions, words, or moves that break this book's voice
-
+{narrator_section}
 Output in a fenced block labeled `voice-guide`:
 
 ```voice-guide

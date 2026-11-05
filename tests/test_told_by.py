@@ -463,3 +463,26 @@ class TestSceneMapScore:
         assert not pov_check()['passed']
         update_scene('act1-sc02', ref, {'told_by': 'act1-sc01'})
         assert pov_check()['passed']
+
+
+class TestNarratorTeller:
+    """After #584: the narrator (any reserved spelling) has no body to be in
+    a cast, so a narrator-told digression gets no teller warning, and still
+    counts toward narrator_pov's limit."""
+
+    @pytest.mark.parametrize('pov', ['narrator', 'Omniscient narrator', 'omniscient'])
+    def test_no_teller_warning_for_the_narrator(self, pov):
+        checks = _structural([_row('hall', '8', pov='hygelac'),
+                              _row('thryth', '-7300', 'hall', pov)],
+                             [{'id': 'hall', 'characters': 'hygelac'}])
+        assert checks['teller-in-telling-scene']['passed']
+
+    def test_a_narrator_told_scene_counts_toward_the_limit(self):
+        from storyforge.narrator import narrator_scenes
+        assert narrator_scenes([_row('hall', '8', pov='hygelac'),
+                                _row('thryth', '-7300', 'hall', 'narrator')]) == ['thryth']
+
+    def test_the_narrator_teller_is_not_present(self):
+        from storyforge.elaborate import present_in_scene
+        assert present_in_scene({'pov': 'narrator', 'told_by': 'hall'},
+                                {'on_stage': 'thryth'}) == {'thryth'}
