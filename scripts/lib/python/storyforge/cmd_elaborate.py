@@ -1559,6 +1559,43 @@ def _run_page_prompt_handler_gn(project_dir: str, *,
 # Main stage execution (spine/architecture/map/briefs)
 # ============================================================================
 
+def _register_brief_ledger(project_dir: str, ref_dir: str, log_dir: str) -> str:
+    """Give the briefs' knowledge and physical-state ids their ledger rows.
+
+    The briefs prompt has the model coin fact and state ids, and every one is
+    meant to be a `commitments.csv` row; the stage wrote only the briefs, so
+    validate counted no facts and the knowledge chain scored 0 (#547; Gawain
+    G-023, Beowulf B-020). This runs the reconciliation `storyforge hone
+    --domain knowledge,physical-states` runs: ids already in the ledger cost
+    nothing, the rest go to the model in batches (about $0.2 a book).
+    Returns '' or what went wrong, which the stage reports; the briefs stay
+    written either way."""
+    from storyforge.hone import reconcile_domain
+    try:
+        model = select_model('synthesis')
+    except Exception as e:  # no key, or the model list unavailable
+        problem = f'the ledger rows for the briefs\' facts and states were not written ({e})'
+        log(f'WARNING: {problem}')
+        return problem + '; run storyforge hone --domain knowledge,physical-states'
+    failed = []
+    for domain in ('knowledge', 'physical-states'):
+        log(f'Registering the briefs\' {domain} in the ledger...')
+        try:
+            result = reconcile_domain(domain, ref_dir, model, log_dir)
+        except Exception as e:
+            log(f'WARNING: {domain} ledger rows not written: {e}')
+            failed.append(domain)
+            continue
+        log(f'  {domain}: {result["registry_entries"]} ledger entries, '
+            f'{result["calls"]} call(s), {result["unresolved"]} unresolved')
+        if result['unresolved']:
+            failed.append(domain)
+    if failed:
+        return (f'the briefs\' {" and ".join(failed)} ids are not all in the ledger; '
+                f'run storyforge hone --domain knowledge,physical-states')
+    return ''
+
+
 def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     dry_run: bool, interactive: bool, seed: str,
                     args=None,
@@ -1986,11 +2023,19 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                 f'See the reply: {stage_log}')
             sys.exit(1)
 
+    # The briefs' new fact and state ids, registered in the ledger (#547)
+    ledger_problem = ''
+    if stage == 'briefs' and medium != 'graphic-novel':
+        ledger_problem = _register_brief_ledger(project_dir, ref_dir, log_dir)
+
     # ========================================================================
     # Validate
     # ========================================================================
     log('Running validation...')
     report = validate_structure(ref_dir)
+    if ledger_problem:
+        report['failures'].append({'severity': 'advisory', 'scene_id': '',
+                                   'message': ledger_problem})
     # The column schema too, which `storyforge validate` checks: a map that
     # wrote "action: she strikes" as a turning point used to report
     # "Validation passed" here (Beowulf B-018). A value outside a closed set
