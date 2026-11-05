@@ -159,6 +159,12 @@ class TestGaps:
         assert gap_to_days('three days" (vacation between terms)') is None
         assert gap_to_days('three days (the vacation)') is None
 
+    def test_winters_count_as_years(self):
+        """B-009: Beowulf reckons in winters ("fifty winters")."""
+        from storyforge.timeline import gap_to_days
+        assert gap_to_days('fifty winters') == 50 * 365
+        assert gap_to_days('twelve winters') == 12 * 365
+
     def test_gap_to_days(self):
         from storyforge.timeline import gap_to_days
         cases = {
@@ -956,6 +962,36 @@ class TestChecks:
         rows = self._rows(('a', '1', 'scene', ''), ('b', '8', 'scene', ''))
         found = check_timeline(rows, {'b': {'relation': 'later', 'gap': 'the next morning'}})
         assert [f['check'] for f in found] == ['gap_mismatch']
+
+    def test_continues_with_no_gap_on_a_later_day(self):
+        """B-029: Beowulf's feast "continues" the morning of thanks, with no
+        gap stated, but the calendar put it a day on."""
+        from storyforge.timeline import check_timeline
+        rows = self._rows(('thanks', '4', 'scene', ''), ('feast', '5', 'summary', ''))
+        found = check_timeline(rows, {'feast': {'relation': 'continues'}})
+        assert [f['check'] for f in found] == ['continues_not_same_day']
+        assert '1 day(s) on' in found[0]['message']
+
+    def test_continues_on_the_same_day_or_with_a_gap_or_after_a_summary(self):
+        from storyforge.timeline import check_timeline
+        same = self._rows(('a', '4', 'scene', ''), ('b', '4', 'scene', ''))
+        assert check_timeline(same, {'b': {'relation': 'continues'}}) == []
+        # a stated gap is checked by gap_mismatch, with its own slack
+        gap = self._rows(('a', '4', 'scene', ''), ('b', '5', 'scene', ''))
+        assert check_timeline(gap, {'b': {'relation': 'continues', 'gap': 'the next day'}}) == []
+        # a summary's day is where its stretch starts
+        summ = self._rows(('a', '4', 'summary', ''), ('b', '9', 'scene', ''))
+        assert check_timeline(summ, {'b': {'relation': 'continues'}}) == []
+        # back from a flashback, it continues the present
+        back = self._rows(('a', '8', 'scene', ''), ('m', '-100', 'scene', ''),
+                          ('b', '8', 'scene', ''))
+        assert check_timeline(back, {'m': {'relation': 'earlier', 'gap': 'ten years'},
+                                     'b': {'relation': 'continues'}}) == []
+        # after a night scene the next day may have begun (the dragon burns
+        # until dawn, and the news reaches Beowulf)
+        night = [dict(r, time_of_day=t) for r, t in zip(
+            self._rows(('a', '4', 'scene', ''), ('b', '5', 'scene', '')), ('night', ''))]
+        assert check_timeline(night, {'b': {'relation': 'continues'}}) == []
 
     def test_dates_and_weekdays_against_days(self):
         from storyforge.timeline import check_timeline

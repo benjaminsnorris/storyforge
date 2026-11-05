@@ -251,7 +251,12 @@ one statement the text can bear out or not: who did what, why, in what order,
 with what outcome, or what the book means. Split a sentence that says several
 things; don't split one thing into several claims. Leave out nothing a reader
 could get wrong, including small words that carry weight ("finally", "all",
-"the last", "because", "after").
+"the last", "because", "after"). Keep a limit with what it limits: a clause cut
+off by "until", "unless", "except", "only", "at first" or "but then" reads as
+false on its own ("she keeps her word each day, until on the last day she
+breaks it" is not a claim that she always keeps it), so keep the sentence as
+one claim, or give each part its limit ("keeps her word on every day but the
+last").
 
 - `section`: the document it comes from, exactly as headed above.
 - `kind`: `event` (what happens), `cause` (why), `order` (before or after),

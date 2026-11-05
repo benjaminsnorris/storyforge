@@ -102,6 +102,18 @@ def main(argv=None):
         for f in canon_result['other']:
             say(f'  {f["file"]}: [{f["severity"]}] {f["type"]}')
 
+    # Scenes waiting on the gate (#556's review): a provisional commit from
+    # `write --keep-going` is the author's to fix; a warning, never blocking
+    from storyforge.status import gate_waiting
+    waiting = gate_waiting(project_dir)
+    if waiting:
+        provisional = sum(r['command'] == 'provisional' for r in waiting)
+        say(f'WARNING: {len(waiting)} scene(s) waiting on the gate in working/gate-pending.csv'
+            + (f' ({provisional} committed provisionally by `write --keep-going`)'
+               if provisional else '') + '; run `storyforge check --pending`:')
+        for row in waiting[:20]:
+            say(f"  {row['scene_id']} ({row['command']}): {row['reason'][:160]}")
+
     # Source coverage (#477): only for a project with a `source:` block, so
     # every other project's report and exit code are as before
     from storyforge import source as source_mod
@@ -147,6 +159,8 @@ def main(argv=None):
         'scores': structural_scores,
         'scores_previous': scores_previous,
     }
+    if waiting:
+        combined['gate_pending'] = waiting
     if source_result is not None:
         # Only an adaptation's report has the key: --json for every other
         # project is unchanged

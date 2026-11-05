@@ -15,9 +15,18 @@ with an earlier scene, the source scenes behind that scene. It rules:
   not committed (`GateResult.source_dropped`, reported);
 - each verified contradiction with an earlier scene: which side the source
   backs. When it backs this scene, the finding doesn't block it
-  (`GateResult.source_backed`): the commitments stating it are held back, as
-  for an inherited one, and the earlier scene is listed `SOURCE_FIX` in
-  working/gate-pending.csv for the author (a row that doesn't stop drafting).
+  (`GateResult.source_backed`): on commit the earlier scene's commitments
+  stating it become `superseded` and this scene's are committed, so later
+  scenes follow the source (`gate._source_supersede`; one whose earlier fact
+  can't be found is held back instead), and the earlier scene is listed
+  `SOURCE_FIX` in working/gate-pending.csv for the author (`mark_source_fix`:
+  a row that doesn't stop drafting, and stays until that scene's prose
+  changes). A scene a fact was dropped from is listed the same way.
+
+Cost: only facts new to the scene are sent, an unchanged re-check makes no
+call, a fix round with the same facts reuses the ruling (`_MEMO`), source
+prose is cut at `MAX_SCENE_PROSE_CHARS` a scene and `MAX_SOURCE_CHARS` a
+call, and `write`'s forecast adds `COST_PER_SCENE`.
 
 A departure the version rules (`source.rules`) or the map row's treatment
 or note authorize is not a contradiction. A project without a source, in
@@ -38,7 +47,15 @@ SOURCE_FIX = 'source-fix'
 
 #: The most source text (characters) one call is sent: past it, the earlier
 #: scenes' sources are left out and contradictions with them not ruled on
-MAX_SOURCE_CHARS = 60000
+MAX_SOURCE_CHARS = 40000
+#: The most of one source scene's prose sent (#557's review: a long book of
+#: the Iliad mapped to one scene would fill the call); the rest is cut, and
+#: the cut said in the prompt
+MAX_SCENE_PROSE_CHARS = 12000
+#: What `write`'s forecast adds to each gated scene of a faithful
+#: adaptation: one Sonnet call with up to `MAX_SOURCE_CHARS` of source (an
+#: estimate, not measured)
+COST_PER_SCENE = 0.10
 
 SCHEMA = {
     'type': 'object',
@@ -86,6 +103,9 @@ class Setup:
     map_rows: dict[str, dict[str, str]]
     skip: str = ''
 
+    def active(self) -> bool:
+        return not self.skip and bool(self.refs)
+
 
 def setup(project_dir: str) -> Setup | None:
     """None for a project with no `source:` block (nothing to say); a
@@ -121,9 +141,28 @@ def setup(project_dir: str) -> Setup | None:
 
 
 def _source_text(project_dir: str, refs: list[tuple[str, str]]) -> str:
+    """The source scenes `refs` (their brief, and prose cut at
+    `MAX_SCENE_PROSE_CHARS`) for the prompt."""
     from storyforge.prompts_source import source_scene_block
-    return '\n\n'.join(source_scene_block(project_dir, slug, sid, prose=True)
-                       for slug, sid in refs)
+    blocks = []
+    for slug, sid in refs:
+        text = source_scene_block(project_dir, slug, sid, prose=True)
+        start = text.find('<source-prose')
+        if start >= 0 and len(text) - start > MAX_SCENE_PROSE_CHARS:
+            text = (text[:start + MAX_SCENE_PROSE_CHARS]
+                    + f'\n[... the rest of {slug}:{sid} is not shown]\n</source-prose>')
+        blocks.append(text)
+    return '\n\n'.join(blocks)
+
+
+def has_source_prose(project_dir: str, refs: list[tuple[str, str]]) -> bool:
+    from storyforge import source
+    return any(source.source_prose(project_dir, slug, sid) for slug, sid in refs)
+
+
+#: (scene, facts sent, contradictions sent) → the ruling, for this process:
+#: a fix round re-gating the same facts doesn't pay again (#557's review)
+_MEMO: dict[tuple, 'SourceReview'] = {}
 
 
 def build_prompt(scene_id: str, prose: str, facts: list[dict[str, str]],
@@ -188,26 +227,39 @@ def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, st
         SourceReviewError: the call failed or its reply can't be used.
     """
     from storyforge.api import extract_text, invoke_to_file, is_truncated
+    from storyforge.source import SourceError
     out = SourceReview()
-    this = _source_text(project_dir, ctx.refs[scene_id])
-    budget = MAX_SOURCE_CHARS - len(this)
-    earlier: dict[str, str] = {}
-    sent: list[int] = []
-    for i, f in enumerate(contradictions):
-        sid = f.established_scene
-        if sid not in earlier:
-            if sid not in ctx.refs:
-                out.notes.append(f'{sid} is not mapped to the source: its contradiction '
-                                 f'with {scene_id} isn\'t ruled on')
-                continue
-            text = _source_text(project_dir, ctx.refs[sid])
-            if len(text) > budget:
-                out.notes.append(f'the source behind {sid} would pass {MAX_SOURCE_CHARS} '
-                                 f'characters: its contradiction isn\'t ruled on')
-                continue
-            budget -= len(text)
-            earlier[sid] = text
-        sent.append(i)
+    key = (scene_id, tuple((f.get('statement', ''), f.get('quote', '')) for f in facts),
+           tuple((c.scene_quote, c.established_scene, c.established_quote)
+                 for c in contradictions))
+    if key in _MEMO:
+        return _MEMO[key]
+    try:
+        if not has_source_prose(project_dir, ctx.refs[scene_id]):
+            raise SourceReviewError(f'{scene_id}: its source scenes have no prose')
+        this = _source_text(project_dir, ctx.refs[scene_id])
+        budget = MAX_SOURCE_CHARS - len(this)
+        earlier: dict[str, str] = {}
+        sent: list[int] = []
+        for i, f in enumerate(contradictions):
+            sid = f.established_scene
+            if sid not in earlier:
+                if sid not in ctx.refs:
+                    out.notes.append(f'{sid} is not mapped to the source: its contradiction '
+                                     f'with {scene_id} isn\'t ruled on')
+                    continue
+                text = _source_text(project_dir, ctx.refs[sid])
+                if len(text) > budget:
+                    out.notes.append(f'the source behind {sid} would pass {MAX_SOURCE_CHARS} '
+                                     f'characters: its contradiction isn\'t ruled on')
+                    continue
+                budget -= len(text)
+                earlier[sid] = text
+            sent.append(i)
+    except (SourceError, OSError, UnicodeDecodeError, KeyError, ValueError) as e:
+        raise SourceReviewError(f'{scene_id}: the source can\'t be read: {e}') from e
+    if not facts and not sent:
+        return out
     row = ctx.map_rows.get(scene_id, {})
     prompt = build_prompt(scene_id, prose, facts,
                           [(contradictions[i].scene_quote, contradictions[i].established_scene,
@@ -231,6 +283,7 @@ def review(project_dir: str, scene_id: str, prose: str, facts: list[dict[str, st
                 out.backs_scene.append((sent[n - 1], str(item.get('why', ''))))
     except (RuntimeError, ValueError, KeyError, TypeError) as e:
         raise SourceReviewError(f'{scene_id}: the source check failed: {e}') from e
+    _MEMO[key] = out
     return out
 
 

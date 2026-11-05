@@ -1652,12 +1652,14 @@ class TestFirstFixNeverWorse(_FixRounds):
             self, monkeypatch, tmp_path):
         first = self._first()
         again = self._with(self._promise('She kept the case on her right shoulder'))
-        out, dirs, _ = self._run(monkeypatch, tmp_path, [first, again],
+        # the retry with the edit that didn't do it (#556) can't finish
+        out, dirs, _ = self._run(monkeypatch, tmp_path, [first, again, GateError('x')],
                                  [(self.FIXED, self.EDITS)])
         assert _blocking_count(again) < _blocking_count(first)   # fewer, and still worse
         assert out.prose == self.PROSE and not out.fixed and out.discarded == 1
         assert out.result is first and out.first is first and out.rounds == []
-        assert len(dirs) == 2   # no second round on the discarded prose
+        assert len(dirs) == 3   # the partial retry; no second round on discarded prose
+        assert dirs[2].endswith('partial-1')
         assert out.notes[0].startswith('fix round 1 brought in 1 problem(s) (PRM breaks the '
                                        'brief [key_dialogue]')
         assert out.notes[0].endswith('kept the prose as given and the first verdict')
@@ -1758,10 +1760,46 @@ class TestFirstFixNeverWorse(_FixRounds):
         again = self._with(self._finding('contradiction', 'She kept the case on her right '
                                          'shoulder', established='Thomas watched the strap '
                                          'go slack in her fingers'))
-        out, _, _ = self._run(monkeypatch, tmp_path, [first, again], [(self.FIXED, self.EDITS)])
+        out, _, _ = self._run(monkeypatch, tmp_path, [first, again, GateError('x')],
+                              [(self.FIXED, self.EDITS)])
         assert out.prose == self.PROSE and out.result is first
         assert out.notes[0].startswith('fix round 1 brought in 1 problem(s) (TRT contradicts '
                                        'cache')
+
+    def test_the_edits_that_held_are_kept_when_one_broke_a_promise(self, monkeypatch,
+                                                                    tmp_path):
+        """B-030 (#556): one fix rewrote three problems; the third edit broke
+        the brief, and the whole fix (the two good ones with it) was thrown
+        away. Now the edit that brought the problem in is dropped, the rest
+        re-gated, and kept when that isn't worse."""
+        first = self._first()
+        again = self._with(self._promise('She kept the case on her right shoulder'))
+        partial = gate.GateResult(SCENE)   # no check problems: passed
+        partial.check = __import__('storyforge.checker', fromlist=['CheckResult']).CheckResult(
+            SCENE, findings=[])
+        out, dirs, _ = self._run(monkeypatch, tmp_path, [first, again, partial],
+                                 [(self.FIXED, self.EDITS)])
+        assert out.result is partial and out.fixed and out.discarded == 0
+        assert out.prose == self.PROSE.replace(' for two days', '')
+        assert [r.edits for r in out.rounds] == [[self.EDITS[0]]]
+        assert 'kept its 1 edit(s) that did not' in out.notes[0]
+        assert 'took the case in her left hand' in out.notes[0]
+
+    def test_a_partial_fix_that_is_worse_is_discarded_too(self, monkeypatch, tmp_path):
+        first = self._first()
+        again = self._with(self._promise('She kept the case on her right shoulder'))
+        worse = self._with(*[self._finding('contradiction', q, source=s, code='PHY')
+                             for q, s in (('a', 'x'), ('b', 'y'), ('c', 'z'), ('d', 'w'))])
+        out, _, _ = self._run(monkeypatch, tmp_path, [first, again, worse],
+                              [(self.FIXED, self.EDITS)])
+        assert out.result is first and out.prose == self.PROSE and out.discarded == 1
+
+    def test_a_single_edit_fix_is_not_retried(self, monkeypatch, tmp_path):
+        first = self._first()
+        again = self._with(self._promise('She kept the case on her right shoulder'))
+        out, dirs, _ = self._run(monkeypatch, tmp_path, [first, again],
+                                 [(self.FIXED, [self.EDITS[1]])])
+        assert out.result is first and len(dirs) == 2
 
     @pytest.mark.parametrize('before, after, persists', [
         # the same scripted line broken again: the problem left, not a new one
@@ -2277,3 +2315,55 @@ class TestAccepted:
                        command='recheck')
         assert not result.passed
         assert f'{gate.BLOCKED_PATH} could not be updated' in capsys.readouterr().out
+
+
+class TestProvisional:
+    """#556: `write --keep-going` commits a scene the gate stopped only for
+    the check's findings, less the facts stating them."""
+    OTHER = 'She tapped the empty space on the map'
+
+    def _failing(self, project_dir, tmp_path, **kw):
+        return _gate(project_dir, tmp_path,
+                     [_commitment(), _commitment(statement='The world has an edge',
+                                                 quote=self.OTHER, type='world')],
+                     findings=[_contradiction()], **kw)
+
+    def test_the_facts_not_stating_a_finding_are_committed(self, project_dir, tmp_path):
+        result = self._failing(project_dir, tmp_path)
+        assert not result.passed and gate.can_commit_provisionally(result) == ''
+        gate.commit_provisional(project_dir, result, 'provisional: 1 problem')
+        assert result.committed and result.provisional and not result.passed
+        mine = [r['statement'] for r in ledger.load(project_dir)
+                if r['scene_id'] == SCENE and ledger.is_commitment(r)]
+        assert mine == ['The world has an edge']   # the 412 fact is held back
+        assert gate.pending(project_dir)[SCENE]['command'] == gate.PROVISIONAL
+        assert gate.blocked(project_dir)[SCENE]   # for check --accept
+        lines = gate.report_lines(result)
+        assert any(line.startswith('COMMITTED (provisionally') for line in lines)
+        assert any('states what stopped the commit' in line for line in lines)
+
+    def test_an_extraction_problem_is_not_committed_provisionally(self, project_dir,
+                                                                  tmp_path):
+        result = _gate(project_dir, tmp_path, [_commitment(quote='words not in the scene')],
+                       findings=[_contradiction()])
+        assert 'extraction' in gate.can_commit_provisionally(result)
+        with pytest.raises(GateError):
+            gate.commit_provisional(project_dir, result, 'x')
+        assert not [r for r in ledger.load(project_dir) if r['scene_id'] == SCENE
+                    and ledger.is_commitment(r)]
+
+    def test_an_ends_on_a_fixed_fact_is_reported_not_blocking(self, project_dir, tmp_path):
+        """G-028: extraction said the scene `ends` a fixed fact; a fixed fact
+        can't end, the link is never applied, and the run stopped on it."""
+        rows = ledger.load(project_dir)
+        base = dict(rows[0], **{k: '' for k in rows[0]})
+        base.update(id='hunt-runs-all-day', scene_id='act1-sc01', type='timeline',
+                    statement='The hunt runs through the day', status='binding',
+                    origin='prose', mutable='fixed', introduced_by='draft')
+        ledger.save(project_dir, rows + [base], command='test')
+        result = _gate(project_dir, tmp_path, [_commitment(ends=['hunt-runs-all-day'])])
+        assert result.passed and result.committed
+        assert result.problems['ends fixed'] == [f'{SCENE}: hunt-runs-all-day']
+        assert any(line.startswith('NOTE (ends fixed)') for line in gate.report_lines(result))
+        hunt = next(r for r in ledger.load(project_dir) if r['id'] == 'hunt-runs-all-day')
+        assert hunt['resolves'] == ''
