@@ -406,3 +406,66 @@ class TestSummaryLimits:
         assert self._check(score_architecture(str(tmp_path)))['passed']
         spine = self._check(score_spine(str(tmp_path)))
         assert not spine['passed'] and '35' in spine['check']
+
+
+FIXTURES = os.path.join(os.path.dirname(__file__), 'fixtures', 'acts')
+
+
+def _book_from(tmp_path, name):
+    """A project holding one evals extraction's scene list (`act` as the act
+    call left it, `want_act` as the author corrected it)."""
+    rows = _read_csv(os.path.join(FIXTURES, name))
+    ref = tmp_path / 'reference'
+    _write(str(ref / 'scenes.csv'), rows, ['id', 'seq', 'title', 'summary', 'part', 'act',
+                                           'status'])
+    (tmp_path / 'scenes').mkdir()
+    (tmp_path / 'logs').mkdir()
+    return rows
+
+
+class TestMovements:
+    """B-004 (Ben's decision, 2026-11-04): a poem's acts follow its movements.
+    The act call read Beowulf as setup / confrontation / resolution, so act 1
+    was only Grendel's twelve years (1-10) and both Danish fights fell in act
+    2; the poem's movements are its three fights (1-45 / 46-72 / 73-105)."""
+
+    def test_the_prompt_asks_for_movements_not_a_proportional_shape(self, tmp_path):
+        rows = _book_from(tmp_path, 'beowulf-scenes.csv')
+        prompt = ' '.join(build_acts_prompt({}, rows, str(tmp_path / 'scenes')).split())
+        assert 'major movements' in prompt
+        assert 'new antagonist' in prompt
+        assert 'episodic' in prompt
+        # a threat that comes before the hero opens its contest's act
+        assert 'not an act of setup' in prompt
+        # aftermath stays with the movement it closes (Beowulf's homecoming)
+        assert 'belongs to the movement it closes' in prompt
+        assert 'proportional' in prompt
+        # a novel built as one conflict keeps today's three-act reading
+        assert 'turn that commits the story to its central conflict' in prompt
+
+    def test_the_division_hints_are_kept(self, tmp_path):
+        rows = _book_from(tmp_path, 'gawain-scenes.csv')
+        marks = {rows[6]['id']: 'Fitt II'}
+        prompt = build_acts_prompt({}, rows, str(tmp_path / 'scenes'), marks=marks)
+        assert '[Fitt II begins]' in prompt
+        assert "where the printed book's parts and chapters begin" in prompt
+
+    @pytest.mark.parametrize('name', ['beowulf-scenes.csv', 'gawain-scenes.csv'])
+    def test_a_movement_answer_writes_the_authors_acts(self, tmp_path, monkeypatch, name):
+        rows = _book_from(tmp_path, name)
+        want = [r['want_act'] for r in rows]
+        bounds = []
+        for n in ('1', '2', '3'):
+            ids = [r['id'] for r, a in zip(rows, want) if a == n]
+            bounds.append(_act(ids[0], ids[-1]))
+        reply = _reply(bounds)
+
+        def fake(prompt, model, log_file, max_tokens=4096, **kw):
+            with open(log_file, 'w') as f:
+                json.dump(reply, f)
+            return reply
+        monkeypatch.setattr(api, 'invoke_to_file', fake)
+        result = run_acts(str(tmp_path / 'reference'), str(tmp_path / 'scenes'),
+                          str(tmp_path / 'logs'), {}, 'claude-opus-4-6')
+        assert result.source == 'model'
+        assert [r['act'] for r in _read_csv(str(tmp_path / 'reference' / 'scenes.csv'))] == want
