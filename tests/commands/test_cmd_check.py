@@ -867,3 +867,113 @@ class TestKeepGoingReview503:
         assert e.value.code == 1
         assert f'ERROR: could not write {cmd_check.REPORT_PATH}' in capsys.readouterr().out
         assert commits   # the ledger is still committed
+
+
+def _api_facts(checks, facts):
+    """`_api` with extraction answering `facts` and the persistence check
+    keeping every one."""
+    import re
+    checks = list(checks)
+
+    def fake(path, body, **k):
+        schema = (body.get('output_config') or {}).get('format', {}).get('schema', {})
+        if 'verdicts' in schema.get('properties', {}):
+            prompt = body['messages'][0]['content']
+            items = re.findall(r'^(\d+)\. ', prompt, re.M)
+            return _text({'verdicts': [{'n': int(n), 'persists': True, 'why': 'w'}
+                                       for n in items]})
+        if 'tools' in body:
+            return _text({'findings': checks.pop(0), 'kept': []})
+        return _text({'commitments': list(facts)})
+    return patch('storyforge.api._api_request', side_effect=fake)
+
+
+def _fact(statement, quote, subject='', type_='world'):
+    return {'type': type_, 'subject': subject, 'statement': statement, 'quote': quote,
+            'mutable': 'fixed', 'supersedes': '', 'ends': []}
+
+
+class TestProvisionalRecovery:
+    """#556's review: a provisional commit holds back the facts a finding
+    is about even when their quotes don't share the checker's words, and a
+    provisional scene comes back through `check --pending` / `--accept`."""
+
+    # the checker quotes HERE; this fact quotes other words of its paragraph
+    SAME_PARA = _fact('The Hollow was on the map', 'should have been exactly here')
+    OTHER = _fact('The map shows no contour line', 'Not even a contour line')
+
+    def _commit(self, project_dir, facts, finding=BAD):
+        with _api_facts([[finding]], facts):
+            result = gate.gate_scene(project_dir, SCENE, command='draft',
+                                     log_dir=os.path.join(project_dir, 'working', 'l'),
+                                     extract_model='m', check_model='m')
+        assert not result.passed and gate.can_commit_provisionally(result) == ''
+        gate.commit_provisional(project_dir, result, 'provisional: 1 problem')
+        return result, [r['statement'] for r in ledger.load(project_dir)
+                        if r['scene_id'] == SCENE and ledger.is_commitment(r)]
+
+    def test_a_fact_in_the_findings_paragraph_is_held_back(self, project):
+        project_dir, _ = project
+        result, mine = self._commit(project_dir, [self.SAME_PARA, self.OTHER])
+        assert mine == ['The map shows no contour line']
+        assert [st for st, _ in result.held_back] == ['The Hollow was on the map']
+
+    def test_the_claim_restated_in_another_paragraph_is_held_back(self, project):
+        """#556's second review: the finding quotes paragraph 1 ("four hundred
+        and twelve"), no fact id, no earlier row; "412 residents" in paragraph 3
+        was committed."""
+        project_dir, _ = project
+        again = _fact('The Hollow had 412 residents',
+                      'Four hundred and twelve people going about their lives',
+                      subject='tarrens-hollow')
+        result, mine = self._commit(project_dir, [again, self.OTHER])
+        assert mine == ['The map shows no contour line']
+        assert [st for st, _ in result.held_back] == ['The Hollow had 412 residents']
+
+    def test_with_a_fact_stating_it_the_restatement_must_share_its_subject(self, project):
+        project_dir, _ = project
+        here = _fact("Tarren's Hollow had 412 people", HERE, subject='tarrens-hollow')
+        other = _fact('Dorren counted 412 maps', 'Four hundred and twelve people going '
+                      'about their lives', subject='dorren-hayle')
+        result, mine = self._commit(project_dir, [here, other])
+        assert mine == ['Dorren counted 412 maps']
+
+    def test_a_fact_on_the_contradicted_facts_subject_is_held_back(self, project):
+        project_dir, _ = project
+        rows = ledger.load(project_dir)
+        base = dict(rows[0], **{k: '' for k in rows[0]})
+        base.update(id='hollow-pop', scene_id='act1-sc01', type='world',
+                    subject='tarrens-hollow', statement='The Hollow has 412 people',
+                    quote='x', status='binding', origin='prose', mutable='fixed',
+                    introduced_by='draft')
+        ledger.save(project_dir, rows + [base], command='test')
+        far = _fact('The Hollow was abandoned', 'Not even a contour line',
+                    subject='tarrens-hollow')
+        result, mine = self._commit(project_dir, [far], finding=dict(BAD, fact_id='hollow-pop'))
+        assert mine == [] and [st for st, _ in result.held_back] == ['The Hollow was abandoned']
+
+    def test_a_failed_check_keeps_it_provisional_and_accept_clears_it(self, project):
+        project_dir, _ = project
+        self._commit(project_dir, [self.OTHER])
+        with _api_facts([[BAD]], [self.OTHER]), pytest.raises(SystemExit):
+            cmd_check.main(['--pending'])
+        assert gate.pending(project_dir)[SCENE]['command'] == gate.PROVISIONAL
+        cmd_check.main(['--accept', SCENE])
+        with _api_facts([[BAD]], [self.OTHER]):
+            cmd_check.main(['--pending'])
+        assert SCENE not in gate.pending(project_dir)
+
+    def test_status_and_validate_surface_it(self, project, capsys, monkeypatch):
+        project_dir, _ = project
+        self._commit(project_dir, [self.OTHER])
+        from storyforge.status import build_status
+        v = build_status(project_dir)
+        assert v['next']['command'] == 'storyforge check --pending'
+        assert 'committed provisionally' in v['next']['reason']
+        assert any(b['source'] == 'gate' and SCENE in b['detail'] for b in v['blockers'])
+        from storyforge import cmd_validate
+        monkeypatch.setattr(cmd_validate, 'detect_project_root', lambda: project_dir)
+        with pytest.raises(SystemExit):
+            cmd_validate.main([])
+        out = capsys.readouterr()
+        assert 'waiting on the gate' in out.out + out.err

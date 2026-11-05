@@ -153,7 +153,11 @@ def main(argv=None):
         log(f'ERROR: {e}')
         sys.exit(1)
     if args.pending:
-        if not waiting:
+        try:
+            has_fixes = bool(gate.source_fixes(project_dir))
+        except gate.GateError:
+            has_fixes = False
+        if not waiting and not has_fixes:
             log('Nothing is waiting on the gate.')
             return
         in_book = ledger.scene_order(project_dir)
@@ -162,6 +166,21 @@ def main(argv=None):
             log(f'WARNING: {", ".join(gone)} in {gate.PENDING_PATH} are no longer scenes in '
                 f'scenes.csv: not checked; remove their rows.')
         scene_ids = [s for s in waiting if s in in_book]
+        # #557: the scenes listed to fix toward the source come too, once
+        # their prose has changed (only a commit of other prose clears them)
+        try:
+            fixes = gate.source_fixes(project_dir)
+        except gate.GateError as e:
+            log(f'WARNING: {e}')
+            fixes = {}
+        unfixed = sorted(s for s in fixes if gate.source_fix_waits(project_dir, s))
+        if unfixed:
+            log(f'NOTE: not checked, waiting for the author to fix them toward the source '
+                f'(their prose hasn\'t changed since they were listed in '
+                f'{gate.SOURCE_FIX_PATH}): {", ".join(unfixed)}')
+        scene_ids += [s for s in sorted(fixes, key=lambda s: in_book.get(s, 0))
+                      if s in in_book and s not in unfixed and s not in scene_ids]
+        scene_ids.sort(key=lambda s: in_book.get(s, 0))
         if not scene_ids:
             log('Nothing in the book is waiting on the gate.')
             return
@@ -503,6 +522,7 @@ def _recheck_after(project_dir: str, result, log_dir: str, skip: set[str], budge
               for x in result.not_rechecked]
     lines += [f'- dependents of {result.scene_id} matched on fewer names: {x}'
               for x in result.name_notes]
+    lines += [f'- {x}' for x in result.prose_notes]
     lines += [f'- registry link to a commitment {result.scene_id} no longer makes: {x}'
               for x in result.dangling]
     if run is None:

@@ -856,9 +856,26 @@ class TestPhysicalStateCharacters:
         row = read_facts(ref_dir, 'physical-states.csv')['cut-hand-dorren']
         assert row['character'] == 'dorren-hayle'
         assert row['acquired'] == 'act1-sc02'
-        assert row['resolves'] == 'never'
+        # act2-sc03 carries it in and not out: the chain ends it there (#547)
+        assert row['resolves'] == 'act2-sc03'
         assert row['action_gating'] == 'false'
         assert _column(ref_dir, 'scene-briefs.csv', 'physical_state_in')['act2-sc03'] == 'cut-hand-dorren'
+
+    def test_a_state_the_chain_never_ends_resolves_never(self, project_dir, monkeypatch,
+                                                         tmp_path):
+        from storyforge.hone import reconcile_domain
+        ref_dir = os.path.join(project_dir, 'reference')
+        _set_column(ref_dir, 'scene-briefs.csv', 'physical_state_in',
+                    {'act2-sc03': 'Dorren has a cut hand'})
+        _set_column(ref_dir, 'scene-briefs.csv', 'physical_state_out',
+                    {'act1-sc02': 'Dorren has a cut hand',
+                     'act2-sc03': 'Dorren has a cut hand'})
+        _mock_api(monkeypatch, ['1 | NEW | cut-hand-dorren | Dorren Hayle | '
+                                'shallow cut across right palm | injury | false\n'])
+
+        reconcile_domain('physical-states', ref_dir, 'test-model', str(tmp_path))
+
+        assert read_facts(ref_dir, 'physical-states.csv')['cut-hand-dorren']['resolves'] == 'never'
 
 
 class TestLocationPrompt:

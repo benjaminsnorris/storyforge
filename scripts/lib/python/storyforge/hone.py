@@ -708,7 +708,27 @@ def _derive_columns(domain: str, ref_dir: str, row: dict[str, str]) -> None:
     elif domain == 'physical-states':
         row['acquired'] = (_first_scene_with(ref_dir, 'physical_state_out', row['id'])
                            or _first_scene_with(ref_dir, 'physical_state_in', row['id']))
-        row.setdefault('resolves', 'never')
+        if (row.get('resolves') or '').strip() in ('', 'never'):
+            row['resolves'] = _resolving_scene(ref_dir, row['id'], row['acquired']) or 'never'
+
+
+def _resolving_scene(ref_dir: str, state_id: str, acquired: str) -> str:
+    """The first scene from *acquired* on that carries the state in
+    (physical_state_in) and not out (physical_state_out): where the briefs'
+    chain ends it. '' when the chain never ends it (#547, Beowulf B-020:
+    eleven states the briefs ended were registered as resolving never)."""
+    briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    started = not acquired
+    for sid in _scene_order(ref_dir):
+        started = started or sid == acquired
+        if not started:
+            continue
+        row = briefs.get(sid, {})
+        ins = {s.strip() for s in (row.get('physical_state_in') or '').split(';')}
+        outs = {s.strip() for s in (row.get('physical_state_out') or '').split(';')}
+        if state_id in ins and state_id not in outs:
+            return sid
+    return ''
 
 
 def rederive_columns(domain: str, ref_dir: str, ids: set[str]) -> None:

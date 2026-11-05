@@ -919,3 +919,41 @@ class TestMergeReview483:
         with pytest.raises(CheckError) as e:
             _run(project_dir, [_answer(), cut], readings=2)
         assert 'reading 2' in str(e.value)
+
+
+class TestPlannedFacts:
+    """#568 review: the briefs stage's rows are `planned`. Prose that departs
+    from one is not a contradiction or a broken promise (it passes); prose
+    that establishes one makes it binding."""
+
+    def _plan(self, project_dir):
+        from storyforge import ledger
+        rows = ledger.load(project_dir)
+        next(r for r in rows if r['id'] == 'village-vanished')['status'] = 'planned'
+        ledger.save(project_dir, rows, command='test')
+
+    def test_a_planned_fact_is_plan_not_promise(self, project_dir):
+        self._plan(project_dir)
+        brief = checker._brief(checker.Book.load(project_dir, SCENE), project_dir, SCENE)
+        assert 'village-vanished' not in brief.promised and brief.stale == []
+        assert 'village-vanished' in brief.planned
+        assert '## Planned, not yet established' in brief.text
+
+    def test_prose_that_departs_from_a_planned_fact_passes(self, project_dir):
+        self._plan(project_dir)
+        departure = _finding(kind='broken-promise', established_scene='', scene_quote='',
+                             established_quote='A village has vanished',
+                             fact_id='village-vanished')
+        result, _ = _run(project_dir, [_answer([departure])])
+        assert result.findings == [] and result.unverified == []
+        assert [f.fact_id for f in result.plan_departures] == ['village-vanished']
+        from storyforge.gate import GateResult
+        gate = GateResult(SCENE, problems={})
+        gate.check = result
+        assert gate.passed
+
+    def test_a_planned_fact_the_prose_establishes_can_be_kept(self, project_dir):
+        self._plan(project_dir)
+        result, _ = _run(project_dir, [_answer(kept=[{'fact_id': 'village-vanished',
+                                                      'quote': HERE}])])
+        assert result.kept == [('village-vanished', HERE)]

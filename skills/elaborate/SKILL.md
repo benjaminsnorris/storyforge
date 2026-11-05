@@ -271,6 +271,8 @@ In graphic-novel mode, the scene-map stage asks for `target_pages` per scene ins
 6. Run validation — knowledge flow, completeness, DAG check
 7. Commit: `git add -A && git commit -m "Elaborate: briefs" && git push`
 
+`storyforge elaborate --stage briefs` registers the briefs' new knowledge and physical-state ids in `commitments.csv` itself, by the reconciliation `storyforge hone --domain knowledge,physical-states` runs (a physical state's `resolves` is the scene where the briefs' chain ends it). Those rows are `introduced_by` `briefs` with status `planned`: plan, not fact, so the gate never holds the prose to them; the gate makes one `binding` when the prose establishes it. A re-run keeps them in step: a fact no active brief names is removed, and one moves to the scene that now sets it up. A row you have edited since is yours and is left alone. When you write briefs by hand, run that hone command after; if the stage reports that ids are not all in the ledger, run it too.
+
 ### Graphic-novel mode
 
 Graphic-novel briefs populate five additional columns alongside the standard ones:
