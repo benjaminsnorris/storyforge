@@ -909,10 +909,31 @@ def generate_html(project_dir: str, manuscript_file: str,
     subprocess.run(cmd, check=True)
 
 
+def get_pdf_css(plugin_dir: str) -> str:
+    """The PDF-only overrides loaded after the genre CSS (G-030)."""
+    return os.path.join(plugin_dir, 'templates', 'production', 'css',
+                        'pdf.css')
+
+
+def _stderr_tail(stderr: bytes | str | None, lines: int = 8) -> str:
+    """The last lines of a subprocess's stderr, for a log line."""
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode('utf-8', errors='replace')
+    tail = [line for line in (stderr or '').strip().split('\n') if line.strip()]
+    return '\n'.join(tail[-lines:])
+
+
 def generate_pdf(project_dir: str, manuscript_file: str,
                  pdf_file: str, plugin_dir: str) -> None:
-    """Generate a PDF from an assembled manuscript via pandoc + weasyprint."""
+    """Generate a PDF from an assembled manuscript via pandoc + weasyprint.
+
+    Falls back to pandoc's default engine (LaTeX) when WeasyPrint fails,
+    logging WeasyPrint's error first. When both fail, raises RuntimeError
+    naming both causes (G-030: the fallback's "pdflatex not found" once hid
+    a WeasyPrint crash).
+    """
     import subprocess
+    from storyforge.common import log as _log
 
     genre = _yaml_field(project_dir, 'project.genre', 'genre') or 'default'
     css_file = get_genre_css(plugin_dir, genre)
@@ -925,21 +946,32 @@ def generate_pdf(project_dir: str, manuscript_file: str,
         '--pdf-engine=weasyprint',
         '--css', css_file,
         '--css', get_parts_css(plugin_dir),
+        # Last: what WeasyPrint can't lay out (the drop cap)
+        '--css', get_pdf_css(plugin_dir),
         f'--metadata=title:{title}',
         # Interior illustration paths are project-relative (#278).
         '--resource-path', project_dir,
     ]
     r = subprocess.run(cmd, capture_output=True)
+    if r.returncode == 0:
+        return
+    weasy_error = _stderr_tail(r.stderr) or f'exit {r.returncode}'
+    _log(f'WARNING: WeasyPrint failed to build the PDF:\n{weasy_error}')
+    _log('Falling back to pandoc\'s default PDF engine (LaTeX)')
+    cmd = [
+        'pandoc', manuscript_file,
+        '-o', pdf_file,
+        f'--metadata=title:{title}',
+        '-V', 'geometry:margin=1in',
+        '--resource-path', project_dir,
+    ]
+    r = subprocess.run(cmd, capture_output=True)
     if r.returncode != 0:
-        # Fall back to default pdf engine (pdflatex/xelatex)
-        cmd = [
-            'pandoc', manuscript_file,
-            '-o', pdf_file,
-            f'--metadata=title:{title}',
-            '-V', 'geometry:margin=1in',
-            '--resource-path', project_dir,
-        ]
-        subprocess.run(cmd, check=True)
+        raise RuntimeError(
+            'PDF not built. WeasyPrint failed:\n'
+            f'{weasy_error}\n'
+            'and the LaTeX fallback failed:\n'
+            f'{_stderr_tail(r.stderr) or f"exit {r.returncode}"}')
 
 
 # ============================================================================
