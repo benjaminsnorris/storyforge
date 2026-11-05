@@ -477,6 +477,11 @@ This mode activates when Scene Function Variety is below target — typically on
 
 5. **Verify.** Re-run scoring to confirm improvement.
 
+**In a `faithful` adaptation** (`source:` block, `mode: faithful`), the source fixes most outcomes, and a relabelled one is drift that `score --source-fidelity` will flag. Before step 1, read `reference/source-map.csv`:
+- A scene **keeps the source's outcome** when it is the last scene (by `seq`) whose `source_scenes` ends on a given source scene: every single-source scene, and the last part of a source scene split in several. `storyforge validate --structural` names how many of the dominant type these are.
+- Only the others are open: invented scenes (`treatment` `invent`) and the earlier parts of a split source scene. Propose changes to those alone, and give a split scene's earlier part a map `note` when its outcome is its own.
+- The source's mix is the target, not "no type over 40%". Show the distribution as fixed and open counts, and say so when the source itself leans one way (Gawain ends 50% `yes-but`, which is the poem: every win costs him).
+
 **Coaching level adaptation:**
 - **Full:** Propose 3-5 specific outcome changes with dramatic reasoning.
 - **Coach:** Show the distribution, ask which scenes feel emotionally repetitive.

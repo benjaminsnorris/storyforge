@@ -153,6 +153,37 @@ def _source_side(project_dir: str, refs: list[tuple[str, str]], tables=None) -> 
     return '\n\n'.join(blocks)
 
 
+def source_fixed_outcomes(project_dir: str) -> list[str]:
+    """The scenes whose outcome a `faithful` adaptation takes from its source,
+    in map order: for each source scene, the last scene (by seq) whose map row
+    ends on it. A single-source scene keeps the source's outcome; of a source
+    scene split in several, the last part keeps it and the earlier parts carry
+    their own; invented scenes are free. [] for no `source:` block, `free`
+    mode or no map yet. Raises SourceError for a block or map that can't be
+    read (#550, Gawain G-025: the outcome review relabelled nine scenes the
+    source fixes, and source fidelity then flagged each as drift)."""
+    cfg = source.read_config(project_dir)
+    if cfg is None or cfg.mode != 'faithful':
+        return []
+    rows = source.read_source_map(project_dir) or []
+    from storyforge.elaborate import _read_csv_as_map
+    scenes = _read_csv_as_map(os.path.join(project_dir, 'reference', 'scenes.csv'))
+
+    def seq(sid: str) -> int:
+        val = (scenes.get(sid) or {}).get('seq', '')
+        return int(val) if val.isdigit() else 0
+
+    last: dict[str, str] = {}
+    for row in rows:
+        sid = row.get('scene_id', '')
+        refs = source.split_ids(row.get('source_scenes', ''))
+        if not sid or not refs or row.get('treatment') == 'invent':
+            continue
+        if refs[-1] not in last or seq(sid) >= seq(last[refs[-1]]):
+            last[refs[-1]] = sid
+    return sorted(set(last.values()), key=seq)
+
+
 # ============================================================================
 # Prompt
 # ============================================================================
