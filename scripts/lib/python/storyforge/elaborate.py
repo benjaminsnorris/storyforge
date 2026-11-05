@@ -20,8 +20,9 @@ from typing import Any, NamedTuple
 OFF_PRESENT_MODES = frozenset({'frame', 'vision'})
 # Time modes whose scene has no clock of its own: frame narration is told
 # from outside the story's time, so it has no time of day or duration to
-# give (a vision keeps its own). Nothing asks such a scene for CLOCK_FIELDS,
-# and its narrator, who has no body, need not be on stage (#488)
+# give (a vision keeps its own). Nothing asks such a scene for CLOCK_FIELDS
+# (#488). Whether its teller must be on stage is the POV's business: a
+# `narrator` POV never is (#555, `narrator.py`)
 CLOCKLESS_MODES = frozenset({'frame'})
 CLOCK_FIELDS = ('time_of_day', 'duration')
 
@@ -30,6 +31,14 @@ def time_mode(row: dict) -> str:
     """A scenes.csv row's `time_mode`, normalized: stripped, lower case,
     'scene' when empty (the column's default)."""
     return (row.get('time_mode') or '').strip().lower() or 'scene'
+
+
+def told_by(row: dict) -> str:
+    """A scenes.csv row's `told_by`, stripped: the id of the scene that
+    tells this one (an embedded tale), or '' for a scene lived on the page.
+    A told scene keeps the day its events happened; like a flashback it is a
+    device, never an error (#548)."""
+    return (row.get('told_by') or '').strip()
 
 
 DELIMITER = '|'
@@ -53,6 +62,10 @@ _SCENES_COLS = [
     # Pointer back to the architecture anchor this map scene serves
     # (empty for purely interstitial scenes).
     'architecture_scene',
+    # The scene that tells this one, when it is an embedded tale (a story,
+    # song or report a character gives there); empty for a scene lived on
+    # the page (#548)
+    'told_by',
 ]
 _INTENT_COLS = [
     'id', 'function', 'action_sequel', 'emotional_arc', 'value_at_stake',
@@ -758,7 +771,11 @@ def _validate_timeline(scenes_map, checks):
         if present_day is not None and day < present_day:
             pov = scenes_map[sid].get('pov', '').strip()
             present_pov = scenes_map[present_id].get('pov', '').strip()
-            kind = 'crosscut' if pov and present_pov and pov != present_pov else 'flashback'
+            # An embedded tale is told inside its telling scene, whose cast
+            # holds its teller: never a crosscut, whatever its pov (#548)
+            kind = ('told' if told_by(scenes_map[sid])
+                    else 'crosscut' if pov and present_pov and pov != present_pov
+                    else 'flashback')
             if current is None:
                 current = {'present_day': present_day, 'present_id': present_id, 'scenes': []}
                 runs.append(current)
@@ -772,20 +789,30 @@ def _validate_timeline(scenes_map, checks):
         present = f"the story's present (day {run['present_day']}, reached in {run['present_id']})"
         first_id, first_day, first_kind = scenes[0]
         if len(scenes) == 1:
-            message = (f"{first_kind.capitalize()}: {first_id} (day {first_day}) "
-                       f"is set before {present}")
+            label = 'Told tale' if first_kind == 'told' else first_kind.capitalize()
+            message = f"{label}: {first_id} (day {first_day}) is set before {present}"
+            if first_kind == 'told':
+                message += f', told in {told_by(scenes_map[first_id])}'
         else:
             last_id, last_day, _ = scenes[-1]
             crosscuts = sum(1 for _, _, kind in scenes if kind == 'crosscut')
-            flashbacks = len(scenes) - crosscuts
-            label = 'Crosscut' if crosscuts else 'Flashback'
+            told = sum(1 for _, _, kind in scenes if kind == 'told')
+            flashbacks = len(scenes) - crosscuts - told
+            label = ('Crosscut' if crosscuts else 'Told tale' if told == len(scenes)
+                     else 'Flashback')
             message = (f"{label}: {len(scenes)} scenes, {first_id} (day {first_day}) to "
                        f"{last_id} (day {last_day}), are set before {present}")
             earliest = min(day for _, day, _ in scenes)
             if earliest < min(first_day, last_day):
                 message += f'; reaching back to day {earliest}'
-            if crosscuts and flashbacks:
-                message += f'; {crosscuts} crosscut, {flashbacks} flashback'
+            kinds = [f'{n} {kind}' for n, kind in ((crosscuts, 'crosscut'), (flashbacks, 'flashback'),
+                                                    (told, 'told'))
+                     if n]
+            if len(kinds) > 1:
+                message += '; ' + ', '.join(kinds)
+            if told:
+                frames = sorted({told_by(scenes_map[sid]) for sid, _, kind in scenes if kind == 'told'})
+                message += f'; told in {", ".join(frames)}'
         check = _check('timeline', 'timeline-order', False, message,
                        scene_id=first_id, severity='advisory')
         check['scenes'] = [sid for sid, _, _ in scenes]
@@ -793,6 +820,87 @@ def _validate_timeline(scenes_map, checks):
 
     if not runs:
         checks.append(_check('timeline', 'timeline-order', True, 'Timeline order is consistent'))
+
+
+def _validate_told(scenes_map, intent_map, checks, ref_dir=''):
+    """Check `told_by`, which marks an embedded tale with the scene that
+    tells it (#548).
+
+    Blocking: a cell naming more than one scene, a scene told by itself,
+    a cycle (a tale that tells the scene telling it), and a telling scene
+    that is cut or merged. A tale inside a told tale is fine. Advisory: a
+    telling scene later in reading order than its tale. An id not in scenes.csv is the schema's
+    `scene_ids` check, so it is skipped here. Advisory: the told scene's
+    pov is its teller, who should be in the telling scene's cast
+    (`characters` or `on_stage`); an empty pov, an unknown one, or the
+    narrator (`narrator.is_narrator`, #555: no body) is not checked. A
+    narrator-told scene still counts toward `narrator_pov: limited N`.
+    """
+    told = {sid: told_by(row) for sid, row in scenes_map.items() if told_by(row)}
+    if not told:
+        return
+    several = sorted(sid for sid, frame in told.items() if ';' in frame)
+    checks.append(_check(
+        'told', 'told-by-one-scene', not several,
+        'told_by names more than one scene (a tale is told in one scene): '
+        + ', '.join(several) if several else 'Every told_by names one scene'))
+    selfish = sorted(sid for sid, frame in told.items() if frame == sid)
+    checks.append(_check(
+        'told', 'told-by-self', not selfish,
+        'A scene told by itself (told_by is its own id): ' + ', '.join(selfish)
+        if selfish else 'No scene is told by itself'))
+    cycles = []
+    for start in sorted(told):
+        seen, sid = [start], told[start]
+        while sid in told and sid not in seen and sid != start:
+            seen.append(sid)
+            sid = told[sid]
+        if sid == start and len(seen) > 1 and min(seen) == start:
+            cycles.append(' -> '.join(seen + [start]))
+    checks.append(_check(
+        'told', 'told-by-cycle', not cycles,
+        'told_by goes round in a cycle (each tale tells the scene telling it): '
+        + '; '.join(cycles) if cycles else 'No told_by cycle'))
+    gone = sorted(f'{sid} (told in {frame}, {scenes_map[frame].get("status", "").strip()})'
+                  for sid, frame in told.items() if frame in scenes_map
+                  and (scenes_map[frame].get('status') or '').strip().lower() in ('cut', 'merged'))
+    checks.append(_check(
+        'told', 'told-by-cut-scene', not gone,
+        'Told in a cut or merged scene (nothing tells the tale now): ' + '; '.join(gone)
+        if gone else 'No tale is told in a cut or merged scene'))
+    # A tale usually follows its telling; one shown before it (a story
+    # opening in the tale, then the telling) is the author's call
+    ahead = sorted(f'{sid} (told in {frame})' for sid, frame in told.items()
+                   if frame in scenes_map and frame != sid
+                   and _seq_sort_key(scenes_map[frame]) > _seq_sort_key(scenes_map[sid]))
+    checks.append(_check(
+        'told', 'told-by-later-scene', not ahead,
+        'Told in a scene that comes later in reading order: ' + '; '.join(ahead)
+        if ahead else 'Every tale comes after the scene that tells it',
+        severity='advisory'))
+    # The narrator (#555) has no body to be in a cast; a first-person
+    # narrator in characters.csv is a character and is checked
+    from .narrator import is_narrator
+    from .enrich import load_alias_map
+    path = os.path.join(ref_dir, 'characters.csv') if ref_dir else ''
+    registry = set(load_alias_map(path)) if path and os.path.isfile(path) else set()
+    absent = []
+    for sid, frame in sorted(told.items()):
+        teller = (scenes_map[sid].get('pov') or '').strip()
+        if (frame not in scenes_map or frame == sid or not teller
+                or is_narrator(teller, registry) or teller.lower() == 'unknown'):
+            continue
+        cast = intent_map.get(frame, {})
+        names = {c.strip() for col in ('characters', 'on_stage')
+                 for c in (cast.get(col) or '').split(';') if c.strip()}
+        names.add((scenes_map[frame].get('pov') or '').strip())
+        if teller not in names:
+            absent.append(f'{sid} (teller {teller}, not in {frame}\'s cast)')
+    checks.append(_check(
+        'told', 'teller-in-telling-scene', not absent,
+        "A told scene's pov is its teller, who should be in the telling scene's cast: "
+        + '; '.join(absent) if absent else "Every teller is in the telling scene's cast",
+        severity='advisory'))
 
 
 def _validate_knowledge(scenes_map, briefs_map, checks):
@@ -832,11 +940,17 @@ def _validate_knowledge(scenes_map, briefs_map, checks):
 def present_in_scene(scene: dict, intent: dict) -> set[str]:
     """Lowercased ids of the characters present in a scene: its ``on_stage``
     (``characters`` when that is empty) plus its POV. Empty when the scene
-    records neither, which means "unknown", not "nobody"."""
+    records neither, which means "unknown", not "nobody". A told scene's
+    POV is its teller, who is in the telling scene, not in the tale: present
+    only when the cast lists them too (Odysseus is in his own tale; the scop
+    is not at Finnsburh) (#548)."""
     raw = intent.get('on_stage', '') or intent.get('characters', '')
     present = {c.strip().lower() for c in raw.split(';') if c.strip()}
     pov = (scene.get('pov') or '').strip().lower()
-    if pov:
+    from .narrator import is_narrator
+    # The narrator has no body (#555); a told scene's teller is in the
+    # telling scene (#548)
+    if pov and not is_narrator(pov) and not told_by(scene):
         present.add(pov)
     return present
 
@@ -1214,6 +1328,7 @@ def validate_structure(ref_dir: str) -> dict:
     # --- Thread, timeline, knowledge, pacing ---
     _validate_threads(scenes_map, intent_map, checks, ref_dir=ref_dir)
     _validate_timeline(scenes_map, checks)
+    _validate_told(scenes_map, intent_map, checks, ref_dir)
     _validate_knowledge(scenes_map, briefs_map, checks)
     _validate_pacing(scenes_map, intent_map, checks)
     _validate_acts(scenes_map, checks)
@@ -1221,6 +1336,7 @@ def validate_structure(ref_dir: str) -> dict:
     _validate_pronouns(ref_dir, checks)
     _validate_cast_named(scenes_map, intent_map, ref_dir, checks)
     _validate_brief_names(ref_dir, checks)
+    _validate_narrator(ref_dir, scenes_map, checks)
 
     failures = [c for c in checks if not c['passed']]
     blocking_failures = [c for c in failures if c.get('severity', 'blocking') != 'advisory']
@@ -1229,6 +1345,18 @@ def validate_structure(ref_dir: str) -> dict:
         'checks': checks,
         'failures': failures,
     }
+
+
+def _validate_narrator(ref_dir: str, scenes_map: dict, checks: list[dict]) -> None:
+    """The narrator as POV against key-decisions.md's `narrator_pov`
+    (#555): narrator scenes when it is `off`, or more than its cap when it is
+    `limited N`. Advisory: the author's setting, not broken data."""
+    from .narrator import setting_problem
+    problem = setting_problem(os.path.dirname(os.path.abspath(ref_dir)),
+                              list(scenes_map.values()))
+    checks.append(_check('pov', 'narrator-pov-setting', not problem,
+                         problem or 'Narrator POV scenes are within the project setting',
+                         severity='advisory'))
 
 
 def _validate_pronouns(ref_dir: str, checks: list[dict]) -> None:

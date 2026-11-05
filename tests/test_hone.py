@@ -1220,11 +1220,11 @@ class TestReviewFixes:
     def test_skip_never_blanks_pov(self, project_dir, monkeypatch, tmp_path):
         from storyforge.hone import reconcile_domain
         ref_dir = os.path.join(project_dir, 'reference')
-        _set_column(ref_dir, 'scenes.csv', 'pov', ['the narrator'])
-        _set_column(ref_dir, 'scene-intent.csv', 'characters', {'act1-sc01': 'the narrator'})
+        _set_column(ref_dir, 'scenes.csv', 'pov', ['the crowd'])
+        _set_column(ref_dir, 'scene-intent.csv', 'characters', {'act1-sc01': 'the crowd'})
         _mock_api(monkeypatch, ['1 | SKIP\n2 | SKIP\n'])
         reconcile_domain('characters', ref_dir, 'test-model', str(tmp_path))
-        assert _column(ref_dir, 'scenes.csv', 'pov')['act1-sc01'] == 'the narrator'
+        assert _column(ref_dir, 'scenes.csv', 'pov')['act1-sc01'] == 'the crowd'
         assert _column(ref_dir, 'scene-intent.csv', 'characters')['act1-sc01'] == ''
 
     def test_new_id_findable_by_its_spelling(self):

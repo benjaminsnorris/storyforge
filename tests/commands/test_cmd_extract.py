@@ -536,6 +536,32 @@ class TestPhaseExecution:
             assert (rows[sid]['title'], rows[sid]['pov'], rows[sid]['location']) == (
                 'Test', 'dorren-hayle', 'cartography-office;deep-archive')
 
+    def test_phase_1_writes_told_by_before_the_calendar(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """#548: phase 1's `told` answers become told_by in scenes.csv
+        before the calendar is placed, so the timeline places a told scene
+        as a flashback."""
+        self._phase_1_env(project_dir, monkeypatch)
+        mock_api.set_response_fn(lambda prompt: _structured(
+            'SKELETON_SCHEMA', title='Test', pov='Dorren Hayle', location=['Office'],
+            time_relation='continues', told='(this is the first scene)' not in prompt))
+        from storyforge.elaborate import _read_csv
+        scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+        seen = []
+
+        def placed(*a, **kw):
+            seen.append({r['id']: r.get('told_by', '') for r in _read_csv(scenes_csv)})
+            return {'assigned': 0, 'unplaced': 0}
+        monkeypatch.setattr('storyforge.timeline.run_assignment', placed)
+
+        main(['--phase', '1'])
+
+        sent = [r['custom_id'] for c in mock_api.calls_for('submit_batch')
+                for r in c['requests']]
+        assert len(sent) > 1 and len(seen) == 1
+        assert seen[0][sent[0]] == ''
+        assert {seen[0][sid] for sid in sent[1:]} == {sent[0]}
+
     def test_phase_1_takes_cues_only_from_this_batchs_answers(
             self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
         """A scene the batch didn't answer (refused, cut off, failed) gets no

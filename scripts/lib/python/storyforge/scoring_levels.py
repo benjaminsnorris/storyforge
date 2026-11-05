@@ -508,10 +508,13 @@ def score_scene_map(project_dir: str) -> dict:
 
     # Required operational columns at the map level. A clockless scene
     # (elaborate.CLOCKLESS_MODES: frame narration, told from after the
-    # story) is asked for no CLOCK_FIELDS, and its narrator, who has no
-    # body, need not be on stage; validate's completeness check exempts the
-    # same fields (#488). The exempt scenes are named in a check of their own.
-    from storyforge.elaborate import CLOCK_FIELDS, CLOCKLESS_MODES, time_mode
+    # story) is asked for no CLOCK_FIELDS; validate's completeness check
+    # exempts the same fields (#488). A `narrator` POV, who has no body, need
+    # not be on stage (#555). The exempt scenes are named in checks of their own.
+    from storyforge.elaborate import CLOCK_FIELDS, CLOCKLESS_MODES, time_mode, told_by
+    from storyforge.narrator import OFF, is_narrator, narrator_scenes, read_setting
+    from storyforge.enrich import load_alias_map
+    characters = set(load_alias_map(os.path.join(project_dir, 'reference', 'characters.csv')))
     required = ['location', 'timeline_day', 'time_of_day', 'duration']
 
     def _clockless(r: dict) -> bool:
@@ -542,7 +545,12 @@ def score_scene_map(project_dir: str) -> dict:
         sid = r.get('id', '?')
         pov = r.get('pov', '').strip()
         on_stage = intent_by_id.get(sid, {}).get('on_stage', '').strip()
-        if not pov or _clockless(r):
+        # The narrator has no body: never on stage (#555, which replaced
+        # #488's frame-only exemption). A narrator who is a character (a
+        # first-person "The Narrator" in characters.csv) is checked. A told
+        # scene's pov is its teller, who is in the telling scene, not in the
+        # tale (validate's teller-in-telling-scene, #548)
+        if not pov or is_narrator(pov, characters) or told_by(r):
             continue
         if not on_stage:
             unpopulated_pov.append(sid)
@@ -569,15 +577,45 @@ def score_scene_map(project_dir: str) -> dict:
             severity='low',
         ))
 
+    narrated = narrator_scenes(map_rows)
+    setting = read_setting(project_dir)
+    if narrated and setting.mode == OFF:
+        checks.append(_check(
+            'no narrator POV (key-decisions.md: narrator_pov: off)',
+            False,
+            (f'{len(narrated)} scene(s) have the narrator as POV: '
+             + ', '.join(narrated[:5]) + ('…' if len(narrated) > 5 else '')),
+            severity='medium',
+        ))
+    elif narrated:
+        # Passing, so it never lowers the rung; it says what wasn't asked
+        checks.append(_check(
+            'narrator scenes exempt from POV on stage',
+            True,
+            (f'{len(narrated)} scene(s) with pov narrator: ' + ', '.join(narrated[:5])
+             + ('…' if len(narrated) > 5 else '')),
+            severity='low',
+        ))
+
     clockless = [r.get('id', '?') for r in map_rows if _clockless(r)]
     if clockless:
         # Passing, so it never lowers the rung; it says what wasn't asked
         checks.append(_check(
-            'frame scenes exempt from time_of_day, duration and POV on stage',
+            'frame scenes exempt from time_of_day and duration',
             True,
             (f'{len(clockless)} scene(s) with time_mode '
              f'{"/".join(sorted(CLOCKLESS_MODES))}: ' + ', '.join(clockless[:5])
              + ('…' if len(clockless) > 5 else '')),
+            severity='low',
+        ))
+
+    told = [r.get('id', '?') for r in map_rows if told_by(r) and not _clockless(r)]
+    if told:
+        checks.append(_check(
+            'told scenes exempt from POV on stage (the teller is in the telling scene)',
+            True,
+            (f'{len(told)} scene(s) with told_by: ' + ', '.join(told[:5])
+             + ('…' if len(told) > 5 else '')),
             severity='low',
         ))
 
