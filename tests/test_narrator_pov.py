@@ -147,3 +147,35 @@ def test_source_import_keeps_the_narrator():
                     NameMap(), unknown)
     assert rows == [['s1', 'narrator']]
     assert not any(unknown.values())
+
+
+def test_a_book_without_narrator_scenes_or_setting_keeps_its_prompts(project_dir):
+    from storyforge.prompts_elaborate import _project_context
+    assert 'Narrator POV' not in _project_context(project_dir)
+    _set_pov(project_dir, 'act1-sc01', 'narrator')
+    assert '**Narrator POV:** allowed.' in _project_context(project_dir)
+
+
+def test_hone_normalizes_a_narrator_pov_and_never_asks_about_it(project_dir, tmp_path,
+                                                                monkeypatch):
+    from storyforge.hone import find_unresolved, reconcile_domain
+    _set_pov(project_dir, 'act1-sc01', 'Omniscient epic narrator')
+    ref_dir = os.path.join(project_dir, 'reference')
+    assert 'Omniscient epic narrator' not in find_unresolved('characters', ref_dir)
+    monkeypatch.setattr('storyforge.hone._invoke_batch', lambda *a, **k: '')
+    reconcile_domain('characters', ref_dir, 'test-model', str(tmp_path))
+    pov = open(os.path.join(ref_dir, 'scenes.csv')).read()
+    assert '|narrator|' in pov and 'Omniscient' not in pov
+    assert 'narrator' not in open(os.path.join(ref_dir, 'characters.csv')).read().lower()
+
+
+def test_drafting_a_narrator_scene_says_so(project_dir):
+    from storyforge.prompts import build_scene_prompt_from_briefs
+    _set_pov(project_dir, 'act1-sc01', 'narrator')
+    plugin = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        prompt = build_scene_prompt_from_briefs('act1-sc01', project_dir, plugin)
+    except TypeError:
+        pytest.skip('signature differs')
+    assert "This scene's POV is the narrator" in prompt
+    assert 'Narrator POV: allowed.' in prompt

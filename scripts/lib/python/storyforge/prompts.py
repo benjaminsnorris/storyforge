@@ -1994,7 +1994,7 @@ def build_scene_prompt_from_briefs(
         char_voice_section = (
             "## Narrator\n\nThis scene's POV is the narrator: tell it in the book's "
             "narrating voice, as the voice guide describes the narrator, through no "
-            f"character's eyes. {prompt_line(project_dir)}"
+            f"character's eyes. {prompt_line(project_dir, always=True)}"
             + (f"\n\n{char_voice_block}" if char_voice_block else ''))
 
     register_line = ''

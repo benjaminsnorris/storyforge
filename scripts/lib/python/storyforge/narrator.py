@@ -52,6 +52,7 @@ def normalize_pov(value: str | None) -> str:
 class Setting:
     mode: str = ALLOWED
     cap: int | None = None   # for `limited`
+    stated: bool = False     # the line is in key-decisions.md (not the default)
 
     def describe(self) -> str:
         return f'limited {self.cap}' if self.mode == LIMITED else self.mode
@@ -73,14 +74,27 @@ def read_setting(project_dir: str) -> Setting:
         if m:
             word = m.group(1).lower()
             if word.startswith(LIMITED):
-                return Setting(LIMITED, int(m.group(2)))
-            return Setting(word)
+                return Setting(LIMITED, int(m.group(2)), True)
+            return Setting(word, None, True)
     return Setting()
 
 
-def prompt_line(project_dir: str) -> str:
-    """One line for the elaborate and drafting prompts saying the setting."""
+def uses_narrator(project_dir: str) -> bool:
+    """Whether any scene in reference/scenes.csv has the narrator as POV."""
+    path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if not os.path.isfile(path):
+        return False
+    from .elaborate import _read_csv
+    return bool(narrator_scenes(_read_csv(path)))
+
+
+def prompt_line(project_dir: str, *, always: bool = False) -> str:
+    """One line for the elaborate and drafting prompts saying the setting:
+    '' for a book that neither states it nor has a narrator scene, so their
+    prompts are unchanged (unless `always`)."""
     s = read_setting(project_dir)
+    if not (always or s.stated or uses_narrator(project_dir)):
+        return ''
     if s.mode == OFF:
         return ('Narrator POV: off. Every scene has a character as its POV; never '
                 'use `narrator` as a scene\'s pov.')

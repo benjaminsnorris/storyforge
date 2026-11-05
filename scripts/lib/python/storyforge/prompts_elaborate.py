@@ -49,13 +49,14 @@ def _project_context(project_dir: str) -> str:
         genre_str = f"{genre} / {subgenre}"
 
     from .narrator import prompt_line
+    narrator = prompt_line(project_dir)
+    narrator = f"\n**{narrator.replace(':', ':**', 1)}" if narrator else ''
     return f"""## Project
 
 **Title:** {title}
 **Genre:** {genre_str}
 **Logline:** {logline}
-**Target word count:** {target}
-**{prompt_line(project_dir).replace(':', ':**', 1)}"""
+**Target word count:** {target}{narrator}"""
 
 
 # The reference docs the stage prompts carry, in order. The shared system
