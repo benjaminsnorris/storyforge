@@ -27,34 +27,53 @@ from dataclasses import dataclass
 
 NARRATOR_POV = 'narrator'
 
-# Words that may precede "narrator" in a variant: "the intrusive omniscient
-# narrator", Carol's registered `intrusive-omniscient-narrator`. Anything
-# else ("Nick's narrator", "narrator-of-troy") is not the reserved value
-_QUALIFIERS = frozenset({
-    'the', 'an', 'a', 'omniscient', 'epic', 'intrusive', 'third', 'person',
-    'unnamed', 'anonymous', 'external', 'authorial', 'frame', 'framing',
-    'heterodiegetic', 'poem', "poem's", 'book', "book's",
-})
+# What makes a narrator the reserved, impersonal one: an omniscient or epic
+# voice ("Omniscient narrator", "third-person narrator", Carol's registered
+# `intrusive-omniscient-narrator`). A narrator who is a person ("unnamed-
+# narrator", a first-person "The Narrator" in characters.csv) is a character:
+# they keep their id, stay subject to the on-stage check and are drafted
+# through their own eyes (#584 review)
+_IMPERSONAL = frozenset({'omniscient', 'epic', 'intrusive', 'third', 'heterodiegetic',
+                         'authorial'})
+_ARTICLES = frozenset({'the', 'person'})   # "the", and "person" of "third person"
 
 _SETTING = re.compile(r'narrator_pov\s*`?\s*:\s*`?\s*(allowed|off|limited\s+(\d+))\b', re.I)
 
 ALLOWED, LIMITED, OFF = 'allowed', 'limited', 'off'
 
 
-def is_narrator(value: str | None) -> bool:
-    """True for `narrator` and the variants that mean it."""
-    words = re.split(r'[\s_-]+', (value or '').strip().lower())
-    words = [w for w in words if w]
+def _words(value: str | None) -> list[str]:
+    return [w for w in re.split(r'[\s_-]+', (value or '').strip().lower()) if w]
+
+
+def is_narrator(value: str | None, registry: set[str] | frozenset[str] | None = None) -> bool:
+    """True for `narrator` and the impersonal variants that mean it:
+    "Omniscient narrator", "omniscient", "third-person narrator", and the bare
+    "the narrator" when it is not a characters.csv name, id or alias
+    (*registry*, lowercased; with no registry a bare "the narrator" is not
+    taken for the reserved value). Never a narrator marked first person or
+    otherwise named ("unnamed-narrator", "Nick's narrator")."""
+    text = (value or '').strip().lower()
+    if text == NARRATOR_POV:
+        return True
+    words = _words(value)
     if words == ['omniscient']:
         return True
-    return (bool(words) and words[-1] in ('narrator', 'narration')
-            and all(w in _QUALIFIERS for w in words[:-1]))
+    if not words or words[-1] not in ('narrator', 'narration'):
+        return False
+    lead = words[:-1]
+    if not all(w in _IMPERSONAL or w in _ARTICLES for w in lead):
+        return False
+    if any(w in _IMPERSONAL for w in lead):
+        return True
+    # bare "the narrator": the reserved value only when no character has it
+    return registry is not None and text not in registry
 
 
-def normalize_pov(value: str | None) -> str:
+def normalize_pov(value: str | None, registry=None) -> str:
     """A pov cell with a narrator variant written as `narrator`; anything
-    else as given."""
-    return NARRATOR_POV if is_narrator(value) else (value or '')
+    else (a character, a first-person narrator) as given. See `is_narrator`."""
+    return NARRATOR_POV if is_narrator(value, registry) else (value or '')
 
 
 @dataclass(frozen=True)
@@ -80,6 +99,11 @@ def read_setting(project_dir: str) -> Setting:
         if line.lstrip().startswith('<!--'):
             continue
         m = _SETTING.search(line)
+        if not m and 'narrator_pov' in line.lower():
+            from .common import log
+            log(f'WARNING: reference/key-decisions.md: can\'t read {line.strip()!r} '
+                f'(narrator_pov is allowed, limited N or off); using allowed')
+            return Setting()
         if m:
             word = m.group(1).lower()
             if word.startswith(LIMITED):

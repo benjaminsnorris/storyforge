@@ -513,6 +513,8 @@ def score_scene_map(project_dir: str) -> dict:
     # not be on stage (#555). The exempt scenes are named in checks of their own.
     from storyforge.elaborate import CLOCK_FIELDS, CLOCKLESS_MODES, time_mode
     from storyforge.narrator import OFF, is_narrator, narrator_scenes, read_setting
+    from storyforge.enrich import load_alias_map
+    characters = set(load_alias_map(os.path.join(project_dir, 'reference', 'characters.csv')))
     required = ['location', 'timeline_day', 'time_of_day', 'duration']
 
     def _clockless(r: dict) -> bool:
@@ -544,8 +546,9 @@ def score_scene_map(project_dir: str) -> dict:
         pov = r.get('pov', '').strip()
         on_stage = intent_by_id.get(sid, {}).get('on_stage', '').strip()
         # The narrator has no body: never on stage (#555, which replaced
-        # #488's frame-only exemption)
-        if not pov or is_narrator(pov):
+        # #488's frame-only exemption). A narrator who is a character (a
+        # first-person "The Narrator" in characters.csv) is checked
+        if not pov or is_narrator(pov, characters):
             continue
         if not on_stage:
             unpopulated_pov.append(sid)

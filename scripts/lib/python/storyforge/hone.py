@@ -263,7 +263,8 @@ def _unresolved_references(domain: str, ref_dir: str) -> dict[str, dict]:
         rows.sort(key=lambda r: order.get(r.get('id', ''), len(order)))
         for row in rows:
             for col in columns:
-                if domain == 'characters' and col == 'pov' and is_narrator(row.get(col)):
+                if (domain == 'characters' and col == 'pov'
+                        and is_narrator(row.get(col), set(lookup))):
                     continue   # the reserved narrator (#555)
                 for part in _split_entries(domain, row.get(col)):
                     ref = _reference_key(domain, part)
@@ -431,7 +432,8 @@ def apply_registry_normalization(
                 if not old_val:
                     continue
 
-                if domain == 'characters' and col == 'pov' and is_narrator(old_val):
+                if (domain == 'characters' and col == 'pov'
+                        and is_narrator(old_val, set(alias_map))):
                     # The reserved narrator, never a registry entry (#555)
                     new_val = NARRATOR_POV
                 elif domain == 'mice-threads' and col == 'mice_threads':

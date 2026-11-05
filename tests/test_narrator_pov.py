@@ -13,8 +13,8 @@ from storyforge.schema import validate_schema
 
 
 @pytest.mark.parametrize('value', ['narrator', 'Narrator', 'Omniscient narrator',
-                                   'the narrator', 'omniscient', 'Omniscient epic narrator',
-                                   ' The  Narrator ', 'intrusive-omniscient-narrator',
+                                   'omniscient', 'Omniscient epic narrator',
+                                   'intrusive-omniscient-narrator', 'third-person narrator',
                                    'third-person omniscient narration'])
 def test_variants_are_the_narrator(value):
     assert narrator.is_narrator(value)
@@ -22,10 +22,54 @@ def test_variants_are_the_narrator(value):
 
 
 @pytest.mark.parametrize('value', ['', 'herald', 'narrator-of-troy', 'Nick Carraway',
-                                   "nick's narrator", 'omniscient-zeus'])
+                                   "nick's narrator", 'omniscient-zeus', 'unnamed-narrator',
+                                   'first-person narrator', 'the first-person narrator',
+                                   'anonymous narrator'])
 def test_others_are_not(value):
-    assert not narrator.is_narrator(value)
-    assert narrator.normalize_pov(value) == value
+    """#584 review: a narrator who is a person keeps their id."""
+    assert not narrator.is_narrator(value, set())
+    assert narrator.normalize_pov(value, set()) == value
+
+
+def test_the_narrator_is_reserved_only_when_no_character_has_the_name():
+    assert narrator.normalize_pov('the narrator', set()) == 'narrator'
+    assert narrator.normalize_pov(' The  Narrator ', {'hero'}) == 'narrator'
+    # a first-person narrator in characters.csv is that character
+    assert narrator.normalize_pov('The Narrator', {'the narrator', 'the-narrator'}) == \
+        'The Narrator'
+    # with no registry to ask, a bare "the narrator" is left for hone
+    assert narrator.normalize_pov('the narrator') == 'the narrator'
+
+
+def test_writers_keep_a_registered_first_person_narrator():
+    row = {'pov': 'The Narrator'}
+    normalize_fields(row, {'characters': {'the narrator': 'the-narrator',
+                                          'the-narrator': 'the-narrator'}})
+    assert row['pov'] == 'the-narrator'
+    row = {'pov': 'the narrator'}
+    normalize_fields(row, {'characters': {'hero': 'hero'}})
+    assert row['pov'] == 'narrator'
+
+
+def test_a_first_person_narrator_is_checked_on_stage(tmp_path):
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'characters.csv').write_text('id|name|role|aliases\nthe-narrator|The Narrator|protagonist|\n')
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words\n'
+        's1|1|t|S.|1|the-narrator|loc|1|morning|1h|character|mapped|0|800\n')
+    (ref / 'scene-intent.csv').write_text('id|on_stage\ns1|hero\n')
+    from storyforge.scoring_levels import score_scene_map
+    c = {x['check']: x for x in score_scene_map(str(tmp_path))['checks']}
+    assert c['POV is on-stage in every scene with on_stage populated']['passed'] is False
+
+
+def test_a_malformed_setting_is_said(project_dir, capsys):
+    _key_decisions(project_dir, 'narrator_pov: sometimes')
+    assert narrator.read_setting(project_dir).mode == 'allowed'
+    out = capsys.readouterr()
+    assert "can't read 'narrator_pov: sometimes'" in out.out + out.err
 
 
 def _set_pov(project_dir, sid, pov):
@@ -65,7 +109,7 @@ def test_writers_normalize_variants():
     row = {'pov': 'Omniscient epic narrator'}
     normalize_fields(row, {'characters': {'hero': 'hero'}})
     assert row['pov'] == 'narrator'
-    assert normalize_fields({'pov': 'the narrator'}, {})['pov'] == 'narrator'
+    assert normalize_fields({'pov': 'Omniscient narrator'}, {})['pov'] == 'narrator'
 
 
 def test_extraction_writes_narrator():

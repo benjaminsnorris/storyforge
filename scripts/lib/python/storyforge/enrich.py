@@ -660,8 +660,10 @@ def normalize_fields(result: dict[str, str],
     """
     if result.get('pov'):
         # "Omniscient narrator", "the narrator": the reserved `narrator` (#555)
+        # (a first-person narrator the registry knows keeps their id)
         from .narrator import normalize_pov
-        result['pov'] = normalize_pov(result['pov'])
+        chars = (alias_maps or {}).get('characters')
+        result['pov'] = normalize_pov(result['pov'], set(chars) if chars else None)
     if not alias_maps:
         return result
 
