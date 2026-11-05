@@ -1350,16 +1350,17 @@ def score_physical_state_chain(scenes_map, briefs_map, ref_dir=''):
             continue
         # Get on-stage characters
         scene = scenes_map.get(sid) or {}
-        pov = _s(scene.get('pov')).strip().lower()
         # Try to get intent data for on_stage
         intent_map = {}
         intent_path = os.path.join(ref_dir, 'scene-intent.csv') if ref_dir else ''
         if intent_path and os.path.isfile(intent_path):
             intent_map = _read_csv_as_map(intent_path)
         intent = intent_map.get(sid) or {}
-        on_stage_raw = _s(intent.get('on_stage')) or _s(intent.get('characters'))
-        on_stage = {c.strip().lower() for c in on_stage_raw.split(';') if c.strip()}
-        on_stage.add(pov)
+        # on_stage (or characters) plus the POV, but not a told scene's
+        # teller (#548)
+        from .elaborate import present_in_scene
+        on_stage = present_in_scene({k: _s(v) for k, v in scene.items()},
+                                    {k: _s(v) for k, v in intent.items()})
 
         # Check if any active state applies to an on-stage character
         has_active = False

@@ -388,6 +388,10 @@ def date_contradicts(stored: str, cue: str) -> bool:
 # Assignment: the running-present walk, then batches
 # ============================================================================
 
+#: A gap that reads back in time, which a step into a told tale keeps
+_GOES_BACK = re.compile(r'\b(ago|before|earlier|back|previous(ly)?|past|once)\b', re.I)
+
+
 def told_cues(rows: list[dict], cues: dict[str, dict]) -> dict[str, dict]:
     """*cues* with every step into an embedded tale read as ``earlier``.
 
@@ -397,8 +401,11 @@ def told_cues(rows: list[dict], cues: dict[str, dict]) -> dict[str, dict]:
     first scene of a tale (one whose scene before isn't told by the same
     scene) is ``earlier`` whatever its cue said, unless the cue made it a
     frame or a vision. A scene going on through the tale keeps its cue
-    (Odysseus's Cicones, then the Lotus-eaters "nine days" on). The cues
-    given are not changed; a copy is returned.
+    (Odysseus's Cicones, then the Lotus-eaters "nine days" on). The step's
+    own gap is kept only when it reads back in time ("years before", "long
+    ago"): a forward one ("the next day") measured on from the scene
+    before, and counted back it would put the tale a day before its
+    telling. The cues given are not changed; a copy is returned.
     """
     out = dict(cues)
     previous = ''
@@ -407,7 +414,8 @@ def told_cues(rows: list[dict], cues: dict[str, dict]) -> dict[str, dict]:
         cue = cues.get(sid, {})
         if (frame and frame != previous and time_mode(row) not in OFF_PRESENT_MODES
                 and cue.get('relation') not in ('earlier', *OFF_PRESENT_MODES)):
-            out[sid] = {**cue, 'relation': 'earlier'}
+            out[sid] = {k: v for k, v in cue.items()
+                        if k != 'gap' or _GOES_BACK.search(v or '')} | {'relation': 'earlier'}
         previous = frame
     return out
 
@@ -994,14 +1002,25 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     findings = []
     # A step into an embedded tale reads as a flashback (#548)
     cues = told_cues(scenes, cues)
-    days = {row.get('id', ''): _int(row.get('timeline_day')) for row in scenes}
+    by_id = {row.get('id', ''): row for row in scenes}
+    told_late: set[str] = set()
     for row in scenes:
-        frame, day = told_by(row), days.get(row.get('id', ''))
-        told_on = days.get(frame)
+        frame, day = told_by(row), _int(row.get('timeline_day'))
+        telling = by_id.get(frame, {})
+        told_on = _int(telling.get('timeline_day'))
+        if not frame or day is None or told_on is None or time_mode(row) in OFF_PRESENT_MODES:
+            continue
+        # A summary telling runs through a stretch: measure from its end,
+        # and not at all when its length isn't counted
+        if time_mode(telling) == 'summary':
+            span = gap_to_days(telling.get('duration', ''))
+            if span is None:
+                continue
+            told_on += span
         # A tale is of what has happened by the time it is told; a told
         # future is a vision (time_mode), not a told scene
-        if (frame and day is not None and told_on is not None and day > told_on
-                and time_mode(row) not in OFF_PRESENT_MODES):
+        if day > told_on:
+            told_late.add(row.get('id', ''))
             findings.append({'scene_id': row.get('id', ''), 'check': 'told_after_telling',
                              'message': f'is told in {frame} (day {told_on}), but its day '
                                         f'({day}) is after that'})
@@ -1056,7 +1075,8 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         # A stated date the calendar keeps outranks "earlier" on a later
         # day; on the same day, a month and day that agree say nothing
         # about the year (Fezziwig's Christmas Eve, years back, on day 1)
-        if relation == 'earlier' and last_day is not None and reached is not None and (
+        # A tale told after its telling is reported once, above
+        if relation == 'earlier' and sid not in told_late and last_day is not None and reached is not None and (
                 (day > reached and not stated)
                 or (day == reached and _goes_back_days(cue.get('gap', '')))):
             before = (f'the previous scene\'s ({last_day})' if at_present and reached == last_day

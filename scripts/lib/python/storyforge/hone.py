@@ -2840,10 +2840,10 @@ def propagate_physical_states(ref_dir: str, dry_run: bool = False) -> dict:
             # Check if character is on-stage (or is POV)
             scene = scenes_map.get(sid, {})
             intent = intent_map.get(sid, {})
-            pov = scene.get('pov', '').strip()
-            on_stage_raw = intent.get('on_stage', '') or intent.get('characters', '')
-            on_stage = {c.strip().lower() for c in on_stage_raw.split(';') if c.strip()}
-            on_stage.add(pov.lower())
+            # on_stage (or characters) plus the POV, but not a told scene's
+            # teller (#548)
+            from storyforge.elaborate import present_in_scene
+            on_stage = present_in_scene(scene, intent)
 
             if character and character.lower() not in on_stage:
                 continue

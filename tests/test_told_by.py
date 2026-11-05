@@ -122,6 +122,20 @@ class TestValidate:
                              [{'id': 'hall', 'characters': 'hygelac'}])
         assert checks['teller-in-telling-scene']['passed']
 
+    def test_a_tale_told_in_a_cut_scene_blocks(self):
+        scenes = [dict(_row('feast', '5'), status='cut'), _row('pyre', '-7300', 'feast')]
+        checks = _structural(scenes)
+        assert not checks['told-by-cut-scene']['passed']
+        assert checks['told-by-cut-scene']['severity'] == 'blocking'
+        assert 'pyre (told in feast, cut)' in checks['told-by-cut-scene']['message']
+
+    def test_a_tale_before_its_telling_is_advisory(self):
+        scenes = [dict(_row('pyre', '-7300', 'feast'), seq='1'), dict(_row('feast', '5'), seq='2')]
+        checks = _structural(scenes)
+        later = checks['told-by-later-scene']
+        assert not later['passed'] and later['severity'] == 'advisory'
+        assert checks['told-by-cut-scene']['passed']
+
     def test_validate_structure_runs_it(self, project_dir):
         from storyforge.elaborate import update_scene, validate_structure
         ref = os.path.join(project_dir, 'reference')
@@ -156,6 +170,14 @@ class TestTimelineOrder:
         assert found[0].startswith('Told tale: 2 scenes, cicones')
         assert found[0].endswith('; told in court')
 
+    def test_a_run_mixing_told_scenes_and_a_flashback_says_both(self):
+        found = self._messages([_row('court', '10', pov='odysseus'),
+                                _row('memory', '-20', pov='odysseus'),
+                                _row('cicones', '-3650', 'court', 'odysseus')])
+        assert len(found) == 1
+        assert found[0].startswith('Flashback: 2 scenes, memory')
+        assert found[0].endswith('; 1 flashback, 1 told; told in court')
+
     def test_an_untold_flashback_reads_as_before(self):
         found = self._messages([_row('a', '10', pov='x'), _row('b', '3', pov='x')])
         assert found == ["Flashback: b (day 3) is set before the story's present "
@@ -174,6 +196,19 @@ class TestToldCues:
         assert out['lotus'] == cues['lotus']   # going on through the tale
         assert out['home'] == cues['home']
         assert cues['cicones'] == {'relation': 'continues'}   # not changed in place
+
+    def test_a_forward_gap_is_dropped_and_a_backward_one_kept(self):
+        """Review of #587: "later, the next day" counted back would put
+        the tale a day before its telling."""
+        from storyforge.timeline import told_cues, walk
+        rows = [_row('court', '10'), _row('cicones', '', 'court'), _row('x', '11'),
+                _row('pyre', '', 'x')]
+        out = told_cues(rows, {'cicones': {'relation': 'later', 'gap': 'the next day'},
+                               'pyre': {'relation': 'continues', 'gap': 'years before'}})
+        assert out['cicones'] == {'relation': 'earlier'}
+        assert out['pyre'] == {'relation': 'earlier', 'gap': 'years before'}
+        days = walk(['court', 'cicones'], out, last=10, present=10)
+        assert days['cicones'] is None   # left for the model, not day 9
 
     def test_a_scene_with_no_cue_still_steps_back(self):
         from storyforge.timeline import told_cues
@@ -221,9 +256,26 @@ class TestCheckTimeline:
         rows = [_row('feast', '5'), _row('later', '9', 'feast'), _row('dawn', '10')]
         found = check_timeline(rows, {'later': {'relation': 'earlier'},
                                       'dawn': {'relation': 'later'}})
-        assert 'told_after_telling' in [f['check'] for f in found]
-        told = [f for f in found if f['check'] == 'told_after_telling'][0]
-        assert told['scene_id'] == 'later' and 'day 5' in told['message']
+        # Once, not again as flashback_not_earlier (review of #587)
+        assert [f['check'] for f in found] == ['told_after_telling']
+        assert found[0]['scene_id'] == 'later' and 'day 5' in found[0]['message']
+
+    def test_a_summary_telling_is_measured_from_its_stretchs_end(self):
+        from storyforge.timeline import check_timeline
+        rows = [_row('winter', '5', mode='summary'), _row('raid', '9', 'winter'),
+                _row('spring', '20')]
+        rows[0]['duration'] = '10 days'
+        cues = {'raid': {'relation': 'earlier'}, 'spring': {'relation': 'later'}}
+        assert [f['check'] for f in check_timeline(rows, cues)] == []
+        rows[1]['timeline_day'] = '17'
+        assert [f['check'] for f in check_timeline(rows, cues)] == ['told_after_telling']
+
+    def test_a_summary_telling_of_unknown_length_is_not_measured(self):
+        from storyforge.timeline import check_timeline
+        rows = [_row('winter', '5', mode='summary'), _row('raid', '40', 'winter')]
+        rows[0]['duration'] = 'all winter'
+        found = check_timeline(rows, {'raid': {'relation': 'earlier'}})
+        assert 'told_after_telling' not in [f['check'] for f in found]
 
     def test_a_told_vision_after_its_telling_is_not_found(self):
         from storyforge.timeline import check_timeline
@@ -299,12 +351,24 @@ class TestExtraction:
     def test_told_by_comes_from_reading_order(self):
         from storyforge.extract import told_by_from_answers
         order = ['court', 'cicones', 'lotus', 'interlude', 'hades', 'ithaca']
-        assert told_by_from_answers(order, {'cicones', 'lotus', 'hades'}) == {
-            'cicones': 'court', 'lotus': 'court', 'hades': 'interlude'}
+        assert told_by_from_answers(order, {'cicones', 'lotus', 'hades'}) == ({
+            'cicones': 'court', 'lotus': 'court', 'hades': 'interlude'}, [])
 
     def test_the_first_scene_is_never_told(self):
+        """Nothing tells it, and the tale it begins has lost its frame."""
         from storyforge.extract import told_by_from_answers
-        assert told_by_from_answers(['a', 'b'], {'a', 'b'}) == {'b': 'a'}
+        assert told_by_from_answers(['a', 'b', 'c', 'd'], {'a', 'b', 'd'}) == (
+            {'d': 'c'}, ['a', 'b'])
+
+    def test_a_scene_with_no_answer_is_no_frame(self):
+        """Review of #587: a told scene after one whose phase 1 reply
+        failed must not name it as the frame, nor may the rest of its tale."""
+        from storyforge.extract import told_by_from_answers
+        order = ['court', 'failed', 'cicones', 'lotus', 'ithaca', 'tale']
+        frames, unframed = told_by_from_answers(
+            order, {'cicones', 'lotus', 'tale'}, set(order) - {'failed'})
+        assert frames == {'tale': 'ithaca'}
+        assert unframed == ['cicones', 'lotus']
 
     def _scenes(self, ref, told_by):
         header = ['id', 'seq', 'title', 'told_by']
@@ -334,11 +398,55 @@ class TestExtraction:
         _set_told_by(str(tmp_path), answers, force=True)
         assert self._column(str(tmp_path))['dawn'] == ''
 
+    def test_unframed_and_absent_tellers_are_logged(self, tmp_path, capsys):
+        from storyforge.cmd_extract import _set_told_by
+        ref = str(tmp_path)
+        self._scenes(ref, {})
+        _write(os.path.join(ref, 'scene-intent.csv'), ['id', 'characters', 'on_stage'],
+               [{'id': 'feast', 'characters': 'hrothgar', 'on_stage': 'hrothgar'}])
+        with open(os.path.join(ref, 'scenes.csv')) as f:
+            lines = f.read().splitlines()
+        lines[0] += '|pov'
+        lines[2] += '|scop'
+        lines[1] += '|'
+        lines[3] += '|'
+        lines[4] += '|'
+        with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        _set_told_by(ref, {'feast': True, 'pyre': False, 'vengeance': True, 'dawn': False},
+                     force=False)
+        out = capsys.readouterr().out
+        assert 'no scene before them to tell them' in out and 'feast' in out
+        _set_told_by(ref, {'feast': False, 'pyre': True, 'vengeance': False, 'dawn': False},
+                     force=True)
+        assert 'pyre (scop, not in feast)' in capsys.readouterr().out
+
     def test_an_unanswered_scene_is_left_alone(self, tmp_path):
         from storyforge.cmd_extract import _set_told_by
         self._scenes(str(tmp_path), {'vengeance': 'feast'})
         _set_told_by(str(tmp_path), {'feast': False}, force=True)
         assert self._column(str(tmp_path))['vengeance'] == 'feast'
+
+
+class TestPresence:
+    """Review of #587: a told scene's teller is in the telling scene, not
+    in the tale, so they carry no physical states and count on no stage
+    there unless the cast lists them."""
+
+    def test_the_teller_is_not_present_in_the_tale(self):
+        from storyforge.elaborate import present_in_scene
+        scene = {'pov': 'scop', 'told_by': 'feast'}
+        assert present_in_scene(scene, {'on_stage': 'hengest;finn'}) == {'hengest', 'finn'}
+
+    def test_a_teller_in_their_own_tale_is_present(self):
+        from storyforge.elaborate import present_in_scene
+        scene = {'pov': 'odysseus', 'told_by': 'court'}
+        assert present_in_scene(scene, {'on_stage': 'odysseus;polyphemus'}) == {
+            'odysseus', 'polyphemus'}
+
+    def test_an_untold_scenes_pov_is_present(self):
+        from storyforge.elaborate import present_in_scene
+        assert present_in_scene({'pov': 'scop'}, {'on_stage': 'hrothgar'}) == {'scop', 'hrothgar'}
 
 
 class TestSceneMapScore:

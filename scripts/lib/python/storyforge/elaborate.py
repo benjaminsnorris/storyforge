@@ -826,8 +826,9 @@ def _validate_told(scenes_map, intent_map, checks):
     tells it (#548).
 
     Blocking: a cell naming more than one scene, a scene told by itself,
-    and a cycle (a tale that tells the scene telling it). A tale inside a
-    told tale is fine. An id not in scenes.csv is the schema's
+    a cycle (a tale that tells the scene telling it), and a telling scene
+    that is cut or merged. A tale inside a told tale is fine. Advisory: a
+    telling scene later in reading order than its tale. An id not in scenes.csv is the schema's
     `scene_ids` check, so it is skipped here. Advisory: the told scene's
     pov is its teller, who should be in the telling scene's cast
     (`characters` or `on_stage`); an empty pov, an unknown one, or the
@@ -858,6 +859,23 @@ def _validate_told(scenes_map, intent_map, checks):
         'told', 'told-by-cycle', not cycles,
         'told_by goes round in a cycle (each tale tells the scene telling it): '
         + '; '.join(cycles) if cycles else 'No told_by cycle'))
+    gone = sorted(f'{sid} (told in {frame}, {scenes_map[frame].get("status", "").strip()})'
+                  for sid, frame in told.items() if frame in scenes_map
+                  and (scenes_map[frame].get('status') or '').strip().lower() in ('cut', 'merged'))
+    checks.append(_check(
+        'told', 'told-by-cut-scene', not gone,
+        'Told in a cut or merged scene (nothing tells the tale now): ' + '; '.join(gone)
+        if gone else 'No tale is told in a cut or merged scene'))
+    # A tale usually follows its telling; one shown before it (a story
+    # opening in the tale, then the telling) is the author's call
+    ahead = sorted(f'{sid} (told in {frame})' for sid, frame in told.items()
+                   if frame in scenes_map and frame != sid
+                   and _seq_sort_key(scenes_map[frame]) > _seq_sort_key(scenes_map[sid]))
+    checks.append(_check(
+        'told', 'told-by-later-scene', not ahead,
+        'Told in a scene that comes later in reading order: ' + '; '.join(ahead)
+        if ahead else 'Every tale comes after the scene that tells it',
+        severity='advisory'))
     absent = []
     for sid, frame in sorted(told.items()):
         teller = (scenes_map[sid].get('pov') or '').strip()
@@ -914,11 +932,14 @@ def _validate_knowledge(scenes_map, briefs_map, checks):
 def present_in_scene(scene: dict, intent: dict) -> set[str]:
     """Lowercased ids of the characters present in a scene: its ``on_stage``
     (``characters`` when that is empty) plus its POV. Empty when the scene
-    records neither, which means "unknown", not "nobody"."""
+    records neither, which means "unknown", not "nobody". A told scene's
+    POV is its teller, who is in the telling scene, not in the tale: present
+    only when the cast lists them too (Odysseus is in his own tale; the scop
+    is not at Finnsburh) (#548)."""
     raw = intent.get('on_stage', '') or intent.get('characters', '')
     present = {c.strip().lower() for c in raw.split(';') if c.strip()}
     pov = (scene.get('pov') or '').strip().lower()
-    if pov:
+    if pov and not told_by(scene):
         present.add(pov)
     return present
 

@@ -316,22 +316,36 @@ def skeleton_told(response: str) -> bool:
     return _json_answer(response, SKELETON_SCHEMA)['told'] is True
 
 
-def told_by_from_answers(order: list[str], told: set[str]) -> dict[str, str]:
+def told_by_from_answers(order: list[str], told: set[str],
+                         answered: set[str] | None = None) -> tuple[dict[str, str], list[str]]:
     """`told_by` for each scene in *told* (the scenes Phase 1 called told),
     from reading order (#548): a tale is told in the scene before it, and a
     scene going on with a tale is told where the tale began, so Odysseus's
-    tale is told in the one scene at Alcinous's court. The first scene can't
-    be told (nothing tells it). A tale inside a tale gets the outer frame."""
+    tale is told in the one scene at Alcinous's court. A tale inside a tale
+    gets the outer frame.
+
+    *answered*: the scenes Phase 1 has an answer for (all of *order* when
+    None). A scene with no answer can't be a frame or carry a tale on: a
+    told scene after it gets no told_by. Returns ``(frames, unframed)``:
+    the told_by per scene, and the told scenes left without one (the first
+    scene, or one after an unanswered scene), for the caller to report.
+    """
+    answered = set(order) if answered is None else answered
     out: dict[str, str] = {}
-    previous, frame = '', ''
+    unframed: list[str] = []
+    previous, frame, lost = '', '', False
     for sid in order:
-        if sid in told and previous:
+        if sid not in told:
+            frame, lost = '', False
+        elif not lost and previous and previous in answered:
             frame = frame or previous
             out[sid] = frame
         else:
-            frame = ''
+            # The rest of this tale has lost its frame too
+            frame, lost = '', True
+            unframed.append(sid)
         previous = sid
-    return out
+    return out, unframed
 
 
 def skeleton_cues(response: str) -> dict[str, str]:
