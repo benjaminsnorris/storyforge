@@ -256,7 +256,8 @@ Answer with a JSON object with these fields (a list field is a JSON array of str
 - duration: approximate in-story duration, e.g., "2 hours", "30 minutes", "an afternoon"
 - type: the scene's primary narrative purpose
 - target_words: current word count is a reasonable target — the approximate word count
-- act: which structural act this scene belongs to, as an integer (1, 2, 3, ...), based on its position in the story's dramatic shape — not a book part or section heading"""
+- act: which structural act this scene belongs to, as an integer (1, 2, 3, ...), based on its position in the story's dramatic shape — not a book part or section heading
+- told: true when this scene's events are a tale told inside the previous scene (a story, song or report a character gives there, or the narrator's digression from it), or go on with one; then pov is the teller. false for a scene lived on the page"""
 
 
 def _reduce_enums(result: dict[str, str]) -> dict[str, str]:
@@ -307,6 +308,30 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
     if date:
         result['timeline_date'] = date
     return _reduce_enums(result)
+
+
+def skeleton_told(response: str) -> bool:
+    """Whether Phase 1's reply calls the scene a tale told inside the scene
+    before it (``told``). Raises ValueError on an unreadable reply."""
+    return _json_answer(response, SKELETON_SCHEMA)['told'] is True
+
+
+def told_by_from_answers(order: list[str], told: set[str]) -> dict[str, str]:
+    """`told_by` for each scene in *told* (the scenes Phase 1 called told),
+    from reading order (#548): a tale is told in the scene before it, and a
+    scene going on with a tale is told where the tale began, so Odysseus's
+    tale is told in the one scene at Alcinous's court. The first scene can't
+    be told (nothing tells it). A tale inside a tale gets the outer frame."""
+    out: dict[str, str] = {}
+    previous, frame = '', ''
+    for sid in order:
+        if sid in told and previous:
+            frame = frame or previous
+            out[sid] = frame
+        else:
+            frame = ''
+        previous = sid
+    return out
 
 
 def skeleton_cues(response: str) -> dict[str, str]:
@@ -729,6 +754,8 @@ def _skeleton_schema() -> dict:
         # "unstated", not "unknown": the text giving no time is an answer (#488)
         'time_of_day': {'type': 'string', 'enum': sorted(VALID_TIMES)}, 'duration': _STR, 'type': _enum(VALID_TYPES),
         'target_words': _STR, 'act': _STR,
+        # An embedded tale (#548): code turns it into told_by
+        'told': {'type': 'boolean'},
     })
 
 

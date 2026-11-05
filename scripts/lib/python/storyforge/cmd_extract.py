@@ -560,6 +560,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     from storyforge.extract import (
         SKELETON_SCHEMA, build_skeleton_prompt, parse_skeleton_response, skeleton_cues,
+        skeleton_told,
     )
     from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps, normalize_fields
     from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
@@ -646,6 +647,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     # on one calendar. Nobody authored these days, so they are replaced.
     from storyforge.timeline import write_cues, run_assignment
     cues = {}
+    told = {}
     rejected = set(_unanswered.get('scenes.csv', []))
     for sid in sorted_scene_ids:
         txt_file = os.path.join(log_dir, f'{sid}.txt')
@@ -654,11 +656,15 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         # no scene values was named as unusable there
         if sid in succeeded and sid not in rejected and os.path.isfile(txt_file):
             with open(txt_file) as f:
-                try:
-                    cues[sid] = skeleton_cues(f.read())
-                except ValueError:
-                    pass  # the scenes.csv merge above named it; no cues for it below
+                reply = f.read()
+            try:
+                cues[sid] = skeleton_cues(reply)
+                told[sid] = skeleton_told(reply)
+            except ValueError:
+                pass  # the scenes.csv merge above named it; no cues for it below
     write_cues(project_dir, cues)
+    # Before the calendar, which places a told scene as a flashback
+    _set_told_by(ref_dir, told, force)
     # A calendar is one piece: placing it without one scene's fresh cues
     # (an earlier run's, or none) would move its neighbours too, and with
     # force the wrong days would replace every scene's.
@@ -674,6 +680,33 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     _safe_remove(batch_file)
     _safe_rmdir(skel_output)
+
+
+def _set_told_by(ref_dir, told, force):
+    """Write `told_by` from Phase 1's `told` answers (*told*: scene id ->
+    bool, for the scenes answered), in reading order (#548). A cell already
+    set is kept unless *force*; with *force* a scene answered as not told is
+    cleared. Logs how many scenes are told, and in how many scenes."""
+    from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP
+    from storyforge.extract import told_by_from_answers
+    path = os.path.join(ref_dir, 'scenes.csv')
+    rows = sorted(_read_csv(path), key=lambda r: int(r.get('seq') or 0))
+    frames = told_by_from_answers([r['id'] for r in rows],
+                                  {sid for sid, yes in told.items() if yes})
+    changed = 0
+    for row in rows:
+        sid, old = row['id'], (row.get('told_by') or '').strip()
+        if sid not in told or (old and not force):
+            continue
+        new = frames.get(sid, '')
+        if new != old:
+            row['told_by'] = new
+            changed += 1
+    if changed:
+        _write_csv(path, rows, _FILE_MAP['scenes.csv'])
+    if frames:
+        log(f'  told_by: {len(frames)} scene(s) told inside '
+            f'{len(set(frames.values()))} scene(s); {changed} cell(s) changed')
 
 
 def _run_acts(project_dir, scenes_dir, ref_dir, log_dir, profile_file):

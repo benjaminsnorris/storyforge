@@ -240,6 +240,16 @@ COLUMN_SCHEMA = {
         'type': 'free_text', 'file': 'scenes.csv', 'stage': 'map',
         'description': 'Reference to reference/architecture.csv:id — the architecture anchor this map scene serves (or own_id if the map scene IS the anchor). Empty for purely interstitial scenes.',
     },
+    'told_by': {
+        'type': 'scene_ids', 'file': 'scenes.csv', 'stage': 'map',
+        'description': 'For an embedded tale (a story, song or report a character gives inside '
+                       'another scene, such as Odysseus\'s tale to the Phaeacians or a '
+                       'digression the narrator makes from a scene), the id of the one scene '
+                       'that tells it; empty for a scene lived on the page. The told scene\'s '
+                       'pov is its teller, who is in the telling scene\'s cast. timeline_day is '
+                       'when the told events happened, and time_mode is unchanged: like a '
+                       'flashback, a told scene is a device, never an error.',
+    },
 
     # architecture.csv — structural anchor tier
     'spine_event': {

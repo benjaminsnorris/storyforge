@@ -40,6 +40,11 @@ This document explains **why** each column in the scene CSV files matters and **
 **time_mode:** `scene` (default), `summary` (covers a stretch; the day is where it starts), `frame` (narration from after the story, which is never treated as the present, so it can't make the whole book look like a flashback), or `vision` (events a character is shown that the story doesn't treat as fixed: a prophecy, a future that may be, a dream. Never the present, so a future shown on day 400 doesn't turn the next morning into a flashback. A memory of the real past is a flashback, not a vision).
 **timeline_date:** the date the scene's own text states, in EDTF. Only what the text gives: "the Fourth of July" with no year is `XXXX-07-04`, never a guessed year.
 
+### told_by — An Embedded Tale
+**Why it matters:** Epics and frame novels tell whole scenes inside other scenes: Odysseus's wanderings to the Phaeacians, a scop's Finnsburh lay at the feast, a herald's history of the Swedish wars. `told_by` names the one scene that tells this one (empty for a scene lived on the page). The calendar, the cast checks and drafting then know the scene is told, not lived.
+**How to fill it:** The telling scene's id. The told scene's `pov` is its teller, who is in the telling scene's cast; its `timeline_day` is when the told events happened, and `time_mode` is unchanged. A scene going on with the tale has the same `told_by` (all of Odysseus's tale is told in one scene at Alcinous's court); a tale inside a tale names the told scene it is told in. Extraction's phase 1 fills it.
+**How to check:** `./storyforge validate` lists a told scene set before the present as a told tale (a device, like a flashback, never an error), blocks a `told_by` naming an unknown scene, itself or a cycle, and warns when the teller isn't in the telling scene's cast. `./storyforge timeline --check` reads the step into a tale as a step back, and reports a told scene set after the scene that tells it (a told future is a `vision`).
+
 ### type — Narrative Purpose
 **Why it matters:** A balanced manuscript has a mix of types. Five consecutive plot scenes with no character development creates pace without depth. Five character scenes with no plot creates depth without momentum.
 **How to check:** Look at the Scene Type Sequence chart. Flag stretches of 4+ same type.

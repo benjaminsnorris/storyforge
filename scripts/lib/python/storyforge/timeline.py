@@ -22,7 +22,7 @@ import os
 import re
 
 from .common import log
-from .elaborate import OFF_PRESENT_MODES, time_mode
+from .elaborate import OFF_PRESENT_MODES, time_mode, told_by
 from .enrich import update_csv_field
 from .schema import stated_time
 from .scenes import match_scene_id
@@ -388,6 +388,30 @@ def date_contradicts(stored: str, cue: str) -> bool:
 # Assignment: the running-present walk, then batches
 # ============================================================================
 
+def told_cues(rows: list[dict], cues: dict[str, dict]) -> dict[str, dict]:
+    """*cues* with every step into an embedded tale read as ``earlier``.
+
+    *rows*: scenes.csv rows in reading order. A told scene (`told_by`, #548)
+    happened when its events did, not when they are told, so the calendar
+    places it as it places a flashback, a device and never an error: the
+    first scene of a tale (one whose scene before isn't told by the same
+    scene) is ``earlier`` whatever its cue said, unless the cue made it a
+    frame or a vision. A scene going on through the tale keeps its cue
+    (Odysseus's Cicones, then the Lotus-eaters "nine days" on). The cues
+    given are not changed; a copy is returned.
+    """
+    out = dict(cues)
+    previous = ''
+    for row in rows:
+        sid, frame = row.get('id', ''), told_by(row)
+        cue = cues.get(sid, {})
+        if (frame and frame != previous and time_mode(row) not in OFF_PRESENT_MODES
+                and cue.get('relation') not in ('earlier', *OFF_PRESENT_MODES)):
+            out[sid] = {**cue, 'relation': 'earlier'}
+        previous = frame
+    return out
+
+
 def walk(order: list[str], cues: dict[str, dict], last: int | None = None,
          present: int | None = None) -> dict[str, int | None]:
     """Provisional days from the cues alone, in reading order.
@@ -465,6 +489,8 @@ def build_assignment_prompt(batch: list[dict], present: int | None,
                 parts.append(f'{key} "{cue[key]}"')
         if cue.get('date'):
             parts.append(f'date stated: {describe_edtf(cue["date"])}')
+        if item.get('told_by'):
+            parts.append(f'a tale told in {item["told_by"]} (gets the day its events happened)')
         provisional = item.get('provisional')
         lines.append(
             f'{item["id"]} — {item.get("title", "")}\n'
@@ -962,9 +988,23 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     backwards on a scene not told as earlier and not a frame or vision; a stated gap
     the days disagree with; a scene that continues the one before it, with no gap
     stated, on a later day; two dates, two months or seasons, or two weekdays,
-    the days contradict.
+    the days contradict; a told scene (`told_by`) set after the scene that
+    tells it. A step into a told tale is read as ``earlier`` (`told_cues`).
     """
     findings = []
+    # A step into an embedded tale reads as a flashback (#548)
+    cues = told_cues(scenes, cues)
+    days = {row.get('id', ''): _int(row.get('timeline_day')) for row in scenes}
+    for row in scenes:
+        frame, day = told_by(row), days.get(row.get('id', ''))
+        told_on = days.get(frame)
+        # A tale is of what has happened by the time it is told; a told
+        # future is a vision (time_mode), not a told scene
+        if (frame and day is not None and told_on is not None and day > told_on
+                and time_mode(row) not in OFF_PRESENT_MODES):
+            findings.append({'scene_id': row.get('id', ''), 'check': 'told_after_telling',
+                             'message': f'is told in {frame} (day {told_on}), but its day '
+                                        f'({day}) is after that'})
     present = None
     last_day = None
     last_mode = ''
@@ -1198,12 +1238,18 @@ def scene_items(project_dir: str, cues: dict[str, dict]) -> list[dict]:
     rows = [r for r in _read_csv(os.path.join(ref_dir, 'scenes.csv'))
             if (r.get('status') or '').strip() not in ('cut', 'merged')]
     rows.sort(key=lambda r: _int(r.get('seq')) or 0)
-    return [{
+    cues = told_cues(rows, cues)
+    items = [{
         'id': r['id'], 'title': r.get('title', ''),
         'summary': (r.get('summary') or intent.get(r['id'], {}).get('function') or '')[:300],
         'time_of_day': r.get('time_of_day', ''), 'duration': r.get('duration', ''),
         'cues': cues.get(r['id'], {}),
     } for r in rows]
+    # Only a told scene's item has the key, so every other prompt is as before
+    for item, r in zip(items, rows):
+        if told_by(r):
+            item['told_by'] = told_by(r)
+    return items
 
 
 def _invoke_assignment(model: str, project_dir: str | None = None):
