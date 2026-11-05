@@ -490,6 +490,33 @@ class TestRecheck:
         assert ids[1] == 's--b' and ids[0] not in ('s--b', 's--b-2') and len(set(ids)) == 2
         assert proposed[1]['supersedes'] == ids[0]   # it meant the first proposed row
 
+    def test_a_new_row_never_takes_a_kept_rows_id(self):
+        """Beowulf B-034: a steady fact kept with its id, and a new fact from
+        a changed paragraph that extraction gave the same id (the statements
+        begin alike), both came out of the gate as
+        'scyld-ship-given-to-sea--scyld-came-to-the-danes-as': the ledger
+        then wouldn't load."""
+        kept = {'id': 's--scyld-came', 'subject': 'scyld', 'type': 'trait',
+                'statement': 'Scyld came as a foundling', 'scene_id': 's'}
+        new = {'id': 's--scyld-came', 'subject': 'scyld', 'type': 'physical',
+               'statement': 'Scyld came in an unmanned boat'}
+        proposed = [dict(kept), new]
+        gate._carry_ids(proposed, [kept], [], 's')
+        assert proposed[0]['id'] == 's--scyld-came'
+        assert proposed[1]['id'] != 's--scyld-came'
+
+    def test_a_new_row_sharing_a_kept_id_keeps_links_to_the_kept_one(self):
+        kept = {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'A',
+                'scene_id': 's'}
+        proposed = [dict(kept),
+                    {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'C'},
+                    {'id': 's--d', 'subject': '', 'type': 'world', 'statement': 'D',
+                     'depends_on': 's--a'}]
+        gate._carry_ids(proposed, [kept], [], 's')
+        assert len({p['id'] for p in proposed}) == 3
+        # extraction's link names its own row, never the kept one
+        assert proposed[2]['depends_on'] == proposed[1]['id']
+
     def _recheck(self, project_dir, tmp_path, findings=()):
         def fake(path, body, **k):
             if 'tools' in body:

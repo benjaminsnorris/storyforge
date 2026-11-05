@@ -1862,28 +1862,39 @@ def _carry_ids(proposed: list[dict[str, str]], old_rows: list[dict[str, str]],
     by_key: dict[tuple, dict[str, str]] = {}
     for o in old_rows:
         by_key.setdefault(ledger.fact_key(o), o)
-    rename: dict[str, str] = {}
+    # by position, never by id: a kept steady row (#558) and a new row
+    # extraction gave the same id are two rows (Beowulf B-034)
+    carry: dict[int, str] = {}
     carried: set[str] = set()
-    for p in proposed:
+    for i, p in enumerate(proposed):
         o = by_key.get(ledger.fact_key(p))
         if o is None or o['id'] in carried:
             continue
         carried.add(o['id'])
-        rename[p['id']] = o['id']
+        carry[i] = o['id']
         if not (p.get('resolves') or '').strip() and ledger._ends_elsewhere(o):
             p['resolves'] = o['resolves']
     # an old id not carried is never reused: links to it must not land on
     # a different fact
     taken = {r['id'] for r in rows} | {o['id'] for o in old_rows}
-    for p in proposed:
-        if p['id'] in rename:
-            p['id'] = rename[p['id']]
+    unchanged = [any(p == o for o in old_rows) for p in proposed]   # kept as it was
+    rename: dict[str, str] = {}
+    for i, p in enumerate(proposed):
+        if i in carry:
+            new_id = carry[i]
         elif p['id'] in taken:
             new_id = commitment_id(scene_id, p.get('statement', ''), taken)
+        else:
+            new_id = p['id']
+        if new_id != p['id']:
             rename[p['id']] = new_id
-            p['id'] = new_id
-        taken.add(p['id'])
-    for p in proposed:
+        p['id'] = new_id
+        taken.add(new_id)
+    # links between extraction's rows follow its renames; a kept row's links
+    # are the ledger's and stay
+    for p, kept in zip(proposed, unchanged):
+        if kept:
+            continue
         for col in ('supersedes', 'depends_on'):
             refs = ledger._split(p.get(col, ''))
             if any(r in rename for r in refs):
