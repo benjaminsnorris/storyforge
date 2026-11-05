@@ -970,7 +970,7 @@ def commitment_id(scene_id: str, statement: str, taken: set[str]) -> str:
 
 #: The kinds `commitment_rows` reports, each a list of strings in `problems`
 COMMITMENT_PROBLEMS = ('quote', 'no quote', 'subject', 'supersedes', 'disagrees',
-                       'ends', 'ends registry', 'ends again', 'cap', 'unplaced')
+                       'ends', 'ends fixed', 'ends registry', 'ends again', 'cap', 'unplaced')
 
 
 def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
@@ -993,7 +993,8 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
     `COMMITMENT_PROBLEMS`) for the caller to report or halt on: a quote not
     in the scene or missing, an unresolved subject, a `supersedes` naming a
     registry fact recorded for this scene (`disagrees`: the prose and the
-    plan differ) or nothing offered, an `ends` naming nothing offered,
+    plan differ) or nothing offered, an `ends` naming nothing offered or
+    a fact that isn't a state (`ends fixed`; not applied),
     another writer's state (`ends registry`) or a state already ended
     elsewhere.
     """
@@ -1036,8 +1037,10 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
         for gone in item['ends']:
             old = offered.get(gone)
             ends = (old or {}).get('resolves', '').strip()
-            if old is None or old.get('mutable') != 'state':
+            if old is None:
                 problems['ends'].append(f'{scene_id}: {gone}')
+            elif old.get('mutable') != 'state':   # a fixed fact can't end (G-028, #556)
+                problems['ends fixed'].append(f'{scene_id}: {gone}')
             elif ends == scene_id:
                 pass   # already ends here
             elif (old.get('introduced_by') or '').strip() not in own_writers:

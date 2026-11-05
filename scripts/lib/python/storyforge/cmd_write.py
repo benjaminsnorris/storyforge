@@ -5,7 +5,9 @@ from its brief and the ledger as of that scene, and gates each before the
 next (plan §3.2, `storyforge.gate`): its facts are extracted and checked
 against the book and its brief, fixed if needed (up to `gate.FIX_ROUNDS`
 times), and committed to the ledger only when clean. A scene that still fails is kept, listed in
-`working/gate-pending.csv`, and stops the run. A redraft that passes
+`working/gate-pending.csv`, and stops the run; with `--keep-going` (#556)
+one stopped only by the check's findings is committed provisionally
+(`gate.commit_provisional`) and the run goes on. A redraft that passes
 re-checks the later scenes depending on what it changed (Phase 4,
 `gate.recheck_pending`). Coaching levels coach and
 strict write briefs or constraints, not prose, and are not gated; only they
@@ -19,7 +21,8 @@ Usage:
     storyforge write act1-sc01              # Draft a single scene
     storyforge write act1-sc01 act1-sc15    # Draft a range (by position)
     storyforge write --act 2                # Draft all scenes in act 2
-    storyforge write --dry-run act1-sc01    # Build prompt without invoking
+    storyforge write --dry-run act1-sc01    # Build prompt and forecast, no API call
+    storyforge write --keep-going           # Don't stop at a gate failure: commit it provisionally
     storyforge write --coaching coach --batch --act 2   # briefs via the Batch API
 """
 
@@ -48,7 +51,7 @@ from storyforge.api import (
     stop_problem, fallback_model, is_refusal, RefusalError, report_fallback_replies,
 )
 from storyforge.costs import (
-    estimate_cost, check_threshold, cost_threshold, exit_if_bad_threshold, log_operation,
+    check_threshold, cost_threshold, exit_if_bad_threshold, log_operation,
     print_summary,
 )
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
@@ -89,6 +92,12 @@ def parse_args(argv):
                         help='Draft all scenes in act N')
     parser.add_argument('--from-seq', type=str, default=None,
                         help='Start from sequence number (N or N-M range)')
+    parser.add_argument('--keep-going', action='store_true',
+                        help='Full coaching: a scene the gate still stops on only for the '
+                             'check\'s findings is committed provisionally (its facts less '
+                             'those stating the findings), listed for the author, and the run '
+                             'goes on; provisional scenes don\'t stop it either. Halts, '
+                             'extraction problems and bad replies still stop it')
     return parser.parse_args(argv)
 
 
@@ -163,7 +172,7 @@ def main(argv=None):
     # A scene that didn't pass the gate has no facts in the ledger: drafting
     # after it would draft from an incomplete ledger
     if coaching == 'full' and not args.dry_run:
-        _exit_if_gate_pending(project_dir, pending_ids)
+        _exit_if_gate_pending(project_dir, pending_ids, keep_going=args.keep_going)
     # Cost forecasting
     # Earlier prose needs a valid mode and every scene's place in the book:
     # checked before anything is spent or set up
@@ -179,29 +188,25 @@ def main(argv=None):
 
     scene_forecast = 0.0   # a scene's share of the forecast: reserved from the re-checks
     draft_forecast = 0.0   # its drafting part: charged for a draft the CLI writes
-    if not args.dry_run:
-        model = select_model('drafting')
-        avg_words = _avg_word_count(metadata_csv)
-        estimated = estimate_cost('draft', len(pending_ids), avg_words, model)
-        if write_mode == 'batch':
-            estimated *= 0.5  # Batch API 50% discount
-        draft_forecast = estimated / len(pending_ids)
-        gated = ''
-        if coaching == 'full':
-            # Every drafted scene is gated, and the gate (extraction, the
-            # persistence check, the check's readings, a fix) costs several
-            # times the draft (F-151): a gate run is what a re-check costs
-            from storyforge import gate
-            gate_cost = len(pending_ids) * gate.RECHECK_COST_PER_SCENE
-            estimated += gate_cost
-            gated = f', ~${gate_cost:.2f} of it the gate'
-        log(f'Cost forecast: ~${estimated:.2f} for {len(pending_ids)} scenes '
-            f'(avg {avg_words} words, model {model}, mode {write_mode}{gated})')
-        scene_forecast = estimated / len(pending_ids)
-        if not check_threshold(estimated):
+    # A dry run forecasts too (G-027): it is how the author learns what a
+    # draft will cost before spending anything
+    forecast = _forecast(project_dir, pending_ids, metadata_csv, write_mode, coaching,
+                         prior_prose)
+    gated = f', ~${forecast.gate:.2f} of it the gate' if forecast.gate else ''
+    log(f'Cost forecast: ~${forecast.total:.2f} for {len(pending_ids)} scenes '
+        f'(mode {write_mode}{gated}; {forecast.basis})')
+    if args.dry_run:
+        if not check_threshold(forecast.total):
+            log(f'NOTE: that is over the cost threshold (${cost_threshold():g}): a real run '
+                f'would stop before drafting. Set STORYFORGE_COST_THRESHOLD higher, or '
+                f'write fewer scenes.')
+    else:
+        draft_forecast = forecast.draft / len(pending_ids)
+        scene_forecast = forecast.total / len(pending_ids)
+        if not check_threshold(forecast.total):
             # Nothing was drafted: exit 1, so a script or chained command
             # doesn't read the stop as a finished run
-            log(f'ERROR: the forecast (~${estimated:.2f}) is over the cost threshold '
+            log(f'ERROR: the forecast (~${forecast.total:.2f}) is over the cost threshold '
                 f'(${cost_threshold():g}): nothing written. Set STORYFORGE_COST_THRESHOLD higher, '
                 f'or write fewer scenes.')
             sys.exit(1)
@@ -286,10 +291,12 @@ def main(argv=None):
                 coaching, use_briefs, args.force, filter_mode, write_mode,
                 args.dry_run, prior_prose=prior_prose, budget=RunBudget(meter),
                 scene_forecast=scene_forecast, draft_forecast=draft_forecast,
+                keep_going=args.keep_going,
             )
 
     drafted_count, total_words = outcome.drafted, outcome.words
     failed, recheck_open, uncommitted = outcome.failed, outcome.recheck_open, outcome.uncommitted
+    provisional = outcome.provisional
 
     # Session summary
     elapsed = int(time.time() - session_start)
@@ -345,7 +352,16 @@ def main(argv=None):
         log('ERROR: re-checks this run owed and did not finish:')
         for entry in recheck_open:
             log(f'  {entry}')
-    if failed or recheck_open or uncommitted:
+    if provisional:
+        # committed and drafted past (--keep-going), but the author's to fix
+        log(f'ERROR: {len(provisional)} scene(s) committed provisionally: the gate still '
+            f'stops on them, and their findings are the author\'s (listed in '
+            f'{gate_pending_path()}):')
+        for entry in provisional:
+            log(f'  {entry}')
+        log('Fix the prose and run `storyforge check --pending`, or accept a verified '
+            'contradiction with `storyforge check --accept <id>`.')
+    if failed or recheck_open or uncommitted or provisional:
         sys.exit(1)
 
 
@@ -364,6 +380,8 @@ class DraftOutcome(NamedTuple):
     #: each scene (or re-check) written but whose commit failed: it needs a
     #: commit by hand, not a redraft
     uncommitted: list = []
+    #: each scene `--keep-going` committed provisionally, and why (#556)
+    provisional: list = []
 
 def _check_voice_guide(project_dir: str) -> None:
     """Warn if no voice guide is found."""
@@ -398,10 +416,12 @@ def _resolve_filter(args) -> tuple:
     sys.exit(1)
 
 
-def _gate_blockers(project_dir: str, scene_id: str) -> list[str]:
+def _gate_blockers(project_dir: str, scene_id: str, keep_going: bool = False) -> list[str]:
     """Scenes waiting on the gate (`gate.pending`) that come before
     `scene_id` in reading order, as `id: reason`. A pending id that is no
-    longer a scene can't block; it is named in a WARNING instead."""
+    longer a scene can't block; it is named in a WARNING instead. With
+    `keep_going`, a scene committed provisionally (`gate.PROVISIONAL`: its
+    facts are in the ledger) doesn't block either."""
     from storyforge import gate, ledger
     waiting = gate.pending(project_dir)
     order = ledger.scene_order(project_dir)
@@ -411,11 +431,15 @@ def _gate_blockers(project_dir: str, scene_id: str) -> list[str]:
             f'{", ".join(gone)}. Delete those rows.')
     at = order.get(scene_id, 0)
     return [f'{s}: {waiting[s]["reason"]}' for s in sorted(
-        (s for s in waiting if s in order and s != scene_id and order[s] < at),
+        (s for s in waiting if s in order and s != scene_id and order[s] < at
+         and not (keep_going and waiting[s]['command'] == gate.PROVISIONAL)
+         # its facts are in the ledger; the source disagrees (#557): the author's
+         and waiting[s]['command'] != gate.SOURCE_FIX),
         key=order.get)]
 
 
-def _exit_if_gate_pending(project_dir: str, to_draft: list[str]) -> None:
+def _exit_if_gate_pending(project_dir: str, to_draft: list[str],
+                          keep_going: bool = False) -> None:
     """Exit 1, before anything is spent, when a scene waiting on the gate
     comes before the first scene to draft. One between scenes to draft
     stops the run when drafting reaches it (`_run_direct_mode`). Drafting
@@ -423,7 +447,8 @@ def _exit_if_gate_pending(project_dir: str, to_draft: list[str]) -> None:
     from storyforge import gate, ledger
     order = ledger.scene_order(project_dir)
     try:
-        blocking = _gate_blockers(project_dir, min(to_draft, key=lambda s: order.get(s, 0)))
+        blocking = _gate_blockers(project_dir, min(to_draft, key=lambda s: order.get(s, 0)),
+                                  keep_going=keep_going)
     except gate.GateError as e:
         log(f'ERROR: {e}')
         sys.exit(1)
@@ -442,7 +467,7 @@ def _log_blockers(blocking: list[str]) -> None:
 
 
 def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, command: str,
-                        log_dir: str, before=None) -> tuple[bool, str]:
+                        log_dir: str, before=None, keep_going: bool = False) -> tuple[bool, str]:
     """Gate the scene just written to `scene_file` (fix and re-check, up to
     `gate.FIX_ROUNDS` times; plan §3.2), writing the fixed prose back. Returns
     (passed, why not). A scene
@@ -452,7 +477,10 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
     re-check (the caller runs `run_recheck` once the scene is committed).
     `before` is the book before this run (`gate.snapshot`, taken once per
     run; None: nothing counts as already there): a contradiction already in
-    it is reported, not blocking (`gate.gate_scene`)."""
+    it is reported, not blocking (`gate.gate_scene`). With `keep_going`
+    (#556), a scene that fails only on the check's findings is committed
+    provisionally (`gate.commit_provisional`, listed `gate.PROVISIONAL`:
+    `is_provisional` tells the caller); it still returns False."""
     from storyforge import gate
     with open(scene_file, encoding='utf-8') as f:
         prose = f.read()
@@ -514,10 +542,33 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
     if out.blocked_stale:   # SF-1 (#504's review): said where the author looks
         tried += (f' [{out.blocked_stale}: `check --accept` refuses this scene until '
                   f'`storyforge check {scene_id}` records it again]')
-    return False, _pend(project_dir, scene_id, command,
-                        f'{len(problems)} problem(s) {tried}: '
-                        + ' / '.join(problems[:3]) + ('; ...' if len(problems) > 3 else '')
-                        + stale)
+    why = (f'{len(problems)} problem(s) {tried}: '
+           + ' / '.join(problems[:3]) + ('; ...' if len(problems) > 3 else '') + stale)
+    if keep_going:
+        cannot = gate.can_commit_provisionally(out.result)
+        if cannot:
+            log(f'  Not committed provisionally: {cannot}.')
+        else:
+            try:
+                gate.commit_provisional(project_dir, out.result, f'provisional: {why}')
+            except gate.GateError as e:
+                log(f'  Not committed provisionally: {e}')
+            else:
+                for line in gate.report_lines(out.result):
+                    if line.startswith(('COMMITTED', 'NOTE (not recorded: states what')):
+                        log(f'  {line}')
+                report_changes(out.result)
+                return False, f'provisional: {why}'
+    return False, _pend(project_dir, scene_id, command, why)
+
+
+def is_provisional(project_dir: str, scene_id: str) -> bool:
+    """Whether `scene_id` is listed as committed provisionally."""
+    from storyforge import gate
+    try:
+        return gate.pending(project_dir).get(scene_id, {}).get('command') == gate.PROVISIONAL
+    except gate.GateError:
+        return False
 
 
 def _drafted(scenes_dir: str, scene_id: str) -> bool:
@@ -636,6 +687,79 @@ def _filter_pending(filtered_ids, project_dir, metadata_csv, force, filter_mode)
             pending.append(sid)
 
     return pending, skipped
+
+
+def _forecast(project_dir: str, pending_ids: list[str], metadata_csv: str,
+              write_mode: str, coaching: str, prior_prose: str):
+    """`costs.forecast_write` for this run (#563). Every drafted scene is
+    gated at `full` coaching, and the gate (extraction, the persistence
+    check, the check's readings, a fix) costs several times the draft
+    (F-151): a gate run is priced as a re-check. A direct draft is sent
+    the shared context and, by `prior_prose`, the earlier prose, both read
+    from cache: the token model counts them (on Gawain, about 133k
+    cache-read tokens a draft)."""
+    from storyforge import costs, gate
+    try:
+        model = select_model('drafting')
+    except RuntimeError as e:
+        # a dry run without an API key can't ask the Models API for the
+        # newest model (a real run has stopped on the key already): price
+        # at the tier's newest listed one
+        from storyforge.common import _TASK_TIER
+        model = costs._TIER_FALLBACK[_TASK_TIER['drafting']]
+        log(f'NOTE: the forecast prices drafts at {model} ({e})')
+    avg_words = _avg_word_count(metadata_csv)
+    earlier: dict[str, int] = {}
+    shared = 0
+    if write_mode == 'direct':
+        earlier = _forecast_earlier_words(project_dir, pending_ids, prior_prose, avg_words)
+        from storyforge.common import build_shared_context
+        from storyforge.source import SourceError
+        try:
+            shared = sum(len(b.get('text', '')) for b in
+                         build_shared_context(project_dir, model)) // 4
+        except (OSError, SourceError) as e:   # a source not imported, ...
+            log(f'WARNING: the forecast leaves out the shared context ({e})')
+    return costs.forecast_write(
+        project_dir, pending_ids, avg_words, model,
+        gate_per_scene=(gate.WRITE_GATE_COST_PER_SCENE + _source_check_cost(project_dir)
+                        if coaching == 'full' else 0.0),
+        earlier_words=earlier, shared_tokens=shared, batch=write_mode == 'batch')
+
+
+def _source_check_cost(project_dir: str) -> float:
+    """The gate's source check per scene in a faithful adaptation (#557),
+    else 0."""
+    from storyforge import gate_source
+    ctx = gate_source.setup(project_dir)
+    return gate_source.COST_PER_SCENE if ctx is not None and ctx.active() else 0.0
+
+
+def _forecast_earlier_words(project_dir: str, pending_ids: list[str], prior_prose: str,
+                            avg_words: int) -> dict[str, int]:
+    """The words of earlier prose each pending scene will be drafted with,
+    for the forecast: in `full` mode the manuscript before it (a scene
+    still to draft at `avg_words`), up to `prompts.FULL_MAX_WORDS`; in
+    `window` mode about two scenes."""
+    if prior_prose == 'none':
+        return {}
+    if prior_prose == 'window':
+        return {s: 2 * avg_words for s in pending_ids}
+    from storyforge import ledger
+    from storyforge.prompts import FULL_MAX_WORDS
+    order = ledger.scene_order(project_dir)
+    pending = set(pending_ids)
+    out, words = {}, 0
+    for sid in sorted(order, key=order.get):
+        if sid in pending:
+            out[sid] = min(words, FULL_MAX_WORDS)
+        path = os.path.join(project_dir, 'scenes', f'{sid}.md')
+        if sid in pending or not os.path.isfile(path):
+            words += avg_words if sid in pending else 0
+        else:
+            with open(path, encoding='utf-8') as f:
+                words += len(f.read().split())
+    return out
 
 
 def _avg_word_count(metadata_csv: str) -> int:
@@ -1079,7 +1203,8 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
 def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                      metadata_csv, coaching, use_briefs, force, filter_mode,
                      write_mode, dry_run, prior_prose='none', budget=None,
-                     scene_forecast: float = 0.0, draft_forecast: float = 0.0):
+                     scene_forecast: float = 0.0, draft_forecast: float = 0.0,
+                     keep_going: bool = False):
     """Run direct/interactive mode. Returns a `DraftOutcome`: ``failed``
     names each scene not drafted and why, ``recheck_open`` each re-check
     that didn't pass or wasn't run (over the cost threshold) and is still in
@@ -1108,11 +1233,17 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
     (the up-front forecast was too low). At other coaching levels a bad reply
     skips only its scene. At every level a failed commit (the scene's, or
     the re-checks' after it) stops the run: the next scene's commit would
-    sweep its files in under the wrong message."""
+    sweep its files in under the wrong message.
+
+    With `keep_going` (#556), a scene the gate still stops on only for the
+    check's findings is committed provisionally (`_gate_drafted_scene`),
+    listed in ``provisional``, and the run goes on (its re-checks too); an
+    earlier provisional scene doesn't stop it."""
     drafted_count = 0
     total_words = 0
     failed: list[str] = []
     uncommitted: list[str] = []
+    provisional: list[str] = []
     recheck_failed: list[str] = []   # each re-check that didn't pass
     recheck_deferred: list[str] = []   # the latest re-check's queue left over budget
     from storyforge import gate
@@ -1164,7 +1295,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                 break
 
         if gated:
-            blocking = _gate_blockers(project_dir, scene_id)
+            blocking = _gate_blockers(project_dir, scene_id, keep_going=keep_going)
             if blocking:
                 _log_blockers(blocking)
                 stop(i, scene_id, f'{scene_id} (not attempted: an earlier scene did not '
@@ -1279,7 +1410,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
         gate_problem = ''
         if gated:
             _, gate_problem = _gate_drafted_scene(project_dir, scene_id, scene_file,
-                                                  command, log_dir, before=baseline)
+                                                  command, log_dir, before=baseline,
+                                                  keep_going=keep_going)
 
         # The prose is committed either way: a scene the gate stopped is kept
         # for the author and listed in gate.pending
@@ -1301,6 +1433,11 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                                   if gate_problem else '') + ')')
             stop(i, scene_id, None)
             break
+        if gate_problem and keep_going and is_provisional(project_dir, scene_id):
+            log(f'WARNING: Scene {scene_id} did not pass the gate and is committed '
+                f'provisionally; going on (--keep-going): {gate_problem}')
+            provisional.append(f'{scene_id} ({gate_problem})')
+            gate_problem = ''
         if gate_problem:
             log(f'ERROR: Scene {scene_id} did not pass the gate: {gate_problem}')
             log('Stopping: later scenes would be drafted without its facts in the ledger.')
@@ -1352,7 +1489,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             f'{len(recheck_deferred)} scene(s) listed for a re-check, not run: over the cost '
             f'threshold ({", ".join(recheck_deferred)}). They stay in {gate_pending_path()}; '
             f'run `storyforge check --pending`, with STORYFORGE_COST_THRESHOLD raised if needed.')
-    return DraftOutcome(drafted_count, total_words, failed, recheck_open, uncommitted)
+    return DraftOutcome(drafted_count, total_words, failed, recheck_open, uncommitted,
+                        provisional)
 
 
 def _invoke_interactive(prompt: str, model: str, project_dir: str) -> int:

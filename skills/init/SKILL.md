@@ -18,7 +18,7 @@ Store this resolved plugin path for use throughout the session.
 
 ## Without questions
 
-When the details are already known (an agent setting up a project, or a public-domain book to extract), skip this skill's interview: `$CLAUDE_PLUGIN_ROOT/storyforge init DIR --title T [--author A] [--genre G] [--logline L]` makes the same layout, writes the `./storyforge` runner and commits. `--meta FILE --fetch` also makes `manuscript.md` from a Project Gutenberg text (see the extract skill, "From a Project Gutenberg text").
+When the details are already known (an agent setting up a project, or a public-domain book to extract), skip this skill's interview: `$CLAUDE_PLUGIN_ROOT/storyforge init DIR --title T [--author A] [--genre G] [--logline L]` makes the same layout, writes the `./storyforge` runner and commits. `--meta FILE --fetch` also makes `manuscript.md` from a Project Gutenberg text (see the extract skill, "From a Project Gutenberg text"). `--source PATH [--source-slug S] [--source-mode faithful|free]` makes an adaptation of the Storyforge project at PATH: it writes the `source:` block, and the next step is `./storyforge source import`.
 
 ## Step 1: Gather Project Details
 
@@ -209,7 +209,7 @@ This project uses the Storyforge plugin for Claude Code. Key commands:
 - `./storyforge score` — score the manuscript against craft principles
 - `./storyforge revise` — execute revision passes from a plan
 - `./storyforge evaluate` — run multi-evaluator assessment
-- `./storyforge write` — draft scenes autonomously
+- `./storyforge write --keep-going` — draft scenes autonomously (a scene the gate can't pass is committed provisionally for you, not a stop)
 
 ## Where to Find Things
 - `storyforge.yaml` — project configuration (title, genre, phase, coaching level)

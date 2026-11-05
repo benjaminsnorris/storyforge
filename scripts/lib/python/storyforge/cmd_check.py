@@ -162,6 +162,13 @@ def main(argv=None):
             log(f'WARNING: {", ".join(gone)} in {gate.PENDING_PATH} are no longer scenes in '
                 f'scenes.csv: not checked; remove their rows.')
         scene_ids = [s for s in waiting if s in in_book]
+        # #557's review: a scene listed to fix toward the source whose prose
+        # hasn't changed can't be cleared by checking it again
+        unfixed = [s for s in scene_ids if gate.source_fix_waits(project_dir, s)]
+        if unfixed:
+            log(f'NOTE: not checked, waiting for the author to fix them toward the source '
+                f'(their prose hasn\'t changed since they were listed): {", ".join(unfixed)}')
+            scene_ids = [s for s in scene_ids if s not in unfixed]
         if not scene_ids:
             log('Nothing in the book is waiting on the gate.')
             return
