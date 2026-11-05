@@ -76,6 +76,15 @@ UNRESOLVED = ('quote', 'no quote', 'supersedes', 'ends', 'ends again', 'rejected
 #: (an object has none), facts left out past the offer cap, facts tied to a
 #: scene id that isn't a scene
 REPORTED = ('disagrees', 'ends registry', 'subject', 'cap', 'unplaced')
+#: What a report line says each `REPORTED` kind means, where its name alone
+#: doesn't (#564: `NOTE (cap): scene (62)` said nothing of what was cut)
+_REPORTED_LABEL = {
+    'cap': 'facts in force left out of what extraction was offered, over the cap '
+           '(extract.MAX_KNOWN_COMMITMENTS); the scene\'s people and place kept first',
+}
+#: Scenes this process's gate runs offered only part of the facts in force,
+#: with how many were left out (`prompts.ledger_window_summary`)
+OFFER_LEFT_OUT: dict[str, int] = {}
 
 
 class GateError(RuntimeError):
@@ -208,8 +217,10 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
              + scene.get('on_stage', '').split(';'))
     scene_subjects = {subjects[n.strip().lower()] for n in names if n.strip().lower() in subjects}
     known, recorded, left_out = known_for_scene(rows, scene_id, order, scene_subjects)
+    OFFER_LEFT_OUT.pop(scene_id, None)   # this run's count, not an earlier gate run's
     if left_out:
         problems['cap'].append(f'{scene_id} ({left_out})')
+        OFFER_LEFT_OUT[scene_id] = left_out
     problems['unplaced'].extend(unplaced_rows(rows, order))
     prompt = build_commitments_prompt(
         scene_id, prose, {k: scene.get(k, '') for k in ('title', 'pov', 'location')},
@@ -1814,7 +1825,8 @@ def report_lines(result: GateResult) -> list[str]:
             continue    # every one is a dispute: a finding, UNRULED or the note above
         items = result.problems.get(kind, [])
         if items:
-            lines.append(f'NOTE ({kind}): ' + '; '.join(_one_line(i) for i in items[:20])
+            lines.append(f'NOTE ({_REPORTED_LABEL.get(kind, kind)}): '
+                         + '; '.join(_one_line(i) for i in items[:20])
                          + (' ...' if len(items) > 20 else ''))
     if result.check:
         for rid, quote, why in result.check.kept_unverified:

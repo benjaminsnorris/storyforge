@@ -1341,6 +1341,25 @@ def _load_prose_exemplars(project_dir: str, pov: str = '') -> str:
 #: states get ended).
 MAX_STATES_PER_SUBJECT = 25
 
+#: Scenes whose drafting prompt left states out in this process, with the
+#: most left out for one subject: `ledger_window_summary` says it once at
+#: the end of a run (#564)
+_STATES_LEFT_OUT: dict[str, tuple[str, int]] = {}
+
+
+def _states_window(states: list[dict]) -> list[dict]:
+    """The `MAX_STATES_PER_SUBJECT` states a prompt shows of `states` (in
+    reading order): those that gate an action or say when they end (a
+    `resolves`: a wound until it heals) first, then the most recent (#564,
+    G-029); in reading order."""
+    if len(states) <= MAX_STATES_PER_SUBJECT:
+        return states
+    ranked = sorted(range(len(states)), key=lambda i: (
+        not ((states[i].get('action_gating') or '').lower() == 'true'
+             or (states[i].get('resolves') or '').strip()), -i))
+    keep = set(ranked[:MAX_STATES_PER_SUBJECT])
+    return [r for i, r in enumerate(states) if i in keep]
+
 
 def _established_facts_block(scene_id: str, scene: dict[str, str],
                              project_dir: str, shown: set[str],
@@ -1452,6 +1471,7 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
     sections = []
     trimmed = []
     no_pronouns: list[str] = []
+    _STATES_LEFT_OUT.pop(scene_id, None)   # this build's count, not a redraft's earlier one
     for sid in subjects + found_places:
         is_place = sid in found_places
         row = places.get(sid, {}) if is_place else characters.get(sid, {})
@@ -1483,16 +1503,20 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
         if states:
             left_out = len(states) - MAX_STATES_PER_SUBJECT
             if left_out > 0:
-                states = states[left_out:]
+                states = _states_window(states)
                 trimmed.append(f'{heading} ({left_out})')
+                if left_out > _STATES_LEFT_OUT.get(scene_id, ('', 0))[1]:
+                    _STATES_LEFT_OUT[scene_id] = (heading, left_out)
             parts.append('True entering this scene'
-                         + (f' (the {MAX_STATES_PER_SUBJECT} most recent; '
-                            f'{left_out} older not shown)' if left_out > 0 else '')
+                         + (f' ({MAX_STATES_PER_SUBJECT} shown: those that gate an action '
+                            f'or say when they end, then the most recent; {left_out} not '
+                            f'shown: lower priority)' if left_out > 0 else '')
                          + ':\n' + '\n'.join(line(r) for r in states))
         sections.append('\n'.join(parts))
     if trimmed:
-        log(f'WARNING: {scene_id}: older states left out of the prompt '
-            f'(more than {MAX_STATES_PER_SUBJECT} in force): {", ".join(trimmed)}')
+        log(f'WARNING: {scene_id}: states left out of the prompt '
+            f'(more than {MAX_STATES_PER_SUBJECT} in force; the brief\'s '
+            f'physical_state_in still reaches the writer): {", ".join(trimmed)}')
     own = [r for r in found.scene if r['id'] not in shown]
     if own and rewrite:
         sections.append('### Already established in this scene\n'
@@ -1522,6 +1546,29 @@ def _established_facts_block(scene_id: str, scene: dict[str, str],
 #: `source.character_pronouns` notes already logged in this process (a run
 #: builds many scenes' prompts against the same sources)
 _SOURCE_NOTES_LOGGED: set[str] = set()
+
+
+def ledger_window_summary() -> list[str]:
+    """One line each for the ledger windows that cut what this process's
+    scenes saw (#564): drafting prompts that left states out
+    (`MAX_STATES_PER_SUBJECT`), and gate runs offered only
+    `extract.MAX_KNOWN_COMMITMENTS` of the facts in force
+    (`gate.OFFER_LEFT_OUT`). [] when neither did. Said once at the end of
+    a run, so the author sees it without reading every scene's log."""
+    from . import gate
+    from .extract import MAX_KNOWN_COMMITMENTS
+    lines = []
+    if _STATES_LEFT_OUT:
+        sid, (who, n) = max(_STATES_LEFT_OUT.items(), key=lambda kv: kv[1][1])
+        lines.append(f'{len(_STATES_LEFT_OUT)} scene(s) were drafted with states left '
+                     f'out (over {MAX_STATES_PER_SUBJECT} in force for a subject; the most: '
+                     f'{n} of {who}\'s at {sid})')
+    if gate.OFFER_LEFT_OUT:
+        sid, n = max(gate.OFFER_LEFT_OUT.items(), key=lambda kv: kv[1])
+        lines.append(f'the gate offered {len(gate.OFFER_LEFT_OUT)} scene(s) only '
+                     f'{MAX_KNOWN_COMMITMENTS} of the facts in force (the most left out: '
+                     f'{n} at {sid}); facts about a scene\'s people and place are kept first')
+    return lines
 
 
 #: Brief columns whose items name ledger facts (registry ids, names or aliases)
