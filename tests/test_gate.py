@@ -2046,7 +2046,7 @@ class TestFixConverges:
         assert '- "Vasht. Six days ago."' in prompt
 
     def test_gate_and_fix_protects_the_brief_lines_the_scene_has(self, project_dir, monkeypatch,
-                                                                 tmp_path):
+                                                              tmp_path):
         from storyforge.checker import CheckResult, Finding
         bad = Finding('contradiction', 'TIM', 'q', 'act1-sc01', 'e', '', 'why')
         first = gate.GateResult(SCENE, check=CheckResult(SCENE, findings=[bad]))
@@ -2277,3 +2277,125 @@ class TestAccepted:
                        command='recheck')
         assert not result.passed
         assert f'{gate.BLOCKED_PATH} could not be updated' in capsys.readouterr().out
+
+
+class TestRewordingIsNoChange:
+    """#558 (B-032): re-extraction rewords facts whose prose never changed;
+    matched by exact statement, each rewording counted as a change and
+    re-checked every later scene sharing its subject. A fact read from a
+    paragraph the new prose still has is the same fact."""
+    LATER = 'act2-sc01'
+    TEMPLE = 'the little temple marked with its standard sigil'
+
+    def _git(self, project_dir):
+        import subprocess
+        subprocess.run(['git', 'init', '-q', project_dir], check=True)
+
+    def _add_later(self, project_dir, **row):
+        rows = ledger.load(project_dir)
+        base = dict(rows[0], **{k: '' for k in rows[0]})
+        base.update(status='binding', origin='prose', mutable='state', introduced_by='draft',
+                    scene_id=self.LATER, type='world')
+        base.update(row)
+        ledger.save(project_dir, rows + [base], command='test')
+
+    def _first(self, project_dir, tmp_path):
+        _gate(project_dir, tmp_path, [
+            _commitment(subject='tarrens-hollow'),
+            _commitment(subject='dorren-hayle', type='knowledge', quote=self.TEMPLE,
+                        statement='Dorren knows the old survey marked a temple')])
+        self._add_later(project_dir, id='later-hollow', subject='tarrens-hollow',
+                        statement='The hollow is empty')
+        self._add_later(project_dir, id='later-dorren', subject='dorren-hayle',
+                        statement='Dorren doubts the survey')
+        return {r['subject']: r['id'] for r in ledger.load(project_dir)
+                if r['scene_id'] == SCENE and ledger.is_commitment(r)}
+
+    def _edit(self, project_dir, old, new):
+        path = os.path.join(project_dir, 'scenes', f'{SCENE}.md')
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+        assert old in text
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(text.replace(old, new))
+
+    def test_a_reworded_fact_from_an_unchanged_paragraph_is_no_change(self, project_dir,
+                                                                       tmp_path):
+        self._git(project_dir)
+        ids = self._first(project_dir, tmp_path)
+        # the edit is in the temple's paragraph; the hollow's is untouched
+        self._edit(project_dir, 'Roads, wells, the little', 'Roads and wells, the little')
+        result = _gate(project_dir, tmp_path, [
+            _commitment(subject='tarrens-hollow', type='knowledge',
+                        statement="Tarren's Hollow had 412 people at the last census"),
+            _commitment(subject='dorren-hayle', type='knowledge', quote=self.TEMPLE,
+                        statement='Dorren knows the old survey shows a temple')],
+            command='redraft')
+        assert result.committed
+        assert result.changed == [ids['dorren-hayle']]
+        assert result.recheck == [self.LATER]   # through later-dorren only
+        mine = {r['subject']: r['id'] for r in ledger.load(project_dir)
+                if r['scene_id'] == SCENE and ledger.is_commitment(r)}
+        assert mine['tarrens-hollow'] == ids['tarrens-hollow']   # the id carried
+        assert result.prose_notes == []
+
+    def test_nothing_changed_lists_nothing(self, project_dir, tmp_path):
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        result = _gate(project_dir, tmp_path, [
+            _commitment(subject='tarrens-hollow', statement="The Hollow held 412 people"),
+            _commitment(subject='dorren-hayle', type='knowledge', quote=self.TEMPLE,
+                        statement='Dorren knows the old survey shows a temple')],
+            command='redraft')
+        assert result.changed == [] and result.recheck == []
+
+    def test_a_steady_fact_a_later_fact_links_to_still_counts(self, project_dir,
+                                                              tmp_path):
+        """A steady fact keeps its id only through a row quoting its words;
+        that row's statement is the new reading, so nothing is lost, but
+        one a later fact links to and nothing carries is a change."""
+        self._git(project_dir)
+        ids = self._first(project_dir, tmp_path)
+        self._add_later(project_dir, id='later-link', subject='tessa-merrin',
+                        statement='Tessa recalls the temple', depends_on=ids['dorren-hayle'])
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow')],
+                       command='redraft')
+        # the temple fact's words are unchanged, but no row carries its id
+        # and later-link names it
+        assert result.changed == [ids['dorren-hayle']]
+
+    def test_a_steady_fact_nothing_carries_or_links_to_is_no_change(self, project_dir,
+                                                                    tmp_path):
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow')],
+                       command='redraft')
+        assert result.changed == [] and result.recheck == []
+
+    def test_without_git_a_rewording_still_counts_and_is_said(self, project_dir, tmp_path):
+        ids = self._first(project_dir, tmp_path)
+        result = _gate(project_dir, tmp_path, [
+            _commitment(subject='tarrens-hollow', statement="The Hollow held 412 people"),
+            _commitment(subject='dorren-hayle', type='knowledge', quote=self.TEMPLE,
+                        statement='Dorren knows the old survey marked a temple')],
+            command='redraft')
+        assert result.changed == [ids['tarrens-hollow']]
+        assert any(gate.PROSE_PATH in n for n in result.prose_notes)
+        assert not os.path.exists(os.path.join(project_dir, gate.PROSE_PATH))
+
+    def test_the_committed_prose_is_recorded_and_read_back(self, project_dir, tmp_path):
+        self._git(project_dir)
+        _gate(project_dir, tmp_path, [_commitment()])
+        with open(os.path.join(project_dir, 'scenes', f'{SCENE}.md'), encoding='utf-8') as f:
+            prose = f.read()
+        assert gate.gated_prose(project_dir, SCENE) == (prose, '')
+        self._edit(project_dir, 'Blank parchment.', 'Blank vellum.')
+        assert gate.gated_prose(project_dir, SCENE) == (prose, '')   # the gated one
+
+    def test_steady_facts_need_their_whole_paragraph_unchanged(self):
+        old = [{'id': 'a', 'quote': 'the cat sat on the mat'},
+               {'id': 'b', 'quote': 'a dog barked at the moon'},
+               {'id': 'c', 'quote': 'words that are nowhere at all'}]
+        earlier = 'The cat sat on the mat. Then it slept.\n\nA dog barked at the moon.'
+        prose = 'The cat sat on the mat. Then it slept.\n\nA dog barked at the sun.'
+        assert gate.steady_facts(old, earlier, prose) == {'a'}

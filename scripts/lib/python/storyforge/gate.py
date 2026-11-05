@@ -36,7 +36,9 @@ For one scene's prose, `gate_scene` runs:
    establish gets its blank quote filled (`ledger.fill_quote`), and the
    ledger is saved through `ledger.save`, so the audit log has every fact.
 5. **Re-check** (Phase 4, `docs/plans/2026-10-31-phase4-safe-revision-design.md`):
-   a fact restated keeps its id; the later scenes depending on what the
+   a fact restated keeps its id, and so does one read again, however
+   reworded, from a paragraph the prose still has (`steady_facts`, #558);
+   the later scenes depending on what the
    scene dropped or changed are listed `RECHECK`, and `recheck_pending`
    re-gates them in reading order (report and stop, under the cost
    threshold). The caller runs it once the scene is committed.
@@ -126,6 +128,9 @@ class GateResult:
     #: (`ledger.subject_names`' notes: a missing registry, no id column),
     #: for the caller to report
     name_notes: list[str] = field(default_factory=list)
+    #: on commit (#558): why the earlier prose couldn't be diffed (so a
+    #: reworded fact counts as changed), or why this prose wasn't recorded
+    prose_notes: list[str] = field(default_factory=list)
     #: on commit: registry rows (the author's) whose `supersedes`/`depends_on`
     #: names a commitment this version removed (`row → id`): a re-check
     #: replaces only commitments, so the author must fix the link
@@ -1052,14 +1057,32 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     except ledger.LedgerError as e:
         raise GateError(f'{scene_id}: {e}') from e
     _hold_back(result)
-    _carry_ids(result.proposed, old_rows, rows, scene_id)
+    # #558: the earlier commitments read from words the prose still has
+    steady: set[str] = set()
+    if old_rows:
+        earlier, why = gated_prose(project_dir, scene_id)
+        if earlier is None:
+            result.prose_notes.append(f'{scene_id}: {why}, so every earlier fact the new '
+                                      f'reading words differently counts as changed')
+        else:
+            steady = steady_facts(old_rows, earlier, prose)
+    carried = _carry_ids(result.proposed, old_rows, rows, scene_id, steady=steady)
     new = rows + result.proposed
     for rid, quote in result.check.kept:
         if ledger.fill_quote(new, rid, quote):
             result.quotes_filled.append(rid)
-    # the old side only: a fact new to the scene lists nothing
-    new_keys = {ledger._fact_key(r) for r in result.proposed}
-    result.changed = [r['id'] for r in old_rows if ledger._fact_key(r) not in new_keys]
+    # the old side only: a fact new to the scene lists nothing. A steady one
+    # no new row carries is no change either, while nothing links to its id
+    # and no later scene ends it (#558: its words, and theirs, are as they were)
+    linked = {ref for r in rows for col in ('supersedes', 'depends_on')
+              for ref in ledger._split(r.get(col, ''))}
+    result.changed = [
+        r['id'] for r in old_rows
+        if (r['id'] in carried
+            and ledger._ends_elsewhere(r) != ledger._ends_elsewhere(carried[r['id']]))
+        or (r['id'] not in carried
+            and not (r['id'] in steady and r['id'] not in linked
+                     and not ledger._ends_elsewhere(r)))]
     result.changed += sorted(ended_before ^ ledger.ended_by(new, scene_id))
     result.changed += [i for i in revised_rejection if i not in result.changed]
     if result.changed:
@@ -1085,6 +1108,9 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                            for ref in ledger._split(r.get(col, '')) if ref in removed]
     ledger.save(project_dir, new, command=command)
     result.committed = True
+    note = record_prose(project_dir, scene_id, prose)
+    if note:
+        result.prose_notes.append(f'{scene_id}: {note}')
     try:
         record_reported(project_dir, scene_id, command, result.inherited, prose=prose)
         record_blocked(project_dir, scene_id, command, [])
@@ -1109,6 +1135,76 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     return result
 
 
+#: The prose each committed scene's commitments were read from, as the git
+#: blob of its text (#558): what `steady_facts` diffs a later version
+#: against. Rows replaced on each commit
+PROSE_PATH = 'working/gate-prose.csv'
+_PROSE_COLUMNS = ['scene_id', 'blob']
+
+
+def _git_out(project_dir: str, *args: str, data: bytes | None = None) -> bytes | None:
+    import subprocess
+    try:
+        r = subprocess.run(['git', '-C', project_dir, *args], input=data,
+                           capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def _prose_rows(project_dir: str) -> dict[str, str]:
+    path = os.path.join(project_dir, PROSE_PATH)
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding='utf-8') as f:
+        lines = [line.rstrip('\n') for line in f if line.strip()]
+    if not lines or lines[0].split('|') != _PROSE_COLUMNS:
+        raise ValueError(f'{PROSE_PATH}: the header must be {"|".join(_PROSE_COLUMNS)}')
+    return dict(line.split('|', 1) for line in lines[1:] if '|' in line)
+
+
+def gated_prose(project_dir: str, scene_id: str) -> tuple[str | None, str]:
+    """The prose `scene_id`'s commitments were last read from (`PROSE_PATH`,
+    read back from git), or None and why not."""
+    try:
+        blob = _prose_rows(project_dir).get(scene_id)
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return None, f'{PROSE_PATH} can\'t be read ({e})'
+    if not blob:
+        return None, f'{PROSE_PATH} doesn\'t record the prose its facts were read from'
+    out = _git_out(project_dir, 'cat-file', 'blob', blob)
+    if out is None:
+        return None, f'git has no blob {blob[:12]} (the prose its facts were read from)'
+    return out.decode('utf-8', errors='replace'), ''
+
+
+def record_prose(project_dir: str, scene_id: str, prose: str) -> str:
+    """Record `prose` as what `scene_id`'s commitments were read from: its
+    git blob, written to the object store, in `PROSE_PATH`. Returns why it
+    couldn't be ('' when it was); its row goes then, so a later gate never
+    diffs against the wrong prose."""
+    blob = _git_out(project_dir, 'hash-object', '-w', '--stdin', data=prose.encode('utf-8'))
+    blob_id = blob.decode().strip() if blob else ''
+    try:
+        rows = _prose_rows(project_dir)
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return f'{PROSE_PATH} not updated ({e}); the next re-check counts every reworded fact'
+    if blob_id:
+        rows[scene_id] = blob_id
+    elif rows.pop(scene_id, None) is None:
+        return ''   # no git, and nothing recorded to take back
+    path = os.path.join(project_dir, PROSE_PATH)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8', newline='') as f:
+            f.write('|'.join(_PROSE_COLUMNS) + '\n')
+            for sid in sorted(rows):
+                f.write(f'{sid}|{rows[sid]}\n')
+    except OSError as e:
+        return f'{PROSE_PATH} not updated ({e}); the next re-check counts every reworded fact'
+    return ''   # no git: the next gate's note says the prose isn't kept
+
+
 def _gone_scenes(project_dir: str) -> set[str]:
     from storyforge.elaborate import get_scenes
     from storyforge.prompts import _GONE
@@ -1125,35 +1221,94 @@ def _has_prose(project_dir: str, scene_id: str) -> bool:
         return False
 
 
+def _shared_run(a: str, b: str) -> int:
+    """The longest run of words two `_words` strings share."""
+    from difflib import SequenceMatcher
+    aw, bw = a.split(), b.split()
+    m = SequenceMatcher(None, aw, bw, autojunk=False).find_longest_match(0, len(aw), 0, len(bw))
+    return m.size
+
+
+def _paragraphs(text: str) -> list[tuple[str, ...]]:
+    return [tuple(_word_list(p)) for p in re.split(r'\n\s*\n', text) if p.strip()]
+
+
+def steady_facts(old_rows: list[dict[str, str]], earlier: str, prose: str) -> set[str]:
+    """The ids of `old_rows` (commitments read from `earlier`, the prose
+    last committed) whose quote lies within a paragraph of `earlier` that
+    `prose` still has word for word (case, punctuation and spacing aside):
+    the words they were read from, and the words around them, didn't
+    change (#558). A quote not found in `earlier`, or found only across
+    paragraphs or in changed ones, is not steady."""
+    kept = set(_paragraphs(prose))
+    out = set()
+    for o in old_rows:
+        for para in _paragraphs(earlier):
+            if para in kept and _quote_spans(o.get('quote') or '', list(para)):
+                out.add(o['id'])
+                break
+    return out
+
+
 def _carry_ids(proposed: list[dict[str, str]], old_rows: list[dict[str, str]],
-               rows: list[dict[str, str]], scene_id: str) -> None:
+               rows: list[dict[str, str]], scene_id: str,
+               steady: set[str] | frozenset[str] = frozenset()) -> dict[str, dict[str, str]]:
     """Give each proposed row that states the same fact as one of the
     scene's earlier commitments (`ledger.fact_key`) that row's id, and its
     end in a later scene when the new row has none: links to it (a later
-    `supersedes`, the later scene's end) keep holding. Every other proposed
+    `supersedes`, the later scene's end) keep holding. An earlier
+    commitment in `steady` (`steady_facts`: read from words the prose
+    still has) left unmatched is matched to an unmatched proposed row
+    whose quote shares four words in a row with its own, the same quote
+    first, then the longest shared run: the same words read again, however
+    reworded (#558). Every other proposed
     row gets an id no other row and no earlier commitment of the scene has
     (extraction chose ids without the old rows, so one may repeat an old id:
     a later link to that id would then land on a different fact), and links
-    between proposed rows follow the renames. In place."""
+    between proposed rows follow the renames. In place. Returns each
+    earlier commitment matched, by id, with the proposed row now carrying
+    it."""
     from storyforge.extract import commitment_id
     by_key: dict[tuple, dict[str, str]] = {}
     for o in old_rows:
         by_key.setdefault(ledger.fact_key(o), o)
     rename: dict[str, str] = {}
-    carried: set[str] = set()
+    carried: dict[str, dict[str, str]] = {}
+    matched: set[int] = set()
+
+    def carry(p: dict[str, str], o: dict[str, str]) -> None:
+        carried[o['id']] = p
+        matched.add(id(p))
+        rename[p['id']] = o['id']
+        if not (p.get('resolves') or '').strip() and ledger._ends_elsewhere(o):
+            p['resolves'] = o['resolves']
+
     for p in proposed:
         o = by_key.get(ledger.fact_key(p))
         if o is None or o['id'] in carried:
             continue
-        carried.add(o['id'])
-        rename[p['id']] = o['id']
-        if not (p.get('resolves') or '').strip() and ledger._ends_elsewhere(o):
-            p['resolves'] = o['resolves']
+        carry(p, o)
+    # the closest quotes first: the same words, then the longest shared run
+    pairs = []
+    for o in old_rows:
+        if o['id'] not in steady or o['id'] in carried:
+            continue
+        ow = _words(o.get('quote') or '')
+        for n, p in enumerate(proposed):
+            if id(p) in matched:
+                continue
+            pw = _words(p.get('quote') or '')
+            run = _shared_run(ow, pw)
+            if run >= _MIN_QUOTE_WORDS:
+                pairs.append((ow != pw, -run, n, o, p))
+    for _, _, _, o, p in sorted(pairs, key=lambda t: t[:3]):
+        if o['id'] not in carried and id(p) not in matched:
+            carry(p, o)
     # an old id not carried is never reused: links to it must not land on
     # a different fact
     taken = {r['id'] for r in rows} | {o['id'] for o in old_rows}
     for p in proposed:
-        if p['id'] in rename:
+        if id(p) in matched:
             p['id'] = rename[p['id']]
         elif p['id'] in taken:
             new_id = commitment_id(scene_id, p.get('statement', ''), taken)
@@ -1165,6 +1320,7 @@ def _carry_ids(proposed: list[dict[str, str]], old_rows: list[dict[str, str]],
             refs = ledger._split(p.get(col, ''))
             if any(r in rename for r in refs):
                 p[col] = ';'.join(rename.get(r, r) for r in refs)
+    return carried
 
 
 # ============================================================================
