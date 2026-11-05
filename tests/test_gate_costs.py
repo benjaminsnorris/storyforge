@@ -117,7 +117,7 @@ class TestWriteCountsTheGate:
         logged = []
         monkeypatch.setattr(cmd_write, 'log', lambda m: logged.append(m))
         monkeypatch.setattr(cmd_write, 'check_threshold', lambda c: False)  # stop there
-        monkeypatch.setattr(cmd_write, '_exit_if_gate_pending', lambda *a: None)
+        monkeypatch.setattr(cmd_write, '_exit_if_gate_pending', lambda *a, **k: None)
         monkeypatch.setattr(cmd_write, 'detect_project_root', lambda: project_dir)
         try:
             cmd_write.main(['--force', '--coaching', 'full', '--scenes', SCENE])

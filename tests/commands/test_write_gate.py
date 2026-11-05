@@ -933,3 +933,62 @@ class TestPendingReason480:
         passed, why = self._gated(project_dir, monkeypatch, r)
         assert not passed and why.startswith('1 problem(s) not fixed (plan conflicts')
         assert 'PLAN CONFLICT' in why
+
+
+class TestKeepGoing:
+    """#556 (G-028, B-028, B-030): one gate stop ended an unattended draft
+    with 17 and 32 scenes undrafted. `--keep-going` commits such a scene
+    provisionally and drafts on."""
+
+    def _provisional(self, monkeypatch, allowed=True):
+        done = []
+
+        def commit(project_dir, result, reason):
+            done.append(result.scene_id)
+            gate.mark_pending(project_dir, result.scene_id, gate.PROVISIONAL, reason)
+            result.committed = result.provisional = True
+        monkeypatch.setattr(gate, 'can_commit_provisionally',
+                            lambda r: '' if allowed else 'it changes a fixed fact (a halt)')
+        monkeypatch.setattr(gate, 'commit_provisional', commit)
+        return done
+
+    def test_a_failing_scene_is_committed_provisionally_and_the_run_goes_on(
+            self, setup, monkeypatch, capsys):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
+        calls = _gate(monkeypatch, {'act1-sc01': False, 'act1-sc02': True})
+        done = self._provisional(monkeypatch)
+        with pytest.raises(SystemExit) as e:
+            main(['--keep-going', '--scenes', 'act1-sc01,act1-sc02'])
+        assert e.value.code == 1   # the author still has work
+        assert calls == [('act1-sc01', 'draft'), ('act1-sc02', 'draft')]
+        assert done == ['act1-sc01']
+        assert _scene(setup, 'act1-sc02') is not None
+        assert gate.pending(setup)['act1-sc01']['command'] == gate.PROVISIONAL
+        out = capsys.readouterr().out
+        assert 'committed provisionally' in out and 'not attempted' not in out
+
+    def test_without_the_flag_the_run_still_stops(self, setup, monkeypatch):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
+        calls = _gate(monkeypatch, {'act1-sc01': False, 'act1-sc02': True})
+        done = self._provisional(monkeypatch)
+        with pytest.raises(SystemExit):
+            main(['--scenes', 'act1-sc01,act1-sc02'])
+        assert calls == [('act1-sc01', 'draft')] and done == []
+
+    def test_a_scene_that_cant_be_committed_provisionally_stops_it(self, setup, monkeypatch,
+                                                                   capsys):
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
+        calls = _gate(monkeypatch, {'act1-sc01': False, 'act1-sc02': True})
+        self._provisional(monkeypatch, allowed=False)
+        with pytest.raises(SystemExit):
+            main(['--keep-going', '--scenes', 'act1-sc01,act1-sc02'])
+        assert calls == [('act1-sc01', 'draft')]
+        assert 'Not committed provisionally: it changes a fixed fact' in capsys.readouterr().out
+
+    def test_an_earlier_provisional_scene_blocks_only_without_the_flag(self, setup,
+                                                                       monkeypatch):
+        gate.mark_pending(setup, 'act1-sc01', gate.PROVISIONAL, 'provisional: 1 problem')
+        assert cmd_write._gate_blockers(setup, 'act1-sc02')
+        assert cmd_write._gate_blockers(setup, 'act1-sc02', keep_going=True) == []
+        gate.mark_pending(setup, 'act1-sc01', 'draft', '1 problem')
+        assert cmd_write._gate_blockers(setup, 'act1-sc02', keep_going=True)

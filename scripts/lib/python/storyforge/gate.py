@@ -74,8 +74,10 @@ UNRESOLVED = ('quote', 'no quote', 'supersedes', 'ends', 'ends again', 'rejected
 #: registry fact, not applied (`disagrees`, `ends registry`: the checker
 #: judges contradictions with the plan), a subject not in the registries
 #: (an object has none), facts left out past the offer cap, facts tied to a
-#: scene id that isn't a scene
-REPORTED = ('disagrees', 'ends registry', 'subject', 'cap', 'unplaced')
+#: scene id that isn't a scene, an `ends` naming a fixed fact (one can't
+#: end, so the link is never applied and the row is right without it:
+#: G-028, #556, an extraction slip that stopped an unattended run)
+REPORTED = ('disagrees', 'ends registry', 'subject', 'cap', 'unplaced', 'ends fixed')
 
 
 class GateError(RuntimeError):
@@ -148,6 +150,11 @@ class GateResult:
     #: commitment stating an inherited contradiction, not recorded
     #: (`_hold_back`)
     held_back: list[tuple[str, Finding]] = field(default_factory=list)
+    #: committed without a pass (`commit_provisional`, `write --keep-going`)
+    provisional: bool = False
+    #: what `_commit` needs from the run (`_CommitContext`); None until the
+    #: run reaches the check
+    _ctx: 'object' = field(default=None, repr=False, compare=False)
 
     @property
     def findings(self) -> list[Finding]:
@@ -872,15 +879,17 @@ def _classify(result: GateResult, project_dir: str, before: Snapshot | None,
             result.speaker_notes.append((f, note))
 
 
-def _hold_back(result: GateResult) -> None:
+def _hold_back(result: GateResult, also: list[Finding] | None = None) -> None:
     """Take out of `proposed` each commitment stating an inherited
     contradiction (its quote and the finding's overlap), so the ledger never
     records a fact the check showed contradicts the book (#480's review).
+    `also`: more findings to hold back for (a provisional commit's, #556).
     They go to `held_back`, reported."""
     keep = []
+    against = result.inherited + list(also or [])
     for row in result.proposed:
         quote = _words(row.get('quote') or '')
-        hit = next((f for f in result.inherited if _count(quote) >= _MIN_BRIEF_WORDS
+        hit = next((f for f in against if f.scene_quote and _count(quote) >= _MIN_BRIEF_WORDS
                     and (quote in _words(f.scene_quote) or _words(f.scene_quote) in quote)),
                    None)
         if hit is None:
@@ -1039,19 +1048,96 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         error.run = getattr(e, 'run', None)
         raise error from e
     _classify(result, project_dir, before, already_reported)
+    result._ctx = _CommitContext(rows, loaded, old_rows, ended_before, revised_rejection,
+                                 names, name_notes, order, prose, command)
     if not result.passed:
         _note_blocked(project_dir, scene_id, command, result)
         return result
+    _commit(project_dir, result)
+    return result
 
+
+@dataclass
+class _CommitContext:
+    """What `_gate_scene` read before its model calls, for `_commit`."""
+    rows: list[dict[str, str]]          # the ledger without the scene's old commitments
+    loaded: list[dict[str, str]]        # the ledger as loaded
+    old_rows: list[dict[str, str]]
+    ended_before: set[str]
+    revised_rejection: list[str]
+    names: dict[str, set[str]]
+    name_notes: list[str]
+    order: dict[str, int]
+    prose: str
+    command: str
+
+
+#: A pending row's command for a scene `write --keep-going` committed
+#: without a pass (`commit_provisional`): its facts are in the ledger, less
+#: those stating what stopped it, and its findings are the author's
+PROVISIONAL = 'provisional'
+
+
+def can_commit_provisionally(result: GateResult) -> str:
+    """Why `result` can't be committed provisionally ('' when it can): only
+    the check's findings stopped it (contradictions, broken promises, plan
+    conflicts, unverified ones). A halt (a fixed fact changed), an
+    extraction problem or an unruled dispute would commit a wrong row."""
+    if result.passed or result.committed:
+        return 'it was committed'
+    if getattr(result, '_ctx', None) is None:
+        return 'the gate run did not finish'
+    if result.halts:
+        return 'it changes a fixed fact (a halt)'
+    if result.unresolved:
+        return 'extraction left problems a commit would write'
+    if result.unruled:
+        return 'the check gave no ruling on a plan fact the scene may change'
+    return ''
+
+
+def commit_provisional(project_dir: str, result: GateResult, reason: str) -> None:
+    """Commit a scene that didn't pass, for `write --keep-going` (#556,
+    G-028/B-028/B-030: one stop ended an unattended draft): its commitments,
+    less each one stating a blocking finding (`_hold_back`), replace its
+    earlier ones as on a pass, and what they changed is listed for a
+    re-check; the scene is listed `PROVISIONAL` in `PENDING_PATH` with
+    `reason`, and its verified contradictions stay in `BLOCKED_PATH` for
+    `storyforge check --accept`. A later scene is then drafted from
+    everything the scene got right. Sets `.committed` and `.provisional`.
+
+    Raises:
+        GateError: `can_commit_provisionally` says no, or the ledger changed
+            since the gate run (nothing written).
+    """
+    why = can_commit_provisionally(result)
+    if why:
+        raise GateError(f'{result.scene_id}: not committed provisionally: {why}')
+    _commit(project_dir, result, holding=result.findings + result.unverified,
+            pending_reason=reason)
+    result.provisional = True
+
+
+def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None = None,
+            pending_reason: str = '') -> None:
+    """Write `result`'s commitments (its gate run's `_ctx`): on a pass, or
+    provisionally (`holding`: the findings it was committed in spite of,
+    whose commitments are held back, and `pending_reason` for its
+    `PROVISIONAL` row)."""
+    ctx = result._ctx
+    scene_id, command, prose = result.scene_id, ctx.command, ctx.prose
+    rows, old_rows, order = ctx.rows, ctx.old_rows, ctx.order
+    ended_before, revised_rejection = ctx.ended_before, ctx.revised_rejection
+    names, name_notes = ctx.names, ctx.name_notes
     # The model calls take minutes: a ledger changed meanwhile would be
     # overwritten, and its change logged under this command
     try:
-        if ledger.load(project_dir) != loaded:
+        if ledger.load(project_dir) != ctx.loaded:
             raise GateError(f'{scene_id}: reference/commitments.csv changed while the '
                             f'scene was being gated; nothing written, gate it again')
     except ledger.LedgerError as e:
         raise GateError(f'{scene_id}: {e}') from e
-    _hold_back(result)
+    _hold_back(result, holding)
     _carry_ids(result.proposed, old_rows, rows, scene_id)
     new = rows + result.proposed
     for rid, quote in result.check.kept:
@@ -1087,13 +1173,17 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     result.committed = True
     try:
         record_reported(project_dir, scene_id, command, result.inherited, prose=prose)
-        record_blocked(project_dir, scene_id, command, [])
+        if holding is None:
+            record_blocked(project_dir, scene_id, command, [])
     except GateError as e:   # the ledger is written; the findings were logged
         from storyforge.common import log
         log(f'WARNING: {scene_id} passed, but {REPORTED_PATH} could not be updated: {e}. '
             f'Its contradictions already in the scene are only in this log.')
     try:
-        clear_pending(project_dir, scene_id)
+        if holding is None:
+            clear_pending(project_dir, scene_id)
+        else:
+            mark_pending(project_dir, scene_id, PROVISIONAL, pending_reason)
         waiting = pending(project_dir)
         for sid in result.recheck:
             if sid not in waiting:   # one waiting for another reason stays as it is
@@ -1106,7 +1196,6 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
             f'Fix it by hand: remove {scene_id}\'s row'
             + (f' and add {", ".join(result.recheck)} for a re-check' if result.recheck else '')
             + '.')
-    return result
 
 
 def _gone_scenes(project_dir: str) -> set[str]:
@@ -1565,6 +1654,74 @@ def _worse(n: int, before_run: GateResult, after_run: GateResult, diff: _Diff) -
     return ''
 
 
+def _edit_span(prose_words: list[str], replace: str) -> list[Span]:
+    """Where an edit's replacement lies in the fixed prose's words."""
+    return _quote_spans(replace, prose_words) if _word_list(replace) else []
+
+
+def _bad_edits(edits: list[dict], new: list[Finding], after_words: list[str]) -> list[int] | None:
+    """The indexes of `edits` that brought in `new` (`_introduced`'s
+    findings), or None when one can't be tied to an edit: a finding whose
+    scene quote lies in or next to an edit's replacement, or a broken
+    promise whose promised words the edit took out (its `find` shares four
+    words in a row with them)."""
+    bad: set[int] = set()
+    for f in new:
+        hit = set()
+        places = _quote_spans(f.scene_quote, after_words) if f.scene_quote else []
+        for i, e in enumerate(edits):
+            spans = _edit_span(after_words, e.get('replace') or '')
+            if places and any(_touches(p, spans, near=True) for p in places):
+                hit.add(i)
+            elif (f.kind == 'broken-promise' and f.established_quote
+                  and _shares_run(_words(e.get('find') or ''), _words(f.established_quote))):
+                hit.add(i)
+        if not hit:
+            return None
+        bad |= hit
+    return sorted(bad)
+
+
+def _shares_run(a: str, b: str, n: int = 4) -> bool:
+    """Whether two `_words` strings share a run of `n` words."""
+    aw, bw = a.split(), b.split()
+    runs = {tuple(aw[i:i + n]) for i in range(len(aw) - n + 1)}
+    return any(tuple(bw[i:i + n]) in runs for i in range(len(bw) - n + 1))
+
+
+def _partial_fix(project_dir: str, scene_id: str, command: str, current: str,
+                 before_run: GateResult, after_run: GateResult, diff: '_Diff',
+                 edits: list[dict], *, log_dir: str, extract_model, check_model,
+                 before) -> tuple[list[dict], str, GateResult, str] | None:
+    """B-030 (#556): a fix round with several edits, discarded because it
+    brought in problems, is retried with only the edits that didn't
+    (`_bad_edits`), one more gate run. Returns (the edits kept, their
+    prose, its gate run, the dropped edits as text), or None when every
+    edit (or none) is to blame, a new problem can't be tied to one, the
+    rest can't be applied, the run fails, or it is worse than `before_run`
+    (`_worse`)."""
+    if len(edits) < 2:
+        return None
+    new = _introduced(before_run, after_run, diff)
+    if not new:
+        return None   # worse by count alone: nothing to tie to an edit
+    bad = _bad_edits(edits, new, diff.after)
+    if not bad or len(bad) == len(edits):
+        return None
+    good = [e for i, e in enumerate(edits) if i not in bad]
+    try:
+        prose = apply_edits(current, good)
+        run = gate_scene(project_dir, scene_id, command=command, prose=prose,
+                         log_dir=log_dir, extract_model=extract_model,
+                         check_model=check_model, before=before)
+    except GateError:
+        return None
+    if not run.passed and _worse(0, before_run, run, _diff(current, prose)):
+        return None
+    dropped = '; '.join(f'"{_one_line(edits[i].get("find", ""))[:60]}"' for i in bad)
+    return good, prose, run, dropped
+
+
 def run_log_dir(log_dir: str, scene_id: str, *, now=None, pid: int | None = None) -> str:
     """A new directory, created, for one gate invocation's logs of
     `scene_id`: `log_dir/<scene>/<YYYYMMDD-HHMMSS>-<pid>`, with `-2`, `-3`
@@ -1730,6 +1887,21 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                              + ', '.join(f'{f.code} vs {f.source}' for f in unplaced[:5])
                              + '): judged by the problem count only')
             if worse:
+                # B-030 (#556): keep the edits that didn't do it
+                part = _partial_fix(project_dir, scene_id, command, current, result, again,
+                                    diff, edits, log_dir=os.path.join(logs, f'partial-{n}'),
+                                    extract_model=extract_model, check_model=check_model,
+                                    before=before)
+                if part is not None:
+                    good, part_prose, part_run, dropped_edits = part
+                    notes.append(f'{worse}; kept its {len(good)} edit(s) that did not, '
+                                 f'dropped {dropped_edits}, and re-checked')
+                    rounds.append(FixRound(to_fix, good))
+                    current, result, run_dir = part_prose, part_run, os.path.join(
+                        logs, f'partial-{n}')
+                    if part_run.passed:
+                        break
+                    continue
                 notes.append(f'{worse}; kept {kept}')
                 discarded = n
                 if loose:
@@ -1802,7 +1974,9 @@ def report_lines(result: GateResult) -> list[str]:
                      f'blocking, the author\'s to fix; listed in {REPORTED_PATH} on commit): '
                      f'{_one_line(f.message())}')
     if result.held_back:
-        lines.append('NOTE (not recorded: states a contradiction already in the scene): '
+        lines.append(('NOTE (not recorded: states what stopped the commit): '
+                      if result.provisional else
+                      'NOTE (not recorded: states a contradiction already in the scene): ')
                      + '; '.join(_one_line(st) for st, _ in result.held_back))
     if result.check:
         for d in result.check.cleared:
@@ -1831,7 +2005,7 @@ def report_lines(result: GateResult) -> list[str]:
                                  for st, why in result.dropped[:20])
                      + (' ...' if len(result.dropped) > 20 else ''))
     if result.committed:
-        lines.append(f'COMMITTED: {len(result.proposed)} fact(s)'
+        lines.append(f'COMMITTED{" (provisionally: listed " + PENDING_PATH + ")" if result.provisional else ""}: {len(result.proposed)} fact(s)'
                      + (f'; quotes filled: {", ".join(result.quotes_filled)}'
                         if result.quotes_filled else ''))
     return lines

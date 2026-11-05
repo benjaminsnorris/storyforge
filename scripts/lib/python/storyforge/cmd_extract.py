@@ -1782,6 +1782,8 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                                      'registry fact recorded for the same scene; kept '
                                      'both, unlinked: check which is right'),
                        ('ends', '"ends" naming no offered state, dropped'),
+                       ('ends fixed', '"ends" naming a fixed fact (which can\'t end), '
+                                      'dropped'),
                        ('ends registry', 'state(s) recorded by another writer (the '
                                          'registry or the gate) that the prose ends in '
                                          'a scene its resolves doesn\'t say; check resolves'),
