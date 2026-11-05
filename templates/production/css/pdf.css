@@ -1,0 +1,12 @@
+/* Storyforge — PDF overrides (G-030), loaded after the genre stylesheet.
+ * WeasyPrint 68 crashes in block layout (an AssertionError in float layout)
+ * on a floated ::first-letter, so in the PDF the drop cap is a raised
+ * initial instead.
+ */
+
+h1 + p::first-letter {
+  float: none;
+  font-size: 2em;
+  line-height: 1;
+  padding: 0;
+}

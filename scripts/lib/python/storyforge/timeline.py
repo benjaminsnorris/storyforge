@@ -178,6 +178,9 @@ _TENS = {'twenty': 20, 'thirty': 30, 'forty': 40, 'fifty': 50, 'sixty': 60,
 _UNIT_DAYS = {
     'minute': 0, 'hour': 0, 'day': 1, 'night': 1, 'week': 7, 'fortnight': 14,
     'month': 30, 'season': 91, 'year': 365, 'decade': 3650,
+    # Old English and other verse epics count years in winters: Beowulf's
+    # "fifty winters" of rule before the dragon (B-009)
+    'winter': 365,
 }
 _SAME_DAY = re.compile(
     r'\b(same (moment|time|day|evening|night|afternoon|morning)|moments? later|'
@@ -212,7 +215,7 @@ def gap_to_days(gap: str) -> int | None:
     match = re.search(
         r'\b(\d+|a couple of|a couple|couple of|' + '|'.join(
             sorted((w for w in _NUMBER_WORDS if ' ' not in w), key=len, reverse=True))
-        + r')\s+(minute|hour|day|night|week|fortnight|month|season|year|decade)s?\b', text)
+        + r')\s+(minute|hour|day|night|week|fortnight|month|season|year|decade|winter)s?\b', text)
     if not match:
         return None
     count = match.group(1)
@@ -957,7 +960,8 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     *scenes*: scenes.csv rows in reading order. Returns findings
     ``{'scene_id', 'check', 'message'}``. Checks: the present going
     backwards on a scene not told as earlier and not a frame or vision; a stated gap
-    the days disagree with; two dates, two months or seasons, or two weekdays,
+    the days disagree with; a scene that continues the one before it, with no gap
+    stated, on a later day; two dates, two months or seasons, or two weekdays,
     the days contradict.
     """
     findings = []
@@ -965,6 +969,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
     last_day = None
     last_mode = ''
     last_duration = ''
+    last_time = ''
     after_frame = False
     dated: list[tuple[str, int, tuple, bool]] = []
     rough: list[tuple[str, int, tuple]] = []
@@ -1033,6 +1038,21 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
                 findings.append({'scene_id': sid, 'check': 'gap_mismatch',
                                  'message': f'the text says "{cue["gap"]}" (about {gap} day(s)), '
                                             f'but the calendar puts it {actual} day(s) on'})
+        # "continues" with no gap stated picks up at once, so a later day
+        # contradicts it. Beowulf's feast continued the morning of thanks,
+        # but extraction put it a day on, and the drafts counted their
+        # nights from that (B-029). After a night scene the next day may
+        # well have begun (the dragon burns "until hint of dawn", and the
+        # news reaches Beowulf)
+        elif (last_day is not None and gap is None and not (cue.get('gap') or '').strip()
+                and last_mode != 'summary' and relation == 'continues' and not stated
+                and last_time != 'night'):
+            base = present if (present is not None and last_day < present <= day) else last_day
+            if day > base:
+                findings.append({'scene_id': sid, 'check': 'continues_not_same_day',
+                                 'message': f'reads as continuing the scene before it, with no '
+                                            f'gap stated, but the calendar puts it '
+                                            f'{day - base} day(s) on'})
         md = _month_day(row.get('timeline_date', ''))
         if md:
             approximate = bool(re.search(r'[~?%]', row['timeline_date']))
@@ -1057,6 +1077,7 @@ def check_timeline(scenes: list[dict], cues: dict[str, dict]) -> list[dict]:
         last_day = day
         last_mode = mode
         last_duration = row.get('duration', '')
+        last_time = (row.get('time_of_day') or '').strip().lower()
         if relation != 'earlier' and (present is None or day > present):
             present = day
 

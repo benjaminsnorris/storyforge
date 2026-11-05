@@ -116,6 +116,16 @@ class TestClaims:
         assert '1. s1 | Scene 1 | Summary 1' in prompt
         assert 's5 | Cut' not in prompt      # cut scenes aren't in the book
 
+    def test_prompt_keeps_a_limit_with_what_it_limits(self, book):
+        """G-010: Gawain's "repays her kisses honestly each night, until on the
+        third day he ... withholds it" became a claim without its "until", and
+        the verify pass marked it contradicted."""
+        tiers = tf.read_tiers(str(book))
+        prompt = ' '.join(tf.build_claims_prompt(tiers.summary_docs(),
+                                                 tf._scenes(str(book))).split())
+        assert 'Keep a limit with what it limits' in prompt
+        assert '"until"' in prompt and '"unless"' in prompt
+
     def test_parse_reads_claims(self, book):
         tiers = tf.read_tiers(str(book))
         claims = tf.parse_claims(json.dumps(_claims_payload()), tiers.summary_docs(), tf._scenes(str(book)))

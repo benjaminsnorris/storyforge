@@ -38,6 +38,7 @@ import os
 import re
 import shutil
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 from storyforge.common import (
     csv_safe, is_unfilled_template, parse_yaml_scalar,
@@ -689,6 +690,13 @@ def plan_import(project_dir: str, cfg: SourceConfig, slug: str) -> ImportResult:
         tables[name] = (header, rows)
         files[name] = _render_csv(header, rows).encode('utf-8')
     if nm is not EMPTY_MAP:
+        # A physical detail names its parent state in `subject`: a ledger id,
+        # not a name the map could hold (#554, Gawain G-014)
+        if 'commitments.csv' in tables and 'commitments.csv:subject' in unknown:
+            header, rows = tables['commitments.csv']
+            if 'id' in header:
+                ids = {r[header.index('id')].strip() for r in rows}
+                unknown['commitments.csv:subject'] -= ids
         unmapped = {k: v for k, v in unknown.items() if v}
         if unmapped:
             result.notes.append(
@@ -743,29 +751,126 @@ def plan_import(project_dir: str, cfg: SourceConfig, slug: str) -> ImportResult:
 # and map stages have canonical ids to use instead of coining them.
 SEEDED_REGISTRIES = ('characters.csv', 'locations.csv', 'values.csv')
 
+# Where the source's adapted scenes name a registry's ids: a ranged source
+# seeds only the rows they use. (table, its scene-id column, the column naming
+# the ids; `;` separates them). The scene tables are required: without one a
+# range can't be checked, so that source's whole registry is seeded and the
+# import says so. The ledger (`_SEED_LEDGER`) adds ids when it's there.
+_SEED_USES = {
+    'characters.csv': (('scenes.csv', 'id', 'pov'),
+                       ('scene-intent.csv', 'id', 'characters'),
+                       ('scene-intent.csv', 'id', 'on_stage')),
+    'locations.csv': (('scenes.csv', 'id', 'location'),),
+    'values.csv': (('scene-intent.csv', 'id', 'value_at_stake'),),
+}
+_SEED_LEDGER = {
+    'characters.csv': (('commitments.csv', 'scene_id', 'subject'),
+                       ('commitments.csv', 'scene_id', 'known_by')),
+}
 
-def seed_registries(project_dir: str, cfg: SourceConfig) -> list[tuple[str, int]]:
+
+class Seeded(NamedTuple):
+    """One registry `seed_registries` wrote: its path, the rows written and
+    the rows the sources' copies have (more than written only for a range)."""
+    path: str
+    written: int
+    available: int
+
+
+def _cells(project_dir: str, slug: str, table: str, key: str, col: str,
+           span: frozenset[str]) -> list[str] | None:
+    """The `;`-separated tokens of `col` in the rows of `table` whose `key`
+    is in `span`; None when the table or either column isn't there."""
+    path = os.path.join(source_dir(project_dir, slug), table)
+    if not os.path.isfile(path):
+        return None
+    rows = read_table(project_dir, slug, table)
+    if rows and (key not in rows[0] or col not in rows[0]):
+        return None
+    out = []
+    for row in rows:
+        if row[key].strip() in span:
+            out.extend(v.strip() for v in row[col].split(';') if v.strip())
+    return out
+
+
+def _lookup(rows: list[dict[str, str]]) -> dict[str, str]:
+    """Lowercased id, name and aliases -> id, for cast cells that hold names."""
+    out: dict[str, str] = {}
+    for row in rows:
+        rid = row['id'].strip()
+        for key in [rid, row.get('name', '')] + row.get('aliases', '').split(';'):
+            if key.strip():
+                out.setdefault(key.strip().lower(), rid)
+    return out
+
+
+def _ranged_keep(project_dir: str, slug: str, name: str, span: frozenset[str],
+                 rows: list[dict[str, str]], notes: list[str]) -> set[str] | None:
+    """The ids of `rows` (a source's copy of registry `name`) that the scenes
+    in `span` use; None (seed them all) when a scene table or column it needs
+    is missing. Tokens that are no row's id, name or alias are noted."""
+    where = f'source {slug}: {name}'
+    lookup = _lookup(rows)
+    keep: set[str] = set()
+    unknown: set[str] = set()
+    for table, key, col in _SEED_USES[name]:
+        tokens = _cells(project_dir, slug, table, key, col, span)
+        if tokens is None:
+            notes.append(f'WARNING: {where}: reference/source/{slug}/{table} has no '
+                         f'`{col}` column (or is missing), so the range can\'t be '
+                         f'checked; every row is seeded')
+            return None
+        for t in tokens:
+            if t.lower() in lookup:
+                keep.add(lookup[t.lower()])
+            else:
+                unknown.add(t)
+    for table, key, col in _SEED_LEDGER.get(name, ()):
+        # Ledger subjects can be topics, not people: no note for the rest
+        for t in _cells(project_dir, slug, table, key, col, span) or ():
+            if t.lower() in lookup:
+                keep.add(lookup[t.lower()])
+    if unknown:
+        notes.append(f'NOTE: {where}: the range\'s scenes name {", ".join(sorted(unknown))}, '
+                     f'which no row has as its id, name or alias; not seeded')
+    return keep
+
+
+def seed_registries(project_dir: str, cfg: SourceConfig) -> tuple[list[Seeded], list[str]]:
     """Fill each of the project's own registries (`SEEDED_REGISTRIES`) that
     is missing or has no rows from the imported sources' copies, which
-    already carry the name map. A registry with any row is the author's and
-    is never touched. The project's header is kept (a column the source
-    lacks, such as `pronouns`, is left empty; one only the source has is
-    dropped); with no project file, the source's header is used. With
-    several sources the first to give an id wins. Returns (file, rows
-    written) for each registry seeded."""
-    seeded = []
+    already carry the name map. A source with a `range:` gives only the rows
+    its adapted scenes use (`_SEED_USES`: the cast, the location, the value
+    at stake; plus the ledger's subjects and knowers for the cast), so a
+    novel of Books I-IV doesn't start with the whole epic's cast. A registry
+    with any row is the author's and is never touched. The project's header
+    is kept (a column the source lacks, such as `pronouns`, is left empty;
+    one only the source has is dropped); with no project file, the source's
+    header is used. With several sources the first to give an id wins; a
+    source not imported yet is passed over. Returns the registries seeded and
+    notes for the author (a registry or source copy that couldn't be read, a
+    range that can't be checked or uses none of a registry's rows, cast names
+    no row has). Raises SourceError when an imported copy is malformed or
+    its range can't be resolved (`adapted_ids`)."""
+    seeded: list[Seeded] = []
+    notes: list[str] = []
     ref = os.path.join(project_dir, 'reference')
+    spans_: dict[str, frozenset[str] | None] = {}
     for name in SEEDED_REGISTRIES:
         own = os.path.join(ref, name)
         header: list[str] = []
         if os.path.isfile(own):
             try:
                 header, rows, _problem = _read_rows(own)
-            except (OSError, UnicodeDecodeError):
-                continue  # unreadable: leave it for validate to report
+            except (OSError, UnicodeDecodeError) as e:
+                notes.append(f'WARNING: reference/{name} can\'t be read ({e}), so it '
+                             f'wasn\'t seeded; run `storyforge validate`')
+                continue
             if rows:
                 continue
         merged: dict[str, dict[str, str]] = {}
+        everything: set[str] = set()
         src_header: list[str] = []
         for slug in cfg.slugs():
             path = os.path.join(source_dir(project_dir, slug), name)
@@ -773,11 +878,28 @@ def seed_registries(project_dir: str, cfg: SourceConfig) -> list[tuple[str, int]
                 continue
             h, rows, problem = _read_rows(path)
             if problem or 'id' not in h:
+                notes.append(f'WARNING: reference/source/{slug}/{name} '
+                             f'{problem or "has no id column"}, so it seeds nothing; '
+                             f're-run `storyforge source import`')
                 continue
             src_header = src_header or h
-            for r in rows:
-                row = dict(zip(h, r))
-                if row['id'].strip() and row['id'] not in merged:
+            src_rows = [dict(zip(h, r)) for r in rows]
+            src_rows = [r for r in src_rows if r['id'].strip()]
+            for r in src_rows:
+                r['id'] = r['id'].strip()
+            if slug not in spans_:
+                ids = adapted_ids(project_dir, cfg, slug)
+                spans_[slug] = None if ids is None else frozenset(ids)
+            span = spans_[slug]
+            keep = (None if span is None
+                    else _ranged_keep(project_dir, slug, name, span, src_rows, notes))
+            if keep is not None and src_rows and not keep:
+                notes.append(f'NOTE: source {slug}: no scene in its range '
+                             f'({range_note(cfg, slug)}) names any of {name}\'s '
+                             f'{len(src_rows)} row(s), so it gives none')
+            for row in src_rows:
+                everything.add(row['id'])
+                if (keep is None or row['id'] in keep) and row['id'] not in merged:
                     merged[row['id']] = row
         if not merged:
             continue
@@ -786,8 +908,8 @@ def seed_registries(project_dir: str, cfg: SourceConfig) -> list[tuple[str, int]
         os.makedirs(ref, exist_ok=True)
         with open(own, 'w', encoding='utf-8', newline='') as f:
             f.write(_render_csv(header, out))
-        seeded.append((f'reference/{name}', len(out)))
-    return seeded
+        seeded.append(Seeded(f'reference/{name}', len(out), len(everything)))
+    return seeded, notes
 
 
 def write_import(result: ImportResult) -> None:

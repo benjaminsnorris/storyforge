@@ -138,7 +138,7 @@ class TestValidStages:
     """Test the valid stages constant."""
 
     def test_contains_all_expected(self):
-        expected = {'spine', 'architecture', 'map', 'briefs',
+        expected = {'spine', 'architecture', 'voice', 'map', 'briefs',
                     'gap-fill', 'mice-fill', 'page-architecture',
                     'prompts'}
         assert VALID_STAGES == expected
