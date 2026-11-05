@@ -97,6 +97,7 @@ Run from your project root via the `./storyforge` runner:
 # Elaboration pipeline
 ./storyforge elaborate --stage spine         # Build the story spine
 ./storyforge elaborate --stage architecture  # Expand to full structure
+./storyforge elaborate --stage voice         # Voice guide and voice profile
 ./storyforge elaborate --stage map           # Complete scene map
 ./storyforge elaborate --stage briefs        # Write drafting contracts
 ./storyforge validate                        # Check structural integrity

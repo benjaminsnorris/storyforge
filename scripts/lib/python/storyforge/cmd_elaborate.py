@@ -60,7 +60,7 @@ def _python_lib():
 
 
 VALID_STAGES: Final[set[str]] = {
-    'spine', 'architecture', 'map', 'briefs',
+    'spine', 'architecture', 'voice', 'map', 'briefs',
     'gap-fill', 'mice-fill', 'page-architecture',
     'prompts',
 }
@@ -77,7 +77,7 @@ def parse_args(argv):
     )
     parser.add_argument('--stage', type=str, default=None,
                         help='Which elaboration stage to run '
-                             '(spine|architecture|map|briefs|gap-fill|'
+                             '(spine|architecture|voice|map|briefs|gap-fill|'
                              'mice-fill|page-architecture|prompts)')
     # Accept stages as direct flags (e.g. --mice-fill, --gap-fill, --briefs)
     for stage in sorted(VALID_STAGES):
@@ -1559,6 +1559,29 @@ def _run_page_prompt_handler_gn(project_dir: str, *,
 # Main stage execution (spine/architecture/map/briefs)
 # ============================================================================
 
+#: storyforge.yaml `artifacts:` entries a stage's written file fills
+_ARTIFACT_FOR_FILE = {
+    'story-architecture.md': 'story_architecture',
+    'character-bible.md': 'character_bible',
+    'world-bible.md': 'world_bible',
+    'voice-guide.md': 'voice_guide',
+    'scenes.csv': 'scene_index',
+}
+
+
+def _mark_artifacts(project_dir: str, written: list[str]) -> None:
+    """Set `exists: true` and today's `updated` on the artifacts the stage just
+    wrote. No stage did, so every pipeline review read the manifest as stale
+    until cleanup ran (#551, Beowulf B-017)."""
+    from datetime import date
+    from storyforge.common import update_artifact_entry
+    names = {w.split(' ', 1)[0] for w in written}
+    for filename, artifact in _ARTIFACT_FOR_FILE.items():
+        if filename in names:
+            update_artifact_entry(project_dir, artifact, exists=True,
+                                  updated=date.today().isoformat())
+
+
 def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     dry_run: bool, interactive: bool, seed: str,
                     args=None,
@@ -1611,7 +1634,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     log(f'Building {stage} prompt...')
 
     from storyforge.prompts_elaborate import (
-        build_spine_prompt, build_architecture_prompt,
+        build_spine_prompt, build_architecture_prompt, build_voice_prompt,
         build_map_prompt, build_briefs_prompt,
         parse_stage_response, csv_block_to_rows,
     )
@@ -1649,6 +1672,10 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     elif stage == 'architecture':
         prompt = build_architecture_prompt(project_dir, plugin_dir, registries_text=registries,
                                            system_context=has_system)
+    elif stage == 'voice':
+        # The voice guide and profile (#551, Gawain G-017): written by hand
+        # or in the skill before; it advances no phase
+        prompt = build_voice_prompt(project_dir, plugin_dir, system_context=has_system)
     elif stage == 'map':
         if medium == 'graphic-novel':
             from storyforge.prompts_elaborate_gn import build_scene_map_prompt as gn_map_prompt
@@ -1939,6 +1966,15 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     source_map_problem += '; reference/source-map.csv is unchanged'
                     log(f'ERROR: {source_map_problem}')
 
+            elif label == 'voice-profile-csv':
+                rows = csv_block_to_rows(content)
+                if rows:
+                    lines_ = [l for l in content.strip().split('\n') if l.strip()]
+                    with open(os.path.join(ref_dir, 'voice-profile.csv'), 'w',
+                              encoding='utf-8', newline='') as f:
+                        f.write('\n'.join(l.strip() for l in lines_) + '\n')
+                    written.append(f'voice-profile.csv ({len(rows)} rows)')
+
             elif label in ('story-architecture', 'character-bible', 'world-bible', 'voice-guide'):
                 filename = label + '.md'
                 path = os.path.join(ref_dir, filename)
@@ -1973,6 +2009,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
 
         if written:
             log(f'  Updated: {", ".join(written)}')
+            _mark_artifacts(project_dir, written)
         elif interactive:
             # The interactive session edits the reference files itself; its
             # stream log holds no blocks to apply
