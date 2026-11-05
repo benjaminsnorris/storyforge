@@ -56,6 +56,10 @@ def parse_args(argv):
                         help='Decide the book\'s three acts again (one call over the whole '
                              'scene list) and rewrite scenes.csv:act; phase 1 runs this step '
                              'itself')
+    parser.add_argument('--census', action='store_true',
+                        help='Add to characters.csv the people the text names often but '
+                             'no scene cast lists (fathers named in lineages, the dead, '
+                             'gods); phase 2 runs this step itself')
     parser.add_argument('--cleanup', action='store_true',
                         help='Run cleanup after extraction')
     parser.add_argument('--cleanup-only', action='store_true',
@@ -96,7 +100,7 @@ def _casts_only_usage_errors(args) -> list[str]:
     errors = []
     if args.phase != 2:
         errors.append('--casts-only re-asks phase 2\'s casts: run extract --phase 2 --casts-only')
-    for flag, on in (('--force', args.force), ('--acts', args.acts),
+    for flag, on in (('--force', args.force), ('--acts', args.acts), ('--census', args.census),
                      ('--cleanup', args.cleanup), ('--cleanup-only', args.cleanup_only),
                      ('--expand', args.expand)):
         if on:
@@ -189,6 +193,17 @@ def main(argv=None):
     validate_failures = 0
     _unanswered.clear()
 
+    if args.census:
+        if args.dry_run:
+            log('Dry run: the census counts names in code, then asks about the most '
+                'mentioned in one call per 100; nothing is sent.')
+            return
+        _run_census(project_dir, log_dir)
+        commit_and_push(project_dir, 'Extract: census of named people (characters.csv)',
+                        ['reference/characters.csv', 'working/'])
+        print_summary(project_dir, 'extract', session_start=session_start)
+        return
+
     if args.acts:
         if args.dry_run:
             log('Dry run: the act step makes one call over the scene list; nothing is sent.')
@@ -240,6 +255,9 @@ def main(argv=None):
                 log('')
                 log('--- Reconciling Phase 2 registries ---')
                 _run_hone(plugin_dir, phase=2)
+                _run_census(project_dir, log_dir)
+                commit_and_push(project_dir, 'Extract: census of named people (characters.csv)',
+                                ['reference/characters.csv', 'working/'])
 
         # Phase 3: Briefs
         if args.phase is None or args.phase == 3:
@@ -560,6 +578,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     from storyforge.extract import (
         SKELETON_SCHEMA, build_skeleton_prompt, parse_skeleton_response, skeleton_cues,
+        skeleton_told,
     )
     from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps, normalize_fields
     from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
@@ -646,6 +665,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     # on one calendar. Nobody authored these days, so they are replaced.
     from storyforge.timeline import write_cues, run_assignment
     cues = {}
+    told = {}
     rejected = set(_unanswered.get('scenes.csv', []))
     for sid in sorted_scene_ids:
         txt_file = os.path.join(log_dir, f'{sid}.txt')
@@ -654,11 +674,15 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         # no scene values was named as unusable there
         if sid in succeeded and sid not in rejected and os.path.isfile(txt_file):
             with open(txt_file) as f:
-                try:
-                    cues[sid] = skeleton_cues(f.read())
-                except ValueError:
-                    pass  # the scenes.csv merge above named it; no cues for it below
+                reply = f.read()
+            try:
+                cues[sid] = skeleton_cues(reply)
+                told[sid] = skeleton_told(reply)
+            except ValueError:
+                pass  # the scenes.csv merge above named it; no cues for it below
     write_cues(project_dir, cues)
+    # Before the calendar, which places a told scene as a flashback
+    _set_told_by(ref_dir, told, force)
     # A calendar is one piece: placing it without one scene's fresh cues
     # (an earlier run's, or none) would move its neighbours too, and with
     # force the wrong days would replace every scene's.
@@ -674,6 +698,78 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
     _safe_remove(batch_file)
     _safe_rmdir(skel_output)
+
+
+def _run_census(project_dir, log_dir):
+    """The people the text names that no cast lists (`extract_census`, #546)."""
+    from storyforge.extract_census import CENSUS_FILE, run_census
+    log('  Census: the people the text names...')
+    model = select_model('evaluation')
+    result = run_census(project_dir, model, log_dir,
+                        on_usage=lambda f, op, target, m: _log_api_usage(f, op, target, m,
+                                                                         project_dir))
+    if result.note:
+        log(f'  Census: not run ({result.note})')
+        return result
+    names = ', '.join(r['name'] for r in result.added) or 'none'
+    log(f'  Census: {result.candidates} capitalized word(s) not in the registries, '
+        f'{result.remembered} answered before, {result.asked} asked about (used '
+        f'{result.min_mentions}+ times); {len(result.added)} person(s) added as referenced: '
+        f'{names}. Every word and answer: {CENSUS_FILE}')
+    if result.failed:
+        log(f'  WARNING: census: {len(result.failed)} word(s) not checked (a call failed)')
+    return result
+
+
+def _set_told_by(ref_dir, told, force):
+    """Write `told_by` from Phase 1's `told` answers (*told*: scene id ->
+    bool, for the scenes answered), in reading order (#548). A cell already
+    set is kept unless *force*; with *force* a scene answered as not told is
+    cleared. Logs how many scenes are told, and in how many scenes; a told
+    scene with no scene to be its frame (the first, or one after a scene
+    with no answer); and a teller (the told scene's pov) missing from the
+    frame's cast when scene-intent.csv has it (after phase 2, validate's
+    teller-in-telling-scene checks the same)."""
+    from storyforge.elaborate import _read_csv, _read_csv_as_map, _write_csv, _FILE_MAP
+    from storyforge.extract import told_by_from_answers
+    path = os.path.join(ref_dir, 'scenes.csv')
+    rows = sorted(_read_csv(path), key=lambda r: int(r.get('seq') or 0))
+    frames, unframed = told_by_from_answers(
+        [r['id'] for r in rows], {sid for sid, yes in told.items() if yes}, set(told))
+    changed = 0
+    for row in rows:
+        sid, old = row['id'], (row.get('told_by') or '').strip()
+        if sid not in told or (old and not force):
+            continue
+        new = frames.get(sid, '')
+        if new != old:
+            row['told_by'] = new
+            changed += 1
+    if changed:
+        _write_csv(path, rows, _FILE_MAP['scenes.csv'])
+    if frames:
+        log(f'  told_by: {len(frames)} scene(s) told inside '
+            f'{len(set(frames.values()))} scene(s); {changed} cell(s) changed')
+    if unframed:
+        log(f'  WARNING: told_by: {len(unframed)} scene(s) answered as told have no scene '
+            f'before them to tell them (the first scene, or one after a scene with no '
+            f'answer), so told_by is left as it was: {", ".join(unframed)}')
+    intent = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+    by_id = {r['id']: r for r in rows}
+    absent = []
+    for sid, frame in frames.items():
+        teller = (by_id[sid].get('pov') or '').strip()
+        cast = intent.get(frame, {})
+        names = {c.strip() for col in ('characters', 'on_stage')
+                 for c in (cast.get(col) or '').split(';') if c.strip()}
+        if teller and names and teller not in names | {(by_id[frame].get('pov') or '').strip()}:
+            absent.append(f'{sid} ({teller}, not in {frame})')
+    if absent:
+        log(f'  WARNING: told_by: a teller (the told scene\'s pov) is not in the telling '
+            f'scene\'s cast: {"; ".join(absent)}')
+    elif frames and not intent:
+        log('  told_by: tellers not checked against the telling scenes\' casts yet (no '
+            'casts before phase 2); validate checks them')
 
 
 def _run_acts(project_dir, scenes_dir, ref_dir, log_dir, profile_file):

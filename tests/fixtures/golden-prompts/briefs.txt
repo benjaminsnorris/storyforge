@@ -103,6 +103,7 @@ id|status
 - States persist until explicitly resolved — do not silently drop them
 - continuity_deps should also list scenes whose physical_state_out this scene needs
 - Every scene must have goal/conflict/outcome filled
+- A scene with told_by is a tale told inside that scene: brief the tale's own events, and the telling scene's brief says who tells it to whom
 - Key dialogue should sound like the character, not the author
 - Scenes with no continuity_deps can be drafted in parallel — maximize these
 - The crisis must be a genuine dilemma (two bad choices or two good choices that conflict), not "do the obvious thing or don't"

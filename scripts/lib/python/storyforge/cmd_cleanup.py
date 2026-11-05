@@ -164,7 +164,8 @@ OPTIONAL_CSV_COLUMNS: dict[str, set[str]] = {
     'reference/characters.csv': {'pronouns'},
     # Added to the schema after projects existed; elaborate and extract add
     # them on their next write of the file
-    'reference/scenes.csv': {'summary', 'time_mode', 'timeline_date', 'architecture_scene'},
+    'reference/scenes.csv': {'summary', 'time_mode', 'timeline_date', 'architecture_scene',
+                             'told_by'},
     'reference/scene-intent.csv': {'theme_threads'},
     'reference/scene-briefs.csv': {'motif_details'},
 }
