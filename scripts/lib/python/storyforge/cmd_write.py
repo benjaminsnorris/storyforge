@@ -411,7 +411,9 @@ def _gate_blockers(project_dir: str, scene_id: str) -> list[str]:
             f'{", ".join(gone)}. Delete those rows.')
     at = order.get(scene_id, 0)
     return [f'{s}: {waiting[s]["reason"]}' for s in sorted(
-        (s for s in waiting if s in order and s != scene_id and order[s] < at),
+        (s for s in waiting if s in order and s != scene_id and order[s] < at
+         # its facts are in the ledger; the source disagrees (#557): the author's
+         and waiting[s]['command'] != gate.SOURCE_FIX),
         key=order.get)]
 
 

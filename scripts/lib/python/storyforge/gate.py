@@ -148,13 +148,25 @@ class GateResult:
     #: commitment stating an inherited contradiction, not recorded
     #: (`_hold_back`)
     held_back: list[tuple[str, Finding]] = field(default_factory=list)
+    #: (finding, why) for each verified contradiction with an earlier scene
+    #: the source backs this scene on (`gate_source`, #557): not blocking,
+    #: never sent to the fix; the earlier scene is listed `SOURCE_FIX` on
+    #: commit. Disjoint from `inherited` and `plan_conflicts`
+    source_backed: list[tuple[Finding, str]] = field(default_factory=list)
+    #: (statement, why) for each extracted fact the source contradicts: not
+    #: committed (#557, B-027)
+    source_dropped: list[tuple[str, str]] = field(default_factory=list)
+    #: why the source check didn't run, or what it didn't rule on
+    source_notes: list[str] = field(default_factory=list)
 
     @property
     def findings(self) -> list[Finding]:
-        """The check's verified findings, less `inherited`."""
+        """The check's verified findings, less `inherited` and `source_backed`."""
         if not self.check:
             return []
-        return [f for f in self.check.findings if not _among(f, self.inherited)]
+        backed = [f for f, _ in self.source_backed]
+        return [f for f in self.check.findings
+                if not _among(f, self.inherited) and not _among(f, backed)]
 
     @property
     def fixable(self) -> list[Finding]:
@@ -878,9 +890,10 @@ def _hold_back(result: GateResult) -> None:
     records a fact the check showed contradicts the book (#480's review).
     They go to `held_back`, reported."""
     keep = []
+    against = result.inherited + [f for f, _ in result.source_backed]
     for row in result.proposed:
         quote = _words(row.get('quote') or '')
-        hit = next((f for f in result.inherited if _count(quote) >= _MIN_BRIEF_WORDS
+        hit = next((f for f in against if _count(quote) >= _MIN_BRIEF_WORDS
                     and (quote in _words(f.scene_quote) or _words(f.scene_quote) in quote)),
                    None)
         if hit is None:
@@ -888,6 +901,46 @@ def _hold_back(result: GateResult) -> None:
         else:
             result.held_back.append((row.get('statement', ''), hit))
     result.proposed = keep
+
+
+def _apply_source(result: GateResult, project_dir: str, scene_id: str, prose: str,
+                  order: dict[str, int], log_dir: str, model: str) -> None:
+    """The source check (`gate_source`, #557) for a faithful adaptation:
+    drop the proposed facts the source contradicts (`source_dropped`) and
+    take the verified contradictions with an earlier scene the source backs
+    this scene on out of the findings (`source_backed`). Says in
+    `source_notes` why it didn't run, or what it didn't rule on; a failed
+    call is a note, never a stop."""
+    from storyforge import gate_source
+    ctx = gate_source.setup(project_dir)
+    if ctx is None:
+        return
+    if ctx.skip:
+        result.source_notes.append(f'not checked against the source: {ctx.skip}')
+        return
+    if scene_id not in ctx.refs:
+        result.source_notes.append('not checked against the source: the scene is invented '
+                                   'or not mapped in reference/source-map.csv')
+        return
+    at = order.get(scene_id, 0)
+    contradictions = [f for f in result.findings
+                      if f.kind == 'contradiction' and not _among(f, result.plan_conflicts)
+                      and f.established_scene in order and order[f.established_scene] < at]
+    if not result.proposed and not contradictions:
+        return
+    try:
+        review = gate_source.review(project_dir, scene_id, prose, result.proposed,
+                                    contradictions, model=model,
+                                    log_file=gate_source.log_file(log_dir, scene_id), ctx=ctx)
+    except gate_source.SourceReviewError as e:
+        result.source_notes.append(f'not checked against the source: {e}')
+        return
+    result.source_notes.extend(review.notes)
+    gone = {i for i, _ in review.dropped}
+    result.source_dropped = [(result.proposed[i].get('statement', ''), why)
+                             for i, why in review.dropped]
+    result.proposed = [r for i, r in enumerate(result.proposed) if i not in gone]
+    result.source_backed = [(contradictions[i], why) for i, why in review.backs_scene]
 
 
 def has_commitments(project_dir: str, scene_id: str) -> bool:
@@ -1039,6 +1092,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         error.run = getattr(e, 'run', None)
         raise error from e
     _classify(result, project_dir, before, already_reported)
+    _apply_source(result, project_dir, scene_id, prose, order, log_dir,
+                  extract_model or select_model('evaluation'))
     if not result.passed:
         _note_blocked(project_dir, scene_id, command, result)
         return result
@@ -1100,6 +1155,14 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
                 mark_pending(project_dir, sid, RECHECK,
                              f're-check: {scene_id} changed {len(result.changed)} fact(s) '
                              f'its facts depend on')
+        waiting = pending(project_dir)
+        for f, why in result.source_backed:
+            sid = f.established_scene
+            if sid not in waiting:
+                mark_pending(project_dir, sid, SOURCE_FIX,
+                             f'source: {scene_id} tells it the source\'s way and this scene '
+                             f'does not: "{_one_line(f.established_quote)[:120]}" ({_one_line(why)[:160]})')
+                waiting = pending(project_dir)
     except GateError as e:   # the ledger is written; say why the list wasn't updated
         from storyforge.common import log
         log(f'WARNING: {scene_id} passed, but {PENDING_PATH} could not be updated: {e}. '
@@ -1759,7 +1822,7 @@ def _one_line(text: str) -> str:
 
 #: `report_lines`' prefixes for what is reported either way, not what
 #: stopped the commit
-_NOT_BLOCKING = ('NOTE', 'COMMITTED', 'ALREADY IN THE SCENE')
+_NOT_BLOCKING = ('NOTE', 'COMMITTED', 'ALREADY IN THE SCENE', 'SOURCE BACKS THIS SCENE')
 
 
 def blocking_lines(lines: list[str]) -> list[str]:
@@ -1797,6 +1860,16 @@ def report_lines(result: GateResult) -> list[str]:
         lines.append(f'UNRULED: the scene may change the plan\'s {d.fact_id} '
                      f'("{_one_line(d.statement)}"): "{_one_line(d.claim)}"; the check gave '
                      f'no ruling')
+    for f, why in result.source_backed:
+        lines.append(f'SOURCE BACKS THIS SCENE (not blocking; {f.source} is listed for the '
+                     f'author in {PENDING_PATH}): {_one_line(f.message())} — the source: '
+                     f'{_one_line(why)}')
+    if result.source_dropped:
+        lines.append('NOTE (not recorded: the source contradicts it): '
+                     + '; '.join(f'{_one_line(st)} ({_one_line(why)})'
+                                 for st, why in result.source_dropped))
+    for note in result.source_notes:
+        lines.append(f'NOTE (source): {_one_line(note)}')
     for f in result.inherited:
         lines.append(f'ALREADY IN THE SCENE (before this pass, or reported before; not '
                      f'blocking, the author\'s to fix; listed in {REPORTED_PATH} on commit): '
@@ -2114,6 +2187,9 @@ RECHECK, RECHECK_FAILED = 'recheck', 'recheck-failed'
 #: it; when it passes the gate, the scenes depending on the rejection are
 #: listed (its reason carries `[rejected: ids]`, kept by `mark_pending`)
 REVISE_REJECTED = 'revise-rejected'
+#: An earlier scene the source contradicts where a later one follows it
+#: (#557): the author's to fix; it doesn't stop drafting
+from storyforge.gate_source import SOURCE_FIX  # noqa: E402
 
 
 @dataclass
