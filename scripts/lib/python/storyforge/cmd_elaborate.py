@@ -1567,9 +1567,13 @@ def _register_brief_ledger(project_dir: str, ref_dir: str, log_dir: str) -> str:
     validate counted no facts and the knowledge chain scored 0 (#547; Gawain
     G-023, Beowulf B-020). This runs the reconciliation `storyforge hone
     --domain knowledge,physical-states` runs: ids already in the ledger cost
-    nothing, the rest go to the model in batches (about $0.2 a book).
-    Returns '' or what went wrong, which the stage reports; the briefs stay
-    written either way."""
+    nothing, the rest go to the model in batches (about $0.2 a book). The
+    rows it adds are `introduced_by` `briefs`, `origin` `plan`: registry
+    facts, which the gate treats as plan, never as what the prose
+    established (`gate.py`, `registry_is_plan`). Then `_prune_brief_rows`
+    keeps them in step with the briefs. Returns '' or what went wrong, which
+    the stage reports; the briefs stay written either way."""
+    from storyforge import ledger
     from storyforge.hone import reconcile_domain
     try:
         model = select_model('synthesis')
@@ -1577,6 +1581,7 @@ def _register_brief_ledger(project_dir: str, ref_dir: str, log_dir: str) -> str:
         problem = f'the ledger rows for the briefs\' facts and states were not written ({e})'
         log(f'WARNING: {problem}')
         return problem + '; run storyforge hone --domain knowledge,physical-states'
+    before = {r.get('id', '') for r in ledger.load_from(ref_dir)}
     failed = []
     for domain in ('knowledge', 'physical-states'):
         log(f'Registering the briefs\' {domain} in the ledger...')
@@ -1590,13 +1595,63 @@ def _register_brief_ledger(project_dir: str, ref_dir: str, log_dir: str) -> str:
             f'{result["calls"]} call(s), {result["unresolved"]} unresolved')
         if result['unresolved']:
             failed.append(domain)
+    _prune_brief_rows(ref_dir, before)
     if failed:
         return (f'the briefs\' {" and ".join(failed)} ids are not all in the ledger; '
                 f'run storyforge hone --domain knowledge,physical-states')
     return ''
 
 
-_ENUM_WITH_TEXT = re.compile(r'^\s*([A-Za-z][\w-]*)\s*(?::|—|–|\s-\s)\s*(.+)$', re.S)
+#: `introduced_by` of the ledger rows the briefs stage registers
+BRIEFS_WRITER = 'briefs'
+_BRIEF_LEDGER_COLUMNS = {'knowledge': ('knowledge_in', 'knowledge_out'),
+                         'physical': ('physical_state_in', 'physical_state_out')}
+
+
+def _prune_brief_rows(ref_dir: str, before: set[str]) -> None:
+    """Keep the briefs stage's own ledger rows in step with the briefs (#568
+    review). Rows new since *before* are marked `introduced_by` `briefs`. A
+    `briefs` row no active scene's brief names any more (a re-run dropped the
+    fact, or only cut or merged scenes named it) is removed, so it can't reach
+    the gate as a binding fact; one whose `scene_id` is an inactive scene is
+    moved to the first active scene that establishes it (blank, backstory,
+    when none does). Rows any other writer made are left alone."""
+    from storyforge import ledger
+    from storyforge.elaborate import _read_csv
+    from storyforge.source import INACTIVE_STATUSES
+    scenes = sorted(_read_csv(os.path.join(ref_dir, 'scenes.csv')),
+                    key=lambda r: int(r['seq']) if (r.get('seq') or '').isdigit() else 0)
+    active = [r['id'] for r in scenes if r.get('id')
+              and (r.get('status') or '').strip() not in INACTIVE_STATUSES]
+    inactive = {r['id'] for r in scenes if r.get('id')} - set(active)
+    briefs = {r.get('id', ''): r for r in _read_csv(os.path.join(ref_dir, 'scene-briefs.csv'))}
+
+    def ids(sid: str, col: str) -> set[str]:
+        return {x.strip() for x in (briefs.get(sid, {}).get(col) or '').split(';') if x.strip()}
+
+    rows = ledger.load_from(ref_dir)
+    out = []
+    for row in rows:
+        type_ = row.get('type', '')
+        cols = _BRIEF_LEDGER_COLUMNS.get(type_)
+        if cols and row.get('id') not in before and not ledger.is_commitment(row):
+            row = dict(row, introduced_by=BRIEFS_WRITER)
+        if not cols or (row.get('introduced_by') or '').strip() != BRIEFS_WRITER:
+            out.append(row)
+            continue
+        rid = row.get('id', '')
+        named = [sid for sid in active if any(rid in ids(sid, c) for c in cols)]
+        if not named:
+            continue   # stale: no active brief names it
+        if (row.get('scene_id') or '').strip() in inactive:
+            sets_up = [sid for sid in named if rid in ids(sid, cols[1])]
+            row = dict(row, scene_id=sets_up[0] if sets_up else '')
+        out.append(row)
+    if out != rows:
+        dropped = len(rows) - len(out)
+        if dropped:
+            log(f'  ledger: removed {dropped} planned fact(s) no active brief names')
+        ledger.save_to(ref_dir, out, command='elaborate-briefs')
 
 
 def split_enum_descriptions(row: dict, filename: str) -> list[str]:
