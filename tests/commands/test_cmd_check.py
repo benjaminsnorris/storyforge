@@ -918,6 +918,26 @@ class TestProvisionalRecovery:
         assert mine == ['The map shows no contour line']
         assert [st for st, _ in result.held_back] == ['The Hollow was on the map']
 
+    def test_the_claim_restated_in_another_paragraph_is_held_back(self, project):
+        """#556's second review: the finding quotes paragraph 1 ("four hundred
+        and twelve"), no fact id, no earlier row; "412 residents" in paragraph 3
+        was committed."""
+        project_dir, _ = project
+        again = _fact('The Hollow had 412 residents',
+                      'Four hundred and twelve people going about their lives',
+                      subject='tarrens-hollow')
+        result, mine = self._commit(project_dir, [again, self.OTHER])
+        assert mine == ['The map shows no contour line']
+        assert [st for st, _ in result.held_back] == ['The Hollow had 412 residents']
+
+    def test_with_a_fact_stating_it_the_restatement_must_share_its_subject(self, project):
+        project_dir, _ = project
+        here = _fact("Tarren's Hollow had 412 people", HERE, subject='tarrens-hollow')
+        other = _fact('Dorren counted 412 maps', 'Four hundred and twelve people going '
+                      'about their lives', subject='dorren-hayle')
+        result, mine = self._commit(project_dir, [here, other])
+        assert mine == ['Dorren counted 412 maps']
+
     def test_a_fact_on_the_contradicted_facts_subject_is_held_back(self, project):
         project_dir, _ = project
         rows = ledger.load(project_dir)
