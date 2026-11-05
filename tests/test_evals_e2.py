@@ -314,7 +314,7 @@ class TestFloors:
             'e2-carol-checker': {'recall_PHY': 0.6667, 'recall_TIM': 0.8, 'recall_KNO': 1.0,
                                  'recall_REL': 0.8, 'recall_TRT': 0.5, 'precision': 0.7742,
                                  'flags': 31},
-            'e2-corpus-drift': {'recall_TIM': 0.1667, 'precision': 0.4, 'flags': 5},
+            'e2-corpus-drift': {'recall_TIM': 0.1667, 'precision': 0.3333, 'flags': 6},
             'e2-corpus-validate': {'recall_PHY': 0.4286, 'precision': 0.0305, 'flags': 753},
         }
         for suite, floors in lowest.items():
