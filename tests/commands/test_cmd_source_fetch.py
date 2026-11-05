@@ -195,3 +195,57 @@ def test_fetch_with_a_bad_config_writes_nothing(tmp_path, files, git_env, monkey
     assert cmd_source.main(['fetch', '--meta', str(bad), '--no-commit']) == 1
     assert 'Nothing was written' in capsys.readouterr().out
     assert (project / 'manuscript.md').read_text() == before
+
+
+class TestInitKinds:
+    """#553 (Beowulf B-014, Gawain G-013): init makes an adaptation with
+    --source, and a new novel's CLAUDE.md lists elaboration, not extraction."""
+
+    def test_source_writes_the_block(self, tmp_path, git_env):
+        src = tmp_path / 'beowulf-source'
+        src.mkdir()
+        (src / 'storyforge.yaml').write_text('project:\n  title: "Beowulf"\n')
+        project = tmp_path / 'novel'
+        assert cmd_init.main([str(project), '--title', 'Beowulf', '--source', str(src),
+                              '--source-slug', 'beowulf', '--no-commit']) == 0
+        from storyforge import source
+        cfg = source.read_config(str(project))
+        assert [(p.slug, p.path) for p in cfg.projects] == [('beowulf', '../beowulf-source')]
+        assert cfg.mode == 'faithful'
+        md = (project / 'CLAUDE.md').read_text()
+        assert './storyforge source import' in md
+        assert 'split-manuscript' not in md and '`./storyforge extract`' not in md
+
+    def test_source_mode_and_default_slug(self, tmp_path, git_env):
+        src = tmp_path / 'gawain'
+        src.mkdir()
+        (src / 'storyforge.yaml').write_text('project:\n  title: "G"\n')
+        project = tmp_path / 'novel'
+        assert cmd_init.main([str(project), '--title', 'G', '--source', str(src),
+                              '--source-mode', 'free', '--no-commit']) == 0
+        from storyforge import source
+        cfg = source.read_config(str(project))
+        assert cfg.projects[0].slug == 'gawain' and cfg.mode == 'free'
+
+    def test_source_must_be_a_project(self, tmp_path, git_env):
+        assert cmd_init.main([str(tmp_path / 'novel'), '--title', 'G', '--source',
+                              str(tmp_path), '--no-commit']) == 1
+        assert not (tmp_path / 'novel').exists()
+
+    def test_source_has_no_manuscript(self, tmp_path, git_env):
+        with pytest.raises(SystemExit):
+            cmd_init.main([str(tmp_path / 'n'), '--title', 'G', '--source', str(tmp_path),
+                           '--manuscript', 'x.md'])
+
+    def test_a_new_novel_lists_elaboration(self, tmp_path, git_env):
+        project = tmp_path / 'novel'
+        assert cmd_init.main([str(project), '--title', 'T', '--no-commit']) == 0
+        md = (project / 'CLAUDE.md').read_text()
+        assert './storyforge elaborate --stage spine' in md
+        assert 'split-manuscript' not in md
+        assert 'source:' not in (project / 'storyforge.yaml').read_text()
+
+    def test_an_extraction_still_lists_extraction(self, tmp_path, files, git_env):
+        code, project = _init(tmp_path, files, '--no-commit')
+        assert code == 0
+        assert 'scenes-setup --split-manuscript' in (project / 'CLAUDE.md').read_text()
