@@ -2533,6 +2533,55 @@ class TestSteadyParagraphs:
         assert any(gate.PROSE_PATH in n for n in result.prose_notes)
         assert not os.path.exists(os.path.join(project_dir, gate.PROSE_PATH))
 
+    def _commit(self, project_dir, message):
+        import subprocess
+        subprocess.run(['git', '-C', project_dir, 'add', '-A'], check=True)
+        subprocess.run(['git', '-C', project_dir, '-c', 'user.name=t', '-c', 'user.email=t@t',
+                        'commit', '-qm', message], check=True)
+
+    def _legacy(self, project_dir, tmp_path):
+        """A book gated before #558: its ledger and prose in git, no
+        gate-prose.csv (Beowulf B-033)."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)
+        os.remove(os.path.join(project_dir, gate.PROSE_PATH))
+        self._commit(project_dir, 'Draft and gate')
+        with open(self._path(project_dir), encoding='utf-8') as f:
+            return old, f.read()
+
+    def test_a_book_gated_before_the_record_reads_its_prose_from_git(
+            self, project_dir, tmp_path):
+        """Beowulf B-033: with no gate-prose.csv, a one-scene revision of the
+        prelude re-read every fact as changed and queued 47 re-checks."""
+        old, prose = self._legacy(project_dir, tmp_path)
+        assert gate.gated_prose(project_dir, SCENE) == (prose, '')
+        self._edit(project_dir, 'Roads, wells, the little', 'Roads and wells, the little')
+        result = _gate(project_dir, tmp_path, [
+            _commitment(subject='tarrens-hollow', type='knowledge',
+                        statement="Tarren's Hollow had 412 people at the last census"),
+            self._temple('Dorren knows the old survey shows a temple')], command='revise')
+        assert result.committed and result.steady == [old['tarrens-hollow']['id']]
+        assert result.changed == [old['dorren-hayle']['id']]
+        assert result.prose_notes == []
+
+    def test_history_skips_a_commit_of_the_prose_alone(self, project_dir, tmp_path):
+        """revise commits the revised prose before the gate reads it: the
+        prose the facts were read from is the one at the ledger's commit."""
+        _, prose = self._legacy(project_dir, tmp_path)
+        self._edit(project_dir, 'Roads, wells, the little', 'Roads and wells, the little')
+        self._commit(project_dir, 'Revision, before the gate')
+        assert gate.gated_prose(project_dir, SCENE) == (prose, '')
+
+    def test_history_is_not_read_when_the_ledger_has_uncommitted_rows(
+            self, project_dir, tmp_path):
+        self._legacy(project_dir, tmp_path)
+        rows = ledger.load(project_dir)
+        mine = next(r for r in rows if r['scene_id'] == SCENE and ledger.is_commitment(r))
+        mine['statement'] += ' (edited by hand)'
+        ledger.save(project_dir, rows, command='test')
+        earlier, why = gate.gated_prose(project_dir, SCENE)
+        assert earlier is None and 'record' in why
+
     def test_the_committed_prose_is_recorded_and_read_back(self, project_dir, tmp_path):
         self._git(project_dir)
         _gate(project_dir, tmp_path, [_commitment()])
