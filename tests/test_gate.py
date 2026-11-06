@@ -1810,6 +1810,35 @@ class TestReextractAMisquote(_FixRounds):
         assert out.prose == 'v1' and out.result is r1
         assert 'could not finish (OSError: disk full)' in out.reextraction.summary()
 
+    def test_a_partial_fix_run_failing_only_on_a_misquote_extracts_again(self, monkeypatch,
+                                                                          tmp_path):
+        """T-3 (#602's review): the run `_partial_fix` keeps is a re-check too."""
+        e1 = [{'find': 'a', 'replace': 'b'}, {'find': 'c', 'replace': 'd'}]
+        part_run = self._misquote()
+        monkeypatch.setattr(gate, '_worse', lambda *a: 'fix round 1 left more problems')
+        monkeypatch.setattr(gate, '_partial_fix',
+                            lambda *a, **k: ([e1[0]], 'vp', part_run, '1 edit'))
+        out, dirs, seen = self._run(monkeypatch, tmp_path,
+                                    [self._result('a', 'c'), self._result('e', 'f', 'g'),
+                                     self._result()],
+                                    [('v1', e1)])
+        logs = out.log_dir
+        assert dirs == [logs, os.path.join(logs, 'recheck'), os.path.join(logs, 'reextract')]
+        assert out.result.passed and out.prose == 'vp' and len(seen) == 1
+        assert out.reextraction.outcome == gate.REGATE_PASSED
+
+    def test_an_inherited_finding_beside_a_misquote_is_extracted_again(self, monkeypatch,
+                                                                       tmp_path):
+        """T-3: an inherited contradiction doesn't block, so the misquote is
+        all that stopped the re-check; the fix is never sent the inherited one."""
+        r1 = self._misquote('old')
+        r1.inherited = list(r1.check.findings)
+        done = self._result('old')
+        done.inherited = list(done.check.findings)
+        out, dirs, seen = self._run(monkeypatch, tmp_path, [self._result('a'), r1, done],
+                                    [('v1', [{'find': 'a', 'replace': 'b'}])])
+        assert out.result is done and done.passed and len(dirs) == 3 and len(seen) == 1
+
     def test_only_extractor_slips(self):
         assert gate._only_extractor_slips(self._misquote()) == [
             f'quote: {SCENE}: {SCENE}--a-fact']
