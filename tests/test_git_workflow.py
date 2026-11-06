@@ -483,3 +483,54 @@ class TestWorkTreeProblem:
         (fresh / 'storyforge.yaml').write_text('project: x\n')
         self._run(fresh, 'init', '-q')
         assert git.project_repo_problem(str(fresh)) == ''
+
+
+class TestAFailedCommitRestoresTheIndex:
+    """#520 review (SF-C): on a failed commit, `reset -- paths` (or `-- .`)
+    unstaged more than the call had staged: the author's own staged edits
+    under the paths, and the `git rm --cached` removals cleanup had just
+    made, while the WARNING said only its own files were unstaged."""
+
+    _git = staticmethod(TestAFailedCommit._git)
+
+    def _index(self, work):
+        return self._git(work, 'ls-files', '-s')
+
+    def _rejecting_subfolder(self, tmp_path):
+        work, project = TestCommitInASubfolder()._repos(tmp_path, 'projects/book')
+        hook = work / '.git' / 'hooks' / 'pre-commit'
+        hook.write_text('#!/bin/sh\necho "hook says no" >&2\nexit 1\n')
+        hook.chmod(0o755)
+        return work, project
+
+    def test_an_authors_staged_edit_under_the_paths_stays_staged(self, tmp_path, capsys):
+        from storyforge import git
+        work, project = self._rejecting_subfolder(tmp_path)
+        (project / 'scenes' / 'kept.md').write_text('the author staged this\n')
+        self._git(project, 'add', 'scenes/kept.md')
+        (project / 'scenes' / 'kept.md').write_text('and kept editing\n')
+        (project / 'scenes' / 'new.md').write_text('ours\n')
+        before = self._index(work)
+        assert git.commit_and_push(str(project), 'Scenes', ['scenes/']) is False
+        assert self._index(work) == before
+        assert 'the index is as it was before' in capsys.readouterr().out
+
+    def test_cleanups_removals_survive_a_failed_commit(self, tmp_path):
+        from storyforge import git
+        work, project = self._rejecting_subfolder(tmp_path)
+        self._git(project, 'rm', '--cached', '-q', 'scenes/gone.md')
+        (project / 'scenes' / 'kept.md').write_text('cleaned\n')
+        before = self._index(work)
+        assert git.commit_and_push(str(project), 'Cleanup') is False
+        assert self._index(work) == before
+        assert 'projects/book/scenes/gone.md' not in self._git(work, 'ls-files')
+
+    def test_a_sibling_projects_staged_file_stays_staged(self, tmp_path):
+        from storyforge import git
+        work, project = self._rejecting_subfolder(tmp_path)
+        (work / 'projects' / 'other' / 'notes.md').write_text('sibling\n')
+        self._git(work, 'add', 'projects/other/notes.md')
+        (project / 'scenes' / 'kept.md').write_text('cleaned\n')
+        before = self._index(work)
+        assert git.commit_and_push(str(project), 'Cleanup') is False
+        assert self._index(work) == before

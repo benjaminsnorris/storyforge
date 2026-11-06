@@ -533,10 +533,19 @@ class TestCommitCleanup:
         hook.chmod(0o755)
         before = _sh(root, 'rev-parse', 'HEAD')
         (project / 'scenes' / 'a.md').write_text('cleaned\n')
+        (project / 'run.log').write_text('x')
+        _sh(project, 'add', 'run.log')
+        _sh(project, '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'log')
+        before = _sh(root, 'rev-parse', 'HEAD')
+        (project / '.gitignore').write_text('run.log\n')
+        cmd_cleanup._untrack_newly_ignored(str(project))
+        index = _sh(root, 'ls-files', '-s')
+        assert 'projects/book/run.log' not in index
 
         assert cmd_cleanup._commit_cleanup(str(project)) is False
 
         assert _sh(root, 'rev-parse', 'HEAD') == before
+        assert _sh(root, 'ls-files', '-s') == index, 'the index was not put back (SF-C)'
         out = capsys.readouterr().out
         assert f'WARNING: git commit "{cmd_cleanup.CLEANUP_COMMIT_MESSAGE}" failed: ' \
                'hook says no' in out

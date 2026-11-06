@@ -348,9 +348,10 @@ def commit_and_push(project_dir: str, message: str, paths: list[str] | None = No
 
     False when nothing was staged (`last_commit_error` is
     `NOTHING_TO_COMMIT`; nothing said) or the commit failed: then git's
-    reason is logged as a WARNING and kept in `last_commit_error`, and what
-    this call staged is unstaged again, so a later commit doesn't sweep it
-    in under its own message. A failed push is a WARNING (`_push`); the
+    reason is logged as a WARNING and kept in `last_commit_error`, and the
+    index is put back exactly as it was before the call (`write-tree` /
+    `read-tree`), so a later commit doesn't sweep in what this one staged,
+    and nothing staged before it is lost. A failed push is a WARNING (`_push`); the
     commit stands and True is returned.
 
     With `paths`, the commit holds only what is staged under them: anything
@@ -373,15 +374,34 @@ def commit_and_push(project_dir: str, message: str, paths: list[str] | None = No
     """
     global last_commit_error
 
+    # The index as it was, to put back exactly if the commit fails. A
+    # `reset -- paths` there unstaged more than this call staged: an author's
+    # own staged edits under the paths, and (with no paths, `-- .`) the
+    # `git rm --cached` removals cleanup had just made (#520 review SF-C)
+    snap = _git(project_dir, 'write-tree', check=False)
+    if snap.returncode != 0:
+        last_commit_error = ' '.join((snap.stderr or 'git write-tree failed').split())[:300]
+        log(f'WARNING: git commit "{message}" failed: could not record the index '
+            f'(unmerged files?): {last_commit_error}. Nothing was staged or committed.')
+        return False
+    index_before = snap.stdout.strip()
+
     def fail(reason: str, what: str = '') -> bool:
-        """Keep git's reason, unstage what this call staged, and say so."""
+        """Keep git's reason, put the index back as it was, and say so."""
         global last_commit_error
         last_commit_error = ' '.join(reason.split())[:300]
-        _git(project_dir, '--literal-pathspecs', 'reset', '-q', '--', *(paths or ['.']),
-             check=False)
+        restored = ''
+        if index_before:
+            rt = _git(project_dir, 'read-tree', index_before, check=False)
+            if rt.returncode == 0:
+                # read-tree drops the cached file stats; refresh them
+                _git(project_dir, 'update-index', '-q', '--refresh', check=False)
+            else:
+                restored = (f' Could not put the index back as it was '
+                            f'({_first_line(rt.stderr)}); check `git status`.')
         log(f'WARNING: git commit "{message}" failed: {what + ": " if what else ""}'
-            f'{last_commit_error}. Nothing was committed; what it staged is unstaged '
-            f'again.')
+            f'{last_commit_error}. Nothing was committed'
+            f'{"" if restored else "; the index is as it was before"}.{restored}')
         return False
 
     if paths:
