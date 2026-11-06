@@ -14,6 +14,7 @@ import tempfile
 from collections.abc import Mapping
 
 from . import mice
+from .speaker_labels import LABEL_RULE
 from .prompts import (
     _read_csv_header_and_rows,
     read_csv_field,
@@ -930,7 +931,8 @@ def _field_instruction(field: str) -> str:
         ),
         'key_dialogue': (
             'KEY_DIALOGUE: <semicolon-separated specific lines or exchanges '
-            'essential to the scene — quote directly from the text>'
+            'essential to the scene — quote directly from the text. '
+            + LABEL_RULE + '>'
         ),
         'emotions': (
             'EMOTIONS: <semicolon-separated emotional beats in sequence '

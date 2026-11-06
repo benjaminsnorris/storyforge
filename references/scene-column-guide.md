@@ -176,6 +176,8 @@ Bad facts (too granular, no scene depends on them):
 
 A line without a label in one of these forms is still matched, but its speaker is not checked. The gate's report says which (`speaker checked` / `speaker not checked`).
 
+Storyforge's own brief writers (elaborate's briefs stage, extraction, enrich, hone and revise's source-drift fix) write `Name: "line"`. Briefs written before v1.156.0 keep the lines they have: label them by hand where it matters.
+
 ### continuity_deps — Parallel Drafting Groups
 **Why it matters:** Scenes with no dependencies can be drafted simultaneously. Minimizing deps maximizes parallelism and reduces drafting time/cost.
 **How to check:** Run `compute_drafting_waves` to see the wave structure. Scenes in wave 1 have no deps; later waves depend on earlier ones.

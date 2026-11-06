@@ -16,6 +16,7 @@ from typing import NamedTuple
 
 from storyforge.brief_names import REWRITTEN_FILES
 from storyforge.narrator import NARRATOR_POV, is_narrator
+from storyforge.speaker_labels import LABEL_RULE
 from storyforge.common import log, reference_text
 
 from storyforge.elaborate import (
@@ -1593,6 +1594,7 @@ def build_concretize_prompt(
 4. Replace "connecting X to Y" with the physical moment: what does the character look at, touch, or say when the connection happens?
 5. Keep the same number of beats (semicolon-separated items). Don't add or remove story events — just rewrite HOW they're described.
 6. Use the character's sensory palette from the voice guide. If they think in food metaphors, their observations should reflect that.
+7. {LABEL_RULE}
 
 ## Output Format
 
@@ -1668,6 +1670,7 @@ def build_trim_prompt(
 2. For emotions: use 2 beats maximum (start → end). "resolve;bitter-defiance" not "resolve;frustration;bitter-resignation;quiet-defiance".
 3. For decision/crisis/goal/conflict: one clause. No sentences, no em-dashes, no elaboration.
 4. Preserve the MEANING — just say it in fewer words.
+5. {LABEL_RULE}
 
 ## Output Format
 
@@ -1806,6 +1809,7 @@ def build_evaluation_fix_prompt(
 2. Every action must be something the POV character physically does or perceives. No thematic descriptions, no narrator interpretations.
 3. Do not invent characters, locations, or events not implied by the existing fields.
 4. Keep each field concise — brief contract language, not prose.
+5. {LABEL_RULE}
 
 ## Output Format
 

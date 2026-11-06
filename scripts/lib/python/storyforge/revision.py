@@ -569,13 +569,14 @@ def build_revision_prompt(
     intent_path = os.path.join(project_dir, 'reference', 'scene-intent.csv')
     briefs_path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
     if os.path.isfile(intent_path) or os.path.isfile(briefs_path):
+        from storyforge.speaker_labels import LABEL_READING
         intent_lines = [
             '\n## Intent-Beat Protection\n',
             '**CRITICAL:** Before cutting or rewriting the final 30% of any scene, verify that '
             'all intent beats survive. Each scene has structural beats specified below that MUST '
             'be present in the revised scene. If a pattern rule (e.g., "cut summary closers") '
             'conflicts with an intent beat, preserve the intent beat and find another way to '
-            'address the pattern.\n',
+            'address the pattern. ' + LABEL_READING + '\n',
         ]
         # Get scene IDs from existing paths
         scope_ids = [os.path.splitext(os.path.basename(p))[0] for p in existing_paths]

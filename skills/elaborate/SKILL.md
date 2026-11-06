@@ -266,6 +266,7 @@ In graphic-novel mode, the scene-map stage asks for `target_pages` per scene ins
 1. Read full scene map and all reference materials
 2. For each scene, define: goal, conflict, outcome, crisis, decision, knowledge_in, knowledge_out, key_actions, key_dialogue, emotions, motifs, continuity_deps
    - **Use canonical IDs from registries** for knowledge_in, knowledge_out (the ledger's knowledge facts in commitments.csv), motifs (motif-taxonomy.csv). Add new registry entries for any new knowledge facts or motifs introduced at this stage: a new fact is a row of `reference/commitments.csv`, the commitments ledger, with `type` `knowledge`: `id`, the `scene_id` that establishes it (blank for backstory), the fact as one sentence in `statement`, `origin` `author` (or `plan` for a brief), `status` `binding`, `mutable` `state`; leave the other columns empty.
+   - **Label every scripted line's speaker:** `Name: "line"` in `key_dialogue` (and on a quoted line in `key_actions` or `outcome`), the name exactly as in characters.csv, no title or possessive, one character per label, repeated after each `;`. The gate checks a speech tag that splits a labelled line against that speaker (see `references/scene-column-guide.md`).
 3. **Knowledge wording must be exact** — knowledge_out from scene N becomes knowledge_in for later scenes, matched literally. Use registry IDs rather than free-text to ensure exact matching.
 4. Maximize scenes with no continuity_deps (these can be drafted in parallel)
 5. Write updates

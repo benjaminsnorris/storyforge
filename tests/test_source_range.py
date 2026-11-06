@@ -604,6 +604,9 @@ class TestFidelity:
         ok = cmd_revise._source_drift_fix(mapped, 'olympus-council-meets', {}, {}, {}, None,
                                           ['brief goal: drifted'], ctx)
         assert isinstance(ok, tuple)
+        # #513: the fix rewrites KEY_DIALOGUE, so it asks for speaker labels
+        from storyforge.speaker_labels import LABEL_RULE
+        assert LABEL_RULE in ok[0]
 
 
 # ----------------------------------------------------------------------------

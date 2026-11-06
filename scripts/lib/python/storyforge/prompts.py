@@ -2097,13 +2097,14 @@ def build_scene_prompt_from_briefs(
         word_target_line = f"\n**Target length: ~{target_words} words.** Prefer economy — achieve through implication what would take twice the words in exposition. Do not pad to reach the target; stop when the scene is complete."
 
     # Key dialogue checklist
+    from .speaker_labels import LABEL_READING
     key_dialogue = scene.get('key_dialogue', '').strip()
     dialogue_checklist = ''
     if key_dialogue:
         lines = [d.strip() for d in key_dialogue.split(';') if d.strip()]
         if lines:
             items = '\n'.join(f'  - [ ] {line}' for line in lines)
-            dialogue_checklist = f"\n\n**Key dialogue checklist — every line below MUST appear in the scene (verbatim or close paraphrase). Do not end the scene until all are delivered:**\n{items}"
+            dialogue_checklist = f"\n\n**Key dialogue checklist — every line below MUST appear in the scene (verbatim or close paraphrase). Do not end the scene until all are delivered.** {LABEL_READING}\n{items}"
 
     states_checklist = _states_checklist(scene, ref_dir)
 
