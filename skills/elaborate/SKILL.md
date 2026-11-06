@@ -118,6 +118,7 @@ When the author doesn't specify a mode, detect the current stage from Step 2 and
 | Spine done (5-10 rows, function only) | Run architecture |
 | Architecture done (has value_shift) | Run scene map |
 | Map done (has characters, on_stage) | Run briefs |
+| Briefs done, `storyforge status` next.stage = `voice` (voice-guide.md missing or init's template) | Run the Voice Stage |
 | Briefs done, validation passes | Announce ready for drafting, redirect to forge |
 | Drafted with validation failures > 0 | Run gap-fill |
 | Everything passes | Redirect to forge |
@@ -339,7 +340,7 @@ Reference images upload alongside the prompt, labeled by role: **Image 1** chara
 
 ### Voice Stage (Interactive)
 
-Voice development typically happens after architecture (you know your POV characters and scene types) and before briefs (the briefs need voice rules). Can also run standalone at any point. Unattended, `./storyforge elaborate --stage voice` writes `reference/voice-guide.md` and `reference/voice-profile.csv` in one call; it advances no phase.
+Voice development typically happens after architecture (you know your POV characters and scene types) and before briefs (the briefs need voice rules). Can also run standalone at any point. Drafting needs it: while `reference/voice-guide.md` is missing or still init's template, `storyforge status` names `voice` as the next stage instead of `write`. Unattended, `./storyforge elaborate --stage voice` writes `reference/voice-guide.md` and `reference/voice-profile.csv` in one call; it advances no phase.
 
 Every CLI stage sets `exists: true` and `updated` on the `storyforge.yaml` artifacts it writes (story architecture, bibles, voice guide, scene index).
 

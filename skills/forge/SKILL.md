@@ -75,6 +75,11 @@ Read the `phase` field from `storyforge.yaml`. If it is one of: `spine`, `archit
     (pressure-tests logline/synopsis/act-shape before any spine work)
   - `storyforge score --compare <a> <b> [--level N]` — compare candidate
     loglines/synopses when the author is exploring options
+- **If `next.stage` is `voice`**, the structure is built but
+  `reference/voice-guide.md` is missing or still init's template (the `voice`
+  blocker says which), and drafting would have no voice to follow. Route to the
+  `elaborate` skill's Voice Stage, or give the author
+  `storyforge elaborate --stage voice` to write it unattended; draft after.
 - **If `then.stage` is `story-power`** (the paired follow-up `status` reports
   while `next.stage` is still a prose-tier rung), that confirms the bullet
   above: once the section's floor check passes, recommend running

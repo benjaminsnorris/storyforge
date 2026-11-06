@@ -13,7 +13,10 @@ from typing import Literal
 from storyforge.scoring_levels import score_all_levels, LEVEL_NAMES
 from storyforge.scoring_consistency import score_consistency_all_levels
 from storyforge.scoring_coverage import score_coverage_all_levels
-from storyforge.common import parse_story_summary, read_yaml_field
+from storyforge.common import (
+    VOICE_GUIDE_PATH, VOICE_GUIDE_REMEDY, VOICE_STAGE_COMMAND,
+    parse_story_summary, read_yaml_field, voice_guide_problem,
+)
 from storyforge.elaborate import _read_csv
 
 LADDER_LEVELS = [0, 1, 2, 3, 4, 5, 6]
@@ -23,7 +26,7 @@ PROSE_STAGES = ('logline', 'synopsis', 'act-shape')
 # scoring_levels.py does for its result shapes) so drift is visible in-type.
 RungState = Literal['solid', 'thin', 'not_started']
 Stage = Literal['logline', 'synopsis', 'act-shape', 'spine', 'architecture',
-                'scene-map', 'briefs', 'story-power', 'draft', 'evaluate']
+                'scene-map', 'briefs', 'story-power', 'voice', 'draft', 'evaluate']
 
 # Rung name -> `elaborate --stage` argument (only rungs with a command stage).
 ELABORATE_STAGE = {
@@ -32,6 +35,11 @@ ELABORATE_STAGE = {
     'scene-map': 'map',
     'briefs': 'briefs',
 }
+
+# The voice rung (#596): between briefs and drafting, a prose book's
+# reference/voice-guide.md must hold the author's text. Not a floor-checked
+# ladder level; `build_status` makes it the phase and a blocker. A graphic
+# novel's script is written from voice-profile.csv, so it has no voice rung.
 
 # Which reference CSV backs each structural rung.
 _LEVEL_CSV = {
@@ -198,6 +206,13 @@ def _recommend(stage: str) -> tuple[dict, dict | None]:
             then = {'stage': 'draft', 'action': 'Draft scenes',
                     'command': 'storyforge write --keep-going', 'reason': ''}
         return nxt, then
+    if stage == 'voice':
+        return ({'stage': 'voice', 'action': 'Develop the voice guide',
+                 'command': VOICE_STAGE_COMMAND,
+                 'reason': (f'Briefs are complete; drafting follows {VOICE_GUIDE_PATH}, '
+                            'which is not filled in yet')},
+                {'stage': 'draft', 'action': 'Draft scenes',
+                 'command': 'storyforge write --keep-going', 'reason': ''})
     if stage == 'draft':
         return ({'stage': 'draft', 'action': 'Draft scenes',
                  'command': 'storyforge write --keep-going',
@@ -252,6 +267,21 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
     if phase is None:
         phase, _drafted, _total = draft_stage(project_dir)
 
+    # #596: briefs to drafting with no voice guide. Before drafting it is the
+    # next step; once every scene is drafted it is still reported, since
+    # evaluation and revision read it too.
+    voice_blocker = None
+    if phase in ('draft', 'evaluate') and medium != 'graphic-novel':
+        problem = voice_guide_problem(project_dir)
+        if problem:
+            voice_blocker = {
+                'source': 'voice', 'level': -1,  # sentinel: not a ladder rung
+                'detail': (f'{VOICE_GUIDE_PATH} {problem}: drafting has no voice '
+                           f'guide to follow. Fill it: {VOICE_GUIDE_REMEDY}'),
+            }
+            if phase == 'draft':
+                phase = 'voice'
+
     declared = (read_yaml_field('phase', project_dir) or '').strip()
     normalized = _PHASE_ALIASES.get(declared, declared)
     # The declared yaml phase is a coarse milestone that legitimately LAGS the
@@ -275,6 +305,8 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
         matches = not unmet
 
     blockers = collect_blockers(project_dir)
+    if voice_blocker:
+        blockers.insert(0, voice_blocker)
     if declared and not matches:
         names = ', '.join(r['name'] for r in unmet)
         blockers.insert(0, {
