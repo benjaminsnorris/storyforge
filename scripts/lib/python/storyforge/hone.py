@@ -1933,8 +1933,8 @@ def hone_briefs(
     for issue in all_issues:
         by_scene.setdefault(issue['scene_id'], []).append(issue)
 
-    from storyforge.brief_names import reference_text
-    known_reference = reference_text(project_dir, exclude=REWRITTEN_FILES)
+    from storyforge.brief_names import reference_text as names_reference_text
+    known_reference = names_reference_text(project_dir, exclude=REWRITTEN_FILES)
     rejected: dict[str, list[str]] = {}
     changed_ids: list[str] = []
 
@@ -2698,8 +2698,8 @@ def hone_intent(
     scenes_rewritten = (len(set(i['scene_id'] for i in not_subset_issues))
                         if det_fields_rewritten > 0 else 0)
     api_fields_rewritten = 0
-    from storyforge.brief_names import reference_text
-    known_reference = reference_text(project_dir, exclude=REWRITTEN_FILES)
+    from storyforge.brief_names import reference_text as names_reference_text
+    known_reference = names_reference_text(project_dir, exclude=REWRITTEN_FILES)
     rejected: dict[str, list[str]] = {}
     changed_ids: list[str] = []
     total_scenes = len(by_scene)
