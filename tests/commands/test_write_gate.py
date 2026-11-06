@@ -972,6 +972,60 @@ class TestKeepGoing:
         out = capsys.readouterr().out
         assert 'committed provisionally' in out and 'not attempted' not in out
 
+    def test_a_misquote_after_a_fix_no_longer_stops_the_run_and_its_run_is_budgeted(
+            self, setup, monkeypatch, capsys):
+        """#598 (#602's review T-3): act1-sc01's fix is re-checked, the
+        re-check misquotes the prose, and a second gate run of the same
+        prose passes; the run drafts act1-sc02, and the run's one budget
+        counts the extra gate run before it does."""
+        from storyforge import api
+        TestReview443._metered_replies(monkeypatch, {'act1-sc01': _reply(GOOD),
+                                                     'act1-sc02': _reply(GOOD)}, 1_000)
+        model = 'claude-opus-4-6'
+        gate_reply = {'usage': {'input_tokens': 0, 'output_tokens': 20_000}}
+        fix_reply = {'usage': {'input_tokens': 0, 'output_tokens': 7_000}}
+
+        def verdict(sid, *findings, misquote=False):
+            r = gate.GateResult(sid, check=CheckResult(sid, findings=list(findings)))
+            if misquote:
+                r.problems = {'quote': [f'{sid}: {sid}--a-fact']}
+            r.committed = r.passed
+            return r
+        runs = {'act1-sc01': iter([verdict('act1-sc01', BAD),
+                                   verdict('act1-sc01', misquote=True),
+                                   verdict('act1-sc01')]),
+                'act1-sc02': iter([verdict('act1-sc02')])}
+        dirs = []
+
+        def gate_run(project_dir, scene_id, *, log_dir, **k):
+            dirs.append(os.path.basename(log_dir))
+            api._meter(gate_reply, model)
+            return next(runs[scene_id])
+
+        def fix(scene_id, prose, result, *, edits_out, **k):
+            api._meter(fix_reply, model)
+            edits_out.append({'find': 'x', 'replace': 'y'})
+            return prose + ' Fixed.'
+        monkeypatch.setattr(gate, 'gate_scene', gate_run)
+        monkeypatch.setattr(gate, 'fix_scene', fix)
+        due = []
+        monkeypatch.setattr(cmd_write, 'check_threshold', lambda d: due.append(d) or True)
+        main(['--keep-going', '--scenes', 'act1-sc01,act1-sc02'])
+        assert _scene(setup, 'act1-sc02') is not None
+        assert gate.pending(setup) == {}
+        assert dirs[1:3] == ['recheck', 'reextract'] and len(dirs) == 4
+        out = capsys.readouterr().out
+        assert 'so the same prose was gated again (extraction and the check): it passed' in out
+        draft = api.calculate_cost_from_usage({'input_tokens': 0, 'output_tokens': 1_000},
+                                              model)
+        one_gate = api.calculate_cost_from_usage(gate_reply['usage'], model)
+        one_fix = api.calculate_cost_from_usage(fix_reply['usage'], model)
+        # the run's forecast, then each scene's check: nothing spent before
+        # act1-sc01, two scenes to draft; before act1-sc02, three gate runs
+        assert len(due) == 3 and due[0] == due[1]
+        per_scene = due[1] / 2
+        assert due[2] == pytest.approx(draft + 3 * one_gate + one_fix + per_scene)
+
     def test_without_the_flag_the_run_still_stops(self, setup, monkeypatch):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
         calls = _gate(monkeypatch, {'act1-sc01': False, 'act1-sc02': True})
