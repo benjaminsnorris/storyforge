@@ -278,3 +278,30 @@ class TestTheRevisionCalendar:
         _log_prompt_warnings('WARNING: p (revision calendar): x\nnoise\n')
         out = capsys.readouterr().out
         assert 'WARNING: p (revision calendar): x' in out and 'noise' not in out
+
+
+class TestTheHeaderSaysWhatIsListed:
+    """The calendar lists every scene with a day or a time of day, so its
+    header doesn't say "each dated scene's day" (rethink status, the
+    calendar's 5-agent review): the drafting, revision and checker
+    calendars all name time-only scenes too."""
+
+    WORDS = "The story's calendar (scenes.csv): each scene with a day or a time of day"
+
+    def test_drafting(self, project_dir):
+        _set(project_dir, 'new-x1', timeline_day='')
+        cal = _calendar(_prompt(project_dir))
+        assert self.WORDS in cal and 'new-x1: afternoon' in cal
+        assert 'dated scene' not in cal
+
+    def test_revision(self, project_dir):
+        from storyforge.revision import build_revision_prompt
+        cal = _calendar(build_revision_prompt('continuity', 'Fix continuity', SCENE,
+                                              project_dir, api_mode=True))
+        assert self.WORDS in cal and 'dated scene' not in cal
+
+    def test_the_checker(self, project_dir):
+        book = checker.Book.load(project_dir, SCENE)
+        note = checker._calendar_note(book, SCENE)
+        assert "gives each scene's day and time of day" in note
+        assert 'where it has them' in note and 'dated scene' not in note

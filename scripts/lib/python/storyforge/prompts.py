@@ -1783,8 +1783,8 @@ def _calendar_block(scene_id: str, project_dir: str) -> str:
     undated = [sid for sid in sorted(order, key=order.get)
                if sid != scene_id and sid in scenes and not is_dated(scenes[sid])]
     return ('## The Calendar\n\n'
-            "Each dated scene's day in the story's calendar (scenes.csv), in reading order"
-            + (f'; this scene is {scene_when(here)}' if is_dated(here) else
+            "The story's calendar (scenes.csv): each scene with a day or a time of day, in "
+            'reading order' + (f'; this scene is {scene_when(here)}' if is_dated(here) else
                '; this scene has no day') + '. '
             'Every elapsed time, day count or date the scene states ("a week ago", '
             '"ten days since", "three nights out") must fit these days and the days of the '
@@ -1830,8 +1830,8 @@ def revision_calendar_block(scene_ids: Collection[str], project_dir: str,
     undated = [sid for sid in sorted(order, key=order.get)
                if sid in scenes and not is_dated(scenes[sid])]
     return ('## The Calendar\n\n'
-            "Each dated scene's day in the story's calendar (scenes.csv), in reading order; "
-            'the scenes this pass revises are marked. Every elapsed time, day count or date a '
+            "The story's calendar (scenes.csv): each scene with a day or a time of day, in "
+            'reading order; the scenes this pass revises are marked. Every elapsed time, day count or date a '
             'revised scene states ("a week ago", "ten days since", "three nights out") must fit '
             'these days and the days of the scenes whose events it counts from. Add or change a '
             'span only where the pass needs to; where you do, make it fit, or use a vaguer '

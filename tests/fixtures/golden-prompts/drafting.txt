@@ -98,7 +98,7 @@ From the scene's plan or its current draft. Keep each of these unless the brief 
 
 ## The Calendar
 
-Each dated scene's day in the story's calendar (scenes.csv), in reading order; this scene is day 1, evening. Every elapsed time, day count or date the scene states ("a week ago", "ten days since", "three nights out") must fit these days and the days of the scenes whose events it counts from. Where the brief doesn't need a span, don't name one: a vaguer phrase is better than a number that breaks the calendar. A summary scene's day is where its stretch starts; a frame or vision scene is not the story's present.
+The story's calendar (scenes.csv): each scene with a day or a time of day, in reading order; this scene is day 1, evening. Every elapsed time, day count or date the scene states ("a week ago", "ten days since", "three nights out") must fit these days and the days of the scenes whose events it counts from. Where the brief doesn't need a span, don't name one: a vaguer phrase is better than a number that breaks the calendar. A summary scene's day is where its stretch starts; a frame or vision scene is not the story's present.
 
 act1-sc01: day 1, morning
 act1-sc02: day 1, evening  <- this scene

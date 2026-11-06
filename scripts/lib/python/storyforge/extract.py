@@ -640,7 +640,7 @@ Answer with a JSON object with these fields (an empty list is a valid value):
 - knowledge_out: fact IDs {pov} knows at the END — knowledge_in plus 0-2 new facts learned during the scene
 - new_facts: one entry for each new ID used above, with its id, name and category
 - continuity_deps: scene IDs that this scene directly depends on — which prior scenes established facts that this scene uses?
-- scene_summary: one sentence summarizing what happens in this scene — this will be used as context for subsequent scenes
+- scene_summary: one sentence of at most 35 words summarizing what happens in this scene — it is used as context for subsequent scenes and kept as the scene's summary in scenes.csv
 
 knowledge_in and knowledge_out contain IDs only, never sentences. Every ID must be either in the knowledge registry above or declared in new_facts."""
 
