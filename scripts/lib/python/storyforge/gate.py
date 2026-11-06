@@ -57,8 +57,10 @@ from __future__ import annotations
 import copy
 import os
 import re
+import unicodedata
 from collections.abc import Set
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import NamedTuple
 
 from storyforge import audit, ledger, persistence
@@ -332,7 +334,9 @@ def _statement(rows: list[dict[str, str]], rid: str) -> str:
 
 def _words(text: str) -> str:
     """`text` as lowercase words, one space apart, padded: a phrase is
-    in it when `_words(phrase)` is a substring."""
+    in it when `_words(phrase)` is a substring. NFC first, so a name typed
+    with a combining accent (decomposed) matches the same name composed."""
+    text = unicodedata.normalize('NFC', text)
     return ' ' + ' '.join(re.findall(r'\w+', text.lower())) + ' '
 
 
@@ -404,6 +408,17 @@ _UNCLEAR = 'the brief\'s speaker label is not clear'
 _NO_CAST = 'no characters in characters.csv'
 
 
+def _not_in_cast(label: str) -> str:
+    """Why a label that starts with no character's name gives no speaker."""
+    if len(label) > 40:
+        label = label[:40].rstrip() + '…'
+    return f'the brief\'s label "{label}" names no one in characters.csv'
+
+
+#: Words that may come before the name in a label (`_named`)
+_LABEL_JOINS = frozenset({'and', 'then'})
+
+
 @dataclass(frozen=True)
 class Cast:
     """The characters a speech tag may name (`_cast`, from
@@ -422,6 +437,17 @@ class Cast:
     @property
     def names(self) -> frozenset[str]:
         return frozenset(self.ids)
+
+    @cached_property
+    def longest(self) -> int:
+        """The most words any name, alias or id has (`_name_at`)."""
+        return _longest(self.ids)
+
+
+def _longest(names) -> int:
+    """The most words any of `names` (as `_words`, no padding) has; 1 for
+    none, so a pronoun is still a tag's speaker."""
+    return max((n.count(' ') + 1 for n in names), default=1)
 
 
 def _cast(project_dir: str) -> Cast:
@@ -502,9 +528,10 @@ _LABEL_SPEECH = frozenset('said says asked asks answered answers replied replies
 
 
 def _name_at(words: list[str], i: int, cast: Cast) -> tuple[int, frozenset[str]]:
-    """The longest name (up to `_MAX_NAME_WORDS` words) in `cast` starting
-    at `words[i]`: its length and ids, or (0, empty)."""
-    for n in range(min(_MAX_NAME_WORDS, len(words) - i), 0, -1):
+    """The longest name in `cast` starting at `words[i]`, of any length
+    (`Cast.longest`: "Ghost of Christmas Past"): its length and ids, or (0,
+    empty)."""
+    for n in range(min(cast.longest, len(words) - i), 0, -1):
         found = cast.ids.get(' '.join(words[i:i + n]))
         if found:
             return n, found
@@ -520,9 +547,19 @@ def _named(text: str, cast: Cast) -> tuple[str | None, str]:
     no other name or pronoun later in it may come with a speech verb or
     "who" (`Silas turns to Croy, who says`)."""
     words = _words(text).split()
+    # "— and Croy:", "then Silas:": the label of a line after another
+    while len(words) > 1 and words[0] in _LABEL_JOINS:
+        words = words[1:]
     n, found = _name_at(words, 0, cast)
     if not n:
-        return None, _NO_LABEL
+        # A label that starts like a name (a capital) but names no one in
+        # characters.csv is said as such: "the brief names no speaker" would
+        # be wrong (#513's review, SF-4). Lowercase is narration ("— though
+        # he knew", "told Thomas:")
+        label = ' '.join(text.split())
+        label = re.sub(r'^(?:(?:and|then)\s+)+', '', label, flags=re.I)
+        named_like = label[:1].isupper()
+        return (None, _not_in_cast(label)) if words and named_like else (None, _NO_LABEL)
     if len(found) != 1:
         return None, _SHARED
     rest = words[n:]
@@ -602,8 +639,9 @@ def _brief_lines(project_dir: str, scene_id: str, cast: Cast | None = None) -> l
     phrases: each quoted span of an item, with the speaker the brief gives
     it (`_label_speaker`; `cast`: the characters, read when not given), and
     a `key_dialogue` item that quotes nothing, whole and with no speaker
-    (a `Name:` label on it is part of the phrase, not read: quote the line
-    to label it). An unquoted action or outcome is a paraphrase, not words
+    (a `Name:` label naming a character is taken off, so the phrase can
+    match the prose, but not read as its speaker: quote the line to label
+    it). An unquoted action or outcome is a paraphrase, not words
     the prose must use, so it isn't one. Phrases under `_MIN_BRIEF_WORDS`
     words are left out. A scene with no brief row scripts nothing."""
     from storyforge.checker import PROMISE_FIELDS, _split_cell
@@ -615,6 +653,12 @@ def _brief_lines(project_dir: str, scene_id: str, cast: Cast | None = None) -> l
             spans = list(re.finditer(r'"([^"]+)"|“([^”]+)”', item))
             if not spans:
                 if col == 'key_dialogue':
+                    label = re.match(r'\s*([^:]{1,80}):\s*(\S.*)$', item, re.S)
+                    if label:
+                        if cast is None:
+                            cast = _cast(project_dir)
+                        if _named(label.group(1), cast)[0]:
+                            item = label.group(2)
                     lines.append(Scripted(item, None, _NO_QUOTES))
                 continue
             if cast is None:
@@ -641,8 +685,6 @@ _SPEECH_VERBS = frozenset('said says asked asks answered replied told called whi
 #: ("Thomas told", never "told Thomas")
 _LISTENER_VERBS = frozenset({'told'})
 _PRONOUNS = frozenset('he she they i we you'.split())
-#: The most words a character's name in a speech tag may have
-_MAX_NAME_WORDS = 3
 #: Quote marks a scripted line is spoken between: double quotes, straight or
 #: curly, and curly single quotes (a closing ’ followed by a letter is an
 #: apostrophe, not a mark)
@@ -651,14 +693,14 @@ _QUOTE_MARKS = re.compile(r'["“”‘]|’(?!\w)')
 
 def _tag_speaker(text: str, names: frozenset[str] | set[str]) -> str | None:
     """Who `text` names when it is only a speech tag: a speech verb
-    (`_SPEECH_VERBS`) and a pronoun or a character's name (`names`, up to
-    `_MAX_NAME_WORDS` words), either order, punctuation aside ("he said",
+    (`_SPEECH_VERBS`) and a pronoun or a character's name (`names`, of any
+    length), either order, punctuation aside ("he said",
     "said Thomas"; "told" only after its speaker, `_LISTENER_VERBS`), as
     `_words` without the padding ("he", "thomas"). None when it isn't one:
     an adverb, a place or anything else in it makes it narration, which may
     hold the error."""
     words = _words(text).split()
-    if not 2 <= len(words) <= _MAX_NAME_WORDS + 1:
+    if not 2 <= len(words) <= _longest(names) + 1:
         return None
     for verb, who, first in ((words[0], words[1:], True), (words[-1], words[:-1], False)):
         if first and verb in _LISTENER_VERBS:

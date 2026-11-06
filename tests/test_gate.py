@@ -1006,8 +1006,9 @@ class TestSpeechTagSpeaker:
 
     @pytest.mark.parametrize('dialogue, why', [
         ('"{line}"', gate._NO_LABEL),                   # mended-bridle: no labels
-        ('Council: "{line}"', gate._NO_LABEL),          # not a character
-        ('Spoken to the grave: "{line}"', gate._NO_LABEL),
+        # not a character: said so (#513's review, SF-4)
+        ('Council: "{line}"', gate._not_in_cast('Council')),
+        ('Spoken to the grave: "{line}"', gate._not_in_cast('Spoken to the grave')),
         ('told Thomas: "{line}"', gate._NO_LABEL),      # C-4: the listener
         ('"{line}" — though he knew the answer', gate._NO_LABEL),
         ('"{line}" / "Come inside."', gate._NO_LABEL),
@@ -1031,10 +1032,11 @@ class TestSpeechTagSpeaker:
         assert (self.LINE, None, why) in lines
 
     def test_an_unquoted_line_has_no_speaker(self, project_dir):
-        """SF-5: a key_dialogue item with no quote marks is a phrase whole,
-        its label included, and is given no speaker."""
+        """SF-5: a key_dialogue item with no quote marks is given no
+        speaker; a label naming a character is taken off it so its words
+        can match the prose (#513's review, G-1)."""
         lines, _ = self._lines(project_dir, f'Thomas: {self.LINE}')
-        assert lines == [(f'Thomas: {self.LINE}', None, gate._NO_QUOTES)]
+        assert lines == [(self.LINE, None, gate._NO_QUOTES)]
 
     def test_a_name_two_characters_share_names_no_one(self, project_dir):
         assert self._speaker(project_dir, 'Thomas: "{line}"', self.TWO_THOMASES) is None
