@@ -1745,13 +1745,66 @@ class TestReextractAMisquote(_FixRounds):
         assert out.notes == ['re-running extraction on the same prose failed (cut off); '
                              'kept the verdict before it']
 
-    def test_extractor_slips(self):
-        assert gate._extractor_slips(self._misquote()) == [f'quote: {SCENE}: {SCENE}--a-fact']
-        assert gate._extractor_slips(self._misquote('a')) == []
-        assert gate._extractor_slips(self._result()) == []          # passed
-        rejected = self._misquote()
-        rejected.problems['rejected'] = ['x']
-        assert gate._extractor_slips(rejected) == []
+    def test_only_extractor_slips(self):
+        assert gate._only_extractor_slips(self._misquote()) == [
+            f'quote: {SCENE}: {SCENE}--a-fact']
+        assert gate._only_extractor_slips(self._misquote(kind='no quote')) == [
+            f'no quote: {SCENE}: {SCENE}--a-fact']
+        assert gate._only_extractor_slips(self._result()) == []          # passed
+
+    # T-1 (#602's review): each guard, alone beside a misquote, stops the
+    # retry (mutating any one of them left every test passing)
+
+    def test_a_finding_beside_the_slip_is_not_slips_only(self):
+        assert gate._only_extractor_slips(self._misquote('a')) == []
+
+    def test_a_halt_beside_the_slip_is_not_slips_only(self):
+        from storyforge.audit import Halt
+        r = self._misquote()
+        r.halts = [Halt('fixed', 'some-fact', 'it changes')]
+        assert gate._only_extractor_slips(r) == []
+
+    def test_a_plan_conflict_beside_the_slip_is_not_slips_only(self):
+        r = self._misquote('a')
+        r.plan_conflicts = list(r.findings)
+        assert r.fixable == [] and gate._only_extractor_slips(r) == []
+
+    def test_an_unverified_finding_beside_the_slip_is_not_slips_only(self):
+        from storyforge.checker import Finding
+        r = self._misquote()
+        r.check.unverified = [Finding('contradiction', 'TIM', 'q', 'act1-sc01', 'e', '', 'w',
+                                      problem='its quote is not in the scene')]
+        assert gate._only_extractor_slips(r) == []
+
+    def test_an_unruled_dispute_beside_the_slip_is_not_slips_only(self):
+        r = self._misquote()
+        from storyforge.checker import Dispute
+        r.check.unruled = [Dispute('plan-fact', 'the plan says', 'the scene says')]
+        assert gate._only_extractor_slips(r) == []
+
+    @pytest.mark.parametrize('kind', [k for k in gate.UNRESOLVED
+                                      if k not in gate._EXTRACTOR_SLIPS])
+    def test_another_extraction_problem_beside_the_slip_is_not_slips_only(self, kind):
+        r = self._misquote()
+        r.problems[kind] = ['x']
+        assert gate._only_extractor_slips(r) == []
+
+    def test_an_inherited_finding_beside_the_slip_is_slips_only(self):
+        """An inherited contradiction doesn't block: the slip is all that does."""
+        r = self._misquote('a')
+        r.inherited = list(r.check.findings)
+        assert gate._only_extractor_slips(r) == [f'quote: {SCENE}: {SCENE}--a-fact']
+
+    def test_the_slips_are_extraction_problems_that_block(self):
+        """TD-3: one spelling of each kind, shared with extraction."""
+        from storyforge import extract
+        assert gate._EXTRACTOR_SLIPS == (extract.MISQUOTE, extract.NO_QUOTE)
+        assert set(gate._EXTRACTOR_SLIPS) <= set(gate.UNRESOLVED)
+        assert set(gate._EXTRACTOR_SLIPS) <= set(extract.COMMITMENT_PROBLEMS)
+
+    def test_one_regate_per_call(self):
+        once = gate._OneRegate()
+        assert not once.taken and once.take() and once.taken and not once.take()
 
 
 @pytest.mark.real_gate

@@ -63,13 +63,14 @@ from typing import NamedTuple
 from storyforge import audit, ledger, persistence
 from storyforge.checker import (GATE_READINGS, CheckError, CheckResult, Dispute, Finding,
                                check_scene)
+from storyforge.extract import MISQUOTE, NO_QUOTE
 
 #: The commands whose prose the gate commits (`ledger.COMMITMENT_WRITERS`
 #: without the extract pass)
 GATE_COMMANDS = tuple(w for w in ledger.COMMITMENT_WRITERS if w != ledger.COMMITMENTS_PASS)
 
 #: Extraction problems that would commit a wrong row: they block the commit
-UNRESOLVED = ('quote', 'no quote', 'supersedes', 'ends', 'ends again', 'rejected')
+UNRESOLVED = (MISQUOTE, NO_QUOTE, 'supersedes', 'ends', 'ends again', 'rejected')
 #: Extraction problems reported on a pass: a link extraction proposed to a
 #: registry fact, not applied (`disagrees`, `ends registry`: the checker
 #: judges contradictions with the plan), a subject not in the registries
@@ -1955,11 +1956,13 @@ def problems_to_fix(result: GateResult) -> list[str]:
     return lines
 
 
-#: How many times `gate_and_fix` re-gates a scene that still fails (after a
-#: fix, or for a first run failing only on extraction, a re-roll with no
-#: edit). A second round sees what the first changed: one fix often moves a
-#: wrong value to another wrong one ("eight days" to "five") or fixes half a
-#: pronoun.
+#: How many rounds `gate_and_fix` runs on a scene that still fails, each a
+#: fix and its re-check (or, for a first run with nothing for the fix, a
+#: re-roll with no edit). A second round sees what the first changed: one
+#: fix often moves a wrong value to another wrong one ("eight days" to
+#: "five") or fixes half a pronoun. Not a cap on gate runs: a partial fix
+#: (`_partial_fix`) and a re-extraction (`_reextract`, #598) are runs
+#: besides the rounds.
 FIX_ROUNDS = 2
 
 
@@ -2099,9 +2102,9 @@ class GatedScene:
     #: why `BLOCKED_PATH` couldn't be put back to the kept run's
     #: contradictions after a discard ('' when it was): the caller says so
     blocked_stale: str = ''
-    #: this invocation's logs (`run_log_dir`): the first run's, and each
-    #: re-check's in `recheck/`, `recheck-2/` (a re-extraction's in
-    #: `reextract/`)
+    #: this invocation's logs (`run_log_dir`): the first run's, each
+    #: re-check's in `recheck/`, `recheck-2/` (round 1's re-roll's in
+    #: `recheck/`), and `_reextract`'s in `reextract/`
     log_dir: str = ''
     #: whether unchanged prose was gated again for its extraction (round 1's
     #: re-roll, or a re-check failing only on the extractor's misquotes, #598)
@@ -2413,15 +2416,26 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
     at most `FIX_ROUNDS` times (plan §3.2 step 3). Each fix after the first is
     sent the earlier fixes' problems and edits (`rounds`, `build_fix_prompt`).
 
-    - A first run that fails only on extraction problems (nothing for the fix)
-      is re-gated without an edit: extraction runs again. That re-gate counts
-      as a round; a later run with nothing for the fix stops, unless all
-      that stopped it is the extractor's misquotes (`_extractor_slips`: a
-      quote not in the prose, or none; #598): then the same prose is gated
-      again (`_reextract`, logged, in `reextract/`; not a round), once per
-      invocation, round 1's re-roll included. A run with real problems as
-      well goes to the fix first: its re-check extracts the edited prose
-      anyway. A re-extraction that misquotes again is reported as before.
+    - A first run with nothing for the fix (`problems_to_fix` empty: it
+      failed on extraction problems, which aren't sent to the fix) and no
+      plan conflicts is re-gated without an edit, so extraction runs again.
+      That re-roll counts as a round and logs to `recheck/`.
+    - A later run with nothing for the fix stops, unless all that stopped
+      it is the extractor's slips (`_only_extractor_slips`: a quote not in
+      the prose or none, with no halt, other extraction problem, finding,
+      plan conflict, unverified finding or unruled dispute; #598). Then the
+      same prose is gated again (`_reextract`: extraction and the check;
+      logged; in `reextract/`; not a round), and so is the last round's
+      re-check when only slips stopped it. That is at most once per
+      invocation (`_OneRegate`), round 1's re-roll included: a first run
+      failing on slips alone is extracted twice, not three times. What the
+      re-extraction's run finds instead goes to the next round's fix while
+      one is left; after the last round it is the verdict. A run that
+      misquotes again is kept and reported (never fuzzy-matched to the
+      prose's words: one word can change the fact); one that can't finish
+      keeps the run before it.
+    - A run with real problems beside slips goes to the fix, not a
+      re-extraction: the fix's re-check extracts the edited prose anyway.
     - A run with plan conflicts and nothing for the fix (extraction problems
       or not) is neither fixed nor re-gated: they are the author's (the brief
       disagrees with the book), and a re-roll that missed one would pass
@@ -2474,14 +2488,11 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
                            before=before)
         current, result, rounds, notes, run_dir = prose, first, [], [], logs
         discarded, blocked_stale = 0, ''
-        # whether this invocation has gated unchanged prose again for
-        # extraction (round 1's re-roll, or `_reextract`): at most once (#598)
-        reextracted = False
+        regate = _OneRegate()
         for n in range(1, FIX_ROUNDS + 1):
             if result.passed:
                 break
-            if n > 1 and not reextracted and _extractor_slips(result):
-                reextracted = True
+            if n > 1 and _only_extractor_slips(result) and regate.take():
                 result, run_dir = _reextract(
                     project_dir, scene_id, command, current, result, logs, notes,
                     extract_model=extract_model, check_model=check_model, before=before,
@@ -2491,6 +2502,12 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             to_fix = problems_to_fix(result)
             if not to_fix and (result.plan_conflicts or n > 1):
                 break
+            # round 1 with nothing for the fix: re-gate the same prose
+            reroll = not to_fix
+            if reroll:
+                regate.take()   # the first take: always granted
+                if _only_extractor_slips(result):
+                    _say_misquoted(scene_id, result)
             kept = ('the prose as given and the first verdict' if n == 1
                     else 'the prose and verdict before it')
             # the brief's own words the scene has: the fix must keep them
@@ -2522,10 +2539,6 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             # each run's log (and the fix that read it) in its own directory:
             # logs, logs/recheck, logs/recheck-2
             next_dir = os.path.join(logs, 'recheck' if n == 1 else f'recheck-{n}')
-            if fixed == current:   # round 1's re-roll for extraction: no edit
-                reextracted = True
-                if _extractor_slips(result):
-                    _say_misquoted(scene_id, result)
             try:
                 again = gate_scene(project_dir, scene_id, command=command, prose=fixed,
                                    log_dir=next_dir, extract_model=extract_model,
@@ -2587,9 +2600,10 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             if fixed != current:
                 rounds.append(FixRound(to_fix, edits))
             current, result, run_dir = fixed, again, next_dir
-        # the last round's re-check failed only on the extractor's slips
-        if not reextracted and not discarded and _extractor_slips(result):
-            reextracted = True
+        # the last round's re-check failed only on the extractor's slips. A
+        # discard needs no guard: the run it keeps had problems for the fix
+        # (it was fixed), so never slips only
+        if _only_extractor_slips(result) and regate.take():
             result, run_dir = _reextract(
                 project_dir, scene_id, command, current, result, logs, notes,
                 extract_model=extract_model, check_model=check_model, before=before,
@@ -2599,17 +2613,33 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
         raise
     return GatedScene(current, result, first, fixed=current != prose, rounds=rounds,
                       notes=notes, log_dir=logs, discarded=discarded,
-                      blocked_stale=blocked_stale, reextracted=reextracted)
+                      blocked_stale=blocked_stale, reextracted=regate.taken)
 
 
 #: Extraction problems that are the extractor's own slip, never the prose's:
 #: a quote that isn't in the scene (`extract.commitment_rows` checks it
 #: against the prose), or no quote at all. No prose edit repairs one, so
 #: the fix is never sent them (`problems_to_fix`)
-_EXTRACTOR_SLIPS = ('quote', 'no quote')
+_EXTRACTOR_SLIPS = (MISQUOTE, NO_QUOTE)
 
 
-def _extractor_slips(result: GateResult) -> list[str]:
+class _OneRegate:
+    """The one gate run of unchanged prose a `gate_and_fix` call may make for
+    its extraction (#598): round 1's re-roll or `_reextract`. `take()`
+    claims it: True the first time, False after; `taken` says whether it
+    was."""
+
+    def __init__(self) -> None:
+        self.taken = False
+
+    def take(self) -> bool:
+        if self.taken:
+            return False
+        self.taken = True
+        return True
+
+
+def _only_extractor_slips(result: GateResult) -> list[str]:
     """The extractor's slips (`_EXTRACTOR_SLIPS`, as `unresolved` lists
     them) when they are all that stopped `result`; [] when it passed or
     anything else blocks (a halt, another extraction problem, a finding, a
@@ -2625,7 +2655,7 @@ def _extractor_slips(result: GateResult) -> list[str]:
 def _say_misquoted(scene_id: str, run: GateResult) -> None:
     """The log line for a re-extraction (#598): what the extractor misquoted."""
     from storyforge.common import log
-    slips = _extractor_slips(run)
+    slips = _only_extractor_slips(run)
     log(f'  {scene_id}: the extractor misquoted the prose ({len(slips)} quote(s) not in the '
         f'scene: {_one_line("; ".join(slips))[:200]}); re-running extraction on the same prose')
 
@@ -2638,14 +2668,20 @@ def _reextract(project_dir: str, scene_id: str, command: str, prose: str, run: G
     quote the extractor changed ("she would sit" for the prose's "he would
     sit"); the fix edits prose, so it had nothing to do, and `write
     --keep-going` stopped (`can_commit_provisionally`: a commit would write
-    the wrong quote). Gate the same `prose` again, which extracts it again
-    (`gate_scene`: its spend is a `gate` row like any run's), and return
-    that run and its log directory (`logs/reextract`). The quote is never
-    replaced by the prose's words: one word (he/she) can change the fact.
+    the wrong quote). Gate the same `prose` again with `gate_scene`: the
+    whole run, extraction and every reading of the check (its spend is a
+    `gate` row like any run's), not extraction alone, so the check rules on
+    the new extraction's disputes. Return that run and its log directory
+    (`logs/reextract`). The quote is never replaced by the prose's words:
+    one word (he/she) can change the fact.
 
-    A run that fails the same way is kept, said in `notes`: its mismatches
-    are reported as before. A run that raises `GateError` keeps `run` (a
-    verdict on the same prose) and `fallback_dir`, said in `notes`."""
+    The run that comes back is kept, a verdict on the same prose: a pass
+    has committed; one stopped by slips alone again is said in `notes`,
+    its mismatches reported; one stopped by anything else (a finding this
+    check makes, or a halt or other problem the new extraction brings) goes
+    to the next round's fix while `gate_and_fix` has one left, and after
+    the last round is the verdict. A run that raises `GateError` keeps `run`
+    and `fallback_dir`, said in `notes`."""
     _say_misquoted(scene_id, run)
     run_dir = os.path.join(logs, 'reextract')
     try:
@@ -2656,7 +2692,7 @@ def _reextract(project_dir: str, scene_id: str, command: str, prose: str, run: G
         notes.append(f're-running extraction on the same prose failed ({e}); kept the '
                      f'verdict before it')
         return run, fallback_dir
-    if _extractor_slips(again):
+    if _only_extractor_slips(again):
         notes.append('extraction re-run on the same prose misquoted it again; the quote '
                      'mismatches are reported, not replaced with the prose\'s words')
     return again, run_dir

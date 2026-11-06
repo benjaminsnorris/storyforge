@@ -1767,7 +1767,8 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     from storyforge.elaborate import get_scene
     from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps
     from storyforge.extract import (COMMITMENT_PROBLEMS, COMMITMENTS_SCHEMA,
-                                    MAX_KNOWN_COMMITMENTS, build_commitments_prompt,
+                                    MAX_KNOWN_COMMITMENTS, MISQUOTE, NO_QUOTE,
+                                    build_commitments_prompt,
                                     commitment_rows, known_for_scene,
                                     parse_commitments_response, unplaced_rows)
 
@@ -1869,8 +1870,8 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         for entry, why in verdict.dropped:
             log(f'    not recorded: {entry["statement"][:160]} ({why[:120]})')
 
-    for kind, what in (('quote', 'quote(s) not found verbatim in their scene'),
-                       ('no quote', 'commitment(s) with no quote'),
+    for kind, what in ((MISQUOTE, 'quote(s) not found verbatim in their scene'),
+                       (NO_QUOTE, 'commitment(s) with no quote'),
                        ('subject', 'subject(s) not a character or location id, kept as '
                                    'written (an object has no registry)'),
                        ('supersedes', '"supersedes" naming no earlier commitment, dropped'),
