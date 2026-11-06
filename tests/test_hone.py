@@ -1010,42 +1010,39 @@ class TestParseMappingResponse:
             'commentary\n',
             batch_size=6, known={'tom', 'daisy'})
         assert mapping == {1: ['tom'], 2: ['tom', 'daisy'], 3: ['nick'], 4: ['nick']}
-        assert new_rows == [{'id': 'nick', 'name': 'Nick Carraway', 'role': 'protagonist',
-                             'pronouns': ''}]
+        assert new_rows == [{'id': 'nick', 'name': 'Nick Carraway', 'role': 'protagonist'}]
         assert skipped == {5}
 
-    def test_a_new_character_takes_the_pronouns_given(self):
-        """#513: a NEW character line may end in its pronouns; one left
-        off is empty."""
+    def test_a_new_character_gets_no_pronouns(self):
+        """#513's review (P-6): the mapping sees names, not prose, and a name
+        is no evidence of pronouns, so a NEW line's extra field is not
+        read."""
         from storyforge.hone import parse_mapping_response
         _, new_rows, _ = parse_mapping_response(
-            'characters', '1 | NEW | mrs-hale | Mrs Hale | minor | she\n'
-                          '2 | NEW | kael | Kael | minor |\n', 2, set())
-        assert [r['pronouns'] for r in new_rows] == ['she', '']
+            'characters', '1 | NEW | mrs-hale | Mrs Hale | minor | she\n', 1, set())
+        assert new_rows == [{'id': 'mrs-hale', 'name': 'Mrs Hale', 'role': 'minor'}]
 
-    def test_the_prompt_asks_for_plain_pronouns_only(self, tmp_path):
-        """#513: the characters mapping asks for pronouns, and only where
-        the reference makes them plain."""
+    def test_the_prompt_asks_for_no_pronouns(self, tmp_path):
         from storyforge.hone import build_mapping_prompt
         ref = tmp_path / 'reference'
         ref.mkdir()
         (ref / 'characters.csv').write_text('id|name|role|aliases|pronouns\n')
         p = build_mapping_prompt('characters', str(ref),
                                  [{'text': 'Mrs Hale', 'scenes': ['s1'], 'key': 'k'}])
-        assert '`N | NEW | id | name | role | pronouns`' in p
-        assert 'Never guess from a first name' in p
+        assert '`N | NEW | id | name | role`' in p and 'pronoun' not in p
 
-    def test_unreadable_new_pronouns_are_left_empty(self, tmp_path):
-        """#513: a value `pronoun_key` can't read would block validate as
-        the author's error, so a NEW row gets none instead."""
+    def test_new_rows_empty_and_the_authors_kept(self, tmp_path):
+        """P-6 and T-3: a new character's pronouns cell is empty (the
+        author's to fill), and the author's own pronouns survive."""
         from storyforge.hone import apply_mapping, read_registry
         ref = tmp_path / 'reference'
         ref.mkdir()
-        (ref / 'characters.csv').write_text('id|name|role|aliases|pronouns\n')
+        (ref / 'characters.csv').write_text('id|name|role|aliases|pronouns\n'
+                                            'tom|Tom|supporting||he\n')
         apply_mapping('characters', str(ref), [], {},
-                      [{'id': 'kael', 'name': 'Kael', 'role': 'minor', 'pronouns': 'unknown'}])
+                      [{'id': 'kael', 'name': 'Kael', 'role': 'minor'}])
         assert [(r['id'], r['pronouns']) for r in read_registry(str(ref), 'characters')] \
-            == [('kael', '')]
+            == [('tom', 'he'), ('kael', '')]
 
     def test_new_with_registered_id_maps_to_it(self):
         from storyforge.hone import parse_mapping_response

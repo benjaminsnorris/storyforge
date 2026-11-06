@@ -1,12 +1,13 @@
 """Extraction's census of named people (#546, storyforge-evals B-007)."""
 
+import csv
 import json
 import os
 
 import pytest
 
 from storyforge import api
-from storyforge.extract_census import (
+from storyforge.extract_census import (ANSWER_KEY, 
     Candidate, build_census_prompt, count_names, parse_census, run_census,
 )
 
@@ -60,21 +61,32 @@ def test_parse_keeps_people_and_drops_groups():
         {'word': 'Unasked', 'person': True, 'id': 'x', 'name': 'X', 'aliases': []},
     ]), cands, registry_ids={'hrothgar'})
     assert rows == [{'id': 'ecgtheow', 'name': 'Ecgtheow', 'role': 'referenced',
-                     'aliases': 'Edgetheow', 'pronouns': ''}]
+                     'aliases': 'Edgetheow', 'pronouns': '', ANSWER_KEY: ''}]
 
 
-def test_parse_keeps_readable_pronouns_only():
-    """#513: a person's pronouns as the passages use them; a value
-    `pronoun_key` can't read is left empty for validate to name."""
+def test_parse_keeps_valid_pronouns_only():
+    """#513 (TD-4): a person's pronouns as the passages use them, one of
+    `VALID_PRONOUNS`; anything else is left empty for validate to name, the
+    answer kept for the caller to report."""
     cands = [Candidate('Wealhtheow', 9, ['a']), Candidate('Unferth', 7, ['a'])]
     rows = parse_census(_reply([
         {'word': 'Wealhtheow', 'person': True, 'id': 'wealhtheow', 'name': 'Wealhtheow',
-         'aliases': [], 'pronouns': 'she/her'},
+         'aliases': [], 'pronouns': 'She'},
         {'word': 'Unferth', 'person': True, 'id': 'unferth', 'name': 'Unferth',
          'aliases': [], 'pronouns': 'unclear'},
     ]), cands, registry_ids=set())
-    assert [(r['id'], r['pronouns']) for r in rows] == [('wealhtheow', 'she/her'),
-                                                        ('unferth', '')]
+    assert [(r['id'], r['pronouns'], r[ANSWER_KEY]) for r in rows] == [
+        ('wealhtheow', 'she', 'She'), ('unferth', '', 'unclear')]
+
+
+def test_the_schema_and_prompt_take_their_choices_from_valid_pronouns():
+    """TD-3/TD-4: one list, schema.VALID_PRONOUNS."""
+    from storyforge.extract_census import CENSUS_SCHEMA
+    from storyforge.schema import VALID_PRONOUNS
+    field = CENSUS_SCHEMA['properties']['names']['items']['properties']['pronouns']
+    assert set(field['enum']) == {''} | VALID_PRONOUNS
+    prompt = build_census_prompt([Candidate('Atreus', 3, ['a'])], [])
+    assert f"one of {', '.join(sorted(VALID_PRONOUNS))} as the passages use them" in prompt
 
 
 def test_prompt_lists_words_passages_and_registry():
@@ -83,7 +95,6 @@ def test_prompt_lists_words_passages_and_registry():
     assert 'Atreus (135 mentions)' in prompt and 'a: the son of Atreus' in prompt
     assert 'agamemnon — Agamemnon' in prompt
     assert 'Judge from the passages only' in prompt
-    assert "`pronouns`, he, she, they or it as the passages use them" in prompt
 
 
 def test_run_census_appends_rows_and_writes_the_list(project_dir, monkeypatch):
@@ -113,8 +124,79 @@ def test_run_census_appends_rows_and_writes_the_list(project_dir, monkeypatch):
         assert line.split('|')[0] in after
     with open(os.path.join(project_dir, 'working', 'census.csv')) as f:
         census = f.read()
-    assert census.startswith('word|mentions|scenes|answer')
+    assert census.startswith('word|mentions|scenes|answer|pronouns')
     assert 'Quillon|2|' in census and '|person' in census
+
+
+def _census_reply(monkeypatch, names):
+    def fake(prompt, model, log_file, max_tokens=4096, **kw):
+        reply = {'content': [{'type': 'text', 'text': _reply(names)}],
+                 'stop_reason': 'end_turn', 'usage': {'input_tokens': 1, 'output_tokens': 1}}
+        with open(log_file, 'w') as f:
+            json.dump(reply, f)
+        return reply
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+
+
+def _mention(project_dir, text):
+    scenes = os.path.join(project_dir, 'scenes')
+    first = sorted(f for f in os.listdir(scenes) if f.endswith('.md'))[0]
+    with open(os.path.join(scenes, first), 'a') as f:
+        f.write('\n\n' + text + '\n')
+
+
+def test_run_census_records_pronouns_and_says_so(project_dir, monkeypatch, capsys):
+    """SF-1/SF-2: pronouns the model gave go to characters.csv, are listed
+    for the author, and census.csv keeps the answer as given, an unusable
+    one included (logged, written empty)."""
+    _mention(project_dir, 'She thought of old Quillon, and of Quillon\'s debts, and of '
+                          'Varrow, and of Varrow again.')
+    _census_reply(monkeypatch, [
+        {'word': 'Quillon', 'person': True, 'id': 'quillon', 'name': 'Quillon',
+         'aliases': [], 'pronouns': 'he'},
+        {'word': 'Varrow', 'person': True, 'id': 'varrow', 'name': 'Varrow',
+         'aliases': [], 'pronouns': 'xe'}])
+    result = run_census(project_dir, 'm', os.path.join(project_dir, 'working', 'logs'))
+    assert result.pronouns_given == [('Quillon', 'he')]
+    assert result.pronouns_unread == [('Varrow', 'xe')]
+    assert "Varrow's pronouns answer 'xe'" in capsys.readouterr().out
+    with open(os.path.join(project_dir, 'reference', 'characters.csv')) as f:
+        rows = {r['id']: r for r in csv.DictReader(f, delimiter='|')}
+    assert rows['quillon']['pronouns'] == 'he' and rows['varrow']['pronouns'] == ''
+    assert '_pronouns_answer' not in rows['quillon']
+    with open(os.path.join(project_dir, 'working', 'census.csv')) as f:
+        census = {r['word']: r for r in csv.DictReader(f, delimiter='|')}
+    assert census['Quillon']['pronouns'] == 'he' and census['Varrow']['pronouns'] == 'xe'
+
+
+def test_run_census_keeps_the_authors_pronouns(project_dir, monkeypatch):
+    """T-3: rows already in characters.csv keep their pronouns."""
+    path = os.path.join(project_dir, 'reference', 'characters.csv')
+    with open(path) as f:
+        text = f.read()
+    with open(path, 'w') as f:
+        f.write(text.replace('id|name|aliases|role|death_scene',
+                             'id|name|aliases|role|death_scene|pronouns', 1)
+                .replace('|protagonist|\n', '|protagonist||she\n', 1))
+    _mention(project_dir, 'She thought of old Quillon, and of Quillon\'s debts.')
+    _census_reply(monkeypatch, [{'word': 'Quillon', 'person': True, 'id': 'quillon',
+                                 'name': 'Quillon', 'aliases': [], 'pronouns': 'he'}])
+    run_census(project_dir, 'm', os.path.join(project_dir, 'working', 'logs'))
+    with open(path) as f:
+        rows = {r['id']: r for r in csv.DictReader(f, delimiter='|')}
+    assert rows['dorren-hayle']['pronouns'] == 'she' and rows['quillon']['pronouns'] == 'he'
+
+
+def test_the_extract_log_names_the_census_pronouns(project_dir, monkeypatch, capsys):
+    """SF-2: extract's census summary lists who got pronouns, to confirm."""
+    from storyforge import cmd_extract
+    _mention(project_dir, 'She thought of old Quillon, and of Quillon\'s debts.')
+    _census_reply(monkeypatch, [{'word': 'Quillon', 'person': True, 'id': 'quillon',
+                                 'name': 'Quillon', 'aliases': [], 'pronouns': 'he'}])
+    monkeypatch.setattr(cmd_extract, '_log_api_usage', lambda *a, **k: None)
+    cmd_extract._run_census(project_dir, os.path.join(project_dir, 'working', 'logs'))
+    assert ('pronouns from the passages, to confirm in characters.csv: Quillon (he)'
+            in capsys.readouterr().out)
 
 
 # ---------------------------------------------------------------------------

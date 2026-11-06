@@ -49,6 +49,20 @@ def pronoun_key(value: str) -> str | None:
         return None
     return key
 
+
+def model_pronouns(value: str) -> tuple[str, bool]:
+    """A model's answer for a new character's pronouns (#513): the value to
+    write and whether the answer could be used. Only a subject pronoun in
+    `VALID_PRONOUNS` (case and spacing aside) or nothing is used; anything
+    else gives '' and False, for the caller to report, so validate names the
+    character as missing pronouns rather than blocking on a value the
+    author never wrote."""
+    v = (value or '').strip().lower()
+    if not v or v in VALID_PRONOUNS:
+        return v, True
+    return '', False
+
+
 #: The real times of day: what a prompt offers as a time, and the only
 #: values `stated_time` passes through as one
 TIMES_OF_DAY = frozenset({
