@@ -21,28 +21,32 @@ class TestMiceMentionsValidate:
     """F-020 made a bare name a mention, but the schema still required +/-:
     120 errors on Gatsby."""
 
+    @staticmethod
+    def _reg(threads=()):
+        from storyforge import mice
+        return mice.registry_from_rows([{'id': t, 'name': t, 'type': ty} for t, ty in threads])
+
     def test_bare_mention_is_valid(self):
         from storyforge.schema import _check_mice
-        alias = {'tom-myrtle-affair': 'tom-myrtle-affair'}
-        types = {'tom-myrtle-affair': 'character'}
+        reg = self._reg([('tom-myrtle-affair', 'character')])
         assert _check_mice('tom-myrtle-affair;+tom-myrtle-affair;-tom-myrtle-affair',
-                           alias, types) == []
-        assert _check_mice('character:tom-myrtle-affair', alias, types) == []
+                           reg) == []
+        assert _check_mice('character:tom-myrtle-affair', reg) == []
 
     def test_unknown_mention_still_reported(self):
         from storyforge.schema import _check_mice
-        problems = _check_mice('no-such-thread', {'a': 'a'}, {})
+        problems = _check_mice('no-such-thread', self._reg([('a', '')]))
         assert problems and 'not in mice-threads.csv' in problems[0]['reason']
 
     def test_prose_is_not_a_mention_without_a_registry(self):
         from storyforge.schema import _check_mice
-        assert _check_mice('gatsby dream opens', {}, {})
-        assert _check_mice('+ +x', {}, {})
-        assert _check_mice('gatsby-dream;+inquiry:who', {}, {}) == []
+        assert _check_mice('gatsby dream opens', self._reg())
+        assert _check_mice('+ +x', self._reg())
+        assert _check_mice('gatsby-dream;+inquiry:who', self._reg()) == []
 
     def test_bare_operator_is_invalid(self):
         from storyforge.schema import _check_mice
-        assert _check_mice('+', {}, {})
+        assert _check_mice('+', self._reg())
 
 
 class TestBooleanAnswers:

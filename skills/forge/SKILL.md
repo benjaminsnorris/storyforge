@@ -474,7 +474,7 @@ Every commit includes updated `storyforge.yaml` so the project state is always c
 Commit messages are descriptive and prefixed: `"Develop: ..."`, `"Voice: ..."`, `"Scenes: ..."`, `"Plan revision: ..."`.
 
 ```
-git add -A && git commit -m "Develop: {what was done}" && git push
+git add -A -- . && git commit -m "Develop: {what was done}" && git push
 ```
 
 ## Graphic-novel mode

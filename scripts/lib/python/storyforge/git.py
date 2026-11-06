@@ -27,6 +27,84 @@ def _git(project_dir: str, *args: str, check: bool = True) -> subprocess.Complet
     )
 
 
+#: `work_tree_problem`'s answer when git ran and found no repository at all
+#: (as opposed to git missing, or a repository git refused or couldn't read)
+NOT_A_REPOSITORY = 'not inside a git repository'
+
+
+def _first_line(text: str) -> str:
+    return next((ln.strip() for ln in (text or '').splitlines() if ln.strip()), '')
+
+
+def work_tree_problem(project_dir: str) -> str:
+    """Why project_dir isn't in a usable git work tree; '' when it is.
+
+    The reason carries git's own message, so a warning names the real cause:
+    `NOT_A_REPOSITORY` exactly when there is no repository, else git missing,
+    or a repository git refused (`safe.directory`) or couldn't read.
+
+    Never `os.path.isdir(project_dir/.git)`: that is False for a project in a
+    subfolder of its repo (every storyforge-evals book is `projects/<book>/`)
+    and in a worktree or submodule, where `.git` is a file, and the callers
+    that gated on it skipped their git work with nothing said (#520).
+    """
+    try:
+        r = _git(project_dir, 'rev-parse', '--is-inside-work-tree', check=False)
+    except OSError as e:
+        return ('git is not installed' if isinstance(e, FileNotFoundError)
+                else f'git could not be run ({e})')
+    if r.returncode != 0:
+        msg = _first_line(r.stderr)
+        # '...: /path' instead is a broken `.git` file (a moved worktree)
+        if msg.startswith('fatal: not a git repository (or any'):
+            return NOT_A_REPOSITORY
+        return f'git could not use the repository here ({msg or f"exit {r.returncode}"})'
+    if r.stdout.strip() != 'true':
+        return 'inside a .git folder, not a work tree'
+    return ''
+
+
+def in_work_tree(project_dir: str) -> bool:
+    """True when project_dir is inside a git work tree (`work_tree_problem`)."""
+    return not work_tree_problem(project_dir)
+
+
+def project_repo_problem(project_dir: str) -> str:
+    """Why git work for this project mustn't happen in its enclosing repo;
+    '' when it may.
+
+    `work_tree_problem`, and also: a project inside a repo that isn't its own
+    (a dotfiles repo in ~) would have cleanup untrack, commit and push there.
+    So the repo must track the project's `storyforge.yaml`, unless the repo
+    is the project folder itself (a new project's own repo, nothing committed
+    yet). A repo that ignores the project is named as such: a commit there
+    finds nothing to commit, forever.
+    """
+    why = work_tree_problem(project_dir)
+    if why:
+        return why
+    tracked = _git(project_dir, '--literal-pathspecs', 'ls-files', '--error-unmatch',
+                   '--', 'storyforge.yaml', check=False)
+    if tracked.returncode == 0:
+        return ''
+    top = _git(project_dir, 'rev-parse', '--show-toplevel', check=False)
+    if top.returncode != 0:
+        return f'git could not find the repository top ({_first_line(top.stderr)})'
+    toplevel = top.stdout.strip()
+    if os.path.realpath(toplevel) == os.path.realpath(project_dir):
+        return ''
+    # (`check-ignore` takes no pathspec magic, `--literal-pathspecs` included)
+    ignored = _git(project_dir, 'check-ignore', '-q', '--', 'storyforge.yaml',
+                   check=False)
+    if ignored.returncode == 0:
+        return f'the git repository at {toplevel} ignores this project'
+    if ignored.returncode != 1:
+        return (f'could not check whether the git repository at {toplevel} ignores '
+                f'this project ({_first_line(ignored.stderr)})')
+    return (f'the git repository at {toplevel} does not track this project '
+            f'(its storyforge.yaml is not committed there)')
+
+
 def has_gh() -> bool:
     """Check if the gh CLI is available."""
     try:
@@ -93,27 +171,52 @@ def ensure_branch_pushed(project_dir: str, branch: str | None = None) -> bool:
     ahead = int(r.stdout.strip()) if r.returncode == 0 else 0
 
     if ahead == 0:
-        committed = False
-        # Try staging pending changes
-        r = _git(project_dir, 'diff', '--quiet', check=False)
-        if r.returncode != 0:
-            _git(project_dir, 'add', 'storyforge.yaml', check=False)
-            _git(project_dir, 'add', 'CLAUDE.md', check=False)
-            short = branch.removeprefix('storyforge/')
-            r = _git(project_dir, 'commit', '-m', f'Start {short}', check=False)
-            committed = r.returncode == 0
-
-        if not committed:
-            short = branch.removeprefix('storyforge/')
-            r = _git(project_dir, 'commit', '--allow-empty', '-m', f'Start {short}', check=False)
-            committed = r.returncode == 0
-
-        if committed:
-            log(f'Initial commit on {branch}')
+        # The project's own setup files, through `_commit_only`: never a bare
+        # `commit`, which took the whole index (a sibling project's staged
+        # work too), after a `diff --quiet` that looked at the whole repo;
+        # and every result checked (#520 review SF-D)
+        message = f'Start {branch.removeprefix("storyforge/")}'
+        if not _commit_only(project_dir, message, ['storyforge.yaml', 'CLAUDE.md']):
+            if last_commit_error != NOTHING_TO_COMMIT:
+                return False   # the WARNING is out
+            if not _empty_commit(project_dir, message):
+                return False
+        log(f'Initial commit on {branch}')
 
     r = _git(project_dir, 'push', '-u', 'origin', branch, check=False)
     if r.returncode != 0:
-        log(f'WARNING: Could not push branch {branch} to origin')
+        log(f'WARNING: could not push {branch}; its commits are only local: '
+            f'{(r.stderr or r.stdout).strip()[:200]}')
+        if branch not in unpushed:
+            unpushed.append(branch)
+        return False
+    return True
+
+
+def _empty_commit(project_dir: str, message: str) -> bool:
+    """Commit HEAD's own tree on top of HEAD: a commit with no changes that
+    leaves the index alone. `commit --allow-empty` commits the index, so
+    anything already staged (a sibling project's work) went in with it."""
+    head = _git(project_dir, 'rev-parse', '--verify', '-q', 'HEAD', check=False)
+    parent = head.stdout.strip() if head.returncode == 0 else ''
+    if parent:
+        tree = _git(project_dir, 'rev-parse', 'HEAD^{tree}', check=False)
+    else:   # an unborn branch: the empty tree, no parent
+        tree = subprocess.run(['git', '-C', project_dir, 'mktree'], input='',
+                              capture_output=True, text=True)
+    new = None
+    if tree.returncode == 0:
+        new = _git(project_dir, 'commit-tree', tree.stdout.strip(),
+                   *(['-p', parent] if parent else []), '-m', message, check=False)
+    ref = None
+    if new is not None and new.returncode == 0:
+        ref = _git(project_dir, 'update-ref', '-m', f'commit: {message}', 'HEAD',
+                   new.stdout.strip(), parent, check=False)
+    if ref is None or ref.returncode != 0:
+        failed = next(r for r in (ref, new, tree) if r is not None and r.returncode != 0)
+        log(f'WARNING: git commit "{message}" failed: '
+            f'{_first_line(failed.stderr) or "git exited " + str(failed.returncode)}. '
+            f'Nothing was committed.')
         return False
     return True
 
@@ -270,9 +373,10 @@ def commit_and_push(project_dir: str, message: str, paths: list[str] | None = No
 
     False when nothing was staged (`last_commit_error` is
     `NOTHING_TO_COMMIT`; nothing said) or the commit failed: then git's
-    reason is logged as a WARNING and kept in `last_commit_error`, and what
-    this call staged is unstaged again, so a later commit doesn't sweep it
-    in under its own message. A failed push is a WARNING (`_push`); the
+    reason is logged as a WARNING and kept in `last_commit_error`, and the
+    index is put back exactly as it was before the call (`write-tree` /
+    `read-tree`), so a later commit doesn't sweep in what this one staged,
+    and nothing staged before it is lost. A failed push is a WARNING (`_push`); the
     commit stands and True is returned.
 
     With `paths`, the commit holds only what is staged under them: anything
@@ -293,17 +397,44 @@ def commit_and_push(project_dir: str, message: str, paths: list[str] | None = No
     on that: its `git rm --cached` removals are only in the index, and
     `commit -- .` would drop them.
     """
+    if not _commit_only(project_dir, message, paths):
+        return False
+    _push(project_dir)
+    return True
+
+
+def _commit_only(project_dir: str, message: str, paths: list[str] | None) -> bool:
+    """`commit_and_push` without the push."""
     global last_commit_error
 
+    # The index as it was, to put back exactly if the commit fails. A
+    # `reset -- paths` there unstaged more than this call staged: an author's
+    # own staged edits under the paths, and (with no paths, `-- .`) the
+    # `git rm --cached` removals cleanup had just made (#520 review SF-C)
+    snap = _git(project_dir, 'write-tree', check=False)
+    if snap.returncode != 0:
+        last_commit_error = ' '.join((snap.stderr or 'git write-tree failed').split())[:300]
+        log(f'WARNING: git commit "{message}" failed: could not record the index '
+            f'(unmerged files?): {last_commit_error}. Nothing was staged or committed.')
+        return False
+    index_before = snap.stdout.strip()
+
     def fail(reason: str, what: str = '') -> bool:
-        """Keep git's reason, unstage what this call staged, and say so."""
+        """Keep git's reason, put the index back as it was, and say so."""
         global last_commit_error
         last_commit_error = ' '.join(reason.split())[:300]
-        _git(project_dir, '--literal-pathspecs', 'reset', '-q', '--', *(paths or ['.']),
-             check=False)
+        restored = ''
+        if index_before:
+            rt = _git(project_dir, 'read-tree', index_before, check=False)
+            if rt.returncode == 0:
+                # read-tree drops the cached file stats; refresh them
+                _git(project_dir, 'update-index', '-q', '--refresh', check=False)
+            else:
+                restored = (f' Could not put the index back as it was '
+                            f'({_first_line(rt.stderr)}); check `git status`.')
         log(f'WARNING: git commit "{message}" failed: {what + ": " if what else ""}'
-            f'{last_commit_error}. Nothing was committed; what it staged is unstaged '
-            f'again.')
+            f'{last_commit_error}. Nothing was committed'
+            f'{"" if restored else "; the index is as it was before"}.{restored}')
         return False
 
     if paths:
@@ -359,7 +490,6 @@ def commit_and_push(project_dir: str, message: str, paths: list[str] | None = No
                     or f'git commit exited {r.returncode}')
 
     last_commit_error = ''
-    _push(project_dir)
     return True
 
 
@@ -397,36 +527,6 @@ def _push(project_dir: str) -> bool:
             unpushed.append(branch)
         return False
     return True
-
-
-def commit_partial_work(project_dir: str) -> None:
-    """Commit any partial work during interrupted shutdown."""
-    if not os.path.isdir(os.path.join(project_dir, '.git')):
-        return
-
-    # Check for staged or unstaged changes in key dirs
-    dirs_to_check = [
-        'working/evaluations/', 'working/logs/', 'working/scores/',
-        'working/costs/', 'working/timeline/', 'scenes/', 'reference/',
-    ]
-    has_changes = False
-    r = _git(project_dir, 'diff', '--cached', '--quiet', check=False)
-    if r.returncode != 0:
-        has_changes = True
-    else:
-        for d in dirs_to_check:
-            r = _git(project_dir, 'status', '--porcelain', d, check=False)
-            if r.stdout.strip():
-                has_changes = True
-                break
-
-    if has_changes:
-        log('Committing partial work before exit...')
-        for d in dirs_to_check:
-            _git(project_dir, 'add', d, check=False)
-        _git(project_dir, 'commit', '-m', 'Interrupted: partial work saved', check=False)
-        _git(project_dir, 'push', check=False)
-        log('Partial work committed.')
 
 
 # ============================================================================
@@ -505,7 +605,7 @@ def _paths(project_dir: str, *args: str) -> list[str]:
 def _project_tree(project_dir: str) -> tuple[list[str], str]:
     """Every file in the project, relative to it, and a note on how they were
     found ('' when git listed them)."""
-    if _git(project_dir, 'rev-parse', '--is-inside-work-tree', check=False).returncode == 0:
+    if in_work_tree(project_dir):
         tracked = _paths(project_dir, 'ls-files')
         untracked = _paths(project_dir, 'ls-files', '--others', '--exclude-standard')
         listed = set(tracked) | set(untracked)

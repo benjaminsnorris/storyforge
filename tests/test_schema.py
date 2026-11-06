@@ -215,36 +215,37 @@ class TestValidateSchema:
 
 class TestMiceValidation:
     def test_normalization(self, fixture_dir):
-        from storyforge.enrich import load_mice_registry, normalize_mice_threads
+        from storyforge.enrich import normalize_mice_threads
+        from storyforge.mice import load_registry
         mice_csv = os.path.join(fixture_dir, 'reference', 'mice-threads.csv')
-        alias_map, type_map = load_mice_registry(mice_csv)
+        registry = load_registry(mice_csv)
 
-        assert normalize_mice_threads('+inquiry:the map anomaly', alias_map, type_map) == '+map-anomaly'
-        assert normalize_mice_threads('+milieu:map-anomaly', alias_map, type_map) == '+map-anomaly'
+        assert normalize_mice_threads('+inquiry:the map anomaly', registry.lookup) == '+map-anomaly'
+        assert normalize_mice_threads('+milieu:map-anomaly', registry.lookup) == '+map-anomaly'
 
     def test_schema_validation(self, fixture_dir):
         from storyforge.schema import _check_mice
-        from storyforge.enrich import load_mice_registry
+        from storyforge.mice import load_registry
         mice_csv = os.path.join(fixture_dir, 'reference', 'mice-threads.csv')
-        alias_map, type_map = load_mice_registry(mice_csv)
+        registry = load_registry(mice_csv)
 
-        assert len(_check_mice('+inquiry:map-anomaly', alias_map, type_map)) == 0
-        assert len(_check_mice('no-prefix:name', alias_map, type_map)) >= 1
-        assert len(_check_mice('+quest:map-anomaly', alias_map, type_map)) >= 1
+        assert len(_check_mice('+inquiry:map-anomaly', registry)) == 0
+        assert len(_check_mice('no-prefix:name', registry)) >= 1
+        assert len(_check_mice('+quest:map-anomaly', registry)) >= 1
 
     def test_bare_name_format(self, tmp_path):
         from storyforge.schema import _check_mice
-        from storyforge.enrich import load_mice_registry
+        from storyforge.mice import load_registry
 
         reg_path = str(tmp_path / 'mice-threads.csv')
         with open(reg_path, 'w') as f:
             f.write('id|name|type|aliases\n')
             f.write('map-anomaly|Map Anomaly|inquiry|\n')
 
-        alias_map, type_map = load_mice_registry(reg_path)
-        assert len(_check_mice('+map-anomaly', alias_map, type_map)) == 0
-        assert len(_check_mice('+inquiry:map-anomaly', alias_map, type_map)) == 0
-        assert len(_check_mice('+nonexistent', alias_map, type_map)) >= 1
+        registry = load_registry(reg_path)
+        assert len(_check_mice('+map-anomaly', registry)) == 0
+        assert len(_check_mice('+inquiry:map-anomaly', registry)) == 0
+        assert len(_check_mice('+nonexistent', registry)) >= 1
 
 
 class TestSceneIdsValidation:

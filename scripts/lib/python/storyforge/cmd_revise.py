@@ -36,7 +36,7 @@ from storyforge.costs import (
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
-    update_pr_task, _git, has_gh, current_branch,
+    update_pr_task, _git, _push, has_gh, current_branch,
     get_pr_body, set_pr_body, add_pr_comment,
 )
 from storyforge.api import (
@@ -3613,7 +3613,7 @@ def _main(argv=None):
 
             # Git commit if needed
             _commit(project_dir, f'Revision: {pass_name}', ['.'])
-            _git(project_dir, 'push', check=False)
+            _push(project_dir)   # checked: a failed push is a WARNING
 
             # Mark completed
             _update_pass_field(plan_rows, pass_num, 'status', 'completed', csv_plan_file)
@@ -3920,7 +3920,7 @@ Rules:
                                       for p in changed if p.endswith('.md')])
 
         # Push
-        _git(project_dir, 'push', check=False)
+        _push(project_dir)   # checked: a failed push is a WARNING
 
         if skipped_scenes:
             _log_gate_failures(gate_failures)

@@ -524,6 +524,9 @@ def test_a_healthy_reference_list_has_no_exclusion_section(in_project):
     make_png(os.path.join(in_project, 'manuscript', 'assets',
                           'cover-illustration.png'), 8, 12)
     _ingest(in_project, 0, ingested_at='2026-07-29')
+    # Healthy includes a cover the author has reviewed against the canon
+    # (#303); an unreviewed one is a reference problem like any other.
+    assert cmd_illustrate.main(['--accept-style-reference']) == 0
     cmd_illustrate.main(['--package'])
     body = _read(in_project, 'README.md')
     assert 'Read this before you upload' not in body
@@ -1577,13 +1580,6 @@ def _set_production(project_dir, key, value):
         f.writelines(out)
 
 
-def _backdate(path, iso_date):
-    """Set a file's mtime to local midnight on an ISO date."""
-    from datetime import datetime
-    stamp = datetime.fromisoformat(f'{iso_date}T00:00:00').timestamp()
-    os.utime(path, (stamp, stamp))
-
-
 def _add_transition(project_dir, **cells):
     from storyforge import visual_state as vs
     rows = list(vs.read_transitions(project_dir))
@@ -1814,19 +1810,32 @@ def test_a_declared_style_reference_reaches_the_packet(in_project):
 
 
 def test_a_stale_style_reference_is_disclosed_in_the_packet(in_project, capsys):
-    """It is never excluded, so the packet must say it is old — in README's gaps
-    as well as reference-images.md, because run_package logs only `gaps`."""
+    """It is never excluded, so the packet must say it is unreviewed — in the
+    log and in README's "What this packet cannot tell you", with the action that
+    clears it, because the skill reads that section aloud and an entry with no
+    clearing action trains the author to skim it (#303)."""
     from illustration_helpers import make_png
-    cover = make_png(os.path.join(in_project, 'manuscript', 'assets',
-                                  'cover-illustration.png'), 8, 8)
-    _backdate(cover, '2026-01-01')          # canon fixture is 2026-07-28
+    make_png(os.path.join(in_project, 'manuscript', 'assets',
+                          'cover-illustration.png'), 8, 8)
 
     assert cmd_illustrate.main(['--package']) == 0
     out = capsys.readouterr().out
-    assert 'before the canon was last updated' in out
-    assert 'before the canon was last updated' in _read(in_project, 'README.md')
-    assert 'before the canon was last updated' in \
-        _read(in_project, 'README.md')
+    body = _read(in_project, 'README.md')
+    for text in (out, body):
+        assert 'not recorded as reviewed against the canon' in text
+        assert 'storyforge illustrate --accept-style-reference' in text
+
+
+def test_an_accepted_style_reference_leaves_the_packet_gaps(in_project):
+    """The clearing action clears it in the packet too, until canon moves."""
+    from illustration_helpers import make_png
+    make_png(os.path.join(in_project, 'manuscript', 'assets',
+                          'cover-illustration.png'), 8, 8)
+    assert cmd_illustrate.main(['--accept-style-reference']) == 0
+    assert cmd_illustrate.main(['--package']) == 0
+    body = _read(in_project, 'README.md')
+    assert 'not recorded as reviewed against the canon' not in body
+    assert '--accept-style-reference' not in body
 
 
 def test_the_positive_headline_never_reaches_the_packet(in_project):

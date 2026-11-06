@@ -2086,7 +2086,7 @@ def stale_render_reason(row: dict[str, str], canon_cutoff: str) -> str:
     `staleness_unchecked_finding`.
 
     Empty and unparseable `ingested_at` are both treated as pre-canon, which is
-    the opposite of `resolve_style_reference`'s policy for an unreadable mtime
+    the opposite of `resolve_style_reference`'s policy for an unreadable file
     and deliberately so: `ingested_at` postdates the plan schema, so "unknown"
     means the render predates even the bookkeeping. The same-day-is-not-stale
     rule lives in `canon.predates_canon`, not here.

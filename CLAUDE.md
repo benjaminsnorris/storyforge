@@ -20,7 +20,7 @@ Read before working in an area:
 ### Gotchas that have caused real bugs
 - `prompts.read_yaml_field(yaml_file, field)` has the **opposite** argument order from `common.read_yaml_field(field, project_dir)`.
 - `common.read_yaml_field('a.b')` also matches a `b:` nested deeper under `a` (e.g. inside a list item). For a block with nested lists, read its own keys by indentation, as `source._direct_keys` does.
-- `parse_yaml_scalar` is the only YAML scalar parser. Edit `storyforge.yaml` entries with `update_artifact_entry`, never a regex over the whole file.
+- `parse_yaml_scalar` is the only YAML scalar parser. Edit `storyforge.yaml` entries with `update_artifact_entry` (or `set_top_level_fields` for a top-level block's direct keys), never a regex over the whole file.
 - `storyforge.yaml` line endings are **preserved** (`newline=''`, `detect_newline`, write only on change, `\r?\n` patterns). CSVs we write are **forced to LF** (`lineterminator='\n'`).
 - Author prose interpolated into a finding `detail` goes through `common.csv_safe` — a `|` corrupts the report CSV.
 - Scene files (`scenes/{id}.md`) are pure prose, no frontmatter; metadata lives in `reference/*.csv` (pipe-delimited, `;` for arrays, no quoting). Scene `id` is a permanent event slug, never positional.

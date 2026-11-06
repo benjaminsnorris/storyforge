@@ -44,7 +44,7 @@ print(dump_schema_markdown())
 |------|-----------|---------------|
 | `enum` | Value must be in a fixed set | N/A — values are already canonical |
 | `registry` | Each value must exist as id, name, or alias in a registry CSV | Resolved to canonical id via alias map |
-| `mice` | Format `+/-type:name`, valid type, name in registry | Name resolved via alias map, type corrected |
+| `mice` | Each entry is `+name` (open), `-name` (close) or a bare `name` (mention), optionally `type:name`; valid type; the name (id, name or alias, any case; `type:name` first) names exactly one registered thread; no `[note]` | Name resolved via alias map, type dropped |
 | `integer` | Must parse as int | N/A |
 | `boolean` | Must be `true`, `false`, or empty | N/A |
 | `free_text` | No constraint | N/A |
@@ -138,7 +138,7 @@ Run `./storyforge validate` to check both structural integrity and schema compli
 - **Completeness:** Required columns for the scene's status are populated
 - **Timeline:** flashbacks and crosscuts (scenes set before the story's present) are listed and gauged, never errors
 - **Knowledge flow:** knowledge_in references match prior scenes' knowledge_out
-- **Thread management:** each MICE thread opens once and closes at most once; interleaving is reported, not an error; no thread dormant >8 scenes
+- **Thread management:** each MICE thread opens once and closes at most once; interleaving is reported, not an error; no thread dormant >8 scenes between its open and its close (a mention before the open or after the close is allowed and not counted; a close before the open is reported; `elaborate --stage mice-fill` adds bare-name mentions inside the span)
 - **Pacing:** No flat polarity stretches (3+ scenes); action/sequel rhythm varied; turning point types varied
 - **Brief names (advisory):** names in a brief's goal, conflict, outcome, crisis, decision, key actions and dialogue, knowledge, physical states and subtext that no scene's prose and no reference file uses (scene-briefs.csv and scene-intent.csv don't count: a brief rewrite that drifted writes them). A draft takes its facts from the brief, so it would write these people into the book. One finding per scene, naming each field and its names, and one for each thing it couldn't check (a missing fact column, no `id` column, an unreadable or non-UTF-8 file), so a pass means checked and clean. Reference files include subfolders (canon/, source/); a graphic novel's pages count as prose. The briefs never vouch for each other, drafted or not (a drift puts the same stray in several briefs): a real name a scene plans before it is drafted belongs in characters.csv or locations.csv. A run of capitalized words ("Danny Olinsky") is one name; possessives, plurals, words the book uses in any case (Unicode names included), weekdays, months, titles ("Detective", "Dr.") and institutional words ("Internal Affairs") pass. Only the first word of a run that opens a sentence, a beat (after `;`) or a `[note]` is excused, and only when no brief uses that word as a name (capitalized mid-sentence, or possessive where a sentence or beat opens). It still over-reports drug and brand names, so check each against the book. `validate` lists advisories on every run; elaborate and extract list them only when validation otherwise fails
 
@@ -146,7 +146,7 @@ Run `./storyforge validate` to check both structural integrity and schema compli
 - **Enum values:** Constrained columns contain only allowed values
 - **Registry references:** Character, location, value, motif, and MICE thread names resolve against their registry CSVs
 - **Integers:** Numeric columns contain valid integers
-- **MICE format:** Thread operations match `+/-type:name` format with valid types
+- **MICE format:** Each entry is an open (`+name`), a close (`-name`) or a mention (bare `name`), optionally typed (`+type:name`) with a valid type, naming exactly one registered thread. A name, alias or bare name two threads share is reported as a registry problem (write `type:name`, or rename one) and an entry using it is ambiguous. With no registry, a slug names a thread and prose does not. Readers that skip a malformed entry say so: structural validation (`mice-unread`), MICE health (a finding), dormancy and mice-fill (WARNINGs naming scene and entry; mice-fill leaves a thread with such entries unfilled)
 
 Use `--no-schema` to skip schema validation. Use `--json` for machine-readable output.
 

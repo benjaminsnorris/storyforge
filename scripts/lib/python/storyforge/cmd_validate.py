@@ -257,7 +257,7 @@ def _print_human_readable(combined):
                     elif e['constraint'] == 'scene_ids':
                         unresolved = ', '.join(e.get('unresolved', []))
                         print(f'    {e["row"]} | {e["column"]}: "{unresolved}" — not in scenes.csv')
-                    elif e['constraint'] == 'ledger':
+                    elif e['constraint'] in ('ledger', 'mice-registry'):
                         print(f'    {e["reason"]}')
 
     source = combined.get('source')

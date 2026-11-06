@@ -391,3 +391,229 @@ class TestCommitInASubfolder:
             for f in committed)
         assert seeded <= set(committed)
         assert self._git(work, 'status', '--porcelain', '--', 'projects/telemachus/reference/source') == ''
+
+
+class TestWorkTreeProblem:
+    """#520 review (SF-A, SF-B/TD-2): `in_work_tree` was a bool that lumped
+    git missing, no repository, a refused (`safe.directory`) and a broken
+    repository together and dropped git's message, so warnings named the
+    wrong cause; and it was True inside any repository, even one that isn't
+    the project's (a dotfiles repo in ~)."""
+
+    @staticmethod
+    def _run(cwd, *a):
+        import subprocess
+        subprocess.run(['git', '-C', str(cwd), *a], check=True, capture_output=True)
+
+    def _ceiling(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('GIT_CEILING_DIRECTORIES', str(tmp_path.parent))
+
+    def test_no_repository(self, tmp_path, monkeypatch):
+        from storyforge import git
+        self._ceiling(tmp_path, monkeypatch)
+        assert git.work_tree_problem(str(tmp_path)) == git.NOT_A_REPOSITORY
+        assert git.in_work_tree(str(tmp_path)) is False
+
+    def test_git_not_installed(self, tmp_path, monkeypatch):
+        from storyforge import git
+        empty = tmp_path / 'empty-path'
+        empty.mkdir()
+        monkeypatch.setenv('PATH', str(empty))
+        assert git.work_tree_problem(str(tmp_path)) == 'git is not installed'
+
+    def test_a_refused_repository_carries_gits_reason(self, tmp_path, monkeypatch):
+        from storyforge import git
+        self._ceiling(tmp_path, monkeypatch)
+        self._run(tmp_path, 'init', '-q')
+        monkeypatch.setenv('GIT_TEST_ASSUME_DIFFERENT_OWNER', '1')
+        why = git.work_tree_problem(str(tmp_path))
+        assert why != git.NOT_A_REPOSITORY and 'dubious ownership' in why
+
+    def test_a_broken_git_file_is_not_no_repository(self, tmp_path, monkeypatch):
+        from storyforge import git
+        self._ceiling(tmp_path, monkeypatch)
+        (tmp_path / '.git').write_text('gitdir: /nonexistent\n')
+        why = git.work_tree_problem(str(tmp_path))
+        assert why != git.NOT_A_REPOSITORY and '/nonexistent' in why
+
+    def test_subfolder_and_worktree_projects(self, tmp_path):
+        from storyforge import git
+        work, project = TestCommitInASubfolder()._repos(tmp_path, 'projects/book')
+        assert git.work_tree_problem(str(project)) == ''
+        wt = tmp_path / 'wt'
+        self._run(work, 'worktree', 'add', '-q', '-b', 'storyforge/wt', str(wt))
+        assert git.work_tree_problem(str(wt)) == ''
+
+    def _parent(self, tmp_path, ignore):
+        root = tmp_path / 'home'
+        book = root / 'Writing' / 'book'
+        book.mkdir(parents=True)
+        (book / 'storyforge.yaml').write_text('project: x\n')
+        (root / '.zshrc').write_text('x\n')
+        if ignore:
+            (root / '.gitignore').write_text('Writing/\n')
+        self._run(root, 'init', '-q')
+        self._run(root, 'add', '.zshrc', *(['.gitignore'] if ignore else []))
+        self._run(root, '-c', 'user.email=t@e.st', '-c', 'user.name=T',
+                  'commit', '-qm', 'dotfiles')
+        return root, book
+
+    def test_an_unrelated_parent_repository_is_named(self, tmp_path):
+        from storyforge import git
+        root, book = self._parent(tmp_path, ignore=False)
+        why = git.project_repo_problem(str(book))
+        assert why == (f'the git repository at {os.path.realpath(root)} does not track '
+                       f'this project (its storyforge.yaml is not committed there)')
+
+    def test_a_parent_repository_that_ignores_the_project(self, tmp_path):
+        from storyforge import git
+        root, book = self._parent(tmp_path, ignore=True)
+        assert git.project_repo_problem(str(book)) == \
+            f'the git repository at {os.path.realpath(root)} ignores this project'
+
+    def test_a_tracked_subfolder_project_and_a_new_projects_own_repo(self, tmp_path):
+        from storyforge import git
+        work, project = TestCommitInASubfolder()._repos(tmp_path, 'projects/book')
+        (project / 'storyforge.yaml').write_text('project: x\n')
+        self._run(work, 'add', '.')
+        self._run(work, 'commit', '-qm', 'yaml')
+        assert git.project_repo_problem(str(project)) == ''
+        fresh = tmp_path / 'fresh'
+        fresh.mkdir()
+        (fresh / 'storyforge.yaml').write_text('project: x\n')
+        self._run(fresh, 'init', '-q')
+        assert git.project_repo_problem(str(fresh)) == ''
+
+
+class TestAFailedCommitRestoresTheIndex:
+    """#520 review (SF-C): on a failed commit, `reset -- paths` (or `-- .`)
+    unstaged more than the call had staged: the author's own staged edits
+    under the paths, and the `git rm --cached` removals cleanup had just
+    made, while the WARNING said only its own files were unstaged."""
+
+    _git = staticmethod(TestAFailedCommit._git)
+
+    def _index(self, work):
+        return self._git(work, 'ls-files', '-s')
+
+    def _rejecting_subfolder(self, tmp_path):
+        work, project = TestCommitInASubfolder()._repos(tmp_path, 'projects/book')
+        hook = work / '.git' / 'hooks' / 'pre-commit'
+        hook.write_text('#!/bin/sh\necho "hook says no" >&2\nexit 1\n')
+        hook.chmod(0o755)
+        return work, project
+
+    def test_an_authors_staged_edit_under_the_paths_stays_staged(self, tmp_path, capsys):
+        from storyforge import git
+        work, project = self._rejecting_subfolder(tmp_path)
+        (project / 'scenes' / 'kept.md').write_text('the author staged this\n')
+        self._git(project, 'add', 'scenes/kept.md')
+        (project / 'scenes' / 'kept.md').write_text('and kept editing\n')
+        (project / 'scenes' / 'new.md').write_text('ours\n')
+        before = self._index(work)
+        assert git.commit_and_push(str(project), 'Scenes', ['scenes/']) is False
+        assert self._index(work) == before
+        assert 'the index is as it was before' in capsys.readouterr().out
+
+    def test_cleanups_removals_survive_a_failed_commit(self, tmp_path):
+        from storyforge import git
+        work, project = self._rejecting_subfolder(tmp_path)
+        self._git(project, 'rm', '--cached', '-q', 'scenes/gone.md')
+        (project / 'scenes' / 'kept.md').write_text('cleaned\n')
+        before = self._index(work)
+        assert git.commit_and_push(str(project), 'Cleanup') is False
+        assert self._index(work) == before
+        assert 'projects/book/scenes/gone.md' not in self._git(work, 'ls-files')
+
+    def test_a_sibling_projects_staged_file_stays_staged(self, tmp_path):
+        from storyforge import git
+        work, project = self._rejecting_subfolder(tmp_path)
+        (work / 'projects' / 'other' / 'notes.md').write_text('sibling edit\n')
+        self._git(work, 'add', 'projects/other/notes.md')
+        (project / 'scenes' / 'kept.md').write_text('cleaned\n')
+        before = self._index(work)
+        assert git.commit_and_push(str(project), 'Cleanup') is False
+        assert self._index(work) == before
+
+
+class TestEnsureBranchPushed:
+    """#520 review (SF-D): on a branch with nothing ahead of its base, it ran
+    `diff --quiet` over the whole repo, then a bare `commit` (the whole index,
+    a sibling project's staged work too), and checked none of it."""
+
+    _git = staticmethod(TestAFailedCommit._git)
+
+    @pytest.fixture(autouse=True)
+    def _no_unpushed(self, monkeypatch):
+        from storyforge import git
+        monkeypatch.setattr(git, 'unpushed', [])
+
+    def _fresh_branch(self, tmp_path):
+        work, project = TestCommitInASubfolder()._repos(tmp_path, 'projects/book')
+        (project / 'storyforge.yaml').write_text('project: x\n')
+        self._git(work, 'add', '.')
+        self._git(work, 'commit', '-qm', 'yaml')
+        self._git(work, 'branch', '-qf', 'main', 'HEAD')    # nothing ahead of main
+        self._git(work, 'checkout', '-qb', 'storyforge/write-1')
+        return work, project
+
+    def _committed(self, work):
+        return self._git(work, 'show', '--name-only', '--format=', 'HEAD').split()
+
+    def test_a_sibling_projects_staged_work_stays_out(self, tmp_path):
+        from storyforge import git
+        work, project = self._fresh_branch(tmp_path)
+        (work / 'projects' / 'other' / 'notes.md').write_text('sibling edit\n')
+        self._git(work, 'add', 'projects/other/notes.md')
+        assert git.ensure_branch_pushed(str(project), 'storyforge/write-1') is True
+        assert self._git(work, 'log', '-1', '--format=%s').strip() == 'Start write-1'
+        assert self._committed(work) == []
+        assert self._git(work, 'diff', '--cached', '--name-only').split() == \
+            ['projects/other/notes.md']
+        assert self._git(work, 'rev-parse', '@{u}') == self._git(work, 'rev-parse', 'HEAD')
+
+    def test_the_projects_setup_files_and_nothing_else(self, tmp_path):
+        from storyforge import git
+        work, project = self._fresh_branch(tmp_path)
+        (project / 'storyforge.yaml').write_text('project: y\n')
+        (project / 'scenes' / 'kept.md').write_text('not setup\n')
+        (work / 'projects' / 'other' / 'notes.md').write_text('sibling edit\n')
+        assert git.ensure_branch_pushed(str(project), 'storyforge/write-1') is True
+        assert self._committed(work) == ['projects/book/storyforge.yaml']
+
+    def test_a_failing_commit_is_a_failure(self, tmp_path, capsys):
+        from storyforge import git
+        work, project = self._fresh_branch(tmp_path)
+        hook = work / '.git' / 'hooks' / 'pre-commit'
+        hook.write_text('#!/bin/sh\necho "hook says no" >&2\nexit 1\n')
+        hook.chmod(0o755)
+        (project / 'storyforge.yaml').write_text('project: y\n')
+        before = self._git(work, 'rev-parse', 'HEAD')
+        assert git.ensure_branch_pushed(str(project), 'storyforge/write-1') is False
+        assert self._git(work, 'rev-parse', 'HEAD') == before
+        out = capsys.readouterr().out
+        assert 'WARNING: git commit "Start write-1" failed: hook says no' in out
+        assert 'Initial commit' not in out
+
+    def test_a_failing_push_is_named(self, tmp_path, capsys):
+        import shutil
+        from storyforge import git
+        work, project = self._fresh_branch(tmp_path)
+        shutil.rmtree(tmp_path / 'remote.git')
+        assert git.ensure_branch_pushed(str(project), 'storyforge/write-1') is False
+        assert 'WARNING: could not push storyforge/write-1' in capsys.readouterr().out
+        assert git.unpushed == ['storyforge/write-1']
+
+
+def test_no_command_pushes_without_checking():
+    """#520 review (SF-E): revise and write pushed with
+    `_git(project_dir, 'push', check=False)` and ignored the result; pushes
+    go through `git._push`, which names a failure."""
+    import pathlib
+    import re
+    pkg = pathlib.Path(__file__).resolve().parent.parent / 'scripts' / 'lib' / 'python' / 'storyforge'
+    bare = [f'{p.name}:{n}' for p in pkg.glob('*.py') if p.name != 'git.py'
+            for n, line in enumerate(p.read_text(encoding='utf-8').splitlines(), 1)
+            if re.search(r"_git\([^)]*'push'", line)]
+    assert bare == []
+
