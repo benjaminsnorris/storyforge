@@ -1288,7 +1288,9 @@ def predates_canon(*, when: str, cutoff: str) -> bool:
     The one comparison every staleness check **against the canon cutoff** makes,
     in one place: the ingested-render check in
     `illustrations.stale_render_reason` and the style-reference check in
-    `cmd_illustrate.resolve_style_reference`. `packet._staging_postdates_render`
+    `cmd_illustrate._style_review` (which compares the canon date the author
+    *recorded a review against*, not the art's own date — the cover's
+    dependency on canon can run either way, #303). `packet._staging_postdates_render`
     is the same predicate against a *different* cutoff (`treatment_at` versus
     `ingested_at`) and still rolls its own, restating the same-day rule below —
     #281 will want both in its inventory.
@@ -1308,9 +1310,10 @@ def predates_canon(*, when: str, cutoff: str) -> bool:
 
     An unparseable or empty date on either side is **not** older. Callers
     disagree about what an unknown date means — an empty `ingested_at` counts
-    as pre-canon because the column postdates the plan schema, while a file
-    whose mtime cannot be read says nothing at all — so each states its own
-    policy rather than inheriting one from here.
+    as pre-canon because the column postdates the plan schema, while an
+    unparseable recorded style-reference review is never current (it would
+    otherwise be a typo clearing a warning) — so each states its own policy
+    rather than inheriting one from here.
     """
     left = iso_date_or_empty(when)
     right = iso_date_or_empty(cutoff)
@@ -1351,6 +1354,28 @@ def newest_canon_updated(project_dir: str) -> str:
             continue
         newest = max(newest, parsed)
     return newest
+
+
+def undated_canon_files(project_dir: str) -> list[str]:
+    """Project-relative canon files that cannot count toward the cutoff.
+
+    A missing, blank or unparseable `canon_updated` — or no frontmatter at all.
+    `newest_canon_updated` skips these (logging only the unparseable ones), so a
+    consumer that records "reviewed against the canon as of D" must name them:
+    an edit to one of them can never move D, and so can never re-raise a check
+    keyed on it (#303 SF-5). Silent, like the walk's other read-only helpers;
+    the caller decides how to report.
+    """
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    if not os.path.isdir(canon_dir):
+        return []
+    undated = []
+    for path in _walk_canon_files(canon_dir):
+        fm = parse_canon_file(path)['frontmatter']
+        raw = (fm.get('canon_updated') or '') if isinstance(fm, dict) else ''
+        if not iso_date_or_empty(str(raw)):
+            undated.append(os.path.relpath(path, project_dir))
+    return undated
 
 
 class AnchorLabel(TypedDict):
