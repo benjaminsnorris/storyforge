@@ -249,3 +249,29 @@ class TestInitKinds:
         code, project = _init(tmp_path, files, '--no-commit')
         assert code == 0
         assert 'scenes-setup --split-manuscript' in (project / 'CLAUDE.md').read_text()
+
+
+class TestInitWhereGitCantHelp:
+    """#520 review (TD-3): init's own `_in_git_repo` read any git failure as
+    "no repository", so inside a repository git refused it ran `git init`
+    and nested a new one; and with no git installed it crashed."""
+
+    def test_no_git_installed_is_an_error_not_a_crash(self, tmp_path, git_env,
+                                                      monkeypatch, capsys):
+        empty = tmp_path / 'empty-path'
+        empty.mkdir()
+        monkeypatch.setenv('PATH', str(empty))
+        project = tmp_path / 'novel'
+        assert cmd_init.main([str(project), '--title', 'T']) == 1
+        assert (project / 'storyforge.yaml').is_file()
+        assert 'not committed: git is not installed' in capsys.readouterr().out
+
+    def test_a_refused_repository_gets_no_nested_repository(self, tmp_path, git_env,
+                                                           monkeypatch, capsys):
+        monkeypatch.setenv('GIT_CEILING_DIRECTORIES', str(tmp_path.parent))
+        subprocess.run(['git', 'init', '-q'], cwd=tmp_path, check=True)
+        monkeypatch.setenv('GIT_TEST_ASSUME_DIFFERENT_OWNER', '1')
+        project = tmp_path / 'novel'
+        assert cmd_init.main([str(project), '--title', 'T']) == 1
+        assert not (project / '.git').exists()
+        assert 'dubious ownership' in capsys.readouterr().out

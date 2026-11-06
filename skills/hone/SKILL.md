@@ -301,7 +301,7 @@ git rev-parse --abbrev-ref HEAD
 After any changes to project files:
 
 ```bash
-git add -A && git commit -m "Hone: [domain] — [summary]" && git push
+git add -A -- . && git commit -m "Hone: [domain] — [summary]" && git push
 ```
 
 ---
@@ -338,7 +338,7 @@ Each proposal file should contain:
 
 **4. Commit after each batch** — After the author approves a group of changes:
 ```bash
-git add -A && git commit -m "Hone: briefs (coach) — [summary of what changed]" && git push
+git add -A -- . && git commit -m "Hone: briefs (coach) — [summary of what changed]" && git push
 ```
 
 **5. Script delegation in coach mode** — When offering the script command, include `--coaching coach`:

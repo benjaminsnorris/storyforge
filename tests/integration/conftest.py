@@ -12,12 +12,12 @@ import importlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import pytest
 
+from fixture_helpers import FIXTURE_DIR, make_project
+
 TESTS_DIR = os.path.dirname(os.path.dirname(__file__))
-FIXTURE_DIR = os.path.join(TESTS_DIR, 'fixtures', 'test-project')
 API_RESPONSES_DIR = os.path.join(TESTS_DIR, 'fixtures', 'api-responses')
 
 
@@ -76,6 +76,9 @@ def load_api_response_text(name: str) -> str:
 def git_project(tmp_path):
     """A real git repo with test-project fixture, initialized and committed.
 
+    Copies the files git would commit, so gitignored leftovers stay out;
+    outside a git work tree, everything (fixture_helpers.make_project).
+
     This creates a genuine git repository so integration tests can exercise
     real git operations (branching, committing, diffing). The repo has:
     - An initial commit with all fixture files
@@ -84,15 +87,7 @@ def git_project(tmp_path):
 
     Returns the path to the project directory (str).
     """
-    dest = tmp_path / 'test-project'
-    shutil.copytree(FIXTURE_DIR, dest)
-
-    # Ensure working directories (matches commands/conftest.py)
-    for subdir in [
-        'working/logs', 'working/scores', 'working/costs',
-        'working/evaluations', 'working/reviews', 'working/coaching',
-    ]:
-        os.makedirs(os.path.join(str(dest), subdir), exist_ok=True)
+    dest = make_project(FIXTURE_DIR, tmp_path / 'test-project', working_dirs=True)
 
     env = {
         **os.environ,
@@ -112,21 +107,14 @@ def git_project(tmp_path):
 
 @pytest.fixture
 def project_dir(tmp_path):
-    """A fresh copy of the test-project fixture in a temp directory (no git).
+    """A fresh copy of the test-project fixture in a temp directory (no git),
+    with the working/ subdirectories command modules expect.
 
     Use this when tests need file I/O but not git operations.
+    Copies the files git would commit, so gitignored leftovers stay out;
+    outside a git work tree, everything (fixture_helpers.make_project).
     """
-    dest = tmp_path / 'test-project'
-    shutil.copytree(FIXTURE_DIR, dest)
-
-    # Ensure working directories (matches commands/conftest.py)
-    for subdir in [
-        'working/logs', 'working/scores', 'working/costs',
-        'working/evaluations', 'working/reviews', 'working/coaching',
-    ]:
-        os.makedirs(os.path.join(str(dest), subdir), exist_ok=True)
-
-    return str(dest)
+    return make_project(FIXTURE_DIR, tmp_path / 'test-project', working_dirs=True)
 
 
 # ---------------------------------------------------------------------------
@@ -477,9 +465,6 @@ def mock_git(monkeypatch):
         def _run_review_phase(self, review_type, project_dir, pr_number=''):
             self.calls.append(('run_review_phase', review_type))
 
-        def _commit_partial_work(self, project_dir):
-            self.calls.append(('commit_partial_work',))
-
     mock = GitMock()
     monkeypatch.setattr('storyforge.git.current_branch', mock._current_branch)
     monkeypatch.setattr('storyforge.git._git', mock._git)
@@ -491,7 +476,6 @@ def mock_git(monkeypatch):
     monkeypatch.setattr('storyforge.git.create_draft_pr', mock._create_draft_pr)
     monkeypatch.setattr('storyforge.git.update_pr_task', mock._update_pr_task)
     monkeypatch.setattr('storyforge.git.run_review_phase', mock._run_review_phase)
-    monkeypatch.setattr('storyforge.git.commit_partial_work', mock._commit_partial_work)
 
     # Patch command module imports
     _git_attrs = [
@@ -502,7 +486,6 @@ def mock_git(monkeypatch):
         ('commit_and_push', mock._commit_and_push),
         ('update_pr_task', mock._update_pr_task),
         ('run_review_phase', mock._run_review_phase),
-        ('commit_partial_work', mock._commit_partial_work),
         ('_git', mock._git),
         ('has_gh', mock._has_gh),
         ('current_branch', mock._current_branch),

@@ -261,7 +261,7 @@ git rev-parse --abbrev-ref HEAD
 
 After every deliverable:
 ```bash
-git add -A && git commit -m "Revision: [what was done]" && git push
+git add -A -- . && git commit -m "Revision: [what was done]" && git push
 ```
 
 ## Coaching Level Behavior

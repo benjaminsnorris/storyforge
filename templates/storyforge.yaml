@@ -188,7 +188,15 @@ phase: spine
 #   # bypass the shared reader (see prompts.read_yaml_field vs
 #   # common.read_yaml_field) are worth not testing.
 #   cover_artwork:
-#   genre_preset:              # default, literary-fiction, thriller, romance, fantasy, science-fiction
+#   # cover_artwork_sha256 / cover_artwork_reviewed: your record that the cover
+#   # artwork was reviewed against the canon — the sha256 of the bytes reviewed
+#   # and the newest canon_updated they were reviewed against. Written by
+#   # `storyforge illustrate --accept-style-reference`; don't hand-edit. Until
+#   # it is recorded, and whenever the canon is updated past it or the art's
+#   # bytes change, illustrate warns that the style reference is unreviewed.
+#   cover_artwork_sha256:
+#   cover_artwork_reviewed:
+#   genre_preset:             # default, literary-fiction, thriller, romance, fantasy, science-fiction
 #   cover:
 #     subtitle:
 #     palette:

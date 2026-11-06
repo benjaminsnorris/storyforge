@@ -14,10 +14,11 @@ or vice versa.
 import importlib
 import json
 import os
-import shutil
 import subprocess
 
 import pytest
+
+from fixture_helpers import FIXTURE_DIR, make_project
 
 
 # ---------------------------------------------------------------------------
@@ -25,7 +26,6 @@ import pytest
 # ---------------------------------------------------------------------------
 
 TESTS_DIR = os.path.dirname(os.path.dirname(__file__))
-FIXTURE_DIR = os.path.join(TESTS_DIR, 'fixtures', 'test-project')
 API_RESPONSES_DIR = os.path.join(TESTS_DIR, 'fixtures', 'api-responses')
 
 
@@ -113,24 +113,15 @@ def _isolate_global_state(monkeypatch):
 
 @pytest.fixture
 def project_dir(tmp_path):
-    """A fresh copy of the test-project fixture in a temp directory.
+    """A fresh copy of the test-project fixture in a temp directory, with
+    the working/ subdirectories command modules expect.
 
-    Use this when tests modify files. Each test gets its own copy
-    so mutations don't leak between tests.
-
-    Sets up the working/ subdirectories that command modules expect.
+    Use this when tests modify files. Each test gets its own copy so
+    mutations don't leak between tests.
+    Copies the files git would commit, so gitignored leftovers stay out;
+    outside a git work tree, everything (fixture_helpers.make_project).
     """
-    dest = tmp_path / 'test-project'
-    shutil.copytree(FIXTURE_DIR, dest)
-
-    # Ensure working directories that commands expect
-    for subdir in [
-        'working/logs', 'working/scores', 'working/costs',
-        'working/evaluations', 'working/reviews', 'working/coaching',
-    ]:
-        os.makedirs(os.path.join(str(dest), subdir), exist_ok=True)
-
-    return str(dest)
+    return make_project(FIXTURE_DIR, tmp_path / 'test-project', working_dirs=True)
 
 
 # ---------------------------------------------------------------------------
@@ -430,9 +421,6 @@ def mock_git(monkeypatch):
         def _run_review_phase(self, review_type, project_dir, pr_number=''):
             self.calls.append(('run_review_phase', review_type))
 
-        def _commit_partial_work(self, project_dir):
-            self.calls.append(('commit_partial_work',))
-
         @property
         def call_count(self) -> int:
             return len(self.calls)
@@ -452,7 +440,6 @@ def mock_git(monkeypatch):
     monkeypatch.setattr('storyforge.git.create_draft_pr', mock._create_draft_pr)
     monkeypatch.setattr('storyforge.git.update_pr_task', mock._update_pr_task)
     monkeypatch.setattr('storyforge.git.run_review_phase', mock._run_review_phase)
-    monkeypatch.setattr('storyforge.git.commit_partial_work', mock._commit_partial_work)
 
     # Also patch where command modules import git functions at top level.
     _git_attrs = [
@@ -463,7 +450,6 @@ def mock_git(monkeypatch):
         ('commit_and_push', mock._commit_and_push),
         ('update_pr_task', mock._update_pr_task),
         ('run_review_phase', mock._run_review_phase),
-        ('commit_partial_work', mock._commit_partial_work),
         ('_git', mock._git),
         ('has_gh', mock._has_gh),
         ('current_branch', mock._current_branch),

@@ -137,7 +137,7 @@ Wait for the author's answer, then act and update status.
 When all action items are `done`, `delegated`, or `skipped`:
 
 1. Delete `working/cleanup-report.csv`
-2. Commit: `git add -A && git commit -m "Cleanup: complete — all issues resolved" && git push`
+2. Commit: `git add -A -- . && git commit -m "Cleanup: complete — all issues resolved" && git push`
 3. Tell the author what was fixed
 
 ## Script Delegation Pattern

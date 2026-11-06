@@ -1970,7 +1970,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
 
         from storyforge.common import is_shutting_down
         if is_shutting_down():
-            log(f'Interrupted during {stage} — partial work may be committed')
+            log(f'Interrupted during {stage}; nothing from this stage was committed')
             sys.exit(130)
 
         if claude_rc != 0:
