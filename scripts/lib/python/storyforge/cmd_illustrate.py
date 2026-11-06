@@ -41,7 +41,7 @@ import re
 import sys
 import time
 from datetime import date
-from typing import Literal, NamedTuple, TypedDict
+from typing import Callable, Literal, NamedTuple, TypedDict, get_args
 
 from storyforge.api import (
     calculate_cost_from_usage, extract_text, extract_usage, invoke,
@@ -2452,6 +2452,29 @@ STYLE_REFERENCE_KEY = 'production.cover_artwork'
 STYLE_REVIEW_DIGEST_KEY = 'production.cover_artwork_sha256'
 STYLE_REVIEW_CANON_KEY = 'production.cover_artwork_reviewed'
 
+
+def _production_key(dotted: str) -> str:
+    """The direct key of `production:` a `production.x` constant names."""
+    block, _, key = dotted.partition('.')
+    assert block == 'production' and key, dotted
+    return key
+
+
+def _read_production(project_dir: str, dotted: str) -> str:
+    """Read one direct key of `production:` the way the writer writes it.
+
+    Through `common.read_top_level_field`, never `read_yaml_field`: that stops
+    at a column-0 comment (the template's partly uncommented shape) where the
+    writer does not, so `--accept-style-reference` once recorded a review and
+    the next line warned "not recorded" (#303 CR-1); and it matches a
+    same-named key at any depth, so a nested `cover_artwork_reviewed` could
+    clear the warning forever (SF-3). `cover_artwork` itself is read the same
+    way, so the declaration and its review are seen through one boundary.
+    """
+    from storyforge.common import read_top_level_field
+    return read_top_level_field(project_dir, 'production',
+                                _production_key(dotted))
+
 #: The clearing action, verbatim, so every warning that needs it names the same
 #: command.
 ACCEPT_STYLE_REFERENCE = 'storyforge illustrate --accept-style-reference'
@@ -2462,18 +2485,21 @@ ACCEPT_STYLE_REFERENCE = 'storyforge illustrate --accept-style-reference'
 StyleReferenceSource = Literal['declared', 'convention', 'none']
 
 #: Where the author's review of the style reference stands against the canon.
+#: The closed set: `_STYLE_REVIEW_VERDICTS` maps every member to its headline,
+#: its warning and whether it is stale, and an import-time check keeps the two
+#: in step, so a new state cannot be half-added (#303 TD-2).
 #:
-#: - `current` — the recorded digest is this file's, and the recorded canon date
-#:   is the newest `canon_updated` (or later).
+#: - `current` — the recorded digest is this file's, and the recorded canon
+#:   date is exactly the newest `canon_updated`.
 #: - `unrecorded` — no review is recorded (or only half of one).
 #: - `art_changed` — a review is recorded, for different bytes.
 #: - `canon_changed` — a review is recorded for these bytes, against a canon
-#:   that has been updated since.
-#: - `bad_record` — `cover_artwork_reviewed` is not an ISO date, so it cannot
-#:   be compared; never read as current.
+#:   date that is no longer the newest one — whichever way it moved.
+#: - `bad_record` — `cover_artwork_reviewed` is not a real ISO date, so it
+#:   cannot be compared; never read as current.
 #: - `unchecked` — no verdict is possible: nothing resolved, the file could not
 #:   be read, or no canon file carries a parseable `canon_updated`. Warned about
-#:   separately, because unknown is not fresh.
+#:   on its own, because unknown is not fresh.
 StyleReview = Literal['current', 'unrecorded', 'art_changed', 'canon_changed',
                       'bad_record', 'unchecked']
 
@@ -2605,7 +2631,7 @@ def resolve_style_reference(project_dir: str, *,
     from storyforge import canon as canon_mod
     if canon_cutoff is None:
         canon_cutoff = canon_mod.newest_canon_updated(project_dir)
-    declared = read_yaml_field(STYLE_REFERENCE_KEY, project_dir).strip()
+    declared = _read_production(project_dir, STYLE_REFERENCE_KEY).strip()
     unresolved = ''
     outside = False
     path = ''
@@ -2643,10 +2669,10 @@ def resolve_style_reference(project_dir: str, *,
         'symlink_target': '',
         'dangling_symlink': '',
         'digest': '',
-        'reviewed_digest': read_yaml_field(STYLE_REVIEW_DIGEST_KEY,
-                                           project_dir).strip().lower(),
-        'reviewed_against': read_yaml_field(STYLE_REVIEW_CANON_KEY,
-                                            project_dir).strip(),
+        'reviewed_digest': _read_production(
+            project_dir, STYLE_REVIEW_DIGEST_KEY).strip().lower(),
+        'reviewed_against': _read_production(
+            project_dir, STYLE_REVIEW_CANON_KEY).strip(),
         'review': 'unchecked',
         'checked_against': canon_cutoff,
         'stale': False,
@@ -2680,7 +2706,7 @@ def resolve_style_reference(project_dir: str, *,
     except OSError:
         return reference
     reference['review'] = _style_review(reference)
-    reference['stale'] = reference['review'] not in ('current', 'unchecked')
+    reference['stale'] = _STYLE_REVIEW_VERDICTS[reference['review']].stale
     return reference
 
 
@@ -2692,21 +2718,38 @@ def _style_review(reference: StyleReference) -> StyleReview:
     `canon_changed` — re-reviewing is the remedy for both, and naming the art
     tells the author which file to look at.
     """
-    from storyforge import canon as canon_mod
     if not reference['digest'] or not reference['checked_against']:
         return 'unchecked'
     if not reference['reviewed_digest'] or not reference['reviewed_against']:
         return 'unrecorded'
     if reference['reviewed_digest'] != reference['digest']:
         return 'art_changed'
-    if not canon_mod.iso_date_or_empty(reference['reviewed_against']):
-        # `predates_canon` reads an unparseable date as "not older", which here
-        # would be a typo clearing the warning — so it never gets that far.
+    if not _is_real_iso_date(reference['reviewed_against']):
         return 'bad_record'
-    if canon_mod.predates_canon(when=reference['reviewed_against'],
-                                cutoff=reference['checked_against']):
+    # Equality, not `predates_canon`. The record names the canon state that was
+    # reviewed, so *any* other newest date means a different canon: later is an
+    # edit since the review, and earlier is a canon date corrected downward or
+    # the newest canon file removed — a 2062 typo recorded and then fixed would
+    # otherwise stay "current" until 2062 (#303 SF-4).
+    if reference['reviewed_against'] != reference['checked_against']:
         return 'canon_changed'
     return 'current'
+
+
+def _is_real_iso_date(value: str) -> bool:
+    """`YYYY-MM-DD` naming a day that exists — `9999-99-99` does not.
+
+    `canon.iso_date_or_empty` checks the pattern only, and `predates_canon`
+    reads garbage as "not older", either of which would let a typo in the
+    record clear the warning.
+    """
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _dangling_convention_link(project_dir: str) -> str:
@@ -2743,26 +2786,7 @@ def describe_style_reference(reference: StyleReference) -> str:
     source = (f'declared in {STYLE_REFERENCE_KEY}'
               if reference['source'] == 'declared'
               else 'the conventional filename')
-    canon = reference['checked_against']
-    review = reference['review']
-    if not reference['digest']:
-        freshness = ', file unreadable'
-    elif not canon:
-        freshness = ' — no canon date to check it against'
-    elif review == 'current':
-        freshness = (f', reviewed against the canon as of '
-                     f'{reference["reviewed_against"]} (canon last updated '
-                     f'{canon})')
-    elif review == 'canon_changed':
-        freshness = (f', reviewed against the canon as of '
-                     f'{reference["reviewed_against"]} — canon last updated '
-                     f'{canon}')
-    elif review == 'art_changed':
-        freshness = (', changed since its recorded review (canon last updated '
-                     f'{canon})')
-    else:
-        freshness = (f', not recorded as reviewed against the canon (last '
-                     f'updated {canon})')
+    freshness = _STYLE_REVIEW_VERDICTS[reference['review']].headline(reference)
     return (f'Style reference: {reference["path"]} ({source})'
             + (f' → {reference["symlink_target"]}'
                if reference['symlink_target'] else '')
@@ -2829,49 +2853,104 @@ def style_reference_warnings(reference: StyleReference) -> list[str]:
             f'rendered artwork beside it. It is still listed, because the one '
             f'reference that is sometimes the only one is never dropped '
             f'silently.')
-    if not reference['digest']:
-        warnings.append(
-            f'the style reference {named} exists but could not be read, so it '
-            f'could not be checked against the canon. Unknown freshness is not '
-            f'the same as fresh — the art may predate the direction now '
-            f'governing the book.')
-    elif not reference['checked_against']:
-        warnings.append(
-            f'nothing in reference/canon/ carries a parseable `canon_updated`, '
+    verdict = _STYLE_REVIEW_VERDICTS[reference['review']]
+    if verdict.problem is not None:
+        warnings.append(verdict.problem(reference, named)
+                        + (_STYLE_REVIEW_REMEDY if verdict.stale else ''))
+    return warnings
+
+
+class _ReviewVerdict(NamedTuple):
+    """Everything that depends on one `StyleReview` state, in one row."""
+    #: The art is not recorded as reviewed against the canon in force — the
+    #: warning carries `_STYLE_REVIEW_REMEDY`, naming the clearing action.
+    stale: bool
+    #: The headline's freshness clause (`describe_style_reference`).
+    headline: Callable[[StyleReference], str]
+    #: The warning's opening, given the reference and its display name; None
+    #: when there is nothing to warn about.
+    problem: Callable[[StyleReference, str], str] | None
+
+
+def _unchecked_headline(r: StyleReference) -> str:
+    return (', file unreadable' if not r['digest']
+            else ' — no canon date to check it against')
+
+
+def _unchecked_problem(r: StyleReference, named: str) -> str:
+    if not r['digest']:
+        return (f'the style reference {named} exists but could not be read, so '
+                f'it could not be checked against the canon. Unknown freshness '
+                f'is not the same as fresh — the art may predate the direction '
+                f'now governing the book.')
+    return (f'nothing in reference/canon/ carries a parseable `canon_updated`, '
             f'so the style reference {named} could not be checked for '
             f'staleness at all. It may predate the direction now governing the '
             f'book, and under --no-prior-refs it is the only thing setting the '
             f'house style.')
-    elif reference['stale']:
-        warnings.append(_STYLE_REVIEW_PROBLEMS[reference['review']](
-            reference, named) + _STYLE_REVIEW_REMEDY)
-    return warnings
 
 
-#: Why the style reference is not cleared, per `StyleReview` state. Each names
-#: the dates or digests it compared, so the author can see what moved.
-_STYLE_REVIEW_PROBLEMS = {
-    'unrecorded': lambda r, named: (
-        f'the style reference {named} is not recorded as reviewed against the '
-        f'canon, which was last updated {r["checked_against"]} '
-        f'({STYLE_REVIEW_DIGEST_KEY} and {STYLE_REVIEW_CANON_KEY} are not both '
-        f'set). '),
-    'art_changed': lambda r, named: (
-        f'the style reference {named} is not the artwork that was reviewed: '
-        f'its sha256 ({r["digest"][:12]}…) differs from '
-        f'{STYLE_REVIEW_DIGEST_KEY} ({r["reviewed_digest"][:12]}…), so the '
-        f'review recorded against the canon as of {r["reviewed_against"]} '
-        f'covers different bytes. '),
-    'canon_changed': lambda r, named: (
-        f'the style reference {named} was reviewed against the canon as of '
-        f'{r["reviewed_against"]}, and the canon was last updated '
-        f'{r["checked_against"]}, after that review. '),
-    'bad_record': lambda r, named: (
-        f'{STYLE_REVIEW_CANON_KEY} is `{r["reviewed_against"]}`, which is not '
-        f'an ISO date, so the review recorded for the style reference {named} '
-        f'cannot be compared with the canon (last updated '
-        f'{r["checked_against"]}). '),
+def _canon_moved(r: StyleReference) -> str:
+    """Which way the newest canon date moved since the recorded review."""
+    if r['checked_against'] > r['reviewed_against']:
+        return 'the canon was updated after that review'
+    return ('that is earlier than the review, so a canon date was corrected '
+            'or the newest canon file removed since, and the review no longer '
+            'describes the canon in force')
+
+
+#: One row per `StyleReview` member: the only place a state's staleness,
+#: headline and warning are decided (#303 TD-2).
+_STYLE_REVIEW_VERDICTS: dict[StyleReview, _ReviewVerdict] = {
+    'current': _ReviewVerdict(
+        stale=False,
+        headline=lambda r: (f', reviewed against the canon as of '
+                            f'{r["reviewed_against"]} (canon last updated '
+                            f'{r["checked_against"]})'),
+        problem=None),
+    'unchecked': _ReviewVerdict(
+        stale=False, headline=_unchecked_headline, problem=_unchecked_problem),
+    'unrecorded': _ReviewVerdict(
+        stale=True,
+        headline=lambda r: (f', not recorded as reviewed against the canon '
+                            f'(last updated {r["checked_against"]})'),
+        problem=lambda r, named: (
+            f'the style reference {named} is not recorded as reviewed against '
+            f'the canon, which was last updated {r["checked_against"]} '
+            f'({STYLE_REVIEW_DIGEST_KEY} and {STYLE_REVIEW_CANON_KEY} are not '
+            f'both set). ')),
+    'art_changed': _ReviewVerdict(
+        stale=True,
+        headline=lambda r: (f', changed since its recorded review (canon last '
+                            f'updated {r["checked_against"]})'),
+        problem=lambda r, named: (
+            f'the style reference {named} is not the artwork that was '
+            f'reviewed: its sha256 ({r["digest"][:12]}…) differs from '
+            f'{STYLE_REVIEW_DIGEST_KEY} ({r["reviewed_digest"][:12]}…), so the '
+            f'review recorded against the canon as of {r["reviewed_against"]} '
+            f'covers different bytes. ')),
+    'canon_changed': _ReviewVerdict(
+        stale=True,
+        headline=lambda r: (f', reviewed against the canon as of '
+                            f'{r["reviewed_against"]} — canon now last updated '
+                            f'{r["checked_against"]}'),
+        problem=lambda r, named: (
+            f'the style reference {named} was reviewed against the canon as of '
+            f'{r["reviewed_against"]}, but the newest `canon_updated` is now '
+            f'{r["checked_against"]} — {_canon_moved(r)}. ')),
+    'bad_record': _ReviewVerdict(
+        stale=True,
+        headline=lambda r: (f', review date `{r["reviewed_against"]}` is not a '
+                            f'valid date (canon last updated '
+                            f'{r["checked_against"]})'),
+        problem=lambda r, named: (
+            f'{STYLE_REVIEW_CANON_KEY} is `{r["reviewed_against"]}`, which is '
+            f'not a valid ISO date, so the review recorded for the style '
+            f'reference {named} cannot be compared with the canon (last '
+            f'updated {r["checked_against"]}). ')),
 }
+if set(_STYLE_REVIEW_VERDICTS) != set(get_args(StyleReview)):
+    raise AssertionError('_STYLE_REVIEW_VERDICTS must cover StyleReview exactly')
 
 #: The shared tail. Re-rendering is *one* remedy, not the only one: a cover
 #: that was supplied from outside the pipeline cannot be re-rendered, and the
@@ -2904,7 +2983,7 @@ def run_accept_style_reference(project_dir: str, dry_run: bool) -> int:
     after recording rather than cleared by it.
     """
     from storyforge import canon as canon_mod
-    from storyforge.common import set_top_level_fields
+    from storyforge.common import StoryforgeYamlError, set_top_level_fields
     canon_cutoff = canon_mod.newest_canon_updated(project_dir)
     style = resolve_style_reference(project_dir, canon_cutoff=canon_cutoff)
     refusal = ''
@@ -2938,11 +3017,23 @@ def run_accept_style_reference(project_dir: str, dry_run: bool) -> int:
         return 0
     try:
         set_top_level_fields(project_dir, 'production', [
-            ('cover_artwork_sha256', style['digest']),
-            ('cover_artwork_reviewed', canon_cutoff),
+            (_production_key(STYLE_REVIEW_DIGEST_KEY), style['digest']),
+            (_production_key(STYLE_REVIEW_CANON_KEY), canon_cutoff),
         ])
-    except OSError as exc:
-        log(f'ERROR: could not write storyforge.yaml: {exc}. Nothing recorded.')
+    except (OSError, StoryforgeYamlError) as exc:
+        log(f'ERROR: could not record the review in storyforge.yaml: {exc} '
+            f'Nothing recorded.')
+        return 1
+    # Read back through the same reader every later run uses, and require the
+    # verdict it exists to produce. "Recorded" followed by a warning that it is
+    # not recorded is the failure this guards (#303 SF-1): anything else means
+    # the file holds the keys somewhere the reader does not look.
+    after = resolve_style_reference(project_dir, canon_cutoff=canon_cutoff)
+    if after['review'] != 'current':
+        log(f'ERROR: wrote {record} to storyforge.yaml, but reading it back '
+            f'gives "{after["review"]}" rather than a current review — the '
+            f'keys are not where the reader looks. Check the `production:` '
+            f'block by hand.')
         return 1
     log(f'Recorded that `{style["path"]}` was reviewed against the canon as of '
         f'{canon_cutoff} ({record}). The staleness warning returns if the canon '
@@ -2950,8 +3041,7 @@ def run_accept_style_reference(project_dir: str, dry_run: bool) -> int:
     # Re-resolved from disk rather than assumed: the record is only as good as
     # what the reader now makes of it, and any warning unrelated to the canon
     # is still the author's to fix.
-    for warning in style_reference_warnings(
-            resolve_style_reference(project_dir, canon_cutoff=canon_cutoff)):
+    for warning in style_reference_warnings(after):
         log(f'WARNING: {warning}')
     return 0
 
