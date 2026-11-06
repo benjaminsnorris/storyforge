@@ -3,6 +3,7 @@
 import os
 import pytest
 
+from fixture_helpers import copy_fixture
 from storyforge.schema import COLUMN_SCHEMA, validate_schema
 
 
@@ -44,9 +45,6 @@ def test_gn_brief_text_columns_are_free_text():
         )
 
 
-import shutil
-
-
 @pytest.fixture
 def gn_project_dir(tmp_path, fixture_dir):
     """A novel fixture copied and flipped to graphic-novel mode.
@@ -58,7 +56,7 @@ def gn_project_dir(tmp_path, fixture_dir):
     being asserted below.
     """
     dest = tmp_path / 'gn-project'
-    shutil.copytree(fixture_dir, dest)
+    copy_fixture(fixture_dir, dest)
     yaml_path = dest / 'storyforge.yaml'
     content = yaml_path.read_text()
     yaml_path.write_text(
