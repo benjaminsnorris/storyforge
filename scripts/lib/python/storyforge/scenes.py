@@ -632,17 +632,18 @@ def generate_rename_plan(scenes_dir: str,
 
 def _title_from_file(filepath: str) -> str:
     """Derive a title from the first heading or first non-empty line."""
-    try:
-        with open(filepath) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                if line.startswith('#'):
-                    return re.sub(r'^#+\s*', '', line)
-                return line[:80]
+    from storyforge.illustrations import read_scene_prose
+    try:   # a marker is not a title (#610's review, T-2)
+        text = read_scene_prose(filepath)
     except OSError:
-        pass
+        return ''
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith('#'):
+            return re.sub(r'^#+\s*', '', line)
+        return line[:80]
     return ''
 
 

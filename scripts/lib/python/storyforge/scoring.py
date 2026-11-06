@@ -11,7 +11,7 @@ import re
 import shutil
 import sys
 
-from storyforge.illustrations import strip_markers
+from storyforge.illustrations import read_scene_prose
 
 
 # Narrative principles scored at novel level, not per scene
@@ -1496,11 +1496,9 @@ def build_fidelity_prompt(scene_id: str, project_dir: str,
     scene_file = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
     if not os.path.isfile(scene_file):
         return ''
-    with open(scene_file, encoding='utf-8') as f:
-        # Illustration markers are build metadata, not prose (#278) — they
-        # must never reach an evaluator or a revision pass, which could
-        # rewrite or drop them.
-        prose = strip_markers(f.read()).strip()
+    # Illustration markers are build metadata, not prose (#278): they never
+    # reach an evaluator
+    prose = read_scene_prose(scene_file).strip()
     if not prose or len(prose) < 100:
         return ''
 

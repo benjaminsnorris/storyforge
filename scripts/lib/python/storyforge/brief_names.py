@@ -354,12 +354,13 @@ def _book_text(project_dir: str, scene_ids, notes: list[str]) -> tuple[str, set[
         for name in sorted(os.listdir(folder)):
             if not name.endswith('.md') or name.startswith('.'):
                 continue
-            text = read_text_noting(os.path.join(folder, name), notes, f'{sub}/{name}')
+            path, label = os.path.join(folder, name), f'{sub}/{name}'
+            if sub == 'scenes':   # a marker id is not a name the book uses (#280)
+                from storyforge.illustrations import read_scene_prose
+                text = read_scene_prose(path, notes=notes, label=label)
+            else:
+                text = read_text_noting(path, notes, label)
             text = text.replace('\r\n', '\n')
-            if sub == 'scenes':
-                # a marker id is not a name the book uses (#280)
-                from storyforge.illustrations import strip_markers
-                text = strip_markers(text)
             texts.append(text)
             if sub == 'scenes' and text.strip():
                 drafted.add(name[:-3])

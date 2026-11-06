@@ -46,7 +46,7 @@ from storyforge.api import (
     REVISION_TIMEOUT, max_output_tokens,
 )
 from storyforge.cli import apply_coaching_override
-from storyforge.illustrations import read_scene_prose
+from storyforge.illustrations import read_scene_prose, read_scene_raw
 
 
 def _log_prompt_warnings(stderr: str) -> None:
@@ -684,8 +684,7 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
                                  'an earlier scene waits on the gate: '
                                  + '; '.join(b.split(':')[0] for b in blocking))
         scene_file = os.path.join(scenes_dir, f'{sid}.md')
-        with open(scene_file, encoding='utf-8') as f:
-            original = f.read()
+        original = read_scene_raw(project_dir, sid)   # its markers must survive the gate
         passed, why = cmd_write._gate_drafted_scene(project_dir, sid, scene_file, 'revise',
                                                     log_dir, before=before)
         _restore_gate_markers(project_dir, sid, scene_file, original)
@@ -1308,9 +1307,9 @@ def _load_findings(cycle_dir: str) -> dict:
             })
 
     # Load per-scene findings
-    scene_path = os.path.join(cycle_dir, 'scene-findings.csv')
-    if os.path.isfile(scene_path):
-        with open(scene_path, newline='', encoding='utf-8') as f:
+    findings_path = os.path.join(cycle_dir, 'scene-findings.csv')
+    if os.path.isfile(findings_path):
+        with open(findings_path, newline='', encoding='utf-8') as f:
             raw = f.read().replace('\r\n', '\n').replace('\r', '')
         reader = csv.DictReader(raw.splitlines(), delimiter='|')
         for row in reader:
@@ -2126,8 +2125,7 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
             failed += [stop] + _not_reached(scene_ids[i:])
             break
         log(f'  Re-drafting scene: {scene_id}')
-        with open(scene_file, encoding='utf-8') as f:
-            original_prose = f.read()
+        original_prose = read_scene_raw(project_dir, scene_id)   # the markers to keep
         try:
             # a rewrite from the fixed brief and the binding ledger, the old
             # prose its voice reference (plan §3.4), as `_redraft_from_briefs`
@@ -3861,9 +3859,7 @@ Rules:
             for scene_id in list_ids(metadata_csv):
                 scene_file = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
                 if os.path.isfile(scene_file):
-                    from storyforge.illustrations import count_prose_words
-                    with open(scene_file, encoding='utf-8') as f:
-                        new_wc = str(count_prose_words(f.read()))
+                    new_wc = str(len(read_scene_prose(scene_file).split()))
                     update_field(metadata_csv, scene_id, 'word_count', new_wc)
 
         # Update annotation status for revised scenes

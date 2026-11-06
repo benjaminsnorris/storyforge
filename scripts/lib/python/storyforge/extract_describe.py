@@ -1326,7 +1326,7 @@ def _prose(project_dir: str, scenes: list[dict[str, str]]) -> tuple[dict[str, st
     Raises DescribeFailed naming the file when one exists but can't be
     read: describing the voice from the scenes that are left would state
     wrong measures as the whole book's."""
-    from .illustrations import strip_markers
+    from .illustrations import read_scene_prose
     texts, absent = {}, []
     for s in scenes:
         rel = f'scenes/{s["id"]}.md'
@@ -1335,8 +1335,7 @@ def _prose(project_dir: str, scenes: list[dict[str, str]]) -> tuple[dict[str, st
             absent.append(s['id'])
             continue
         try:
-            with open(path, encoding='utf-8') as f:
-                text = strip_markers(f.read())
+            text = read_scene_prose(path)
         except (OSError, UnicodeDecodeError) as e:
             raise DescribeFailed(f'{rel} could not be read ({e})') from e
         if text.strip():

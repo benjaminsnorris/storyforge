@@ -620,15 +620,26 @@ def count_prose_words(text: str) -> int:
     return len(strip_markers(text).split())
 
 
-def read_scene_prose(path: str, *, errors: str = 'strict') -> str:
+def read_scene_prose(path: str, *, errors: str = 'strict',
+                     notes: list[str] | None = None, label: str = '') -> str:
     """A scene file's text with illustration markers stripped (#280).
 
     The one reader for scene text that feeds analysis, scoring, word counts
-    or a prompt. Code that writes the file back, renders the markers, or
-    compares raw bytes (marker preservation, assembly, the gate's snapshot)
-    reads the file itself. Raises what ``open`` raises; *errors* is passed to
-    it (``'replace'`` for callers that tolerate a non-UTF-8 file).
+    or a prompt. Code that needs the markers or the exact bytes (one that
+    writes the scene back, assembly, which renders the markers, or a byte
+    comparison such as the gate's snapshot) reads through `read_scene_raw`,
+    or is listed in tests/test_scene_read_guard.py with why.
+
+    By default an unreadable file raises ``OSError`` and one that is not
+    UTF-8 raises ``UnicodeDecodeError`` (from the read, not the open);
+    *errors* (``'replace'``) decodes it with replacement characters instead,
+    silently. With *notes*, the reading is `brief_names.read_text_noting`'s:
+    an unreadable file is '' and a non-UTF-8 one is decoded with replacement
+    characters, each with a note appended naming *label* (default: the path).
     """
+    if notes is not None:
+        from storyforge.brief_names import read_text_noting
+        return strip_markers(read_text_noting(path, notes, label or path))
     with open(path, encoding='utf-8', errors=errors) as f:
         return strip_markers(f.read())
 

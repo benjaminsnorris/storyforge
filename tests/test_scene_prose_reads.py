@@ -342,3 +342,61 @@ def test_bible_scorer_drafted_scenes(tmp_path):
     project_dir = _project(tmp_path, MARKED)
     write_scene(project_dir, 's2', '![[illus:lf-09]]\n')
     assert _drafted_scenes(project_dir) == [('s1', PROSE)]
+
+
+# ============================================================================
+# Sites the read guard found (#610's review, T-2) and the reader's notes
+# ============================================================================
+
+def test_extract_acts_first_line(tmp_path):
+    from storyforge.extract_acts import _first_line
+    project_dir = _project(tmp_path, '![[illus:lf-01]]\n\nThe lamp was lit.\n')
+    assert _first_line(os.path.join(project_dir, 'scenes'), 's1') == 'The lamp was lit.'
+
+
+def test_scene_title_from_file_skips_a_marker(tmp_path):
+    """A marker as the first line would have become the title, and the slug."""
+    from storyforge.scenes import _title_from_file
+    path = os.path.join(_project(tmp_path, '![[illus:lf-01]]\n\nThe lamp was lit.\n'),
+                        'scenes', 's1.md')
+    assert _title_from_file(path) == 'The lamp was lit.'
+
+
+def test_gate_has_prose_agrees_with_prompts(tmp_path):
+    """A file of markers alone has no prose, for the gate as for drafting."""
+    from storyforge import gate, prompts
+    project_dir = _project(tmp_path, '![[illus:lf-01]]\n')
+    assert gate._has_prose(project_dir, 's1') is False
+    assert prompts._has_prose(project_dir, 's1') is False
+
+
+def test_revision_pass_prompt(project_dir):
+    """An API revision pass inlines the scenes it revises without their
+    markers; the reply is written back with them (test_marker_write_back)."""
+    from storyforge.revision import build_revision_prompt
+    prose = _mark(project_dir, 'act1-sc01')
+    prompt = build_revision_prompt('prose', 'Tighten', 'act1-sc01', project_dir, api_mode=True)
+    assert prose.strip()[:40] in prompt and 'illus:' not in prompt
+
+
+def test_scene_score_prompt(project_dir):
+    from storyforge.cmd_score import _build_scene_prompt
+    prose = _mark(project_dir, 'act1-sc01')
+    ref = os.path.join(project_dir, 'reference')
+    prompt = _build_scene_prompt('act1-sc01', '{{SCENE_TEXT}}', '', '',
+                                 os.path.join(ref, 'scenes.csv'),
+                                 os.path.join(ref, 'scene-intent.csv'),
+                                 os.path.join(project_dir, 'scenes'))
+    assert prose.splitlines()[-1].strip()[:40] in prompt and 'illus:' not in prompt
+
+
+def test_reader_notes_like_read_text_noting(tmp_path):
+    from storyforge.illustrations import read_scene_prose
+    path = tmp_path / 's.md'
+    path.write_bytes(b'caf\xe9.\n\n![[illus:lf-01]]\n')
+    notes = []
+    assert read_scene_prose(str(path), notes=notes, label='scenes/s.md') == 'caf�.\n'
+    assert notes == ['scenes/s.md is not UTF-8: read with replacement characters']
+    notes = []
+    assert read_scene_prose(str(tmp_path / 'gone.md'), notes=notes) == ''
+    assert 'could not be read' in notes[0]

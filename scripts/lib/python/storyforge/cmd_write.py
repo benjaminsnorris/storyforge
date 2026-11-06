@@ -911,13 +911,11 @@ def current_prose(project_dir: str, scene_id: str) -> str:
             permission), naming it: a rewrite must not lose its voice
             reference unnoticed.
     """
-    from storyforge.illustrations import strip_markers
     path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
     if not os.path.isfile(path):
         return ''
     try:
-        with open(path, encoding='utf-8') as f:
-            return strip_markers(f.read()).strip()
+        return read_scene_prose(path).strip()
     except (OSError, UnicodeDecodeError) as e:
         raise ValueError(f'could not read {path} for the rewrite\'s voice reference: {e}') from e
 

@@ -118,9 +118,8 @@ def _append_csv_row(csv_path: str, row: str) -> None:
 
 def _word_count(filepath: str) -> int:
     """Word count for a scene file, excluding illustration markers (#278)."""
-    from storyforge.illustrations import count_prose_words
-    with open(filepath) as f:
-        return count_prose_words(f.read())
+    from storyforge.illustrations import read_scene_prose
+    return len(read_scene_prose(filepath).split())
 
 
 def _apply_scene_filter(metadata_csv: str, filter_mode: str,
