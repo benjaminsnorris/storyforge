@@ -14,8 +14,8 @@ from storyforge.scoring_levels import score_all_levels, LEVEL_NAMES
 from storyforge.scoring_consistency import score_consistency_all_levels
 from storyforge.scoring_coverage import score_coverage_all_levels
 from storyforge.common import (
-    VOICE_GUIDE_PATH, VOICE_GUIDE_REMEDY, VOICE_STAGE_COMMAND,
-    parse_story_summary, read_yaml_field, voice_guide_problem,
+    MEDIUM_GRAPHIC_NOVEL, VOICE_GUIDE_REMEDY, VOICE_STAGE, VOICE_STAGE_COMMAND,
+    parse_story_summary, read_yaml_field, resolve_voice_guide,
 )
 from storyforge.elaborate import _read_csv
 
@@ -26,7 +26,8 @@ PROSE_STAGES = ('logline', 'synopsis', 'act-shape')
 # scoring_levels.py does for its result shapes) so drift is visible in-type.
 RungState = Literal['solid', 'thin', 'not_started']
 Stage = Literal['logline', 'synopsis', 'act-shape', 'spine', 'architecture',
-                'scene-map', 'briefs', 'story-power', 'voice', 'draft', 'evaluate']
+                'scene-map', 'briefs', 'story-power', 'voice', 'draft', 'evaluate',
+                'check']
 
 # Rung name -> `elaborate --stage` argument (only rungs with a command stage).
 ELABORATE_STAGE = {
@@ -36,10 +37,19 @@ ELABORATE_STAGE = {
     'briefs': 'briefs',
 }
 
-# The voice rung (#596): between briefs and drafting, a prose book's
-# reference/voice-guide.md must hold the author's text. Not a floor-checked
-# ladder level; `build_status` makes it the phase and a blocker. A graphic
+# The voice rung (#596): between briefs and drafting, a prose book needs a
+# voice guide with the author's text in it (`common.resolve_voice_guide`: not
+# missing, init's template, empty, unreadable, or only persistent-prompt.md).
+# Not a floor-checked ladder level. Before drafting, `build_status` makes it
+# the phase and `next` (or `then`, while scenes wait on the gate) and a
+# `voice` blocker; once every scene is drafted, the blocker alone. A graphic
 # novel's script is written from voice-profile.csv, so it has no voice rung.
+
+#: what status recommends for drafting (Storyforge's unattended drafting
+#: passes --keep-going, Ben 2026-11-04)
+WRITE_COMMAND = 'storyforge write --keep-going'
+#: what clears scenes waiting on the gate; `next.stage` 'check' while any wait
+CHECK_COMMAND = 'storyforge check --pending'
 
 # Which reference CSV backs each structural rung.
 _LEVEL_CSV = {
@@ -161,7 +171,7 @@ def _read_scene_statuses(project_dir: str) -> list[str]:
     return [r.get('status', '') for r in rows]
 
 
-def draft_stage(project_dir: str) -> tuple[str, int, int]:
+def draft_stage(project_dir: str) -> tuple[Stage, int, int]:
     """Return (stage, drafted, total) for the post-briefs rungs.
 
     stage is 'evaluate' once every non-cut/merged scene is drafted+; else
@@ -176,7 +186,7 @@ def draft_stage(project_dir: str) -> tuple[str, int, int]:
     return 'draft', drafted, total
 
 
-def _recommend(stage: str) -> tuple[dict, dict | None]:
+def _recommend(stage: Stage) -> tuple[dict, dict | None]:
     """Map the current stage to (next, then) step objects."""
     if stage in PROSE_STAGES:
         level = {'logline': 0, 'synopsis': 1, 'act-shape': 2}[stage]
@@ -204,18 +214,18 @@ def _recommend(stage: str) -> tuple[dict, dict | None]:
                     'reason': ''}
         else:
             then = {'stage': 'draft', 'action': 'Draft scenes',
-                    'command': 'storyforge write --keep-going', 'reason': ''}
+                    'command': WRITE_COMMAND, 'reason': ''}
         return nxt, then
-    if stage == 'voice':
-        return ({'stage': 'voice', 'action': 'Develop the voice guide',
+    if stage == VOICE_STAGE:
+        return ({'stage': VOICE_STAGE, 'action': 'Develop the voice guide',
                  'command': VOICE_STAGE_COMMAND,
-                 'reason': (f'Briefs are complete; drafting follows {VOICE_GUIDE_PATH}, '
-                            'which is not filled in yet')},
+                 'reason': ('Briefs are complete; drafting needs a voice guide with '
+                            "the author's text (see the voice blocker)")},
                 {'stage': 'draft', 'action': 'Draft scenes',
-                 'command': 'storyforge write --keep-going', 'reason': ''})
+                 'command': WRITE_COMMAND, 'reason': ''})
     if stage == 'draft':
         return ({'stage': 'draft', 'action': 'Draft scenes',
-                 'command': 'storyforge write --keep-going',
+                 'command': WRITE_COMMAND,
                  'reason': 'Briefs are complete; scenes are ready to draft'},
                 {'stage': 'evaluate', 'action': 'Evaluate drafted scenes',
                  'command': 'storyforge evaluate', 'reason': ''})
@@ -267,20 +277,21 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
     if phase is None:
         phase, _drafted, _total = draft_stage(project_dir)
 
-    # #596: briefs to drafting with no voice guide. Before drafting it is the
-    # next step; once every scene is drafted it is still reported, since
-    # evaluation and revision read it too.
+    # #596: briefs to drafting with no voice guide. Before drafting the
+    # voice stage is the phase (next, or then while scenes wait on the gate);
+    # once every scene is drafted only the blocker is reported, since
+    # evaluation and revision read the voice guide too.
     voice_blocker = None
-    if phase in ('draft', 'evaluate') and medium != 'graphic-novel':
-        problem = voice_guide_problem(project_dir)
-        if problem:
+    if phase in ('draft', 'evaluate') and medium != MEDIUM_GRAPHIC_NOVEL:
+        voice = resolve_voice_guide(project_dir)
+        if voice.kind != 'ok':
             voice_blocker = {
-                'source': 'voice', 'level': -1,  # sentinel: not a ladder rung
-                'detail': (f'{VOICE_GUIDE_PATH} {problem}: drafting has no voice '
-                           f'guide to follow. Fill it: {VOICE_GUIDE_REMEDY}'),
+                'source': VOICE_STAGE, 'level': -1,  # sentinel: not a ladder rung
+                'detail': (f'{voice.detail}: drafting has no voice guide to follow, '
+                           f'and write refuses to draft. Fill it: {VOICE_GUIDE_REMEDY}'),
             }
             if phase == 'draft':
-                phase = 'voice'
+                phase = VOICE_STAGE
 
     declared = (read_yaml_field('phase', project_dir) or '').strip()
     normalized = _PHASE_ALIASES.get(declared, declared)
@@ -325,8 +336,10 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
     if waiting:
         provisional = sum(r['command'] == 'provisional' for r in waiting)
         then = nxt
-        nxt = {'stage': phase, 'action': 'Clear the scenes waiting on the gate',
-               'command': 'storyforge check --pending',
+        # its own stage (TD-6): forge routes on next.stage, and the phase's
+        # stage (voice, draft) would send it to that work instead
+        nxt = {'stage': 'check', 'action': 'Clear the scenes waiting on the gate',
+               'command': CHECK_COMMAND,
                'reason': (f'{len(waiting)} scene(s) in working/gate-pending.csv'
                           + (f', {provisional} committed provisionally' if provisional else '')
                           + ': fix them (or `storyforge check --accept`), then check')}

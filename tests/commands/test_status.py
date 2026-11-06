@@ -471,7 +471,65 @@ def test_gate_waiting_keeps_voice_as_then(tmp_path, monkeypatch):
         {'scene_id': 's1', 'command': 'draft', 'reason': 'x'}])
     v = status.build_status(pd)
     assert v['next']['command'] == 'storyforge check --pending'
+    # TD-6: forge routes on next.stage; the phase's stage would send it to
+    # the Voice Stage instead of the gate check
+    assert v['next']['stage'] == 'check'
+    assert v['phase'] == 'voice'
     assert v['then']['stage'] == 'voice'
+
+
+def test_gate_waiting_while_drafting_routes_to_the_check(tmp_path, monkeypatch):
+    # TD-6, the same before #596: next.stage was 'draft' with check's command
+    pd = str(tmp_path)
+    _briefed(pd)
+    _voice_guide(pd)
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    monkeypatch.setattr(status, 'gate_waiting', lambda pd_: [
+        {'scene_id': 's1', 'command': 'provisional', 'reason': 'x'}])
+    v = status.build_status(pd)
+    assert (v['next']['stage'], v['next']['command']) == ('check', status.CHECK_COMMAND)
+    assert v['then']['stage'] == 'draft'
+
+
+def test_a_voice_guide_named_in_yaml_satisfies_status(tmp_path, monkeypatch):
+    # CR-1: status reads the voice guide where write and the prompt do
+    pd = str(tmp_path)
+    _briefed(pd)
+    _write(os.path.join(pd, 'docs', 'voice.md'), '# Voice\n\nTerse.\n')
+    _write(os.path.join(pd, 'storyforge.yaml'),
+           'artifacts:\n  voice_guide:\n    path: docs/voice.md\n')
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'draft'
+    assert not any(b['source'] == 'voice' for b in v['blockers'])
+
+
+def test_only_persistent_prompt_is_a_voice_blocker(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _briefed(pd)
+    _write(os.path.join(pd, 'reference', 'persistent-prompt.md'), 'Old voice.\n')
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'voice'
+    assert 'only reference/persistent-prompt.md' in v['blockers'][0]['detail']
+
+
+def test_every_elaborate_command_status_emits_is_a_valid_stage():
+    # TD-5/7: the stage status names after --stage must be one elaborate takes
+    from storyforge.cmd_elaborate import VALID_STAGES
+    emitted = []
+    for stage in get_args(status.Stage):
+        if stage in ('story-power', 'check'):
+            continue          # then-only / the gate: no _recommend branch of their own
+        nxt, then = status._recommend(stage)
+        emitted += [s['command'] for s in (nxt, then) if s]
+    elaborate = [c.split('--stage ', 1)[1] for c in emitted
+                 if c.startswith('storyforge elaborate --stage ')]
+    assert 'voice' in elaborate
+    assert set(elaborate) <= VALID_STAGES
 
 
 def test_status_names_the_voice_stage_on_the_fixture(project_dir, monkeypatch):
