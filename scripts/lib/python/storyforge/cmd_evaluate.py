@@ -29,7 +29,7 @@ from datetime import datetime
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field,
     select_model, get_plugin_dir, install_signal_handlers,
-    get_coaching_level, build_shared_context, is_unfilled_template,
+    get_coaching_level, build_shared_context, reference_text, resolve_voice_guide,
     VOICE_GUIDE_REMEDY,
 )
 from storyforge.costs import estimate_cost, log_operation, print_summary
@@ -181,25 +181,21 @@ def _load_custom_evaluators(project_dir):
 def _resolve_voice_guide(project_dir):
     """Find and read voice guide content. Returns (path, content) or (None, '').
 
-    A voice guide still init's template is skipped (F-130, #596) and said:
-    the evaluators would read its guidance as the book's voice."""
-    candidates = []
-    custom_vg = read_yaml_field('artifacts.voice_guide.path', project_dir)
-    if custom_vg:
-        candidates.append(custom_vg)
-    candidates += ['references/voice-guide.md', 'reference/voice-guide.md',
-                   'reference/persistent-prompt.md']
-    for vg in candidates:
-        vg_path = os.path.join(project_dir, vg)
-        if not os.path.isfile(vg_path):
-            continue
-        if is_unfilled_template(vg_path):
-            log(f'WARNING: {vg} is still init\'s template; left out of the evaluation. '
-                f'Fill it: {VOICE_GUIDE_REMEDY}.')
-            continue
-        return vg_path, open(vg_path).read()
-
-    return None, ''
+    `common.resolve_voice_guide` (#596, CR-1), with the older
+    persistent-prompt.md: a candidate still init's template or empty is
+    passed over and said (the evaluators would read a template's guidance as
+    the book's voice); one that can't be read stops the evaluation (ERROR,
+    exit 1), naming it."""
+    voice = resolve_voice_guide(project_dir, briefs=False)
+    passed = voice.skipped + ((voice.detail,) if voice.kind in ('template', 'empty') else ())
+    for detail in passed:
+        log(f'WARNING: {detail}; left out of the evaluation. Fill it: {VOICE_GUIDE_REMEDY}.')
+    if voice.kind == 'unreadable':
+        log(f'ERROR: {voice.detail}')
+        sys.exit(1)
+    if voice.kind != 'ok':
+        return None, ''
+    return os.path.join(project_dir, voice.path), voice.text
 
 
 # ============================================================================
@@ -617,14 +613,18 @@ def _build_assessment_prompt(project_dir, eval_dir, eval_timestamp, scope_descri
 
     Returns (prompt, ref_count) or (None, 0) if no reference files.
     """
-    ref_files = []
-    for ref in ['reference/key-decisions.md',
-                'reference/voice-guide.md', 'references/voice-guide.md',
-                'reference/story-architecture.md', 'references/story-architecture.md']:
-        path = os.path.join(project_dir, ref)
-        # a template copy states no intention of the author's (F-130, #596)
-        if os.path.isfile(path) and not is_unfilled_template(path):
-            ref_files.append(ref)
+    # a doc missing or still its template states no intention of the
+    # author's (F-130, #596); one that can't be read raises ReferenceDocError
+    voice = resolve_voice_guide(project_dir, briefs=False)
+    candidates = ['reference/key-decisions.md',
+                  *([voice.path] if voice.kind == 'ok' else []),
+                  'reference/story-architecture.md', 'references/story-architecture.md']
+    ref_text = {}
+    for ref in candidates:
+        text = reference_text(os.path.join(project_dir, ref), strip=False)
+        if text:
+            ref_text[ref] = text
+    ref_files = list(ref_text)
 
     if not ref_files:
         return None, 0
@@ -632,7 +632,7 @@ def _build_assessment_prompt(project_dir, eval_dir, eval_timestamp, scope_descri
     # Build sections based on which files exist
     sections = []
     for ref in ref_files:
-        if 'voice-guide' in ref:
+        if voice.kind == 'ok' and ref == voice.path:
             sections.append('## Voice Guide Alignment\nDid the prose deliver the voice described in the voice guide?')
         elif 'story-architecture' in ref:
             sections.append('## Story Architecture Alignment\nDid the structural intentions land?')
@@ -654,9 +654,8 @@ def _build_assessment_prompt(project_dir, eval_dir, eval_timestamp, scope_descri
 
         ref_inline = ''
         for ref in ref_files:
-            ref_path = os.path.join(project_dir, ref)
             ref_inline += f'\n===== REFERENCE: {ref} =====\n\n'
-            ref_inline += open(ref_path).read()
+            ref_inline += ref_text[ref]
             ref_inline += f'\n\n===== END REFERENCE: {ref} =====\n'
 
         prompt = f'''You are assessing the manuscript's execution against the author's stated intentions for "{project_title}."

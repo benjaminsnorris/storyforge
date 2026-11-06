@@ -77,6 +77,11 @@ def get_plugin_dir() -> str:
     return str(here.parent.parent.parent.parent)
 
 
+#: The placeholder init replaces with the book's title when it copies a
+#: reference template (key-decisions.md)
+PROJECT_TITLE: Final = 'PROJECT_TITLE'
+
+
 def is_unfilled_template(path: str, plugin_dir: str | None = None) -> bool:
     """True when a reference file is still the template init copied in.
 
@@ -102,36 +107,144 @@ def is_unfilled_template(path: str, plugin_dir: str | None = None) -> bool:
             text, model = f.read().strip(), t.read().strip()
     except (OSError, UnicodeDecodeError):
         return False  # unreadable: the caller's own read reports it
-    if 'PROJECT_TITLE' not in model:
+    if PROJECT_TITLE not in model:
         return text == model
-    pattern = r'[^\n]*'.join(re.escape(part) for part in model.split('PROJECT_TITLE'))
+    pattern = r'[^\n]*'.join(re.escape(part) for part in model.split(PROJECT_TITLE))
     return re.fullmatch(pattern, text) is not None
 
 
-VOICE_GUIDE_PATH = 'reference/voice-guide.md'
-#: the command that writes the voice guide (`status`'s voice rung)
-VOICE_STAGE_COMMAND = 'storyforge elaborate --stage voice'
-#: what fills the voice guide, named wherever its absence is reported
-VOICE_GUIDE_REMEDY = f"{VOICE_STAGE_COMMAND} (or the elaborate skill's voice stage)"
+class ReferenceDocError(Exception):
+    """A reference doc that exists but can't be read (permissions, not
+    UTF-8). The message names the file; a prompt must not go out as if the
+    doc weren't there (#596, SF-1)."""
+
+    def __init__(self, path: str, reason: object):
+        self.path = path
+        super().__init__(f"can't read {path}: {reason}")
 
 
-def voice_guide_problem(project_dir: str) -> str:
-    """Why drafting has no voice guide to follow, or '' when
-    reference/voice-guide.md holds the author's text (#596): 'is missing',
-    "is still init's template", 'is empty', or that it can't be read.
-    Any of these leaves the drafting prompt without a voice guide;
-    `status` puts the voice stage before drafting and `write` warns."""
-    path = os.path.join(project_dir, VOICE_GUIDE_PATH)
-    if not os.path.isfile(path):
-        return 'is missing'
-    if is_unfilled_template(path):
-        return "is still init's template"
+def reference_text(path: str, strip: bool = True) -> str:
+    """A reference doc's text for a prompt, stripped: '' when the file is
+    missing, empty or still its template (F-130). The one reading of a
+    reference doc for a prompt (`prompts_elaborate.reference_doc` names it
+    by project). Read as UTF-8 with any BOM dropped, as
+    `is_unfilled_template` compares it. `strip=False` keeps the text as
+    written (a prompt that inlines whole files; whitespace-only is still '').
+
+    Raises:
+        ReferenceDocError: the file exists but can't be read.
+    """
+    if not os.path.isfile(path) or is_unfilled_template(path):
+        return ''
     try:
         with open(path, encoding='utf-8-sig') as f:
             text = f.read()
     except (OSError, UnicodeDecodeError) as e:
-        return f"can't be read ({e})"
-    return '' if text.strip() else 'is empty'
+        raise ReferenceDocError(path, e) from e
+    if not text.strip():
+        return ''
+    return text.strip() if strip else text
+
+
+DocKind = Literal['ok', 'missing', 'template', 'empty', 'unreadable', 'unread']
+
+
+class DocState(NamedTuple):
+    """What a prompt gets from a reference doc (#596, TD-1): `kind` to
+    branch on, `detail` to show, `text` when `kind` is 'ok'."""
+    kind: DocKind
+    path: str      # relative to the project ('' when there is no file)
+    detail: str    # e.g. "reference/voice-guide.md is still init's template"
+    text: str = ''
+    #: details of earlier candidates passed over (a voice guide only)
+    skipped: tuple[str, ...] = ()
+
+    def raise_if_unreadable(self, project_dir: str) -> None:
+        """Raise the ReferenceDocError an 'unreadable' doc came from."""
+        if self.kind == 'unreadable':
+            reference_text(os.path.join(project_dir, self.path))
+            raise ReferenceDocError(self.path, 'unreadable')  # it became readable
+
+
+def doc_state(project_dir: str, rel: str) -> DocState:
+    """reference_text's verdict on one file, as a DocState; an unreadable
+    file is kind 'unreadable', not raised."""
+    path = os.path.join(project_dir, rel)
+    if not os.path.isfile(path):
+        return DocState('missing', rel, f'{rel} is missing')
+    if is_unfilled_template(path):
+        return DocState('template', rel, f"{rel} is still init's template")
+    try:
+        text = reference_text(path)
+    except ReferenceDocError as e:
+        return DocState('unreadable', rel, f"can't read {rel}: {e.__cause__}")
+    if not text:
+        return DocState('empty', rel, f'{rel} is empty')
+    return DocState('ok', rel, rel, text)
+
+
+VOICE_GUIDE_PATH = 'reference/voice-guide.md'
+#: the older voice file; only the prompt without briefs reads it
+PERSISTENT_PROMPT_PATH = 'reference/persistent-prompt.md'
+#: the elaborate stage that writes the voice guide
+VOICE_STAGE: Final = 'voice'
+#: the command that writes the voice guide (`status`'s voice rung)
+VOICE_STAGE_COMMAND = f'storyforge elaborate --stage {VOICE_STAGE}'
+#: what fills the voice guide, named wherever its absence is reported
+VOICE_GUIDE_REMEDY = f"{VOICE_STAGE_COMMAND} (or the elaborate skill's voice stage)"
+
+
+def _voice_guide_candidates(project_dir: str) -> list[str]:
+    """Where a voice guide may be, first to last: a path storyforge.yaml
+    names (`artifacts.voice_guide.path`, or the older `reference.voice_guide`
+    / `voice_guide`), then reference/voice-guide.md, then the older
+    references/ folder."""
+    out = []
+    for value in (read_artifact_field(project_dir, 'voice_guide', 'path'),
+                  read_yaml_field('reference.voice_guide', project_dir),
+                  read_yaml_field('voice_guide', project_dir)):
+        value = value.strip()
+        if value and value not in out:
+            out.append(value)
+    for rel in (VOICE_GUIDE_PATH, 'references/voice-guide.md'):
+        if rel not in out:
+            out.append(rel)
+    return out
+
+
+def resolve_voice_guide(project_dir: str, briefs: bool = True) -> DocState:
+    """The voice guide a drafting, revision or evaluation prompt follows:
+    the one resolver `status`, `write`, the prompt builders and `evaluate`
+    share (#596, CR-1).
+
+    The first candidate holding the author's text is 'ok'; a template or
+    empty one is passed over (`skipped`) for the next. A file that can't be
+    read stops the search ('unreadable'): it may be the guide meant. With
+    none, the first template or empty one found is the verdict. With
+    `briefs` False (the prompt without briefs, `prompts.build_scene_prompt`,
+    and evaluate, which name the file to read) reference/persistent-prompt.md
+    counts too; with briefs it isn't read, and a project with only it is
+    kind 'unread'. Otherwise 'missing'.
+    """
+    candidates = _voice_guide_candidates(project_dir)
+    if not briefs:
+        candidates.append(PERSISTENT_PROMPT_PATH)
+    passed: list[DocState] = []
+    for rel in candidates:
+        state = doc_state(project_dir, rel)
+        if state.kind == 'ok':
+            return state._replace(skipped=tuple(p.detail for p in passed))
+        if state.kind == 'unreadable':
+            return state._replace(skipped=tuple(p.detail for p in passed))
+        if state.kind != 'missing':
+            passed.append(state)
+    if passed:
+        return passed[0]._replace(skipped=tuple(p.detail for p in passed[1:]))
+    if briefs and os.path.isfile(os.path.join(project_dir, PERSISTENT_PROMPT_PATH)):
+        return DocState('unread', PERSISTENT_PROMPT_PATH,
+                        f'there is no {VOICE_GUIDE_PATH}, only {PERSISTENT_PROMPT_PATH}, '
+                        'which the brief-based drafting prompt does not read')
+    return DocState('missing', '', f'{VOICE_GUIDE_PATH} is missing')
 
 
 # ============================================================================
@@ -698,6 +811,27 @@ def _artifact_block_span(lines: list[str],
     return None
 
 
+def read_artifact_field(project_dir: str, artifact: str, key: str) -> str:
+    """One direct key of an `artifacts:` entry in storyforge.yaml
+    (`artifacts.voice_guide.path`), or '' when it isn't there.
+    `read_yaml_field` reads only two levels: `artifacts.voice_guide.path`
+    through it was always '' (#596). Unreadable is absent, as there."""
+    try:
+        with open(os.path.join(project_dir, 'storyforge.yaml'), encoding='utf-8') as f:
+            lines = f.read().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return ''
+    block = _artifact_block_span(lines, artifact)
+    if block is None:
+        return ''
+    key_re = re.compile(rf'^{re.escape(block.child_indent)}{re.escape(key)}:\s*(.*)$')
+    for line in lines[block.first_child:block.end]:
+        m = key_re.match(line)
+        if m:
+            return parse_yaml_scalar(m.group(1))
+    return ''
+
+
 def _artifact_span_failure(lines: list[str], artifact: str) -> str:
     """Say which of the three ways the lookup failed, with a usable remedy.
 
@@ -1088,10 +1222,15 @@ def build_shared_context(project_dir: str, model: str = '') -> list[dict]:
 
     # --- Tier 2: Project-level (session-stable) ---
     ref_dir = os.path.join(project_dir, 'reference')
+    # the voice guide drafting follows (resolve_voice_guide), wherever it is;
+    # an unreadable one is kept so the read below warns, naming it
+    voice = resolve_voice_guide(project_dir)
+    voice_source = ([(os.path.join(project_dir, voice.path), 'Voice Guide')]
+                    if voice.kind in ('ok', 'unreadable') else [])
     tier2_sources = [
         (os.path.join(ref_dir, 'character-bible.md'), 'Character Bible'),
         (os.path.join(ref_dir, 'world-bible.md'), 'World Bible'),
-        (os.path.join(ref_dir, 'voice-guide.md'), 'Voice Guide'),
+        *voice_source,
         (os.path.join(ref_dir, 'voice-profile.csv'), 'Voice Profile'),
         (os.path.join(ref_dir, 'characters.csv'), 'Character Registry'),
         (os.path.join(ref_dir, 'locations.csv'), 'Location Registry'),
@@ -1386,6 +1525,10 @@ def offer_interactive(project_dir: str, step_label: str) -> bool:
 # Medium
 # ============================================================================
 
+MEDIUM_NOVEL: Final = 'novel'
+MEDIUM_GRAPHIC_NOVEL: Final = 'graphic-novel'
+
+
 def get_medium(project_dir: str) -> str:
     """Return the project's medium: 'novel' (default) or 'graphic-novel'.
 
@@ -1397,7 +1540,7 @@ def get_medium(project_dir: str) -> str:
     if not value:
         return 'novel'
     value = value.strip().lower()
-    if value in ('novel', 'graphic-novel'):
+    if value in (MEDIUM_NOVEL, MEDIUM_GRAPHIC_NOVEL):
         return value
     log(f"Warning: project.medium='{value}' is not a recognized value; defaulting to 'novel'")
     return 'novel'

@@ -15,7 +15,7 @@ import re
 
 from storyforge.brief_names import REWRITTEN_FILES
 from storyforge.narrator import NARRATOR_POV, is_narrator
-from storyforge.common import is_unfilled_template, log
+from storyforge.common import log, reference_text
 
 from storyforge.elaborate import (
     _read_csv, _read_csv_as_map, _write_csv, _FILE_MAP, DELIMITER,
@@ -112,16 +112,6 @@ _DOMAIN_TO_REGISTRY = {
 #: Domains whose registry is one type of the ledger's facts, read and
 #: written in the old files' columns (`ledger.view`)
 _LEDGER_TYPES = {'knowledge': 'knowledge', 'physical-states': 'physical'}
-
-
-def _reference_text(ref_dir: str, name: str) -> str:
-    """A reference doc's text for a hone prompt: '' when it is missing or
-    still its template, which isn't the book's (F-130, #596)."""
-    path = os.path.join(ref_dir, name)
-    if not os.path.isfile(path) or is_unfilled_template(path):
-        return ''
-    with open(path, encoding='utf-8') as fh:
-        return fh.read()
 
 
 def read_registry(ref_dir: str, domain: str) -> list[dict[str, str]]:
@@ -1932,9 +1922,9 @@ def hone_briefs(
         }
 
     # Load voice guide and character bible for prompt building
-    voice_guide = _reference_text(ref_dir, 'voice-guide.md')
+    voice_guide = reference_text(os.path.join(ref_dir, 'voice-guide.md'))
 
-    char_bible = _reference_text(ref_dir, 'character-bible.md')
+    char_bible = reference_text(os.path.join(ref_dir, 'character-bible.md'))
 
     from storyforge.api import invoke_to_file, extract_text_from_file
 
@@ -2695,7 +2685,7 @@ def hone_intent(
         }
 
     # Load voice guide
-    voice_guide = _reference_text(ref_dir, 'voice-guide.md')
+    voice_guide = reference_text(os.path.join(ref_dir, 'voice-guide.md'))
 
     from storyforge.api import invoke_to_file, extract_text_from_file
 

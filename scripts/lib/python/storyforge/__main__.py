@@ -190,14 +190,16 @@ def _dispatch(module) -> None:
     ``source.SourceError`` (a `source:` block or name map that can't be used),
     or a ``costs.ThresholdError`` (`STORYFORGE_COST_THRESHOLD` isn't a number;
     the commands that check the threshold stop on it up front, this catches
-    the rest).
+    the rest), or a ``common.ReferenceDocError`` (a reference doc a prompt
+    needs exists but can't be read; the message names it, #596).
     """
+    from storyforge.common import ReferenceDocError
     from storyforge.costs import ThresholdError
     from storyforge.ledger import LedgerError
     from storyforge.source import SourceError
     try:
         code = module.main(sys.argv[1:])
-    except (LedgerError, SourceError, ThresholdError) as e:
+    except (LedgerError, ReferenceDocError, SourceError, ThresholdError) as e:
         # A command with no up-front check reached the registries, a source
         # block, or a non-numeric STORYFORGE_COST_THRESHOLD: stop as plainly
         # as the ones that check

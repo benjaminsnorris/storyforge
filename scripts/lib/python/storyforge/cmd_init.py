@@ -37,7 +37,7 @@ import shutil
 import subprocess
 import sys
 
-from storyforge.common import get_plugin_dir, install_signal_handlers, log
+from storyforge.common import PROJECT_TITLE, get_plugin_dir, install_signal_handlers, log
 
 # Graphic-novel-only templates that a prose project does not get.
 GN_ONLY = {'canon', 'visual-style.md'}
@@ -269,7 +269,7 @@ def main(argv=None):
             with open(entry, encoding='utf-8') as f:
                 text = f.read()
             with open(os.path.join(project, 'reference', name), 'w', encoding='utf-8') as f:
-                f.write(text.replace('PROJECT_TITLE', details['title']))
+                f.write(text.replace(PROJECT_TITLE, details['title']))
     kind = _kind(args, meta)
     with open(os.path.join(project, 'storyforge.yaml'), 'w') as f:
         f.write(_storyforge_yaml(plugin, details, target))

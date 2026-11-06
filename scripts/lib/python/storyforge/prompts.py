@@ -11,7 +11,10 @@ import re
 import sys
 from collections.abc import Collection, Mapping
 
-from .common import is_unfilled_template, parse_yaml_scalar
+from .common import (
+    is_unfilled_template, parse_yaml_scalar, reference_text,
+    resolve_voice_guide,
+)
 
 
 # ============================================================================
@@ -654,7 +657,12 @@ def build_scene_prompt(scene_id: str, project_dir: str,
             craft engine, AI-tell vocabulary, voice profile) is provided via
             the API ``system`` parameter and should NOT be inlined in the
             user prompt. Project-specific weighted directives, scene briefs,
-            and per-scene overrides are still included.
+            and per-scene overrides are still included, and so are the key
+            decisions, which the system context doesn't carry (#596).
+
+    Raises:
+        common.ReferenceDocError: the voice guide or an inlined reference
+            file exists but can't be read.
 
     Returns:
         The assembled prompt string.
@@ -688,16 +696,11 @@ def build_scene_prompt(scene_id: str, project_dir: str,
     # --- Previous scene ---
     prev_scene = get_previous_scene(scene_id, project_dir)
 
-    # --- Voice guide ---
-    voice_guide = read_yaml_field(yaml_file, 'reference.voice_guide')
-    if not voice_guide:
-        voice_guide = read_yaml_field(yaml_file, 'voice_guide')
-    if not voice_guide:
-        vg_path = os.path.join(project_dir, 'reference', 'voice-guide.md')
-        if os.path.isfile(vg_path) and not is_unfilled_template(vg_path):
-            voice_guide = 'reference/voice-guide.md'
-        elif os.path.isfile(os.path.join(project_dir, 'reference', 'persistent-prompt.md')):
-            voice_guide = 'reference/persistent-prompt.md'
+    # --- Voice guide --- (this prompt names the file, so the older
+    # persistent-prompt.md counts: common.resolve_voice_guide)
+    voice = resolve_voice_guide(project_dir, briefs=False)
+    voice.raise_if_unreadable(project_dir)
+    voice_guide = voice.path if voice.kind == 'ok' else ''
 
     # --- Reference files ---
     # a doc still its template is not the book's (F-130, #596)
@@ -710,10 +713,8 @@ def build_scene_prompt(scene_id: str, project_dir: str,
         for rf in ref_files:
             ref_list += f'\n- {rf}'
             if api_mode:
-                full_path = os.path.join(project_dir, rf)
-                if os.path.isfile(full_path):
-                    with open(full_path) as f:
-                        content = f.read()
+                content = reference_text(os.path.join(project_dir, rf), strip=False)
+                if content:
                     ref_inline += f'\n=== FILE: {rf} ===\n{content}\n=== END FILE ===\n'
 
     # --- Previous scene content (API mode) ---
@@ -1883,7 +1884,9 @@ def build_scene_prompt_from_briefs(
                     Their brief rows are included for context.
         system_context: When True, shared reference material (voice guide,
             character bible, AI-tell vocabulary, voice profile) is provided
-            via the API ``system`` parameter and should NOT be inlined.
+            via the API ``system`` parameter and should NOT be inlined. The
+            key decisions are in the prompt either way: the system context
+            doesn't carry them (#596).
         voice_reference: The scene's current prose, for a rewrite (rethink
             plan §3.4, Phase 4 PR 5: rewrites draft from the plan and the
             binding ledger, the old prose a voice reference only). Shown at
@@ -1942,19 +1945,21 @@ def build_scene_prompt_from_briefs(
     if source_block:
         dep_block = f'{dep_block}\n\n{source_block}' if dep_block else source_block
 
-    # Key decisions, voice guide and character bible: a doc still its
-    # template is left out (F-130, #596), read as the elaborate stages read
-    # them. The shared system context carries the voice guide and bibles,
-    # not the key decisions, so those are here either way.
+    # Key decisions, voice guide and character bible, each left out when
+    # missing or still its template (F-130, #596). The key decisions go in
+    # with or without system_context, which doesn't carry them; the voice
+    # guide and character bible only without it, since it carries both.
+    # A doc that can't be read raises ReferenceDocError.
     from .prompts_elaborate import reference_doc
     decisions = reference_doc(project_dir, 'key-decisions.md')
     decisions_block = _key_decisions_block(decisions)
 
     voice_guide = ''
     if not system_context:
-        text = reference_doc(project_dir, 'voice-guide.md')
-        if text:
-            voice_guide = f"## Voice Guide\n\n{text}"
+        voice = resolve_voice_guide(project_dir)
+        voice.raise_if_unreadable(project_dir)
+        if voice.kind == 'ok':
+            voice_guide = f"## Voice Guide\n\n{voice.text}"
 
     char_block = ''
     on_stage = scene.get('on_stage', '')
