@@ -14,10 +14,11 @@ or vice versa.
 import importlib
 import json
 import os
-import shutil
 import subprocess
 
 import pytest
+
+from fixture_helpers import copy_fixture
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +122,7 @@ def project_dir(tmp_path):
     Sets up the working/ subdirectories that command modules expect.
     """
     dest = tmp_path / 'test-project'
-    shutil.copytree(FIXTURE_DIR, dest)
+    copy_fixture(FIXTURE_DIR, dest)
 
     # Ensure working directories that commands expect
     for subdir in [

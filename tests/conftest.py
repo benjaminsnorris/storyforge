@@ -5,11 +5,12 @@ and all assertion functions (now native pytest assertions).
 """
 
 import os
-import shutil
 import sys
 from pathlib import Path
 
 import pytest
+
+from fixture_helpers import copy_fixture
 
 # Add the Python library to the path
 TESTS_DIR = Path(__file__).parent
@@ -116,7 +117,7 @@ def fixture_dir_gn():
 def project_dir_gn(tmp_path):
     """A fresh copy of the graphic-novel fixture in a temp directory."""
     dest = tmp_path / 'test-project-gn'
-    shutil.copytree(FIXTURE_DIR_GN, dest)
+    copy_fixture(FIXTURE_DIR_GN, dest)
     return str(dest)
 
 
@@ -131,9 +132,10 @@ def project_dir(tmp_path):
     """A fresh copy of the test-project fixture in a temp directory.
 
     Use this when tests modify files — prevents contaminating the fixture.
+    Gitignored files in the fixture aren't copied (see fixture_helpers).
     """
     dest = tmp_path / 'test-project'
-    shutil.copytree(FIXTURE_DIR, dest)
+    copy_fixture(FIXTURE_DIR, dest)
     return str(dest)
 
 

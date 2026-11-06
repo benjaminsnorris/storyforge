@@ -12,9 +12,10 @@ import importlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import pytest
+
+from fixture_helpers import copy_fixture
 
 TESTS_DIR = os.path.dirname(os.path.dirname(__file__))
 FIXTURE_DIR = os.path.join(TESTS_DIR, 'fixtures', 'test-project')
@@ -85,7 +86,7 @@ def git_project(tmp_path):
     Returns the path to the project directory (str).
     """
     dest = tmp_path / 'test-project'
-    shutil.copytree(FIXTURE_DIR, dest)
+    copy_fixture(FIXTURE_DIR, dest)
 
     # Ensure working directories (matches commands/conftest.py)
     for subdir in [
@@ -117,7 +118,7 @@ def project_dir(tmp_path):
     Use this when tests need file I/O but not git operations.
     """
     dest = tmp_path / 'test-project'
-    shutil.copytree(FIXTURE_DIR, dest)
+    copy_fixture(FIXTURE_DIR, dest)
 
     # Ensure working directories (matches commands/conftest.py)
     for subdir in [
