@@ -143,6 +143,23 @@ def test_count_prose_words_excludes_markers():
     assert ill.count_prose_words(inserted) == len(SCENE.split())
 
 
+def test_read_scene_prose_strips_markers(tmp_path):
+    """#280: the shared scene reader returns the marker-free prose."""
+    path = tmp_path / 's.md'
+    path.write_text(ill.insert_marker(SCENE_ADVERSARIAL, plan_row(
+        anchor='By morning she had decided.'))['text'], encoding='utf-8')
+    assert '![[illus:' in path.read_text(encoding='utf-8')
+    assert ill.read_scene_prose(str(path)) == SCENE_ADVERSARIAL
+
+
+def test_read_scene_prose_errors_replace(tmp_path):
+    path = tmp_path / 's.md'
+    path.write_bytes(b'caf\xe9 ![[illus:lf-01]]\n')
+    with pytest.raises(UnicodeDecodeError):
+        ill.read_scene_prose(str(path))
+    assert ill.read_scene_prose(str(path), errors='replace') == 'caf� \n'
+
+
 def test_remove_marker():
     inserted = ill.insert_marker(SCENE, plan_row())['text']
     text, changed = ill.remove_marker(inserted, 'lantern-vigil')

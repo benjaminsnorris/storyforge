@@ -33,6 +33,7 @@ from storyforge.common import (
     VOICE_GUIDE_REMEDY,
 )
 from storyforge.costs import estimate_cost, log_operation, print_summary
+from storyforge.illustrations import read_scene_prose
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
@@ -318,7 +319,8 @@ def _build_manuscript_text(scene_files: list[str], project_dir: str) -> str:
         sf_path = os.path.join(project_dir, sf)
         if os.path.isfile(sf_path):
             parts.append(f'===== {sf} =====\n\n')
-            parts.append(open(sf_path).read())
+            # markers are build metadata, never prose for the panel (#280)
+            parts.append(read_scene_prose(sf_path))
             parts.append(f'\n\n===== END {sf} =====\n')
     return ''.join(parts)
 
@@ -730,7 +732,7 @@ def _estimate_avg_words(project_dir, scene_files):
     for sf in scene_files:
         sf_path = os.path.join(project_dir, sf)
         if os.path.isfile(sf_path):
-            wc = len(open(sf_path).read().split())
+            wc = len(read_scene_prose(sf_path).split())
             total += wc
             count += 1
 

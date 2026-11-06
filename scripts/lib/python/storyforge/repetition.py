@@ -8,6 +8,7 @@ import os
 import re
 
 from storyforge.elaborate import _read_csv
+from storyforge.illustrations import read_scene_prose
 
 
 # ============================================================================
@@ -245,8 +246,9 @@ def scan_manuscript(project_dir: str,
     for sid in scene_ids:
         path = os.path.join(scenes_dir, f'{sid}.md')
         if os.path.isfile(path):
-            with open(path, encoding='utf-8') as f:
-                scene_texts[sid] = f.read()
+            # markers are never prose (#280): `![[illus:` in every
+            # illustrated scene would be a cross-chapter repeated phrase
+            scene_texts[sid] = read_scene_prose(path)
 
     return scan_scenes(scene_texts)
 

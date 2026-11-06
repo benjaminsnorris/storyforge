@@ -19,6 +19,7 @@ from storyforge.cmd_evaluate import (
     _resolve_voice_guide,
     _build_eval_prompt,
     _build_manuscript_text,
+    _estimate_avg_words,
     _build_synthesis_prompt,
 )
 
@@ -667,6 +668,38 @@ class TestBuildEvalPrompt:
         )
         assert 'Exists.' in text
         assert 'nonexistent' not in text
+
+    def test_build_manuscript_text_strips_illustration_markers(self, project_dir):
+        """#280: the panel never sees a marker; the assembled manuscript
+        equals the one built from the marker-free prose."""
+        from illustration_helpers import SCENE_ADVERSARIAL
+        path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(SCENE_ADVERSARIAL)
+        clean = _build_manuscript_text(['scenes/act1-sc01.md'], project_dir)
+        marked_text = SCENE_ADVERSARIAL.replace(
+            'decided.\n', 'decided.\n\n![[illus:lf-01]]\n').replace(
+            'She set it', '![[illus:lf-02]]\n\nShe set it')
+        assert marked_text.count('![[illus:') == 2
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(marked_text)
+        text = _build_manuscript_text(['scenes/act1-sc01.md'], project_dir)
+        assert '![[illus:' not in text
+        assert text == clean
+
+    def test_estimate_avg_words_excludes_illustration_markers(self, project_dir):
+        """#280: the file fallback of the token budget counts prose words
+        only (scenes.csv has no word counts here, so the files are read)."""
+        from illustration_helpers import SCENE_ADVERSARIAL
+        os.remove(os.path.join(project_dir, 'reference', 'scenes.csv'))
+        path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(SCENE_ADVERSARIAL)
+        clean = _estimate_avg_words(project_dir, ['scenes/act1-sc01.md'])
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(SCENE_ADVERSARIAL + '\n![[illus:lf-01]]\n')
+        assert _estimate_avg_words(project_dir, ['scenes/act1-sc01.md']) == clean
+        assert clean == len(SCENE_ADVERSARIAL.split())
 
     def test_build_manuscript_text_empty_list(self, project_dir):
         """_build_manuscript_text with no files returns empty string."""

@@ -618,6 +618,19 @@ def count_prose_words(text: str) -> int:
     return len(strip_markers(text).split())
 
 
+def read_scene_prose(path: str, *, errors: str = 'strict') -> str:
+    """A scene file's text with illustration markers stripped (#280).
+
+    The one reader for scene text that feeds analysis, scoring, word counts
+    or a prompt. Code that writes the file back, renders the markers, or
+    compares raw bytes (marker preservation, assembly, the gate's snapshot)
+    reads the file itself. Raises what ``open`` raises; *errors* is passed to
+    it (``'replace'`` for callers that tolerate a non-UTF-8 file).
+    """
+    with open(path, encoding='utf-8', errors=errors) as f:
+        return strip_markers(f.read())
+
+
 def prose_digest(text: str) -> str:
     """A digest of scene prose, stable under cosmetic whitespace edits.
 
