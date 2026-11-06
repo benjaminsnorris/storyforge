@@ -1785,6 +1785,31 @@ class TestReextractAMisquote(_FixRounds):
         assert out.reextraction.summary().endswith(
             'which could not finish (cut off); the verdict before it stands')
 
+    def test_an_unexpected_error_after_the_last_round_keeps_its_edits(self, monkeypatch,
+                                                                       tmp_path):
+        """SF-5 (#602's review): an exception other than GateError escaped
+        to write's catch-all, which keeps the prose as drafted: both
+        rounds' edits were lost and nothing said so."""
+        r2 = self._misquote()
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), self._result('b'), r2,
+                                  KeyError('proposed')],
+                                 [('v1', [{'find': 'a', 'replace': 'b'}]),
+                                  ('v2', [{'find': 'b', 'replace': 'c'}])])
+        assert out.prose == 'v2' and out.fixed and len(out.rounds) == 2
+        assert out.result is r2 and len(dirs) == 4
+        assert out.reextraction.outcome == gate.REGATE_ERROR
+        assert "could not finish (KeyError: 'proposed')" in out.reextraction.summary()
+
+    def test_an_unexpected_error_in_a_later_round_keeps_round_ones_edits(self, monkeypatch,
+                                                                       tmp_path):
+        r1 = self._misquote()
+        out, _, _ = self._run(monkeypatch, tmp_path,
+                              [self._result('a'), r1, OSError('disk full')],
+                              [('v1', [{'find': 'a', 'replace': 'b'}])])
+        assert out.prose == 'v1' and out.result is r1
+        assert 'could not finish (OSError: disk full)' in out.reextraction.summary()
+
     def test_only_extractor_slips(self):
         assert gate._only_extractor_slips(self._misquote()) == [
             f'quote: {SCENE}: {SCENE}--a-fact']
@@ -1936,6 +1961,46 @@ def test_a_second_misquote_still_stops_write(project_dir, tmp_path):
     assert ('so the same prose was gated again (extraction and the check): it misquoted the '
             'prose again (' in row['reason'])
     assert "no quote is replaced with the prose's words" in row['reason']
+
+
+@pytest.mark.real_gate
+def test_a_reextraction_that_crashes_keeps_the_fixed_prose_and_says_so(project_dir, tmp_path,
+                                                                       monkeypatch):
+    """SF-5 (#602's review), through write: the fix's edit is written to the
+    scene, and the pending reason names the error, not "the gate failed
+    unexpectedly" with the prose as drafted."""
+    from storyforge import cmd_write
+    scene_file = os.path.join(project_dir, 'scenes', f'{SCENE}.md')
+    quotes = iter(['Blank parchment. Not even a contour line.',
+                   'Blank vellum. Not even a contour line.'])
+
+    def fake(path, body, **k):
+        prompt = body['messages'][0]['content']
+        if 'tools' in body:
+            return _text({'findings': [_contradiction()] if HERE in prompt else [],
+                          'kept': []})
+        if 'edits' in json.dumps(body.get('output_config', {})):
+            return _text({'edits': [{'problem': 1, 'find': HERE,
+                                     'replace': 'a village of some size'}]})
+        return _text({'commitments': [_commitment(statement='The map is blank there',
+                                                  quote=next(quotes))]})
+    real, runs = gate.gate_scene, []
+
+    def gate_run(*a, **k):
+        runs.append(k['log_dir'])
+        if len(runs) == 3:
+            raise KeyError('id')
+        return real(*a, **k)
+    monkeypatch.setattr(gate, 'gate_scene', gate_run)
+    with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+        passed, why = cmd_write._gate_drafted_scene(project_dir, SCENE, scene_file, 'draft',
+                                                    str(tmp_path / 'logs'), keep_going=True)
+    assert not passed and runs[-1].endswith('reextract')
+    with open(scene_file, encoding='utf-8') as f:
+        assert 'a village of some size' in f.read()
+    reason = gate.pending(project_dir)[SCENE]['reason']
+    assert "could not finish (KeyError: 'id'); the verdict before it stands" in reason
+    assert 'failed unexpectedly' not in reason
 
 
 class TestFirstFixNeverWorse(_FixRounds):

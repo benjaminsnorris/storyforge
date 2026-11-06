@@ -2765,7 +2765,11 @@ def _reextract(project_dir: str, scene_id: str, command: str, prose: str, run: G
     else (a finding this check makes, or a halt or other problem the new
     extraction brings) goes to the next round's fix while `gate_and_fix`
     has one left, and after the last round is the verdict. A run that
-    raises `GateError` keeps `run` and `fallback_dir` (`REGATE_ERROR`)."""
+    raises keeps `run` and `fallback_dir` (`REGATE_ERROR`, naming the
+    error): `GateError`, or any other exception (#602's review SF-5: one
+    escaping here lost the fix rounds' edits to write's catch-all, which
+    keeps the prose as drafted). The prose is unchanged, so the run before
+    is still its verdict."""
     _say_misquoted(scene_id, run)
     run_dir = os.path.join(logs, 'reextract')
     try:
@@ -2774,6 +2778,8 @@ def _reextract(project_dir: str, scene_id: str, command: str, prose: str, run: G
                            check_model=check_model, before=before)
     except GateError as e:
         return run, fallback_dir, Reextraction.of(run, error=str(e))
+    except Exception as e:   # a bug or an I/O failure: say it, keep the fixes
+        return run, fallback_dir, Reextraction.of(run, error=f'{type(e).__name__}: {e}')
     return again, run_dir, Reextraction.of(run, again)
 
 
