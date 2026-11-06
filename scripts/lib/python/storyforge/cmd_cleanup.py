@@ -33,7 +33,8 @@ from storyforge import common
 from storyforge.common import (
     csv_safe, detect_project_root, get_medium, log, read_yaml_field,
 )
-from storyforge.git import commit_and_push, ensure_on_branch
+from storyforge import git as git_mod
+from storyforge.git import commit_and_push, ensure_on_branch, in_work_tree
 from storyforge import ledger
 from storyforge.elaborate import _FILE_MAP, _MOTIF_COLS, _THEMES_COLS
 from storyforge.audit import COLUMNS as AUDIT_COLUMNS
@@ -608,8 +609,12 @@ def _untrack_newly_ignored(project_dir: str) -> None:
     not catch it, because a test project has no `.git`. A git-index effect is
     not a step, so it is not modelled as one.
     """
-    git_dir = os.path.join(project_dir, '.git')
-    if not (shutil.which('git') and os.path.isdir(git_dir)):
+    # Not `isdir(project_dir/.git)`: False for a project in a subfolder of its
+    # repo (`projects/<book>/`), a worktree or a submodule, which skipped the
+    # sweep with nothing said (#520)
+    if not in_work_tree(project_dir):
+        log('WARNING: not inside a git work tree (or git is not installed), so '
+            'files the .gitignore excludes were not checked for and untracked.')
         return
     # `-c` is required, not decorative: `git ls-files -i` has been fatal
     # without either `-o` or `-c` since git 2.32, and the failure was silent
@@ -618,9 +623,13 @@ def _untrack_newly_ignored(project_dir: str) -> None:
     # checked `returncode`, so `stdout` was `''` and the empty result read as
     # "nothing is ignored-but-tracked". The sweep did nothing, said nothing,
     # and exited 0 on every machine with a current git.
+    #
+    # `-z`: without it a non-ASCII name arrives C-quoted (`"caf\303\251.md"`)
+    # and the `git rm --cached` of that string matches nothing. Run in the
+    # project, it lists only the project's files, relative to it.
     r = subprocess.run(
         ['git', '-C', project_dir, 'ls-files', '-i', '-c',
-         '--exclude-standard'],
+         '--exclude-standard', '-z'],
         capture_output=True, text=True,
     )
     if r.returncode != 0:
@@ -628,13 +637,81 @@ def _untrack_newly_ignored(project_dir: str) -> None:
             f'({r.stderr.strip()}). Nothing was untracked; the rest of '
             f'cleanup still runs.')
         return
-    tracked = r.stdout.strip()
+    tracked = [f for f in r.stdout.split('\0') if f]
     if not tracked:
         return
-    log(f'  Untracking {len(tracked.splitlines())} newly-gitignored files')
-    for f in tracked.splitlines():
-        subprocess.run(['git', '-C', project_dir, 'rm', '--cached', '-q', f],
-                       capture_output=True)
+    log(f'  Untracking {len(tracked)} newly-gitignored files')
+    failed = []
+    for f in tracked:
+        rm = subprocess.run(['git', '-C', project_dir, '--literal-pathspecs',
+                             'rm', '--cached', '-q', '--', f],
+                            capture_output=True, text=True)
+        if rm.returncode != 0:
+            failed.append(f'{f} ({(rm.stderr or "").strip()[:200]})')
+    if failed:
+        log(f'WARNING: could not untrack {len(failed)} of them; they stay '
+            f'tracked: {"; ".join(failed)}')
+
+
+CLEANUP_COMMIT_MESSAGE = 'Cleanup: project structure and working files'
+
+
+def _git_out(project_dir: str, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(['git', '-C', project_dir, *args],
+                          capture_output=True, text=True)
+
+
+def _commit_cleanup(project_dir: str) -> bool:
+    """Commit cleanup's changes to the project. True if committed.
+
+    Scoped to the project (`status -- .`), so in a repo holding several
+    projects (`projects/<book>/`) a sibling's edits don't count as changes,
+    and `commit_and_push`'s `add -A -- .` doesn't stage them. The commit
+    itself takes the whole index, because `_untrack_newly_ignored`'s
+    `git rm --cached` removals are only there (`commit -- .` re-adds them).
+    So a file already staged outside the project would ride in under
+    cleanup's message: then nothing is committed and the files are named.
+
+    Every path that doesn't commit says why (#520: the gate was
+    `isdir(project_dir/.git)`, which skipped subfolder, worktree and
+    submodule projects with nothing said).
+    """
+    if not in_work_tree(project_dir):
+        log("WARNING: not inside a git work tree (or git is not installed), so "
+            "cleanup's changes were not committed.")
+        return False
+    r = _git_out(project_dir, 'status', '--porcelain', '-z', '--', '.')
+    if r.returncode != 0:
+        log(f"WARNING: could not check for changes (git status: "
+            f"{r.stderr.strip()[:200]}), so cleanup's changes were not committed.")
+        return False
+    if not r.stdout.strip('\0'):
+        log('No changes to commit.')
+        return False
+    prefix = _git_out(project_dir, 'rev-parse', '--show-prefix')
+    staged = _git_out(project_dir, 'diff', '--cached', '--name-only',
+                      '--no-renames', '-z')
+    if prefix.returncode != 0 or staged.returncode != 0:
+        log(f"WARNING: could not list what is staged (git: "
+            f"{(prefix.stderr + staged.stderr).strip()[:200]}), so cleanup's "
+            f"changes were not committed.")
+        return False
+    outside = [f for f in staged.stdout.split('\0')
+               if f and not f.startswith(prefix.stdout.strip())]
+    if outside:
+        log(f"WARNING: files outside this project are staged, and cleanup's "
+            f"commit would take them in: {', '.join(outside)}. Cleanup's "
+            f"changes were not committed; commit or unstage those files, then "
+            f"commit this project's changes.")
+        return False
+    log('')
+    log('Committing changes...')
+    if commit_and_push(project_dir, CLEANUP_COMMIT_MESSAGE):
+        return True
+    if git_mod.last_commit_error == git_mod.NOTHING_TO_COMMIT:
+        log('No changes to commit.')
+    # A failed commit is already a WARNING from commit_and_push
+    return False
 
 
 def update_gitignore(project_dir: str) -> None:
@@ -2974,23 +3051,7 @@ def main(argv=None):
 
     # Commit (unless dry-run)
     if not args.dry_run:
-        git_dir = os.path.join(project_dir, '.git')
-        if shutil.which('git') and os.path.isdir(git_dir):
-            r = subprocess.run(
-                ['git', '-C', project_dir, 'status', '--porcelain'],
-                capture_output=True, text=True,
-            )
-            if r.stdout.strip():
-                log('')
-                log('Committing changes...')
-                committed = commit_and_push(
-                    project_dir,
-                    'Cleanup: project structure and working files',
-                )
-                if not committed:
-                    log('WARNING: git commit or push may have failed')
-            else:
-                log('No changes to commit.')
+        _commit_cleanup(project_dir)
 
     log('')
     log('Cleanup complete.')
