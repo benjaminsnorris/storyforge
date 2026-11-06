@@ -1639,9 +1639,13 @@ class TestReextractAMisquote(_FixRounds):
     failed, and `write --keep-going` stopped the run with 18 scenes left. A
     second extraction of the same prose passed."""
 
-    def _misquote(self, *tags, kind='quote'):
+    SAID = "she would sit in his father's seat"
+
+    def _misquote(self, *tags, kind='quote', fact='a-fact', quote=SAID):
         r = self._result(*tags)
-        r.problems = {kind: [f'{SCENE}: {SCENE}--a-fact']}
+        rid = f'{SCENE}--{fact}'
+        r.problems = {kind: [f'{SCENE}: {rid}']}
+        r.proposed = [{'id': rid, 'quote': '' if kind == 'no quote' else quote}]
         return r
 
     def test_a_recheck_failing_only_on_a_misquote_extracts_again_and_passes(
@@ -1652,12 +1656,17 @@ class TestReextractAMisquote(_FixRounds):
                                     [('v1', e1)])
         logs = out.log_dir
         assert dirs == [logs, os.path.join(logs, 'recheck'), os.path.join(logs, 'reextract')]
-        assert out.result.passed and out.prose == 'v1' and out.reextracted
+        assert out.result.passed and out.prose == 'v1'
         assert len(out.rounds) == 1 and len(seen) == 1   # no fix was spent on it
         said = capsys.readouterr().out
-        assert (f'{SCENE}: the extractor misquoted the prose (1 quote(s) not in the scene: '
-                f'quote: {SCENE}: {SCENE}--a-fact); re-running extraction on the same prose'
-                in said)
+        # SF-3 (#602's review): the fact, what was quoted, and what re-runs
+        assert (f'{SCENE}: the extractor misquoted the prose ({SCENE}--a-fact: "{self.SAID}" '
+                f'is not in the scene); gating the same prose again (extraction and the '
+                f'check), not sending it to the fix' in said)
+        assert out.reextraction == gate.Reextraction(
+            [f'{SCENE}--a-fact: "{self.SAID}" is not in the scene'], gate.REGATE_PASSED)
+        assert out.reextraction.summary().endswith(
+            'so the same prose was gated again (extraction and the check): it passed')
 
     def test_a_misquote_after_the_last_round_extracts_again(self, monkeypatch, tmp_path):
         out, dirs, _ = self._run(monkeypatch, tmp_path,
@@ -1675,17 +1684,35 @@ class TestReextractAMisquote(_FixRounds):
                                   self._result()],
                                  [('v1', [{'find': 'a', 'replace': 'b'}])])
         assert out.result.passed and len(dirs) == 3
+        # SF-3: a missing quote is not called a quote not in the scene
+        assert out.reextraction.slips == [f'{SCENE}--a-fact: no quote']
+
+    def test_a_long_quote_is_cut_and_many_slips_are_counted(self):
+        r = self._misquote(quote='word ' * 40)
+        r.problems['quote'] += [f'{SCENE}: {SCENE}--b', f'{SCENE}: {SCENE}--c',
+                                f'{SCENE}: {SCENE}--d']
+        slips = gate._describe_slips(r)
+        assert slips[0] == (f'{SCENE}--a-fact: "' + ('word ' * 12).strip() + '…" is not in '
+                            f'the scene')
+        assert slips[1] == f'{SCENE}--b: its quote is not in the scene'   # no such row
+        assert gate._slip_text(slips).endswith(f'{SCENE}--c: its quote is not in the scene; '
+                                               f'and 1 more')
 
     def test_a_second_misquote_is_reported_not_repaired(self, monkeypatch, tmp_path):
         """No fuzzy match: the prose's words never replace the quote."""
-        again = self._misquote()
+        again = self._misquote(fact='b-fact', quote='he sat in the seat')
         out, dirs, _ = self._run(monkeypatch, tmp_path,
                                  [self._result('a'), self._misquote(), again],
                                  [('v1', [{'find': 'a', 'replace': 'b'}])])
         assert len(dirs) == 3 and out.result is again and not out.result.passed
-        assert out.notes == ['extraction re-run on the same prose misquoted it again; the '
-                             'quote mismatches are reported, not replaced with the prose\'s '
-                             'words']
+        # SF-4 (#602's review): both runs' slips, the first's kept beside the second's
+        r = out.reextraction
+        assert (r.outcome, r.others) == (gate.REGATE_FAILED, False)
+        assert r.slips == [f'{SCENE}--a-fact: "{self.SAID}" is not in the scene']
+        assert r.again == [f'{SCENE}--b-fact: "he sat in the seat" is not in the scene']
+        assert (f'misquoted the prose ({SCENE}--a-fact: ' in r.summary()
+                and f'it misquoted the prose again ({SCENE}--b-fact: ' in r.summary()
+                and "no quote is replaced with the prose's words" in r.summary())
         # the stop rule stands: a commit would write the wrong quote
         again._ctx = object()   # as a finished gate run has
         assert gate.can_commit_provisionally(out.result) == (
@@ -1710,19 +1737,31 @@ class TestReextractAMisquote(_FixRounds):
                                  [('v1', [{'find': 'a', 'replace': 'b'}]),
                                   ('v2', [{'find': 'b', 'replace': 'c'}])])
         assert len(dirs) == 4 and not out.result.passed and out.result.unresolved
+        # the one there was: its run went on to round 2's fix
+        assert out.reextraction.outcome == gate.REGATE_FAILED and out.reextraction.others
+        assert out.reextraction.summary().endswith('it stopped on other problems (listed)')
 
     def test_round_ones_reroll_is_the_one_reextraction(self, monkeypatch, tmp_path, capsys):
         out, dirs, _ = self._run(monkeypatch, tmp_path,
                                  [self._misquote(), self._misquote()], [])
-        assert len(dirs) == 2 and out.reextracted and not out.result.passed
+        assert len(dirs) == 2 and not out.result.passed
+        assert out.reextraction.outcome == gate.REGATE_FAILED   # misquoted again
         assert 'the extractor misquoted the prose' in capsys.readouterr().out
+
+    def test_a_reroll_for_another_extraction_problem_is_no_reextraction(self, monkeypatch,
+                                                                         tmp_path):
+        """SF-2 (#602's review): only a re-gate for slips is reported as one."""
+        first = self._result()
+        first.problems = {'ends': [f'{SCENE}: some-state']}
+        out, dirs, _ = self._run(monkeypatch, tmp_path, [first, self._misquote()], [])
+        assert len(dirs) == 2 and out.reextraction is None   # and no second regate
 
     def test_another_extraction_problem_beside_it_is_not_retried(self, monkeypatch, tmp_path):
         mixed = self._misquote()
         mixed.problems['supersedes'] = [f'{SCENE}: nothing-offered']
         out, dirs, _ = self._run(monkeypatch, tmp_path, [self._result('a', 'c'), mixed],
                                  [('v1', [{'find': 'a', 'replace': 'b'}])])
-        assert len(dirs) == 2 and out.result is mixed and not out.reextracted
+        assert len(dirs) == 2 and out.result is mixed and out.reextraction is None
 
     def test_a_finding_beside_it_goes_to_the_fix_not_a_reextraction(self, monkeypatch,
                                                                     tmp_path):
@@ -1734,7 +1773,7 @@ class TestReextractAMisquote(_FixRounds):
                                      ('v2', [{'find': 'b', 'replace': 'c'}])])
         logs = out.log_dir
         assert dirs == [logs, os.path.join(logs, 'recheck'), os.path.join(logs, 'recheck-2')]
-        assert len(seen) == 2 and out.result.passed and not out.reextracted
+        assert len(seen) == 2 and out.result.passed and out.reextraction is None
 
     def test_a_reextraction_that_fails_keeps_the_verdict_before_it(self, monkeypatch, tmp_path):
         r1 = self._misquote()
@@ -1742,8 +1781,9 @@ class TestReextractAMisquote(_FixRounds):
                                  [self._result('a'), r1, gate.GateError('cut off')],
                                  [('v1', [{'find': 'a', 'replace': 'b'}])])
         assert out.result is r1 and out.prose == 'v1' and len(dirs) == 3
-        assert out.notes == ['re-running extraction on the same prose failed (cut off); '
-                             'kept the verdict before it']
+        assert out.reextraction.outcome == gate.REGATE_ERROR
+        assert out.reextraction.summary().endswith(
+            'which could not finish (cut off); the verdict before it stands')
 
     def test_only_extractor_slips(self):
         assert gate._only_extractor_slips(self._misquote()) == [
@@ -1841,7 +1881,11 @@ def test_a_misquote_after_a_fix_no_longer_stops_write(project_dir, tmp_path, cap
     assert (passed, why) == (True, '')
     assert calls == ['extract', 'check', 'fix', 'extract', 'check', 'extract', 'check']
     said = capsys.readouterr().out
-    assert 'the extractor misquoted the prose' in said and 'Gate passed' in said
+    assert 'Gate passed' in said
+    # SF-2 (#602's review): the author can see a misquote happened
+    assert ('NOTE: the extractor misquoted the prose (' in said
+            and '"Blank vellum. Not even a contour line." is not in the scene), so the same '
+                'prose was gated again (extraction and the check): it passed' in said)
     mine = [r for r in ledger.load(project_dir) if r['scene_id'] == SCENE
             and ledger.is_commitment(r)]
     assert [r['quote'] for r in mine] == [right]
@@ -1865,9 +1909,12 @@ def test_a_second_misquote_still_stops_write(project_dir, tmp_path):
     scene_file = os.path.join(project_dir, 'scenes', f'{SCENE}.md')
     wrong = 'Blank vellum. Not even a contour line.'
     quotes = iter(['Blank parchment. Not even a contour line.', wrong, wrong])
+    calls = []
 
     def fake(path, body, **k):
         prompt = body['messages'][0]['content']
+        calls.append('check' if 'tools' in body else 'fix' if 'edits' in json.dumps(
+            body.get('output_config', {})) else 'extract')
         if 'tools' in body:
             return _text({'findings': [_contradiction()] if HERE in prompt else [],
                           'kept': []})
@@ -1881,7 +1928,14 @@ def test_a_second_misquote_still_stops_write(project_dir, tmp_path):
                                                     str(tmp_path / 'logs'), keep_going=True)
     assert not passed and 'EXTRACTION: quote' in why
     assert not why.startswith('provisional')
-    assert gate.pending(project_dir)[SCENE]['command'] == 'draft'
+    # T-2 (#602's review): the re-extraction ran (a third extraction)
+    assert calls == ['extract', 'check', 'fix', 'extract', 'check', 'extract', 'check']
+    # SF-1: the pending reason says the extractor misquoted, twice
+    row = gate.pending(project_dir)[SCENE]
+    assert row['command'] == 'draft'
+    assert ('so the same prose was gated again (extraction and the check): it misquoted the '
+            'prose again (' in row['reason'])
+    assert "no quote is replaced with the prose's words" in row['reason']
 
 
 class TestFirstFixNeverWorse(_FixRounds):
