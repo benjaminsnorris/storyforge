@@ -403,9 +403,30 @@ def _ledger_lines(rows: list[dict[str, str]]) -> list[str]:
 
 
 def _write_lines(path: str, lines: list[str]) -> None:
-    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-    with open(path, 'w', newline='', encoding='utf-8') as f:
-        f.write(''.join(line + '\n' for line in lines))
+    """Write `lines` to `path` whole or not at all (#599's review, T-6): to
+    a temporary file beside it, then moved over it, so a write that fails
+    part-way (a full disk) leaves the file as it was."""
+    import tempfile
+    directory = os.path.dirname(path) or '.'
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=f'.{os.path.basename(path)}.',
+                               suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w', newline='', encoding='utf-8') as f:
+            f.write(''.join(line + '\n' for line in lines))
+        if os.path.exists(path):
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        else:
+            umask = os.umask(0)
+            os.umask(umask)
+            os.chmod(tmp, 0o666 & ~umask)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _cell(row: dict, column: str) -> str:
@@ -1523,6 +1544,12 @@ def migrate_files(ref_dir: str, *, dry_run: bool = False) -> FileMigration:
                            quirks=migration.quirks)
     if dry_run:
         result.removed = old
+        return result
+    # #599's review (TD-5): the migration's rows pass the ledger's id
+    # checks too, or nothing is written
+    problems = row_problems(migration.rows)
+    if problems:
+        result.status, result.problems = 'stopped', problems
         return result
     path = os.path.join(ref_dir, LEDGER_FILE)
     write_ledger(path, migration.rows)
