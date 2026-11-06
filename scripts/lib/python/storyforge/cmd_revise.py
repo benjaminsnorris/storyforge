@@ -1007,6 +1007,21 @@ def _generate_naturalness_plan(plan_file, project_dir='', *, write=True):
 
 def _generate_structural_plan(project_dir, plan_file, *, write=True):
     """Generate CSV-only plan from structural proposals."""
+    # Scores and proposals older than the CSVs are re-made first: a stale
+    # "before" skews the delta, and stale proposals plan the wrong fixes
+    # (#600). A dry run only says so.
+    from storyforge.structural import refresh_structural_scores, structural_staleness
+    saved = os.path.isfile(os.path.join(project_dir, 'working', 'scores',
+                                        'structural-latest.csv'))
+    if not saved:
+        pass   # no score to be stale: the proposals stand as they are
+    elif write:
+        stale = refresh_structural_scores(project_dir)
+        if stale:
+            log(f'Structural scores and proposals re-computed before revising: {stale}')
+    elif structural_staleness(project_dir):
+        log(f'NOTE: the structural scores are stale ({structural_staleness(project_dir)}); '
+            f'the real run re-scores before planning')
     proposals_file = os.path.join(project_dir, 'working', 'scores', 'structural-proposals.csv')
     if not os.path.isfile(proposals_file):
         log(f'ERROR: No structural proposals found at {proposals_file}')
@@ -1027,7 +1042,7 @@ def _generate_structural_plan(project_dir, plan_file, *, write=True):
         log(f'ERROR: No pending proposals in {proposals_file}')
         sys.exit(1)
 
-    # Save pre-revision scores
+    # Save pre-revision scores (re-made above when stale)
     pre_scores = os.path.join(project_dir, 'working', 'scores', 'structural-latest.csv')
     if os.path.isfile(pre_scores):
         import shutil

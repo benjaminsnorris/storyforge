@@ -44,7 +44,7 @@ Before doing anything else, orient yourself:
    - `reference/scenes.csv`
    - `working/evaluations/*/findings.csv` (preferred) or `working/evaluations/findings.yaml` (legacy)
    - `working/plans/revision-plan.csv` (preferred) or `working/plans/revision-plan.yaml` (legacy)
-   - `working/scores/structural-latest.csv` (structural scoring results)
+   - `working/scores/structural-latest.csv` (structural scoring results; its `computed_at` column says when. It is stale once the scene CSVs change after that: re-run `./storyforge validate --structural`, free, before quoting it)
    - `working/scores/structural-proposals.csv` (unaddressed structural proposals)
    - `working/scoring-verdicts.csv` (LLM boundary-diff verdicts, if any boundaries have been run)
    - `reference/voice-profile.csv` (voice profile with per-character banned words)
@@ -290,7 +290,7 @@ Determine the single highest-value next action based on project state. Work thro
 
 **1.6. Post-extraction gaps:** If `scenes.csv` has rows with `status=drafted` AND `scene-briefs.csv` is populated AND `validate_structure()` returns failures > 0 → "Your extracted data has structural gaps. Run elaborate to fill them." → invoke `elaborate` (which will detect gap-fill state).
 
-**1.7. Structural scoring:** If briefs are populated AND no `working/scores/structural-latest.csv` exists (or it's older than the CSVs) → "Check your story structure before drafting." → Provide `./storyforge validate --structural`. Review scores and proposals. Address any below-target dimensions before drafting.
+**1.7. Structural scoring:** If briefs are populated AND no `working/scores/structural-latest.csv` exists (or its `computed_at` is older than the scene CSVs' last change) → "Check your story structure before drafting." → Provide `./storyforge validate --structural`. Review scores and proposals. Address any below-target dimensions before drafting.
 
 **2. Ready to draft:** If briefs are complete and validated → "Draft your scenes" → provide `./storyforge write --keep-going` command.
 

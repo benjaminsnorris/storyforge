@@ -1030,8 +1030,13 @@ def commitment_id(scene_id: str, statement: str, taken: Set[str]) -> str:
     return rid
 
 
+#: `commitment_rows`' kinds for a quote that isn't the prose's: one not in
+#: the scene, and none at all. The extractor's slips: no prose edit repairs
+#: one (`gate._EXTRACTOR_SLIPS`, #598)
+MISQUOTE = 'quote'
+NO_QUOTE = 'no quote'
 #: The kinds `commitment_rows` reports, each a list of strings in `problems`
-COMMITMENT_PROBLEMS = ('quote', 'no quote', 'subject', 'supersedes', 'disagrees',
+COMMITMENT_PROBLEMS = (MISQUOTE, NO_QUOTE, 'subject', 'supersedes', 'disagrees',
                        'ends', 'ends fixed', 'ends registry', 'ends again', 'cap', 'unplaced')
 
 
@@ -1118,9 +1123,9 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
             else:
                 old['resolves'] = scene_id
         if not item['quote']:
-            problems['no quote'].append(f'{scene_id}: {row["id"]}')
+            problems[NO_QUOTE].append(f'{scene_id}: {row["id"]}')
         elif not quote_in(scene_text, item['quote']):
-            problems['quote'].append(f'{scene_id}: {row["id"]}')
+            problems[MISQUOTE].append(f'{scene_id}: {row["id"]}')
         taken.add(row['id'])
         out.append(row)
     return out

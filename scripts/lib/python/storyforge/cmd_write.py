@@ -517,6 +517,11 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
             f're-checked.')
     for note in out.notes:
         log(f'  NOTE: {note}')
+    # #598 (#602's review SF-1, SF-2): a misquote is the extractor's, said in
+    # the log and in the pending reason the author reads
+    regate = out.reextraction.summary() if out.reextraction else ''
+    if regate:
+        log(f'  NOTE: {regate}')
     lines = gate.report_lines(out.result)
     for line in lines:
         log(f'  {line}')
@@ -540,6 +545,8 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
                  'says why)')
     elif out.discarded:
         tried += f' (fix round {out.discarded} was discarded; the log says why)'
+    if regate:
+        tried += f' [{regate}]'
     if out.blocked_stale:   # SF-1 (#504's review): said where the author looks
         tried += (f' [{out.blocked_stale}: `check --accept` refuses this scene until '
                   f'`storyforge check {scene_id}` records it again]')
