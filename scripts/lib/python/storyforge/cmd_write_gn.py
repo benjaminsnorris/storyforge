@@ -71,13 +71,11 @@ def _row_to_dict(csv_path, row_id):
 
 
 def _build_visual_refs(project_dir):
-    """Read character-bible.md and world-bible.md for visual reference."""
-    ref_dir = os.path.join(project_dir, 'reference')
-    chars_path = os.path.join(ref_dir, 'character-bible.md')
-    world_path = os.path.join(ref_dir, 'world-bible.md')
-    char_text = open(chars_path, encoding='utf-8').read() if os.path.isfile(chars_path) else ''
-    world_text = open(world_path, encoding='utf-8').read() if os.path.isfile(world_path) else ''
-    return char_text, world_text
+    """Read character-bible.md and world-bible.md for visual reference
+    ('' for one missing or still its template: F-130, #596)."""
+    from storyforge.prompts_elaborate import reference_doc
+    return (reference_doc(project_dir, 'character-bible.md'),
+            reference_doc(project_dir, 'world-bible.md'))
 
 
 def _build_voice_text(project_dir):

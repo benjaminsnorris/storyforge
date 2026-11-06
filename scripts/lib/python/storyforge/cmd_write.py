@@ -387,10 +387,19 @@ class DraftOutcome(NamedTuple):
     provisional: list = []
 
 def _check_voice_guide(project_dir: str) -> None:
-    """Warn if no voice guide is found."""
-    for vg in ('reference/voice-guide.md', 'reference/persistent-prompt.md'):
-        if os.path.isfile(os.path.join(project_dir, vg)):
-            return
+    """Warn if no voice guide is found, or it is one the prompt leaves out
+    (still init's template, empty or unreadable: #596)."""
+    from storyforge.common import (
+        VOICE_GUIDE_PATH, VOICE_GUIDE_REMEDY, voice_guide_problem)
+    problem = voice_guide_problem(project_dir)
+    if not problem:
+        return
+    if problem != 'is missing':
+        log(f'WARNING: {VOICE_GUIDE_PATH} {problem}, so drafting proceeds without '
+            f'a voice guide. Fill it first: {VOICE_GUIDE_REMEDY}.')
+        return
+    if os.path.isfile(os.path.join(project_dir, 'reference/persistent-prompt.md')):
+        return
     custom_vg = read_yaml_field('reference.voice_guide', project_dir)
     if not custom_vg:
         custom_vg = read_yaml_field('voice_guide', project_dir)

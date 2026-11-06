@@ -9,7 +9,10 @@ import subprocess
 import sys
 from datetime import datetime
 
-from storyforge.common import log, read_yaml_field, get_coaching_level, select_model, get_pipeline_file
+from storyforge.common import (
+    log, read_yaml_field, get_coaching_level, select_model, get_pipeline_file,
+    is_unfilled_template,
+)
 
 
 # ============================================================================
@@ -978,7 +981,9 @@ def _run_recommend_step(review_type: str, project_dir: str, cycle_id: int) -> No
         (get_pipeline_file(project_dir), 'working/pipeline.csv'),
         (os.path.join(project_dir, 'reference', 'key-decisions.md'), 'reference/key-decisions.md'),
     ]:
-        if os.path.isfile(fpath) and os.path.getsize(fpath) < 51200:
+        # a key-decisions.md still its template records no decision (#596)
+        if (os.path.isfile(fpath) and os.path.getsize(fpath) < 51200
+                and not is_unfilled_template(fpath)):
             with open(fpath) as f:
                 context_parts.append(f'=== FILE: {label} ===\n{f.read()}\n=== END FILE ===')
 

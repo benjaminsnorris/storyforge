@@ -214,8 +214,11 @@ class TestDraftingPrompt:
         assert "treatment of its source: **compress** (two days in one)" in section
         assert '<source-prose scene="minerva-visits">\nThen Pallas Minerva went down.' in section
         assert '<source-prose scene="assembly-called">' in section
-        assert 'softens the killing' in section           # the version rules
-        assert 'Not a rule' not in p                      # only the rules section
+        # the version rules live in Key Decisions, which drafting carries
+        # whole (#596): pointed to, not repeated (B-015)
+        assert 'The version rules are in Key Decisions' in section
+        assert p.count('softens the killing') == 1
+        assert p.index('## Key Decisions') > p.index('## Source\n')
         assert 'Minerva → Athena' in section
         assert p.index('## Source\n') < p.index('## Task')
 

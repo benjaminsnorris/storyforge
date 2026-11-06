@@ -542,9 +542,11 @@ def _gather_style_cues(project_dir: str) -> StyleGuideCues:
 
 
 def _read_optional(path: str, head_lines: int | None = None) -> str:
-    """Read a file if it exists; return '' otherwise. Optionally truncate
+    """Read a file if it exists; return '' otherwise, and for a reference
+    doc still its template (F-130, #596). Optionally truncate
     to the first N lines so LLM prompts stay bounded."""
-    if not os.path.isfile(path):
+    from storyforge.common import is_unfilled_template
+    if not os.path.isfile(path) or is_unfilled_template(path):
         return ''
     try:
         with open(path, encoding='utf-8') as f:

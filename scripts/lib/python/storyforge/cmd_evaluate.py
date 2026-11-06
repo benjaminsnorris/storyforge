@@ -29,7 +29,8 @@ from datetime import datetime
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field,
     select_model, get_plugin_dir, install_signal_handlers,
-    get_coaching_level, build_shared_context,
+    get_coaching_level, build_shared_context, is_unfilled_template,
+    VOICE_GUIDE_REMEDY,
 )
 from storyforge.costs import estimate_cost, log_operation, print_summary
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
@@ -178,18 +179,25 @@ def _load_custom_evaluators(project_dir):
 # ============================================================================
 
 def _resolve_voice_guide(project_dir):
-    """Find and read voice guide content. Returns (path, content) or (None, '')."""
+    """Find and read voice guide content. Returns (path, content) or (None, '').
+
+    A voice guide still init's template is skipped (F-130, #596) and said:
+    the evaluators would read its guidance as the book's voice."""
+    candidates = []
     custom_vg = read_yaml_field('artifacts.voice_guide.path', project_dir)
     if custom_vg:
-        vg_path = os.path.join(project_dir, custom_vg)
-        if os.path.isfile(vg_path):
-            return vg_path, open(vg_path).read()
-
-    for vg in ['references/voice-guide.md', 'reference/voice-guide.md',
-               'reference/persistent-prompt.md']:
+        candidates.append(custom_vg)
+    candidates += ['references/voice-guide.md', 'reference/voice-guide.md',
+                   'reference/persistent-prompt.md']
+    for vg in candidates:
         vg_path = os.path.join(project_dir, vg)
-        if os.path.isfile(vg_path):
-            return vg_path, open(vg_path).read()
+        if not os.path.isfile(vg_path):
+            continue
+        if is_unfilled_template(vg_path):
+            log(f'WARNING: {vg} is still init\'s template; left out of the evaluation. '
+                f'Fill it: {VOICE_GUIDE_REMEDY}.')
+            continue
+        return vg_path, open(vg_path).read()
 
     return None, ''
 
@@ -613,7 +621,9 @@ def _build_assessment_prompt(project_dir, eval_dir, eval_timestamp, scope_descri
     for ref in ['reference/key-decisions.md',
                 'reference/voice-guide.md', 'references/voice-guide.md',
                 'reference/story-architecture.md', 'references/story-architecture.md']:
-        if os.path.isfile(os.path.join(project_dir, ref)):
+        path = os.path.join(project_dir, ref)
+        # a template copy states no intention of the author's (F-130, #596)
+        if os.path.isfile(path) and not is_unfilled_template(path):
             ref_files.append(ref)
 
     if not ref_files:

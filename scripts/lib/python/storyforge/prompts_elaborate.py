@@ -74,6 +74,17 @@ _REFERENCE_DOCS = [
 ]
 
 
+def reference_doc(project_dir: str, name: str) -> str:
+    """`reference/<name>`'s text, stripped: '' when the file is missing,
+    empty or still its template (F-130). The one reading of a reference doc
+    for a prompt, shared with drafting (`prompts`, #596)."""
+    from .common import is_unfilled_template
+    path = os.path.join(project_dir, 'reference', name)
+    if is_unfilled_template(path):
+        return ''
+    return _read_file(path).strip()
+
+
 def _existing_refs(project_dir: str, shared: bool = False) -> str:
     """Include any existing reference materials.
 
@@ -81,19 +92,13 @@ def _existing_refs(project_dir: str, shared: bool = False) -> str:
     docs that context carries (the bibles, the voice guide, the source
     bibles) are left out and the rest are kept. A doc still holding its
     template text is skipped (F-130)."""
-    from .common import is_unfilled_template
     sections = []
-    ref_dir = os.path.join(project_dir, 'reference')
-
     for name, label, in_shared in _REFERENCE_DOCS:
         if shared and in_shared:
             continue
-        path = os.path.join(ref_dir, name)
-        if is_unfilled_template(path):
-            continue
-        content = _read_file(path)
-        if content.strip():
-            sections.append(f"### {label}\n\n{content.strip()}")
+        content = reference_doc(project_dir, name)
+        if content:
+            sections.append(f"### {label}\n\n{content}")
 
     if shared:
         return '\n\n'.join(sections)

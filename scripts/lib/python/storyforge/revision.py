@@ -629,9 +629,11 @@ def build_revision_prompt(
             'reference/scenes.csv',
         ]
         ref_parts = []
+        from storyforge.common import is_unfilled_template
         for ref in ref_files:
             ref_path = os.path.join(project_dir, ref)
-            if os.path.isfile(ref_path):
+            # a template copy is not the book's voice guide (F-130, #596)
+            if os.path.isfile(ref_path) and not is_unfilled_template(ref_path):
                 with open(ref_path) as f:
                     ref_content = f.read()
                 ref_parts.append(

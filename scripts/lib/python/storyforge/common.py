@@ -86,7 +86,9 @@ def is_unfilled_template(path: str, plugin_dir: str | None = None) -> bool:
     (F-130). Readers skip such a file, and extract phase 5 treats it as
     free to write. Compared with templates/reference/<name>, ignoring outer
     whitespace, a BOM and line endings; a file with no template counterpart,
-    or one that can't be read, is never unfilled.
+    or one that can't be read, is never unfilled. Init writes the book's
+    title over a template's `PROJECT_TITLE` (key-decisions.md), so there
+    any one-line title matches (#596).
     """
     template = os.path.join(plugin_dir or get_plugin_dir(), 'templates',
                             'reference', os.path.basename(path))
@@ -97,9 +99,39 @@ def is_unfilled_template(path: str, plugin_dir: str | None = None) -> bool:
         # folds CRLF, so an editor's re-save doesn't make a template copy
         # read as the author's own text
         with open(path, encoding='utf-8-sig') as f, open(template, encoding='utf-8-sig') as t:
-            return f.read().strip() == t.read().strip()
+            text, model = f.read().strip(), t.read().strip()
     except (OSError, UnicodeDecodeError):
         return False  # unreadable: the caller's own read reports it
+    if 'PROJECT_TITLE' not in model:
+        return text == model
+    pattern = r'[^\n]*'.join(re.escape(part) for part in model.split('PROJECT_TITLE'))
+    return re.fullmatch(pattern, text) is not None
+
+
+VOICE_GUIDE_PATH = 'reference/voice-guide.md'
+#: the command that writes the voice guide (`status`'s voice rung)
+VOICE_STAGE_COMMAND = 'storyforge elaborate --stage voice'
+#: what fills the voice guide, named wherever its absence is reported
+VOICE_GUIDE_REMEDY = f"{VOICE_STAGE_COMMAND} (or the elaborate skill's voice stage)"
+
+
+def voice_guide_problem(project_dir: str) -> str:
+    """Why drafting has no voice guide to follow, or '' when
+    reference/voice-guide.md holds the author's text (#596): 'is missing',
+    "is still init's template", 'is empty', or that it can't be read.
+    Any of these leaves the drafting prompt without a voice guide;
+    `status` puts the voice stage before drafting and `write` warns."""
+    path = os.path.join(project_dir, VOICE_GUIDE_PATH)
+    if not os.path.isfile(path):
+        return 'is missing'
+    if is_unfilled_template(path):
+        return "is still init's template"
+    try:
+        with open(path, encoding='utf-8-sig') as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        return f"can't be read ({e})"
+    return '' if text.strip() else 'is empty'
 
 
 # ============================================================================
