@@ -647,9 +647,27 @@ def prose_digest(text: str) -> str:
     return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
 
 
+def keep_markers(project_dir: str, scene_id: str, original: str, rewritten: str,
+                 by: str, log: Callable[[str], None]) -> str:
+    """*rewritten* with every marker *original* carried put back
+    (`preserve_markers`), logging what *by* (e.g. "the redraft") dropped:
+    what was restored, and a WARNING for each marker that could not be
+    re-anchored. The one place a write-back path calls, so a scene's
+    illustrations survive whatever rewrote its prose (#610's review, SF-W)."""
+    kept = preserve_markers(project_dir, original, rewritten)
+    if kept['restored']:
+        log(f'  restored {len(kept["restored"])} illustration marker(s) {by} '
+            f'dropped: {", ".join(kept["restored"])}')
+    for lost in kept['lost']:
+        log(f'  WARNING: illustration marker {lost!r} was in {scene_id} and {by} '
+            f'dropped it; its anchor no longer matches the prose, so it could not '
+            f'be restored. Re-anchor the plan row and run `storyforge illustrate --embed`')
+    return kept['text']
+
+
 def scene_prose_digest(project_dir: str, scene_id: str) -> str:
     """`prose_digest` of a scene on disk, or '' when the scene has no file."""
-    text = _read_scene(project_dir, scene_id)
+    text = read_scene_raw(project_dir, scene_id)
     return prose_digest(text) if text is not None else ''
 
 
@@ -1772,7 +1790,7 @@ def plan_report(project_dir: str, *,
         if (row.get('status') or '').strip() == 'superseded':
             continue
         rid = row['id'].strip()
-        scene_text = _read_scene(project_dir, (row.get('scene_id') or '').strip())
+        scene_text = read_scene_raw(project_dir, (row.get('scene_id') or '').strip())
         if scene_text is not None and has_marker(scene_text, rid):
             embedded.append(rid)
         else:
@@ -1788,8 +1806,11 @@ def plan_report(project_dir: str, *,
     }
 
 
-def _read_scene(project_dir: str, scene_id: str) -> str | None:
-    """Read a scene file's text, or None when it doesn't exist."""
+def read_scene_raw(project_dir: str, scene_id: str) -> str | None:
+    """A scene file's text *with* its illustration markers, or None when it
+    doesn't exist. For code that needs the markers or the exact bytes (a
+    writer, the marker checks); prose for analysis, scoring, word counts or a
+    prompt comes from `read_scene_prose` (#280)."""
     if not scene_id:
         return None
     path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
@@ -2608,7 +2629,7 @@ def validate_plan(project_dir: str, *,
                              'detail': 'no scene_id — the illustration has nowhere to land'})
             continue
 
-        scene_text = _read_scene(project_dir, scene_id)
+        scene_text = read_scene_raw(project_dir, scene_id)
         if scene_text is None:
             findings.append({'kind': 'unknown_scene', 'id': rid, 'scene_id': scene_id,
                              'detail': f'scene {scene_id!r} has no file in scenes/'})

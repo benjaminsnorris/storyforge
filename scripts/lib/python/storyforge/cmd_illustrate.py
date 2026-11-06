@@ -915,7 +915,7 @@ def _state_scene_prose(project_dir: str,
     blocks: list[str] = []
     found = 0
     for scene_id in scene_ids:
-        text = ill._read_scene(project_dir, scene_id)
+        text = ill.read_scene_raw(project_dir, scene_id)
         if text is None:
             log(f'  {scene_id} has no file in scenes/ — not read')
             continue
@@ -1152,7 +1152,7 @@ def _audit_scene_prose(
     read: list[str] = []
     truncated: list[str] = []
     for scene_id in scene_ids:
-        text = ill._read_scene(project_dir, scene_id)
+        text = ill.read_scene_raw(project_dir, scene_id)
         if text is None:
             log(f'  {scene_id} has no file in scenes/ — not read')
             continue

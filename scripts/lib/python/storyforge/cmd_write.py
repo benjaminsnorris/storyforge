@@ -56,7 +56,7 @@ from storyforge.costs import (
 )
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.csv_cli import get_field, update_field
-from storyforge.illustrations import read_scene_prose
+from storyforge.illustrations import count_prose_words, read_scene_prose
 
 
 def parse_args(argv):
@@ -536,8 +536,10 @@ def _gate_drafted_scene(project_dir: str, scene_id: str, scene_file: str, comman
         return False, _pend(project_dir, scene_id, command,
                             f'the gate failed unexpectedly ({type(e).__name__}: {e}).{stale}')
     if out.fixed:
+        from storyforge.illustrations import keep_markers
         with open(scene_file, 'w', encoding='utf-8') as f:
-            f.write(out.prose)
+            f.write(keep_markers(project_dir, scene_id, prose, out.prose,
+                                 "the gate's fix", log))
     if out.log_dir:
         log(f'  Gate logs: {os.path.relpath(out.log_dir, project_dir)}')
     for n, r in enumerate(out.rounds, start=1):
@@ -607,12 +609,30 @@ def is_provisional(project_dir: str, scene_id: str) -> bool:
         return False
 
 
+def _already_drafted(scenes_dir: str, scene_id: str) -> str:
+    """Why the run's skip rule keeps a scene ('' when it drafts it): over 200
+    words of prose, or any illustration marker. The words are prose (#280),
+    and a marker means the scene was illustrated, which only drafted prose
+    is, so a short illustrated scene is kept rather than redrafted out from
+    under its illustrations (#610's review, SF-W). `--force`, or naming the
+    scene, redrafts it and keeps the markers (`_extract_scene_from_response`)."""
+    from storyforge.illustrations import all_marker_ids, read_scene_raw
+    text = read_scene_raw(os.path.dirname(scenes_dir), scene_id)
+    if text is None:
+        return ''
+    words = count_prose_words(text)
+    if words > 200:
+        return f'already has {words} words'
+    marked = all_marker_ids(text)
+    if marked:
+        return (f'has {words} words and {len(marked)} illustration marker(s); '
+                f'--force (or naming the scene) redrafts it and keeps them')
+    return ''
+
+
 def _drafted(scenes_dir: str, scene_id: str) -> bool:
-    """Whether a scene has prose the run's skip rule keeps (over 200 words)."""
-    path = os.path.join(scenes_dir, f'{scene_id}.md')
-    if not os.path.isfile(path):
-        return False
-    return len(read_scene_prose(path).split()) > 200
+    """Whether the run's skip rule keeps a scene (`_already_drafted`)."""
+    return bool(_already_drafted(scenes_dir, scene_id))
 
 
 def report_changes(result) -> None:
@@ -684,9 +704,22 @@ def _interactive_problem(scene_file: str, before: str) -> str:
         text = f.read()
     if text == before:
         return 'the CLI left the scene file unchanged'
-    if len(text.split()) < _MIN_SCENE_WORDS:
-        return f'only {len(text.split())} words (the floor is {_MIN_SCENE_WORDS})'
+    words = count_prose_words(text)   # the floor counts prose, as the API path's does
+    if words < _MIN_SCENE_WORDS:
+        return f'only {words} words (the floor is {_MIN_SCENE_WORDS})'
     return ''
+
+
+def _keep_cli_markers(project_dir: str, scene_id: str, scene_file: str, before: str) -> None:
+    """Put back the illustration markers `before` (the scene the CLI
+    rewrote) carried and the CLI's prose dropped (#610's review, SF-W)."""
+    from storyforge.illustrations import keep_markers
+    with open(scene_file, encoding='utf-8') as f:
+        written = f.read()
+    kept = keep_markers(project_dir, scene_id, before, written, 'the CLI', log)
+    if kept != written:
+        with open(scene_file, 'w', encoding='utf-8') as f:
+            f.write(kept)
 
 
 def _pend(project_dir: str, scene_id: str, command: str, why: str) -> str:
@@ -944,9 +977,16 @@ def _extract_scene_from_response(log_file: str, out_file: str,
         reason = unsafe_scene_reason(content, old_text)
         if reason:
             return reason
-        words = len(content.split())
+        words = count_prose_words(content)
         if words < _MIN_SCENE_WORDS:
             return f'only {words} words (the floor is {_MIN_SCENE_WORDS})'
+        if old_text:
+            # a redraft of an illustrated scene keeps its illustrations
+            # (#610's review, SF-W): the model has no reason to copy a marker
+            from storyforge.illustrations import keep_markers
+            content = keep_markers(os.path.dirname(os.path.dirname(os.path.abspath(out_file))),
+                                   os.path.basename(out_file)[:-len('.md')],
+                                   old_text, content, 'the redraft', log)
     else:
         content = text
 
@@ -1090,10 +1130,10 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
         scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
 
         # Skip already-drafted unless --force
-        if not force and os.path.isfile(scene_file) and filter_mode != 'single':
-            existing_wc = len(read_scene_prose(scene_file).split())
-            if existing_wc > 200:
-                log(f'Scene {scene_id} already has {existing_wc} words, skipping')
+        if not force and filter_mode != 'single':
+            kept = _already_drafted(scenes_dir, scene_id)
+            if kept:
+                log(f'Scene {scene_id} {kept}, skipping')
                 continue
 
         try:   # as direct mode: prose on disk makes it a rewrite
@@ -1314,10 +1354,10 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
         log(f'--- Scene {scene_id} ({scene_num}/{len(pending_ids)}) ---')
 
         # Skip already-drafted
-        if not force and os.path.isfile(scene_file) and filter_mode != 'single':
-            existing_wc = len(read_scene_prose(scene_file).split())
-            if existing_wc > 200:
-                log(f'Scene file already has {existing_wc} words, skipping')
+        if not force and filter_mode != 'single':
+            kept = _already_drafted(scenes_dir, scene_id)
+            if kept:
+                log(f'Scene {scene_id} {kept}, skipping')
                 continue
 
         if not dry_run and scene_forecast:
@@ -1402,6 +1442,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             budget.charge(draft_forecast)   # no meter sees the CLI's spend
             if exit_code == 0 and coaching == 'full':
                 reason = _interactive_problem(scene_file, before)
+                if not reason and before:
+                    _keep_cli_markers(project_dir, scene_id, scene_file, before)
         else:
             # Direct API mode
             max_tokens = 16384 if write_mode != 'direct' else 8192

@@ -223,10 +223,15 @@ def _words_and_markers(words, markers=3):
 
 
 def test_write_drafted_threshold(tmp_path):
-    """`write` skips a scene of over 200 words; markers don't count."""
-    from storyforge.cmd_write import _drafted
-    project_dir = _project(tmp_path, _words_and_markers(200))
-    assert not _drafted(os.path.join(project_dir, 'scenes'), 's1')
+    """`write` skips a scene of over 200 prose words; markers don't count
+    toward them (a marked scene is kept for its markers instead:
+    test_marker_write_back)."""
+    from storyforge.cmd_write import _already_drafted
+    project_dir = _project(tmp_path, _words_and_markers(201, markers=0))
+    write_scene(project_dir, 's2', _words_and_markers(198))
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    assert _already_drafted(scenes_dir, 's1') == 'already has 201 words'
+    assert _already_drafted(scenes_dir, 's2').startswith('has 198 words and 3')
 
 
 def test_write_forecast_earlier_words(project_dir):
@@ -237,15 +242,20 @@ def test_write_forecast_earlier_words(project_dir):
     assert _forecast_earlier_words(project_dir, pending, 'full', 1000) == clean
 
 
-def test_write_counts_no_marker_words():
-    """`write`'s drafted-scene word_count and its skip checks inside the
-    batch and direct loops need a full drafting run to drive; checked on
-    the source: no scene word count there splits the raw file."""
-    import inspect
-    from storyforge import cmd_write
-    src = inspect.getsource(cmd_write)
-    assert 'len(read_scene_prose(scene_file).split())' in src
-    assert src.count('existing_wc = len(read_scene_prose(scene_file).split())') == 2
+def test_write_records_the_prose_word_count(project_dir):
+    """The word_count `write` records for a drafted scene counts prose (T-3)."""
+    from storyforge.cmd_write import _verify_and_commit_scene
+    from storyforge.csv_cli import get_field
+    from storyforge.git import _git
+    prose = _mark(project_dir, 'act1-sc01')
+    r = _git(project_dir, 'rev-parse', 'HEAD', check=False)
+    head = r.stdout.strip() if r.returncode == 0 else 'none'
+    csv_path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    wc, ok = _verify_and_commit_scene('act1-sc01', project_dir,
+                                      os.path.join(project_dir, 'scenes'), csv_path,
+                                      'full', head, commit=False)
+    assert ok and wc == len(prose.split())
+    assert get_field(csv_path, 'act1-sc01', 'word_count') == str(wc)
 
 
 def test_revise_update_word_counts_from_dir(project_dir):

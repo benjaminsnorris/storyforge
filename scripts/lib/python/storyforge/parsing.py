@@ -184,6 +184,12 @@ def _write_scene(scene_id: str, lines: list[str], scene_dir: str, written: list[
         _log(f'WARNING: Skipping "{scene_id}" -- {reason}')
         skipped[scene_id] = reason
         return
+    if old_text:
+        # A revision pass rewrites the scene; its illustration markers are
+        # not the model's to keep (#610's review, SF-W)
+        from storyforge.illustrations import keep_markers
+        content = keep_markers(os.path.dirname(os.path.abspath(scene_dir)), scene_id,
+                               old_text, content, 'the revision', _log)
 
     with open(path, 'w') as f:
         f.write(content)
