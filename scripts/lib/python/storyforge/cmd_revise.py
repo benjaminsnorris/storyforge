@@ -1027,7 +1027,12 @@ def _generate_structural_plan(project_dir, plan_file, *, write=True):
         log(f'ERROR: No pending proposals in {proposals_file}')
         sys.exit(1)
 
-    # Save pre-revision scores
+    # Save pre-revision scores, re-scored first when the saved ones are
+    # older than the CSVs: a stale "before" skews the delta (#600)
+    from storyforge.structural import refresh_structural_scores
+    stale = refresh_structural_scores(project_dir)
+    if stale:
+        log(f'Structural scores re-computed before revising: {stale}')
     pre_scores = os.path.join(project_dir, 'working', 'scores', 'structural-latest.csv')
     if os.path.isfile(pre_scores):
         import shutil

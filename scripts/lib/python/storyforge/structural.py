@@ -1691,11 +1691,53 @@ def structural_score(ref_dir, weights=None):
 # Score persistence
 # ---------------------------------------------------------------------------
 
+#: The reference files `structural_score` reads (#600): a saved score records
+#: a hash of them, so a reader can tell it from one computed before they
+#: changed. A missing file hashes as missing.
+STRUCTURAL_INPUTS = ('scenes.csv', 'scene-intent.csv', 'scene-briefs.csv',
+                     'characters.csv', 'mice-threads.csv', 'commitments.csv',
+                     'source-map.csv')
+
+#: The columns every saved row carries after its score (#600).
+_STAMP_COLUMNS = ('computed_at', 'inputs')
+
+
+def structural_inputs_hash(ref_dir):
+    """A short hash of the `STRUCTURAL_INPUTS` in `ref_dir` as they are now."""
+    import hashlib
+    h = hashlib.sha256()
+    for name in STRUCTURAL_INPUTS:
+        h.update(name.encode() + b'\0')
+        path = os.path.join(ref_dir, name)
+        try:
+            with open(path, 'rb') as f:
+                h.update(f.read())
+        except OSError:
+            h.update(b'\0missing')
+        h.update(b'\0')
+    return h.hexdigest()[:16]
+
+
+def _score_lines(report, computed_at, inputs):
+    stamp = f'|{computed_at}|{inputs}'
+    lines = ['dimension|score|target|weight|' + '|'.join(_STAMP_COLUMNS)]
+    for dim in report['dimensions']:
+        lines.append(f"{dim['name']}|{dim['score']:.4f}|{dim['target']:.2f}|{dim['weight']:.1f}"
+                     + stamp)
+    lines.append(f"overall|{report['overall_score']:.4f}|0.70|1.0" + stamp)
+    return lines
+
+
 def save_structural_scores(report, project_dir):
-    """Save structural scores to a timestamped CSV and update latest.
+    """Save structural scores to a timestamped CSV and update the latest file.
+
+    Every row carries `computed_at` (when) and `inputs`
+    (`structural_inputs_hash` of the reference files scored), so the file
+    says how old it is (#600: a score saved before the briefs existed was
+    quoted a day later as the book's).
 
     Args:
-        report: dict from structural_score()
+        report: dict returned by structural_score()
         project_dir: path to project root
 
     Returns:
@@ -1704,16 +1746,12 @@ def save_structural_scores(report, project_dir):
     scores_dir = os.path.join(project_dir, 'working', 'scores')
     os.makedirs(scores_dir, exist_ok=True)
 
-    timestamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
-    filename = f'structural-{timestamp}.csv'
+    now = datetime.datetime.now()
+    filename = f'structural-{now.strftime("%Y%m%d-%H%M%S")}.csv'
     filepath = os.path.join(scores_dir, filename)
 
-    lines = ['dimension|score|target|weight']
-    for dim in report['dimensions']:
-        lines.append(f"{dim['name']}|{dim['score']:.4f}|{dim['target']:.2f}|{dim['weight']:.1f}")
-    lines.append(f"overall|{report['overall_score']:.4f}|0.70|1.0")
-
-    content = '\n'.join(lines) + '\n'
+    inputs = structural_inputs_hash(os.path.join(project_dir, 'reference'))
+    content = '\n'.join(_score_lines(report, now.isoformat(timespec='seconds'), inputs)) + '\n'
 
     with open(filepath, 'w') as f:
         f.write(content)
@@ -1724,6 +1762,52 @@ def save_structural_scores(report, project_dir):
         f.write(content)
 
     return filepath
+
+
+def structural_staleness(project_dir):
+    """'' when working/scores/structural-latest.csv was computed from the
+    reference files as they are now; otherwise why it can't be trusted (no
+    file, no record of its inputs, or inputs changed since). #600."""
+    latest = os.path.join(project_dir, 'working', 'scores', 'structural-latest.csv')
+    if not os.path.isfile(latest):
+        return 'there is no structural score yet'
+    rows = _read_csv(latest)
+    stamps = {(_s(r.get('computed_at')).strip(), _s(r.get('inputs')).strip()) for r in rows}
+    if not rows or len(stamps) != 1 or not all(next(iter(stamps))):
+        return ('it records no inputs (saved before Storyforge stamped structural '
+                'scores), so its age is unknown')
+    computed_at, inputs = stamps.pop()
+    if inputs != structural_inputs_hash(os.path.join(project_dir, 'reference')):
+        return (f'the scene CSVs or registries have changed since it was computed '
+                f'({computed_at})')
+    return ''
+
+
+def current_structural_rows(project_dir):
+    """The structural score rows for the project as it is now: the saved
+    file's when it is current, else a fresh score computed in memory and not
+    saved (a reader such as publish must not write). #600."""
+    latest = os.path.join(project_dir, 'working', 'scores', 'structural-latest.csv')
+    if not structural_staleness(project_dir):
+        return _read_csv(latest)
+    ref_dir = os.path.join(project_dir, 'reference')
+    if not os.path.isfile(os.path.join(ref_dir, 'scenes.csv')):
+        return _read_csv(latest) if os.path.isfile(latest) else []
+    report = structural_score(ref_dir)
+    inputs = structural_inputs_hash(ref_dir)
+    lines = _score_lines(report, datetime.datetime.now().isoformat(timespec='seconds'), inputs)
+    header = lines[0].split('|')
+    return [dict(zip(header, line.split('|'))) for line in lines[1:]]
+
+
+def refresh_structural_scores(project_dir):
+    """Re-score and save when the saved structural score is stale; returns
+    why it was refreshed ('' when it was current). Deterministic and free."""
+    why = structural_staleness(project_dir)
+    if why:
+        report = structural_score(os.path.join(project_dir, 'reference'))
+        save_structural_scores(report, project_dir)
+    return why
 
 
 def load_previous_scores(project_dir):
