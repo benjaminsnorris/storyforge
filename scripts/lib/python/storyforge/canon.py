@@ -1356,6 +1356,28 @@ def newest_canon_updated(project_dir: str) -> str:
     return newest
 
 
+def undated_canon_files(project_dir: str) -> list[str]:
+    """Project-relative canon files that cannot count toward the cutoff.
+
+    A missing, blank or unparseable `canon_updated` — or no frontmatter at all.
+    `newest_canon_updated` skips these (logging only the unparseable ones), so a
+    consumer that records "reviewed against the canon as of D" must name them:
+    an edit to one of them can never move D, and so can never re-raise a check
+    keyed on it (#303 SF-5). Silent, like the walk's other read-only helpers;
+    the caller decides how to report.
+    """
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    if not os.path.isdir(canon_dir):
+        return []
+    undated = []
+    for path in _walk_canon_files(canon_dir):
+        fm = parse_canon_file(path)['frontmatter']
+        raw = (fm.get('canon_updated') or '') if isinstance(fm, dict) else ''
+        if not iso_date_or_empty(str(raw)):
+            undated.append(os.path.relpath(path, project_dir))
+    return undated
+
+
 class AnchorLabel(TypedDict):
     """The human-readable name for one anchor, and where it came from.
 

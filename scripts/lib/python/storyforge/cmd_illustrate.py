@@ -178,15 +178,27 @@ def main(argv=None):
             '--audit, --diagnose, --review, or --accept-style-reference.')
         return 1
 
+    if args.diagnose and args.accept_style_reference:
+        # `--diagnose` is the read-only health gate and returns before every
+        # other phase, so pairing it with a write would skip the write
+        # silently (#303 C-3).
+        log('ERROR: --diagnose is read-only and cannot be combined with '
+            '--accept-style-reference. Run --accept-style-reference on its '
+            'own, then --diagnose.')
+        return 1
+
     if args.diagnose:
         return run_diagnose(project_dir)
 
     exit_code = 0
     if args.accept_style_reference:
         # Before every other phase, so a run that pairs it with --prompts or
-        # --package builds against the review it just recorded.
-        exit_code = run_accept_style_reference(project_dir,
-                                               args.dry_run) or exit_code
+        # --package builds against the review it just recorded — and a refusal
+        # stops the run there, rather than letting those phases build against
+        # the unreviewed cover the author just tried to clear (#303 C-3).
+        exit_code = run_accept_style_reference(project_dir, args.dry_run)
+        if exit_code:
+            return exit_code
     if args.direction:
         exit_code = run_direction(project_dir, coaching,
                                   args.dry_run) or exit_code
@@ -2565,6 +2577,11 @@ class StyleReference(TypedDict):
     reviewed_against: str
     #: Where that review stands. See `StyleReview`.
     review: StyleReview
+    #: Canon files with no usable `canon_updated` (`canon.undated_canon_files`).
+    #: They cannot move `checked_against`, so a review recorded against it
+    #: cannot see them, and editing them never re-raises the check (#303
+    #: SF-5). Warned about separately; `--accept-style-reference` refuses.
+    undated_canon: list[str]
     #: The newest `canon_updated` this was checked against, '' if there is none.
     #: Named for what it is rather than `canon_cutoff`, which is also the name of
     #: `_references_for`'s parameter — and those two mean deliberately different
@@ -2674,6 +2691,7 @@ def resolve_style_reference(project_dir: str, *,
         'reviewed_against': _read_production(
             project_dir, STYLE_REVIEW_CANON_KEY).strip(),
         'review': 'unchecked',
+        'undated_canon': [],
         'checked_against': canon_cutoff,
         'stale': False,
     }
@@ -2686,6 +2704,8 @@ def resolve_style_reference(project_dir: str, *,
         return reference
 
     full = path if os.path.isabs(path) else os.path.join(project_dir, path)
+    if canon_cutoff:
+        reference['undated_canon'] = canon_mod.undated_canon_files(project_dir)
 
     extension = ill.normalize_asset_extension(os.path.splitext(full)[1])
     if extension not in _STYLE_REFERENCE_EXTENSIONS:
@@ -2853,6 +2873,14 @@ def style_reference_warnings(reference: StyleReference) -> list[str]:
             f'rendered artwork beside it. It is still listed, because the one '
             f'reference that is sometimes the only one is never dropped '
             f'silently.')
+    if reference['undated_canon']:
+        undated = reference['undated_canon']
+        warnings.append(
+            f'{len(undated)} canon file(s) carry no usable `canon_updated` '
+            f'({_and_more_files(undated)}), so the style reference {named} '
+            f'cannot be reviewed against them: they never move the canon date '
+            f'a review is recorded at, and editing them never re-raises this '
+            f'check. Give each a `canon_updated: YYYY-MM-DD` date.')
     verdict = _STYLE_REVIEW_VERDICTS[reference['review']]
     if verdict.problem is not None:
         warnings.append(verdict.problem(reference, named)
@@ -2987,10 +3015,20 @@ def run_accept_style_reference(project_dir: str, dry_run: bool) -> int:
     canon_cutoff = canon_mod.newest_canon_updated(project_dir)
     style = resolve_style_reference(project_dir, canon_cutoff=canon_cutoff)
     refusal = ''
-    if style['unresolved_declaration']:
-        refusal = (f'{STYLE_REFERENCE_KEY} names '
-                   f'`{style["unresolved_declaration"]}`, which does not exist. '
+    declared = style['unresolved_declaration']
+    if declared:
+        full = (declared if os.path.isabs(declared)
+                else os.path.join(project_dir, declared))
+        what = ('is a symlink whose target does not exist'
+                if os.path.islink(full) else 'does not exist')
+        refusal = (f'{STYLE_REFERENCE_KEY} names `{declared}`, which {what}. '
                    f'Fix the path before recording a review of it.')
+    elif not style['path'] and style['dangling_symlink']:
+        # A broken link is not "no cover artwork": the file is there in `ls`
+        # (#303 SF-8, the `_dangling_convention_link` reasoning).
+        refusal = (f'the style reference `{style["dangling_symlink"]}` is a '
+                   f'symlink whose target does not exist. Repoint it at the '
+                   f'artwork you selected, or set {STYLE_REFERENCE_KEY}.')
     elif not style['path']:
         refusal = 'there is no cover artwork to record a review of.'
     elif not style['digest']:
@@ -3000,6 +3038,17 @@ def run_accept_style_reference(project_dir: str, dry_run: bool) -> int:
         refusal = ('nothing in reference/canon/ carries a parseable '
                    '`canon_updated`, so there is no canon state to record a '
                    'review against. Date the canon files first.')
+    elif style['undated_canon']:
+        # Refused rather than recorded with a warning: the record would claim
+        # a review of "the canon as of D" while these files are not part of
+        # any D, and later edits to them could never re-raise it — the silent
+        # pass this check exists to prevent. Dating a file is a one-line fix.
+        undated = style['undated_canon']
+        refusal = (f'{len(undated)} canon file(s) carry no usable '
+                   f'`canon_updated` ({", ".join(undated)}), so a review '
+                   f'recorded now could not see them, and later edits to them '
+                   f'would never re-raise it. Give each a '
+                   f'`canon_updated: YYYY-MM-DD` date first.')
     if refusal:
         log(f'ERROR: --accept-style-reference: {refusal} Nothing recorded.')
         return 1

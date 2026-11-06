@@ -3458,6 +3458,118 @@ def test_every_review_state_has_one_verdict_row():
         assert verdict.stale is (state not in ('current', 'unchecked'))
 
 
+def test_undated_canon_files_are_named_and_block_accepting(in_project,
+                                                          capsys):
+    """#303 SF-5: a canon file with no usable `canon_updated` never moves the
+    date a review is recorded at, so editing it could never re-raise the
+    check. Warned about, and accept refuses rather than recording a review
+    that cannot see it."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _write_entity_canon(in_project, 'characters', 'mira', 'Twelve years old.',
+                        canon_updated='')
+    _style_ref(in_project)
+
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    undated = os.path.join('reference', 'canon', 'characters', 'mira.md')
+    assert undated in style['undated_canon']
+    warning = _warning_text(in_project)
+    assert 'no usable `canon_updated`' in warning and 'mira.md' in warning
+
+    assert cmd_illustrate.main(['--accept-style-reference']) == 1
+    out = capsys.readouterr().out
+    assert 'mira.md' in out and 'Nothing recorded' in out
+    assert read_yaml_field('production.cover_artwork_sha256', in_project) == ''
+
+
+def test_dating_the_canon_file_lets_accepting_proceed(in_project):
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _write_entity_canon(in_project, 'characters', 'mira', 'Twelve years old.',
+                        canon_updated='TODO')
+    _style_ref(in_project)
+    assert cmd_illustrate.main(['--accept-style-reference']) == 1
+    _write_entity_canon(in_project, 'characters', 'mira', 'Twelve years old.',
+                        canon_updated='2026-07-20')
+    _accept_style_reference(in_project)
+    assert _warning_text(in_project) == ''
+
+
+def test_accept_with_diagnose_is_an_error(in_project, capsys):
+    """#303 C-3: --diagnose returns before every other phase, so the accept
+    was skipped silently."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _style_ref(in_project)
+    assert cmd_illustrate.main(['--diagnose', '--accept-style-reference']) == 1
+    assert 'cannot be combined' in capsys.readouterr().out
+    assert read_yaml_field('production.cover_artwork_sha256', in_project) == ''
+
+
+def test_a_refused_accept_stops_the_run(in_project, monkeypatch, capsys):
+    """#303 C-3: a refusal must not let --package build against the
+    unreviewed cover the author just tried to clear."""
+    _style_ref(in_project)        # no canon date: accept refuses
+    called = []
+    monkeypatch.setattr(cmd_illustrate, 'run_package',
+                        lambda *a, **k: called.append(1) or 0)
+    assert cmd_illustrate.main(['--accept-style-reference', '--package']) == 1
+    assert called == []
+
+
+def test_a_successful_accept_runs_the_paired_phase(in_project, monkeypatch):
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _style_ref(in_project)
+    seen = []
+    monkeypatch.setattr(
+        cmd_illustrate, 'run_package',
+        lambda project_dir, *a, **k: seen.append(
+            cmd_illustrate.resolve_style_reference(project_dir)['review']) or 0)
+    assert cmd_illustrate.main(['--accept-style-reference', '--package']) == 0
+    assert seen == ['current']
+
+
+def test_accepting_a_broken_convention_link_says_so(in_project, capsys):
+    """#303 SF-8: the link is there in `ls`; "no cover artwork" is wrong."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    assets = os.path.join(in_project, 'manuscript', 'assets')
+    os.makedirs(assets, exist_ok=True)
+    os.symlink('gone.png', os.path.join(assets, 'cover-illustration.png'))
+    assert cmd_illustrate.main(['--accept-style-reference']) == 1
+    out = capsys.readouterr().out
+    assert 'symlink whose target does not exist' in out
+    assert 'no cover artwork' not in out
+
+
+def test_accepting_a_broken_declared_link_says_so(in_project, capsys):
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    assets = os.path.join(in_project, 'manuscript', 'assets')
+    os.makedirs(assets, exist_ok=True)
+    os.symlink('gone.png', os.path.join(assets, 'selected.png'))
+    _set_yaml_production(in_project, 'cover_artwork',
+                         'manuscript/assets/selected.png')
+    assert cmd_illustrate.main(['--accept-style-reference']) == 1
+    assert 'is a symlink whose target does not exist' in \
+        capsys.readouterr().out
+
+
+def test_accept_names_an_unwritable_yaml(in_project, capsys):
+    """#303 SF-7: a non-UTF-8 storyforge.yaml is an ERROR naming the file."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _style_ref(in_project)
+    path = os.path.join(in_project, 'storyforge.yaml')
+    with open(path, 'ab') as f:
+        f.write(b'# \xff\xfe\n')
+    assert cmd_illustrate.main(['--accept-style-reference']) == 1
+    out = capsys.readouterr().out
+    assert 'storyforge.yaml is not valid UTF-8' in out
+    assert 'Nothing recorded' in out
+
+
 def test_accepting_does_not_clear_unrelated_warnings(in_project, capsys):
     """The record is about the canon; an unusable extension is not."""
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
