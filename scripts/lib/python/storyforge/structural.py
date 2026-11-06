@@ -1696,7 +1696,9 @@ def structural_score(ref_dir, weights=None):
 #: changed. A missing file hashes as missing.
 STRUCTURAL_INPUTS = ('scenes.csv', 'scene-intent.csv', 'scene-briefs.csv',
                      'characters.csv', 'mice-threads.csv', 'commitments.csv',
-                     'source-map.csv')
+                     'source-map.csv',
+                     # the ledger's legacy files, which ledger.read_view still reads
+                     'knowledge.csv', 'physical-states.csv')
 
 #: The columns every saved row carries after its score (#600).
 _STAMP_COLUMNS = ('computed_at', 'inputs')
@@ -1715,6 +1717,10 @@ def structural_inputs_hash(ref_dir):
         except OSError:
             h.update(b'\0missing')
         h.update(b'\0')
+    # storyforge.yaml's source block (mode, map) reaches the score only through
+    # the outcomes a faithful source fixes: hash those, not the whole file
+    # (its artifact flags change on every stage)
+    h.update('\n'.join(_source_fixed_outcomes(ref_dir)).encode())
     return h.hexdigest()[:16]
 
 
@@ -1771,7 +1777,10 @@ def structural_staleness(project_dir):
     latest = os.path.join(project_dir, 'working', 'scores', 'structural-latest.csv')
     if not os.path.isfile(latest):
         return 'there is no structural score yet'
-    rows = _read_csv(latest)
+    try:
+        rows = _read_csv(latest)
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return f'it can\'t be read ({e})'
     stamps = {(_s(r.get('computed_at')).strip(), _s(r.get('inputs')).strip()) for r in rows}
     if not rows or len(stamps) != 1 or not all(next(iter(stamps))):
         return ('it records no inputs (saved before Storyforge stamped structural '
@@ -1792,7 +1801,10 @@ def current_structural_rows(project_dir):
         return _read_csv(latest)
     ref_dir = os.path.join(project_dir, 'reference')
     if not os.path.isfile(os.path.join(ref_dir, 'scenes.csv')):
-        return _read_csv(latest) if os.path.isfile(latest) else []
+        try:   # nothing to score: the saved rows, if they can be read
+            return _read_csv(latest) if os.path.isfile(latest) else []
+        except (OSError, UnicodeDecodeError, ValueError):
+            return []
     report = structural_score(ref_dir)
     inputs = structural_inputs_hash(ref_dir)
     lines = _score_lines(report, datetime.datetime.now().isoformat(timespec='seconds'), inputs)
@@ -1801,12 +1813,14 @@ def current_structural_rows(project_dir):
 
 
 def refresh_structural_scores(project_dir):
-    """Re-score and save when the saved structural score is stale; returns
-    why it was refreshed ('' when it was current). Deterministic and free."""
+    """Re-score and save when the saved structural score is stale, with its
+    proposals rebuilt as validate --structural does; returns why it was
+    refreshed ('' when it was current). Deterministic and free."""
     why = structural_staleness(project_dir)
     if why:
         report = structural_score(os.path.join(project_dir, 'reference'))
         save_structural_scores(report, project_dir)
+        generate_structural_proposals(report, os.path.join(project_dir, 'working', 'scores'))
     return why
 
 
