@@ -573,6 +573,18 @@ def inline_marker_ids(text: str) -> list[str]:
     return inline
 
 
+def malformed_markers(text: str) -> list[str]:
+    """Each ``![[illus:`` in *text* that no marker pattern matches (a broken
+    id, a lost bracket), as the rest of its line: `strip_markers` can't
+    remove one safely, so it stays in the prose every consumer reads and in
+    the book. `validate_plan` reports them (#610's review, SF-2)."""
+    out = []
+    for m in re.finditer(re.escape('![[illus:'), text):
+        if not MARKER_ANY_RE.match(text, m.start()):
+            out.append(text[m.start():].split('\n', 1)[0][:60])
+    return out
+
+
 def has_marker(text: str, illus_id: str) -> bool:
     """True when *text* already carries the marker for *illus_id*.
 
@@ -636,6 +648,11 @@ def read_scene_prose(path: str, *, errors: str = 'strict',
     silently. With *notes*, the reading is `brief_names.read_text_noting`'s:
     an unreadable file is '' and a non-UTF-8 one is decoded with replacement
     characters, each with a note appended naming *label* (default: the path).
+
+    A malformed marker (``![[illus:`` that no marker pattern matches) stays in
+    the text: it can't be told apart from prose safely, so it isn't stripped.
+    `validate_plan` reports it (``malformed_marker``), so `validate`,
+    `cleanup` and `illustrate --diagnose` name it (#610's review, SF-2).
     """
     if notes is not None:
         from storyforge.brief_names import read_text_noting
@@ -2241,6 +2258,10 @@ IllustrationFindingKind = Literal[
     # neither reported it, so a malformed override survived both clean.
     'state_override_unparsed', 'state_override_prose_key',
     'state_override_unmatched_entity',
+    # `![[illus:` that is not a marker (#610's review, SF-2): it is neither
+    # stripped from the prose analysis reads nor rendered as art, so it is
+    # printed in the book. Blocking.
+    'malformed_marker',
 ]
 
 
@@ -2268,6 +2289,7 @@ BLOCKING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     'invalid_placement',
     'invalid_layout', 'missing_scene', 'unknown_scene', 'missing_file',
     'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
+    'malformed_marker',
     # A transition keyed to a scene that no longer exists silently stops
     # applying, and every scene downstream of it resolves to the wrong state.
     # This is the one failure a dense grid could not have, and the price the
@@ -2346,6 +2368,31 @@ def severity_of(kind: IllustrationFindingKind) -> Severity:
     through to neither.
     """
     return 'warning' if kind in WARNING_FINDINGS else 'error'
+
+
+def malformed_marker_findings(project_dir: str) -> list[IllustrationFinding]:
+    """One `malformed_marker` finding per `malformed_markers` hit in a
+    scene file (#610's review, SF-2)."""
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    if not os.path.isdir(scenes_dir):
+        return []
+    findings: list[IllustrationFinding] = []
+    for name in sorted(os.listdir(scenes_dir)):
+        if not name.endswith('.md'):
+            continue
+        try:
+            text = read_scene_raw(project_dir, name[:-3]) or ''
+        except (OSError, UnicodeDecodeError):
+            # cleanup's scene check reports the file itself; nothing to add
+            continue
+        for bad in malformed_markers(text):
+            findings.append({
+                'kind': 'malformed_marker', 'id': '', 'scene_id': name[:-3],
+                'detail': f'{name} has {_csv_safe(bad)!r}, which is not an '
+                          f'illustration marker (![[illus:ID]], the id letters, '
+                          f'digits, - and _): it is left in the prose and the book',
+            })
+    return findings
 
 
 def truncated_anchor_findings(project_dir: str) -> list[IllustrationFinding]:
@@ -2564,6 +2611,8 @@ def validate_plan(project_dir: str, *,
     # a single illustration has been planned yet, and fixing it before the plan
     # exists is the cheapest moment there is.
     findings.extend(truncated_anchor_findings(project_dir))
+    # Before it too: a broken marker is in the prose with or without a plan
+    findings.extend(malformed_marker_findings(project_dir))
 
     rows = read_plan(project_dir)
     # Canon staleness, and the case where it cannot be judged (#300). Both are

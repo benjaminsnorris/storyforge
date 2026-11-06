@@ -2330,6 +2330,8 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
                       'publishing is content-addressed and needs it',
     'duplicate_marker': 'Remove the repeated ![[illus:…]] line from the scene',
     'orphan_marker': 'Add the plan row, or remove the marker from the scene',
+    'malformed_marker': 'Fix the marker to ![[illus:ID]] with the plan row\'s id, '
+                        'or delete it from the scene',
     'anchor_drift': 'Update the anchor to a phrase that appears in the '
                     'revised prose, then re-run '
                     'storyforge illustrate --embed',

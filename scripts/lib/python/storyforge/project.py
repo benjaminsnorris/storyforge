@@ -271,14 +271,18 @@ def _count_chapters(project_dir: str) -> int:
     return len(records)
 
 
-def _manuscript_word_count(project_dir: str) -> int:
-    """Sum word counts across all scene files."""
+def _manuscript_word_count(project_dir: str, unread: list[str] | None = None) -> int:
+    """Sum the prose word counts of all scene files. A file that can't be
+    read, or isn't UTF-8, is not counted: it is added to *unread*
+    (`scenes/{name} ({why})`), or, without *unread*, named in a WARNING on
+    stderr (#610's review, SF-1: it was left out silently)."""
     scenes_dir = os.path.join(project_dir, 'scenes')
     if not os.path.isdir(scenes_dir):
         return 0
 
+    missed = [] if unread is None else unread
     total = 0
-    for fname in os.listdir(scenes_dir):
+    for fname in sorted(os.listdir(scenes_dir)):
         if not fname.endswith('.md'):
             continue
         fpath = os.path.join(scenes_dir, fname)
@@ -287,8 +291,11 @@ def _manuscript_word_count(project_dir: str) -> int:
         try:
             from storyforge.illustrations import read_scene_prose
             total += len(read_scene_prose(fpath).split())
-        except (OSError, UnicodeDecodeError):
-            pass
+        except (OSError, UnicodeDecodeError) as e:
+            missed.append(f'scenes/{fname} ({type(e).__name__})')
+    if unread is None and missed:
+        print(f'WARNING: the word count leaves out {len(missed)} scene file(s) it '
+              f'could not read: {", ".join(missed)}', file=sys.stderr)
     return total
 
 
@@ -307,7 +314,10 @@ def project_summary(project_dir: str) -> dict:
     summary = dict(config)
     summary['scene_count'] = _count_scenes(project_dir)
     summary['chapter_count'] = _count_chapters(project_dir)
-    summary['word_count'] = _manuscript_word_count(project_dir)
+    unread: list[str] = []
+    summary['word_count'] = _manuscript_word_count(project_dir, unread)
+    # the files the count leaves out, said rather than dropped ([] when none)
+    summary['word_count_unread'] = unread
 
     if cycle:
         summary['current_cycle'] = cycle

@@ -470,7 +470,9 @@ def get_scene_status(scene_id: str, project_dir: str) -> str:
         project_dir: Root directory of the project.
 
     Returns:
-        Status string: 'pending', 'drafted', 'revised', 'cut', etc.
+        Status string: 'pending', 'drafted', 'revised', 'cut', etc., or
+        'unreadable' for a scene file with no CSV status that can't be read
+        (no permission, not UTF-8).
     """
     csv_file = _resolve_scenes_csv(project_dir)
     if csv_file:
@@ -481,13 +483,15 @@ def get_scene_status(scene_id: str, project_dir: str) -> str:
     # If no CSV status, check if file exists with content
     scene_file = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
     if os.path.isfile(scene_file):
+        from .illustrations import read_scene_prose
         try:
-            from .illustrations import read_scene_prose
             word_count = len(read_scene_prose(scene_file).split())
-            if word_count > 100:
-                return 'drafted'
-        except OSError:
-            pass
+        except (OSError, UnicodeDecodeError):
+            # not 'pending': `write` would draft over a file it never read
+            # (#610's review, SF-3)
+            return 'unreadable'
+        if word_count > 100:
+            return 'drafted'
 
     return 'pending'
 

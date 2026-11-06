@@ -1815,6 +1815,13 @@ No explanation. No markdown. Just the labeled lines."""
 # ============================================================================
 
 
+def _unread_note(notes: list[str]) -> str:
+    """What a name check read of the scene's prose other than as written
+    (#610's review, SF-4): a name spelled with a non-UTF-8 character there
+    does not match the rewrite's, so a rejection says so."""
+    return f' ({"; ".join(notes)}, so a name spelled there may not match)' if notes else ''
+
+
 def _apply_checked_rewrites(row: dict, sid: str, rewrites: dict, current_values: dict,
                             kind: str, project_dir: str, known_reference: str,
                             rejected: dict[str, list[str]]) -> int:
@@ -1830,12 +1837,14 @@ def _apply_checked_rewrites(row: dict, sid: str, rewrites: dict, current_values:
     if not changed:
         return 0
     prose_path = os.path.join(project_dir, 'scenes', f'{sid}.md')
-    prose = read_scene_prose(prose_path, errors='replace') if os.path.isfile(prose_path) else ''
+    notes: list[str] = []
+    prose = (read_scene_prose(prose_path, notes=notes, label=f'scenes/{sid}.md')
+             if os.path.isfile(prose_path) else '')
     names = invented_names(list(changed.values()), '\n'.join((known_reference, prose)))
     if names:
         reason = f'{kind} rewrite of {", ".join(sorted(changed))} named {", ".join(names)}'
         log(f'    WARNING: not rewriting {sid}: the {reason}, which appear nowhere in the '
-            f'reference files or its prose')
+            f'reference files or its prose{_unread_note(notes)}')
         rejected.setdefault(sid, []).append(reason)
         return 0
     row.update(changed)

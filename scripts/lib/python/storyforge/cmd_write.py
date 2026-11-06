@@ -742,7 +742,11 @@ def _filter_pending(filtered_ids, project_dir, metadata_csv, force, filter_mode)
 
     for sid in filtered_ids:
         status = get_scene_status(sid, project_dir)
-        if status in ('drafted', 'revised', 'final'):
+        if status == 'unreadable':
+            log(f'WARNING: scenes/{sid}.md can\'t be read (no permission, or not UTF-8), '
+                f'so it is not drafted over. Fix or remove the file, then run write again.')
+            skipped += 1
+        elif status in ('drafted', 'revised', 'final'):
             if force or filter_mode == 'single':
                 pending.append(sid)
                 if force:

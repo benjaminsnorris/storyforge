@@ -1905,7 +1905,8 @@ def _fix_upstream_briefs(project_dir: str,
     for scene_id in scene_ids:
         brief = briefs_map.get(scene_id, {})
         prose_path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
-        prose = (read_scene_prose(prose_path, errors='replace')
+        prose_notes: list[str] = []
+        prose = (read_scene_prose(prose_path, notes=prose_notes, label=f'scenes/{scene_id}.md')
                  if os.path.isfile(prose_path) else None)
         scene = scenes_map.get(scene_id, {})
         intent = intent_map.get(scene_id, {})
@@ -2007,9 +2008,10 @@ DECISION: [rewritten decision]"""
                                               brief, fix_fields))
         if invented:
             skipped[scene_id] = f'named {", ".join(invented)}'
+            from storyforge.hone import _unread_note
             log(f'  WARNING: Not rewriting the brief of {scene_id}: the rewrite names '
                 f'{", ".join(invented)}, which appear nowhere in the reference files '
-                f'or this scene. Its brief is unchanged.')
+                f'or this scene{_unread_note(prose_notes)}. Its brief is unchanged.')
             continue
 
         briefs_map.setdefault(scene_id, {'id': scene_id})

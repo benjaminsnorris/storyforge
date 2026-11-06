@@ -400,3 +400,101 @@ def test_reader_notes_like_read_text_noting(tmp_path):
     notes = []
     assert read_scene_prose(str(tmp_path / 'gone.md'), notes=notes) == ''
     assert 'could not be read' in notes[0]
+
+
+# ============================================================================
+# What can't be read, or isn't a marker, is said (#610's review, SF-1..SF-5)
+# ============================================================================
+
+NOT_UTF8 = b'The lamp \x93burned\x94 all night.\n'
+
+
+def _bad_scene(project_dir, sid='s1'):
+    path = os.path.join(project_dir, 'scenes', f'{sid}.md')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'wb') as f:
+        f.write(NOT_UTF8)
+    return path
+
+
+def test_manuscript_word_count_names_an_unreadable_scene(tmp_path, capsys):
+    """SF-1: a non-UTF-8 scene was left out of the total silently."""
+    from storyforge.project import _manuscript_word_count
+    project_dir = _project(tmp_path, MARKED)
+    _bad_scene(project_dir, 's2')
+    unread = []
+    assert _manuscript_word_count(project_dir, unread) == len(PROSE.split())
+    assert unread == ['scenes/s2.md (UnicodeDecodeError)']
+    assert _manuscript_word_count(project_dir) == len(PROSE.split())
+    assert 'leaves out 1 scene file(s) it could not read: scenes/s2.md' in capsys.readouterr().err
+
+
+def test_project_summary_lists_the_unread_scenes(project_dir):
+    from storyforge.project import project_summary
+    assert project_summary(project_dir)['word_count_unread'] == []
+    _bad_scene(project_dir, 'act1-sc01')
+    assert project_summary(project_dir)['word_count_unread'] == [
+        'scenes/act1-sc01.md (UnicodeDecodeError)']
+
+
+@pytest.mark.parametrize('bad', ['![[illus:lf 01]]', '![[illus:lf-01]', '![[illus:]]',
+                                 '![[illus:-lf]]'])
+def test_a_malformed_marker_is_reported(project_dir, bad):
+    """SF-2: `![[illus:` that is no marker is neither stripped nor rendered."""
+    from storyforge import illustrations as ill
+    from storyforge.cmd_cleanup import _ILLUSTRATION_ACTIONS
+    write_scene(project_dir, 'act1-sc01', f'The lamp.\n\n{bad}\n\nThe dark.\n')
+    assert ill.strip_markers(f'a {bad} b') == f'a {bad} b'
+    found = [f for f in ill.validate_plan(project_dir) if f['kind'] == 'malformed_marker']
+    assert [f['scene_id'] for f in found] == ['act1-sc01']
+    assert bad in found[0]['detail']
+    assert ill.severity_of('malformed_marker') == 'error'
+    assert 'malformed_marker' in _ILLUSTRATION_ACTIONS
+
+
+def test_a_good_marker_is_not_malformed():
+    from storyforge.illustrations import malformed_markers
+    assert malformed_markers('a\n\n![[illus:lf-01]]\n\nb ![[illus:x_2]] c') == []
+
+
+def test_scene_status_of_an_unreadable_scene(tmp_path):
+    """SF-3: it was 'pending', so `write` drafted over a file it never read."""
+    from storyforge.prompts import get_scene_status
+    project_dir = str(tmp_path)
+    _bad_scene(project_dir)
+    assert get_scene_status('s1', project_dir) == 'unreadable'
+
+
+def test_write_does_not_draft_over_an_unreadable_scene(tmp_path, capsys):
+    from storyforge.cmd_write import _filter_pending
+    project_dir = str(tmp_path)
+    _bad_scene(project_dir)
+    assert _filter_pending(['s1'], project_dir, '', False, 'all') == ([], 1)
+    assert "scenes/s1.md can't be read" in capsys.readouterr().out
+
+
+def test_hone_name_check_notes_replaced_bytes(tmp_path, capsys):
+    """SF-4: a rejection over a name the prose spells with a bad byte says
+    the prose was read with replacement characters."""
+    from storyforge.hone import _apply_checked_rewrites
+    project_dir = str(tmp_path)
+    _bad_scene(project_dir)
+    rejected = {}
+    assert _apply_checked_rewrites({}, 's1', {'goal': 'Mallen waits'}, {'goal': ''},
+                                   'brief', project_dir, '', rejected) == 0
+    out = capsys.readouterr().out
+    assert 'scenes/s1.md is not UTF-8: read with replacement characters' in out
+
+
+def test_boundary_reports_an_unreadable_draft(tmp_path):
+    """SF-5: a draft 6->7 can't read is a result, not only a log line."""
+    from storyforge.scoring_boundary import score_boundary
+    project_dir = str(tmp_path)
+    _bad_scene(project_dir)
+    os.makedirs(os.path.join(project_dir, 'reference'))
+    with open(os.path.join(project_dir, 'reference', 'scene-briefs.csv'), 'w') as f:
+        f.write('id|goal\ns1|Wait for the street\n')
+    [result] = score_boundary(project_dir, '6->7', model='m', coaching_level='full',
+                              dry_run=True)
+    assert result['scope'] == 's1' and result['persisted'] is False
+    assert result['alignment'].startswith('not checked: could not read the draft')
