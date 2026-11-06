@@ -472,8 +472,7 @@ def _upstream_fix_cost(project_dir: str, scene_ids: list[str]) -> float:
     for sid in scene_ids:
         path = os.path.join(project_dir, 'scenes', f'{sid}.md')
         if os.path.isfile(path):
-            with open(path, encoding='utf-8') as f:
-                words = len(f.read().split())
+            words = len(read_scene_prose(path).split())
         else:
             words = avg_words
         prose = int(words * 1.3)
@@ -2842,9 +2841,7 @@ def _update_word_counts_from_dir(project_dir: str) -> None:
     for row in rows:
         scene_file = os.path.join(scenes_dir, f'{row["id"]}.md')
         if os.path.isfile(scene_file):
-            with open(scene_file) as f:
-                wc = len(f.read().split())
-            row['word_count'] = str(wc)
+            row['word_count'] = str(len(read_scene_prose(scene_file).split()))
 
     _write_csv(metadata_csv, rows, _FILE_MAP['scenes.csv'])
 
@@ -2898,8 +2895,7 @@ def _estimate_avg_words(project_dir):
     if os.path.isdir(scenes_dir):
         for f in os.listdir(scenes_dir):
             if f.endswith('.md') and f[:-3] not in counts:
-                with open(os.path.join(scenes_dir, f), encoding='utf-8') as fh:
-                    counts[f[:-3]] = len(fh.read().split())
+                counts[f[:-3]] = len(read_scene_prose(os.path.join(scenes_dir, f)).split())
     if counts:
         return sum(counts.values()) // len(counts), len(counts)
     log('WARNING: no scene has a word count or a scene file; the cost forecast '
@@ -3074,7 +3070,7 @@ def _register_new_scenes(project_dir, targets, pass_name):
                     continue
 
         max_seq += 1
-        wc = len(open(scene_file).read().split())
+        wc = len(read_scene_prose(scene_file).split())
 
         # Generate title from slug
         title = ' '.join(w.capitalize() for w in sid.split('-'))

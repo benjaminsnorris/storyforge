@@ -211,3 +211,75 @@ def test_extract_reads_scene_prose_only_through_the_reader():
                      r'open\(os\.path\.join\(scenes_dir', src)
     assert raw == []
     assert src.count('read_scene_prose(') >= 10
+
+
+# ============================================================================
+# Word counts: thresholds, budgets and scenes.csv:word_count
+# ============================================================================
+
+def _words_and_markers(words, markers=3):
+    return (''.join(f'![[illus:lf-{i}]]\n\n' for i in range(markers))
+            + ' '.join(['word'] * words) + '\n')
+
+
+def test_write_drafted_threshold(tmp_path):
+    """`write` skips a scene of over 200 words; markers don't count."""
+    from storyforge.cmd_write import _drafted
+    project_dir = _project(tmp_path, _words_and_markers(200))
+    assert not _drafted(os.path.join(project_dir, 'scenes'), 's1')
+
+
+def test_write_forecast_earlier_words(project_dir):
+    from storyforge.cmd_write import _forecast_earlier_words
+    pending = ['act2-sc01']
+    clean = _forecast_earlier_words(project_dir, pending, 'full', 1000)
+    _mark(project_dir, 'act1-sc01')
+    assert _forecast_earlier_words(project_dir, pending, 'full', 1000) == clean
+
+
+def test_write_counts_no_marker_words():
+    """`write`'s drafted-scene word_count and its skip checks inside the
+    batch and direct loops need a full drafting run to drive; checked on
+    the source: no scene word count there splits the raw file."""
+    import inspect
+    from storyforge import cmd_write
+    src = inspect.getsource(cmd_write)
+    assert 'len(read_scene_prose(scene_file).split())' in src
+    assert src.count('existing_wc = len(read_scene_prose(scene_file).split())') == 2
+
+
+def test_revise_update_word_counts_from_dir(project_dir):
+    from storyforge.cmd_revise import _update_word_counts_from_dir
+    from storyforge.csv_cli import get_field
+    prose = _mark(project_dir, 'act1-sc01')
+    _update_word_counts_from_dir(project_dir)
+    csv_path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    assert get_field(csv_path, 'act1-sc01', 'word_count') == str(len(prose.split()))
+
+
+def test_revise_estimate_avg_words_file_fallback(tmp_path):
+    from storyforge.cmd_revise import _estimate_avg_words
+    assert _estimate_avg_words(_project(tmp_path, MARKED)) == (len(PROSE.split()), 1)
+
+
+def test_revise_register_new_scene_word_count(tmp_path):
+    from storyforge.cmd_revise import _register_new_scenes
+    project_dir = _project(tmp_path, MARKED, sid='s-new')
+    ref_dir = os.path.join(project_dir, 'reference')
+    os.makedirs(ref_dir)
+    meta = os.path.join(ref_dir, 'scenes.csv')
+    with open(meta, 'w') as f:
+        f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration'
+                '|type|status|word_count|target_words\n')
+    _register_new_scenes(project_dir, 'NEW:s-new', 'p')
+    with open(meta) as f:
+        row = f.read().splitlines()[1].split('|')
+    assert row[0] == 's-new'
+    assert row[row.index('drafted') + 1] == str(len(PROSE.split()))
+
+
+def test_revise_upstream_fix_cost(project_dir):
+    from storyforge.cmd_revise import _upstream_fix_cost
+    clean = _upstream_fix_cost(project_dir, ['act1-sc01'])
+    _mark(project_dir, 'act1-sc01')
+    assert _upstream_fix_cost(project_dir, ['act1-sc01']) == clean > 0

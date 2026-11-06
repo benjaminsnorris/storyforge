@@ -56,6 +56,7 @@ from storyforge.costs import (
 )
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.csv_cli import get_field, update_field
+from storyforge.illustrations import read_scene_prose
 
 
 def parse_args(argv):
@@ -611,8 +612,7 @@ def _drafted(scenes_dir: str, scene_id: str) -> bool:
     path = os.path.join(scenes_dir, f'{scene_id}.md')
     if not os.path.isfile(path):
         return False
-    with open(path, encoding='utf-8') as f:
-        return len(f.read().split()) > 200
+    return len(read_scene_prose(path).split()) > 200
 
 
 def report_changes(result) -> None:
@@ -792,8 +792,7 @@ def _forecast_earlier_words(project_dir: str, pending_ids: list[str], prior_pros
         if sid in pending or not os.path.isfile(path):
             words += avg_words if sid in pending else 0
         else:
-            with open(path, encoding='utf-8') as f:
-                words += len(f.read().split())
+            words += len(read_scene_prose(path).split())
     return out
 
 
@@ -1015,8 +1014,7 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
         if not os.path.isfile(scene_file):
             log(f'ERROR: Scene file not created: {scene_file}')
             return 0, False
-        with open(scene_file) as f:
-            word_count = len(f.read().split())
+        word_count = len(read_scene_prose(scene_file).split())
         if word_count < _MIN_SCENE_WORDS:
             log(f'ERROR: Scene file suspiciously short ({word_count} words): {scene_file}')
             return 0, False
@@ -1093,8 +1091,7 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
         # Skip already-drafted unless --force
         if not force and os.path.isfile(scene_file) and filter_mode != 'single':
-            with open(scene_file) as f:
-                existing_wc = len(f.read().split())
+            existing_wc = len(read_scene_prose(scene_file).split())
             if existing_wc > 200:
                 log(f'Scene {scene_id} already has {existing_wc} words, skipping')
                 continue
@@ -1318,8 +1315,7 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
 
         # Skip already-drafted
         if not force and os.path.isfile(scene_file) and filter_mode != 'single':
-            with open(scene_file) as f:
-                existing_wc = len(f.read().split())
+            existing_wc = len(read_scene_prose(scene_file).split())
             if existing_wc > 200:
                 log(f'Scene file already has {existing_wc} words, skipping')
                 continue
