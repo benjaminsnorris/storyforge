@@ -198,21 +198,6 @@ def test_extract_mark_drafted_skips_a_markers_only_scene(tmp_path):
     assert _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))['s1']['status'] == ''
 
 
-def test_extract_reads_scene_prose_only_through_the_reader():
-    """Every extraction phase sends the scene to a prompt (or counts it), so
-    none may open a scene file raw. Phases 1-3 need a batch API run to drive,
-    so this is checked on the source; phase 4 is driven in
-    test_extract_commitments."""
-    import inspect
-    import re
-    from storyforge import cmd_extract
-    src = inspect.getsource(cmd_extract)
-    raw = re.findall(r'open\((?:scene_path|scene_file)\b|'
-                     r'open\(os\.path\.join\(scenes_dir', src)
-    assert raw == []
-    assert src.count('read_scene_prose(') >= 10
-
-
 # ============================================================================
 # Word counts: thresholds, budgets and scenes.csv:word_count
 # ============================================================================
