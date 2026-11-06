@@ -140,6 +140,30 @@ def _line_problems(lines: list[str]) -> list[str]:
     return problems
 
 
+def row_problems(rows: list[dict[str, str]]) -> list[str]:
+    """What would stop `rows`, written, being read as the ledger (the id
+    checks of `file_problems`: an id on two rows, a blank or padded id),
+    one string each, naming the ids and the scenes whose rows have them
+    (#599's review, SF-4: not line numbers in a file never written). The
+    header and cell counts are `write_ledger`'s own, always right."""
+    problems = []
+    scenes: dict[str, list[str]] = {}
+    for r in rows:
+        rid = r.get('id') or ''
+        scene = (r.get('scene_id') or '').strip() or 'no scene'
+        if not rid.strip():
+            problems.append(f'a row of {scene} has no id: '
+                            f'"{" ".join((r.get("statement") or "").split())[:80]}"')
+        elif rid != rid.strip():
+            problems.append(f'id {rid!r} ({scene}) has surrounding whitespace')
+        else:
+            scenes.setdefault(rid, []).append(scene)
+    problems += [f'id {rid!r} would be on {len(where)} rows (from '
+                 f'{", ".join(sorted(set(where)))})'
+                 for rid, where in scenes.items() if len(where) > 1]
+    return problems
+
+
 def legacy_files(ref_dir: str) -> list[str]:
     """The replaced files still present in `ref_dir`."""
     return [f for f in LEGACY_FILES if os.path.isfile(os.path.join(ref_dir, f))]
@@ -296,7 +320,8 @@ def save_to(ref_dir: str, rows: list[dict[str, str]], *, command: str) -> None:
 
     Raises:
         LedgerError: `rows` would make a ledger `load` refuses (two rows with
-            one id, a blank id: `file_problems`); nothing is written (#599).
+            one id, a blank or padded id: `row_problems`, which names the
+            ids and their scenes); nothing is written (#599).
         ValueError: a cell would break its row (`write_ledger`); nothing is
             written.
     """
@@ -305,10 +330,10 @@ def save_to(ref_dir: str, rows: list[dict[str, str]], *, command: str) -> None:
     project_dir = audit.project_of(ref_dir)
     # #599: a ledger the next command can't load is never written
     lines = _ledger_lines(rows)
-    problems = _line_problems(lines)
+    problems = row_problems(rows)
     if problems:
-        raise LedgerError(f'reference/{LEDGER_FILE} not written ({command}): it would '
-                          f'have had ' + '; '.join(problems))
+        raise LedgerError(f'reference/{LEDGER_FILE} not written ({command}), so the next '
+                          f'command can still read it: ' + '; '.join(problems))
     with _SAVE_LOCK:
         old = read_ledger(path) if os.path.isfile(path) else []
         # What changed on disk since the last logged write was not this writer

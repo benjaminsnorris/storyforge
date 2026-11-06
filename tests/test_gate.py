@@ -3,6 +3,7 @@ The API is mocked at `api._api_request`: a request with tools is the
 checker, one whose schema asks for `verdicts` the persistence check, any
 other extraction."""
 
+import copy
 import json
 import os
 from unittest.mock import patch
@@ -1579,6 +1580,18 @@ class TestSecondFixRound(_FixRounds):
         assert out.prose == 'v1' and out.result is r1 and len(dirs) == 3
         assert out.notes[0].startswith('the check after fix round 2 failed (cut off)')
 
+    def test_a_refused_ledger_write_after_round_two_says_so(self, monkeypatch, tmp_path):
+        """SF-4: a refused write after a later round was reported as a
+        failed check."""
+        r1 = self._result('b')
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), r1,
+                                  gate.LedgerWriteRefused('s: ledger write refused: x')],
+                                 [('v1', []), ('v2', [])])
+        assert out.prose == 'v1' and out.result is r1
+        assert out.notes[0].startswith('the ledger write after fix round 2 was refused '
+                                       '(s: ledger write refused: x)')
+
     def test_a_first_round_error_still_carries_the_first_run(self, monkeypatch, tmp_path):
         first = self._result('a')
         with pytest.raises(gate.GateError) as e:
@@ -2781,9 +2794,66 @@ class TestSteadyParagraphs:
             for p in proposed:
                 p['id'] = old_rows[0]['id']
         monkeypatch.setattr(gate, '_carry_ids', collide)
-        with pytest.raises(GateError, match='not written .*is also on line'):
+        with pytest.raises(gate.LedgerWriteRefused,
+                           match="ledger write refused: .*'act1-sc02--tarren-s-hollow"
+                                 "-had-412-people' would be on 2 rows \\(from act1-sc02\\)"):
             _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
                                           self._temple()], command='recheck')
+        assert open(path, encoding='utf-8').read() == before
+
+    def test_a_refused_commit_leaves_the_result_as_it_was(
+            self, project_dir, tmp_path, monkeypatch):
+        """TD-3: a refused write never leaves the result half-committed (ids
+        carried, steady facts kept, `changed` set) for the caller to read."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        self._edit(project_dir, 'Roads, wells, the little', 'Roads and wells, the little')
+        seen = {}
+        real = gate._commit
+
+        def watch(project_dir_, result, *a, **k):
+            seen['before'] = copy.deepcopy({k_: v for k_, v in vars(result).items()
+                                            if k_ != '_ctx'})
+            seen['result'] = result
+            return real(project_dir_, result, *a, **k)
+
+        def refuse(*a, **k):
+            raise ledger.LedgerError('refused')
+        monkeypatch.setattr(gate, '_commit', watch)
+        monkeypatch.setattr(ledger, 'save', refuse)
+        with pytest.raises(gate.LedgerWriteRefused, match='ledger write refused: refused'):
+            _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                          self._temple('Dorren knows the survey shows a temple')],
+                  command='redraft')
+        after = {k: v for k, v in vars(seen['result']).items() if k != '_ctx'}
+        assert after == seen['before'] and not seen['result'].committed
+        assert seen['result'].steady == [] and seen['result'].changed == []
+
+    def test_a_cell_that_would_break_its_row_is_a_refused_write(
+            self, project_dir, tmp_path, monkeypatch):
+        """SF-3: the ValueError a breaking cell raises was not caught, and it
+        stopped `check --pending --keep-going`; it is a refused write, and a
+        re-check that hits it is listed failed."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        path = ledger.ledger_path(project_dir)
+        before = open(path, encoding='utf-8').read()
+        gate.mark_pending(project_dir, SCENE, gate.RECHECK, 're-check: x changed 1 fact(s)')
+
+        def corrupt(proposed, old_rows, *_):
+            proposed[0]['mutable'] = 'state|fixed'
+        monkeypatch.setattr(gate, '_carry_ids', corrupt)
+
+        def fake(path_, body, **k):
+            if 'tools' in body:
+                return _text({'findings': [], 'kept': []})
+            return _text({'commitments': [_commitment(subject='tarrens-hollow'),
+                                          self._temple()]})
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+            run = gate.recheck_pending(project_dir, log_dir=str(tmp_path / 'rc'),
+                                       extract_model='m', check_model='m')
+        assert run.failed == SCENE and 'ledger write refused' in run.why
+        assert gate.pending(project_dir)[SCENE]['command'] == gate.RECHECK_FAILED
         assert open(path, encoding='utf-8').read() == before
 
     def test_a_recheck_that_would_repeat_an_id_is_listed_failed(
@@ -2807,7 +2877,8 @@ class TestSteadyParagraphs:
         with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
             run = gate.recheck_pending(project_dir, log_dir=str(tmp_path / 'rc'),
                                        extract_model='m', check_model='m')
-        assert run.failed == SCENE and 'is also on line' in run.why
+        assert run.failed == SCENE and 'ledger write refused' in run.why
+        assert 'would be on 2 rows' in run.why
         assert gate.pending(project_dir)[SCENE]['command'] == gate.RECHECK_FAILED
         assert open(path, encoding='utf-8').read() == before
         ledger.load(project_dir)   # the next command can read it

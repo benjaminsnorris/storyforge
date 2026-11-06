@@ -98,6 +98,12 @@ class GateError(RuntimeError):
     log_dir: str = ''
 
 
+class LedgerWriteRefused(GateError):
+    """The commit's ledger write was refused (`ledger.save`: rows the next
+    command couldn't read, or a cell that would break its row); nothing was
+    written and the gate result is as it was before the commit (#599)."""
+
+
 def _among(f: Finding, findings: list[Finding]) -> bool:
     """Whether `f` is one of `findings`, by identity: `Finding` compares
     by value, and the classified lists hold the check's own objects."""
@@ -1357,6 +1363,27 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
                             f'scene was being gated; nothing written, gate it again')
     except ledger.LedgerError as e:
         raise GateError(f'{scene_id}: {e}') from e
+    # #599's review (TD-3): a refused write leaves the result and the
+    # context as they were, never half-committed
+    saved = copy.deepcopy({k: v for k, v in vars(result).items() if k != '_ctx'})
+    saved_rows = copy.deepcopy(rows)
+    try:
+        fixed_toward_source = _write_commit(project_dir, result, holding, rows, old_rows,
+                                            order, ended_before, revised_rejection, names,
+                                            name_notes, prose, command, scene_id)
+    except BaseException:
+        vars(result).update(saved)
+        rows[:] = saved_rows
+        raise
+    result.committed = True
+    _after_commit(project_dir, result, holding, pending_reason, prose, command, scene_id,
+                  fixed_toward_source)
+
+
+def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_before,
+                  revised_rejection, names, name_notes, prose, command, scene_id) -> bool:
+    """`_commit`'s changes to `result` and `rows`, ending in the ledger
+    write; returns whether the scene was fixed toward its source."""
     _source_supersede(result, rows)
     fixed_toward_source = _keep_superseded(project_dir, result, rows, prose)
     # #558's second review: the kept facts go through the hold-back too
@@ -1393,11 +1420,21 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
         result.dangling = [f'{r["id"]} → {ref}' for r in rows if not ledger.is_commitment(r)
                            for col in ('supersedes', 'depends_on')
                            for ref in ledger._split(r.get(col, '')) if ref in removed]
+    # #599: never a ledger the next command can't load; a cell that would
+    # break its row is refused the same way (#599's review, SF-3: it was
+    # uncaught, and stopped `check --pending --keep-going`)
     try:
         ledger.save(project_dir, new, command=command)
-    except ledger.LedgerError as e:   # #599: never a ledger the next command can't load
-        raise GateError(f'{scene_id}: {e}') from e
-    result.committed = True
+    except (ledger.LedgerError, ValueError) as e:
+        raise LedgerWriteRefused(f'{scene_id}: ledger write refused: {e}') from e
+    return fixed_toward_source
+
+
+def _after_commit(project_dir, result, holding, pending_reason, prose, command, scene_id,
+                  fixed_toward_source) -> None:
+    """What follows a written commit: the prose recorded, the source-fix,
+    reported, blocked and pending lists updated (a failure is a WARNING:
+    the ledger is written)."""
     note = record_prose(project_dir, scene_id, prose)
     if note:
         result.prose_notes.append(f'{scene_id}: {note}')
@@ -2647,7 +2684,10 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             except GateError as e:
                 if n == 1:
                     raise
-                notes.append(f'the check after fix round {n} failed ({e}); kept {kept}')
+                what = ('the ledger write after fix round {n} was refused'
+                        if isinstance(e, LedgerWriteRefused)
+                        else 'the check after fix round {n} failed').format(n=n)
+                notes.append(f'{what} ({e}); kept {kept}')
                 discarded = n
                 break
             # never worse, the first round included (mended-bridle, 2026-11-03:

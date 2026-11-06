@@ -745,9 +745,9 @@ class TestFileProblems:
         assert ledger.file_problems(ledger.ledger_path(project_dir)) == []
 
     @pytest.mark.parametrize('ids, needle', [
-        (['a', 'a'], "id 'a' is also on line"),
-        ([''], 'no id'),
-        (['a '], "id 'a ' has surrounding whitespace"),
+        (['a', 'a'], "id 'a' would be on 2 rows \\(from s1, s2\\)"),
+        ([''], 'a row of s1 has no id: "fact 0"'),
+        (['a '], "id 'a ' \\(s1\\) has surrounding whitespace"),
     ])
     def test_save_never_writes_a_ledger_load_refuses(self, project_dir, ids, needle):
         """#599: a re-check wrote an id on two rows, and every later command
@@ -758,9 +758,11 @@ class TestFileProblems:
         before = open(path, encoding='utf-8').read()
         log = os.path.join(project_dir, audit.LOG_PATH)
         logged = open(log, encoding='utf-8').read() if os.path.isfile(log) else None
-        extra = [dict(rows[0], id=rid, statement=f'fact {n}') for n, rid in enumerate(ids)]
-        with pytest.raises(ledger.LedgerError, match='not written \\(test\\)'):
+        extra = [dict(rows[0], id=rid, statement=f'fact {n}', scene_id=f's{n + 1}')
+                 for n, rid in enumerate(ids)]
+        with pytest.raises(ledger.LedgerError, match='not written \\(test\\)') as e:
             ledger.save(project_dir, rows + extra, command='test')
+        assert 'line' not in str(e.value)   # SF-4: no line of a file never written
         with pytest.raises(ledger.LedgerError, match=needle):
             ledger.save(project_dir, rows + extra, command='test')
         assert open(path, encoding='utf-8').read() == before
