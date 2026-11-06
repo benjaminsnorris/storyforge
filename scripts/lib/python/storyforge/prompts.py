@@ -482,9 +482,8 @@ def get_scene_status(scene_id: str, project_dir: str) -> str:
     scene_file = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
     if os.path.isfile(scene_file):
         try:
-            with open(scene_file) as f:
-                content = f.read()
-            word_count = len(content.split())
+            from .illustrations import read_scene_prose
+            word_count = len(read_scene_prose(scene_file).split())
             if word_count > 100:
                 return 'drafted'
         except OSError:
@@ -722,8 +721,8 @@ def build_scene_prompt(scene_id: str, project_dir: str,
     if api_mode and prev_scene:
         prev_file = os.path.join(project_dir, 'scenes', f'{prev_scene}.md')
         if os.path.isfile(prev_file):
-            with open(prev_file) as f:
-                prev_scene_content = f.read()
+            from .illustrations import read_scene_prose
+            prev_scene_content = read_scene_prose(prev_file)
 
     # --- Plugin root (used for craft engine fallback and word list) ---
     # __file__ is scripts/lib/python/storyforge/prompts.py — 5 levels to repo root
@@ -2466,17 +2465,21 @@ def prior_scenes(scene_id: str, project_dir: str, mode: str,
     return [s for s in earlier if s in chosen]
 
 
+def _scene_prose(project_dir: str, scene_id: str) -> str:
+    """The scene's prose, without illustration markers (#280)."""
+    from .illustrations import read_scene_prose
+    return read_scene_prose(os.path.join(project_dir, 'scenes', f'{scene_id}.md'))
+
+
 def _words(project_dir: str, scene_id: str) -> int:
-    with open(os.path.join(project_dir, 'scenes', f'{scene_id}.md'), encoding='utf-8') as f:
-        return len(f.read().split())
+    return len(_scene_prose(project_dir, scene_id).split())
 
 
 def _has_prose(project_dir: str, scene_id: str) -> bool:
     path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
     if not os.path.isfile(path):
         return False
-    with open(path, encoding='utf-8') as f:
-        return bool(f.read().strip())
+    return bool(_scene_prose(project_dir, scene_id).strip())
 
 
 def prior_prose_blocks(scene_id: str, project_dir: str, mode: str) -> list[dict]:
@@ -2497,7 +2500,7 @@ def prior_prose_blocks(scene_id: str, project_dir: str, mode: str) -> list[dict]
         f'({what}). Continue from them: names, facts, states and voice must agree with '
         f'what they establish. Don\'t repeat or summarize them.')}]
     for sid in ids:
-        with open(os.path.join(project_dir, 'scenes', f'{sid}.md'), encoding='utf-8') as f:
-            blocks.append({'type': 'text', 'text': f'<scene id="{sid}">\n{f.read().strip()}\n</scene>'})
+        prose = _scene_prose(project_dir, sid).strip()
+        blocks.append({'type': 'text', 'text': f'<scene id="{sid}">\n{prose}\n</scene>'})
     blocks[-1]['cache_control'] = {'type': 'ephemeral'}
     return blocks

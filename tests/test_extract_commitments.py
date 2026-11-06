@@ -155,6 +155,20 @@ class TestPhase4:
         assert '1 quote(s) not found verbatim' in out
         assert "1 subject(s) not a character or location id" in out
 
+    def test_the_prompt_never_carries_illustration_markers(self, project_dir, monkeypatch):
+        """#280: the extraction prompt gets the scene's prose, not its markers."""
+        from storyforge.cmd_extract import _build_sorted_scene_ids
+        ref = os.path.join(project_dir, 'reference')
+        first = _build_sorted_scene_ids(os.path.join(project_dir, 'scenes'), ref)[0]
+        path = os.path.join(project_dir, 'scenes', f'{first}.md')
+        with open(path, encoding='utf-8') as f:
+            prose = f.read()
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(f'![[illus:lf-01]]\n\n{prose}\n![[illus:lf-02]]\n')
+        _, calls = self._run(project_dir, monkeypatch, {}, only=[first])
+        [(sid, prompt)] = calls
+        assert sid == first and 'illus:' not in prompt
+
     def test_later_scenes_are_offered_earlier_commitments_and_supersede_them(
             self, project_dir, monkeypatch):
         from storyforge.cmd_extract import _build_sorted_scene_ids

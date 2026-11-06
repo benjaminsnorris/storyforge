@@ -1824,12 +1824,13 @@ def _apply_checked_rewrites(row: dict, sid: str, rewrites: dict, current_values:
     then the row is left as it was and the scene listed in *rejected* with
     why. The row's own fields don't vouch for a name either. Returns the
     number of fields changed."""
-    from storyforge.brief_names import invented_names, read_text
+    from storyforge.brief_names import invented_names
+    from storyforge.illustrations import read_scene_prose
     changed = {f: v for f, v in rewrites.items() if v and v != current_values.get(f)}
     if not changed:
         return 0
     prose_path = os.path.join(project_dir, 'scenes', f'{sid}.md')
-    prose = read_text(prose_path) if os.path.isfile(prose_path) else ''
+    prose = read_scene_prose(prose_path, errors='replace') if os.path.isfile(prose_path) else ''
     names = invented_names(list(changed.values()), '\n'.join((known_reference, prose)))
     if names:
         reason = f'{kind} rewrite of {", ".join(sorted(changed))} named {", ".join(names)}'

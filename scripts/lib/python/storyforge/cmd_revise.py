@@ -25,7 +25,7 @@ import subprocess
 import sys
 import time
 
-from storyforge.brief_names import invented_names, read_text, reference_text
+from storyforge.brief_names import invented_names, reference_text
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field,
     select_model, select_revision_model, get_coaching_level,
@@ -46,6 +46,7 @@ from storyforge.api import (
     REVISION_TIMEOUT, max_output_tokens,
 )
 from storyforge.cli import apply_coaching_override
+from storyforge.illustrations import read_scene_prose
 
 
 def _log_prompt_warnings(stderr: str) -> None:
@@ -1906,7 +1907,8 @@ def _fix_upstream_briefs(project_dir: str,
     for scene_id in scene_ids:
         brief = briefs_map.get(scene_id, {})
         prose_path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
-        prose = read_text(prose_path) if os.path.isfile(prose_path) else None
+        prose = (read_scene_prose(prose_path, errors='replace')
+                 if os.path.isfile(prose_path) else None)
         scene = scenes_map.get(scene_id, {})
         intent = intent_map.get(scene_id, {})
 
