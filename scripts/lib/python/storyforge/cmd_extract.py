@@ -1793,6 +1793,10 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                     and r.get('resolves', '').strip() in order:
                 r['resolves'] = ''
     done = {r['scene_id'] for r in rows if r.get('introduced_by') == ledger.COMMITMENTS_PASS}
+    # an id a link names, where it is or not, is never minted again (#599's
+    # review, TD-1): the link would land on a different fact
+    from storyforge.audit import brief_fact_ids
+    linked = ledger.linked_ids(rows) | brief_fact_ids(project_dir)
     problems = {kind: [] for kind in COMMITMENT_PROBLEMS}
     unplaced = unplaced_rows(rows, order)
     if unplaced and not dry_run:
@@ -1858,7 +1862,8 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             _log_api_usage(persistence_log, 'extract-persistence', scene_id, model, project_dir)
         new = commitment_rows(verdict.kept, scene_id, scene_text, rows, known, recorded,
                               subjects, ledger.COMMITMENTS_PASS, problems,
-                              own_writers=(ledger.COMMITMENTS_PASS,))
+                              own_writers=(ledger.COMMITMENTS_PASS,),
+                              reserved=linked)
         rows.extend(new)
         written += len(new)
         dropped += len(verdict.dropped)

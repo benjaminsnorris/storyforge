@@ -488,7 +488,7 @@ class TestRecheck:
                      'supersedes': 's--b-2'},
                     {'id': 's--c', 'subject': '', 'type': 'world', 'statement': 'C',
                      'depends_on': 's--b-3'}]
-        gate._carry_ids(proposed, old)
+        gate._carry_ids(proposed, old, [])
         ids = [p['id'] for p in proposed]
         assert ids == ['s--b-2', 's--b', 's--c']
         assert proposed[1]['supersedes'] == 's--b-2'   # it meant the first proposed row
@@ -505,7 +505,7 @@ class TestRecheck:
         new = {'id': 's--scyld-came-2', 'subject': 'scyld', 'type': 'physical',
                'statement': 'Scyld came in an unmanned boat'}
         proposed = [dict(kept), new]
-        gate._carry_ids(proposed, [kept])
+        gate._carry_ids(proposed, [kept], [kept['id']])
         assert [p['id'] for p in proposed] == ['s--scyld-came', 's--scyld-came-2']
 
     def test_two_kept_rows_stating_one_fact_keep_their_own_ids(self):
@@ -515,7 +515,7 @@ class TestRecheck:
         a = {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'A', 'scene_id': 's'}
         b = dict(a, id='s--a-again')
         proposed = [dict(a), dict(b)]
-        gate._carry_ids(proposed, [a, b])
+        gate._carry_ids(proposed, [a, b], [a['id'], b['id']])
         assert [p['id'] for p in proposed] == ['s--a', 's--a-again']
 
     def test_a_new_row_sharing_a_kept_id_keeps_links_to_the_kept_one(self):
@@ -525,7 +525,7 @@ class TestRecheck:
                     {'id': 's--a-2', 'subject': '', 'type': 'world', 'statement': 'C'},
                     {'id': 's--d', 'subject': '', 'type': 'world', 'statement': 'D',
                      'depends_on': 's--a-2'}]
-        gate._carry_ids(proposed, [kept])
+        gate._carry_ids(proposed, [kept], [kept['id']])
         assert len({p['id'] for p in proposed}) == 3
         # extraction's link names its own row, never the kept one
         assert proposed[2]['depends_on'] == proposed[1]['id'] == 's--a-2'
@@ -2719,6 +2719,54 @@ class TestSteadyParagraphs:
         ids = {r['statement']: r['id'] for r in self._mine(project_dir)}
         assert ids[old['statement']] == old['id']
         assert ids[mill['statement']] == old['id'] + '-2'
+
+    CENSUS_ID = 'act1-sc02--tarren-s-hollow-had-412-people'
+
+    def test_an_id_a_ledger_link_names_is_never_minted_again(self, project_dir, tmp_path):
+        """#599's review (TD-1/SF-2): an id the ledger no longer has but a
+        later fact's `supersedes` still names, minted again, would put that
+        link on a different fact."""
+        self._add_later(project_dir, id='later-hollow', subject='tarrens-hollow',
+                        statement='The hollow is empty', supersedes=self.CENSUS_ID)
+        _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow')])
+        ids = [r['id'] for r in self._mine(project_dir)]
+        assert ids == [self.CENSUS_ID + '-2']
+
+    def test_an_id_a_brief_names_is_never_minted_again(self, project_dir, tmp_path):
+        path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+        with open(path, encoding='utf-8') as f:
+            lines = f.read().split('\n')
+        header = lines[0].split('|')
+        cells = lines[1].split('|')
+        k = header.index('knowledge_in')
+        cells[k] = ';'.join(filter(None, [cells[k], self.CENSUS_ID]))
+        lines[1] = '|'.join(cells)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines))
+        _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow')])
+        assert [r['id'] for r in self._mine(project_dir)] == [self.CENSUS_ID + '-2']
+
+    def test_reserved_is_the_old_ids_and_every_id_a_link_names(self):
+        loaded = [{'id': 'a', 'supersedes': 'gone;b', 'depends_on': 'c'}, {'id': 'b'}]
+        assert gate._reserved_ids({'s--x'}, loaded, {'brief-fact'}) == {
+            's--x', 'gone', 'b', 'c', 'brief-fact'}
+
+    def test_a_new_row_with_an_old_id_stops_the_commit(self):
+        """TD-2: `_carry_ids` checks what it relies on: a row minted without
+        the reserved ids, neither kept nor carried, never keeps an old id."""
+        old = {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'A',
+               'scene_id': 's'}
+        stray = {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'B',
+                 'scene_id': 's'}
+        with pytest.raises(GateError, match="'s--a' has the id of an earlier commitment"):
+            gate._carry_ids([stray], [old], [])
+
+    def test_reserved_ids_are_required(self):
+        from storyforge.extract import COMMITMENT_PROBLEMS, commitment_rows
+        with pytest.raises(TypeError, match='reserved'):
+            commitment_rows([], 's', '', [], [], [], {}, 'draft',
+                            {k: [] for k in COMMITMENT_PROBLEMS},
+                            own_writers=ledger.COMMITMENT_WRITERS)
 
     def test_a_commit_that_would_repeat_an_id_writes_nothing(
             self, project_dir, tmp_path, monkeypatch):

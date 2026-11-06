@@ -677,6 +677,17 @@ def _split(value: str) -> list[str]:
     return [v.strip() for v in (value or '').split(';') if v.strip()]
 
 
+#: The columns whose cells name other facts by id
+LINK_COLUMNS = ('supersedes', 'depends_on')
+
+
+def linked_ids(rows: list[dict[str, str]]) -> set[str]:
+    """Every id a row of `rows` names in a link (`LINK_COLUMNS`), there or
+    not: a new fact must never take one (#599's review, TD-1), or the link
+    would land on it."""
+    return {ref for r in rows for col in LINK_COLUMNS for ref in _split(r.get(col, ''))}
+
+
 # ============================================================================
 # Derived state
 # ============================================================================

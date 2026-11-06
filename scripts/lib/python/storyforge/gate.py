@@ -57,6 +57,7 @@ from __future__ import annotations
 import copy
 import os
 import re
+from collections.abc import Set
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
@@ -244,10 +245,11 @@ def _subjects(project_dir: str) -> dict[str, str]:
 def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
              order: dict[str, int], introduced_by: str, model: str, log_dir: str,
              problems: dict[str, list[str]],
-             dropped: list[tuple[str, str]],
-             reserved: set[str] | frozenset[str] = frozenset()) -> list[dict[str, str]]:
+             dropped: list[tuple[str, str]], *,
+             reserved: Set[str]) -> list[dict[str, str]]:
     """The scene's commitments read from `prose` against `rows`, each with an
-    id no row of `rows` and none of `reserved` has (#599)."""
+    id no row of `rows` and none of `reserved` has (#599; required, #599's
+    review TD-2: `_reserved_ids`)."""
     from storyforge.api import extract_text, invoke_to_file, is_truncated
     from storyforge.elaborate import get_scene
     from storyforge.enrich import format_registries_for_prompt
@@ -1202,6 +1204,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         names, name_notes = ledger.subject_names(project_dir)
         revised_rejection = rejected_ids(pending(project_dir).get(scene_id))
         already_reported = reported(project_dir).get(scene_id, [])
+        briefs_name = audit.brief_fact_ids(project_dir)
     except (ledger.LedgerError, ValueError, OSError, UnicodeDecodeError) as e:
         raise GateError(f'{scene_id}: {e}') from e
     loaded = copy.deepcopy(rows)
@@ -1231,7 +1234,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     result.proposed = _extract(project_dir, scene_id, prose, rows, order,
                                introduced_by or command,
                                extract_model or select_model('evaluation'), log_dir,
-                               result.problems, result.dropped, reserved=old)
+                               result.problems, result.dropped,
+                               reserved=_reserved_ids(old, loaded, briefs_name))
     # A fact the author rejected may not come back as binding
     for r in result.proposed:
         rid = rejected_here.get(ledger.fact_key(r))
@@ -1259,6 +1263,18 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         return result
     _commit(project_dir, result)
     return result
+
+
+def _reserved_ids(old: Set[str], loaded: list[dict[str, str]],
+                  briefs_name: Set[str]) -> set[str]:
+    """The ids no new commitment of the scene may take though the ledger the
+    scene is read against hasn't got them (#599, and its review TD-1/SF-2):
+    the scene's earlier commitments (`old`, an id not carried is never
+    reused), and every id a link names, in the ledger (`ledger.linked_ids`,
+    `loaded`) or a brief (`briefs_name`), there or not: an id dropped by an
+    earlier commit and minted again would put that link on a different
+    fact."""
+    return set(old) | ledger.linked_ids(loaded) | set(briefs_name)
 
 
 @dataclass
@@ -1346,7 +1362,7 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
     # #558's second review: the kept facts go through the hold-back too
     _keep_steady(project_dir, result, old_rows, prose)
     _hold_back(result, holding, prose=prose if holding else '', rows=rows)
-    _carry_ids(result.proposed, old_rows)
+    _carry_ids(result.proposed, old_rows, result.steady)
     new = rows + result.proposed
     for rid, quote in result.check.kept:
         if ledger.fill_quote(new, rid, quote):
@@ -1971,30 +1987,42 @@ def _has_prose(project_dir: str, scene_id: str) -> bool:
         return False
 
 
-def _carry_ids(proposed: list[dict[str, str]], old_rows: list[dict[str, str]]) -> None:
+def _carry_ids(proposed: list[dict[str, str]], old_rows: list[dict[str, str]],
+               steady: list[str]) -> None:
     """Give each proposed row that states the same fact as one of the
     scene's earlier commitments (`ledger.fact_key`) that row's id, and its
     end in a later scene when the new row has none: links to it (a later
     `supersedes`, the later scene's end) keep holding. A kept row (#558,
-    an earlier commitment as it was) keeps its own id. Every other row
-    keeps the id extraction gave it, which no earlier commitment of the
-    scene and no other row has (`_extract`'s `reserved`, #599: an old id not
-    carried is never reused, or a later link to it would land on a
-    different fact). Links between proposed rows follow the renames. In
-    place."""
+    its id in `steady`) keeps its own id. Every other row keeps the id
+    extraction gave it, which no earlier commitment of the scene and no
+    other row has (`_extract`'s `reserved`, #599: an old id not carried is
+    never reused, or a later link to it would land on a different fact).
+    Links between proposed rows follow the renames. In place.
+
+    Raises:
+        GateError: a row neither kept nor carried has an earlier
+            commitment's id (it was minted without `reserved`; #599's
+            review, TD-2): nothing is written.
+    """
+    kept_ids = set(steady)
+    old_ids = {o['id'] for o in old_rows}
     by_key: dict[tuple, dict[str, str]] = {}
     for o in old_rows:
         by_key.setdefault(ledger.fact_key(o), o)
-    unchanged = [any(p == o for o in old_rows) for p in proposed]   # kept as it was
+    unchanged = [p['id'] in kept_ids for p in proposed]   # kept as it was (#558)
     # by position, never by id: a kept steady row (#558) and a new row
     # stating the same fact are two rows (Beowulf B-034)
-    carried = {p['id'] for p, kept in zip(proposed, unchanged) if kept}
+    carried = set(kept_ids)
     rename: dict[str, str] = {}
     for p, kept in zip(proposed, unchanged):
         if kept:
             continue
         o = by_key.get(ledger.fact_key(p))
         if o is None or o['id'] in carried:
+            if p['id'] in old_ids:
+                raise GateError(f'{p.get("scene_id") or "?"}: new fact {p["id"]!r} has the id '
+                                f'of an earlier commitment of the scene (minted without the '
+                                f'reserved ids); nothing written')
             continue
         carried.add(o['id'])
         rename[p['id']] = o['id']
