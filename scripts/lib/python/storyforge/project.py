@@ -285,8 +285,8 @@ def _manuscript_word_count(project_dir: str) -> int:
         if not os.path.isfile(fpath):
             continue
         try:
-            with open(fpath, encoding='utf-8') as f:
-                total += len(f.read().split())
+            from storyforge.illustrations import read_scene_prose
+            total += len(read_scene_prose(fpath).split())
         except (OSError, UnicodeDecodeError):
             pass
     return total

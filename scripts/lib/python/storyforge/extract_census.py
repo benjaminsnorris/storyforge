@@ -261,8 +261,8 @@ def run_census(project_dir: str, model: str, log_dir: str, on_usage=None,
     for r in rows:
         path = os.path.join(scenes_dir, f'{r["id"]}.md')
         if os.path.isfile(path):
-            with open(path, encoding='utf-8') as f:
-                texts[r['id']] = f.read()
+            from .illustrations import read_scene_prose
+            texts[r['id']] = read_scene_prose(path)
     result = CensusResult()
     if not texts:
         result.note = 'no scene has prose'

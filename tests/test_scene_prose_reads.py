@@ -283,3 +283,52 @@ def test_revise_upstream_fix_cost(project_dir):
     clean = _upstream_fix_cost(project_dir, ['act1-sc01'])
     _mark(project_dir, 'act1-sc01')
     assert _upstream_fix_cost(project_dir, ['act1-sc01']) == clean > 0
+
+
+def test_manuscript_word_count(tmp_path):
+    from storyforge.project import _manuscript_word_count
+    assert _manuscript_word_count(_project(tmp_path, MARKED)) == len(PROSE.split())
+
+
+def test_assemble_dry_run_word_count(tmp_path):
+    from storyforge.cmd_assemble import _word_count
+    path = os.path.join(_project(tmp_path, MARKED), 'scenes', 's1.md')
+    assert _word_count(path) == len(PROSE.split())
+
+
+# ============================================================================
+# Name checks and the bible scorer
+# ============================================================================
+
+def test_book_text_for_name_checks(tmp_path):
+    """A marker id is not a name the book uses, and a markers-only scene
+    has no prose."""
+    from storyforge.brief_names import _book_text
+    project_dir = _project(tmp_path, '![[illus:Mallen-01]]\n\nThe warden waits.\n')
+    write_scene(project_dir, 's2', '![[illus:lf-02]]\n')
+    text, drafted = _book_text(project_dir, ['s1', 's2'], [])
+    assert 'illus' not in text and 'Mallen' not in text
+    assert drafted == {'s1'}
+
+
+def test_name_census_counts_prose_only(tmp_path, monkeypatch):
+    from storyforge import extract_census
+    project_dir = _project(tmp_path, MARKED)
+    os.makedirs(os.path.join(project_dir, 'reference'))
+    with open(os.path.join(project_dir, 'reference', 'scenes.csv'), 'w') as f:
+        f.write('id|seq|title|status\ns1|1|One|drafted\n')
+    seen = {}
+
+    def count_names(texts, known):
+        seen.update(texts)
+        return []
+    monkeypatch.setattr(extract_census, 'count_names', count_names)
+    extract_census.run_census(project_dir, 'm', str(tmp_path / 'logs'))
+    assert seen == {'s1': PROSE}
+
+
+def test_bible_scorer_drafted_scenes(tmp_path):
+    from storyforge.scoring_bible import _drafted_scenes
+    project_dir = _project(tmp_path, MARKED)
+    write_scene(project_dir, 's2', '![[illus:lf-09]]\n')
+    assert _drafted_scenes(project_dir) == [('s1', PROSE)]

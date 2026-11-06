@@ -356,6 +356,10 @@ def _book_text(project_dir: str, scene_ids, notes: list[str]) -> tuple[str, set[
                 continue
             text = read_text_noting(os.path.join(folder, name), notes, f'{sub}/{name}')
             text = text.replace('\r\n', '\n')
+            if sub == 'scenes':
+                # a marker id is not a name the book uses (#280)
+                from storyforge.illustrations import strip_markers
+                text = strip_markers(text)
             texts.append(text)
             if sub == 'scenes' and text.strip():
                 drafted.add(name[:-3])
