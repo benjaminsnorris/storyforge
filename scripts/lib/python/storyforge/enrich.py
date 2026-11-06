@@ -14,7 +14,6 @@ import tempfile
 from collections.abc import Mapping
 
 from . import mice
-from .speaker_labels import LABEL_RULE
 from .prompts import (
     _read_csv_header_and_rows,
     read_csv_field,
@@ -784,6 +783,7 @@ def build_enrich_prompt(scene_id: str, project_dir: str,
 
     # Build field instructions -- only for fields still needed
     field_instructions = []
+    requested = []
     for field in fields:
         if not force:
             current_val = ''
@@ -799,6 +799,7 @@ def build_enrich_prompt(scene_id: str, project_dir: str,
         instruction = _field_instruction(field)
         if instruction:
             field_instructions.append(instruction)
+            requested.append(field)
 
     if not field_instructions:
         return ''
@@ -824,6 +825,12 @@ def build_enrich_prompt(scene_id: str, project_dir: str,
 
     for instruction in field_instructions:
         prompt_parts.append(instruction)
+
+    # A quoted line in either field gets a speaker label (#513); not in a
+    # graphic novel, whose key_dialogue the script check matches verbatim
+    from .speaker_labels import LABEL_RULE, applies
+    if any(f in requested for f in ('key_dialogue', 'key_actions')) and applies(project_dir):
+        prompt_parts.append(LABEL_RULE)
 
     return '\n'.join(prompt_parts)
 
@@ -931,8 +938,7 @@ def _field_instruction(field: str) -> str:
         ),
         'key_dialogue': (
             'KEY_DIALOGUE: <semicolon-separated specific lines or exchanges '
-            'essential to the scene — quote directly from the text. '
-            + LABEL_RULE + '>'
+            'essential to the scene — quote directly from the text>'
         ),
         'emotions': (
             'EMOTIONS: <semicolon-separated emotional beats in sequence '

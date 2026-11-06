@@ -16,7 +16,6 @@ from typing import NamedTuple
 
 from storyforge.brief_names import REWRITTEN_FILES
 from storyforge.narrator import NARRATOR_POV, is_narrator
-from storyforge.speaker_labels import LABEL_RULE
 from storyforge.common import log, reference_text
 
 from storyforge.elaborate import (
@@ -1557,14 +1556,24 @@ def diagnose_briefs(project_dir: str) -> list[dict]:
 # Briefs domain: concretization prompt builder and parser
 # ============================================================================
 
+def _labels_block(labels: str) -> str:
+    """A brief rewrite prompt's speaker-label section (#513), after its
+    rules: '' when there is none (a graphic novel)."""
+    return f'\n{labels}\n' if labels else ''
+
+
 def build_concretize_prompt(
     scene_id: str,
     fields: list[str],
     current_values: dict[str, str],
     voice_guide: str = '',
     character_entry: str = '',
+    labels: str = '',
 ) -> str:
     """Build prompt to rewrite abstract brief fields as concrete physical beats.
+
+    `labels`: the cast and how to keep speaker labels
+    (`speaker_labels.keep_section`; '' for a graphic novel), as a section.
 
     Args:
         scene_id: The scene being concretized.
@@ -1604,8 +1613,7 @@ def build_concretize_prompt(
 4. Replace "connecting X to Y" with the physical moment: what does the character look at, touch, or say when the connection happens?
 5. Keep the same number of beats (semicolon-separated items). Don't add or remove story events — just rewrite HOW they're described.
 6. Use the character's sensory palette from the voice guide. If they think in food metaphors, their observations should reflect that.
-7. {LABEL_RULE}
-
+{_labels_block(labels)}
 ## Output Format
 
 Return each field on its own labeled line, exactly like the input but rewritten:
@@ -1620,8 +1628,10 @@ def build_trim_prompt(
     issues: list[dict],
     current_values: dict[str, str],
     target_words: int = 0,
+    labels: str = '',
 ) -> str:
     """Build prompt to trim overspecified/verbose brief fields.
+    `labels` as `build_concretize_prompt`'s.
 
     Handles both overspecified (too many beats) and verbose (too long)
     fields in a single prompt per scene.
@@ -1680,8 +1690,7 @@ def build_trim_prompt(
 2. For emotions: use 2 beats maximum (start → end). "resolve;bitter-defiance" not "resolve;frustration;bitter-resignation;quiet-defiance".
 3. For decision/crisis/goal/conflict: one clause. No sentences, no em-dashes, no elaboration.
 4. Preserve the MEANING — just say it in fewer words.
-5. {LABEL_RULE}
-
+{_labels_block(labels)}
 ## Output Format
 
 Return each field on its own labeled line:
@@ -1773,8 +1782,10 @@ def build_evaluation_fix_prompt(
     guidance: str,
     voice_guide: str = '',
     character_entry: str = '',
+    labels: str = '',
 ) -> str:
     """Build prompt to rewrite brief fields based on evaluation findings.
+    `labels` as `build_concretize_prompt`'s.
 
     The output format matches ``build_concretize_prompt`` so it is parseable
     by the existing ``parse_concretize_response()``.
@@ -1819,8 +1830,7 @@ def build_evaluation_fix_prompt(
 2. Every action must be something the POV character physically does or perceives. No thematic descriptions, no narrator interpretations.
 3. Do not invent characters, locations, or events not implied by the existing fields.
 4. Keep each field concise — brief contract language, not prose.
-5. {LABEL_RULE}
-
+{_labels_block(labels)}
 ## Output Format
 
 Return each field on its own labeled line:
@@ -1956,6 +1966,10 @@ def hone_briefs(
 
     char_bible = reference_text(os.path.join(ref_dir, 'character-bible.md'))
 
+    # The cast and how to keep speaker labels (#513); none for a graphic novel
+    from storyforge.speaker_labels import keep_section
+    labels = keep_section(project_dir)
+
     from storyforge.api import invoke_to_file, extract_text_from_file
 
     # Group issues by scene and separate by type
@@ -1993,6 +2007,7 @@ def hone_briefs(
                 current_values=current_values,
                 voice_guide=voice_guide[:3000],
                 character_entry=char_bible[:2000],
+                labels=labels,
             )
 
             os.makedirs(log_dir, exist_ok=True)
@@ -2016,6 +2031,7 @@ def hone_briefs(
                 issues=trim_issues,
                 current_values=current_values,
                 target_words=target_words,
+                labels=labels,
             )
 
             if prompt:
@@ -2045,6 +2061,7 @@ def hone_briefs(
                 guidance=guidance,
                 voice_guide=voice_guide[:3000],
                 character_entry=char_bible[:2000],
+                labels=labels,
             )
 
             os.makedirs(log_dir, exist_ok=True)

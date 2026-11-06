@@ -2096,15 +2096,18 @@ def build_scene_prompt_from_briefs(
     if target_words and str(target_words).strip() and int(str(target_words).strip() or 0) > 0:
         word_target_line = f"\n**Target length: ~{target_words} words.** Prefer economy — achieve through implication what would take twice the words in exposition. Do not pad to reach the target; stop when the scene is complete."
 
-    # Key dialogue checklist
-    from .speaker_labels import LABEL_READING
+    # Key dialogue checklist; what a speaker label means when a brief field
+    # the prompt shows has one (#513)
+    from .speaker_labels import LABEL_READING, has_label
+    reading = (f' {LABEL_READING}' if any(has_label(scene.get(f, ''))
+                                          for f in ('key_dialogue', 'key_actions', 'outcome'))
+               else '')
     key_dialogue = scene.get('key_dialogue', '').strip()
-    dialogue_checklist = ''
-    if key_dialogue:
-        lines = [d.strip() for d in key_dialogue.split(';') if d.strip()]
-        if lines:
-            items = '\n'.join(f'  - [ ] {line}' for line in lines)
-            dialogue_checklist = f"\n\n**Key dialogue checklist — every line below MUST appear in the scene (verbatim or close paraphrase). Do not end the scene until all are delivered.** {LABEL_READING}\n{items}"
+    lines = [d.strip() for d in key_dialogue.split(';') if d.strip()]
+    dialogue_checklist = f'\n\n{reading.strip()}' if reading else ''
+    if lines:
+        items = '\n'.join(f'  - [ ] {line}' for line in lines)
+        dialogue_checklist = f"\n\n**Key dialogue checklist — every line below MUST appear in the scene (verbatim or close paraphrase). Do not end the scene until all are delivered:**{reading}\n{items}"
 
     states_checklist = _states_checklist(scene, ref_dir)
 

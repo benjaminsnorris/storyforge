@@ -146,7 +146,7 @@ The brief is your contract. Deliver:
 - The POV character must know village-vanished;archive-erasure by scene end
 
 
-**Key dialogue checklist — every line below MUST appear in the scene (verbatim or close paraphrase). Do not end the scene until all are delivered.** A line written `Name: "line"` is that character's to say; the label is not part of the line, so never write it into the prose.
+**Key dialogue checklist — every line below MUST appear in the scene (verbatim or close paraphrase). Do not end the scene until all are delivered:**
   - [ ] It was there forty years ago. It isn't there now. There is no note.
 
 **Physical states checklist — the scene ends with each of these, and each MUST be on the page (in action, sensation, dialogue or a stated fact), not left for the reader to infer:**
