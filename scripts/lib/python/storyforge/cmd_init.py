@@ -204,12 +204,6 @@ def _claude_md(d: dict, meta: dict, kind: str = 'extraction') -> str:
     return '\n'.join(lines)
 
 
-def _in_git_repo(path: str) -> bool:
-    r = subprocess.run(['git', 'rev-parse', '--is-inside-work-tree'], cwd=path,
-                       capture_output=True, text=True)
-    return r.returncode == 0 and r.stdout.strip() == 'true'
-
-
 def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
     install_signal_handlers()
@@ -314,7 +308,16 @@ def _written(project: str) -> list[str]:
 
 def _commit(project: str, title: str, next_step: str) -> int:
     message = f'Initialize Storyforge project: {title}'
-    if not _in_git_repo(project):
+    from storyforge.git import NOT_A_REPOSITORY, work_tree_problem
+    why = work_tree_problem(project)
+    if why and why != NOT_A_REPOSITORY:
+        # Git missing, or a repository git refused (`safe.directory`) or
+        # couldn't read: a `git init` here would nest a new repository inside
+        # that one, and with no git it crashed
+        log(f'ERROR: the project is written but not committed: {why}. Fix that, '
+            f'then commit it yourself.')
+        return 1
+    if why == NOT_A_REPOSITORY:
         # A new repository: the project is its first commit, on main, as the
         # init skill does
         for cmd in (['git', 'init', '-q', '-b', 'main'], ['git', 'add', '-A'],

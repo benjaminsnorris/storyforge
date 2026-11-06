@@ -391,3 +391,95 @@ class TestCommitInASubfolder:
             for f in committed)
         assert seeded <= set(committed)
         assert self._git(work, 'status', '--porcelain', '--', 'projects/telemachus/reference/source') == ''
+
+
+class TestWorkTreeProblem:
+    """#520 review (SF-A, SF-B/TD-2): `in_work_tree` was a bool that lumped
+    git missing, no repository, a refused (`safe.directory`) and a broken
+    repository together and dropped git's message, so warnings named the
+    wrong cause; and it was True inside any repository, even one that isn't
+    the project's (a dotfiles repo in ~)."""
+
+    @staticmethod
+    def _run(cwd, *a):
+        import subprocess
+        subprocess.run(['git', '-C', str(cwd), *a], check=True, capture_output=True)
+
+    def _ceiling(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('GIT_CEILING_DIRECTORIES', str(tmp_path.parent))
+
+    def test_no_repository(self, tmp_path, monkeypatch):
+        from storyforge import git
+        self._ceiling(tmp_path, monkeypatch)
+        assert git.work_tree_problem(str(tmp_path)) == git.NOT_A_REPOSITORY
+        assert git.in_work_tree(str(tmp_path)) is False
+
+    def test_git_not_installed(self, tmp_path, monkeypatch):
+        from storyforge import git
+        empty = tmp_path / 'empty-path'
+        empty.mkdir()
+        monkeypatch.setenv('PATH', str(empty))
+        assert git.work_tree_problem(str(tmp_path)) == 'git is not installed'
+
+    def test_a_refused_repository_carries_gits_reason(self, tmp_path, monkeypatch):
+        from storyforge import git
+        self._ceiling(tmp_path, monkeypatch)
+        self._run(tmp_path, 'init', '-q')
+        monkeypatch.setenv('GIT_TEST_ASSUME_DIFFERENT_OWNER', '1')
+        why = git.work_tree_problem(str(tmp_path))
+        assert why != git.NOT_A_REPOSITORY and 'dubious ownership' in why
+
+    def test_a_broken_git_file_is_not_no_repository(self, tmp_path, monkeypatch):
+        from storyforge import git
+        self._ceiling(tmp_path, monkeypatch)
+        (tmp_path / '.git').write_text('gitdir: /nonexistent\n')
+        why = git.work_tree_problem(str(tmp_path))
+        assert why != git.NOT_A_REPOSITORY and '/nonexistent' in why
+
+    def test_subfolder_and_worktree_projects(self, tmp_path):
+        from storyforge import git
+        work, project = TestCommitInASubfolder()._repos(tmp_path, 'projects/book')
+        assert git.work_tree_problem(str(project)) == ''
+        wt = tmp_path / 'wt'
+        self._run(work, 'worktree', 'add', '-q', '-b', 'storyforge/wt', str(wt))
+        assert git.work_tree_problem(str(wt)) == ''
+
+    def _parent(self, tmp_path, ignore):
+        root = tmp_path / 'home'
+        book = root / 'Writing' / 'book'
+        book.mkdir(parents=True)
+        (book / 'storyforge.yaml').write_text('project: x\n')
+        (root / '.zshrc').write_text('x\n')
+        if ignore:
+            (root / '.gitignore').write_text('Writing/\n')
+        self._run(root, 'init', '-q')
+        self._run(root, 'add', '.zshrc', *(['.gitignore'] if ignore else []))
+        self._run(root, '-c', 'user.email=t@e.st', '-c', 'user.name=T',
+                  'commit', '-qm', 'dotfiles')
+        return root, book
+
+    def test_an_unrelated_parent_repository_is_named(self, tmp_path):
+        from storyforge import git
+        root, book = self._parent(tmp_path, ignore=False)
+        why = git.project_repo_problem(str(book))
+        assert why == (f'the git repository at {os.path.realpath(root)} does not track '
+                       f'this project (its storyforge.yaml is not committed there)')
+
+    def test_a_parent_repository_that_ignores_the_project(self, tmp_path):
+        from storyforge import git
+        root, book = self._parent(tmp_path, ignore=True)
+        assert git.project_repo_problem(str(book)) == \
+            f'the git repository at {os.path.realpath(root)} ignores this project'
+
+    def test_a_tracked_subfolder_project_and_a_new_projects_own_repo(self, tmp_path):
+        from storyforge import git
+        work, project = TestCommitInASubfolder()._repos(tmp_path, 'projects/book')
+        (project / 'storyforge.yaml').write_text('project: x\n')
+        self._run(work, 'add', '.')
+        self._run(work, 'commit', '-qm', 'yaml')
+        assert git.project_repo_problem(str(project)) == ''
+        fresh = tmp_path / 'fresh'
+        fresh.mkdir()
+        (fresh / 'storyforge.yaml').write_text('project: x\n')
+        self._run(fresh, 'init', '-q')
+        assert git.project_repo_problem(str(fresh)) == ''

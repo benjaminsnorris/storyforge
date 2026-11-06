@@ -27,20 +27,82 @@ def _git(project_dir: str, *args: str, check: bool = True) -> subprocess.Complet
     )
 
 
-def in_work_tree(project_dir: str) -> bool:
-    """True when project_dir is inside a git work tree.
+#: `work_tree_problem`'s answer when git ran and found no repository at all
+#: (as opposed to git missing, or a repository git refused or couldn't read)
+NOT_A_REPOSITORY = 'not inside a git repository'
+
+
+def _first_line(text: str) -> str:
+    return next((ln.strip() for ln in (text or '').splitlines() if ln.strip()), '')
+
+
+def work_tree_problem(project_dir: str) -> str:
+    """Why project_dir isn't in a usable git work tree; '' when it is.
+
+    The reason carries git's own message, so a warning names the real cause:
+    `NOT_A_REPOSITORY` exactly when there is no repository, else git missing,
+    or a repository git refused (`safe.directory`) or couldn't read.
 
     Never `os.path.isdir(project_dir/.git)`: that is False for a project in a
     subfolder of its repo (every storyforge-evals book is `projects/<book>/`)
     and in a worktree or submodule, where `.git` is a file, and the callers
-    that gated on it skipped their git work with nothing said (#520). False
-    too when git isn't installed; a caller that then can't do its work says so.
+    that gated on it skipped their git work with nothing said (#520).
     """
     try:
         r = _git(project_dir, 'rev-parse', '--is-inside-work-tree', check=False)
-    except (FileNotFoundError, NotADirectoryError):
-        return False
-    return r.returncode == 0 and r.stdout.strip() == 'true'
+    except OSError as e:
+        return ('git is not installed' if isinstance(e, FileNotFoundError)
+                else f'git could not be run ({e})')
+    if r.returncode != 0:
+        msg = _first_line(r.stderr)
+        # '...: /path' instead is a broken `.git` file (a moved worktree)
+        if msg.startswith('fatal: not a git repository (or any'):
+            return NOT_A_REPOSITORY
+        return f'git could not use the repository here ({msg or f"exit {r.returncode}"})'
+    if r.stdout.strip() != 'true':
+        return 'inside a .git folder, not a work tree'
+    return ''
+
+
+def in_work_tree(project_dir: str) -> bool:
+    """True when project_dir is inside a git work tree (`work_tree_problem`)."""
+    return not work_tree_problem(project_dir)
+
+
+def project_repo_problem(project_dir: str) -> str:
+    """Why git work for this project mustn't happen in its enclosing repo;
+    '' when it may.
+
+    `work_tree_problem`, and also: a project inside a repo that isn't its own
+    (a dotfiles repo in ~) would have cleanup untrack, commit and push there.
+    So the repo must track the project's `storyforge.yaml`, unless the repo
+    is the project folder itself (a new project's own repo, nothing committed
+    yet). A repo that ignores the project is named as such: a commit there
+    finds nothing to commit, forever.
+    """
+    why = work_tree_problem(project_dir)
+    if why:
+        return why
+    tracked = _git(project_dir, '--literal-pathspecs', 'ls-files', '--error-unmatch',
+                   '--', 'storyforge.yaml', check=False)
+    if tracked.returncode == 0:
+        return ''
+    top = _git(project_dir, 'rev-parse', '--show-toplevel', check=False)
+    if top.returncode != 0:
+        return f'git could not find the repository top ({_first_line(top.stderr)})'
+    toplevel = top.stdout.strip()
+    if os.path.realpath(toplevel) == os.path.realpath(project_dir):
+        return ''
+    # (`check-ignore` takes no pathspec magic, `--literal-pathspecs` included)
+    ignored = _git(project_dir, 'check-ignore', '-q', '--', 'storyforge.yaml',
+                   check=False)
+    if ignored.returncode == 0:
+        return f'the git repository at {toplevel} ignores this project'
+    if ignored.returncode != 1:
+        return (f'could not check whether the git repository at {toplevel} ignores '
+                f'this project ({_first_line(ignored.stderr)})')
+    return (f'the git repository at {toplevel} does not track this project '
+            f'(its storyforge.yaml is not committed there)')
 
 
 def has_gh() -> bool:
