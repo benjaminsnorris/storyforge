@@ -29,9 +29,25 @@ Before doing anything else, orient yourself:
      real, non-empty command. For prose-tier rungs it's the deterministic
      floor check (`storyforge score --level N`) — the section itself is
      developed via the `elaborate` skill, not by this command.
-   - `blockers` — coverage/consistency mismatches and any phase/yaml
-     disagreement; surface these before advancing.
-   - `ladder` — per-rung `solid`/`thin`/`not_started` for the status readout.
+   - `blockers` — coverage/consistency mismatches, any phase/yaml
+     disagreement, a `voice` blocker (no voice guide to draft from) and a
+     `gate` blocker per scene waiting on the gate; surface these before
+     advancing.
+   - `ladder` — per-rung `solid`/`thin`/`not_started` for the status readout
+     (L0–L6; the voice guide is not a ladder rung, it shows as the `voice`
+     stage and blocker).
+
+   Two stages route the same in every phase, elaboration or not:
+   - **`next.stage` is `check`**: scenes wait on the gate. Have the author run
+     `next.command` (`storyforge check --pending`, see "Draft overnight"
+     below) before anything else; `then` is the work after it.
+   - **`next.stage` is `voice`** (or `then.stage` is, behind a `check`): the
+     structure is built, but the voice guide is missing, init's template,
+     empty, can't be read, or is only `reference/persistent-prompt.md`, which
+     the brief-based prompt doesn't read (the `voice` blocker says which).
+     `storyforge write` refuses to draft until it is filled. Route to the
+     `elaborate` skill's Voice Stage, or give the author
+     `storyforge elaborate --stage voice` to write it unattended; draft after.
 3. **Read the project `CLAUDE.md`**. This contains orientation and any standing instructions from the author.
 4. **Scan for key artifacts** — check for the existence of:
    - `reference/character-bible.md`
@@ -75,11 +91,6 @@ Read the `phase` field from `storyforge.yaml`. If it is one of: `spine`, `archit
     (pressure-tests logline/synopsis/act-shape before any spine work)
   - `storyforge score --compare <a> <b> [--level N]` — compare candidate
     loglines/synopses when the author is exploring options
-- **If `next.stage` is `voice`**, the structure is built but
-  `reference/voice-guide.md` is missing or still init's template (the `voice`
-  blocker says which), and drafting would have no voice to follow. Route to the
-  `elaborate` skill's Voice Stage, or give the author
-  `storyforge elaborate --stage voice` to write it unattended; draft after.
 - **If `then.stage` is `story-power`** (the paired follow-up `status` reports
   while `next.stage` is still a prose-tier rung), that confirms the bullet
   above: once the section's floor check passes, recommend running
@@ -87,7 +98,7 @@ Read the `phase` field from `storyforge.yaml`. If it is one of: `spine`, `archit
 - Route to the `elaborate` skill for most requests (scene work, drafting prep, "what's next", structural planning)
 - Character, world, voice and scene design and revision planning have no separate skills: that work is in the elaborate pipeline (and revision planning in the `revise` skill)
 - Skills that still apply normally: `title`, `cover`, `press-kit`, `produce`, `score`, `publish`
-- If the author asks to start drafting and the phase is `briefs` (briefs are complete), check that `reference/scene-briefs.csv` has data and validation passes, then provide the write command (which will automatically detect briefs and use the brief-aware prompt builder)
+- If the author asks to start drafting and the phase is `briefs` (briefs are complete), check that `reference/scene-briefs.csv` has data, validation passes and `status` has no `voice` blocker, then provide the write command (which will automatically detect briefs and use the brief-aware prompt builder)
 - If the author asks to evaluate or polish after drafting, those scripts work normally
 
 **If the project is NOT in an elaboration phase** (legacy phases: `development`, `scene-design`, `drafting`, `evaluation`, `revision`, `review`, `complete`, `production`), proceed with the existing routing below.
@@ -108,7 +119,7 @@ The author has a specific request. Parse what they want and route to the right s
 Invoke the `elaborate` skill. This handles all creative development work — from spine through briefs, including character deepening, world building, voice guide creation, and scene-level design.
 
 **"Start drafting" / "Write scenes":**
-Check that `reference/scenes.csv` exists with scenes, and `reference/voice-guide.md` exists. If ready, provide the command:
+Check that `reference/scenes.csv` exists with scenes, and that `storyforge status --json` has no `voice` blocker (a `reference/voice-guide.md` that exists can still be init's template; `write` refuses to draft without a filled one). If there is one, route to the Voice Stage first (Step 1). If ready, provide the command:
 ```bash
 ./storyforge write --keep-going [options]
 ```
@@ -321,9 +332,9 @@ The author wants to see where things stand. Lead with the deterministic
 verdict from `storyforge status --json` (already gathered in Step 1) — it is
 the source of truth for position and next step:
 
-- **Ladder:** render the `ladder` rungs (`solid` / `thin` / `not_started`) so the author sees exactly where the project sits on logline → briefs → draft → evaluate.
+- **Ladder:** render the `ladder` rungs (`solid` / `thin` / `not_started`) so the author sees exactly where the project sits on logline → briefs → voice → draft → evaluate (voice from the `voice` stage/blocker, not a rung).
 - **Next / then:** present the verdict's `next` (and `then`) step verbatim rather than re-deriving guidance by hand.
-- **Blockers:** surface `blockers` (coverage/consistency mismatches, phase/yaml disagreement) — these are what to resolve before advancing.
+- **Blockers:** surface `blockers` (coverage/consistency mismatches, phase/yaml disagreement, the `voice` blocker, scenes waiting on the `gate`) — these are what to resolve before advancing.
 
 Then add the context the verdict doesn't carry:
 
@@ -341,7 +352,7 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 
 | Command | Requires |
 |---|---|
-| `storyforge write` | Scene data (`reference/scenes.csv`) with at least one scene, `reference/voice-guide.md` |
+| `storyforge write` | Scene data (`reference/scenes.csv`) with at least one scene; a voice guide with the author's text (no `voice` blocker in `storyforge status`; `write` refuses a missing, template or empty one) |
 | `storyforge evaluate` | At least some scene files (`.md`) in `scenes/` |
 | Revision planning (`revise` skill) | Evaluation results in `working/evaluations/`, or scores |
 | `storyforge revise` | Revision plan for the current pipeline cycle (from `working/pipeline.csv`) |

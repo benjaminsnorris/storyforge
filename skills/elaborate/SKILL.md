@@ -118,7 +118,7 @@ When the author doesn't specify a mode, detect the current stage from Step 2 and
 | Spine done (5-10 rows, function only) | Run architecture |
 | Architecture done (has value_shift) | Run scene map |
 | Map done (has characters, on_stage) | Run briefs |
-| Briefs done, `storyforge status` next.stage = `voice` (voice-guide.md missing or init's template) | Run the Voice Stage |
+| Briefs done, `storyforge status` has a `voice` blocker (next.stage `voice`, or then.stage `voice` behind a gate `check`: the voice guide is missing, init's template, empty, unreadable, or only persistent-prompt.md) | Run the Voice Stage |
 | Briefs done, validation passes | Announce ready for drafting, redirect to forge |
 | Drafted with validation failures > 0 | Run gap-fill |
 | Everything passes | Redirect to forge |
@@ -340,13 +340,13 @@ Reference images upload alongside the prompt, labeled by role: **Image 1** chara
 
 ### Voice Stage (Interactive)
 
-Voice development typically happens after architecture (you know your POV characters and scene types) and before briefs (the briefs need voice rules). Can also run standalone at any point. Drafting needs it: while `reference/voice-guide.md` is missing or still init's template, `storyforge status` names `voice` as the next stage instead of `write`. Unattended, `./storyforge elaborate --stage voice` writes `reference/voice-guide.md` and `reference/voice-profile.csv` in one call; it advances no phase.
+Voice development typically happens after architecture (you know your POV characters and scene types) and before briefs (the briefs need voice rules). Can also run standalone at any point. Drafting needs it: while the voice guide is missing, still init's template, empty, unreadable, or only `reference/persistent-prompt.md` (which the brief-based prompt doesn't read), `storyforge status` has a `voice` blocker and names `voice` as the stage before drafting, and `storyforge write` refuses to draft. Unattended, `./storyforge elaborate --stage voice` writes `reference/voice-guide.md` and `reference/voice-profile.csv` in one call; it advances no phase.
 
 Every CLI stage sets `exists: true` and `updated` on the `storyforge.yaml` artifacts it writes (story architecture, bibles, voice guide, scene index).
 
 1. Read existing reference materials (character bible for voice fingerprints, story architecture for tone)
-2. If voice guide doesn't exist: explore the author's influences, genre voice expectations, POV rules, prose register. Build `reference/voice-guide.md` through conversation.
-3. If voice guide exists: refine it. Test against sample scenes. Develop POV-specific rules. Identify areas where voice drifts.
+2. If the voice guide doesn't exist, or is still init's template (it starts `# [Title] -- Voice Guide`; `storyforge status` shows a `voice` blocker): explore the author's influences, genre voice expectations, POV rules, prose register. Build `reference/voice-guide.md` through conversation, replacing the template; its bracketed placeholders are not the author's choices.
+3. If the voice guide has the author's text: refine it. Test against sample scenes. Develop POV-specific rules. Identify areas where voice drifts.
    - **The narrator.** When scenes have `pov` `narrator` (the book's narrator tells them, through no character's eyes), or key-decisions.md says `narrator_pov: limited N`, the voice guide defines the narrator like a POV character: who they are (an omniscient voice, a bard, a later teller, a character looking back) and their stance (how far into minds they see, whether they judge, foreshadow or address the reader, how close they stand to the action), with a `narrator` row in `voice-profile.csv`. An adaptation's narrator is the novel's, not the translator's.
 4. For each POV character, define: their unique speech patterns, what metaphors they reach for, what they notice first, what they never say, their sentence rhythm.
 5. Commit: `git add -A && git commit -m "Elaborate: voice guide" && git push`
