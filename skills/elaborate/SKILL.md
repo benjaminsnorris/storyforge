@@ -59,7 +59,7 @@ Read all registry files in `reference/` to know the canonical IDs for normalized
 | `knowledge_in`, `knowledge_out` | commitments.csv, `type` `knowledge` |
 | `physical_state_in`, `physical_state_out` | commitments.csv, `type` `physical` |
 | `motifs` | motif-taxonomy.csv |
-| `mice_threads` | mice-threads.csv (format: `+type:id` or `-type:id`) |
+| `mice_threads` | mice-threads.csv (`+id` where the thread opens, `-id` where it closes, bare `id` where a scene mentions it) |
 
 **When the author introduces a new character, location, value, knowledge fact, motif, or MICE thread that does not exist in a registry:** add it to the appropriate registry CSV first, then use the new ID in scene data.
 

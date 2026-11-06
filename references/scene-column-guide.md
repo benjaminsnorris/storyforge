@@ -91,7 +91,7 @@ This document explains **why** each column in the scene CSV files matters and **
 
 ### mice_threads — MICE Thread Operations
 **Why it matters:** MICE threads (Milieu, Inquiry, Character, Event) track the reader's open questions and spatial sense. Notation: +name where the thread begins (once), -name where it resolves (at most once), bare name where a scene advances or touches an open thread. Kowal suggests same-type threads close in reverse order of opening, like parentheses; Storyforge treats that as guidance, since literary novels interleave threads deliberately.
-**How to check:** Run validation: it reports threads opened or closed more than once, closes with no open, and (descriptively) where threads interleave. None of these block.
+**How to check:** Run validation: it reports threads opened or closed more than once, closes with no open, and (descriptively) where threads interleave. None of these block. A bare name must be a registered thread (id, name or alias). A mention before the open (foreshadowing) or after the close (an echo) is allowed; dormancy counts only the stretch between open and close.
 **How to improve:** If same-type nesting is wrong, determine which thread should close first. Sometimes the fix is reordering scenes; sometimes it's adding a brief resolution beat.
 
 ---
