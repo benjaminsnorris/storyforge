@@ -59,6 +59,16 @@ def _no_live_api(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_stale_log_file(monkeypatch):
+    """A command's main() points `common._log_file` into its project's
+    working/logs; once the test's tmp dir is gone, a later test's `log()`
+    would write into a deleted directory. Every test starts and ends with
+    no log file (monkeypatch restores None on teardown)."""
+    import storyforge.common as common
+    monkeypatch.setattr(common, '_log_file', None)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_fallback_replies(monkeypatch):
     """api records refusal-fallback replies per process; keep them per test."""
     import storyforge.api as api
