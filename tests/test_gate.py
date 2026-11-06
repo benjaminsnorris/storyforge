@@ -2537,6 +2537,59 @@ class TestSteadyParagraphs:
         assert old['tarrens-hollow']['id'] not in ids
         assert [st for st, _ in result.held_back] == [old['tarrens-hollow']['statement']]
 
+    # #599 (Telemachy pilot): `check --pending`'s re-checks read prose that
+    # hasn't changed, and extraction quoted another sentence for a fact the
+    # scene already had; the ledger was then written with an id on two rows
+    LIVES = 'Four hundred and twelve people going about their lives'
+
+    def _recheck_ok(self, project_dir, result):
+        assert result.committed
+        assert ledger.file_problems(ledger.ledger_path(project_dir)) == []
+
+    def test_a_commit_that_would_repeat_an_id_writes_nothing(
+            self, project_dir, tmp_path, monkeypatch):
+        """Whatever slips past the ids, the ledger is never written as one
+        the next command can't load: the gate stops, nothing written."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        path = ledger.ledger_path(project_dir)
+        before = open(path, encoding='utf-8').read()
+
+        def collide(proposed, old_rows, *_):
+            for p in proposed:
+                p['id'] = old_rows[0]['id']
+        monkeypatch.setattr(gate, '_carry_ids', collide)
+        with pytest.raises(GateError, match='not written .*is also on line'):
+            _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                          self._temple()], command='recheck')
+        assert open(path, encoding='utf-8').read() == before
+
+    def test_a_recheck_that_would_repeat_an_id_is_listed_failed(
+            self, project_dir, tmp_path, monkeypatch):
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        path = ledger.ledger_path(project_dir)
+        before = open(path, encoding='utf-8').read()
+        gate.mark_pending(project_dir, SCENE, gate.RECHECK, 're-check: x changed 1 fact(s)')
+
+        def collide(proposed, old_rows, *_):
+            for p in proposed:
+                p['id'] = old_rows[0]['id']
+        monkeypatch.setattr(gate, '_carry_ids', collide)
+
+        def fake(path, body, **k):
+            if 'tools' in body:
+                return _text({'findings': [], 'kept': []})
+            return _text({'commitments': [_commitment(subject='tarrens-hollow'),
+                                          self._temple()]})
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+            run = gate.recheck_pending(project_dir, log_dir=str(tmp_path / 'rc'),
+                                       extract_model='m', check_model='m')
+        assert run.failed == SCENE and 'is also on line' in run.why
+        assert gate.pending(project_dir)[SCENE]['command'] == gate.RECHECK_FAILED
+        assert open(path, encoding='utf-8').read() == before
+        ledger.load(project_dir)   # the next command can read it
+
     def test_a_moved_paragraph_is_not_steady(self):
         earlier = 'One para here.\n\nTwo para here.\n\nThree para here.'
         assert gate.steady_paragraphs(earlier, earlier) == {0, 1, 2}

@@ -744,6 +744,37 @@ class TestFileProblems:
     def test_the_fixture_has_none(self, project_dir):
         assert ledger.file_problems(ledger.ledger_path(project_dir)) == []
 
+    @pytest.mark.parametrize('ids, needle', [
+        (['a', 'a'], "id 'a' is also on line"),
+        ([''], 'no id'),
+        (['a '], "id 'a ' has surrounding whitespace"),
+    ])
+    def test_save_never_writes_a_ledger_load_refuses(self, project_dir, ids, needle):
+        """#599: a re-check wrote an id on two rows, and every later command
+        then stopped. The write is refused instead, and nothing written."""
+        from storyforge import audit
+        path = ledger.ledger_path(project_dir)
+        rows = ledger.load(project_dir)
+        before = open(path, encoding='utf-8').read()
+        log = os.path.join(project_dir, audit.LOG_PATH)
+        logged = open(log, encoding='utf-8').read() if os.path.isfile(log) else None
+        extra = [dict(rows[0], id=rid, statement=f'fact {n}') for n, rid in enumerate(ids)]
+        with pytest.raises(ledger.LedgerError, match='not written \\(test\\)'):
+            ledger.save(project_dir, rows + extra, command='test')
+        with pytest.raises(ledger.LedgerError, match=needle):
+            ledger.save(project_dir, rows + extra, command='test')
+        assert open(path, encoding='utf-8').read() == before
+        assert (open(log, encoding='utf-8').read() if os.path.isfile(log) else None) == logged
+        ledger.load(project_dir)
+
+    def test_a_row_that_would_break_the_file_writes_nothing(self, tmp_path):
+        path = str(tmp_path / 'commitments.csv')
+        write_ledger(path, [_row('a')])
+        before = open(path, encoding='utf-8').read()
+        with pytest.raises(ValueError):
+            write_ledger(path, [_row('a'), _row('b|c')])
+        assert open(path, encoding='utf-8').read() == before
+
 
 class TestCommitmentsAndRegistry:
     """Gate rows are commitments by `introduced_by` (the design note,

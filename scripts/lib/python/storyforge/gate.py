@@ -1367,7 +1367,10 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
         result.dangling = [f'{r["id"]} → {ref}' for r in rows if not ledger.is_commitment(r)
                            for col in ('supersedes', 'depends_on')
                            for ref in ledger._split(r.get(col, '')) if ref in removed]
-    ledger.save(project_dir, new, command=command)
+    try:
+        ledger.save(project_dir, new, command=command)
+    except ledger.LedgerError as e:   # #599: never a ledger the next command can't load
+        raise GateError(f'{scene_id}: {e}') from e
     result.committed = True
     note = record_prose(project_dir, scene_id, prose)
     if note:

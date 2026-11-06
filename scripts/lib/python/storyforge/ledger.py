@@ -96,6 +96,11 @@ def file_problems(path: str) -> list[str]:
     if not os.path.isfile(path):
         return []
     lines, _ = _raw_lines(path)
+    return _line_problems(lines)
+
+
+def _line_problems(lines: list[str]) -> list[str]:
+    """`file_problems` of a ledger's lines, the header first."""
     if not lines:
         return []
     problems = []
@@ -288,15 +293,27 @@ def save_to(ref_dir: str, rows: list[dict[str, str]], *, command: str) -> None:
     and the ledger write stands (`storyforge.audit` says why). A change made
     on disk since the last logged write (by hand) is logged first, as
     `command=hand-edit`, from the snapshot `audit` keeps.
+
+    Raises:
+        LedgerError: `rows` would make a ledger `load` refuses (two rows with
+            one id, a blank id: `file_problems`); nothing is written (#599).
+        ValueError: a cell would break its row (`write_ledger`); nothing is
+            written.
     """
     from storyforge import audit
     path = os.path.join(ref_dir, LEDGER_FILE)
     project_dir = audit.project_of(ref_dir)
+    # #599: a ledger the next command can't load is never written
+    lines = _ledger_lines(rows)
+    problems = _line_problems(lines)
+    if problems:
+        raise LedgerError(f'reference/{LEDGER_FILE} not written ({command}): it would '
+                          f'have had ' + '; '.join(problems))
     with _SAVE_LOCK:
         old = read_ledger(path) if os.path.isfile(path) else []
         # What changed on disk since the last logged write was not this writer
         audit.log_hand_edits(project_dir, old)
-        write_ledger(path, rows)
+        _write_lines(path, lines)
         written = read_ledger(path)
         audit.record(project_dir, old, written, command=command)
         audit.write_snapshot(project_dir, written)
@@ -350,12 +367,20 @@ def read_ledger(path: str) -> list[dict[str, str]]:
 
 
 def write_ledger(path: str, rows: list[dict[str, str]]) -> None:
-    """Write the ledger: COLUMNS order, LF, one physical line per row."""
+    """Write the ledger: COLUMNS order, LF, one physical line per row. A
+    cell that would break its row raises before anything is written."""
+    _write_lines(path, _ledger_lines(rows))
+
+
+def _ledger_lines(rows: list[dict[str, str]]) -> list[str]:
+    """The lines `write_ledger` writes for `rows`, the header first."""
+    return ['|'.join(COLUMNS)] + ['|'.join(_cell(row, c) for c in COLUMNS) for row in rows]
+
+
+def _write_lines(path: str, lines: list[str]) -> None:
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     with open(path, 'w', newline='', encoding='utf-8') as f:
-        f.write('|'.join(COLUMNS) + '\n')
-        for row in rows:
-            f.write('|'.join(_cell(row, c) for c in COLUMNS) + '\n')
+        f.write(''.join(line + '\n' for line in lines))
 
 
 def _cell(row: dict, column: str) -> str:
