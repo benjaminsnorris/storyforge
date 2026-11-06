@@ -1659,42 +1659,52 @@ def cleanup_mice_threads(ref_dir: str) -> list[dict]:
 
     Returns a list of fixes applied.
     """
+    from . import mice
     from .elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
 
     intent_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
     scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
     sorted_ids = sorted(scenes_map.keys(),
                         key=lambda s: int(scenes_map[s].get('seq', 0)))
+    registry = mice.registry_for(ref_dir)
 
     fixes = []
     open_threads = set()
 
     for sid in sorted_ids:
         intent = intent_map.get(sid, {})
-        mice = intent.get('mice_threads', '').strip()
-        if not mice:
+        value = intent.get('mice_threads', '').strip()
+        if not value:
             continue
 
         new_entries = []
-        for entry in (e.strip() for e in mice.split(';') if e.strip()):
-            thread_name = entry.lstrip('+-')
-            if entry.startswith('+') and thread_name in open_threads:
-                new_entries.append(thread_name)
+        for r in mice.resolve(value, registry):
+            entry = r.entry.raw
+            # The thread as validate resolves it, so `+inquiry:x` and a
+            # later `+x` (or an alias) are one thread; an entry that names
+            # no thread (an invalid type, prose) is keyed by its own name,
+            # never by its text with the operator, so its close still
+            # clears its open (#272)
+            thread = r.thread or r.entry.name.lower()
+            op = r.kind
+            if op is mice.Kind.OPEN and thread and thread in open_threads:
+                mention = entry[1:].strip()
+                new_entries.append(mention)
                 fixes.append({
                     'scene_id': sid,
                     'field': 'mice_threads',
                     'old_value': entry,
-                    'new_value': f'{thread_name} (already open: mention)',
+                    'new_value': f'{mention} (already open: mention)',
                 })
                 continue
-            if entry.startswith('+'):
-                open_threads.add(thread_name)
-            elif entry.startswith('-'):
-                open_threads.discard(thread_name)
+            if op is mice.Kind.OPEN and thread:
+                open_threads.add(thread)
+            elif op is mice.Kind.CLOSE:
+                open_threads.discard(thread)
             new_entries.append(entry)
 
         new_value = ';'.join(dict.fromkeys(new_entries))
-        if new_value != mice:
+        if new_value != value:
             intent_map[sid]['mice_threads'] = new_value
 
     if fixes:

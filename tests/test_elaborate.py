@@ -229,7 +229,7 @@ class TestValidateStructure:
         interleaving = [c for c in thread_checks if c['check'] == 'mice-interleaving']
         assert len(interleaving) == 1
         assert interleaving[0]['severity'] == 'advisory'
-        assert 'inquiry:inner-question' in interleaving[0]['message']
+        assert "'inner-question'" in interleaving[0]['message']
         assert not [c for c in report['failures'] if c['category'] == 'threads'
                     and c.get('severity', 'blocking') != 'advisory']
 

@@ -198,20 +198,20 @@ def _seed_mice_threads(ref_dir: str, dry_run: bool) -> str:
             return f'mice-threads.csv:skip:already exists ({len(existing)-1} entries)'
 
     _, intent_rows = _read_csv(os.path.join(ref_dir, 'scene-intent.csv'))
+    from storyforge import mice
     threads = {}  # name -> type
     for r in intent_rows:
-        mice = r.get('mice_threads', '').strip()
-        if not mice:
-            continue
-        for entry in mice.split(';'):
-            entry = entry.strip()
-            if len(entry) > 1 and entry[0] in ('+', '-') and ':' in entry[1:]:
-                rest = entry[1:]
-                type_part, _, name_part = rest.partition(':')
-                type_part = type_part.strip().lower()
-                name_part = name_part.strip()
-                if name_part and name_part not in threads:
-                    threads[name_part] = type_part
+        # An old-format open or close (`+type:name`) names a thread and its
+        # type (mice.parse, the one reader of entries); a mention, or an
+        # entry with no type, says nothing to seed from
+        for e in mice.entries(r.get('mice_threads', '')):
+            if e.kind is mice.Kind.MENTION or not e.name or not e.typed:
+                continue
+            if e.type not in mice.VALID_TYPES:
+                log(f'WARNING: mice-threads.csv: not seeding from {r.get("id", "")}: '
+                    f'"{e.raw}" (unknown type "{e.type}")')
+                continue
+            threads.setdefault(e.name, e.type)
 
     if threads and not dry_run:
         rows = []
@@ -357,7 +357,7 @@ def step6_validate(ref_dir: str, project_dir: str) -> str:
                 elif e['constraint'] == 'scene_ids':
                     unresolved = ', '.join(e.get('unresolved', []))
                     lines.append(f'    {e["row"]} | {e["column"]}: "{unresolved}" — not in scenes.csv')
-                elif e['constraint'] == 'ledger':
+                elif e['constraint'] in ('ledger', 'mice-registry'):
                     lines.append(f'    {e["reason"]}')
 
     return '\n'.join(lines)

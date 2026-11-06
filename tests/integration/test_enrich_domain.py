@@ -1,7 +1,7 @@
 """Tests for storyforge.enrich — metadata enrichment library functions.
 
 Covers: parse_enrich_response, load_alias_map, strip_parentheticals,
-normalize_aliases, load_mice_registry, normalize_mice_threads,
+normalize_aliases, mice.load_registry, normalize_mice_threads,
 format_registries_for_prompt, load_registry_alias_maps, normalize_fields,
 validate_type, validate_time_of_day, update_csv_field, apply_enrich_result,
 build_enrich_prompt, enrich_and_apply, _field_instruction, constants.
@@ -13,18 +13,17 @@ import shutil
 import pytest
 
 from storyforge.schema import VALID_TIMES  # enrich's own copy is gone (#488)
+from storyforge import mice
 from storyforge.enrich import (
     METADATA_FIELDS,
     INTENT_FIELDS,
     BRIEFS_FIELDS,
     ALL_FIELDS,
     VALID_TYPES,
-    VALID_MICE_TYPES,
     parse_enrich_response,
     load_alias_map,
     strip_parentheticals,
     normalize_aliases,
-    load_mice_registry,
     normalize_mice_threads,
     format_registries_for_prompt,
     load_registry_alias_maps,
@@ -270,29 +269,38 @@ class TestNormalizeAliases:
 
 
 # ============================================================================
-# load_mice_registry
+# mice.load_registry
 # ============================================================================
 
 class TestLoadMiceRegistry:
     def test_loads_from_fixture(self, project_dir):
         csv_path = os.path.join(project_dir, 'reference', 'mice-threads.csv')
-        alias_map, type_map = load_mice_registry(csv_path)
-        assert alias_map['map anomaly'] == 'map-anomaly'
-        assert alias_map['the map anomaly'] == 'map-anomaly'
-        assert type_map['map-anomaly'] == 'inquiry'
-        assert type_map['uncharted-reaches'] == 'milieu'
+        reg = mice.load_registry(csv_path)
+        assert reg.lookup['map anomaly'] == 'map-anomaly'
+        assert reg.lookup['the map anomaly'] == 'map-anomaly'
+        assert reg.types['map-anomaly'] == 'inquiry'
+        assert reg.types['uncharted-reaches'] == 'milieu'
+        assert reg.findings() == []
 
     def test_missing_file_returns_empty(self):
-        alias_map, type_map = load_mice_registry('/nonexistent.csv')
-        assert alias_map == {}
-        assert type_map == {}
+        reg = mice.load_registry('/nonexistent.csv')
+        assert reg.lookup == {} and reg.types == {}
+        assert not reg.present and not reg.checked
 
-    def test_no_name_column_returns_empty(self, tmp_path):
+    def test_no_name_column_reads_ids_and_says_so(self, tmp_path):
+        """SF-6: it was read as no registry at all, silently."""
         csv = tmp_path / 'bad.csv'
         csv.write_text('id|title|type\na|b|inquiry\n')
-        alias_map, type_map = load_mice_registry(str(csv))
-        assert alias_map == {}
-        assert type_map == {}
+        reg = mice.load_registry(str(csv))
+        assert reg.lookup['a'] == 'a' and reg.types == {'a': 'inquiry'}
+        assert any('no name column' in p for p in reg.findings())
+
+    def test_no_id_or_name_column_is_reported(self, tmp_path):
+        csv = tmp_path / 'bad.csv'
+        csv.write_text('title|type\nb|inquiry\n')
+        reg = mice.load_registry(str(csv))
+        assert not reg.checked
+        assert any('neither an id nor a name column' in p for p in reg.findings())
 
 
 # ============================================================================

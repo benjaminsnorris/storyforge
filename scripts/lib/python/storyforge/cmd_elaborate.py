@@ -135,14 +135,43 @@ def _run_mice_fill(project_dir: str, ref_dir: str, dry_run: bool,
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)
 
+    from storyforge import mice
     from storyforge.hone import detect_mice_dormancy, build_mice_fill_prompt, parse_mice_fill_response
     from storyforge.elaborate import _read_csv_as_map, _read_csv, _write_csv, _FILE_MAP, get_scene
     from storyforge.api import invoke_to_file, extract_text_from_file
 
+    def fillable(report, say: bool):
+        """The gaps mice-fill may fill. A thread with entries dormancy could
+        not read is left out: its gaps may exist only because those entries
+        were skipped (#272). Everything not read is said when ``say``."""
+        if say:
+            for line in report.warnings():
+                log(f'WARNING: {line}')
+        out = []
+        for g in report.gaps:
+            if g['thread_id'] in report.suspect:
+                if say:
+                    log(f'WARNING: not filling {g["thread_id"]} '
+                        f'({g["before_scene"]}..{g["after_scene"]}): it has entries '
+                        f'validate rejects ({"; ".join(report.suspect[g["thread_id"]])}); '
+                        f'fix them and run mice-fill again')
+            elif not registry.mention_for(g['thread_id']):
+                if say:
+                    log(f'WARNING: not filling {g["thread_id"]}: no name in '
+                        f'{mice.REGISTRY_FILE} names it alone')
+            else:
+                out.append(g)
+        return out
+
     # Initial detection
-    gaps = detect_mice_dormancy(ref_dir)
+    registry = mice.registry_for(ref_dir)
+    report = detect_mice_dormancy(ref_dir)
+    gaps = fillable(report, say=True)
+    if report.unchecked:
+        return
     if not gaps:
-        log('No MICE dormancy gaps found.')
+        log('No MICE dormancy gaps to fill.' if report.gaps or report.skipped
+            else 'No MICE dormancy gaps found.')
         return
 
     if dry_run:
@@ -162,7 +191,7 @@ def _run_mice_fill(project_dir: str, ref_dir: str, dry_run: bool,
     baseline_gaps = len(gaps)
 
     for pass_num in range(1, max_passes + 1):
-        gaps = detect_mice_dormancy(ref_dir)
+        gaps = fillable(detect_mice_dormancy(ref_dir), say=False)
         gap_count = len(gaps)
 
         if gap_count == 0:
@@ -207,18 +236,18 @@ def _run_mice_fill(project_dir: str, ref_dir: str, dry_run: bool,
                 log(f'  {gap["thread_id"]}: no scenes recommended')
                 continue
 
-            # Use bare thread name (without type: prefix) to match existing intent format
-            bare_id = gap['thread_id']
-            if ':' in bare_id:
-                bare_id = bare_id.split(':', 1)[1]
+            # A bare mention, by the shortest name that names this thread
+            # alone (the bare name of a type-prefixed id, unless shared)
+            mention = registry.mention_for(gap['thread_id'])
 
             for sid in scene_ids:
                 if sid not in intent_map:
                     continue
                 current = intent_map[sid].get('mice_threads', '').strip()
                 entries = [e.strip() for e in current.split(';') if e.strip()] if current else []
-                if bare_id not in entries:
-                    entries.append(bare_id)
+                if not any(r.thread == gap['thread_id']
+                           for r in mice.resolve(current, registry)):
+                    entries.append(mention)
                     intent_map[sid]['mice_threads'] = ';'.join(entries)
                     pass_mentions += 1
 
@@ -243,11 +272,16 @@ def _run_mice_fill(project_dir: str, ref_dir: str, dry_run: bool,
         log(f'\n  Reached max passes ({max_passes})')
 
     # Final summary
-    final_gaps = len(detect_mice_dormancy(ref_dir))
+    final = detect_mice_dormancy(ref_dir)
+    final_gaps = len(final.gaps)
+    unfilled = final_gaps - len(fillable(final, say=False))
     log(f'\nMICE dormancy fill complete.')
     log(f'  Before: {baseline_gaps} gaps')
     log(f'  After:  {final_gaps} gaps')
     log(f'  Total mentions added: {grand_total} across {pass_num} passes')
+    if unfilled:
+        log(f'  WARNING: {unfilled} gap(s) left unfilled: their threads have entries '
+            f'validate rejects, or no name that names them alone (see above)')
 
 
 # ============================================================================

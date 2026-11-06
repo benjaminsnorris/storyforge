@@ -12,6 +12,7 @@ Each domain follows: detect → prompt → apply → commit.
 import csv
 import os
 import re
+from typing import NamedTuple
 
 from storyforge.brief_names import REWRITTEN_FILES
 from storyforge.narrator import NARRATOR_POV, is_narrator
@@ -20,10 +21,10 @@ from storyforge.common import log, reference_text
 from storyforge.elaborate import (
     _read_csv, _read_csv_as_map, _write_csv, _FILE_MAP, DELIMITER,
 )
+from storyforge import mice
 from storyforge.enrich import (
-    is_placeholder, load_alias_map, load_mice_registry, normalize_aliases,
-    normalize_mice_threads, reduce_boolean, split_mice_entries,
-    strip_parentheticals, strip_placeholders,
+    is_placeholder, load_alias_map, normalize_aliases, normalize_mice_threads,
+    reduce_boolean, strip_parentheticals, strip_placeholders,
 )
 
 # ============================================================================
@@ -200,23 +201,11 @@ def _collect_physical_state_chain(ref_dir: str) -> list[tuple[str, str, str, str
     return chain
 
 
-def _split_mice(entry: str) -> tuple[str, str, str]:
-    """``+inquiry:who-is-gatsby`` → ``('+', 'inquiry', 'who-is-gatsby')``."""
-    entry = entry.strip()
-    prefix = ''
-    if len(entry) > 1 and entry[0] in '+-':
-        prefix, entry = entry[0], entry[1:]
-    type_part, sep, name = entry.partition(':')
-    if not sep:
-        return prefix, '', entry.strip()
-    return prefix, type_part.strip().lower(), name.strip()
-
-
 def _split_entries(domain: str, value: str) -> list[str]:
     """A target field's entries. MICE entries may be comma-joined (see
-    :func:`split_mice_entries`)."""
+    :func:`mice.split`)."""
     if domain == 'mice-threads':
-        return split_mice_entries(value)
+        return mice.split(value)
     return (value or '').split(';')
 
 
@@ -225,8 +214,8 @@ def _reference_key(domain: str, part: str) -> tuple[str, str, str] | None:
     None for an empty entry or a placeholder. Mirrors the lookups in
     :func:`normalize_aliases` and :func:`normalize_mice_threads`."""
     if domain == 'mice-threads':
-        _prefix, type_hint, name = _split_mice(part)
-        return (name.lower(), name, type_hint) if name else None
+        e = mice.parse(part)
+        return (e.name.lower(), e.name, e.type) if e.name else None
     if domain in _PLACEHOLDER_DOMAINS and is_placeholder(part):
         return None
     text = strip_parentheticals(part.strip())
@@ -243,9 +232,9 @@ def _registry_lookup(domain: str, ref_dir: str) -> dict[str, str]:
         from storyforge import ledger
         return ledger.alias_map(read_registry(ref_dir, domain))
     if domain == 'mice-threads':
-        lookup = load_mice_registry(path)[0]
-    else:
-        lookup = load_alias_map(path)
+        # Ids, names and aliases, a shared key left out (mice.Registry)
+        return dict(mice.registry_for(ref_dir).lookup)
+    lookup = load_alias_map(path)
     for row in _read_csv(path):
         if row.get('id'):
             lookup.setdefault(row['id'].lower(), row['id'])
@@ -256,6 +245,7 @@ def _unresolved_references(domain: str, ref_dir: str) -> dict[str, dict]:
     """Target-field references the registry does not resolve, in scene order:
     ``{key: {'key', 'text', 'type', 'scenes'}}``."""
     lookup = _registry_lookup(domain, ref_dir)
+    shared = mice.registry_for(ref_dir).ambiguous if domain == 'mice-threads' else {}
     order = {sid: i for i, sid in enumerate(_scene_order(ref_dir))}
     found: dict[str, dict] = {}
     for filename, columns in _DOMAIN_TARGETS[domain]:
@@ -269,6 +259,12 @@ def _unresolved_references(domain: str, ref_dir: str) -> dict[str, dict]:
                 for part in _split_entries(domain, row.get(col)):
                     ref = _reference_key(domain, part)
                     if not ref or ref[0] in lookup:
+                        continue
+                    if domain == 'mice-threads' and (
+                            mice.lookup_thread(lookup, mice.parse(part))
+                            or ref[0] in shared):
+                        # Named by type:name, or a name two threads share
+                        # (a collision, reported as one): not missing
                         continue
                     entry = found.setdefault(ref[0], {'key': ref[0], 'text': ref[1],
                                                       'type': ref[2], 'scenes': []})
@@ -292,6 +288,9 @@ def find_alias_collisions(domain: str, ref_dir: str) -> dict[str, list[str]]:
     :func:`load_alias_map` keeps whichever entry comes last, so a collision
     silently routes references to the wrong entry.
     """
+    if domain == 'mice-threads':
+        # Includes the bare name of a type-prefixed id (mice.Registry)
+        return dict(sorted(mice.registry_for(ref_dir).ambiguous.items()))
     owners: dict[str, set[str]] = {}
     for row in read_registry(ref_dir, domain):
         entry_id = row.get('id', '')
@@ -403,12 +402,10 @@ def apply_registry_normalization(
     registry_path = os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain])
 
     # Load alias map (and type map for MICE)
-    if domain == 'mice-threads':
-        alias_map, type_map = load_mice_registry(registry_path)
-    else:
-        alias_map = _registry_lookup(domain, ref_dir)
-        type_map = None
+    alias_map = _registry_lookup(domain, ref_dir)
+    if domain != 'mice-threads':
         # A shared alias names no single entry: never normalize through it
+        # (mice.Registry leaves shared keys out of its lookup itself)
         if domain != 'physical-states':
             for alias in find_alias_collisions(domain, ref_dir):
                 alias_map.pop(alias, None)
@@ -437,7 +434,7 @@ def apply_registry_normalization(
                     # The reserved narrator, never a registry entry (#555)
                     new_val = NARRATOR_POV
                 elif domain == 'mice-threads' and col == 'mice_threads':
-                    new_val = normalize_mice_threads(old_val, alias_map, type_map)
+                    new_val = normalize_mice_threads(old_val, alias_map)
                 elif domain in _PLACEHOLDER_DOMAINS:
                     new_val = normalize_aliases(alias_map, strip_placeholders(old_val))
                 else:
@@ -679,7 +676,7 @@ def _rewrite_targets(domain: str, ref_dir: str, mapping: dict[str, list[str]]) -
                     if ids is None or (col in _SINGLE_VALUE_COLUMNS and len(ids) != 1):
                         out.append(part.strip())
                     elif domain == 'mice-threads':
-                        prefix = _split_mice(part)[0]
+                        prefix = mice.parse(part).kind.value
                         out += [prefix + i for i in ids]
                     else:
                         out += ids
@@ -843,15 +840,18 @@ def _report_remaining(domain: str, ref_dir: str, skipped: list[str]) -> int:
 # MICE operations: one open and at most one close per thread
 # ============================================================================
 
-def _mice_timelines(ref_dir: str) -> dict[str, list[tuple[str, str]]]:
-    """Thread id → [(scene_id, '+' | '-' | ''), ...] in scene order."""
+def _mice_timelines(ref_dir: str) -> dict[str, list[tuple[str, mice.Kind]]]:
+    """Thread → [(scene_id, kind), ...] in scene order. A thread is what
+    :func:`mice.check` reads (the canonical id, or the lower-cased name of
+    a thread the registry lacks); an entry naming no thread is left to
+    validate, which reports it."""
     intent = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
-    timelines: dict[str, list[tuple[str, str]]] = {}
+    registry = mice.registry_for(ref_dir)
+    timelines: dict[str, list[tuple[str, mice.Kind]]] = {}
     for sid in _scene_order(ref_dir):
-        for entry in _split_entries('mice-threads', intent.get(sid, {}).get('mice_threads')):
-            prefix, _type, name = _split_mice(entry)
-            if name:
-                timelines.setdefault(name, []).append((sid, prefix))
+        for r in mice.resolve(intent.get(sid, {}).get('mice_threads'), registry):
+            if r.thread:
+                timelines.setdefault(r.thread, []).append((sid, r.kind))
     return timelines
 
 
@@ -865,10 +865,12 @@ def find_mice_anomalies(ref_dir: str) -> list[str]:
     them would re-ask the same question on every run."""
     anomalous = []
     for thread, timeline in _mice_timelines(ref_dir).items():
-        ops = [op for _sid, op in timeline if op]
-        if (ops.count('+') > 1 or ops.count('-') > 1
-                or ('-' in ops and ('+' not in ops or ops.index('-') < ops.index('+')))
-                or (timeline and '+' not in ops)):
+        ops = [op for _sid, op in timeline if op is not mice.Kind.MENTION]
+        opens, closes = ops.count(mice.Kind.OPEN), ops.count(mice.Kind.CLOSE)
+        if (opens > 1 or closes > 1
+                or (closes and (not opens or ops.index(mice.Kind.CLOSE)
+                                < ops.index(mice.Kind.OPEN)))
+                or (timeline and not opens)):
             anomalous.append(thread)
     return anomalous
 
@@ -882,7 +884,7 @@ def build_mice_operations_prompt(ref_dir: str, threads: list[str]) -> str:
     for thread in threads:
         entry = registry.get(thread, {})
         head = f'### {thread}' + (f' — {entry.get("name", "")} ({entry.get("type", "")})' if entry else '')
-        lines = [f'  {sid}: {op or "mention"}    [function: {functions.get(sid, "")}]'
+        lines = [f'  {sid}: {op.value or "mention"}    [function: {functions.get(sid, "")}]'
                  for sid, op in timelines.get(thread, [])]
         blocks.append(head + '\n' + '\n'.join(lines))
     return f"""These MICE threads in a novel are opened more than once, closed more than once, closed before they open, or never opened. Each is listed with every scene that touches it, in scene order, with the operation the scene currently records (+ open, - close, or a mention) and the scene's function.
@@ -931,19 +933,19 @@ def apply_mice_operations(ref_dir: str, decisions: dict[str, tuple[str, str]]) -
         return 0
     path = os.path.join(ref_dir, 'scene-intent.csv')
     rows = _read_csv(path)
+    registry = mice.registry_for(ref_dir)
     changed = 0
     for row in rows:
         old_val = row.get('mice_threads') or ''
         out = []
-        for entry in _split_entries('mice-threads', old_val):
-            if not entry.strip():
+        for r in mice.resolve(old_val, registry):
+            if r.thread not in decisions:
+                out.append(r.entry.raw)
                 continue
-            _prefix, _type, name = _split_mice(entry)
-            if name not in decisions:
-                out.append(entry.strip())
-                continue
-            open_sid, close_sid = decisions[name]
-            ops = [op for op, sid in (('+', open_sid), ('-', close_sid)) if sid == row.get('id')]
+            name = registry.mention_for(r.thread) or r.entry.name
+            open_sid, close_sid = decisions[r.thread]
+            ops = [k.value for k, sid in ((mice.Kind.OPEN, open_sid), (mice.Kind.CLOSE, close_sid))
+                   if sid == row.get('id')]
             out += [op + name for op in ops] or [name]
         new_val = ';'.join(dict.fromkeys(out))
         if new_val != old_val:
@@ -1072,7 +1074,11 @@ def reconcile_domain(
     if domain == 'mice-threads':
         # Repeated opens of an already-open thread are mentions
         from storyforge.extract import cleanup_mice_threads
-        fields_normalized += len(cleanup_mice_threads(ref_dir))
+        reopened = cleanup_mice_threads(ref_dir)
+        for fix in reopened:
+            log(f'  mice-threads: {fix["scene_id"]}: "{fix["old_value"]}" -> '
+                f'{fix["new_value"]}')
+        fields_normalized += len(reopened)
         ops_changed, ops_calls = reconcile_mice_operations(ref_dir, model, log_dir)
         fields_normalized += ops_changed
         calls += ops_calls
@@ -2939,27 +2945,61 @@ def propagate_physical_states(ref_dir: str, dry_run: bool = False) -> dict:
 _DORMANCY_THRESHOLD = 8  # scenes
 
 
-def detect_mice_dormancy(ref_dir: str) -> list[dict]:
+class MiceDormancy(NamedTuple):
+    """What :func:`detect_mice_dormancy` found, and what it could not read."""
+    gaps: list[dict]
+    #: (scene, entry, why) for each entry not counted: validate rejects it
+    skipped: list[tuple[str, str, str]]
+    #: thread -> its skipped entries ("scene: entry"): a thread whose gaps
+    #: may exist only because these were not read, so mice-fill leaves it
+    suspect: dict[str, list[str]]
+    #: (thread, close scene, open scene): closed before it opens, no span
+    misordered: list[tuple[str, str, str]]
+    #: why dormancy was not measured at all ('' when it was)
+    unchecked: str
+    #: the registry's own problems (shared names, missing columns)
+    registry_problems: list[str]
+
+    def warnings(self) -> list[str]:
+        """Everything above but the gaps, one WARNING line each."""
+        out = []
+        if self.unchecked:
+            out.append(f'MICE dormancy not checked: {self.unchecked}')
+        out += [f'{mice.REGISTRY_FILE}: {p}' for p in self.registry_problems]
+        out += [f'{sid}: mice_threads entry "{entry}" not counted for dormancy: {why}'
+                for sid, entry, why in self.skipped]
+        out += [f'MICE thread {t} closes in {c} before it opens in {o}: '
+                f'its dormancy is not measured' for t, c, o in self.misordered]
+        return out
+
+
+def detect_mice_dormancy(ref_dir: str) -> MiceDormancy:
     """Detect MICE thread dormancy gaps.
 
-    For each thread in the registry, finds gaps > _DORMANCY_THRESHOLD
-    scenes between consecutive mentions.
+    For each registered thread, finds gaps > _DORMANCY_THRESHOLD scenes
+    between consecutive entries inside its open..close span. An entry counts
+    when validate accepts it (:func:`mice.check`): an open, a close or a bare
+    mention (what mice-fill writes) of a registered thread, by id, name or
+    alias in any case (#272). Every entry that is not counted is listed in
+    ``skipped``, and a thread it may belong to in ``suspect``.
 
     Args:
         ref_dir: Path to the reference/ directory.
 
     Returns:
-        List of dicts: {thread_id, thread_name, thread_type, gap_size,
-                        before_scene, after_scene, gap_scenes: [scene_ids]}.
+        :class:`MiceDormancy`; ``gaps`` holds dicts {thread_id, thread_name,
+        thread_type, gap_size, before_scene, after_scene, gap_scenes}.
     """
-    registry_path = os.path.join(ref_dir, 'mice-threads.csv')
     scenes_path = os.path.join(ref_dir, 'scenes.csv')
     intent_path = os.path.join(ref_dir, 'scene-intent.csv')
 
-    if not os.path.isfile(registry_path):
-        return []
+    registry = mice.registry_for(ref_dir)
+    if not registry.present:
+        return MiceDormancy([], [], {}, [], f'no reference/{mice.REGISTRY_FILE}', [])
+    if not registry.checked:
+        return MiceDormancy([], [], {}, [], f'reference/{mice.REGISTRY_FILE} lists no thread',
+                            registry.findings())
 
-    registry = {r['id']: r for r in _read_csv(registry_path)}
     scenes_map = _read_csv_as_map(scenes_path)
     intent_map = _read_csv_as_map(intent_path) if os.path.isfile(intent_path) else {}
 
@@ -2968,54 +3008,43 @@ def detect_mice_dormancy(ref_dir: str) -> list[dict]:
         key=lambda sid: int(scenes_map[sid].get('seq', 0) or 0)
     )
 
-    # Build lookup: bare name -> registry ID (handles type:name registry keys)
-    bare_to_id = {}
-    for rid in registry:
-        bare_to_id[rid] = rid  # exact match
-        if ':' in rid:
-            bare_to_id[rid.split(':', 1)[1]] = rid  # bare name -> full ID
-
-    # Build per-thread mention indices
-    thread_mentions = {}  # thread_id -> [scene_index]
+    touches: dict[str, dict[int, set[mice.Kind]]] = {}  # thread -> {position: kinds}
+    skipped: list[tuple[str, str, str]] = []
+    suspect: dict[str, list[str]] = {}
     for idx, sid in enumerate(ordered_ids):
-        mice = intent_map.get(sid, {}).get('mice_threads', '').strip()
-        if not mice:
-            continue
-        for entry in mice.split(';'):
-            entry = entry.strip()
-            if not entry:
+        for r in mice.resolve(intent_map.get(sid, {}).get('mice_threads', ''), registry):
+            if r.valid:
+                touches.setdefault(r.thread, {}).setdefault(idx, set()).add(r.kind)
                 continue
-            # Strip +/- prefix
-            name = entry.lstrip('+-')
-            # Try exact match first, then bare name (without type: prefix)
-            reg_id = bare_to_id.get(name)
-            if not reg_id and ':' in name:
-                reg_id = bare_to_id.get(name.split(':', 1)[1])
-            if reg_id:
-                thread_mentions.setdefault(reg_id, []).append(idx)
+            skipped.append((sid, r.entry.raw, r.problem))
+            # The registered thread its name points at, if any
+            owner = r.thread if r.thread in registry.names else (
+                registry.lookup.get(r.entry.name.lower(), '') if r.entry.name else '')
+            if owner:
+                suspect.setdefault(owner, []).append(f'{sid}: {r.entry.raw}')
 
-    # Find gaps
+    # Find gaps, only inside each thread's open..close span: a thread is not
+    # dormant before it opens or after it closes (mice.span_gaps)
     results = []
-    for thread_id, indices in thread_mentions.items():
-        indices = sorted(set(indices))
-        if len(indices) < 2:
-            continue
-        for i in range(len(indices) - 1):
-            gap = indices[i + 1] - indices[i]
+    misordered = []
+    for thread_id, by_position in touches.items():
+        order = mice.misordered(by_position)
+        if order:
+            misordered.append((thread_id, ordered_ids[order[0]], ordered_ids[order[1]]))
+        for before, after in mice.span_gaps(by_position):
+            gap = after - before
             if gap > _DORMANCY_THRESHOLD:
-                gap_scene_ids = ordered_ids[indices[i] + 1:indices[i + 1]]
-                reg = registry.get(thread_id, {})
                 results.append({
                     'thread_id': thread_id,
-                    'thread_name': reg.get('name', thread_id),
-                    'thread_type': reg.get('type', 'unknown'),
+                    'thread_name': registry.names.get(thread_id, thread_id),
+                    'thread_type': registry.types.get(thread_id, 'unknown'),
                     'gap_size': gap,
-                    'before_scene': ordered_ids[indices[i]],
-                    'after_scene': ordered_ids[indices[i + 1]],
-                    'gap_scenes': gap_scene_ids,
+                    'before_scene': ordered_ids[before],
+                    'after_scene': ordered_ids[after],
+                    'gap_scenes': ordered_ids[before + 1:after],
                 })
 
-    return results
+    return MiceDormancy(results, skipped, suspect, misordered, '', registry.findings())
 
 
 def build_mice_fill_prompt(

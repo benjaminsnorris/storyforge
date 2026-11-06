@@ -414,7 +414,9 @@ class TestMiceFill:
                             lambda: project_dir)
 
         # Patch detect_mice_dormancy to return empty list
-        monkeypatch.setattr('storyforge.hone.detect_mice_dormancy', lambda ref_dir: [])
+        from storyforge.hone import MiceDormancy
+        monkeypatch.setattr('storyforge.hone.detect_mice_dormancy',
+                            lambda ref_dir: MiceDormancy([], [], {}, [], '', []))
 
         main(['--stage', 'mice-fill'])
 
