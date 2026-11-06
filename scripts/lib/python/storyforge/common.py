@@ -907,6 +907,80 @@ def _set_block_value(lines: list[str], start: int, end: int, key: str,
     return None
 
 
+def set_top_level_fields(project_dir: str, block: str,
+                         fields: list[tuple[str, str]]) -> bool:
+    """Set direct keys of one top-level block (`production:`), in place.
+
+    Returns True if the file changed. The sibling of `update_artifact_entry` for
+    a block that is not an `artifacts:` entry, sharing its write discipline:
+    line-scoped (never a whole-file regex — #276), line endings preserved
+    (`newline=''`, `detect_newline`), comments kept, written only on change, and
+    every value double-quoted through `_yaml_double_quote` so it cannot open new
+    YAML. Values carry no `#` — see `_set_block_value` for why that matters.
+
+    A key is matched only at the block's **own** child indent, read off its
+    first child line, so a same-named key nested deeper (under `cover:`, say) is
+    never rewritten in its place. A key absent from the block is inserted after
+    the block's last content line. A block absent from the file is appended,
+    because the caller is an explicit author action that asked for the values to
+    be recorded, and refusing for want of a header line would leave that action
+    with no way to succeed.
+    """
+    yaml_file = os.path.join(project_dir, 'storyforge.yaml')
+    if not os.path.isfile(yaml_file):
+        raise FileNotFoundError(f'{yaml_file} does not exist')
+    with open(yaml_file, newline='') as f:
+        lines = f.readlines()
+    newline = detect_newline(''.join(lines))
+
+    header = re.compile(rf'^{re.escape(block)}:\s*(?:#.*)?\r?\n?$')
+    top = next((i for i, line in enumerate(lines) if header.match(line)), None)
+    if top is None:
+        if lines and not lines[-1].endswith(('\n', '\r')):
+            lines[-1] += newline
+        lines.append(f'{block}:{newline}')
+        for key, value in fields:
+            lines.append(f'  {key}: {_yaml_double_quote(value)}{newline}')
+        with open(yaml_file, 'w', newline='') as f:
+            f.writelines(lines)
+        return True
+
+    end = top + 1
+    child_indent = ''
+    for i in range(top + 1, len(lines)):
+        line = lines[i]
+        if not line.strip():
+            continue
+        if not line[0].isspace():
+            if line.startswith('#'):
+                continue  # a column-0 comment inside the block does not end it
+            break
+        if line.lstrip().startswith('#'):
+            continue
+        if not child_indent:
+            child_indent = line[:len(line) - len(line.lstrip())]
+        end = i + 1
+    child_indent = child_indent or '  '
+
+    changed = False
+    for key, value in fields:
+        quoted = _yaml_double_quote(value)
+        result = _set_block_value(lines, top + 1, end, key, quoted,
+                                  child_indent=child_indent)
+        if result is None:
+            if end and not lines[end - 1].endswith(('\n', '\r')):
+                lines[end - 1] += newline
+            lines.insert(end, f'{child_indent}{key}: {quoted}{newline}')
+            end += 1
+            changed = True
+        elif result:
+            changed = True
+    if changed:
+        with open(yaml_file, 'w', newline='') as f:
+            f.writelines(lines)
+    return changed
+
+
 # ============================================================================
 # Story summary parsing (reference/story-summary.md)
 # ============================================================================

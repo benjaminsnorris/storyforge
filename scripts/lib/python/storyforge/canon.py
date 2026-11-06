@@ -1288,7 +1288,9 @@ def predates_canon(*, when: str, cutoff: str) -> bool:
     The one comparison every staleness check **against the canon cutoff** makes,
     in one place: the ingested-render check in
     `illustrations.stale_render_reason` and the style-reference check in
-    `cmd_illustrate.resolve_style_reference`. `packet._staging_postdates_render`
+    `cmd_illustrate._style_review` (which compares the canon date the author
+    *recorded a review against*, not the art's own date — the cover's
+    dependency on canon can run either way, #303). `packet._staging_postdates_render`
     is the same predicate against a *different* cutoff (`treatment_at` versus
     `ingested_at`) and still rolls its own, restating the same-day rule below —
     #281 will want both in its inventory.
@@ -1308,9 +1310,10 @@ def predates_canon(*, when: str, cutoff: str) -> bool:
 
     An unparseable or empty date on either side is **not** older. Callers
     disagree about what an unknown date means — an empty `ingested_at` counts
-    as pre-canon because the column postdates the plan schema, while a file
-    whose mtime cannot be read says nothing at all — so each states its own
-    policy rather than inheriting one from here.
+    as pre-canon because the column postdates the plan schema, while an
+    unparseable recorded style-reference review is never current (it would
+    otherwise be a typo clearing a warning) — so each states its own policy
+    rather than inheriting one from here.
     """
     left = iso_date_or_empty(when)
     right = iso_date_or_empty(cutoff)

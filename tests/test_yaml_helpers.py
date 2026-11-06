@@ -26,6 +26,7 @@ from storyforge.common import (
     _strip_yaml_value,
     parse_yaml_scalar,
     read_yaml_field,
+    set_top_level_fields,
     update_artifact_entry,
     yaml_single_quote,
 )
@@ -932,3 +933,92 @@ class TestEpubMetadataEscaping:
             'group-position': '3',
             'rights': 'Copyright © 2026 O\'Brien',
         }
+
+
+# ===========================================================================
+# #303 — set_top_level_fields records the style-reference review
+# ===========================================================================
+
+class TestSetTopLevelFields:
+    """The writer `illustrate --accept-style-reference` records through. Same
+    discipline as `update_artifact_entry`: line-scoped, endings preserved,
+    comments kept, nothing written when nothing changed."""
+
+    def test_inserts_into_the_block_and_keeps_what_follows(self, yaml_project):
+        assert set_top_level_fields(yaml_project, 'production', [
+            ('cover_artwork_sha256', 'ab12'),
+            ('cover_artwork_reviewed', '2026-07-29')]) is True
+        text = read_yaml(yaml_project)
+        assert text.startswith(YAML_WITH_TRAILING_BLOCKS.rstrip('\n'))
+        assert text.endswith('  language: en\n'
+                             '  cover_artwork_sha256: "ab12"\n'
+                             '  cover_artwork_reviewed: "2026-07-29"\n')
+        assert read_yaml_field('production.cover_artwork_reviewed',
+                               yaml_project) == '2026-07-29'
+        assert read_yaml_field('phase', yaml_project) == 'drafting'
+
+    def test_updates_in_place_keeping_a_comment(self, tmp_path):
+        (tmp_path / 'storyforge.yaml').write_text(
+            'production:\n'
+            '  cover_artwork_reviewed: "2026-01-01"  # by hand\n'
+            '  language: en\n'
+            'phase: drafting\n')
+        assert set_top_level_fields(str(tmp_path), 'production', [
+            ('cover_artwork_reviewed', '2026-07-29')]) is True
+        assert read_yaml(str(tmp_path)) == (
+            'production:\n'
+            '  cover_artwork_reviewed: "2026-07-29"  # by hand\n'
+            '  language: en\n'
+            'phase: drafting\n')
+
+    def test_a_no_op_does_not_write(self, tmp_path):
+        (tmp_path / 'storyforge.yaml').write_text(
+            'production:\n  cover_artwork_reviewed: "2026-07-29"\n')
+        assert set_top_level_fields(str(tmp_path), 'production', [
+            ('cover_artwork_reviewed', '2026-07-29')]) is False
+
+    def test_a_same_named_nested_key_is_not_the_direct_one(self, tmp_path):
+        """The `common.read_yaml_field` gotcha, on the write side."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'production:\n'
+            '  cover:\n'
+            '    cover_artwork_reviewed: nested\n'
+            '  language: en\n')
+        set_top_level_fields(str(tmp_path), 'production', [
+            ('cover_artwork_reviewed', '2026-07-29')])
+        assert read_yaml(str(tmp_path)) == (
+            'production:\n'
+            '  cover:\n'
+            '    cover_artwork_reviewed: nested\n'
+            '  language: en\n'
+            '  cover_artwork_reviewed: "2026-07-29"\n')
+
+    def test_crlf_is_preserved(self, tmp_path):
+        path = tmp_path / 'storyforge.yaml'
+        path.write_bytes(b'project:\r\n  title: X\r\nproduction:\r\n'
+                         b'  language: en\r\n')
+        set_top_level_fields(str(tmp_path), 'production', [
+            ('cover_artwork_sha256', 'ab12')])
+        assert path.read_bytes() == (
+            b'project:\r\n  title: X\r\nproduction:\r\n'
+            b'  language: en\r\n  cover_artwork_sha256: "ab12"\r\n')
+
+    def test_a_missing_block_is_appended(self, tmp_path):
+        path = tmp_path / 'storyforge.yaml'
+        path.write_text('project:\n  title: X')     # no final newline
+        set_top_level_fields(str(tmp_path), 'production', [
+            ('cover_artwork_sha256', 'ab12')])
+        assert path.read_text() == (
+            'project:\n  title: X\nproduction:\n'
+            '  cover_artwork_sha256: "ab12"\n')
+
+    def test_a_commented_template_block_is_not_the_block(self, tmp_path):
+        """The template ships `# production:` commented out; that is not a
+        block to write into."""
+        path = tmp_path / 'storyforge.yaml'
+        path.write_text('project:\n  title: X\n# production:\n#   author: ""\n')
+        set_top_level_fields(str(tmp_path), 'production', [
+            ('cover_artwork_sha256', 'ab12')])
+        assert path.read_text().endswith(
+            '# production:\n#   author: ""\nproduction:\n'
+            '  cover_artwork_sha256: "ab12"\n')

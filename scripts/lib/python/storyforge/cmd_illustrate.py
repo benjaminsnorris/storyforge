@@ -114,6 +114,12 @@ def parse_args(argv):
     phase.add_argument('--audit', action='store_true',
                        help='Read the prose against the state matrix and report '
                             'contradictions. Read-only.')
+    phase.add_argument('--accept-style-reference', action='store_true',
+                       help='Record that you reviewed the cover artwork (the '
+                            'style reference) against the current canon: '
+                            'writes its sha256 and the newest canon_updated '
+                            'into storyforge.yaml, clearing the staleness '
+                            'warning until either changes')
 
     parser.add_argument('--count', type=int, default=None,
                         help='Target illustration count for --plan '
@@ -165,17 +171,22 @@ def main(argv=None):
 
     phases = [args.direction, args.plan, args.prompts, bool(args.ingest),
               args.embed, args.diagnose, args.review, args.state, args.audit,
-              args.package, args.sequence]
+              args.package, args.sequence, args.accept_style_reference]
     if not any(phases):
         log('Nothing to do. Pick a phase: --direction, --plan, --sequence, '
             '--prompts, --package, --ingest PATH, --embed, --state, '
-            '--audit, --diagnose, or --review.')
+            '--audit, --diagnose, --review, or --accept-style-reference.')
         return 1
 
     if args.diagnose:
         return run_diagnose(project_dir)
 
     exit_code = 0
+    if args.accept_style_reference:
+        # Before every other phase, so a run that pairs it with --prompts or
+        # --package builds against the review it just recorded.
+        exit_code = run_accept_style_reference(project_dir,
+                                               args.dry_run) or exit_code
     if args.direction:
         exit_code = run_direction(project_dir, coaching,
                                   args.dry_run) or exit_code
@@ -2432,10 +2443,39 @@ _STYLE_REFERENCE_EXTENSIONS = ('png', 'jpg', 'jpeg', 'webp')
 #: one that sets the house style.
 STYLE_REFERENCE_KEY = 'production.cover_artwork'
 
+#: The author's record that the style reference was reviewed against the canon
+#: (#303): the sha256 of the bytes they looked at, and the newest
+#: `canon_updated` they looked at them against. Written by
+#: `--accept-style-reference`, never by anything else. Two keys rather than one
+#: because they re-raise the warning for different reasons — the art changing
+#: and the canon changing — and the warning says which.
+STYLE_REVIEW_DIGEST_KEY = 'production.cover_artwork_sha256'
+STYLE_REVIEW_CANON_KEY = 'production.cover_artwork_reviewed'
+
+#: The clearing action, verbatim, so every warning that needs it names the same
+#: command.
+ACCEPT_STYLE_REFERENCE = 'storyforge illustrate --accept-style-reference'
+
 #: Where the resolved path came from. A `Literal` rather than a `declared: bool`
 #: beside an empty-`path` sentinel, because those two fields encoded one
 #: three-valued fact and let a caller represent "declared but nothing resolved".
 StyleReferenceSource = Literal['declared', 'convention', 'none']
+
+#: Where the author's review of the style reference stands against the canon.
+#:
+#: - `current` — the recorded digest is this file's, and the recorded canon date
+#:   is the newest `canon_updated` (or later).
+#: - `unrecorded` — no review is recorded (or only half of one).
+#: - `art_changed` — a review is recorded, for different bytes.
+#: - `canon_changed` — a review is recorded for these bytes, against a canon
+#:   that has been updated since.
+#: - `bad_record` — `cover_artwork_reviewed` is not an ISO date, so it cannot
+#:   be compared; never read as current.
+#: - `unchecked` — no verdict is possible: nothing resolved, the file could not
+#:   be read, or no canon file carries a parseable `canon_updated`. Warned about
+#:   separately, because unknown is not fresh.
+StyleReview = Literal['current', 'unrecorded', 'art_changed', 'canon_changed',
+                      'bad_record', 'unchecked']
 
 
 class StyleReference(TypedDict):
@@ -2449,14 +2489,15 @@ class StyleReference(TypedDict):
     Which combinations occur, so a reader need not re-derive them from the
     constructor (`resolve_style_reference` is the only one):
 
-    - `source='none'` ⟺ `path=''`, and then `symlink_target`, `modified` are ''
-      and `stale` is False. Nothing resolved.
+    - `source='none'` ⟺ `path=''`, and then `symlink_target`, `digest` are '',
+      `review` is `unchecked` and `stale` is False. Nothing resolved.
     - `source='declared'` ⟹ `unresolved_declaration=''`. The declaration either
       resolved or it did not.
     - `unresolved_declaration != ''` with `source='convention'` — the declaration
       was ignored and the convention answered instead.
-    - `stale=True` ⟹ `modified != ''` and `checked_against != ''`.
-    - `path != ''` with `modified=''` — the mtime could not be read, so freshness
+    - `stale=True` ⟺ `review` is neither `current` nor `unchecked`, and then
+      `digest != ''` and `checked_against != ''`.
+    - `path != ''` with `digest=''` — the file could not be read, so freshness
       is *unknown*, which is not the same as fresh and is warned about.
     """
     #: Whatever the resolution produced, verbatim: the declaration as written
@@ -2486,15 +2527,26 @@ class StyleReference(TypedDict):
     #: because the convention filename *is* present, and telling an author to
     #: create a file they can see in `ls` is the least useful thing to say.
     dangling_symlink: str
-    #: ISO date of the file's mtime, or '' if it could not be read.
-    modified: str
+    #: Hex sha256 of the artwork's bytes (through any symlink), or '' if it
+    #: could not be read. A content digest, not an mtime: an mtime belongs to
+    #: the working copy, so a fresh clone or a `cp` cleared the old check and a
+    #: `touch` raised it, with nothing about the art changing (#303).
+    digest: str
+    #: `production.cover_artwork_sha256` as recorded, '' when absent.
+    reviewed_digest: str
+    #: `production.cover_artwork_reviewed` as recorded, '' when absent — the
+    #: newest `canon_updated` the author reviewed the art against.
+    reviewed_against: str
+    #: Where that review stands. See `StyleReview`.
+    review: StyleReview
     #: The newest `canon_updated` this was checked against, '' if there is none.
     #: Named for what it is rather than `canon_cutoff`, which is also the name of
     #: `_references_for`'s parameter — and those two mean deliberately different
     #: things (that parameter is '' under `--no-prior-refs`; this never is), so
     #: one name for both invites the tidy-up that reintroduces #299.
     checked_against: str
-    #: `modified` is strictly older than `checked_against`.
+    #: The art is not recorded as reviewed against the current canon, in any of
+    #: the four ways `StyleReview` names. False when no verdict was possible.
     stale: bool
 
 
@@ -2520,15 +2572,27 @@ def resolve_style_reference(project_dir: str, *,
     *ships*, which on a real book is the typeset composite. The artwork and the
     typeset cover are different files on purpose, so they get different keys.
 
-    Staleness is the file's mtime against the newest `canon_updated`, on the
-    same footing as a prior ingested render — the cover is the most influential
-    reference in the list and the *only* one under `--no-prior-refs`, so
-    exempting it left the highest-stakes run unchecked. Unlike an ingested row,
-    an unreadable mtime is **not** treated as stale: there is no bookkeeping
-    column here that a file could predate, so "unknown" is genuinely unknown —
-    and because unknown must not read as fresh, it is warned about rather than
-    passed over. `os.path.getmtime` follows symlinks, which is what we want —
-    the target is the artwork.
+    Staleness is checked because the cover is the most influential reference in
+    the list and the *only* one under `--no-prior-refs`, so exempting it left
+    the highest-stakes run unchecked (#299). But it is **not** checked on the
+    footing of a prior ingested render, which is what #299 first did by
+    comparing mtimes. A render is *produced from* canon, so canon moving past it
+    is a fact. The cover is as often what canon was *written from* — the
+    visual foundation describes the cover's register because someone looked at
+    the cover — so canon moving past it is a judgment only the author can make,
+    and the mtime comparison raised a warning with no clearing action on a book
+    whose cover could not be re-rendered at all (#303).
+
+    So the verdict is the author's recorded review (`StyleReview`): the sha256
+    of the bytes they reviewed (`production.cover_artwork_sha256`) and the
+    newest `canon_updated` they reviewed them against
+    (`production.cover_artwork_reviewed`), both written by
+    `--accept-style-reference`. It is stale until that review is recorded, again
+    when the canon is updated past it, and again when the file's bytes change —
+    whatever its name or date. No mtime is read: a fresh clone neither clears
+    nor raises it. An unreadable file is **not** stale but is warned about,
+    because unknown must not read as fresh. Reading follows symlinks, which is
+    what we want — the target is the artwork.
 
     `canon_cutoff` defaults to reading the canon tree rather than taking
     `_reference_cutoff`'s answer, and that distinction is the whole point:
@@ -2578,7 +2642,12 @@ def resolve_style_reference(project_dir: str, *,
         'unusable_extension': '',
         'symlink_target': '',
         'dangling_symlink': '',
-        'modified': '',
+        'digest': '',
+        'reviewed_digest': read_yaml_field(STYLE_REVIEW_DIGEST_KEY,
+                                           project_dir).strip().lower(),
+        'reviewed_against': read_yaml_field(STYLE_REVIEW_CANON_KEY,
+                                            project_dir).strip(),
+        'review': 'unchecked',
         'checked_against': canon_cutoff,
         'stale': False,
     }
@@ -2607,13 +2676,37 @@ def resolve_style_reference(project_dir: str, *,
         reference['symlink_target'] = (
             target if relative.startswith(os.pardir) else relative)
     try:
-        reference['modified'] = date.fromtimestamp(
-            os.path.getmtime(full)).isoformat()
+        reference['digest'] = ill.sha256_of(full)
     except OSError:
         return reference
-    reference['stale'] = canon_mod.predates_canon(
-        when=reference['modified'], cutoff=canon_cutoff)
+    reference['review'] = _style_review(reference)
+    reference['stale'] = reference['review'] not in ('current', 'unchecked')
     return reference
+
+
+def _style_review(reference: StyleReference) -> StyleReview:
+    """Judge the recorded review against this file's digest and the canon.
+
+    Order matters where two things are wrong at once: a review of different
+    bytes says nothing about these ones, so `art_changed` outranks
+    `canon_changed` — re-reviewing is the remedy for both, and naming the art
+    tells the author which file to look at.
+    """
+    from storyforge import canon as canon_mod
+    if not reference['digest'] or not reference['checked_against']:
+        return 'unchecked'
+    if not reference['reviewed_digest'] or not reference['reviewed_against']:
+        return 'unrecorded'
+    if reference['reviewed_digest'] != reference['digest']:
+        return 'art_changed'
+    if not canon_mod.iso_date_or_empty(reference['reviewed_against']):
+        # `predates_canon` reads an unparseable date as "not older", which here
+        # would be a typo clearing the warning — so it never gets that far.
+        return 'bad_record'
+    if canon_mod.predates_canon(when=reference['reviewed_against'],
+                                cutoff=reference['checked_against']):
+        return 'canon_changed'
+    return 'current'
 
 
 def _dangling_convention_link(project_dir: str) -> str:
@@ -2640,23 +2733,36 @@ def describe_style_reference(reference: StyleReference) -> str:
     variations is to symlink the convention filename at the selected art, and
     the target is the name the author recognizes.
 
-    The freshness clause names what the mtime was compared against, so a bare
-    date is never left for the reader to complete into a verdict of their own —
-    and says so explicitly when there was nothing to compare against.
+    The freshness clause names both sides of the comparison — what the review
+    was recorded against and where the canon is now — so a bare date is never
+    left for the reader to complete into a verdict of their own, and says so
+    explicitly when there was nothing to compare against.
     """
     if not reference['path']:
         return ''
     source = (f'declared in {STYLE_REFERENCE_KEY}'
               if reference['source'] == 'declared'
               else 'the conventional filename')
-    if not reference['modified']:
-        freshness = ', modification time unreadable'
-    elif reference['checked_against']:
-        freshness = (f', modified {reference["modified"]} '
-                     f'(canon last updated {reference["checked_against"]})')
+    canon = reference['checked_against']
+    review = reference['review']
+    if not reference['digest']:
+        freshness = ', file unreadable'
+    elif not canon:
+        freshness = ' — no canon date to check it against'
+    elif review == 'current':
+        freshness = (f', reviewed against the canon as of '
+                     f'{reference["reviewed_against"]} (canon last updated '
+                     f'{canon})')
+    elif review == 'canon_changed':
+        freshness = (f', reviewed against the canon as of '
+                     f'{reference["reviewed_against"]} — canon last updated '
+                     f'{canon}')
+    elif review == 'art_changed':
+        freshness = (', changed since its recorded review (canon last updated '
+                     f'{canon})')
     else:
-        freshness = (f', modified {reference["modified"]} — no canon date to '
-                     f'check it against')
+        freshness = (f', not recorded as reviewed against the canon (last '
+                     f'updated {canon})')
     return (f'Style reference: {reference["path"]} ({source})'
             + (f' → {reference["symlink_target"]}'
                if reference['symlink_target'] else '')
@@ -2674,7 +2780,7 @@ def style_reference_warnings(reference: StyleReference) -> list[str]:
 
     **Every way this reference can be wrong or unverified produces a sentence
     here**, including the two that produce no verdict at all: no canon date to
-    check against, and an unreadable mtime. #299 was a silent wrong reference, so
+    check against, and an unreadable file. #299 was a silent wrong reference, so
     a silent *unchecked* one is the same bug with a smaller blast radius —
     `--audit` renders "Not assessed" rather than "None found" for exactly this
     reason.
@@ -2723,12 +2829,12 @@ def style_reference_warnings(reference: StyleReference) -> list[str]:
             f'rendered artwork beside it. It is still listed, because the one '
             f'reference that is sometimes the only one is never dropped '
             f'silently.')
-    if not reference['modified']:
+    if not reference['digest']:
         warnings.append(
-            f'the style reference {named} exists but its modification time '
-            f'could not be read, so it could not be checked against the canon. '
-            f'Unknown freshness is not the same as fresh — the art may predate '
-            f'the direction now governing the book.')
+            f'the style reference {named} exists but could not be read, so it '
+            f'could not be checked against the canon. Unknown freshness is not '
+            f'the same as fresh — the art may predate the direction now '
+            f'governing the book.')
     elif not reference['checked_against']:
         warnings.append(
             f'nothing in reference/canon/ carries a parseable `canon_updated`, '
@@ -2737,15 +2843,117 @@ def style_reference_warnings(reference: StyleReference) -> list[str]:
             f'book, and under --no-prior-refs it is the only thing setting the '
             f'house style.')
     elif reference['stale']:
-        warnings.append(
-            f'the style reference {named} was last modified '
-            f'{reference["modified"]}, before the canon was last updated '
-            f'{reference["checked_against"]}. It sets the house style for '
-            f'every prompt — under --no-prior-refs it is the only thing that '
-            f'does — so drift the new canon exists to remove is taught back. '
-            f'Re-render the cover artwork, or point {STYLE_REFERENCE_KEY} at '
-            f'art that postdates the canon.')
+        warnings.append(_STYLE_REVIEW_PROBLEMS[reference['review']](
+            reference, named) + _STYLE_REVIEW_REMEDY)
     return warnings
+
+
+#: Why the style reference is not cleared, per `StyleReview` state. Each names
+#: the dates or digests it compared, so the author can see what moved.
+_STYLE_REVIEW_PROBLEMS = {
+    'unrecorded': lambda r, named: (
+        f'the style reference {named} is not recorded as reviewed against the '
+        f'canon, which was last updated {r["checked_against"]} '
+        f'({STYLE_REVIEW_DIGEST_KEY} and {STYLE_REVIEW_CANON_KEY} are not both '
+        f'set). '),
+    'art_changed': lambda r, named: (
+        f'the style reference {named} is not the artwork that was reviewed: '
+        f'its sha256 ({r["digest"][:12]}…) differs from '
+        f'{STYLE_REVIEW_DIGEST_KEY} ({r["reviewed_digest"][:12]}…), so the '
+        f'review recorded against the canon as of {r["reviewed_against"]} '
+        f'covers different bytes. '),
+    'canon_changed': lambda r, named: (
+        f'the style reference {named} was reviewed against the canon as of '
+        f'{r["reviewed_against"]}, and the canon was last updated '
+        f'{r["checked_against"]}, after that review. '),
+    'bad_record': lambda r, named: (
+        f'{STYLE_REVIEW_CANON_KEY} is `{r["reviewed_against"]}`, which is not '
+        f'an ISO date, so the review recorded for the style reference {named} '
+        f'cannot be compared with the canon (last updated '
+        f'{r["checked_against"]}). '),
+}
+
+#: The shared tail. Re-rendering is *one* remedy, not the only one: a cover
+#: that was supplied from outside the pipeline cannot be re-rendered, and the
+#: canon is often written *from* the cover, so the author confirming the two
+#: still agree is the usual clearing action (#303).
+_STYLE_REVIEW_REMEDY = (
+    'It sets the house style for every prompt — under --no-prior-refs it is '
+    'the only thing that does — so any drift between it and the canon is '
+    'taught to every render. Look at the art against the current canon: if '
+    'they agree (or the canon was written from this art), record that with '
+    f'`{ACCEPT_STYLE_REFERENCE}`; if not, re-render the cover artwork or '
+    f'point {STYLE_REFERENCE_KEY} at art that matches the canon.')
+
+
+def run_accept_style_reference(project_dir: str, dry_run: bool) -> int:
+    """Record the author's review of the style reference against the canon.
+
+    The clearing action for the staleness warning (#303). It writes the two
+    facts the verdict is made of — the sha256 of the bytes reviewed and the
+    newest `canon_updated` they were reviewed against — and nothing else, so the
+    warning comes back by itself when either moves. It records a judgment the
+    author made; it does not make one, which is why the skill runs it only on
+    the author's say-so.
+
+    Refuses (exit 1) wherever a record would claim more than was reviewed: no
+    artwork resolved, a declaration that names a missing file (the art you meant
+    is not the art that would be recorded), an unreadable file, or no canon date
+    to review against. Every other warning about the reference — an outside
+    path, an unusable extension — is unrelated to the canon and is logged again
+    after recording rather than cleared by it.
+    """
+    from storyforge import canon as canon_mod
+    from storyforge.common import set_top_level_fields
+    canon_cutoff = canon_mod.newest_canon_updated(project_dir)
+    style = resolve_style_reference(project_dir, canon_cutoff=canon_cutoff)
+    refusal = ''
+    if style['unresolved_declaration']:
+        refusal = (f'{STYLE_REFERENCE_KEY} names '
+                   f'`{style["unresolved_declaration"]}`, which does not exist. '
+                   f'Fix the path before recording a review of it.')
+    elif not style['path']:
+        refusal = 'there is no cover artwork to record a review of.'
+    elif not style['digest']:
+        refusal = (f'`{style["path"]}` could not be read, so there is no '
+                   f'digest to record.')
+    elif not canon_cutoff:
+        refusal = ('nothing in reference/canon/ carries a parseable '
+                   '`canon_updated`, so there is no canon state to record a '
+                   'review against. Date the canon files first.')
+    if refusal:
+        log(f'ERROR: --accept-style-reference: {refusal} Nothing recorded.')
+        return 1
+
+    headline = describe_style_reference(style)
+    if style['review'] == 'current':
+        log(f'{headline}. Already recorded as reviewed against the current '
+            f'canon — nothing to change.')
+        return 0
+    record = (f'{STYLE_REVIEW_DIGEST_KEY}: {style["digest"]}, '
+              f'{STYLE_REVIEW_CANON_KEY}: {canon_cutoff}')
+    if dry_run:
+        log(f'[dry-run] would record that `{style["path"]}` was reviewed '
+            f'against the canon as of {canon_cutoff} ({record}).')
+        return 0
+    try:
+        set_top_level_fields(project_dir, 'production', [
+            ('cover_artwork_sha256', style['digest']),
+            ('cover_artwork_reviewed', canon_cutoff),
+        ])
+    except OSError as exc:
+        log(f'ERROR: could not write storyforge.yaml: {exc}. Nothing recorded.')
+        return 1
+    log(f'Recorded that `{style["path"]}` was reviewed against the canon as of '
+        f'{canon_cutoff} ({record}). The staleness warning returns if the canon '
+        f'is updated past that date or the artwork\'s bytes change.')
+    # Re-resolved from disk rather than assumed: the record is only as good as
+    # what the reader now makes of it, and any warning unrelated to the canon
+    # is still the author's to fix.
+    for warning in style_reference_warnings(
+            resolve_style_reference(project_dir, canon_cutoff=canon_cutoff)):
+        log(f'WARNING: {warning}')
+    return 0
 
 
 class _Candidate(NamedTuple):

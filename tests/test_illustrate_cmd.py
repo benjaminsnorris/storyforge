@@ -12,6 +12,7 @@ import os
 import pytest
 
 from storyforge import cmd_illustrate
+from storyforge.common import read_yaml_field
 from storyforge import illustrations as ill
 from storyforge import packet
 from storyforge import prompts_illustrate as pi
@@ -3063,37 +3064,252 @@ def test_a_declared_path_that_does_not_exist_with_no_convention(in_project):
     assert any('no cover artwork' in w for w in warnings)
 
 
-def test_a_style_reference_older_than_the_canon_warns(in_project):
-    """The regression: every other reference was staleness-checked and the most
-    influential one was exempt."""
+# ----------------------------------------------------------------------------
+# The style reference's review against the canon (#303)
+# ----------------------------------------------------------------------------
+#
+# #299's check compared the cover's mtime against the newest `canon_updated`, on
+# the footing of a prior ingested render. But a render is produced *from* canon
+# and the cover is often what canon was written *from*, so on a real book whose
+# cover was supplied from outside the pipeline the check fired on every run with
+# no clearing action: it could not be re-rendered and nothing newer existed. And
+# an mtime is the working copy's, not the art's — a clone cleared it, a touch
+# raised it. The check stays; the verdict is now the author's recorded review of
+# specific bytes against a specific canon date.
+# ----------------------------------------------------------------------------
+
+def _accept_style_reference(project_dir):
+    assert cmd_illustrate.main(['--accept-style-reference']) == 0
+
+
+def _warning_text(project_dir):
+    return ' '.join(cmd_illustrate.style_reference_warnings(
+        cmd_illustrate.resolve_style_reference(project_dir)))
+
+
+def test_canon_edited_after_the_cover_with_no_review_names_the_clearing_action(
+        in_project):
+    """The regression: the warning must name an action that clears it, and
+    re-rendering is not one for art that cannot be re-rendered."""
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
                         canon_updated='2026-07-20')
     _backdate(_style_ref(in_project), '2026-07-01')
 
     style = cmd_illustrate.resolve_style_reference(in_project)
-    assert style['modified'] == '2026-07-01'
     assert style['checked_against'] == '2026-07-20'
+    assert style['review'] == 'unrecorded'
     assert style['stale'] is True
-    warning = ' '.join(cmd_illustrate.style_reference_warnings(style))
+    warning = _warning_text(in_project)
     assert 'cover-illustration.png' in warning
-    assert 'last modified 2026-07-01' in warning
+    assert 'not recorded as reviewed against the canon' in warning
     assert '2026-07-20' in warning
+    assert 'storyforge illustrate --accept-style-reference' in warning
     assert 'production.cover_artwork' in warning
 
 
-def test_a_style_reference_newer_than_the_canon_is_not_stale(in_project):
+def test_a_cover_newer_than_the_canon_is_still_unreviewed(in_project):
+    """No mtime is read, so a new-looking file is not thereby reviewed —
+    the record is the only thing that clears it."""
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
                         canon_updated='2026-07-20')
     _backdate(_style_ref(in_project), '2026-07-21')
-    assert cmd_illustrate.resolve_style_reference(in_project)['stale'] is False
+    assert cmd_illustrate.resolve_style_reference(in_project)['review'] == \
+        'unrecorded'
 
 
-def test_a_style_reference_modified_the_same_day_is_not_stale(in_project):
-    """Same-day is the ordinary loop — edit canon, re-render the cover, prompt."""
+def test_an_acknowledged_style_reference_does_not_warn(in_project):
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
                         canon_updated='2026-07-20')
-    _backdate(_style_ref(in_project), '2026-07-20')
-    assert cmd_illustrate.resolve_style_reference(in_project)['stale'] is False
+    art = _style_ref(in_project)
+    _accept_style_reference(in_project)
+
+    assert read_yaml_field('production.cover_artwork_sha256', in_project) == \
+        ill.sha256_of(art)
+    assert read_yaml_field('production.cover_artwork_reviewed',
+                           in_project) == '2026-07-20'
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['review'] == 'current'
+    assert style['stale'] is False
+    assert cmd_illustrate.style_reference_warnings(style) == []
+
+
+def test_a_canon_update_after_the_review_warns_again(in_project):
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _style_ref(in_project)
+    _accept_style_reference(in_project)
+    _write_entity_canon(in_project, 'characters', 'mira', 'Twelve years old.',
+                        canon_updated='2026-07-29')
+
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['review'] == 'canon_changed'
+    assert style['stale'] is True
+    warning = _warning_text(in_project)
+    assert 'reviewed against the canon as of 2026-07-20' in warning
+    assert 'last updated 2026-07-29' in warning
+    assert 'storyforge illustrate --accept-style-reference' in warning
+
+    # And the same action clears it again, at the new canon date.
+    _accept_style_reference(in_project)
+    assert read_yaml_field('production.cover_artwork_reviewed',
+                           in_project) == '2026-07-29'
+    assert cmd_illustrate.resolve_style_reference(in_project)['review'] == \
+        'current'
+
+
+def test_replaced_art_warns_even_with_a_recent_review(in_project):
+    """The acknowledgement is of specific bytes, not of a filename."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    art = _style_ref(in_project)
+    _accept_style_reference(in_project)
+    make_png(art, 16, 16)   # same name, different bytes
+
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['review'] == 'art_changed'
+    assert style['stale'] is True
+    warning = _warning_text(in_project)
+    assert 'not the artwork that was reviewed' in warning
+    assert 'production.cover_artwork_sha256' in warning
+    assert 'storyforge illustrate --accept-style-reference' in warning
+
+
+def test_repointing_the_declaration_at_other_art_warns(in_project):
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _style_ref(in_project)
+    _accept_style_reference(in_project)
+    make_png(os.path.join(in_project, 'manuscript', 'assets', 'other.png'),
+             16, 16)
+    _set_yaml_production(in_project, 'cover_artwork',
+                         'manuscript/assets/other.png')
+    assert cmd_illustrate.resolve_style_reference(in_project)['review'] == \
+        'art_changed'
+
+
+@pytest.mark.parametrize('accepted', [True, False])
+def test_an_mtime_change_alone_never_changes_the_verdict(in_project, accepted):
+    """A fresh clone or a `cp` stamps today's date; a restore stamps an old
+    one. Neither is a property of the art, so neither may clear or raise it."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    art = _style_ref(in_project)
+    if accepted:
+        _accept_style_reference(in_project)
+    before = cmd_illustrate.resolve_style_reference(in_project)
+    assert before['stale'] is (not accepted)
+
+    for stamp in ('2020-01-01', '2030-01-01'):
+        _backdate(art, stamp)
+        after = cmd_illustrate.resolve_style_reference(in_project)
+        assert (after['review'], after['stale']) == \
+            (before['review'], before['stale'])
+        assert cmd_illustrate.style_reference_warnings(after) == \
+            cmd_illustrate.style_reference_warnings(before)
+
+
+def test_an_unparseable_review_date_is_never_current(in_project):
+    """`predates_canon` reads garbage as "not older", which here would be a
+    typo clearing the warning."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    art = _style_ref(in_project)
+    _set_yaml_production(in_project, 'cover_artwork_sha256', ill.sha256_of(art))
+    _set_yaml_production(in_project, 'cover_artwork_reviewed', 'last tuesday')
+
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['review'] == 'bad_record'
+    assert style['stale'] is True
+    assert 'not an ISO date' in _warning_text(in_project)
+
+
+def test_half_a_review_record_is_no_record(in_project):
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _style_ref(in_project)
+    _set_yaml_production(in_project, 'cover_artwork_reviewed', '2026-07-20')
+    assert cmd_illustrate.resolve_style_reference(in_project)['review'] == \
+        'unrecorded'
+
+
+def test_accepting_refuses_with_no_canon_date(in_project, capsys):
+    _style_ref(in_project)
+    assert cmd_illustrate.main(['--accept-style-reference']) == 1
+    assert 'no canon state to record' in capsys.readouterr().out
+    assert read_yaml_field('production.cover_artwork_sha256', in_project) == ''
+
+
+def test_accepting_refuses_with_no_artwork(in_project, capsys):
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    assert cmd_illustrate.main(['--accept-style-reference']) == 1
+    assert 'no cover artwork' in capsys.readouterr().out
+
+
+def test_accepting_refuses_a_declaration_that_names_a_missing_file(in_project,
+                                                                   capsys):
+    """Recording the convention's bytes would be recording a review of art the
+    author did not mean."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _style_ref(in_project)
+    _set_yaml_production(in_project, 'cover_artwork', 'manuscript/assets/gone.png')
+    assert cmd_illustrate.main(['--accept-style-reference']) == 1
+    assert 'gone.png' in capsys.readouterr().out
+    assert read_yaml_field('production.cover_artwork_sha256', in_project) == ''
+
+
+def test_accepting_refuses_unreadable_art(in_project, monkeypatch, capsys):
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _style_ref(in_project)
+    monkeypatch.setattr(ill, 'sha256_of',
+                        lambda _p: (_ for _ in ()).throw(OSError('read')))
+    assert cmd_illustrate.main(['--accept-style-reference']) == 1
+    assert 'could not be read' in capsys.readouterr().out
+
+
+def test_accepting_dry_run_writes_nothing(in_project, capsys):
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _style_ref(in_project)
+    yaml_path = os.path.join(in_project, 'storyforge.yaml')
+    with open(yaml_path, 'rb') as f:
+        before = f.read()
+    assert cmd_illustrate.main(['--accept-style-reference', '--dry-run']) == 0
+    assert '[dry-run] would record' in capsys.readouterr().out
+    with open(yaml_path, 'rb') as f:
+        assert f.read() == before
+
+
+def test_accepting_twice_is_a_no_op(in_project, capsys):
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _style_ref(in_project)
+    _accept_style_reference(in_project)
+    yaml_path = os.path.join(in_project, 'storyforge.yaml')
+    with open(yaml_path, 'rb') as f:
+        before = f.read()
+    capsys.readouterr()
+    _accept_style_reference(in_project)
+    assert 'nothing to change' in capsys.readouterr().out
+    with open(yaml_path, 'rb') as f:
+        assert f.read() == before
+
+
+def test_accepting_does_not_clear_unrelated_warnings(in_project, capsys):
+    """The record is about the canon; an unusable extension is not."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    svg = os.path.join(in_project, 'production', 'cover.svg')
+    os.makedirs(os.path.dirname(svg), exist_ok=True)
+    with open(svg, 'w') as f:
+        f.write('<svg/>')
+    _set_yaml_production(in_project, 'cover_artwork', 'production/cover.svg')
+    _accept_style_reference(in_project)
+    out = capsys.readouterr().out
+    assert 'WARNING' in out and '.svg file' in out
+    assert 'not recorded as reviewed' not in _warning_text(in_project)
 
 
 def test_a_style_reference_is_never_excluded_for_being_stale(in_project, capsys):
@@ -3113,7 +3329,7 @@ def test_a_style_reference_is_never_excluded_for_being_stale(in_project, capsys)
                                           notes=notes)
     assert [p for p, _ in refs] == [os.path.join('manuscript', 'assets',
                                                  'cover-illustration.png')]
-    assert any('before the canon was last updated' in n for n in notes)
+    assert any('not recorded as reviewed against the canon' in n for n in notes)
 
 
 def test_the_style_staleness_check_survives_no_prior_refs(in_project):
@@ -3130,8 +3346,7 @@ def test_the_style_staleness_check_survives_no_prior_refs(in_project):
     cmd_illustrate._references_for(in_project, 'lantern-vigil',
                                    canon_cutoff=cutoff, no_prior_refs=True,
                                    notes=notes)
-    assert any('before the canon was last updated 2026-07-20' in n
-               for n in notes)
+    assert any('which was last updated 2026-07-20' in n for n in notes)
 
 
 def test_a_symlinked_style_reference_resolves_with_its_target(in_project):
@@ -3242,18 +3457,20 @@ def test_the_convention_scan_cannot_produce_an_unusable_extension(in_project):
         in_project)['unusable_extension'] == ''
 
 
-def test_an_unreadable_mtime_is_unknown_not_fresh(in_project, monkeypatch):
+def test_an_unreadable_artwork_is_unknown_not_fresh(in_project, monkeypatch):
     """Deliberately the opposite of `ingested_at`: there is no bookkeeping
     column here for a file to predate, so unknown is genuinely unknown — and
-    unknown must not report as checked."""
+    unknown must not report as checked. Unchanged from #299 by #303: no digest
+    is reported, not passed over."""
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
                         canon_updated='2026-07-20')
     _style_ref(in_project)
-    monkeypatch.setattr(os.path, 'getmtime',
-                        lambda _p: (_ for _ in ()).throw(OSError('stat')))
+    monkeypatch.setattr(ill, 'sha256_of',
+                        lambda _p: (_ for _ in ()).throw(OSError('read')))
 
     style = cmd_illustrate.resolve_style_reference(in_project)
-    assert style['modified'] == ''
+    assert style['digest'] == ''
+    assert style['review'] == 'unchecked'
     assert style['stale'] is False
     warning = ' '.join(cmd_illustrate.style_reference_warnings(style))
     assert 'could not be read' in warning
@@ -3276,14 +3493,18 @@ def test_no_canon_date_means_the_check_did_not_run_and_says_so(in_project):
         cmd_illustrate.describe_style_reference(style)
 
 
-def test_the_headline_names_what_the_mtime_was_compared_against(in_project):
+def test_the_headline_names_both_sides_of_the_review(in_project):
     """A bare date is a verdict the reader completes themselves."""
     _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
                         canon_updated='2026-07-20')
-    _backdate(_style_ref(in_project), '2026-07-21')
-    assert 'canon last updated 2026-07-20' in \
-        cmd_illustrate.describe_style_reference(
-            cmd_illustrate.resolve_style_reference(in_project))
+    _style_ref(in_project)
+    assert 'not recorded as reviewed against the canon (last updated ' \
+           '2026-07-20)' in cmd_illustrate.describe_style_reference(
+               cmd_illustrate.resolve_style_reference(in_project))
+    _accept_style_reference(in_project)
+    assert 'reviewed against the canon as of 2026-07-20 (canon last updated ' \
+           '2026-07-20)' in cmd_illustrate.describe_style_reference(
+               cmd_illustrate.resolve_style_reference(in_project))
 
 
 def test_a_dangling_convention_symlink_is_not_reported_as_no_artwork(in_project):
@@ -3391,7 +3612,8 @@ def test_diagnose_reports_the_style_reference(in_project, capsys):
     cmd_illustrate.main(['--diagnose'])
     out = capsys.readouterr().out
     assert 'Style reference: ' in out
-    assert 'before the canon was last updated' in out
+    assert 'not recorded as reviewed against the canon, which' in out
+    assert '--accept-style-reference' in out
 
 
 def test_diagnose_reports_the_style_reference_with_no_plan(in_project, capsys):
@@ -3429,7 +3651,7 @@ def test_prompts_logs_the_style_staleness_warning_once(in_project, monkeypatch,
     assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
     out = capsys.readouterr().out
     # Two rows, one warning: resolved once for the run, not once per row.
-    assert out.count('was last modified 2026-07-01') == 1
+    assert out.count('not recorded as reviewed against the canon, which') == 1
 
 
 def test_ingest_records_the_ingest_date(in_project):
