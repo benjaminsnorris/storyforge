@@ -500,7 +500,8 @@ class TestRecheck:
         a changed paragraph that extraction gave the same id (the statements
         begin alike), both came out of the gate as
         'scyld-ship-given-to-sea--scyld-came-to-the-danes-as': the ledger
-        then wouldn't load."""
+        then wouldn't load. Since #599 extraction mints it `-2` (the old ids
+        are reserved) and `_carry_ids` leaves both ids as they are."""
         kept = {'id': 's--scyld-came', 'subject': 'scyld', 'type': 'trait',
                 'statement': 'Scyld came as a foundling', 'scene_id': 's'}
         new = {'id': 's--scyld-came-2', 'subject': 'scyld', 'type': 'physical',
