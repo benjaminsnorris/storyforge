@@ -607,6 +607,18 @@ def build_revision_prompt(
     if calendar_section:
         calendar_section = '\n' + calendar_section
 
+    # The voice guide drafting follows (#596, SF-3): with none, the prompt
+    # says so and the voice comes from the book's scenes; the caller tells
+    # the author (cmd_revise)
+    from storyforge.common import reference_text, resolve_voice_guide
+    voice = resolve_voice_guide(project_dir)
+    voice.raise_if_unreadable(project_dir)
+    no_voice_section = '' if voice.kind == 'ok' else (
+        '\n## No Voice Guide\n\n'
+        'This book has no voice guide yet. Wherever these instructions mention the '
+        "voice guide, take the voice from the book's existing scenes instead: their "
+        'register, rhythm, diction and each POV character\'s way of thinking and speaking.\n')
+
     # New scene creation instructions
     new_scenes_section = ''
     if new_scene_ids:
@@ -624,18 +636,13 @@ def build_revision_prompt(
     # Inline reference files for API mode (skip when system_context provides them)
     inline_references = ''
     if api_mode and not system_context:
-        ref_files = [
-            'reference/voice-guide.md',
-            'reference/scenes.csv',
-        ]
+        # the voice guide, when there is one, and scenes.csv; a doc missing or
+        # still its template is left out (F-130, #596)
+        ref_files = ([voice.path] if voice.kind == 'ok' else []) + ['reference/scenes.csv']
         ref_parts = []
-        from storyforge.common import is_unfilled_template
         for ref in ref_files:
-            ref_path = os.path.join(project_dir, ref)
-            # a template copy is not the book's voice guide (F-130, #596)
-            if os.path.isfile(ref_path) and not is_unfilled_template(ref_path):
-                with open(ref_path) as f:
-                    ref_content = f.read()
+            ref_content = reference_text(os.path.join(project_dir, ref), strip=False)
+            if ref_content:
                 ref_parts.append(
                     f'\n=== FILE: {ref} ===\n'
                     f'{ref_content}'
@@ -709,6 +716,7 @@ def build_revision_prompt(
         f'# Revision Pass: {pass_name}\n',
         f'## Purpose\n\n{purpose}\n',
         f'## Scope\n\nThis pass covers {file_count} scene file(s):\n\n{file_block}',
+        no_voice_section,
         config_section,
         intent_section,
         calendar_section,
@@ -738,7 +746,7 @@ def build_revision_prompt(
                       'Apply the revision purpose stated above to the scene files provided.')
         parts.append(_api_output_format_block())
     else:
-        parts.append(_claudep_read_instructions())
+        parts.append(_claudep_read_instructions(voice.path if voice.kind == 'ok' else ''))
 
     # Coaching-level-specific instructions
     parts.append(_coaching_instructions(
@@ -769,15 +777,20 @@ def _api_output_format_block() -> str:
     )
 
 
-def _claudep_read_instructions() -> str:
+def _claudep_read_instructions(voice_path: str = 'reference/voice-guide.md') -> str:
+    """The `claude -p` read list; `voice_path` '' when the book has no voice
+    guide (the prompt's No Voice Guide section says where the voice comes from)."""
+    voice_line = (
+        f'- `{voice_path}` — the established voice rules, prose style, and '
+        'per-character dialogue fingerprints. Every edit you make must be consistent with this guide.\n'
+        if voice_path else '')
     return (
         '\n## Instructions\n\n'
         'You are performing a revision pass on a novel manuscript. Follow these rules precisely:\n\n'
         '### 1. Read Reference Context First\n\n'
         'Before making any changes, read these reference files to understand the project\'s '
         'voice and continuity state:\n\n'
-        '- `reference/voice-guide.md` — the established voice rules, prose style, and '
-        'per-character dialogue fingerprints. Every edit you make must be consistent with this guide.\n'
+        + voice_line +
         '- `reference/scenes.csv` — the master scene list for structural context.\n'
         '- `reference/scene-intent.csv` — narrative dynamics, MICE threads, and character presence.\n'
         '- `reference/commitments.csv` — the commitments ledger: canonical knowledge facts '

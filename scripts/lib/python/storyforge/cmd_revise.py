@@ -3110,6 +3110,27 @@ def main(argv=None):
         return _main(argv)
 
 
+def _note_reference_docs(project_dir: str) -> None:
+    """Tell the author what the revision prompts leave out (#596, SF-3/SF-4):
+    with no voice guide they take the voice from the existing scenes (a
+    WARNING); key decisions missing or a template are a NOTE. One that
+    exists but can't be read stops the session (ERROR, exit 1)."""
+    from storyforge.common import VOICE_GUIDE_REMEDY, doc_state, resolve_voice_guide
+    voice = resolve_voice_guide(project_dir)
+    decisions = doc_state(project_dir, 'reference/key-decisions.md')
+    for state in (voice, decisions):
+        if state.kind == 'unreadable':
+            log(f'ERROR: {state.detail}. Fix the file (permissions, or save it as UTF-8) '
+                'and run again; nothing was revised.')
+            sys.exit(1)
+    if voice.kind != 'ok':
+        log(f'WARNING: {voice.detail}: the revision prompts have no voice guide and take '
+            f"the voice from the book's existing scenes. Fill it: {VOICE_GUIDE_REMEDY}.")
+    if decisions.kind != 'ok':
+        log(f'NOTE: {decisions.detail}, so a scene redrafted from its brief carries no '
+            'key decisions.')
+
+
 def _main(argv=None):
     from datetime import datetime
     args = parse_args(argv or [])
@@ -3136,6 +3157,7 @@ def _main(argv=None):
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)
     set_log_file(os.path.join(log_dir, 'revision-log.txt'))
+    _note_reference_docs(project_dir)
 
     python_lib = os.path.join(os.path.dirname(os.path.dirname(__file__)))
 
