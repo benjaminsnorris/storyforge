@@ -35,7 +35,7 @@ from storyforge.git import (
     update_pr_task, has_gh,
 )
 from storyforge.cli import add_scene_filter_args, resolve_filter_args, apply_coaching_override
-from storyforge.illustrations import strip_markers
+from storyforge.illustrations import read_scene_prose
 from storyforge.api import (
     invoke_to_file, extract_text, extract_text_from_file, extract_usage,
     calculate_cost_from_usage, submit_batch, poll_batch, download_batch_results,
@@ -1059,8 +1059,7 @@ def _load_scene_texts(scene_ids, project_dir):
     for sid in scene_ids:
         path = os.path.join(scenes_dir, f'{sid}.md')
         if os.path.isfile(path):
-            with open(path, encoding='utf-8') as f:
-                texts[sid] = f.read()
+            texts[sid] = read_scene_prose(path)
     return texts
 
 
@@ -1289,8 +1288,7 @@ def _avg_word_count(metadata_csv: str, scene_ids: list, scenes_dir: str) -> int:
     for sid in scene_ids:
         sf = os.path.join(scenes_dir, f'{sid}.md')
         if os.path.isfile(sf):
-            with open(sf) as f:
-                total += len(f.read().split())
+            total += len(read_scene_prose(sf).split())
             count += 1
     return (total // count) if count > 0 else 3000
 
@@ -1303,8 +1301,7 @@ def _build_scene_prompt(scene_id: str, eval_template: str,
     scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
     scene_text = ''
     if os.path.isfile(scene_file):
-        with open(scene_file) as f:
-            scene_text = strip_markers(f.read())
+        scene_text = read_scene_prose(scene_file)
 
     scene_title = get_field(metadata_csv, scene_id, 'title') or 'Unknown'
     scene_pov = get_field(metadata_csv, scene_id, 'pov') or 'Unknown'
@@ -1812,9 +1809,8 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
             if not os.path.isfile(scene_file):
                 continue
             scene_title = get_field(metadata_csv, sid, 'title') or sid
-            with open(scene_file) as f:
-                act_scenes_text += (f'\n\n--- Scene: {scene_title} ({sid}) '
-                                    f'---\n\n{strip_markers(f.read())}')
+            act_scenes_text += (f'\n\n--- Scene: {scene_title} ({sid}) '
+                                f'---\n\n{read_scene_prose(scene_file)}')
             act_scene_count += 1
 
         if act_scene_count == 0:

@@ -573,6 +573,18 @@ def inline_marker_ids(text: str) -> list[str]:
     return inline
 
 
+def malformed_markers(text: str) -> list[str]:
+    """Each ``![[illus:`` in *text* that no marker pattern matches (a broken
+    id, a lost bracket), as the rest of its line: `strip_markers` can't
+    remove one safely, so it stays in the prose every consumer reads and in
+    the book. `validate_plan` reports them (#610's review, SF-2)."""
+    out = []
+    for m in re.finditer(re.escape('![[illus:'), text):
+        if not MARKER_ANY_RE.match(text, m.start()):
+            out.append(text[m.start():].split('\n', 1)[0][:60])
+    return out
+
+
 def has_marker(text: str, illus_id: str) -> bool:
     """True when *text* already carries the marker for *illus_id*.
 
@@ -590,9 +602,12 @@ def strip_markers(text: str) -> str:
     in place. The result is byte-identical to the prose before the marker
     landed, for every placement.
 
-    Every prose consumer — word counts, deterministic scorers, revision
-    prompts — must go through this. A marker scored as a sentence perturbs
-    rhythm variance, and a marker counted as a word inflates word_count.
+    Every prose consumer — word counts, deterministic scorers, prompts —
+    must go through this; `read_scene_prose` does it for a scene file. (What
+    a model rewrites from that prose gets the markers back through
+    `keep_markers` when it is written over the scene.) A marker scored as a
+    sentence perturbs rhythm variance, and a marker counted as a word
+    inflates word_count.
     """
     if '![[illus:' not in text:
         return text
@@ -618,6 +633,35 @@ def count_prose_words(text: str) -> int:
     return len(strip_markers(text).split())
 
 
+def read_scene_prose(path: str, *, errors: str = 'strict',
+                     notes: list[str] | None = None, label: str = '') -> str:
+    """A scene file's text with illustration markers stripped (#280).
+
+    The one reader for scene text that feeds analysis, scoring, word counts
+    or a prompt. Code that needs the markers or the exact bytes (one that
+    writes the scene back, assembly, which renders the markers, or a byte
+    comparison such as the gate's snapshot) reads through `read_scene_raw`,
+    or is listed in tests/test_scene_read_guard.py with why.
+
+    By default an unreadable file raises ``OSError`` and one that is not
+    UTF-8 raises ``UnicodeDecodeError`` (from the read, not the open);
+    *errors* (``'replace'``) decodes it with replacement characters instead,
+    silently. With *notes*, the reading is `brief_names.read_text_noting`'s:
+    an unreadable file is '' and a non-UTF-8 one is decoded with replacement
+    characters, each with a note appended naming *label* (default: the path).
+
+    A malformed marker (``![[illus:`` that no marker pattern matches) stays in
+    the text: it can't be told apart from prose safely, so it isn't stripped.
+    `validate_plan` reports it (``malformed_marker``), so `validate`,
+    `cleanup` and `illustrate --diagnose` name it (#610's review, SF-2).
+    """
+    if notes is not None:
+        from storyforge.brief_names import read_text_noting
+        return strip_markers(read_text_noting(path, notes, label or path))
+    with open(path, encoding='utf-8', errors=errors) as f:
+        return strip_markers(f.read())
+
+
 def prose_digest(text: str) -> str:
     """A digest of scene prose, stable under cosmetic whitespace edits.
 
@@ -632,9 +676,27 @@ def prose_digest(text: str) -> str:
     return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
 
 
+def keep_markers(project_dir: str, scene_id: str, original: str, rewritten: str,
+                 by: str, log: Callable[[str], None]) -> str:
+    """*rewritten* with every marker *original* carried put back
+    (`preserve_markers`), logging what *by* (e.g. "the redraft") dropped:
+    what was restored, and a WARNING for each marker that could not be
+    re-anchored. The one place a write-back path calls, so a scene's
+    illustrations survive whatever rewrote its prose (#610's review, SF-W)."""
+    kept = preserve_markers(project_dir, original, rewritten)
+    if kept['restored']:
+        log(f'  restored {len(kept["restored"])} illustration marker(s) {by} '
+            f'dropped: {", ".join(kept["restored"])}')
+    for lost in kept['lost']:
+        log(f'  WARNING: illustration marker {lost!r} was in {scene_id} and {by} '
+            f'dropped it; its anchor no longer matches the prose, so it could not '
+            f'be restored. Re-anchor the plan row and run `storyforge illustrate --embed`')
+    return kept['text']
+
+
 def scene_prose_digest(project_dir: str, scene_id: str) -> str:
     """`prose_digest` of a scene on disk, or '' when the scene has no file."""
-    text = _read_scene(project_dir, scene_id)
+    text = read_scene_raw(project_dir, scene_id)
     return prose_digest(text) if text is not None else ''
 
 
@@ -1757,7 +1819,7 @@ def plan_report(project_dir: str, *,
         if (row.get('status') or '').strip() == 'superseded':
             continue
         rid = row['id'].strip()
-        scene_text = _read_scene(project_dir, (row.get('scene_id') or '').strip())
+        scene_text = read_scene_raw(project_dir, (row.get('scene_id') or '').strip())
         if scene_text is not None and has_marker(scene_text, rid):
             embedded.append(rid)
         else:
@@ -1773,8 +1835,11 @@ def plan_report(project_dir: str, *,
     }
 
 
-def _read_scene(project_dir: str, scene_id: str) -> str | None:
-    """Read a scene file's text, or None when it doesn't exist."""
+def read_scene_raw(project_dir: str, scene_id: str) -> str | None:
+    """A scene file's text *with* its illustration markers, or None when it
+    doesn't exist. For code that needs the markers or the exact bytes (a
+    writer, the marker checks); prose for analysis, scoring, word counts or a
+    prompt comes from `read_scene_prose` (#280)."""
     if not scene_id:
         return None
     path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
@@ -2194,6 +2259,10 @@ IllustrationFindingKind = Literal[
     # neither reported it, so a malformed override survived both clean.
     'state_override_unparsed', 'state_override_prose_key',
     'state_override_unmatched_entity',
+    # `![[illus:` that is not a marker (#610's review, SF-2): it is neither
+    # stripped from the prose analysis reads nor rendered as art, so it is
+    # printed in the book. Blocking.
+    'malformed_marker',
 ]
 
 
@@ -2221,6 +2290,7 @@ BLOCKING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     'invalid_placement',
     'invalid_layout', 'missing_scene', 'unknown_scene', 'missing_file',
     'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
+    'malformed_marker',
     # A transition keyed to a scene that no longer exists silently stops
     # applying, and every scene downstream of it resolves to the wrong state.
     # This is the one failure a dense grid could not have, and the price the
@@ -2299,6 +2369,31 @@ def severity_of(kind: IllustrationFindingKind) -> Severity:
     through to neither.
     """
     return 'warning' if kind in WARNING_FINDINGS else 'error'
+
+
+def malformed_marker_findings(project_dir: str) -> list[IllustrationFinding]:
+    """One `malformed_marker` finding per `malformed_markers` hit in a
+    scene file (#610's review, SF-2)."""
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    if not os.path.isdir(scenes_dir):
+        return []
+    findings: list[IllustrationFinding] = []
+    for name in sorted(os.listdir(scenes_dir)):
+        if not name.endswith('.md'):
+            continue
+        try:
+            text = read_scene_raw(project_dir, name[:-3]) or ''
+        except (OSError, UnicodeDecodeError):
+            # cleanup's scene check reports the file itself; nothing to add
+            continue
+        for bad in malformed_markers(text):
+            findings.append({
+                'kind': 'malformed_marker', 'id': '', 'scene_id': name[:-3],
+                'detail': f'{name} has {_csv_safe(bad)!r}, which is not an '
+                          f'illustration marker (![[illus:ID]], the id letters, '
+                          f'digits, - and _): it is left in the prose and the book',
+            })
+    return findings
 
 
 def truncated_anchor_findings(project_dir: str) -> list[IllustrationFinding]:
@@ -2517,6 +2612,8 @@ def validate_plan(project_dir: str, *,
     # a single illustration has been planned yet, and fixing it before the plan
     # exists is the cheapest moment there is.
     findings.extend(truncated_anchor_findings(project_dir))
+    # Before it too: a broken marker is in the prose with or without a plan
+    findings.extend(malformed_marker_findings(project_dir))
 
     rows = read_plan(project_dir)
     # Canon staleness, and the case where it cannot be judged (#300). Both are
@@ -2593,7 +2690,7 @@ def validate_plan(project_dir: str, *,
                              'detail': 'no scene_id — the illustration has nowhere to land'})
             continue
 
-        scene_text = _read_scene(project_dir, scene_id)
+        scene_text = read_scene_raw(project_dir, scene_id)
         if scene_text is None:
             findings.append({'kind': 'unknown_scene', 'id': rid, 'scene_id': scene_id,
                              'detail': f'scene {scene_id!r} has no file in scenes/'})

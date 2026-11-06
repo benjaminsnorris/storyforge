@@ -79,8 +79,8 @@ def _check_pandoc() -> str:
 
 
 def _word_count(filepath: str) -> int:
-    with open(filepath) as f:
-        return len(f.read().split())
+    from storyforge.illustrations import read_scene_prose
+    return len(read_scene_prose(filepath).split())
 
 
 # ============================================================================

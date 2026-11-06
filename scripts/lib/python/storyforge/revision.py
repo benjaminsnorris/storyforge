@@ -547,8 +547,10 @@ def build_revision_prompt(
         file_lines.append(f'- {rel}')
         if api_mode and os.path.isfile(fpath):
             scene_id = os.path.splitext(os.path.basename(fpath))[0]
-            with open(fpath) as f:
-                content = f.read()
+            # the pass's reply is written back with the markers restored
+            # (`parsing._write_scene`), so the model never sees them (#280)
+            from storyforge.illustrations import read_scene_prose
+            content = read_scene_prose(fpath)
             inline_scenes.append(
                 f'\n=== SCENE: {scene_id} ===\n'
                 f'{content}'

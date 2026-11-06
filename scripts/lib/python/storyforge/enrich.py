@@ -763,8 +763,8 @@ def build_enrich_prompt(scene_id: str, project_dir: str,
     if not os.path.isfile(scene_file):
         return ''
 
-    with open(scene_file) as f:
-        scene_text = f.read()
+    from .illustrations import read_scene_prose
+    scene_text = read_scene_prose(scene_file)
 
     # Read existing metadata for context
     metadata_csv = _resolve_scenes_csv(project_dir)

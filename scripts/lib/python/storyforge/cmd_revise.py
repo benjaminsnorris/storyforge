@@ -25,7 +25,7 @@ import subprocess
 import sys
 import time
 
-from storyforge.brief_names import invented_names, read_text, reference_text
+from storyforge.brief_names import invented_names, reference_text
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field,
     select_model, select_revision_model, get_coaching_level,
@@ -46,6 +46,7 @@ from storyforge.api import (
     REVISION_TIMEOUT, max_output_tokens,
 )
 from storyforge.cli import apply_coaching_override
+from storyforge.illustrations import read_scene_prose, read_scene_raw
 
 
 def _log_prompt_warnings(stderr: str) -> None:
@@ -471,8 +472,7 @@ def _upstream_fix_cost(project_dir: str, scene_ids: list[str]) -> float:
     for sid in scene_ids:
         path = os.path.join(project_dir, 'scenes', f'{sid}.md')
         if os.path.isfile(path):
-            with open(path, encoding='utf-8') as f:
-                words = len(f.read().split())
+            words = len(read_scene_prose(path).split())
         else:
             words = avg_words
         prose = int(words * 1.3)
@@ -684,8 +684,7 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
                                  'an earlier scene waits on the gate: '
                                  + '; '.join(b.split(':')[0] for b in blocking))
         scene_file = os.path.join(scenes_dir, f'{sid}.md')
-        with open(scene_file, encoding='utf-8') as f:
-            original = f.read()
+        original = read_scene_raw(project_dir, sid)   # its markers must survive the gate
         passed, why = cmd_write._gate_drafted_scene(project_dir, sid, scene_file, 'revise',
                                                     log_dir, before=before)
         _restore_gate_markers(project_dir, sid, scene_file, original)
@@ -1308,9 +1307,9 @@ def _load_findings(cycle_dir: str) -> dict:
             })
 
     # Load per-scene findings
-    scene_path = os.path.join(cycle_dir, 'scene-findings.csv')
-    if os.path.isfile(scene_path):
-        with open(scene_path, newline='', encoding='utf-8') as f:
+    findings_path = os.path.join(cycle_dir, 'scene-findings.csv')
+    if os.path.isfile(findings_path):
+        with open(findings_path, newline='', encoding='utf-8') as f:
             raw = f.read().replace('\r\n', '\n').replace('\r', '')
         reader = csv.DictReader(raw.splitlines(), delimiter='|')
         for row in reader:
@@ -1906,7 +1905,9 @@ def _fix_upstream_briefs(project_dir: str,
     for scene_id in scene_ids:
         brief = briefs_map.get(scene_id, {})
         prose_path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
-        prose = read_text(prose_path) if os.path.isfile(prose_path) else None
+        prose_notes: list[str] = []
+        prose = (read_scene_prose(prose_path, notes=prose_notes, label=f'scenes/{scene_id}.md')
+                 if os.path.isfile(prose_path) else None)
         scene = scenes_map.get(scene_id, {})
         intent = intent_map.get(scene_id, {})
 
@@ -2007,9 +2008,10 @@ DECISION: [rewritten decision]"""
                                               brief, fix_fields))
         if invented:
             skipped[scene_id] = f'named {", ".join(invented)}'
+            from storyforge.hone import _unread_note
             log(f'  WARNING: Not rewriting the brief of {scene_id}: the rewrite names '
                 f'{", ".join(invented)}, which appear nowhere in the reference files '
-                f'or this scene. Its brief is unchanged.')
+                f'or this scene{_unread_note(prose_notes)}. Its brief is unchanged.')
             continue
 
         briefs_map.setdefault(scene_id, {'id': scene_id})
@@ -2125,8 +2127,7 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
             failed += [stop] + _not_reached(scene_ids[i:])
             break
         log(f'  Re-drafting scene: {scene_id}')
-        with open(scene_file, encoding='utf-8') as f:
-            original_prose = f.read()
+        original_prose = read_scene_raw(project_dir, scene_id)   # the markers to keep
         try:
             # a rewrite from the fixed brief and the binding ledger, the old
             # prose its voice reference (plan §3.4), as `_redraft_from_briefs`
@@ -2840,9 +2841,7 @@ def _update_word_counts_from_dir(project_dir: str) -> None:
     for row in rows:
         scene_file = os.path.join(scenes_dir, f'{row["id"]}.md')
         if os.path.isfile(scene_file):
-            with open(scene_file) as f:
-                wc = len(f.read().split())
-            row['word_count'] = str(wc)
+            row['word_count'] = str(len(read_scene_prose(scene_file).split()))
 
     _write_csv(metadata_csv, rows, _FILE_MAP['scenes.csv'])
 
@@ -2896,8 +2895,7 @@ def _estimate_avg_words(project_dir):
     if os.path.isdir(scenes_dir):
         for f in os.listdir(scenes_dir):
             if f.endswith('.md') and f[:-3] not in counts:
-                with open(os.path.join(scenes_dir, f), encoding='utf-8') as fh:
-                    counts[f[:-3]] = len(fh.read().split())
+                counts[f[:-3]] = len(read_scene_prose(os.path.join(scenes_dir, f)).split())
     if counts:
         return sum(counts.values()) // len(counts), len(counts)
     log('WARNING: no scene has a word count or a scene file; the cost forecast '
@@ -3072,7 +3070,7 @@ def _register_new_scenes(project_dir, targets, pass_name):
                     continue
 
         max_seq += 1
-        wc = len(open(scene_file).read().split())
+        wc = len(read_scene_prose(scene_file).split())
 
         # Generate title from slug
         title = ' '.join(w.capitalize() for w in sid.split('-'))
@@ -3863,9 +3861,7 @@ Rules:
             for scene_id in list_ids(metadata_csv):
                 scene_file = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
                 if os.path.isfile(scene_file):
-                    from storyforge.illustrations import count_prose_words
-                    with open(scene_file, encoding='utf-8') as f:
-                        new_wc = str(count_prose_words(f.read()))
+                    new_wc = str(len(read_scene_prose(scene_file).split()))
                     update_field(metadata_csv, scene_id, 'word_count', new_wc)
 
         # Update annotation status for revised scenes

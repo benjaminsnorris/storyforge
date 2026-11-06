@@ -166,6 +166,15 @@ class TestFixUpstreamBriefs:
             g='x', c='Ostrander and Vellstrom block her'))
         assert fixed == ['act1-sc01']
 
+    def test_an_illustration_marker_is_not_prose(self, project_dir):
+        """#280: a marker never reaches the prompt, and a name that appears
+        only in a marker id doesn't vouch for a rewrite."""
+        _append_prose(project_dir, 'act1-sc01', '\n![[illus:Vellstrom-01]]\n')
+        (fixed, skipped), prompt = _fix(project_dir, REPLY.format(
+            g='x', c='Vellstrom blocks her'))
+        assert fixed == [] and skipped == {'act1-sc01': 'named Vellstrom'}
+        assert 'illus:' not in prompt
+
     def test_other_scenes_briefs_and_prose_do_not_vouch(self, project_dir):
         _set_brief(project_dir, 'act1-sc02', goal='find Ostrander')
         _append_prose(project_dir, 'act1-sc02', '\nVellstrom watched from the door.\n')

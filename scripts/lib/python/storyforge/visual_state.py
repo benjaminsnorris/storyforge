@@ -556,7 +556,7 @@ def prepass(project_dir: str) -> PrepassResult:
 
         if not transition['evidence']:
             continue
-        text = ill._read_scene(project_dir, from_scene)
+        text = ill.read_scene_raw(project_dir, from_scene)
         if text is None:
             # Undrafted is valid in-flight state, not a finding — the same
             # posture as an unrendered illustration. Say so rather than
@@ -692,7 +692,7 @@ def prepass(project_dir: str) -> PrepassResult:
     # walks `order`, never looks at it. Its prose is neither read nor reported as
     # unread unless this is surfaced.
     unmapped = sorted(sid for sid in missing_from_map
-                      if ill._read_scene(project_dir, sid) is not None)
+                      if ill.read_scene_raw(project_dir, sid) is not None)
     return {
         'findings': findings,
         'candidate_scenes': candidates,
@@ -737,7 +737,7 @@ def _candidate_scenes(
     candidates: list[str] = []
     undrafted: list[str] = []
     for scene_id, position in sorted(order.items(), key=lambda kv: (kv[1], kv[0])):
-        text = ill._read_scene(project_dir, scene_id)
+        text = ill.read_scene_raw(project_dir, scene_id)
         if text is None:
             undrafted.append(scene_id)
             continue

@@ -1414,8 +1414,8 @@ def scene_text(project_dir: str, scene_id: str) -> tuple[str, bool]:
     function. Returns (text, is_summary)."""
     path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
     if os.path.isfile(path):
-        with open(path, encoding='utf-8') as f:
-            prose = f.read()
+        from .illustrations import read_scene_prose
+        prose = read_scene_prose(path)
         if prose.strip():
             return prose, False
     from .elaborate import _read_csv_as_map

@@ -7,6 +7,7 @@ content for reference documents.
 """
 
 import os
+from .illustrations import read_scene_prose
 from .prompts import read_yaml_field
 from .scenes import SCENE_ID_RULE
 
@@ -880,7 +881,7 @@ def build_gap_fill_prompt(
 
     # Read prose excerpt (first 500 words)
     prose_path = os.path.join(scenes_dir, f'{scene_id}.md')
-    prose = _read_file(prose_path)
+    prose = read_scene_prose(prose_path) if os.path.isfile(prose_path) else ''
     if prose:
         words = prose.split()
         if len(words) > 500:
@@ -953,7 +954,7 @@ def build_knowledge_fix_prompt(
 
     # Read prose excerpt
     prose_path = os.path.join(scenes_dir, f'{scene_id}.md')
-    prose = _read_file(prose_path)
+    prose = read_scene_prose(prose_path) if os.path.isfile(prose_path) else ''
     if prose:
         words = prose.split()
         if len(words) > 500:
@@ -1019,7 +1020,7 @@ def build_physical_state_fix_prompt(
 
     # Read prose excerpt
     prose_path = os.path.join(scenes_dir, f'{scene_id}.md')
-    prose = _read_file(prose_path)
+    prose = read_scene_prose(prose_path) if os.path.isfile(prose_path) else ''
     if prose:
         words = prose.split()
         if len(words) > 500:

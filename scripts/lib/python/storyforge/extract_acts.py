@@ -107,8 +107,8 @@ def _opening(scenes_dir: str, sid: str) -> str:
     path = os.path.join(scenes_dir, f'{sid}.md')
     if not os.path.isfile(path):
         return ''
-    with open(path, encoding='utf-8') as f:
-        words = f.read().split()
+    from .illustrations import read_scene_prose
+    words = read_scene_prose(path).split()
     text = ' '.join(words[:OPENING_WORDS])
     return text + (' …' if len(words) > OPENING_WORDS else '')
 
@@ -117,8 +117,8 @@ def _first_line(scenes_dir: str, sid: str) -> str:
     path = os.path.join(scenes_dir, f'{sid}.md')
     if not os.path.isfile(path):
         return ''
-    with open(path, encoding='utf-8') as f:
-        lines = f.read().lstrip('\ufeff').splitlines()
+    from .illustrations import read_scene_prose
+    lines = read_scene_prose(path).lstrip('\ufeff').splitlines()
     if lines and lines[0].rstrip() == '---':            # frontmatter
         close = next((i for i, line in enumerate(lines[1:], 1) if line.rstrip() == '---'),
                      len(lines))

@@ -106,11 +106,10 @@ def target_text(project_dir: str, scene_id: str, target: str,
     knowledge_out names), or its prose without illustration markers. None
     when there is none (no brief goal, or no prose file)."""
     if target == 'prose':
-        from storyforge.illustrations import strip_markers
+        from storyforge.illustrations import read_scene_prose
         path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
         try:
-            with open(path, encoding='utf-8') as f:
-                prose = strip_markers(f.read()).strip()
+            prose = read_scene_prose(path).strip()
         except FileNotFoundError:
             return None
         return prose or None

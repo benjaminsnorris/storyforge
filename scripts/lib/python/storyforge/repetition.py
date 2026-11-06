@@ -8,6 +8,7 @@ import os
 import re
 
 from storyforge.elaborate import _read_csv
+from storyforge.illustrations import read_scene_prose
 
 
 # ============================================================================
@@ -245,8 +246,11 @@ def scan_manuscript(project_dir: str,
     for sid in scene_ids:
         path = os.path.join(scenes_dir, f'{sid}.md')
         if os.path.isfile(path):
-            with open(path, encoding='utf-8') as f:
-                scene_texts[sid] = f.read()
+            # markers are never prose (#280). A marker never repeats itself
+            # (each id is unique and tokenizes as one word); the harm is that
+            # one between two paragraphs splits a real repeated phrase that
+            # runs across them, hiding that finding
+            scene_texts[sid] = read_scene_prose(path)
 
     return scan_scenes(scene_texts)
 

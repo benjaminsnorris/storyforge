@@ -2017,10 +2017,12 @@ def _gone_scenes(project_dir: str) -> set[str]:
 
 
 def _has_prose(project_dir: str, scene_id: str) -> bool:
+    """Whether the scene has prose: a file of illustration markers alone
+    has none, as `prompts._has_prose` says (#610's review, T-2)."""
+    from storyforge.illustrations import read_scene_prose
     path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
     try:
-        with open(path, encoding='utf-8') as f:
-            return bool(f.read().strip())
+        return bool(read_scene_prose(path).strip())
     except OSError:
         return False
 

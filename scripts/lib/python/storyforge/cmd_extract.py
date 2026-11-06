@@ -26,6 +26,7 @@ from datetime import datetime
 
 import argparse
 
+from storyforge.illustrations import read_scene_prose
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field, select_model,
     get_coaching_level, install_signal_handlers, get_plugin_dir,
@@ -589,8 +590,8 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     if dry_run:
         sample_id = sorted_scene_ids[0] if sorted_scene_ids else ''
         if sample_id:
-            with open(os.path.join(scenes_dir, f'{sample_id}.md')) as f:
-                sample_text = '\n'.join(f.readlines()[:20])
+            sample_text = '\n'.join(read_scene_prose(
+                os.path.join(scenes_dir, f'{sample_id}.md')).splitlines(keepends=True)[:20])
             prompt = build_skeleton_prompt(sample_id, sample_text, profile,
                                            registries_text=registries)
             print(f'===== DRY RUN: Phase 1 (skeleton) — sample for {sample_id} =====')
@@ -613,8 +614,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
         if not os.path.isfile(scene_path):
             continue
-        with open(scene_path) as f:
-            scene_text = f.read()
+        scene_text = read_scene_prose(scene_path)
         if not scene_text:
             continue
         batched.append(scene_id)
@@ -646,8 +646,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         row['status'] = 'drafted'
         scene_file = os.path.join(scenes_dir, f'{sid}.md')
         if os.path.isfile(scene_file):
-            with open(scene_file) as f:
-                row['word_count'] = str(len(f.read().split()))
+            row['word_count'] = str(len(read_scene_prose(scene_file).split()))
 
     count = _merge_batch_results(
         os.path.join(ref_dir, 'scenes.csv'), 'scenes.csv', sorted_scene_ids,
@@ -806,9 +805,8 @@ def _mark_drafted(ref_dir, scenes_dir, scene_ids) -> int:
         path = os.path.join(scenes_dir, f'{sid}.md')
         if row is None or row.get('status', '').strip() or not os.path.isfile(path):
             continue
-        with open(path, encoding='utf-8', errors='replace') as f:
-            if not f.read().strip():
-                continue
+        if not read_scene_prose(path, errors='replace').strip():
+            continue
         update_scene(sid, ref_dir, {'status': 'drafted'})
         marked += 1
     return marked
@@ -849,8 +847,7 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
         if not os.path.isfile(scene_path):
             continue
-        with open(scene_path) as f:
-            scene_text = f.read()
+        scene_text = read_scene_prose(scene_path)
 
         prompt = build_intent_prompt(scene_id, scene_text, profile, skeleton,
                                       registries_text=registries)
@@ -1032,8 +1029,7 @@ def _run_casts_only(args, project_dir, scenes_dir, ref_dir, log_dir, profile_fil
         elif not os.path.isfile(scene_path):
             not_merged[sid] = f'no scenes/{sid}.md'
         else:
-            with open(scene_path, encoding='utf-8') as f:
-                text = f.read()
+            text = read_scene_prose(scene_path)
             if text.strip():
                 texts[sid] = text
             else:
@@ -1477,8 +1473,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
         if not os.path.isfile(scene_path):
             continue
-        with open(scene_path) as f:
-            scene_text = f.read()
+        scene_text = read_scene_prose(scene_path)
 
         prompt = build_brief_parallel_prompt(scene_id, scene_text, profile,
                                               skeleton, intent,
@@ -1555,8 +1550,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
         if not os.path.isfile(scene_path):
             continue
-        with open(scene_path) as f:
-            scene_text = f.read()
+        scene_text = read_scene_prose(scene_path)
         if not scene_text:
             continue
 
@@ -1669,8 +1663,7 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
         if not os.path.isfile(scene_path):
             continue
-        with open(scene_path) as f:
-            scene_text = f.read()
+        scene_text = read_scene_prose(scene_path)
         if not scene_text:
             continue
 
@@ -1811,8 +1804,7 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
         if not os.path.isfile(scene_path):
             continue
-        with open(scene_path, encoding='utf-8') as f:
-            scene_text = f.read()
+        scene_text = read_scene_prose(scene_path)
         if not scene_text.strip():
             continue
         if scene_id in done and not force:

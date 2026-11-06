@@ -12,6 +12,7 @@ Last updated 2026-11-03, at v1.136.1 (`revise --polish --loop` and `--naturalnes
   - **E8:** reintroduced 7 → 5 (reintroduction rate 0.21 → 0.14), 1 passed by the gate (ceiling 3), `gate_unfinished` 0.
   - One run each, so read these as likely, not measured, improvements (E6's spread predates the gate changes).
 - **`evals/baseline.json` refreshed** from a full replay at this commit (12 suites, all PASS). E6's runs 2 and 3 were not re-recorded and now miss on the drafting prompt, as before.
+- **#280/#610 (v1.155.4):** illustration markers no longer reach analysis or prompts, so The Lantern Folk's timeline-cue and phase-4 requests changed: e2-corpus-drift and recheck-set re-recorded (**$2.26**). Drift unchanged (flags 6, precision 0.33); recheck-set captured 30 → 29, recall 0.933 → 0.931 (floor 0.9). Baseline refreshed again.
 
 ## Latest: one cost budget per run, and `check --pending --keep-going` (2026-11-03, #503)
 

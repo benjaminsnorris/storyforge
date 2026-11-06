@@ -16,6 +16,7 @@ from storyforge.common import (
 )
 from storyforge.costs import log_operation
 from storyforge.elaborate import _read_csv
+from storyforge.illustrations import read_scene_prose
 from storyforge.scoring_state import (
     VALID_BOUNDARY_VERDICTS, append_verdict, get_verdict,
 )
@@ -81,13 +82,21 @@ def score_boundary(project_dir: str, boundary: str,
     coaching_level = coaching_level or get_coaching_level(project_dir)
     model = model or select_model('evaluation')
 
-    pairs = _collect_pairs(project_dir, boundary, scope)
+    unread: list[tuple[str, str]] = []
+    pairs = _collect_pairs(project_dir, boundary, scope, unread)
+    # A draft that can't be read is a result, not just a log line (#610's
+    # review, SF-5): the printed report says which scope went unchecked
+    results: list[dict] = [{
+        'boundary': boundary, 'scope': sid, 'persisted': False,
+        'alignment': f'not checked: could not read the draft ({why})',
+    } for sid, why in unread]
     if not pairs:
+        if results:
+            return results
         log(f'No content to compare at boundary {boundary}'
             + (f' for scope {scope!r}' if scope else ''))
         return []
 
-    results: list[dict] = []
     for scope_id, upstream, downstream in pairs:
         if not upstream.strip() or not downstream.strip():
             log(f'  [{boundary} / {scope_id}] skip: '
@@ -147,9 +156,10 @@ def score_all_boundaries(project_dir: str,
 # Content collection — what does each boundary compare?
 # ============================================================================
 
-def _collect_pairs(project_dir: str, boundary: str,
-                   scope: str | None) -> list[tuple[str, str, str]]:
+def _collect_pairs(project_dir: str, boundary: str, scope: str | None,
+                   unread: list[tuple[str, str]] | None = None) -> list[tuple[str, str, str]]:
     """Return [(scope_id, upstream_content, downstream_content), ...].
+    *unread* collects (scene id, why) for each draft 6->7 could not read.
 
     Prose-tier boundaries return a single-element list with scope_id='global'.
     Structural-tier boundaries return one element per affected unit (filtered
@@ -171,7 +181,7 @@ def _collect_pairs(project_dir: str, boundary: str,
     if boundary == '5->6':
         return _collect_per_scene_intent_vs_brief(project_dir, scope)
     if boundary == '6->7':
-        return _collect_per_brief_vs_draft(project_dir, scope)
+        return _collect_per_brief_vs_draft(project_dir, scope, unread)
     return []
 
 
@@ -361,7 +371,8 @@ def _collect_per_scene_intent_vs_brief(
 
 
 def _collect_per_brief_vs_draft(
-    project_dir: str, scope: str | None
+    project_dir: str, scope: str | None,
+    unread: list[tuple[str, str]] | None = None,
 ) -> list[tuple[str, str, str]]:
     """For each scene that has both a brief and a draft on disk, compare.
 
@@ -409,10 +420,11 @@ def _collect_per_brief_vs_draft(
         ])
         upstream = '\n'.join(upstream_parts)
         try:
-            with open(draft_path, encoding='utf-8') as f:
-                downstream = f.read()
+            downstream = read_scene_prose(draft_path)
         except (OSError, UnicodeDecodeError) as e:
-            log(f'  [6->7 / {sid}] skip: could not read draft ({e})')
+            log(f'  WARNING: [6->7 / {sid}] not checked: could not read the draft ({e})')
+            if unread is not None:
+                unread.append((sid, f'{type(e).__name__}: {e}'))
             continue
         pairs.append((sid, upstream, downstream))
     return pairs

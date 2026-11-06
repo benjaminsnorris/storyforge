@@ -72,6 +72,7 @@ import re
 from dataclasses import dataclass, field
 
 from storyforge import ledger
+from storyforge.illustrations import read_scene_raw
 from storyforge.prompts import THIS_SCENE, is_dated
 from storyforge.quotes import normalize, quote_in, word_count
 from storyforge.api import ToolInputError, ToolRun, converse, extract_text, is_truncated
@@ -268,10 +269,9 @@ class Book:
         order = live_order(order, scenes, scene_id)
         texts = {}
         for sid in order:
-            path = os.path.join(project_dir, 'scenes', f'{sid}.md')
-            if os.path.isfile(path):
-                with open(path, encoding='utf-8') as f:
-                    texts[sid] = f.read()
+            text = read_scene_raw(project_dir, sid)   # the gate exception (docs/history.md)
+            if text is not None:
+                texts[sid] = text
         if prose is not None:
             texts[scene_id] = prose
         if not (texts.get(scene_id) or '').strip():

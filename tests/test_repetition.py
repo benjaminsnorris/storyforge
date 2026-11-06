@@ -128,3 +128,33 @@ def test_full_scan_with_fixtures(project_dir):
         assert 'severity' in f
         assert 'count' in f
         assert 'scene_ids' in f
+
+
+def _write_marked_book(root, marked):
+    """Six scenes sharing SCENE_ADVERSARIAL's repeated phrases; with *marked*,
+    each carries its own illustration marker between two paragraphs, inside
+    a phrase the scan reports across chapters."""
+    from illustration_helpers import SCENE_ADVERSARIAL
+    scenes_dir = os.path.join(str(root), 'scenes')
+    os.makedirs(scenes_dir, exist_ok=True)
+    for i in range(6):
+        text = f'Scene {i} opens on its own.\n\n{SCENE_ADVERSARIAL}'
+        if marked:
+            text = text.replace('the room.\n\nBy morning',
+                                f'the room.\n\n![[illus:lf-night-0{i}]]\n\nBy morning')
+            assert '![[illus:' in text
+        with open(os.path.join(scenes_dir, f's{i}.md'), 'w', encoding='utf-8') as f:
+            f.write(text)
+    return str(root)
+
+
+def test_scan_manuscript_ignores_illustration_markers(tmp_path):
+    """#280: a marker is never prose. The findings are identical with and
+    without markers, and no phrase names one (a marker inside a repeated
+    phrase used to split it, hiding a real finding)."""
+    from storyforge.repetition import scan_manuscript
+    clean = scan_manuscript(_write_marked_book(tmp_path / 'clean', marked=False))
+    marked = scan_manuscript(_write_marked_book(tmp_path / 'marked', marked=True))
+    assert any('by morning' in f['phrase'] for f in clean)
+    assert marked == clean
+    assert not any('illus' in f['phrase'] for f in marked)

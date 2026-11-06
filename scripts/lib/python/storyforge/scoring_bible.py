@@ -12,6 +12,7 @@ from storyforge.api import (
 )
 from storyforge.common import detect_project_root, is_unfilled_template, log, select_model
 from storyforge.costs import log_operation
+from storyforge.illustrations import read_scene_prose
 from storyforge.scoring_state import is_override_accepted
 
 
@@ -65,8 +66,7 @@ def _drafted_scenes(project_dir: str) -> list[tuple[str, str]]:
             continue
         sid = filename[:-3]  # strip .md
         path = os.path.join(scenes_dir, filename)
-        with open(path, encoding='utf-8') as f:
-            prose = f.read()
+        prose = read_scene_prose(path)
         if prose.strip():
             results.append((sid, prose))
     return results

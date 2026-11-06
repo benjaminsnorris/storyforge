@@ -118,9 +118,8 @@ def _append_csv_row(csv_path: str, row: str) -> None:
 
 def _word_count(filepath: str) -> int:
     """Word count for a scene file, excluding illustration markers (#278)."""
-    from storyforge.illustrations import count_prose_words
-    with open(filepath) as f:
-        return count_prose_words(f.read())
+    from storyforge.illustrations import read_scene_prose
+    return len(read_scene_prose(filepath).split())
 
 
 def _apply_scene_filter(metadata_csv: str, filter_mode: str,
@@ -175,8 +174,8 @@ def _infer_times_of_day(metadata_csv: str, scenes_dir: str, scene_ids: list[str]
         if not inferred:
             scene_file = os.path.join(scenes_dir, f'{sid}.md')
             if os.path.isfile(scene_file):
-                with open(scene_file) as f:
-                    head_text = f.read(1000)
+                from storyforge.illustrations import read_scene_prose
+                head_text = read_scene_prose(scene_file)[:1000]
                 inferred = _infer_time_of_day(head_text)
         if inferred:
             _update_csv_field(metadata_csv, sid, 'time_of_day', inferred)
