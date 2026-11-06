@@ -134,7 +134,7 @@ Every artifact change gets its own commit before moving on:
 - Recorded the key decision? Commit and push.
 
 ```
-git add -A && git commit -m "Title: {what was done}" && git push
+git add -A -- . && git commit -m "Title: {what was done}" && git push
 ```
 
 ## Coaching Level Behavior

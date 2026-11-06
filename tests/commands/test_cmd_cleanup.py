@@ -291,54 +291,61 @@ class TestUntrackNewlyIgnored:
             self, tmp_path, monkeypatch, capsys):
         monkeypatch.setenv('GIT_CEILING_DIRECTORIES', str(tmp_path.parent))
         cmd_cleanup._untrack_newly_ignored(str(tmp_path))
-        assert 'WARNING: not inside a git work tree' in capsys.readouterr().out
+        assert ('WARNING: not inside a git repository, so files the .gitignore '
+                'excludes were not checked for or untracked.') in capsys.readouterr().out
 
     def test_a_project_in_a_subfolder_of_its_repo(self, tmp_path):
         """#520: the gate was `isdir(project_dir/.git)`, False for every
         storyforge-evals book (`projects/<book>/`), so the sweep was skipped
-        with nothing said."""
-        root = str(tmp_path / 'evals')
-        project = os.path.join(root, 'projects', 'book')
-        sibling = os.path.join(root, 'projects', 'other', 'working', 'logs')
-        os.makedirs(os.path.join(project, 'working', 'logs'))
-        os.makedirs(sibling)
-        subprocess.run(['git', 'init', '-q', root], check=True)
-        for k, v in (('user.email', 'a@b.c'), ('user.name', 'Test')):
-            subprocess.run(['git', '-C', root, 'config', k, v], check=True)
-        for d in (os.path.join(project, 'working', 'logs'), sibling):
-            with open(os.path.join(d, 'run.log'), 'w') as f:
-                f.write('x')
-        with open(os.path.join(project, '.gitignore'), 'w') as f:
-            f.write('working/logs/\n')
-        with open(os.path.join(root, 'projects', 'other', '.gitignore'), 'w') as f:
-            f.write('working/logs/\n')
-        subprocess.run(['git', '-C', root, 'add', '-Af'], check=True)
-        subprocess.run(['git', '-C', root, 'commit', '-qm', 'seed'], check=True)
+        with nothing said. A sibling project's ignored file stays tracked."""
+        root, project = _books(tmp_path)
+        for p in (project, root / 'projects' / 'other'):
+            (p / 'working' / 'logs').mkdir(parents=True)
+            (p / 'working' / 'logs' / 'run.log').write_text('x')
+            (p / '.gitignore').write_text('working/logs/\n')
+        _sh(root, 'add', '-Af')
+        _sh(root, 'commit', '-qm', 'logs')
 
-        cmd_cleanup._untrack_newly_ignored(project)
+        cmd_cleanup._untrack_newly_ignored(str(project))
 
-        tracked = self._tracked(root)
+        tracked = _sh(root, 'ls-files').split()
         assert 'projects/book/working/logs/run.log' not in tracked
-        assert 'projects/other/working/logs/run.log' in tracked, \
-            "untracked a sibling project's file"
+        assert 'projects/other/working/logs/run.log' in tracked
 
     def test_a_non_ascii_name_is_untracked(self, tmp_path, capsys):
-        """Without `-z`, `ls-files` C-quotes `café.log` as
-        `"working/logs/caf\\303\\251.log"`, and the `git rm --cached` of that
-        string matched nothing, unchecked."""
+        """Without `-z`, `ls-files` C-quotes `café.log` (core.quotepath, set
+        here so the test doesn't depend on the machine's config) and the
+        `git rm --cached` of the quoted string matched nothing, unchecked."""
         root = self._repo(tmp_path)
+        _sh(root, 'config', 'core.quotepath', 'true')
         with open(os.path.join(root, 'working', 'logs', 'café.log'), 'w') as f:
             f.write('x')
-        subprocess.run(['git', '-C', root, 'add', '-f', 'working/logs/café.log'],
-                       check=True)
-        subprocess.run(['git', '-C', root, 'commit', '-qm', 'cafe'], check=True)
+        _sh(root, 'add', '-f', 'working/logs/café.log')
+        _sh(root, 'commit', '-qm', 'cafe')
 
         cmd_cleanup._untrack_newly_ignored(root)
 
-        r = subprocess.run(['git', '-C', root, 'ls-files', '-z', 'working'],
-                           capture_output=True, text=True, check=True)
-        assert r.stdout == '', r.stdout
+        assert _sh(root, 'ls-files', '-z', 'working') == ''
         assert 'WARNING' not in capsys.readouterr().out
+
+    def test_a_name_with_glob_characters_is_taken_literally(self, tmp_path):
+        """`git rm --cached -- working/logs/[1].log` without
+        `--literal-pathspecs` also matches `working/logs/1.log`, which the
+        .gitignore doesn't exclude (T-6)."""
+        root = self._repo(tmp_path)
+        with open(os.path.join(root, '.gitignore'), 'w') as f:
+            f.write('working/logs/run.log\nworking/logs/\\[1\\].log\n')
+        for name in ('[1].log', '1.log'):
+            with open(os.path.join(root, 'working', 'logs', name), 'w') as f:
+                f.write('x')
+        _sh(root, 'add', '-Af')
+        _sh(root, 'commit', '-qm', 'globs')
+
+        cmd_cleanup._untrack_newly_ignored(root)
+
+        tracked = self._tracked(root)
+        assert 'working/logs/[1].log' not in tracked
+        assert 'working/logs/1.log' in tracked
 
     def test_a_failed_untrack_is_named(self, tmp_path, monkeypatch, capsys):
         root = self._repo(tmp_path)
@@ -356,111 +363,248 @@ class TestUntrackNewlyIgnored:
         assert 'WARNING: could not untrack 1 of them' in out
         assert 'working/logs/run.log (fatal: locked)' in out
 
+    @pytest.mark.parametrize('ignore', [False, True])
+    def test_an_unrelated_parent_repository_is_left_alone(self, tmp_path, capsys, ignore):
+        """SF-A: inside a repo that isn't the project's (a dotfiles repo in
+        ~), the sweep untracked files there, never naming that repo."""
+        home, book = _dotfiles(tmp_path, ignore)
+        before = _sh(home, 'ls-files')
 
+        cmd_cleanup._untrack_newly_ignored(str(book))
+
+        assert _sh(home, 'ls-files') == before
+        out = capsys.readouterr().out
+        assert f'WARNING: the git repository at {os.path.realpath(home)} ' in out
+        assert ('ignores this project' if ignore else 'does not track this project') in out
+
+
+def _sh(cwd, *a):
+    """Run git in cwd; its stdout."""
+    return subprocess.run(['git', '-C', str(cwd), *a], capture_output=True,
+                          text=True, check=True).stdout
+
+
+def _books(tmp_path, book='book', at_root=False):
+    """A repo of books with an upstream: the project at `projects/<book>` (or
+    at the repo root) and, beside it, `projects/other`. Returns (root, project)."""
+    remote = tmp_path / 'remote.git'
+    root = tmp_path / 'evals'
+    project = root if at_root else root / 'projects' / book
+    (project / 'scenes').mkdir(parents=True)
+    (project / 'storyforge.yaml').write_text('project: x\n')
+    (project / 'scenes' / 'a.md').write_text('a\n')
+    other = root / 'projects' / 'other'
+    other.mkdir(parents=True)
+    (other / 'notes.md').write_text('sibling\n')
+    _sh(tmp_path, 'init', '-q', '--bare', str(remote))
+    _sh(tmp_path, 'init', '-q', '-b', 'storyforge/x', str(root))
+    for k, v in (('user.email', 'a@b.c'), ('user.name', 'Test'),
+                 ('core.quotepath', 'true')):
+        _sh(root, 'config', k, v)
+    _sh(root, 'add', '.')
+    _sh(root, 'commit', '-qm', 'seed')
+    _sh(root, 'remote', 'add', 'origin', str(remote))
+    _sh(root, 'push', '-qu', 'origin', 'storyforge/x')
+    return root, project
+
+
+def _dotfiles(tmp_path, ignore):
+    """A book inside a repo that isn't its own (dotfiles in ~), which ignores
+    the book's folder or merely doesn't track it."""
+    home = tmp_path / 'home'
+    book = home / 'Writing' / 'book'
+    (book / 'working' / 'logs').mkdir(parents=True)
+    (book / 'storyforge.yaml').write_text('project: x\n')
+    (book / 'working' / 'logs' / 'run.log').write_text('x')
+    (book / '.gitignore').write_text('working/logs/\n')
+    (home / '.zshrc').write_text('x\n')
+    (home / '.gitignore').write_text('Writing/\n' if ignore else '')
+    _sh(tmp_path, 'init', '-q', str(home))
+    for k, v in (('user.email', 'a@b.c'), ('user.name', 'Test')):
+        _sh(home, 'config', k, v)
+    _sh(home, 'add', '.zshrc', '.gitignore')
+    if not ignore:
+        # tracked by accident: the sweep must still not touch it
+        _sh(home, 'add', '-f', 'Writing/book/working/logs/run.log')
+    _sh(home, 'commit', '-qm', 'dotfiles')
+    return home, book
+
+
+@pytest.fixture
+def no_unpushed(monkeypatch):
+    """`git.unpushed` is process-wide; each test starts with it empty."""
+    from storyforge import git
+    monkeypatch.setattr(git, 'unpushed', [])
+    return git
+
+
+@pytest.mark.usefixtures('no_unpushed')
 class TestCommitCleanup:
     """Cleanup's closing commit. #520: gated on `isdir(project_dir/.git)`, so
     a project in a subfolder of its repo, a worktree or a submodule had its
     changes left uncommitted with no line saying so; and an unscoped
     `status --porcelain` counted a sibling project's edits as changes."""
 
-    @staticmethod
-    def _git(cwd, *a):
-        return subprocess.run(['git', '-C', str(cwd), *a], capture_output=True,
-                              text=True).stdout
-
-    def _repo(self, tmp_path):
-        root = tmp_path / 'evals'
-        project = root / 'projects' / 'book'
-        sibling = root / 'projects' / 'other'
-        for d in (project / 'scenes', sibling):
-            d.mkdir(parents=True)
-        (project / 'scenes' / 'a.md').write_text('a\n')
-        (sibling / 'notes.md').write_text('sibling\n')
-        subprocess.run(['git', 'init', '-q', '-b', 'storyforge/x', str(root)], check=True)
-        for k, v in (('user.email', 'a@b.c'), ('user.name', 'Test')):
-            self._git(root, 'config', k, v)
-        self._git(root, 'add', '.')
-        self._git(root, 'commit', '-qm', 'seed')
-        return root, project
-
     def _committed(self, root):
-        return sorted(self._git(root, 'show', '--name-only', '--format=', 'HEAD').split())
+        return sorted(_sh(root, 'show', '--name-only', '-z', '--format=', 'HEAD')
+                      .strip('\0\n').split('\0'))
 
-    def test_a_subfolder_project_is_committed(self, tmp_path, capsys):
-        root, project = self._repo(tmp_path)
+    def _pushed(self, root):
+        return _sh(root, 'rev-parse', 'HEAD') == _sh(root, 'rev-parse', '@{u}')
+
+    @pytest.mark.parametrize('book', ['book', 'café'])
+    def test_a_subfolder_project_is_committed_and_pushed(self, tmp_path, capsys, book):
+        root, project = _books(tmp_path, book)
         (project / '.gitignore').write_text('working/logs/\n')
         (project / 'scenes' / 'a.md').write_text('cleaned\n')
         (root / 'projects' / 'other' / 'notes.md').write_text('sibling edit\n')
 
         assert cmd_cleanup._commit_cleanup(str(project)) is True
 
-        assert self._committed(root) == ['projects/book/.gitignore',
-                                         'projects/book/scenes/a.md']
-        assert self._git(root, 'log', '-1', '--format=%s').strip() == \
-            cmd_cleanup.CLEANUP_COMMIT_MESSAGE
-        assert self._git(root, 'status', '--porcelain', '--', 'projects/other') \
-            .strip() == 'M projects/other/notes.md'
-        assert 'Committing changes...' in capsys.readouterr().out
+        assert self._committed(root) == [f'projects/{book}/.gitignore',
+                                         f'projects/{book}/scenes/a.md']
+        assert self._pushed(root)
+        assert _sh(root, 'status', '--porcelain', '--', 'projects/other').strip() == \
+            'M projects/other/notes.md'
+        out = capsys.readouterr().out
+        assert f'Committed: {cmd_cleanup.CLEANUP_COMMIT_MESSAGE}' in out
+        assert 'WARNING' not in out
+
+    def test_a_project_at_the_repo_root_is_committed(self, tmp_path, capsys):
+        """T-3: the layout every author repo has."""
+        root, project = _books(tmp_path, at_root=True)
+        (project / 'scenes' / 'a.md').write_text('cleaned\n')
+        (project / 'projects' / 'other' / 'notes.md').write_text('inside it\n')
+
+        assert cmd_cleanup._commit_cleanup(str(project)) is True
+
+        assert self._committed(root) == ['projects/other/notes.md', 'scenes/a.md']
+        assert self._pushed(root)
+        assert 'WARNING' not in capsys.readouterr().out
 
     def test_only_a_sibling_changed_is_no_changes(self, tmp_path, capsys):
-        root, project = self._repo(tmp_path)
-        before = self._git(root, 'rev-parse', 'HEAD')
+        root, project = _books(tmp_path)
+        before = _sh(root, 'rev-parse', 'HEAD')
         (root / 'projects' / 'other' / 'notes.md').write_text('sibling edit\n')
 
-        assert cmd_cleanup._commit_cleanup(str(project)) is False
+        assert cmd_cleanup._commit_cleanup(str(project)) is True
 
-        assert self._git(root, 'rev-parse', 'HEAD') == before
-        assert 'No changes to commit.' in capsys.readouterr().out
+        assert _sh(root, 'rev-parse', 'HEAD') == before
+        out = capsys.readouterr().out
+        assert 'No changes to commit.' in out
+        assert 'Committ' not in out.replace('No changes to commit.', '')   # T-5
 
     def test_a_file_staged_outside_the_project_is_not_swept_in(self, tmp_path, capsys):
         """The commit takes the whole index (the `rm --cached` removals live
         only there), so a sibling's staged file would go in under cleanup's
-        message: refused, named, and nothing committed."""
-        root, project = self._repo(tmp_path)
-        before = self._git(root, 'rev-parse', 'HEAD')
+        message: refused, named, nothing committed, the index as it was."""
+        root, project = _books(tmp_path)
+        before = _sh(root, 'rev-parse', 'HEAD')
         (project / 'scenes' / 'a.md').write_text('cleaned\n')
         (root / 'projects' / 'other' / 'notes.md').write_text('sibling edit\n')
-        self._git(root, 'add', 'projects/other/notes.md')
+        _sh(root, 'add', 'projects/other/notes.md')
 
         assert cmd_cleanup._commit_cleanup(str(project)) is False
 
-        assert self._git(root, 'rev-parse', 'HEAD') == before
+        assert _sh(root, 'rev-parse', 'HEAD') == before
+        assert _sh(root, 'diff', '--cached', '--name-only').split() == \
+            ['projects/other/notes.md']
         out = capsys.readouterr().out
         assert 'WARNING: files outside this project are staged' in out
         assert 'projects/other/notes.md' in out
 
     def test_the_untrack_sweeps_removals_are_committed(self, tmp_path):
-        root, project = self._repo(tmp_path)
+        root, project = _books(tmp_path)
         (project / 'working' / 'logs').mkdir(parents=True)
         (project / 'working' / 'logs' / 'café.log').write_text('x')
-        self._git(root, 'add', '.')
-        self._git(root, 'commit', '-qm', 'log')
+        _sh(root, 'add', '.')
+        _sh(root, 'commit', '-qm', 'log')
         (project / '.gitignore').write_text('working/logs/\n')
 
         cmd_cleanup._untrack_newly_ignored(str(project))
         assert cmd_cleanup._commit_cleanup(str(project)) is True
 
-        assert self._git(root, 'ls-files', '--', 'projects/book/working') == ''
+        assert _sh(root, 'ls-files', '--', 'projects/book/working') == ''
 
-    def test_a_failing_commit_is_not_reported_as_committed(self, tmp_path, capsys):
-        root, project = self._repo(tmp_path)
+    def test_a_failing_commit_is_a_failure(self, tmp_path, capsys):
+        root, project = _books(tmp_path)
         hook = root / '.git' / 'hooks' / 'pre-commit'
         hook.write_text('#!/bin/sh\necho "hook says no" >&2\nexit 1\n')
         hook.chmod(0o755)
-        before = self._git(root, 'rev-parse', 'HEAD')
+        before = _sh(root, 'rev-parse', 'HEAD')
         (project / 'scenes' / 'a.md').write_text('cleaned\n')
 
         assert cmd_cleanup._commit_cleanup(str(project)) is False
 
-        assert self._git(root, 'rev-parse', 'HEAD') == before
+        assert _sh(root, 'rev-parse', 'HEAD') == before
+        out = capsys.readouterr().out
         assert f'WARNING: git commit "{cmd_cleanup.CLEANUP_COMMIT_MESSAGE}" failed: ' \
-               'hook says no' in capsys.readouterr().out
+               'hook says no' in out
+        assert 'Committed:' not in out
 
-    def test_outside_a_git_work_tree_it_says_so(self, tmp_path, monkeypatch, capsys):
+    def test_outside_a_git_repository_it_says_so(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setenv('GIT_CEILING_DIRECTORIES', str(tmp_path.parent))
-        assert cmd_cleanup._commit_cleanup(str(tmp_path)) is False
-        assert "WARNING: not inside a git work tree (or git is not installed), so " \
-               "cleanup's changes were not committed." in capsys.readouterr().out
+        assert cmd_cleanup._commit_cleanup(str(tmp_path)) is True
+        assert ("WARNING: not inside a git repository, so cleanup's changes were "
+                "not committed.") in capsys.readouterr().out
+
+    @pytest.mark.parametrize('ignore', [False, True])
+    def test_an_unrelated_parent_repository_gets_no_commit(self, tmp_path, capsys, ignore):
+        """SF-A: a book inside a dotfiles repo was committed (and pushed)
+        there; one the dotfiles repo ignores printed "No changes to commit."
+        on every run while nothing was ever committed."""
+        home, book = _dotfiles(tmp_path, ignore)
+        before = _sh(home, 'rev-parse', 'HEAD')
+        (book / 'scenes').mkdir()
+        (book / 'scenes' / 'a.md').write_text('a\n')
+
+        assert cmd_cleanup._commit_cleanup(str(book)) is True
+
+        assert _sh(home, 'rev-parse', 'HEAD') == before
+        out = capsys.readouterr().out
+        assert f'WARNING: the git repository at {os.path.realpath(home)} ' in out
+        assert "so cleanup's changes were not committed." in out
+        assert 'No changes to commit.' not in out
+
+    @pytest.mark.parametrize('failing', ['status', 'diff'])
+    def test_a_git_that_fails_is_a_failure(self, tmp_path, monkeypatch, capsys, failing):
+        root, project = _books(tmp_path)
+        (project / 'scenes' / 'a.md').write_text('cleaned\n')
+        real_run = subprocess.run
+
+        def fail(cmd, *a, **k):
+            if failing in cmd:
+                return subprocess.CompletedProcess(cmd, 128, '', 'fatal: index locked')
+            return real_run(cmd, *a, **k)
+
+        monkeypatch.setattr(cmd_cleanup.subprocess, 'run', fail)
+        assert cmd_cleanup._commit_cleanup(str(project)) is False
+        out = capsys.readouterr().out
+        assert 'fatal: index locked' in out
+        assert "so cleanup's changes were not committed." in out
+
+    def test_nothing_to_commit_from_the_commit_itself(self, tmp_path, monkeypatch, capsys):
+        root, project = _books(tmp_path)
+        (project / 'scenes' / 'a.md').write_text('cleaned\n')
+        from storyforge import git
+
+        def nothing(*a, **k):
+            git.last_commit_error = git.NOTHING_TO_COMMIT
+            return False
+
+        monkeypatch.setattr(cmd_cleanup, 'commit_and_push', nothing)
+        assert cmd_cleanup._commit_cleanup(str(project)) is True
+        assert 'No changes to commit.' in capsys.readouterr().out
+
+    def test_a_stale_nothing_to_commit_is_not_read_as_this_ones(self, tmp_path, monkeypatch):
+        """TD-5: `last_commit_error` from an earlier commit turned this
+        commit's failure into "nothing to commit"."""
+        root, project = _books(tmp_path)
+        (project / 'scenes' / 'a.md').write_text('cleaned\n')
+        from storyforge import git
+        monkeypatch.setattr(git, 'last_commit_error', git.NOTHING_TO_COMMIT)
+        monkeypatch.setattr(cmd_cleanup, 'commit_and_push', lambda *a, **k: False)
+        assert cmd_cleanup._commit_cleanup(str(project)) is False
 
 
 # ============================================================================
@@ -1301,14 +1445,14 @@ class TestMainDryRun:
 
     def test_dry_run_no_commits(self, mock_api, mock_git, mock_costs,
                                 project_dir, monkeypatch):
-        monkeypatch.setattr('storyforge.cmd_cleanup.detect_project_root',
-                            lambda: project_dir)
-        monkeypatch.setattr('storyforge.cmd_cleanup.subprocess.run',
-                            lambda *a, **kw: subprocess.CompletedProcess(
-                                a[0] if a else [], 0, stdout='', stderr=''))
+        """T-1: in a repo with changes, so a real run would commit; with no
+        repo the commit was skipped anyway and this could not fail."""
+        _a_repo_with_changes(project_dir, monkeypatch)
         main(['--dry-run'])
         commit_calls = mock_git.calls_for('commit_and_push')
         assert len(commit_calls) == 0
+        main([])   # the same arrangement does commit, or this proves nothing
+        assert len(mock_git.calls_for('commit_and_push')) == 1
 
     def test_dry_run_no_branch_creation(self, mock_api, mock_git, mock_costs,
                                         project_dir, monkeypatch):
@@ -1338,6 +1482,23 @@ class TestMainDryRun:
 # ============================================================================
 
 
+def _a_repo_with_changes(project_dir, monkeypatch):
+    """`main` against a project its repo tracks, with changes to commit
+    (mock_git stubs `storyforge.git._git`; this answers for the repo)."""
+    monkeypatch.setattr('storyforge.cmd_cleanup.detect_project_root',
+                        lambda: project_dir)
+    monkeypatch.setattr('storyforge.git.project_repo_problem', lambda d: '')
+
+    def fake_git(d, *args, check=True):
+        out = ' M .gitignore\0' if 'status' in args else ''
+        return subprocess.CompletedProcess(['git', *args], 0, stdout=out, stderr='')
+
+    monkeypatch.setattr('storyforge.git._git', fake_git)
+    monkeypatch.setattr('storyforge.cmd_cleanup.subprocess.run',
+                        lambda *a, **kw: subprocess.CompletedProcess(
+                            a[0] if a else [], 0, stdout='', stderr=''))
+
+
 class TestMainFullRun:
     """Test main() full cleanup path."""
 
@@ -1354,22 +1515,20 @@ class TestMainFullRun:
 
     def test_commits_when_changes_exist(self, mock_api, mock_git, mock_costs,
                                         project_dir, monkeypatch):
-        monkeypatch.setattr('storyforge.cmd_cleanup.detect_project_root',
-                            lambda: project_dir)
-        # Simulate a git work tree reporting changes to commit (mock_git
-        # replaces storyforge.git._git, which in_work_tree asks)
-        monkeypatch.setattr('storyforge.cmd_cleanup.in_work_tree', lambda d: True)
+        _a_repo_with_changes(project_dir, monkeypatch)
+        assert main([]) == 0
+        assert len(mock_git.calls_for('commit_and_push')) == 1
 
-        def fake_subprocess_run(cmd, **kwargs):
-            if isinstance(cmd, list) and 'status' in cmd and '--porcelain' in cmd:
-                return subprocess.CompletedProcess(cmd, 0, stdout=' M .gitignore\0',
-                                                   stderr='')
-            return subprocess.CompletedProcess(cmd if isinstance(cmd, list) else [cmd], 0,
-                                               stdout='', stderr='')
-        monkeypatch.setattr('storyforge.cmd_cleanup.subprocess.run', fake_subprocess_run)
-        main([])
-        commit_calls = mock_git.calls_for('commit_and_push')
-        assert len(commit_calls) == 1
+    def test_a_failed_commit_exits_1(self, mock_api, mock_git, mock_costs,
+                                     project_dir, monkeypatch, capsys):
+        """TD-4: `main` ignored the commit's result and said "Cleanup
+        complete." over changes left uncommitted."""
+        _a_repo_with_changes(project_dir, monkeypatch)
+        mock_git.commit_success = False
+        assert main([]) == 1
+        out = capsys.readouterr().out
+        assert 'they are not committed' in out
+        assert 'Cleanup complete.' not in out
 
     def test_scenes_flag_triggers_scene_cleanup(self, mock_api, mock_git,
                                                 mock_costs, project_dir,

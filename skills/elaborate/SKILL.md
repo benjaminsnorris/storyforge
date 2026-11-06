@@ -209,7 +209,7 @@ For each section, in order:
 5. Write the section to `reference/story-summary.md`. Its `_updated`
    frontmatter timestamp feeds cascade drift detection, so let the write
    update it rather than hand-editing the timestamp.
-6. Commit: `git add -A && git commit -m "Elaborate: prose tier" && git push`
+6. Commit: `git add -A -- . && git commit -m "Elaborate: prose tier" && git push`
 
 Advance to the spine stage only when the prose tier reads `solid` in
 `storyforge status` and the story-power scorecard is acceptable to the
@@ -227,7 +227,7 @@ author.
    - `reference/scenes.csv` (id, seq, title, status=spine)
    - `reference/scene-intent.csv` (id, function)
    - `reference/spine.csv` (`id|seq|title|summary|function|act`): the same spine scenes, with a summary of at most 35 words and the act. The status ladder and `score --level 3` read it
-6. Commit: `git add -A && git commit -m "Elaborate: spine" && git push`
+6. Commit: `git add -A -- . && git commit -m "Elaborate: spine" && git push`
 
 ### Architecture Stage (Interactive)
 
@@ -239,7 +239,7 @@ author.
 5. Create world bible if needed
 6. Write updates to all CSV files and reference docs, including `reference/architecture.csv` (`id|seq|title|summary|act|pov|spine_event|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point`, one row per architecture scene, `spine_event` naming the spine scene it serves) and each of those scenes' `architecture_scene` in scenes.csv (its own id). The status ladder and `score --level 4` read it
 7. Run validation — fix any issues before committing
-8. Commit: `git add -A && git commit -m "Elaborate: architecture" && git push`
+8. Commit: `git add -A -- . && git commit -m "Elaborate: architecture" && git push`
 
 ### Scene Map Stage (Interactive)
 
@@ -251,7 +251,7 @@ author.
    - An enum cell holds only its value (`turning_point` `action`, never `action: she strikes`; `time_of_day` one of morning, afternoon, evening, night, dawn, dusk or unstated). The CLI stage splits a `value: description` cell and keeps the description in `function`.
 5. Write updates
 6. Run validation — MICE nesting, timeline, character references
-7. Commit: `git add -A && git commit -m "Elaborate: scene map" && git push`
+7. Commit: `git add -A -- . && git commit -m "Elaborate: scene map" && git push`
 
 ### Graphic-novel mode
 
@@ -270,7 +270,7 @@ In graphic-novel mode, the scene-map stage asks for `target_pages` per scene ins
 4. Maximize scenes with no continuity_deps (these can be drafted in parallel)
 5. Write updates
 6. Run validation — knowledge flow, completeness, DAG check
-7. Commit: `git add -A && git commit -m "Elaborate: briefs" && git push`
+7. Commit: `git add -A -- . && git commit -m "Elaborate: briefs" && git push`
 
 `storyforge elaborate --stage briefs` registers the briefs' new knowledge and physical-state ids in `commitments.csv` itself, by the reconciliation `storyforge hone --domain knowledge,physical-states` runs (a physical state's `resolves` is the scene where the briefs' chain ends it). Those rows are `introduced_by` `briefs` with status `planned`: plan, not fact, so the gate never holds the prose to them; the gate makes one `binding` when the prose establishes it. A re-run keeps them in step: a fact no active brief names is removed, and one moves to the scene that now sets it up. A row you have edited since is yours and is left alone. When you write briefs by hand, run that hone command after; if the stage reports that ids are not all in the ledger, run it too.
 
@@ -349,7 +349,7 @@ Every CLI stage sets `exists: true` and `updated` on the `storyforge.yaml` artif
 3. If the voice guide has the author's text: refine it. Test against sample scenes. Develop POV-specific rules. Identify areas where voice drifts.
    - **The narrator.** When scenes have `pov` `narrator` (the book's narrator tells them, through no character's eyes), or key-decisions.md says `narrator_pov: limited N`, the voice guide defines the narrator like a POV character: who they are (an omniscient voice, a bard, a later teller, a character looking back) and their stance (how far into minds they see, whether they judge, foreshadow or address the reader, how close they stand to the action), with a `narrator` row in `voice-profile.csv`. An adaptation's narrator is the novel's, not the translator's.
 4. For each POV character, define: their unique speech patterns, what metaphors they reach for, what they notice first, what they never say, their sentence rhythm.
-5. Commit: `git add -A && git commit -m "Elaborate: voice guide" && git push`
+5. Commit: `git add -A -- . && git commit -m "Elaborate: voice guide" && git push`
 
 Voice work in coach mode: ask questions about what the author hears in their head — tone, rhythm, register. Don't propose voice; help the author discover it.
 
@@ -419,7 +419,7 @@ If Option A, work through each gap group interactively:
 - After all groups, re-run validation
 - If gaps remain, offer to continue
 
-4. Commit: `git add -A && git commit -m "Elaborate: gap-fill" && git push`
+4. Commit: `git add -A -- . && git commit -m "Elaborate: gap-fill" && git push`
 
 ### Character Development (Interactive)
 
@@ -547,7 +547,7 @@ git rev-parse --abbrev-ref HEAD
 Every stage output gets committed immediately:
 
 ```bash
-git add -A && git commit -m "Elaborate: [stage name]" && git push
+git add -A -- . && git commit -m "Elaborate: [stage name]" && git push
 ```
 
 Do not batch multiple stages into one commit.

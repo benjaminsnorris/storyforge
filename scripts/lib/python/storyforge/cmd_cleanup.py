@@ -33,8 +33,8 @@ from storyforge import common
 from storyforge.common import (
     csv_safe, detect_project_root, get_medium, log, read_yaml_field,
 )
-from storyforge import git as git_mod
-from storyforge.git import commit_and_push, ensure_on_branch, in_work_tree
+from storyforge import git as gitmod
+from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge import ledger
 from storyforge.elaborate import _FILE_MAP, _MOTIF_COLS, _THEMES_COLS
 from storyforge.audit import COLUMNS as AUDIT_COLUMNS
@@ -611,10 +611,12 @@ def _untrack_newly_ignored(project_dir: str) -> None:
     """
     # Not `isdir(project_dir/.git)`: False for a project in a subfolder of its
     # repo (`projects/<book>/`), a worktree or a submodule, which skipped the
-    # sweep with nothing said (#520)
-    if not in_work_tree(project_dir):
-        log('WARNING: not inside a git work tree (or git is not installed), so '
-            'files the .gitignore excludes were not checked for and untracked.')
+    # sweep with nothing said (#520). Nor merely "inside some repo": not one
+    # that isn't the project's (a dotfiles repo in ~)
+    why = gitmod.project_repo_problem(project_dir)
+    if why:
+        log(f'WARNING: {why}, so files the .gitignore excludes were not checked '
+            f'for or untracked.')
         return
     # `-c` is required, not decorative: `git ls-files -i` has been fatal
     # without either `-o` or `-c` since git 2.32, and the failure was silent
@@ -627,11 +629,8 @@ def _untrack_newly_ignored(project_dir: str) -> None:
     # `-z`: without it a non-ASCII name arrives C-quoted (`"caf\303\251.md"`)
     # and the `git rm --cached` of that string matches nothing. Run in the
     # project, it lists only the project's files, relative to it.
-    r = subprocess.run(
-        ['git', '-C', project_dir, 'ls-files', '-i', '-c',
-         '--exclude-standard', '-z'],
-        capture_output=True, text=True,
-    )
+    r = gitmod._git(project_dir, 'ls-files', '-i', '-c', '--exclude-standard', '-z',
+                    check=False)
     if r.returncode != 0:
         log(f'WARNING: could not list ignored-but-tracked files '
             f'({r.stderr.strip()}). Nothing was untracked; the rest of '
@@ -643,9 +642,9 @@ def _untrack_newly_ignored(project_dir: str) -> None:
     log(f'  Untracking {len(tracked)} newly-gitignored files')
     failed = []
     for f in tracked:
-        rm = subprocess.run(['git', '-C', project_dir, '--literal-pathspecs',
-                             'rm', '--cached', '-q', '--', f],
-                            capture_output=True, text=True)
+        # literal: `working/logs/[1].log` would otherwise be a glob
+        rm = gitmod._git(project_dir, '--literal-pathspecs', 'rm', '--cached', '-q',
+                         '--', f, check=False)
         if rm.returncode != 0:
             failed.append(f'{f} ({(rm.stderr or "").strip()[:200]})')
     if failed:
@@ -656,13 +655,14 @@ def _untrack_newly_ignored(project_dir: str) -> None:
 CLEANUP_COMMIT_MESSAGE = 'Cleanup: project structure and working files'
 
 
-def _git_out(project_dir: str, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(['git', '-C', project_dir, *args],
-                          capture_output=True, text=True)
-
-
 def _commit_cleanup(project_dir: str) -> bool:
-    """Commit cleanup's changes to the project. True if committed.
+    """Commit cleanup's changes to the project. False only when that failed.
+
+    True when they were committed, when there was nothing to commit, and
+    when the project has no repository of its own to commit to (a WARNING
+    says which). False, after a WARNING, when git failed, when the commit was
+    refused (below) or failed: `main` exits 1 then, since the project's
+    changes sit uncommitted.
 
     Scoped to the project (`status -- .`), so in a repo holding several
     projects (`projects/<book>/`) a sibling's edits don't count as changes,
@@ -672,29 +672,28 @@ def _commit_cleanup(project_dir: str) -> bool:
     So a file already staged outside the project would ride in under
     cleanup's message: then nothing is committed and the files are named.
 
-    Every path that doesn't commit says why (#520: the gate was
-    `isdir(project_dir/.git)`, which skipped subfolder, worktree and
-    submodule projects with nothing said).
+    #520: the gate was `isdir(project_dir/.git)`, which skipped subfolder,
+    worktree and submodule projects with nothing said.
     """
-    if not in_work_tree(project_dir):
-        log("WARNING: not inside a git work tree (or git is not installed), so "
-            "cleanup's changes were not committed.")
-        return False
-    r = _git_out(project_dir, 'status', '--porcelain', '-z', '--', '.')
+    msg = "so cleanup's changes were not committed."
+    why = gitmod.project_repo_problem(project_dir)
+    if why:
+        log(f'WARNING: {why}, {msg}')
+        return True
+    r = gitmod._git(project_dir, 'status', '--porcelain', '-z', '--', '.', check=False)
     if r.returncode != 0:
-        log(f"WARNING: could not check for changes (git status: "
-            f"{r.stderr.strip()[:200]}), so cleanup's changes were not committed.")
+        log(f'WARNING: could not check for changes (git status: '
+            f'{r.stderr.strip()[:200]}), {msg}')
         return False
     if not r.stdout.strip('\0'):
         log('No changes to commit.')
-        return False
-    prefix = _git_out(project_dir, 'rev-parse', '--show-prefix')
-    staged = _git_out(project_dir, 'diff', '--cached', '--name-only',
-                      '--no-renames', '-z')
+        return True
+    prefix = gitmod._git(project_dir, 'rev-parse', '--show-prefix', check=False)
+    staged = gitmod._git(project_dir, 'diff', '--cached', '--name-only',
+                         '--no-renames', '-z', check=False)
     if prefix.returncode != 0 or staged.returncode != 0:
-        log(f"WARNING: could not list what is staged (git: "
-            f"{(prefix.stderr + staged.stderr).strip()[:200]}), so cleanup's "
-            f"changes were not committed.")
+        log(f'WARNING: could not list what is staged (git: '
+            f'{(prefix.stderr + staged.stderr).strip()[:200]}), {msg}')
         return False
     outside = [f for f in staged.stdout.split('\0')
                if f and not f.startswith(prefix.stdout.strip())]
@@ -704,12 +703,15 @@ def _commit_cleanup(project_dir: str) -> bool:
             f"changes were not committed; commit or unstage those files, then "
             f"commit this project's changes.")
         return False
-    log('')
-    log('Committing changes...')
+    gitmod.last_commit_error = ''    # a stubbed commit sets none: not a stale one
     if commit_and_push(project_dir, CLEANUP_COMMIT_MESSAGE):
+        # Said after, not before: a "Committing changes..." ahead of a
+        # nothing-to-commit read as a commit that happened
+        log(f'Committed: {CLEANUP_COMMIT_MESSAGE}')
         return True
-    if git_mod.last_commit_error == git_mod.NOTHING_TO_COMMIT:
+    if gitmod.last_commit_error == gitmod.NOTHING_TO_COMMIT:
         log('No changes to commit.')
+        return True
     # A failed commit is already a WARNING from commit_and_push
     return False
 
@@ -3049,9 +3051,15 @@ def main(argv=None):
     log('')
     _run_and_write_report(project_dir)
 
-    # Commit (unless dry-run)
-    if not args.dry_run:
-        _commit_cleanup(project_dir)
+    # Commit (unless dry-run). A failed commit is exit 1: the project's
+    # changes sit uncommitted, not "complete"
+    log('')
+    if not args.dry_run and not _commit_cleanup(project_dir):
+        log('')
+        log("Cleanup made its changes, but they are not committed (see the "
+            "WARNING above).")
+        return 1
 
     log('')
     log('Cleanup complete.')
+    return 0

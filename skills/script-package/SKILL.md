@@ -203,7 +203,7 @@ git rev-parse --abbrev-ref HEAD
 
 **4. Commit and push:**
 ```bash
-git add -A && git commit -m "Produce: create chapter map and script-package settings" && git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
+git add -A -- . && git commit -m "Produce: create chapter map and script-package settings" && git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
 ```
 
 **5. Tell the author how to run assembly:**
@@ -229,7 +229,7 @@ Every artifact change gets its own commit before moving on:
 - Added or renamed a chapter? Commit and push.
 
 ```
-git add -A && git commit -m "Produce: {what was done}" && git push
+git add -A -- . && git commit -m "Produce: {what was done}" && git push
 ```
 
 ---

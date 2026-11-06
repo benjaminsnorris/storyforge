@@ -247,7 +247,7 @@ Every time you modify weights, record author scores, or make any file changes, c
 1. Write the updated files (craft-weights.csv, author-scores.csv, etc.)
 2. **Commit and push immediately:**
    ```
-   git add -A && git commit -m "Score: {what was done}" && git push
+   git add -A -- . && git commit -m "Score: {what was done}" && git push
    ```
    Examples: `"Score: adjust author weights for prose_craft principles"`, `"Score: record author scores for Act 1 scenes"`, `"Score: review cycle 3 results"`.
 

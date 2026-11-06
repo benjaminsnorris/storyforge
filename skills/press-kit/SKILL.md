@@ -146,7 +146,7 @@ Generated: {YYYY-MM-DD}
 
 Commit the manifest:
 ```
-git add -A && git commit -m "Press kit: generate manifest" && git push
+git add -A -- . && git commit -m "Press kit: generate manifest" && git push
 ```
 
 ## Ensure Feature Branch
@@ -166,7 +166,7 @@ git rev-parse --abbrev-ref HEAD
 Every component gets its own commit as it's approved:
 
 ```
-git add -A && git commit -m "Press kit: {component name}" && git push
+git add -A -- . && git commit -m "Press kit: {component name}" && git push
 ```
 
 Do not batch components. Each approval triggers its own commit and push.

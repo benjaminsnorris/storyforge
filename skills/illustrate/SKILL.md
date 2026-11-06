@@ -593,7 +593,7 @@ Every artifact gets its own commit:
 - Ran a sequence review? Commit the checklist, then commit each drift fix separately.
 
 ```bash
-git add -A && git commit -m "Illustrate: {what was done}" && git push
+git add -A -- . && git commit -m "Illustrate: {what was done}" && git push
 ```
 
 ## Coaching Posture

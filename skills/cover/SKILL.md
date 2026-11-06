@@ -219,7 +219,7 @@ Do not move to the next step until `cover.png` exists and is valid.
 1. Update `production.cover_image` in `storyforge.yaml` to point to the cover file.
 2. Commit and push:
 ```
-git add -A && git commit -m "Cover: design custom SVG cover for {title}" && git push
+git add -A -- . && git commit -m "Cover: design custom SVG cover for {title}" && git push
 ```
 
 ## Tier 2: AI Image Generation
@@ -426,7 +426,7 @@ Every artifact gets its own commit:
 - Updated production configuration? Commit and push.
 
 ```
-git add -A && git commit -m "Cover: {what was done}" && git push
+git add -A -- . && git commit -m "Cover: {what was done}" && git push
 ```
 
 ## Coaching Posture
