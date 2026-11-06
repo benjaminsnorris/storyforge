@@ -2559,6 +2559,21 @@ class TestSteadyParagraphs:
         assert result.committed
         assert ledger.file_problems(ledger.ledger_path(project_dir)) == []
 
+    def test_a_recheck_does_not_add_a_reworded_fact_the_scene_has(
+            self, project_dir, tmp_path):
+        """'The scab ... split open and bled' read again as 'splits and
+        bleeds', quoted from another paragraph: the same fact, not a second."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        reworded = _commitment(subject='tarrens-hollow',
+                               statement="Tarren's Hollow had 412 people living there",
+                               quote=self.LIVES)
+        result = _gate(project_dir, tmp_path, [reworded, self._temple()], command='recheck')
+        self._recheck_ok(project_dir, result)
+        mine = [r for r in self._mine(project_dir) if r['subject'] == 'tarrens-hollow']
+        assert mine == [old]
+        assert result.changed == [] and result.recheck == []
+
     def test_a_recheck_adds_a_different_fact_beginning_alike_under_a_new_id(
             self, project_dir, tmp_path):
         """'Telemachus tells Pisistratus that his father ...': a different

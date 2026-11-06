@@ -1793,11 +1793,17 @@ def _keep_steady(project_dir: str, result: GateResult, old_rows: list[dict[str, 
     place (`steady_facts`) exactly as it was, same id and statement, and
     drop each proposed row that reads one of them again: its quote lies
     within that same paragraph, and it states the same fact or its quote
-    shares four words in a row with the kept one's. A proposed row from any
-    other paragraph is never matched to a kept fact (#558's second review:
-    a changed paragraph's new fact sharing four words with a kept one was
-    dropped, and nothing was re-checked). Only the changed paragraphs'
-    facts are new readings, so only they can count as changed. A steady
+    shares four words in a row with the kept one's; or (#599) its quote
+    lies within any unchanged paragraph and it has the type and the
+    statement's first words (`extract.statement_opening`) of a kept one: a
+    re-check reads prose that hasn't changed at all, and extraction may
+    quote another sentence for the same fact ("split open and bled", "splits
+    and bleeds"), which would otherwise be added beside the kept fact. A
+    proposed row from a changed paragraph is never matched to a kept fact
+    (#558's second review: a changed paragraph's new fact sharing four
+    words with a kept one was dropped, and nothing was re-checked). Only
+    the changed paragraphs' facts are new readings, so only they can count
+    as changed. A steady
     fact re-extraction left out is kept too, never dropped silently. Without
     the earlier prose (no git, nothing recorded) nothing is kept, and
     `prose_notes` says so. Runs before the hold-back, which then applies to
@@ -1809,11 +1815,15 @@ def _keep_steady(project_dir: str, result: GateResult, old_rows: list[dict[str, 
         result.prose_notes.append(f'{result.scene_id}: {why}, so every earlier fact the new '
                                   f'reading words differently counts as changed')
         return
+    from storyforge.extract import statement_opening
     where = steady_facts(old_rows, earlier, prose)
     kept = [copy.deepcopy(o) for o in old_rows if o['id'] in where]
     if not kept:
         return
     new_paras = _paragraphs(prose)
+    steady = set(_steady_pairs(earlier, prose).values())
+    openings = {(o.get('type') or '', statement_opening(o.get('statement') or ''))
+                for o in kept}
 
     def again(p: dict[str, str]) -> bool:
         q = p.get('quote') or ''
@@ -1821,6 +1831,11 @@ def _keep_steady(project_dir: str, result: GateResult, old_rows: list[dict[str, 
         if len(at) != 1:
             return False
         j = at.pop()
+        if j not in steady:
+            return False
+        opening = statement_opening(p.get('statement') or '')
+        if opening and (p.get('type') or '', opening) in openings:
+            return True   # the same fact read from another sentence (#599)
         qw = _words(q)
         return any(where[o['id']] == j and (
             ledger.fact_key(p) == ledger.fact_key(o)
