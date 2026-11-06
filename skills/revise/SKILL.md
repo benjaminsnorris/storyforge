@@ -19,7 +19,7 @@ Store this resolved plugin path for use throughout the session.
 2. `working/pipeline.csv` — current cycle status
 3. Latest evaluation: `working/evaluations/eval-*/findings.yaml` or `synthesis.md`
 4. Latest scoring: `working/scores/latest/diagnosis.csv`, `fidelity-scores.csv`
-5. Structural scoring: `working/scores/structural-latest.csv`, `working/scores/structural-proposals.csv`
+5. Structural scoring: `working/scores/structural-latest.csv`, `working/scores/structural-proposals.csv`. Every row has `computed_at`; if the scene CSVs have changed since, run `./storyforge validate --structural` (free) before using or quoting the scores. `revise --structural` re-scores a stale file itself
 6. Existing revision plan: `working/plans/revision-plan.csv`
 7. Latest review: `working/reviews/` (most recent)
 

@@ -608,3 +608,148 @@ class TestFlashbacksIgnoreCutScenes:
                         'status': 'cut'},
                   'c': {'seq': '3', 'timeline_day': '6', 'pov': 'x', 'word_count': '10'}}
         assert assess_flashbacks(scenes, {}) == []
+
+
+class TestStructuralStaleness:
+    """#600 (Beowulf B-038): a structural score saved before the briefs existed
+    was quoted a day later as the book's, with two dimensions at 0.00 that
+    re-scored at 0.90 and 0.95. A saved score records when and from what."""
+
+    def _project(self, fixture_dir, tmp_path):
+        import shutil
+        proj = str(tmp_path / 'proj')
+        shutil.copytree(os.path.join(fixture_dir, 'reference'), os.path.join(proj, 'reference'))
+        return proj
+
+    def _save(self, proj):
+        from storyforge.structural import structural_score, save_structural_scores
+        save_structural_scores(structural_score(os.path.join(proj, 'reference')), proj)
+        return os.path.join(proj, 'working', 'scores', 'structural-latest.csv')
+
+    def _touch_briefs(self, proj):
+        with open(os.path.join(proj, 'reference', 'scene-briefs.csv'), 'a') as f:
+            f.write('\n')
+
+    def test_every_row_is_stamped(self, fixture_dir, tmp_path):
+        from storyforge.elaborate import _read_csv
+        from storyforge.structural import structural_inputs_hash
+        proj = self._project(fixture_dir, tmp_path)
+        rows = _read_csv(self._save(proj))
+        assert rows and all(r['computed_at'] and r['inputs'] for r in rows)
+        assert {r['inputs'] for r in rows} == {
+            structural_inputs_hash(os.path.join(proj, 'reference'))}
+
+    def test_a_fresh_score_is_current_and_a_changed_csv_makes_it_stale(
+            self, fixture_dir, tmp_path):
+        from storyforge.structural import structural_staleness
+        proj = self._project(fixture_dir, tmp_path)
+        self._save(proj)
+        assert structural_staleness(proj) == ''
+        self._touch_briefs(proj)
+        assert 'changed since' in structural_staleness(proj)
+
+    def test_a_score_saved_before_stamping_is_stale(self, fixture_dir, tmp_path):
+        from storyforge.structural import structural_staleness
+        proj = self._project(fixture_dir, tmp_path)
+        latest = os.path.join(proj, 'working', 'scores', 'structural-latest.csv')
+        os.makedirs(os.path.dirname(latest))
+        with open(latest, 'w') as f:
+            f.write('dimension|score|target|weight\nknowledge_chain|0.0000|0.60|0.5\n'
+                    'overall|0.6390|0.70|1.0\n')
+        assert 'no inputs' in structural_staleness(proj)
+        assert 'no structural score' in structural_staleness(str(tmp_path / 'none'))
+
+    def test_current_rows_score_a_stale_file_in_memory_without_writing(
+            self, fixture_dir, tmp_path):
+        from storyforge.structural import current_structural_rows, structural_staleness
+        proj = self._project(fixture_dir, tmp_path)
+        latest = self._save(proj)
+        self._touch_briefs(proj)
+        with open(latest) as f:
+            before = f.read()
+        rows = current_structural_rows(proj)
+        assert {r['dimension'] for r in rows} >= {'knowledge_chain', 'overall'}
+        with open(latest) as f:
+            assert f.read() == before          # a reader never writes
+        assert structural_staleness(proj)      # still stale on disk
+
+    def test_refresh_rescores_only_a_stale_file(self, fixture_dir, tmp_path):
+        from storyforge.structural import refresh_structural_scores, structural_staleness
+        proj = self._project(fixture_dir, tmp_path)
+        self._save(proj)
+        assert refresh_structural_scores(proj) == ''
+        self._touch_briefs(proj)
+        assert refresh_structural_scores(proj)
+        assert structural_staleness(proj) == ''
+
+    def test_the_dashboard_carries_the_current_score(self, fixture_dir, tmp_path):
+        from storyforge.structural import structural_inputs_hash
+        from storyforge.visualize import load_dashboard_data
+        proj = self._project(fixture_dir, tmp_path)
+        self._save(proj)
+        self._touch_briefs(proj)
+        rows = load_dashboard_data(proj)['structural_scores']
+        assert rows and {r['inputs'] for r in rows} == {
+            structural_inputs_hash(os.path.join(proj, 'reference'))}
+
+    def test_export_warns_on_a_stale_score(self, fixture_dir, tmp_path):
+        from storyforge.export import _score_tables
+        proj = self._project(fixture_dir, tmp_path)
+        self._save(proj)
+        warnings = []
+        _score_tables(proj, warnings)
+        assert not any('stale' in w for w in warnings)
+        self._touch_briefs(proj)
+        _score_tables(proj, warnings)
+        assert any('structural-latest.csv is stale' in w for w in warnings)
+
+    # --- PR #603's review ---
+
+    def test_a_change_to_the_source_outcomes_makes_it_stale(
+            self, fixture_dir, tmp_path, monkeypatch):
+        """storyforge.yaml's source block reaches the score through the
+        outcomes a faithful source fixes (mode faithful -> free moved
+        function_variety 0.35 -> 0.25); the hash must see it."""
+        from storyforge import structural
+        proj = self._project(fixture_dir, tmp_path)
+        monkeypatch.setattr(structural, '_source_fixed_outcomes', lambda ref: ['s01'])
+        self._save(proj)
+        assert structural.structural_staleness(proj) == ''
+        monkeypatch.setattr(structural, '_source_fixed_outcomes', lambda ref: [])
+        assert 'changed since' in structural.structural_staleness(proj)
+
+    def test_refresh_rebuilds_the_proposals(self, fixture_dir, tmp_path):
+        from storyforge.structural import refresh_structural_scores
+        proj = self._project(fixture_dir, tmp_path)
+        self._save(proj)
+        proposals = os.path.join(proj, 'working', 'scores', 'structural-proposals.csv')
+        with open(proposals, 'w') as f:
+            f.write('stale\n')
+        self._touch_briefs(proj)
+        refresh_structural_scores(proj)
+        with open(proposals) as f:
+            assert f.read() != 'stale\n'
+
+    def test_a_structural_dry_run_writes_no_scores(self, fixture_dir, tmp_path):
+        from storyforge.cmd_revise import _generate_structural_plan
+        proj = self._project(fixture_dir, tmp_path)
+        latest = self._save(proj)
+        proposals = os.path.join(proj, 'working', 'scores', 'structural-proposals.csv')
+        with open(proposals, 'w') as f:
+            f.write('dimension|fix_location|target|change|rationale|status\n'
+                    'arc_completeness|intent|global|x|y|pending\n')
+        self._touch_briefs(proj)
+        with open(latest) as f:
+            before = f.read()
+        _generate_structural_plan(proj, str(tmp_path / 'plan.csv'), write=False)
+        with open(latest) as f:
+            assert f.read() == before
+
+    def test_an_unreadable_score_is_stale_not_a_crash(self, fixture_dir, tmp_path):
+        from storyforge.structural import current_structural_rows, structural_staleness
+        proj = self._project(fixture_dir, tmp_path)
+        latest = self._save(proj)
+        with open(latest, 'wb') as f:
+            f.write(b'dimension|score\n\xff\xfe|0.5\n')
+        assert "can't be read" in structural_staleness(proj)
+        assert {r['dimension'] for r in current_structural_rows(proj)} >= {'overall'}

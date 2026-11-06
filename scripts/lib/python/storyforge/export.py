@@ -181,6 +181,11 @@ def _score_tables(project_dir: str, warnings: list[str]) -> tuple[str | None, li
     structural = os.path.join(project_dir, 'working', 'scores', 'structural-latest.csv')
     if os.path.isfile(structural):
         paths.append(structural)
+        from storyforge.structural import structural_staleness
+        stale = structural_staleness(project_dir)
+        if stale:
+            warnings.append(f'working/scores/structural-latest.csv is stale: {stale}; '
+                            f'run ./storyforge validate --structural before exporting')
     return cycle_rel, paths
 
 
