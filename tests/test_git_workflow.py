@@ -528,9 +528,132 @@ class TestAFailedCommitRestoresTheIndex:
     def test_a_sibling_projects_staged_file_stays_staged(self, tmp_path):
         from storyforge import git
         work, project = self._rejecting_subfolder(tmp_path)
-        (work / 'projects' / 'other' / 'notes.md').write_text('sibling\n')
+        (work / 'projects' / 'other' / 'notes.md').write_text('sibling edit\n')
         self._git(work, 'add', 'projects/other/notes.md')
         (project / 'scenes' / 'kept.md').write_text('cleaned\n')
         before = self._index(work)
         assert git.commit_and_push(str(project), 'Cleanup') is False
         assert self._index(work) == before
+
+
+class TestEnsureBranchPushed:
+    """#520 review (SF-D): on a branch with nothing ahead of its base, it ran
+    `diff --quiet` over the whole repo, then a bare `commit` (the whole index,
+    a sibling project's staged work too), and checked none of it."""
+
+    _git = staticmethod(TestAFailedCommit._git)
+
+    @pytest.fixture(autouse=True)
+    def _no_unpushed(self, monkeypatch):
+        from storyforge import git
+        monkeypatch.setattr(git, 'unpushed', [])
+
+    def _fresh_branch(self, tmp_path):
+        work, project = TestCommitInASubfolder()._repos(tmp_path, 'projects/book')
+        (project / 'storyforge.yaml').write_text('project: x\n')
+        self._git(work, 'add', '.')
+        self._git(work, 'commit', '-qm', 'yaml')
+        self._git(work, 'branch', '-qf', 'main', 'HEAD')    # nothing ahead of main
+        self._git(work, 'checkout', '-qb', 'storyforge/write-1')
+        return work, project
+
+    def _committed(self, work):
+        return self._git(work, 'show', '--name-only', '--format=', 'HEAD').split()
+
+    def test_a_sibling_projects_staged_work_stays_out(self, tmp_path):
+        from storyforge import git
+        work, project = self._fresh_branch(tmp_path)
+        (work / 'projects' / 'other' / 'notes.md').write_text('sibling edit\n')
+        self._git(work, 'add', 'projects/other/notes.md')
+        assert git.ensure_branch_pushed(str(project), 'storyforge/write-1') is True
+        assert self._git(work, 'log', '-1', '--format=%s').strip() == 'Start write-1'
+        assert self._committed(work) == []
+        assert self._git(work, 'diff', '--cached', '--name-only').split() == \
+            ['projects/other/notes.md']
+        assert self._git(work, 'rev-parse', '@{u}') == self._git(work, 'rev-parse', 'HEAD')
+
+    def test_the_projects_setup_files_and_nothing_else(self, tmp_path):
+        from storyforge import git
+        work, project = self._fresh_branch(tmp_path)
+        (project / 'storyforge.yaml').write_text('project: y\n')
+        (project / 'scenes' / 'kept.md').write_text('not setup\n')
+        (work / 'projects' / 'other' / 'notes.md').write_text('sibling edit\n')
+        assert git.ensure_branch_pushed(str(project), 'storyforge/write-1') is True
+        assert self._committed(work) == ['projects/book/storyforge.yaml']
+
+    def test_a_failing_commit_is_a_failure(self, tmp_path, capsys):
+        from storyforge import git
+        work, project = self._fresh_branch(tmp_path)
+        hook = work / '.git' / 'hooks' / 'pre-commit'
+        hook.write_text('#!/bin/sh\necho "hook says no" >&2\nexit 1\n')
+        hook.chmod(0o755)
+        (project / 'storyforge.yaml').write_text('project: y\n')
+        before = self._git(work, 'rev-parse', 'HEAD')
+        assert git.ensure_branch_pushed(str(project), 'storyforge/write-1') is False
+        assert self._git(work, 'rev-parse', 'HEAD') == before
+        out = capsys.readouterr().out
+        assert 'WARNING: git commit "Start write-1" failed: hook says no' in out
+        assert 'Initial commit' not in out
+
+    def test_a_failing_push_is_named(self, tmp_path, capsys):
+        import shutil
+        from storyforge import git
+        work, project = self._fresh_branch(tmp_path)
+        shutil.rmtree(tmp_path / 'remote.git')
+        assert git.ensure_branch_pushed(str(project), 'storyforge/write-1') is False
+        assert 'WARNING: could not push storyforge/write-1' in capsys.readouterr().out
+        assert git.unpushed == ['storyforge/write-1']
+
+
+def test_no_command_pushes_without_checking():
+    """#520 review (SF-E): revise and write pushed with
+    `_git(project_dir, 'push', check=False)` and ignored the result; pushes
+    go through `git._push`, which names a failure."""
+    import pathlib
+    import re
+    pkg = pathlib.Path(__file__).resolve().parent.parent / 'scripts' / 'lib' / 'python' / 'storyforge'
+    bare = [f'{p.name}:{n}' for p in pkg.glob('*.py') if p.name != 'git.py'
+            for n, line in enumerate(p.read_text(encoding='utf-8').splitlines(), 1)
+            if re.search(r"_git\([^)]*'push'", line)]
+    assert bare == []
+
+
+class TestVerifyRevisionChanges:
+    """#520 review (SF-F): it looked at the whole repo, so a sibling
+    project's edit read as this pass's change, and a git that failed read
+    as a change too."""
+
+    _git = staticmethod(TestAFailedCommit._git)
+
+    def _head(self, tmp_path):
+        work, project = TestCommitInASubfolder()._repos(tmp_path, 'projects/book')
+        return work, project, self._git(work, 'rev-parse', 'HEAD').strip()
+
+    def test_a_sibling_projects_changes_are_not_this_passs(self, tmp_path):
+        from storyforge.revision import verify_revision_changes
+        work, project, head = self._head(tmp_path)
+        (work / 'projects' / 'other' / 'notes.md').write_text('edit\n')
+        (work / 'projects' / 'other' / 'new.md').write_text('staged\n')
+        self._git(work, 'add', 'projects/other/new.md')
+        self._git(work, 'commit', '-qm', 'sibling', '--', 'projects/other/new.md')
+        (work / 'projects' / 'other' / 'staged.md').write_text('staged\n')
+        self._git(work, 'add', 'projects/other/staged.md')
+        assert verify_revision_changes(head, str(project)) is False
+
+    @pytest.mark.parametrize('change', ['commit', 'unstaged', 'staged', 'untracked'])
+    def test_the_projects_own_changes(self, tmp_path, change):
+        from storyforge.revision import verify_revision_changes
+        work, project, head = self._head(tmp_path)
+        target = project / 'scenes' / ('new.md' if change == 'untracked' else 'kept.md')
+        target.write_text('revised\n')
+        if change in ('staged', 'commit'):
+            self._git(project, 'add', 'scenes/kept.md')
+        if change == 'commit':
+            self._git(project, 'commit', '-qm', 'pass')
+        assert verify_revision_changes(head, str(project)) is True
+
+    def test_a_failing_git_is_an_error_not_a_change(self, tmp_path):
+        from storyforge.revision import GitCheckError, verify_revision_changes
+        work, project, head = self._head(tmp_path)
+        with pytest.raises(GitCheckError, match='rev-list failed'):
+            verify_revision_changes('0' * 40, str(project))

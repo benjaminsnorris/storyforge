@@ -1048,59 +1048,42 @@ def _full_instructions(pass_name: str, purpose: str, api_mode: bool) -> str:
 # Change verification
 # ============================================================================
 
+class GitCheckError(Exception):
+    """Git failed while `verify_revision_changes` was looking."""
+
+
 def verify_revision_changes(head_before: str, project_dir: str) -> bool:
-    """Check if a revision pass produced changes.
+    """Whether a revision pass changed the project.
 
-    Checks for new commits since head_before, uncommitted changes
-    (staged or unstaged), and untracked files in scenes/ or reference/.
-
-    Args:
-        head_before: Git commit hash recorded before the pass started.
-        project_dir: Path to the project root.
-
-    Returns:
-        True if changes exist, False if the pass produced no changes.
+    True for commits since head_before that touch the project, uncommitted
+    changes (staged or unstaged) inside it, or untracked files in its
+    scenes/ or reference/. Every check is scoped to the project (`-- .`), so
+    in a repo holding several projects (`projects/<book>/`) a sibling's work
+    doesn't count; and a git that fails raises `GitCheckError` with git's
+    message rather than reading as a change (#520 review SF-F).
     """
-    import subprocess
+    from storyforge.git import _git
 
-    def _git(*args: str) -> str:
+    def run(*args: str, ok=(0,)):
         try:
-            result = subprocess.run(
-                ['git', '-C', project_dir] + list(args),
-                capture_output=True, text=True, timeout=10,
-            )
-            return result.stdout.strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            return ''
+            r = _git(project_dir, *args, check=False)
+        except OSError as e:
+            raise GitCheckError(f'git could not be run: {e}') from e
+        if r.returncode not in ok:
+            raise GitCheckError(f'git {args[0]} failed: '
+                                f'{(r.stderr or "").strip()[:200] or r.returncode}')
+        return r
 
-    def _git_rc(*args: str) -> int:
-        try:
-            result = subprocess.run(
-                ['git', '-C', project_dir] + list(args),
-                capture_output=True, text=True, timeout=10,
-            )
-            return result.returncode
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            return 1
-
-    # Check for new commits
-    head_now = _git('rev-parse', 'HEAD')
-    if head_now and head_now != head_before:
+    if run('rev-list', '--count', f'{head_before}..HEAD', '--', '.').stdout.strip() != '0':
         return True
-
-    # Check for uncommitted changes (staged or unstaged)
-    if _git_rc('diff', '--quiet') != 0:
+    # `diff --quiet`: 0 no changes, 1 changes, anything else an error
+    if run('diff', '--quiet', '--', '.', ok=(0, 1)).returncode == 1:
         return True
-    if _git_rc('diff', '--cached', '--quiet') != 0:
+    if run('diff', '--cached', '--quiet', '--', '.', ok=(0, 1)).returncode == 1:
         return True
+    return bool(run('ls-files', '--others', '--exclude-standard', '-z',
+                    '--', 'scenes/', 'reference/').stdout.strip('\0'))
 
-    # Check for untracked files in scenes/ or reference/
-    untracked = _git('ls-files', '--others', '--exclude-standard',
-                      '--', 'scenes/', 'reference/')
-    if untracked:
-        return True
-
-    return False
 
 
 # ============================================================================
@@ -1194,7 +1177,11 @@ def main():
             sys.exit(1)
         head_before = sys.argv[2]
         project_dir = sys.argv[3]
-        has_changes = verify_revision_changes(head_before, project_dir)
+        try:
+            has_changes = verify_revision_changes(head_before, project_dir)
+        except GitCheckError as e:
+            print(f'ERROR: could not check for changes: {e}', file=sys.stderr)
+            sys.exit(2)
         if has_changes:
             print('changes')
             sys.exit(0)

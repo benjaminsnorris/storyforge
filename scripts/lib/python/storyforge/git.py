@@ -171,27 +171,52 @@ def ensure_branch_pushed(project_dir: str, branch: str | None = None) -> bool:
     ahead = int(r.stdout.strip()) if r.returncode == 0 else 0
 
     if ahead == 0:
-        committed = False
-        # Try staging pending changes
-        r = _git(project_dir, 'diff', '--quiet', check=False)
-        if r.returncode != 0:
-            _git(project_dir, 'add', 'storyforge.yaml', check=False)
-            _git(project_dir, 'add', 'CLAUDE.md', check=False)
-            short = branch.removeprefix('storyforge/')
-            r = _git(project_dir, 'commit', '-m', f'Start {short}', check=False)
-            committed = r.returncode == 0
-
-        if not committed:
-            short = branch.removeprefix('storyforge/')
-            r = _git(project_dir, 'commit', '--allow-empty', '-m', f'Start {short}', check=False)
-            committed = r.returncode == 0
-
-        if committed:
-            log(f'Initial commit on {branch}')
+        # The project's own setup files, through `_commit_only`: never a bare
+        # `commit`, which took the whole index (a sibling project's staged
+        # work too), after a `diff --quiet` that looked at the whole repo;
+        # and every result checked (#520 review SF-D)
+        message = f'Start {branch.removeprefix("storyforge/")}'
+        if not _commit_only(project_dir, message, ['storyforge.yaml', 'CLAUDE.md']):
+            if last_commit_error != NOTHING_TO_COMMIT:
+                return False   # the WARNING is out
+            if not _empty_commit(project_dir, message):
+                return False
+        log(f'Initial commit on {branch}')
 
     r = _git(project_dir, 'push', '-u', 'origin', branch, check=False)
     if r.returncode != 0:
-        log(f'WARNING: Could not push branch {branch} to origin')
+        log(f'WARNING: could not push {branch}; its commits are only local: '
+            f'{(r.stderr or r.stdout).strip()[:200]}')
+        if branch not in unpushed:
+            unpushed.append(branch)
+        return False
+    return True
+
+
+def _empty_commit(project_dir: str, message: str) -> bool:
+    """Commit HEAD's own tree on top of HEAD: a commit with no changes that
+    leaves the index alone. `commit --allow-empty` commits the index, so
+    anything already staged (a sibling project's work) went in with it."""
+    head = _git(project_dir, 'rev-parse', '--verify', '-q', 'HEAD', check=False)
+    parent = head.stdout.strip() if head.returncode == 0 else ''
+    if parent:
+        tree = _git(project_dir, 'rev-parse', 'HEAD^{tree}', check=False)
+    else:   # an unborn branch: the empty tree, no parent
+        tree = subprocess.run(['git', '-C', project_dir, 'mktree'], input='',
+                              capture_output=True, text=True)
+    new = None
+    if tree.returncode == 0:
+        new = _git(project_dir, 'commit-tree', tree.stdout.strip(),
+                   *(['-p', parent] if parent else []), '-m', message, check=False)
+    ref = None
+    if new is not None and new.returncode == 0:
+        ref = _git(project_dir, 'update-ref', '-m', f'commit: {message}', 'HEAD',
+                   new.stdout.strip(), parent, check=False)
+    if ref is None or ref.returncode != 0:
+        failed = next(r for r in (ref, new, tree) if r is not None and r.returncode != 0)
+        log(f'WARNING: git commit "{message}" failed: '
+            f'{_first_line(failed.stderr) or "git exited " + str(failed.returncode)}. '
+            f'Nothing was committed.')
         return False
     return True
 
@@ -372,6 +397,14 @@ def commit_and_push(project_dir: str, message: str, paths: list[str] | None = No
     on that: its `git rm --cached` removals are only in the index, and
     `commit -- .` would drop them.
     """
+    if not _commit_only(project_dir, message, paths):
+        return False
+    _push(project_dir)
+    return True
+
+
+def _commit_only(project_dir: str, message: str, paths: list[str] | None) -> bool:
+    """`commit_and_push` without the push."""
     global last_commit_error
 
     # The index as it was, to put back exactly if the commit fails. A
@@ -457,7 +490,6 @@ def commit_and_push(project_dir: str, message: str, paths: list[str] | None = No
                     or f'git commit exited {r.returncode}')
 
     last_commit_error = ''
-    _push(project_dir)
     return True
 
 

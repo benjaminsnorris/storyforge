@@ -588,35 +588,6 @@ class TestEnsureBranchPushed:
         result = ensure_branch_pushed('/proj')
         assert result is False
 
-    def test_creates_empty_commit_when_no_changes_ahead(self, monkeypatch):
-        commit_cmds = []
-
-        def mock_run(cmd, **kwargs):
-            if 'rev-parse' in cmd:
-                return _cp(stdout='storyforge/test\n')
-            if 'config' in cmd:
-                return _cp(stdout='main\n')
-            if 'rev-list' in cmd:
-                return _cp(stdout='0\n')
-            if 'diff' in cmd and '--quiet' in cmd:
-                # No changes
-                return _cp(returncode=0)
-            if 'commit' in cmd:
-                commit_cmds.append(cmd)
-                return _cp()
-            if 'push' in cmd:
-                return _cp()
-            return _cp()
-
-        monkeypatch.setattr('subprocess.run', mock_run)
-
-        from storyforge.git import ensure_branch_pushed
-        ensure_branch_pushed('/proj', 'storyforge/test')
-
-        # Should have tried --allow-empty commit
-        allow_empty = [c for c in commit_cmds if '--allow-empty' in c]
-        assert len(allow_empty) == 1
-
 
 # ---------------------------------------------------------------------------
 # ensure_all_labels
