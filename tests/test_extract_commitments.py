@@ -560,3 +560,35 @@ def test_a_persistence_reply_that_skips_facts_is_asked_again_once(monkeypatch, t
                           log_file=str(tmp_path / 'p.json'))
     assert [e['statement'] for e, _ in v.dropped] == ['B']
     assert 'not usable' in prompts[1] and 'item(s) 2' in prompts[1]
+
+
+class TestCommitmentIds:
+    """#599: an id is the statement's first words, so a reworded fact or a
+    different one beginning alike collides; ids are made unique where they
+    are minted, against the ledger, the reserved ids and the batch."""
+
+    def _found(self, statement):
+        return {'type': 'world', 'subject': '', 'statement': statement, 'quote': 'q',
+                'mutable': 'fixed', 'supersedes': '', 'ends': []}
+
+    def test_a_collision_gets_the_next_suffix(self):
+        from storyforge.extract import commitment_id
+        assert commitment_id('s', 'The scab split', set()) == 's--the-scab-split'
+        assert commitment_id('s', 'The scab split.', {'s--the-scab-split'}) \
+            == 's--the-scab-split-2'
+        assert commitment_id('s', 'the SCAB split', {'s--the-scab-split',
+                                                     's--the-scab-split-2'}) \
+            == 's--the-scab-split-3'
+
+    def test_rows_never_take_a_ledger_reserved_or_batch_id(self):
+        from storyforge.extract import COMMITMENT_PROBLEMS, commitment_rows
+        rows = [{c: '' for c in ledger.COLUMNS}]
+        rows[0].update(id='s--a-b-c-d-e-f')
+        found = [self._found('A b c d e f one'), self._found('A b c d e f two'),
+                 self._found('A b c d e f three')]
+        problems = {k: [] for k in COMMITMENT_PROBLEMS}
+        out = commitment_rows(found, 's', 'q', rows, [], [], {}, 'recheck', problems,
+                              own_writers=ledger.COMMITMENT_WRITERS,
+                              reserved={'s--a-b-c-d-e-f-2'})
+        assert [r['id'] for r in out] == ['s--a-b-c-d-e-f-3', 's--a-b-c-d-e-f-4',
+                                          's--a-b-c-d-e-f-5']

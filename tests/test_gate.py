@@ -481,14 +481,18 @@ class TestRecheck:
         assert gate.pending(project_dir)[self.LATER]['reason'] == 'its own problem'
 
     def test_carried_ids_and_fresh_ids_never_collide(self):
+        # extraction's ids never repeat an old one (`_extract`'s `reserved`)
         old = [{'id': 's--b', 'subject': '', 'type': 'world', 'statement': 'B', 'scene_id': 's'}]
-        proposed = [{'id': 's--b', 'subject': '', 'type': 'world', 'statement': 'A'},
-                    {'id': 's--b-2', 'subject': '', 'type': 'world', 'statement': 'B',
-                     'supersedes': 's--b'}]
-        gate._carry_ids(proposed, old, [], 's')
+        proposed = [{'id': 's--b-2', 'subject': '', 'type': 'world', 'statement': 'A'},
+                    {'id': 's--b-3', 'subject': '', 'type': 'world', 'statement': 'B',
+                     'supersedes': 's--b-2'},
+                    {'id': 's--c', 'subject': '', 'type': 'world', 'statement': 'C',
+                     'depends_on': 's--b-3'}]
+        gate._carry_ids(proposed, old)
         ids = [p['id'] for p in proposed]
-        assert ids[1] == 's--b' and ids[0] not in ('s--b', 's--b-2') and len(set(ids)) == 2
-        assert proposed[1]['supersedes'] == ids[0]   # it meant the first proposed row
+        assert ids == ['s--b-2', 's--b', 's--c']
+        assert proposed[1]['supersedes'] == 's--b-2'   # it meant the first proposed row
+        assert proposed[2]['depends_on'] == 's--b'     # follows its row's carried id
 
     def test_a_new_row_never_takes_a_kept_rows_id(self):
         """Beowulf B-034: a steady fact kept with its id, and a new fact from
@@ -498,24 +502,33 @@ class TestRecheck:
         then wouldn't load."""
         kept = {'id': 's--scyld-came', 'subject': 'scyld', 'type': 'trait',
                 'statement': 'Scyld came as a foundling', 'scene_id': 's'}
-        new = {'id': 's--scyld-came', 'subject': 'scyld', 'type': 'physical',
+        new = {'id': 's--scyld-came-2', 'subject': 'scyld', 'type': 'physical',
                'statement': 'Scyld came in an unmanned boat'}
         proposed = [dict(kept), new]
-        gate._carry_ids(proposed, [kept], [], 's')
-        assert proposed[0]['id'] == 's--scyld-came'
-        assert proposed[1]['id'] != 's--scyld-came'
+        gate._carry_ids(proposed, [kept])
+        assert [p['id'] for p in proposed] == ['s--scyld-came', 's--scyld-came-2']
+
+    def test_two_kept_rows_stating_one_fact_keep_their_own_ids(self):
+        """A kept row keeps its id even when an earlier kept row states the
+        same fact (a ledger with the fact twice): renaming it would break
+        the links to it."""
+        a = {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'A', 'scene_id': 's'}
+        b = dict(a, id='s--a-again')
+        proposed = [dict(a), dict(b)]
+        gate._carry_ids(proposed, [a, b])
+        assert [p['id'] for p in proposed] == ['s--a', 's--a-again']
 
     def test_a_new_row_sharing_a_kept_id_keeps_links_to_the_kept_one(self):
         kept = {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'A',
                 'scene_id': 's'}
         proposed = [dict(kept),
-                    {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'C'},
+                    {'id': 's--a-2', 'subject': '', 'type': 'world', 'statement': 'C'},
                     {'id': 's--d', 'subject': '', 'type': 'world', 'statement': 'D',
-                     'depends_on': 's--a'}]
-        gate._carry_ids(proposed, [kept], [], 's')
+                     'depends_on': 's--a-2'}]
+        gate._carry_ids(proposed, [kept])
         assert len({p['id'] for p in proposed}) == 3
         # extraction's link names its own row, never the kept one
-        assert proposed[2]['depends_on'] == proposed[1]['id']
+        assert proposed[2]['depends_on'] == proposed[1]['id'] == 's--a-2'
 
     def _recheck(self, project_dir, tmp_path, findings=()):
         def fake(path, body, **k):
@@ -2545,6 +2558,39 @@ class TestSteadyParagraphs:
     def _recheck_ok(self, project_dir, result):
         assert result.committed
         assert ledger.file_problems(ledger.ledger_path(project_dir)) == []
+
+    def test_a_recheck_adds_a_different_fact_beginning_alike_under_a_new_id(
+            self, project_dir, tmp_path):
+        """'Telemachus tells Pisistratus that his father ...': a different
+        fact whose statement begins as one the scene has gets the next id."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        other = _commitment(subject='dorren-hayle', type='knowledge', mutable='state',
+                            statement="Tarren's Hollow had 412 people, Dorren recalls",
+                            quote=self.LIVES)
+        # the kept fact not read again: the new one is the first to begin so
+        result = _gate(project_dir, tmp_path, [other, self._temple()], command='recheck')
+        self._recheck_ok(project_dir, result)
+        ids = {r['statement']: r['id'] for r in self._mine(project_dir)}
+        assert ids[old['statement']] == old['id']
+        assert ids[other['statement']] == old['id'] + '-2'
+
+    def test_a_changed_paragraphs_fact_beginning_as_a_kept_one_gets_a_new_id(
+            self, project_dir, tmp_path):
+        """Beowulf B-034 through the gate: a kept fact and a new one from a
+        changed paragraph whose statements begin alike."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        self._edit(project_dir, 'She returned to the new map. Nothing.',
+                   'She returned to the new map. Nothing. A mill had stood by the river.')
+        mill = _commitment(subject='tarrens-hollow',
+                           statement="Tarren's Hollow had 412 people and a mill",
+                           quote='A mill had stood by the river')
+        result = _gate(project_dir, tmp_path, [mill, self._temple()], command='redraft')
+        self._recheck_ok(project_dir, result)
+        ids = {r['statement']: r['id'] for r in self._mine(project_dir)}
+        assert ids[old['statement']] == old['id']
+        assert ids[mill['statement']] == old['id'] + '-2'
 
     def test_a_commit_that_would_repeat_an_id_writes_nothing(
             self, project_dir, tmp_path, monkeypatch):

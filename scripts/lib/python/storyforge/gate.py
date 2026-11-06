@@ -237,7 +237,10 @@ def _subjects(project_dir: str) -> dict[str, str]:
 def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
              order: dict[str, int], introduced_by: str, model: str, log_dir: str,
              problems: dict[str, list[str]],
-             dropped: list[tuple[str, str]]) -> list[dict[str, str]]:
+             dropped: list[tuple[str, str]],
+             reserved: set[str] | frozenset[str] = frozenset()) -> list[dict[str, str]]:
+    """The scene's commitments read from `prose` against `rows`, each with an
+    id no row of `rows` and none of `reserved` has (#599)."""
     from storyforge.api import extract_text, invoke_to_file, is_truncated
     from storyforge.elaborate import get_scene
     from storyforge.enrich import format_registries_for_prompt
@@ -278,7 +281,7 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
     dropped.extend((e['statement'], why) for e, why in verdict.dropped)
     return commitment_rows(verdict.kept, scene_id, prose, rows, known, recorded, subjects,
                            introduced_by, problems, own_writers=ledger.COMMITMENT_WRITERS,
-                           registry_is_plan=True)
+                           registry_is_plan=True, reserved=reserved)
 
 
 def _disputes(result: GateResult, rows: list[dict[str, str]]) -> list[Dispute]:
@@ -1221,7 +1224,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     result.proposed = _extract(project_dir, scene_id, prose, rows, order,
                                introduced_by or command,
                                extract_model or select_model('evaluation'), log_dir,
-                               result.problems, result.dropped)
+                               result.problems, result.dropped, reserved=old)
     # A fact the author rejected may not come back as binding
     for r in result.proposed:
         rid = rejected_here.get(ledger.fact_key(r))
@@ -1336,7 +1339,7 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
     # #558's second review: the kept facts go through the hold-back too
     _keep_steady(project_dir, result, old_rows, prose)
     _hold_back(result, holding, prose=prose if holding else '', rows=rows)
-    _carry_ids(result.proposed, old_rows, rows, scene_id)
+    _carry_ids(result.proposed, old_rows)
     new = rows + result.proposed
     for rid, quote in result.check.kept:
         if ledger.fill_quote(new, rid, quote):
@@ -1851,48 +1854,36 @@ def _has_prose(project_dir: str, scene_id: str) -> bool:
         return False
 
 
-def _carry_ids(proposed: list[dict[str, str]], old_rows: list[dict[str, str]],
-               rows: list[dict[str, str]], scene_id: str) -> None:
+def _carry_ids(proposed: list[dict[str, str]], old_rows: list[dict[str, str]]) -> None:
     """Give each proposed row that states the same fact as one of the
     scene's earlier commitments (`ledger.fact_key`) that row's id, and its
     end in a later scene when the new row has none: links to it (a later
-    `supersedes`, the later scene's end) keep holding. Every other proposed
-    row gets an id no other row and no earlier commitment of the scene has
-    (extraction chose ids without the old rows, so one may repeat an old id:
-    a later link to that id would then land on a different fact), and links
-    between proposed rows follow the renames. In place."""
-    from storyforge.extract import commitment_id
+    `supersedes`, the later scene's end) keep holding. A kept row (#558,
+    an earlier commitment as it was) keeps its own id. Every other row
+    keeps the id extraction gave it, which no earlier commitment of the
+    scene and no other row has (`_extract`'s `reserved`, #599: an old id not
+    carried is never reused, or a later link to it would land on a
+    different fact). Links between proposed rows follow the renames. In
+    place."""
     by_key: dict[tuple, dict[str, str]] = {}
     for o in old_rows:
         by_key.setdefault(ledger.fact_key(o), o)
+    unchanged = [any(p == o for o in old_rows) for p in proposed]   # kept as it was
     # by position, never by id: a kept steady row (#558) and a new row
-    # extraction gave the same id are two rows (Beowulf B-034)
-    carry: dict[int, str] = {}
-    carried: set[str] = set()
-    for i, p in enumerate(proposed):
+    # stating the same fact are two rows (Beowulf B-034)
+    carried = {p['id'] for p, kept in zip(proposed, unchanged) if kept}
+    rename: dict[str, str] = {}
+    for p, kept in zip(proposed, unchanged):
+        if kept:
+            continue
         o = by_key.get(ledger.fact_key(p))
         if o is None or o['id'] in carried:
             continue
         carried.add(o['id'])
-        carry[i] = o['id']
+        rename[p['id']] = o['id']
+        p['id'] = o['id']
         if not (p.get('resolves') or '').strip() and ledger._ends_elsewhere(o):
             p['resolves'] = o['resolves']
-    # an old id not carried is never reused: links to it must not land on
-    # a different fact
-    taken = {r['id'] for r in rows} | {o['id'] for o in old_rows}
-    unchanged = [any(p == o for o in old_rows) for p in proposed]   # kept as it was
-    rename: dict[str, str] = {}
-    for i, p in enumerate(proposed):
-        if i in carry:
-            new_id = carry[i]
-        elif p['id'] in taken:
-            new_id = commitment_id(scene_id, p.get('statement', ''), taken)
-        else:
-            new_id = p['id']
-        if new_id != p['id']:
-            rename[p['id']] = new_id
-        p['id'] = new_id
-        taken.add(new_id)
     # links between extraction's rows follow its renames; a kept row's links
     # are the ledger's and stay
     for p, kept in zip(proposed, unchanged):

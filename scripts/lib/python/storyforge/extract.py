@@ -1017,10 +1017,17 @@ def unplaced_rows(rows, order):
             and r['scene_id'].strip() not in order]
 
 
-def commitment_id(scene_id: str, statement: str, taken: set[str]) -> str:
-    """`{scene_id}--{first words of the statement}`, unique in the ledger."""
-    words = re.sub(r'[^a-z0-9]+', '-', statement.lower()).strip('-').split('-')
-    base = f'{scene_id}--{"-".join(words[:6])}'.rstrip('-')
+def statement_opening(statement: str) -> str:
+    """A statement's first words as a commitment id has them ('' for none):
+    two statements with the same opening get the same id but for a suffix."""
+    return '-'.join(re.sub(r'[^a-z0-9]+', '-', statement.lower()).strip('-').split('-')[:6])
+
+
+def commitment_id(scene_id: str, statement: str, taken: set[str] | frozenset[str]) -> str:
+    """`{scene_id}--{first words of the statement}`, unique in `taken` (the
+    ledger's ids): `-2`, `-3`, ... on a collision (#599: a reworded fact, or
+    a different fact beginning alike, has the same opening)."""
+    base = f'{scene_id}--{statement_opening(statement)}'.rstrip('-')
     rid, n = base, 2
     while rid in taken:
         rid, n = f'{base}-{n}', n + 1
@@ -1037,11 +1044,14 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
                     recorded: list[dict[str, str]], subjects: dict[str, str],
                     introduced_by: str, problems: dict[str, list[str]],
                     own_writers: tuple[str, ...],
-                    registry_is_plan: bool = False) -> list[dict[str, str]]:
+                    registry_is_plan: bool = False,
+                    reserved: set[str] | frozenset[str] = frozenset()) -> list[dict[str, str]]:
     """Ledger rows for one scene's parsed commitments (`parse_commitments_response`).
 
-    Each is binding, `origin=prose`, `introduced_by`, with an id unique in
-    `rows`. A subject is resolved through `subjects` (lowercased name → id).
+    Each is binding, `origin=prose`, `introduced_by`, with an id that no row
+    of `rows`, none of `reserved` (ids the caller left out of `rows` that no
+    new row may take: the gate's scene's earlier commitments, #599) and no
+    row made before it has. A subject is resolved through `subjects` (lowercased name → id).
     A `supersedes` is kept only when it names an offered fact (`known`); an
     `ends` sets `resolves` in place on an offered state whose
     `introduced_by` is in `own_writers` (the one change made to `rows`):
@@ -1059,7 +1069,7 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
     """
     from .common import csv_safe
     from . import ledger
-    taken = {r['id'] for r in rows}
+    taken = {r['id'] for r in rows} | set(reserved)
     offered = {r['id']: r for r in known}
     here = {r['id']: r for r in recorded}
     from .quotes import quote_in
