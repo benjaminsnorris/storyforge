@@ -444,11 +444,11 @@ def test_build_cleanup_report_clean_canon_plus_pages_zero_findings(
     findings in the full cleanup report pipeline. Guards against a
     regression in any of the layers: list_page_files, _walk_canon_files,
     _resolve_canon_path, _embeddable_block_text, normalize_for_comparison."""
-    import shutil
+    from fixture_helpers import copy_fixture
     from storyforge.cmd_cleanup import build_cleanup_report
 
     project = str(tmp_path / 'gn-project')
-    shutil.copytree(fixture_dir_gn, project)
+    copy_fixture(fixture_dir_gn, project)
 
     canon_text = _embeddable_text(
         project, 'characters', 'cartographer.md',

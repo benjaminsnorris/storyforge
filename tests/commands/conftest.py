@@ -14,10 +14,11 @@ or vice versa.
 import importlib
 import json
 import os
-import shutil
 import subprocess
 
 import pytest
+
+from fixture_helpers import FIXTURE_DIR, make_project
 
 
 # ---------------------------------------------------------------------------
@@ -25,7 +26,6 @@ import pytest
 # ---------------------------------------------------------------------------
 
 TESTS_DIR = os.path.dirname(os.path.dirname(__file__))
-FIXTURE_DIR = os.path.join(TESTS_DIR, 'fixtures', 'test-project')
 API_RESPONSES_DIR = os.path.join(TESTS_DIR, 'fixtures', 'api-responses')
 
 
@@ -113,24 +113,15 @@ def _isolate_global_state(monkeypatch):
 
 @pytest.fixture
 def project_dir(tmp_path):
-    """A fresh copy of the test-project fixture in a temp directory.
+    """A fresh copy of the test-project fixture in a temp directory, with
+    the working/ subdirectories command modules expect.
 
-    Use this when tests modify files. Each test gets its own copy
-    so mutations don't leak between tests.
-
-    Sets up the working/ subdirectories that command modules expect.
+    Use this when tests modify files. Each test gets its own copy so
+    mutations don't leak between tests.
+    Copies the files git would commit, so gitignored leftovers stay out;
+    outside a git work tree, everything (fixture_helpers.make_project).
     """
-    dest = tmp_path / 'test-project'
-    shutil.copytree(FIXTURE_DIR, dest)
-
-    # Ensure working directories that commands expect
-    for subdir in [
-        'working/logs', 'working/scores', 'working/costs',
-        'working/evaluations', 'working/reviews', 'working/coaching',
-    ]:
-        os.makedirs(os.path.join(str(dest), subdir), exist_ok=True)
-
-    return str(dest)
+    return make_project(FIXTURE_DIR, tmp_path / 'test-project', working_dirs=True)
 
 
 # ---------------------------------------------------------------------------
