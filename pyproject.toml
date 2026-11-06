@@ -1,6 +1,11 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--tb=short --cov=scripts/lib/python/storyforge --cov-report=term-missing:skip-covered --cov-fail-under=73"
+# Each passing test's tmp dir is deleted when the test ends; a failing test's
+# is kept. A new run deletes every earlier run's tree when it starts, even if
+# the new run passes, so at most one run's leftovers sit on disk (#296).
+tmp_path_retention_count = 1
+tmp_path_retention_policy = "failed"
 
 [tool.coverage.run]
 source = ["scripts/lib/python/storyforge"]

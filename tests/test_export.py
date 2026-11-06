@@ -9,6 +9,7 @@ import shutil
 
 import pytest
 
+from fixture_helpers import copy_fixture
 from storyforge import export, ledger
 from storyforge.project import INCOMPLETE_MARKER
 from storyforge.visualize import DASHBOARD_SCHEMA_VERSION
@@ -140,7 +141,7 @@ class TestGlobCharactersInPath:
         """Regression: paths went to glob.glob unescaped, so a book under
         `x [draft]` exported no tables with no warning."""
         project = tmp_path / 'x [draft] *?' / 'book'
-        shutil.copytree(fixture_dir, project)
+        copy_fixture(fixture_dir, project)
         project = str(project)
         scores = os.path.join(project, 'working', 'scores')
         _write(os.path.join(scores, 'cycle-1', 'scene-scores.csv'), b'id|p\na|1\n')

@@ -20,12 +20,12 @@ Read before working in an area:
 ### Gotchas that have caused real bugs
 - `prompts.read_yaml_field(yaml_file, field)` has the **opposite** argument order from `common.read_yaml_field(field, project_dir)`.
 - `common.read_yaml_field('a.b')` also matches a `b:` nested deeper under `a` (e.g. inside a list item). For a block with nested lists, read its own keys by indentation, as `source._direct_keys` does.
-- `parse_yaml_scalar` is the only YAML scalar parser. Edit `storyforge.yaml` entries with `update_artifact_entry`, never a regex over the whole file.
+- `parse_yaml_scalar` is the only YAML scalar parser. Edit `storyforge.yaml` entries with `update_artifact_entry` (or `set_top_level_fields` for a top-level block's direct keys), never a regex over the whole file.
 - `storyforge.yaml` line endings are **preserved** (`newline=''`, `detect_newline`, write only on change, `\r?\n` patterns). CSVs we write are **forced to LF** (`lineterminator='\n'`).
 - Author prose interpolated into a finding `detail` goes through `common.csv_safe` — a `|` corrupts the report CSV.
 - Scene files (`scenes/{id}.md`) are pure prose, no frontmatter; metadata lives in `reference/*.csv` (pipe-delimited, `;` for arrays, no quoting). Scene `id` is a permanent event slug, never positional.
 - New cleanup step: a `plan_*` function registered in `cmd_cleanup.plan_cleanup` (no `if args.dry_run:` branch; read disk through `DiskFacts`), plus rows in `ARRANGEMENTS` and `TRANSCRIPTS` in `tests/commands/test_cmd_cleanup_dry_run.py`.
 
 ## Testing and evals
-- `python3 -m pytest tests/` (or `./tests/run-tests.sh`). Fixtures in `tests/conftest.py` (`project_dir` is a writable copy of `tests/fixtures/test-project`). Every fix gets a regression test.
+- `python3 -m pytest tests/` (or `./tests/run-tests.sh`). Fixtures in `tests/conftest.py` (`project_dir` is a writable copy of `tests/fixtures/test-project`, made by `tests/fixture_helpers.copy_fixture`, which copies only the files git would commit: `working/` and `*.log` are gitignored, so a fixture file there must be force-added; outside a git work tree it copies everything, with a warning). Passing tests' tmp dirs are deleted as they finish (`tmp_path_retention_policy = "failed"`). Every fix gets a regression test.
 - `python3 evals/run.py` replays the eval suites from recorded API calls (exit 0 pass / 1 gate failed / 2 errored); see `evals/README.md`. A prompt change is a recording miss: re-record that suite.

@@ -444,11 +444,11 @@ def test_build_cleanup_report_clean_canon_plus_pages_zero_findings(
     findings in the full cleanup report pipeline. Guards against a
     regression in any of the layers: list_page_files, _walk_canon_files,
     _resolve_canon_path, _embeddable_block_text, normalize_for_comparison."""
-    import shutil
+    from fixture_helpers import copy_fixture
     from storyforge.cmd_cleanup import build_cleanup_report
 
     project = str(tmp_path / 'gn-project')
-    shutil.copytree(fixture_dir_gn, project)
+    copy_fixture(fixture_dir_gn, project)
 
     canon_text = _embeddable_text(
         project, 'characters', 'cartographer.md',
@@ -1703,3 +1703,35 @@ def test_shipped_templates_pass_structural_validation(plugin_dir, tmp_path):
         f'expected 4 unfilled-template findings (one per shipped root '
         f'canon), got {len(unfilled)}: {unfilled}'
     )
+
+
+# ---------------------------------------------------------------------------
+# undated_canon_files (#303 SF-5)
+# ---------------------------------------------------------------------------
+
+def test_undated_canon_files_names_every_file_with_no_usable_date(tmp_path):
+    """Missing, blank, placeholder, and no frontmatter at all: none can move
+    the canon cutoff, so a review recorded against it cannot see them."""
+    from storyforge.canon import undated_canon_files
+    canon = tmp_path / 'reference' / 'canon' / 'characters'
+    canon.mkdir(parents=True)
+    bodies = {
+        'dated.md': 'canon_updated: 2026-07-20\n',
+        'blank.md': 'canon_updated:\n',
+        'todo.md': 'canon_updated: TODO\n',
+        'missing.md': 'canon_id: missing\n',
+    }
+    for name, fm in bodies.items():
+        (canon / name).write_text(f'---\n{fm}---\n\n## Embeddable block\n\nX.\n')
+    (canon / 'bare.md').write_text('No frontmatter.\n')
+    (canon / '_template.md').write_text('---\ncanon_updated:\n---\n')
+
+    rel = os.path.join('reference', 'canon', 'characters')
+    assert undated_canon_files(str(tmp_path)) == [
+        os.path.join(rel, name)
+        for name in ('bare.md', 'blank.md', 'missing.md', 'todo.md')]
+
+
+def test_undated_canon_files_with_no_canon_dir(tmp_path):
+    from storyforge.canon import undated_canon_files
+    assert undated_canon_files(str(tmp_path)) == []
