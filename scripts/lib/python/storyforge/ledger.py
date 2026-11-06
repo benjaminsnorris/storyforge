@@ -96,6 +96,11 @@ def file_problems(path: str) -> list[str]:
     if not os.path.isfile(path):
         return []
     lines, _ = _raw_lines(path)
+    return _line_problems(lines)
+
+
+def _line_problems(lines: list[str]) -> list[str]:
+    """`file_problems` of a ledger's lines, the header first."""
     if not lines:
         return []
     problems = []
@@ -132,6 +137,30 @@ def file_problems(path: str) -> list[str]:
                             f'{seen[rid]}')
         else:
             seen[rid] = n
+    return problems
+
+
+def row_problems(rows: list[dict[str, str]]) -> list[str]:
+    """What would stop `rows`, written, being read as the ledger (the id
+    checks of `file_problems`: an id on two rows, a blank or padded id),
+    one string each, naming the ids and the scenes whose rows have them
+    (#599's review, SF-4: not line numbers in a file never written). The
+    header and cell counts are `write_ledger`'s own, always right."""
+    problems = []
+    scenes: dict[str, list[str]] = {}
+    for r in rows:
+        rid = r.get('id') or ''
+        scene = (r.get('scene_id') or '').strip() or 'no scene'
+        if not rid.strip():
+            problems.append(f'a row of {scene} has no id: '
+                            f'"{" ".join((r.get("statement") or "").split())[:80]}"')
+        elif rid != rid.strip():
+            problems.append(f'id {rid!r} ({scene}) has surrounding whitespace')
+        else:
+            scenes.setdefault(rid, []).append(scene)
+    problems += [f'id {rid!r} would be on {len(where)} rows (from '
+                 f'{", ".join(sorted(set(where)))})'
+                 for rid, where in scenes.items() if len(where) > 1]
     return problems
 
 
@@ -288,15 +317,28 @@ def save_to(ref_dir: str, rows: list[dict[str, str]], *, command: str) -> None:
     and the ledger write stands (`storyforge.audit` says why). A change made
     on disk since the last logged write (by hand) is logged first, as
     `command=hand-edit`, from the snapshot `audit` keeps.
+
+    Raises:
+        LedgerError: `rows` would make a ledger `load` refuses (two rows with
+            one id, a blank or padded id: `row_problems`, which names the
+            ids and their scenes); nothing is written (#599).
+        ValueError: a cell would break its row (`write_ledger`); nothing is
+            written.
     """
     from storyforge import audit
     path = os.path.join(ref_dir, LEDGER_FILE)
     project_dir = audit.project_of(ref_dir)
+    # #599: a ledger the next command can't load is never written
+    lines = _ledger_lines(rows)
+    problems = row_problems(rows)
+    if problems:
+        raise LedgerError(f'reference/{LEDGER_FILE} not written ({command}), so the next '
+                          f'command can still read it: ' + '; '.join(problems))
     with _SAVE_LOCK:
         old = read_ledger(path) if os.path.isfile(path) else []
         # What changed on disk since the last logged write was not this writer
         audit.log_hand_edits(project_dir, old)
-        write_ledger(path, rows)
+        _write_lines(path, lines)
         written = read_ledger(path)
         audit.record(project_dir, old, written, command=command)
         audit.write_snapshot(project_dir, written)
@@ -350,12 +392,41 @@ def read_ledger(path: str) -> list[dict[str, str]]:
 
 
 def write_ledger(path: str, rows: list[dict[str, str]]) -> None:
-    """Write the ledger: COLUMNS order, LF, one physical line per row."""
-    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-    with open(path, 'w', newline='', encoding='utf-8') as f:
-        f.write('|'.join(COLUMNS) + '\n')
-        for row in rows:
-            f.write('|'.join(_cell(row, c) for c in COLUMNS) + '\n')
+    """Write the ledger: COLUMNS order, LF, one physical line per row. A
+    cell that would break its row raises before anything is written."""
+    _write_lines(path, _ledger_lines(rows))
+
+
+def _ledger_lines(rows: list[dict[str, str]]) -> list[str]:
+    """The lines `write_ledger` writes for `rows`, the header first."""
+    return ['|'.join(COLUMNS)] + ['|'.join(_cell(row, c) for c in COLUMNS) for row in rows]
+
+
+def _write_lines(path: str, lines: list[str]) -> None:
+    """Write `lines` to `path` whole or not at all (#599's review, T-6): to
+    a temporary file beside it, then moved over it, so a write that fails
+    part-way (a full disk) leaves the file as it was."""
+    import tempfile
+    directory = os.path.dirname(path) or '.'
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=f'.{os.path.basename(path)}.',
+                               suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w', newline='', encoding='utf-8') as f:
+            f.write(''.join(line + '\n' for line in lines))
+        if os.path.exists(path):
+            os.chmod(tmp, os.stat(path).st_mode & 0o7777)
+        else:
+            umask = os.umask(0)
+            os.umask(umask)
+            os.chmod(tmp, 0o666 & ~umask)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _cell(row: dict, column: str) -> str:
@@ -650,6 +721,17 @@ def validate_ledger(rows: list[dict[str, str]], *,
 
 def _split(value: str) -> list[str]:
     return [v.strip() for v in (value or '').split(';') if v.strip()]
+
+
+#: The columns whose cells name other facts by id
+LINK_COLUMNS = ('supersedes', 'depends_on')
+
+
+def linked_ids(rows: list[dict[str, str]]) -> set[str]:
+    """Every id a row of `rows` names in a link (`LINK_COLUMNS`), there or
+    not: a new fact must never take one (#599's review, TD-1), or the link
+    would land on it."""
+    return {ref for r in rows for col in LINK_COLUMNS for ref in _split(r.get(col, ''))}
 
 
 # ============================================================================
@@ -1462,6 +1544,12 @@ def migrate_files(ref_dir: str, *, dry_run: bool = False) -> FileMigration:
                            quirks=migration.quirks)
     if dry_run:
         result.removed = old
+        return result
+    # #599's review (TD-5): the migration's rows pass the ledger's id
+    # checks too, or nothing is written
+    problems = row_problems(migration.rows)
+    if problems:
+        result.status, result.problems = 'stopped', problems
         return result
     path = os.path.join(ref_dir, LEDGER_FILE)
     write_ledger(path, migration.rows)

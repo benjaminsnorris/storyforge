@@ -3,6 +3,7 @@ The API is mocked at `api._api_request`: a request with tools is the
 checker, one whose schema asks for `verdicts` the persistence check, any
 other extraction."""
 
+import copy
 import json
 import os
 from unittest.mock import patch
@@ -481,41 +482,55 @@ class TestRecheck:
         assert gate.pending(project_dir)[self.LATER]['reason'] == 'its own problem'
 
     def test_carried_ids_and_fresh_ids_never_collide(self):
+        # extraction's ids never repeat an old one (`_extract`'s `reserved`)
         old = [{'id': 's--b', 'subject': '', 'type': 'world', 'statement': 'B', 'scene_id': 's'}]
-        proposed = [{'id': 's--b', 'subject': '', 'type': 'world', 'statement': 'A'},
-                    {'id': 's--b-2', 'subject': '', 'type': 'world', 'statement': 'B',
-                     'supersedes': 's--b'}]
-        gate._carry_ids(proposed, old, [], 's')
+        proposed = [{'id': 's--b-2', 'subject': '', 'type': 'world', 'statement': 'A'},
+                    {'id': 's--b-3', 'subject': '', 'type': 'world', 'statement': 'B',
+                     'supersedes': 's--b-2'},
+                    {'id': 's--c', 'subject': '', 'type': 'world', 'statement': 'C',
+                     'depends_on': 's--b-3'}]
+        gate._carry_ids(proposed, old, [])
         ids = [p['id'] for p in proposed]
-        assert ids[1] == 's--b' and ids[0] not in ('s--b', 's--b-2') and len(set(ids)) == 2
-        assert proposed[1]['supersedes'] == ids[0]   # it meant the first proposed row
+        assert ids == ['s--b-2', 's--b', 's--c']
+        assert proposed[1]['supersedes'] == 's--b-2'   # it meant the first proposed row
+        assert proposed[2]['depends_on'] == 's--b'     # follows its row's carried id
 
     def test_a_new_row_never_takes_a_kept_rows_id(self):
         """Beowulf B-034: a steady fact kept with its id, and a new fact from
         a changed paragraph that extraction gave the same id (the statements
         begin alike), both came out of the gate as
         'scyld-ship-given-to-sea--scyld-came-to-the-danes-as': the ledger
-        then wouldn't load."""
+        then wouldn't load. Since #599 extraction mints it `-2` (the old ids
+        are reserved) and `_carry_ids` leaves both ids as they are."""
         kept = {'id': 's--scyld-came', 'subject': 'scyld', 'type': 'trait',
                 'statement': 'Scyld came as a foundling', 'scene_id': 's'}
-        new = {'id': 's--scyld-came', 'subject': 'scyld', 'type': 'physical',
+        new = {'id': 's--scyld-came-2', 'subject': 'scyld', 'type': 'physical',
                'statement': 'Scyld came in an unmanned boat'}
         proposed = [dict(kept), new]
-        gate._carry_ids(proposed, [kept], [], 's')
-        assert proposed[0]['id'] == 's--scyld-came'
-        assert proposed[1]['id'] != 's--scyld-came'
+        gate._carry_ids(proposed, [kept], [kept['id']])
+        assert [p['id'] for p in proposed] == ['s--scyld-came', 's--scyld-came-2']
+
+    def test_two_kept_rows_stating_one_fact_keep_their_own_ids(self):
+        """A kept row keeps its id even when an earlier kept row states the
+        same fact (a ledger with the fact twice): renaming it would break
+        the links to it."""
+        a = {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'A', 'scene_id': 's'}
+        b = dict(a, id='s--a-again')
+        proposed = [dict(a), dict(b)]
+        gate._carry_ids(proposed, [a, b], [a['id'], b['id']])
+        assert [p['id'] for p in proposed] == ['s--a', 's--a-again']
 
     def test_a_new_row_sharing_a_kept_id_keeps_links_to_the_kept_one(self):
         kept = {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'A',
                 'scene_id': 's'}
         proposed = [dict(kept),
-                    {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'C'},
+                    {'id': 's--a-2', 'subject': '', 'type': 'world', 'statement': 'C'},
                     {'id': 's--d', 'subject': '', 'type': 'world', 'statement': 'D',
-                     'depends_on': 's--a'}]
-        gate._carry_ids(proposed, [kept], [], 's')
+                     'depends_on': 's--a-2'}]
+        gate._carry_ids(proposed, [kept], [kept['id']])
         assert len({p['id'] for p in proposed}) == 3
         # extraction's link names its own row, never the kept one
-        assert proposed[2]['depends_on'] == proposed[1]['id']
+        assert proposed[2]['depends_on'] == proposed[1]['id'] == 's--a-2'
 
     def _recheck(self, project_dir, tmp_path, findings=()):
         def fake(path, body, **k):
@@ -1565,6 +1580,18 @@ class TestSecondFixRound(_FixRounds):
                                  [('v1', []), ('v2', [])])
         assert out.prose == 'v1' and out.result is r1 and len(dirs) == 3
         assert out.notes[0].startswith('the check after fix round 2 failed (cut off)')
+
+    def test_a_refused_ledger_write_after_round_two_says_so(self, monkeypatch, tmp_path):
+        """SF-4: a refused write after a later round was reported as a
+        failed check."""
+        r1 = self._result('b')
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), r1,
+                                  gate.LedgerWriteRefused('s: ledger write refused: x')],
+                                 [('v1', []), ('v2', [])])
+        assert out.prose == 'v1' and out.result is r1
+        assert out.notes[0].startswith('the ledger write after fix round 2 was refused '
+                                       '(s: ledger write refused: x)')
 
     def test_a_first_round_error_still_carries_the_first_run(self, monkeypatch, tmp_path):
         first = self._result('a')
@@ -2936,6 +2963,326 @@ class TestSteadyParagraphs:
         ids = {r['id'] for r in self._mine(project_dir)}
         assert old['tarrens-hollow']['id'] not in ids
         assert [st for st, _ in result.held_back] == [old['tarrens-hollow']['statement']]
+
+    # #599 (Telemachy pilot): `check --pending`'s re-checks read prose that
+    # hasn't changed, and extraction quoted another sentence for a fact the
+    # scene already had; the ledger was then written with an id on two rows
+    LIVES = 'Four hundred and twelve people going about their lives'
+
+    def _recheck_ok(self, project_dir, result):
+        assert result.committed
+        assert ledger.file_problems(ledger.ledger_path(project_dir)) == []
+
+    TAPPED = 'She tapped the empty space on the map'
+
+    def _statements(self, project_dir):
+        return {r['statement']: r['id'] for r in self._mine(project_dir)}
+
+    def test_a_recheck_drops_a_reading_again_that_says_nothing_new_and_says_so(
+            self, project_dir, tmp_path, capsys):
+        """A fact the scene has, read again from another unchanged paragraph
+        in words that add nothing, is not a second fact; the drop is
+        reported and logged (#599's review, T-2)."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        again = _commitment(subject='tarrens-hollow',
+                            statement="Tarren's Hollow had 412 people living there",
+                            quote=self.LIVES)
+        result = _gate(project_dir, tmp_path, [again, self._temple()], command='recheck')
+        self._recheck_ok(project_dir, result)
+        mine = [r for r in self._mine(project_dir) if r['subject'] == 'tarrens-hollow']
+        assert mine == [old]
+        assert result.changed == [] and result.recheck == []
+        assert result.reread == [(again['statement'], old['id'])]
+        assert any(line.startswith(f'NOTE (not recorded: a reading again of {old["id"]}')
+                   and 'living there' in line for line in gate.report_lines(result))
+        assert f'a reading again of {old["id"]}' in capsys.readouterr().out
+
+    def test_a_recheck_keeps_a_reworded_fact_under_a_new_id_and_lists_it(
+            self, project_dir, tmp_path):
+        """The pilot's scab ("split open and bled" / "splits and bleeds"):
+        words changed, so containment can't call it the same; it is kept as a
+        new fact with the next id and listed for the author."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        reworded = _commitment(subject='tarrens-hollow',
+                               statement="Tarren's village had 412 people",
+                               quote=self.LIVES)
+        result = _gate(project_dir, tmp_path, [reworded, self._temple()], command='recheck')
+        self._recheck_ok(project_dir, result)
+        assert self._statements(project_dir)[reworded['statement']] not in (old['id'], '')
+        assert result.reread == [] and result.restates == [(reworded['statement'], old['id'])]
+        assert any('reads much like ' + old['id'] in line for line in gate.report_lines(result))
+
+    def test_a_recheck_keeps_a_fact_of_another_subject_beginning_alike(
+            self, project_dir, tmp_path):
+        """The pilot's case 3 ("Telemachus tells Pisistratus that his father
+        ...", subjects telemachus and pisistratus): same type, same opening,
+        another subject: a fact of its own, under the next id (#599's
+        review, CR-1 (a): it was dropped and the gate said committed)."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        other = _commitment(subject='dorren-hayle',
+                            statement="Tarren's Hollow had 412 people, Dorren recalls",
+                            quote=self.LIVES)
+        assert other['type'] == old['type']
+        # the kept fact not read again: the new one is the first to begin so
+        result = _gate(project_dir, tmp_path, [other, self._temple()], command='recheck')
+        self._recheck_ok(project_dir, result)
+        ids = self._statements(project_dir)
+        assert ids[old['statement']] == old['id']
+        assert ids[other['statement']] == old['id'] + '-2'
+        assert result.reread == [] and result.restates == []
+
+    def test_a_recheck_keeps_a_different_fact_of_the_same_subject(
+            self, project_dir, tmp_path):
+        """CR-1 (b): "... the old survey marked a well" is not "... marked a
+        temple", though all but one word is the same."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        well = self._temple('Dorren knows the old survey marked a well')
+        well['quote'] = self.LIVES
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                               self._temple(), well], command='recheck')
+        self._recheck_ok(project_dir, result)
+        assert well['statement'] in self._statements(project_dir)
+        assert result.reread == []
+
+    def test_a_redraft_keeps_a_different_fact_from_another_unchanged_paragraph(
+            self, project_dir, tmp_path):
+        """CR-1 (c): a redraft's new reading of an unchanged paragraph that
+        says something the kept facts don't is recorded."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        self._edit(project_dir, 'She returned to the new map. Nothing.',
+                   'She returned to the new map. Nothing at all.')
+        well = self._temple('Dorren knows the old survey marked a well')
+        well['quote'] = self.TAPPED
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                               self._temple(), well], command='redraft')
+        assert result.committed
+        assert well['statement'] in self._statements(project_dir)
+
+    def test_a_redraft_drops_the_same_fact_from_another_unchanged_paragraph(
+            self, project_dir, tmp_path):
+        """CR-1 (c), decided by #558's rule: an unchanged paragraph's facts
+        are kept as they were, and only a changed paragraph's are new
+        readings. The same fact read from another unchanged paragraph is a
+        reading again, in a redraft as in a re-check, and reported."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)
+        self._edit(project_dir, 'She returned to the new map. Nothing.',
+                   'She returned to the new map. Nothing at all.')
+        again = self._temple('Dorren knows that the old survey marked a temple there')
+        again['quote'] = self.TAPPED
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                               self._temple(), again], command='redraft')
+        assert result.committed
+        assert again['statement'] not in self._statements(project_dir)
+        assert result.reread == [(again['statement'], old['dorren-hayle']['id'])]
+
+    def test_an_earlier_fact_not_kept_is_never_dropped_as_a_reading_again(
+            self, project_dir, tmp_path):
+        """CR-1b: the census fact's paragraph changed, so it isn't kept; the
+        redraft reads it again from the unchanged temple paragraph (its
+        quote shares four words with the kept temple fact's). Dropping that
+        row would delete the census fact and re-check what depends on it,
+        though the fact is still there."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)
+        self._edit(project_dir, 'should have been exactly here',
+                   'should have been right here')
+        census = _commitment(subject='tarrens-hollow', quote=self.TEMPLE)
+        result = _gate(project_dir, tmp_path, [census, self._temple()], command='redraft')
+        assert result.committed
+        assert self._statements(project_dir)[census['statement']] == \
+            old['tarrens-hollow']['id']
+        assert old['tarrens-hollow']['id'] not in result.changed
+        assert result.reread == []
+
+    def test_a_reworded_copy_quoted_across_paragraphs_is_kept_and_listed(
+            self, project_dir, tmp_path):
+        """T-4: a reading whose quote lies in no one paragraph can't be
+        placed in unchanged prose, so it is never dropped as a reading
+        again; when it reads much like a kept fact it is listed, so the
+        copy is the author's to see. Kept rather than dropped: dropping on
+        the statement alone would drop facts from changed prose too."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        across = _commitment(subject='tarrens-hollow',
+                             statement="Tarren's Hollow had 412 people counted",
+                             quote='should have been exactly here. She tapped the empty space')
+        result = _gate(project_dir, tmp_path, [across, self._temple()], command='recheck')
+        self._recheck_ok(project_dir, result)
+        assert self._statements(project_dir)[across['statement']] == old['id'] + '-2'
+        assert result.restates == [(across['statement'], old['id'])]
+
+    def test_a_changed_paragraphs_fact_beginning_as_a_kept_one_gets_a_new_id(
+            self, project_dir, tmp_path):
+        """Beowulf B-034 through the gate: a kept fact and a new one from a
+        changed paragraph whose statements begin alike."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        self._edit(project_dir, 'She returned to the new map. Nothing.',
+                   'She returned to the new map. Nothing. A mill had stood by the river.')
+        mill = _commitment(subject='tarrens-hollow',
+                           statement="Tarren's Hollow had 412 people and a mill",
+                           quote='A mill had stood by the river')
+        result = _gate(project_dir, tmp_path, [mill, self._temple()], command='redraft')
+        self._recheck_ok(project_dir, result)
+        ids = {r['statement']: r['id'] for r in self._mine(project_dir)}
+        assert ids[old['statement']] == old['id']
+        assert ids[mill['statement']] == old['id'] + '-2'
+
+    CENSUS_ID = 'act1-sc02--tarren-s-hollow-had-412-people'
+
+    def test_an_id_a_ledger_link_names_is_never_minted_again(self, project_dir, tmp_path):
+        """#599's review (TD-1/SF-2): an id the ledger no longer has but a
+        later fact's `supersedes` still names, minted again, would put that
+        link on a different fact."""
+        self._add_later(project_dir, id='later-hollow', subject='tarrens-hollow',
+                        statement='The hollow is empty', supersedes=self.CENSUS_ID)
+        _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow')])
+        ids = [r['id'] for r in self._mine(project_dir)]
+        assert ids == [self.CENSUS_ID + '-2']
+
+    def test_an_id_a_brief_names_is_never_minted_again(self, project_dir, tmp_path):
+        path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+        with open(path, encoding='utf-8') as f:
+            lines = f.read().split('\n')
+        header = lines[0].split('|')
+        cells = lines[1].split('|')
+        k = header.index('knowledge_in')
+        cells[k] = ';'.join(filter(None, [cells[k], self.CENSUS_ID]))
+        lines[1] = '|'.join(cells)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines))
+        _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow')])
+        assert [r['id'] for r in self._mine(project_dir)] == [self.CENSUS_ID + '-2']
+
+    def test_reserved_is_the_old_ids_and_every_id_a_link_names(self):
+        loaded = [{'id': 'a', 'supersedes': 'gone;b', 'depends_on': 'c'}, {'id': 'b'}]
+        assert gate._reserved_ids({'s--x'}, loaded, {'brief-fact'}) == {
+            's--x', 'gone', 'b', 'c', 'brief-fact'}
+
+    def test_a_new_row_with_an_old_id_stops_the_commit(self):
+        """TD-2: `_carry_ids` checks what it relies on: a row minted without
+        the reserved ids, neither kept nor carried, never keeps an old id."""
+        old = {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'A',
+               'scene_id': 's'}
+        stray = {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'B',
+                 'scene_id': 's'}
+        with pytest.raises(GateError, match="'s--a' has the id of an earlier commitment"):
+            gate._carry_ids([stray], [old], [])
+
+    def test_reserved_ids_are_required(self):
+        from storyforge.extract import COMMITMENT_PROBLEMS, commitment_rows
+        with pytest.raises(TypeError, match='reserved'):
+            commitment_rows([], 's', '', [], [], [], {}, 'draft',
+                            {k: [] for k in COMMITMENT_PROBLEMS},
+                            own_writers=ledger.COMMITMENT_WRITERS)
+
+    def test_a_commit_that_would_repeat_an_id_writes_nothing(
+            self, project_dir, tmp_path, monkeypatch):
+        """Whatever slips past the ids, the ledger is never written as one
+        the next command can't load: the gate stops, nothing written."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        path = ledger.ledger_path(project_dir)
+        before = open(path, encoding='utf-8').read()
+
+        def collide(proposed, old_rows, *_):
+            for p in proposed:
+                p['id'] = old_rows[0]['id']
+        monkeypatch.setattr(gate, '_carry_ids', collide)
+        with pytest.raises(gate.LedgerWriteRefused,
+                           match="ledger write refused: .*'act1-sc02--tarren-s-hollow"
+                                 "-had-412-people' would be on 2 rows \\(from act1-sc02\\)"):
+            _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                          self._temple()], command='recheck')
+        assert open(path, encoding='utf-8').read() == before
+
+    def test_a_refused_commit_leaves_the_result_as_it_was(
+            self, project_dir, tmp_path, monkeypatch):
+        """TD-3: a refused write never leaves the result half-committed (ids
+        carried, steady facts kept, `changed` set) for the caller to read."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        self._edit(project_dir, 'Roads, wells, the little', 'Roads and wells, the little')
+        seen = {}
+        real = gate._commit
+
+        def watch(project_dir_, result, *a, **k):
+            seen['before'] = copy.deepcopy({k_: v for k_, v in vars(result).items()
+                                            if k_ != '_ctx'})
+            seen['result'] = result
+            return real(project_dir_, result, *a, **k)
+
+        def refuse(*a, **k):
+            raise ledger.LedgerError('refused')
+        monkeypatch.setattr(gate, '_commit', watch)
+        monkeypatch.setattr(ledger, 'save', refuse)
+        with pytest.raises(gate.LedgerWriteRefused, match='ledger write refused: refused'):
+            _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                          self._temple('Dorren knows the survey shows a temple')],
+                  command='redraft')
+        after = {k: v for k, v in vars(seen['result']).items() if k != '_ctx'}
+        assert after == seen['before'] and not seen['result'].committed
+        assert seen['result'].steady == [] and seen['result'].changed == []
+
+    def test_a_cell_that_would_break_its_row_is_a_refused_write(
+            self, project_dir, tmp_path, monkeypatch):
+        """SF-3: the ValueError a breaking cell raises was not caught, and it
+        stopped `check --pending --keep-going`; it is a refused write, and a
+        re-check that hits it is listed failed."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        path = ledger.ledger_path(project_dir)
+        before = open(path, encoding='utf-8').read()
+        gate.mark_pending(project_dir, SCENE, gate.RECHECK, 're-check: x changed 1 fact(s)')
+
+        def corrupt(proposed, old_rows, *_):
+            proposed[0]['mutable'] = 'state|fixed'
+        monkeypatch.setattr(gate, '_carry_ids', corrupt)
+
+        def fake(path_, body, **k):
+            if 'tools' in body:
+                return _text({'findings': [], 'kept': []})
+            return _text({'commitments': [_commitment(subject='tarrens-hollow'),
+                                          self._temple()]})
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+            run = gate.recheck_pending(project_dir, log_dir=str(tmp_path / 'rc'),
+                                       extract_model='m', check_model='m')
+        assert run.failed == SCENE and 'ledger write refused' in run.why
+        assert gate.pending(project_dir)[SCENE]['command'] == gate.RECHECK_FAILED
+        assert open(path, encoding='utf-8').read() == before
+
+    def test_a_recheck_that_would_repeat_an_id_is_listed_failed(
+            self, project_dir, tmp_path, monkeypatch):
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        path = ledger.ledger_path(project_dir)
+        before = open(path, encoding='utf-8').read()
+        gate.mark_pending(project_dir, SCENE, gate.RECHECK, 're-check: x changed 1 fact(s)')
+
+        def collide(proposed, old_rows, *_):
+            for p in proposed:
+                p['id'] = old_rows[0]['id']
+        monkeypatch.setattr(gate, '_carry_ids', collide)
+
+        def fake(path, body, **k):
+            if 'tools' in body:
+                return _text({'findings': [], 'kept': []})
+            return _text({'commitments': [_commitment(subject='tarrens-hollow'),
+                                          self._temple()]})
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+            run = gate.recheck_pending(project_dir, log_dir=str(tmp_path / 'rc'),
+                                       extract_model='m', check_model='m')
+        assert run.failed == SCENE and 'ledger write refused' in run.why
+        assert 'would be on 2 rows' in run.why
+        assert gate.pending(project_dir)[SCENE]['command'] == gate.RECHECK_FAILED
+        assert open(path, encoding='utf-8').read() == before
+        ledger.load(project_dir)   # the next command can read it
 
     def test_a_moved_paragraph_is_not_steady(self):
         earlier = 'One para here.\n\nTwo para here.\n\nThree para here.'

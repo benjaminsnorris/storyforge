@@ -57,6 +57,7 @@ from __future__ import annotations
 import copy
 import os
 import re
+from collections.abc import Set
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
@@ -96,6 +97,12 @@ class GateError(RuntimeError):
     invocation's logs (`run_log_dir`)."""
     first: 'GateResult | None' = None
     log_dir: str = ''
+
+
+class LedgerWriteRefused(GateError):
+    """The commit's ledger write was refused (`ledger.save`: rows the next
+    command couldn't read, or a cell that would break its row); nothing was
+    written and the gate result is as it was before the commit (#599)."""
 
 
 def _among(f: Finding, findings: list[Finding]) -> bool:
@@ -144,6 +151,13 @@ class GateResult:
     #: on commit (#558): the earlier commitments kept as they were, read from
     #: paragraphs the new prose has unchanged and in place (`steady_facts`)
     steady: list[str] = field(default_factory=list)
+    #: on commit (#599): proposed rows dropped as a reading again of a kept
+    #: (`steady`) fact, `(statement, kept id)`: reported, never silent
+    reread: list[tuple[str, str]] = field(default_factory=list)
+    #: on commit (#599): proposed rows committed as new facts that read much
+    #: like a kept fact of the same subject and type (`_RESTATES`), `(statement,
+    #: kept id)`, for the author to judge: a second fact or a copy
+    restates: list[tuple[str, str]] = field(default_factory=list)
     #: on commit: registry rows (the author's) whose `supersedes`/`depends_on`
     #: names a commitment this version removed (`row → id`): a re-check
     #: replaces only commitments, so the author must fix the link
@@ -238,7 +252,11 @@ def _subjects(project_dir: str) -> dict[str, str]:
 def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
              order: dict[str, int], introduced_by: str, model: str, log_dir: str,
              problems: dict[str, list[str]],
-             dropped: list[tuple[str, str]]) -> list[dict[str, str]]:
+             dropped: list[tuple[str, str]], *,
+             reserved: Set[str]) -> list[dict[str, str]]:
+    """The scene's commitments read from `prose` against `rows`, each with an
+    id no row of `rows` and none of `reserved` has (#599; required, #599's
+    review TD-2: `_reserved_ids`)."""
     from storyforge.api import extract_text, invoke_to_file, is_truncated
     from storyforge.elaborate import get_scene
     from storyforge.enrich import format_registries_for_prompt
@@ -279,7 +297,7 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
     dropped.extend((e['statement'], why) for e, why in verdict.dropped)
     return commitment_rows(verdict.kept, scene_id, prose, rows, known, recorded, subjects,
                            introduced_by, problems, own_writers=ledger.COMMITMENT_WRITERS,
-                           registry_is_plan=True)
+                           registry_is_plan=True, reserved=reserved)
 
 
 def _disputes(result: GateResult, rows: list[dict[str, str]]) -> list[Dispute]:
@@ -1193,6 +1211,7 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         names, name_notes = ledger.subject_names(project_dir)
         revised_rejection = rejected_ids(pending(project_dir).get(scene_id))
         already_reported = reported(project_dir).get(scene_id, [])
+        briefs_name = audit.brief_fact_ids(project_dir)
     except (ledger.LedgerError, ValueError, OSError, UnicodeDecodeError) as e:
         raise GateError(f'{scene_id}: {e}') from e
     loaded = copy.deepcopy(rows)
@@ -1222,7 +1241,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     result.proposed = _extract(project_dir, scene_id, prose, rows, order,
                                introduced_by or command,
                                extract_model or select_model('evaluation'), log_dir,
-                               result.problems, result.dropped)
+                               result.problems, result.dropped,
+                               reserved=_reserved_ids(old, loaded, briefs_name))
     # A fact the author rejected may not come back as binding
     for r in result.proposed:
         rid = rejected_here.get(ledger.fact_key(r))
@@ -1250,6 +1270,18 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         return result
     _commit(project_dir, result)
     return result
+
+
+def _reserved_ids(old: Set[str], loaded: list[dict[str, str]],
+                  briefs_name: Set[str]) -> set[str]:
+    """The ids no new commitment of the scene may take though the ledger the
+    scene is read against hasn't got them (#599, and its review TD-1/SF-2):
+    the scene's earlier commitments (`old`, an id not carried is never
+    reused), and every id a link names, in the ledger (`ledger.linked_ids`,
+    `loaded`) or a brief (`briefs_name`), there or not: an id dropped by an
+    earlier commit and minted again would put that link on a different
+    fact."""
+    return set(old) | ledger.linked_ids(loaded) | set(briefs_name)
 
 
 @dataclass
@@ -1332,12 +1364,33 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
                             f'scene was being gated; nothing written, gate it again')
     except ledger.LedgerError as e:
         raise GateError(f'{scene_id}: {e}') from e
+    # #599's review (TD-3): a refused write leaves the result and the
+    # context as they were, never half-committed
+    saved = copy.deepcopy({k: v for k, v in vars(result).items() if k != '_ctx'})
+    saved_rows = copy.deepcopy(rows)
+    try:
+        fixed_toward_source = _write_commit(project_dir, result, holding, rows, old_rows,
+                                            order, ended_before, revised_rejection, names,
+                                            name_notes, prose, command, scene_id)
+    except BaseException:
+        vars(result).update(saved)
+        rows[:] = saved_rows
+        raise
+    result.committed = True
+    _after_commit(project_dir, result, holding, pending_reason, prose, command, scene_id,
+                  fixed_toward_source)
+
+
+def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_before,
+                  revised_rejection, names, name_notes, prose, command, scene_id) -> bool:
+    """`_commit`'s changes to `result` and `rows`, ending in the ledger
+    write; returns whether the scene was fixed toward its source."""
     _source_supersede(result, rows)
     fixed_toward_source = _keep_superseded(project_dir, result, rows, prose)
     # #558's second review: the kept facts go through the hold-back too
     _keep_steady(project_dir, result, old_rows, prose)
     _hold_back(result, holding, prose=prose if holding else '', rows=rows)
-    _carry_ids(result.proposed, old_rows, rows, scene_id)
+    _carry_ids(result.proposed, old_rows, result.steady)
     new = rows + result.proposed
     for rid, quote in result.check.kept:
         if ledger.fill_quote(new, rid, quote):
@@ -1368,8 +1421,21 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
         result.dangling = [f'{r["id"]} → {ref}' for r in rows if not ledger.is_commitment(r)
                            for col in ('supersedes', 'depends_on')
                            for ref in ledger._split(r.get(col, '')) if ref in removed]
-    ledger.save(project_dir, new, command=command)
-    result.committed = True
+    # #599: never a ledger the next command can't load; a cell that would
+    # break its row is refused the same way (#599's review, SF-3: it was
+    # uncaught, and stopped `check --pending --keep-going`)
+    try:
+        ledger.save(project_dir, new, command=command)
+    except (ledger.LedgerError, ValueError) as e:
+        raise LedgerWriteRefused(f'{scene_id}: ledger write refused: {e}') from e
+    return fixed_toward_source
+
+
+def _after_commit(project_dir, result, holding, pending_reason, prose, command, scene_id,
+                  fixed_toward_source) -> None:
+    """What follows a written commit: the prose recorded, the source-fix,
+    reported, blocked and pending lists updated (a failure is a WARNING:
+    the ledger is written)."""
     note = record_prose(project_dir, scene_id, prose)
     if note:
         result.prose_notes.append(f'{scene_id}: {note}')
@@ -1786,17 +1852,36 @@ def _keep_steady(project_dir: str, result: GateResult, old_rows: list[dict[str, 
     re-extraction and counted as changed, 18 re-checks): keep each earlier
     commitment read from a paragraph the prose still has unchanged and in
     place (`steady_facts`) exactly as it was, same id and statement, and
-    drop each proposed row that reads one of them again: its quote lies
-    within that same paragraph, and it states the same fact or its quote
-    shares four words in a row with the kept one's. A proposed row from any
-    other paragraph is never matched to a kept fact (#558's second review:
-    a changed paragraph's new fact sharing four words with a kept one was
-    dropped, and nothing was re-checked). Only the changed paragraphs'
-    facts are new readings, so only they can count as changed. A steady
-    fact re-extraction left out is kept too, never dropped silently. Without
-    the earlier prose (no git, nothing recorded) nothing is kept, and
+    drop each proposed row that reads one of them again (one worded
+    otherwise is listed in `result.reread`, logged and reported: never a
+    silent drop). A proposed row reads a kept
+    fact again when its quote lies within one unchanged paragraph and
+    either
+
+    - that is the kept fact's paragraph, and it states the same fact or its
+      quote shares four words in a row with the kept one's (#558); or
+    - (#599) it has the kept fact's subject and type and says nothing the
+      kept statement doesn't, or the kept statement says nothing it doesn't
+      (`_says_the_same`): a re-check reads prose that hasn't changed at all,
+      and extraction may quote another paragraph for a fact the scene has
+      ("Tarren's Hollow had 412 people" read again as "... 412 people
+      living there").
+
+    A row stating the same fact as an earlier commitment that is not kept
+    is never dropped (#599's review, CR-1b): it carries that fact's id
+    (`_carry_ids`), and dropping it would delete the fact and re-check its
+    dependents though its prose never changed. A row from a changed
+    paragraph is never matched to a kept fact (#558's second review: a
+    changed paragraph's new fact sharing four words with a kept one was
+    dropped, and nothing was re-checked). A row kept as new that reads much
+    like a kept fact of its subject and type (`_RESTATES`) is listed in
+    `result.restates` for the author to judge. Only the changed paragraphs'
+    facts are new readings, so only they can count as changed. A steady fact
+    re-extraction left out is kept too, never dropped silently. Without the
+    earlier prose (no git, nothing recorded) nothing is kept, and
     `prose_notes` says so. Runs before the hold-back, which then applies to
     the kept facts too."""
+    from storyforge.common import log
     if not old_rows:
         return
     earlier, why = gated_prose(project_dir, result.scene_id)
@@ -1809,20 +1894,111 @@ def _keep_steady(project_dir: str, result: GateResult, old_rows: list[dict[str, 
     if not kept:
         return
     new_paras = _paragraphs(prose)
+    steady = set(_steady_pairs(earlier, prose).values())
+    # CR-1b: what carries an earlier fact's id is never a re-reading
+    not_kept = {ledger.fact_key(o) for o in old_rows if o['id'] not in where}
 
-    def again(p: dict[str, str]) -> bool:
+    def same_fact(p: dict[str, str], o: dict[str, str]) -> bool:
+        return (_subject(p) == _subject(o) and (p.get('type') or '') == (o.get('type') or '')
+                and _says_the_same(p.get('statement') or '', o.get('statement') or ''))
+
+    def reads_again(p: dict[str, str]) -> dict[str, str] | None:
+        """The kept fact `p` reads again, or None."""
+        if ledger.fact_key(p) in not_kept:
+            return None
         q = p.get('quote') or ''
         at = {j for j, para in enumerate(new_paras) if _quote_spans(q, list(para))}
         if len(at) != 1:
-            return False
+            return None
         j = at.pop()
+        if j not in steady:
+            return None
         qw = _words(q)
-        return any(where[o['id']] == j and (
-            ledger.fact_key(p) == ledger.fact_key(o)
-            or _shared_run(qw, _words(o.get('quote') or '')) >= _MIN_QUOTE_WORDS)
-            for o in kept)
-    result.proposed = kept + [p for p in result.proposed if not again(p)]
+        for o in kept:
+            if where[o['id']] == j and (
+                    ledger.fact_key(p) == ledger.fact_key(o)
+                    or _shared_run(qw, _words(o.get('quote') or '')) >= _MIN_QUOTE_WORDS):
+                return o
+        return next((o for o in kept if same_fact(p, o)), None)
+
+    fresh = []
+    for p in result.proposed:
+        o = reads_again(p)
+        if o is None:
+            fresh.append(p)
+            continue
+        if ledger.fact_key(p) == ledger.fact_key(o):
+            continue   # the kept fact word for word: nothing is lost
+        result.reread.append((p.get('statement') or '', o['id']))
+        log(f'  NOTE: {result.scene_id}: not recorded, a reading again of {o["id"]} '
+            f'(unchanged prose): "{_one_line(p.get("statement") or "")[:160]}"')
+    for p in fresh:
+        o = next((o for o in kept if _subject(p) == _subject(o)
+                  and (p.get('type') or '') == (o.get('type') or '')
+                  and _overlap(p.get('statement') or '', o.get('statement') or '')
+                  >= _RESTATES), None)
+        if o is not None:
+            result.restates.append((p.get('statement') or '', o['id']))
+            log(f'  NOTE: {result.scene_id}: recorded as a new fact, but it reads much like '
+                f'{o["id"]}; check it is not a copy: "'
+                f'{_one_line(p.get("statement") or "")[:160]}"')
+    result.proposed = kept + fresh
     result.steady = [o['id'] for o in kept]
+
+
+def _subject(row: dict[str, str]) -> str:
+    return (row.get('subject') or '').strip().casefold()
+
+
+#: Words that carry no fact of their own (#599): left out when two
+#: statements are compared (`_content_words`)
+_FUNCTION_WORDS = frozenset(
+    'a an the and or but nor of to in on at by for from with into onto upon as is are was '
+    'were be been being has have had do does did that this these those it its his her hers '
+    'their theirs him them he she they i you we me my your our us who whom whose which what '
+    'when where while than then so there s t'.split())
+
+#: `_overlap` at or above which a new fact is listed as reading much like a
+#: kept one (`GateResult.restates`). The pilot's (#599): the scab "split open
+#: and bled" / "splits and bleeds a thin line of blood" 0.54; Medon's warning
+#: reworded 0.65; "Telemachus tells Pisistratus ..." 0.58, but its subjects
+#: differ, so it isn't compared. A survey that "marked a temple" / "marked a
+#: well" is 0.71 too: overlap can't tell a rewording from a different fact,
+#: which is why it only lists, and `_says_the_same` decides a drop
+_RESTATES = 0.5
+
+
+def _content_words(statement: str) -> set[str]:
+    """`statement`'s words less `_FUNCTION_WORDS`, lowercased, with a plural
+    or tense ending taken off (-s, -es, -ed, -ing; three letters kept)."""
+    out = set()
+    for w in re.findall(r'[a-z0-9]+', statement.lower()):
+        if w in _FUNCTION_WORDS:
+            continue
+        for end in ('ing', 'ed', 'es', 's'):
+            if w.endswith(end) and not w.endswith('ss') and len(w) - len(end) >= 3:
+                w = w[:-len(end)]
+                break
+        out.add(w)
+    return out
+
+
+def _says_the_same(a: str, b: str) -> bool:
+    """Whether one statement says nothing the other doesn't: the content
+    words of one all in the other's (`_content_words`). Containment, not a
+    similarity score (#599's review): "marked a temple" and "marked a well"
+    share all but one word and are different facts; "had 412 people" and
+    "had 412 people living there" are one. A rewording that changes words
+    ("split open and bled" / "splits and bleeds") is not the same by this
+    test; it is kept, and listed in `restates`."""
+    wa, wb = _content_words(a), _content_words(b)
+    return bool(wa) and bool(wb) and (wa <= wb or wb <= wa)
+
+
+def _overlap(a: str, b: str) -> float:
+    """The content words two statements share, of all they have (Jaccard)."""
+    wa, wb = _content_words(a), _content_words(b)
+    return len(wa & wb) / len(wa | wb) if wa | wb else 0.0
 
 
 def _shared_run(a: str, b: str) -> int:
@@ -1850,47 +2026,47 @@ def _has_prose(project_dir: str, scene_id: str) -> bool:
 
 
 def _carry_ids(proposed: list[dict[str, str]], old_rows: list[dict[str, str]],
-               rows: list[dict[str, str]], scene_id: str) -> None:
+               steady: list[str]) -> None:
     """Give each proposed row that states the same fact as one of the
     scene's earlier commitments (`ledger.fact_key`) that row's id, and its
     end in a later scene when the new row has none: links to it (a later
-    `supersedes`, the later scene's end) keep holding. Every other proposed
-    row gets an id no other row and no earlier commitment of the scene has
-    (extraction chose ids without the old rows, so one may repeat an old id:
-    a later link to that id would then land on a different fact), and links
-    between proposed rows follow the renames. In place."""
-    from storyforge.extract import commitment_id
+    `supersedes`, the later scene's end) keep holding. A kept row (#558,
+    its id in `steady`) keeps its own id. Every other row keeps the id
+    extraction gave it, which no earlier commitment of the scene and no
+    other row has (`_extract`'s `reserved`, #599: an old id not carried is
+    never reused, or a later link to it would land on a different fact).
+    Links between proposed rows follow the renames. In place.
+
+    Raises:
+        GateError: a row neither kept nor carried has an earlier
+            commitment's id (it was minted without `reserved`; #599's
+            review, TD-2): nothing is written.
+    """
+    kept_ids = set(steady)
+    old_ids = {o['id'] for o in old_rows}
     by_key: dict[tuple, dict[str, str]] = {}
     for o in old_rows:
         by_key.setdefault(ledger.fact_key(o), o)
+    unchanged = [p['id'] in kept_ids for p in proposed]   # kept as it was (#558)
     # by position, never by id: a kept steady row (#558) and a new row
-    # extraction gave the same id are two rows (Beowulf B-034)
-    carry: dict[int, str] = {}
-    carried: set[str] = set()
-    for i, p in enumerate(proposed):
+    # stating the same fact are two rows (Beowulf B-034)
+    carried = set(kept_ids)
+    rename: dict[str, str] = {}
+    for p, kept in zip(proposed, unchanged):
+        if kept:
+            continue
         o = by_key.get(ledger.fact_key(p))
         if o is None or o['id'] in carried:
+            if p['id'] in old_ids:
+                raise GateError(f'{p.get("scene_id") or "?"}: new fact {p["id"]!r} has the id '
+                                f'of an earlier commitment of the scene (minted without the '
+                                f'reserved ids); nothing written')
             continue
         carried.add(o['id'])
-        carry[i] = o['id']
+        rename[p['id']] = o['id']
+        p['id'] = o['id']
         if not (p.get('resolves') or '').strip() and ledger._ends_elsewhere(o):
             p['resolves'] = o['resolves']
-    # an old id not carried is never reused: links to it must not land on
-    # a different fact
-    taken = {r['id'] for r in rows} | {o['id'] for o in old_rows}
-    unchanged = [any(p == o for o in old_rows) for p in proposed]   # kept as it was
-    rename: dict[str, str] = {}
-    for i, p in enumerate(proposed):
-        if i in carry:
-            new_id = carry[i]
-        elif p['id'] in taken:
-            new_id = commitment_id(scene_id, p.get('statement', ''), taken)
-        else:
-            new_id = p['id']
-        if new_id != p['id']:
-            rename[p['id']] = new_id
-        p['id'] = new_id
-        taken.add(new_id)
     # links between extraction's rows follow its renames; a kept row's links
     # are the ledger's and stay
     for p, kept in zip(proposed, unchanged):
@@ -2596,7 +2772,10 @@ def gate_and_fix(project_dir: str, scene_id: str, *, command: str, prose: str,
             except GateError as e:
                 if n == 1:
                     raise
-                notes.append(f'the check after fix round {n} failed ({e}); kept {kept}')
+                what = ('the ledger write after fix round {n} was refused'
+                        if isinstance(e, LedgerWriteRefused)
+                        else 'the check after fix round {n} failed').format(n=n)
+                notes.append(f'{what} ({e}); kept {kept}')
                 discarded = n
                 break
             if misquoted is not None:
@@ -2803,6 +2982,16 @@ def _from_reading(f: Finding) -> str:
     return f' [reading {f.reading}]' if f.reading > 1 else ''
 
 
+def reread_lines(result: GateResult) -> list[str]:
+    """#599: the proposed rows dropped as a reading again of a kept fact, and
+    those recorded as new that read much like one, as NOTE lines."""
+    lines = [f'NOTE (not recorded: a reading again of {rid}, from unchanged prose): '
+             f'{_one_line(st)}' for st, rid in result.reread]
+    lines += [f'NOTE (recorded as a new fact, but reads much like {rid}; check it is not a '
+              f'copy): {_one_line(st)}' for st, rid in result.restates]
+    return lines
+
+
 def report_lines(result: GateResult) -> list[str]:
     """The gate's verdict on a scene as one-line strings (log lines, list
     items): everything that stopped the commit, then what is reported
@@ -2886,6 +3075,7 @@ def report_lines(result: GateResult) -> list[str]:
                      f'{len(result.steady)} fact(s)')
     for note in result.prose_notes:
         lines.append(f'NOTE (re-check): {_one_line(note)}')
+    lines += reread_lines(result)
     if result.committed:
         lines.append(f'COMMITTED{" (provisionally: listed " + PENDING_PATH + ")" if result.provisional else ""}: {len(result.proposed)} fact(s)'
                      + (f'; quotes filled: {", ".join(result.quotes_filled)}'
@@ -3203,6 +3393,9 @@ class Recheck:
     spent: float = 0.0
     #: what the caller's run had spent and reserved before this call
     spent_before: float = 0.0
+    #: what the re-checks that passed did not record, or recorded as new that
+    #: reads like a kept fact (`reread_lines`), each `scene: line` (#599)
+    notes: list[str] = field(default_factory=list)
 
 
 def recheck_queue(project_dir: str, skip: set[str] | frozenset[str] = frozenset()) -> list[str]:
@@ -3280,6 +3473,7 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
             run.left = recheck_queue(project_dir, skip)
             return run
         run.passed.append(sid)
+        run.notes += [f'{sid}: {line}' for line in reread_lines(result)]
 
 
 def _writer(project_dir: str, scene_id: str) -> str:

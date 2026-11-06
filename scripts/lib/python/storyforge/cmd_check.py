@@ -528,6 +528,7 @@ def _recheck_after(project_dir: str, result, log_dir: str, skip: set[str], budge
     if run is None:
         return lines + ([''] if lines else []), None
     lines += [f'- re-check passed: {s}' for s in run.passed]
+    lines += [f'- {x}' for x in run.notes]
     if run.failed:
         lines.append(f'- re-check of {run.failed} did not pass: {run.why} (listed pending)')
     if run.over_budget:

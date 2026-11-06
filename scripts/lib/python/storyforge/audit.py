@@ -576,6 +576,18 @@ def mark(rows: list[dict[str, str]], ids: list[str], verdict: str, *,
     return changed
 
 
+#: The scene-briefs.csv columns that name facts by id
+BRIEF_FACT_COLUMNS = ('knowledge_in', 'knowledge_out', 'physical_state_in', 'physical_state_out')
+
+
+def brief_fact_ids(project_dir: str) -> set[str]:
+    """Every fact id a brief names (`BRIEF_FACT_COLUMNS`), in the ledger or
+    not: a new fact must never take one (#599's review, TD-1)."""
+    _, briefs = _read(project_dir, 'scene-briefs.csv')
+    return {ref.strip() for b in briefs for col in BRIEF_FACT_COLUMNS
+            for ref in (b.get(col) or '').split(';') if ref.strip()}
+
+
 def leaning_scenes(project_dir: str, ids: list[str]) -> dict[str, list[str]]:
     """fact id → scenes whose brief names it in knowledge_in/out or
     physical_state_in/out: the scenes a brief ties to the fact. The reject
@@ -585,8 +597,7 @@ def leaning_scenes(project_dir: str, ids: list[str]) -> dict[str, list[str]]:
     wanted = set(ids)
     out: dict[str, list[str]] = {i: [] for i in ids}
     for b in briefs:
-        for col in ('knowledge_in', 'knowledge_out', 'physical_state_in',
-                    'physical_state_out'):
+        for col in BRIEF_FACT_COLUMNS:
             for ref in (b.get(col) or '').split(';'):
                 ref = ref.strip()
                 if ref in wanted and b.get('id', '') not in out[ref]:
