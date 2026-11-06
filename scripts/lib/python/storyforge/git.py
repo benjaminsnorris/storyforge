@@ -415,54 +415,6 @@ def _push(project_dir: str) -> bool:
     return True
 
 
-def commit_partial_work(project_dir: str) -> bool:
-    """Commit partial work during an interrupted shutdown. True if committed.
-
-    Commits what changed under the pipeline's output folders plus anything
-    already staged inside project_dir, through `commit_and_push(paths=)`, so
-    a sibling project's edits or staged files in the same repo neither count
-    as changes nor ride along (#520: a bare `diff --cached --quiet` and
-    `commit` took the whole index). Nothing to commit says nothing; work
-    that can't be committed (not in a git work tree, git failing, the commit
-    failing) is a WARNING, and "Partial work committed." is logged only when
-    it was.
-    """
-    if not in_work_tree(project_dir):
-        log(f'WARNING: {project_dir} is not inside a git work tree (or git is not '
-            f'installed), so partial work was not committed.')
-        return False
-
-    dirs_to_check = [
-        'working/evaluations/', 'working/logs/', 'working/scores/',
-        'working/costs/', 'working/timeline/', 'scenes/', 'reference/',
-    ]
-    # Both scoped to the project (`-- .`, its folders): from a subfolder of
-    # its repo an unscoped check sees a sibling project's changes too
-    staged = _git(project_dir, 'diff', '--cached', '--name-only', '--relative',
-                  '--no-renames', '-z', '--', '.', check=False)
-    changed = _git(project_dir, 'status', '--porcelain', '--', *dirs_to_check,
-                   check=False)
-    for r, what in ((staged, 'git diff --cached'), (changed, 'git status')):
-        if r.returncode != 0:
-            log(f'WARNING: could not check for partial work ({what} exited '
-                f'{r.returncode}: {(r.stderr or "").strip()[:200]}), so none was '
-                f'committed.')
-            return False
-    staged_files = [f for f in staged.stdout.split('\0') if f]
-    if not staged_files and not changed.stdout.strip():
-        return False
-
-    log('Committing partial work before exit...')
-    if commit_and_push(project_dir, 'Interrupted: partial work saved',
-                       dirs_to_check + staged_files):
-        log('Partial work committed.')
-        return True
-    if last_commit_error == NOTHING_TO_COMMIT:
-        log('No partial work to commit (what changed is gitignored).')
-    # A failed commit is already a WARNING from commit_and_push
-    return False
-
-
 # ============================================================================
 # Review prompt
 # ============================================================================
