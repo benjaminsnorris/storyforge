@@ -261,9 +261,29 @@ It is the *artwork*, deliberately not `production.cover_image`: that key names t
 
 The command names the resolved file **once per run, before any call is made**, with its symlink target if it is a symlink — and `--diagnose` and `--prompts --dry-run` report it too, so you never have to start a paid run to find out which cover is about to direct it.
 
-If `production.cover_artwork` names a file that does not exist, `--prompts` **refuses** rather than falling back to the convention and spending the run. A path that isn't there is unambiguous — you meant that path — where staleness is a judgment call. Fix the path, or remove the key to use the convention deliberately. It is also staleness-checked on the same footing as a prior render — an mtime older than the newest `canon_updated` is a WARNING — but never *excluded* for it, because dropping it would leave the highest-stakes run with no style signal at all. If you see that warning, re-render the cover artwork or point `production.cover_artwork` at art that postdates the canon.
+If `production.cover_artwork` names a file that does not exist, `--prompts` **refuses** rather than falling back to the convention and spending the run. A path that isn't there is unambiguous — you meant that path — where staleness is a judgment call. Fix the path, or remove the key to use the convention deliberately.
 
-Two more cases get their own warning, and both mean the check did not run rather than that it passed: no canon file carries a parseable `canon_updated`, and the file's modification time could not be read. Unknown freshness is not freshness. A file an image model cannot read — an SVG compositing source, say — is warned about and still listed, because the one reference that is sometimes the only one is never dropped silently.
+#### The cover is reviewed against the canon, not dated against it
+
+The cover is staleness-checked, and never *excluded* for it, because dropping it would leave the highest-stakes run with no style signal at all. But it is **not** checked like a prior render. A render is produced *from* the canon, so canon moving past it is a fact. The cover is just as often what the canon was written *from* — `visual-foundation.md` describes the cover's register because someone looked at the cover — so only the author can say whether a canon change left it behind. And if the cover came from outside this pipeline, "re-render it" is not a remedy at all.
+
+So the check is the author's recorded review: `production.cover_artwork_sha256` (the bytes they looked at) and `production.cover_artwork_reviewed` (the newest `canon_updated` they looked at them against). `storyforge illustrate --accept-style-reference` writes both; nothing else does. The WARNING fires when:
+
+- no review is recorded yet (the first time a book has both a cover and dated canon);
+- the canon has been updated **after** the recorded date;
+- the art's bytes no longer match the recorded digest — replaced, re-exported, or `production.cover_artwork` pointed at a different file. The acknowledgement is of specific bytes, not of a filename.
+
+No file date is read, so a fresh clone, a copy, or a `touch` neither clears nor raises it.
+
+**When you see it, do the review — don't just run the command.** Open the cover beside the canon files whose `canon_updated` is at or after the recorded date (or all of `reference/canon/` the first time), and say what you see: does the art still carry the palette, the register, and every anchor the canon now states? Then ask the author. If they agree the two still match — or the canon was written from this art and the change was elsewhere — run:
+
+```bash
+[plugin_path]/storyforge illustrate --accept-style-reference
+```
+
+_(No API calls. Writes two keys under `production:` in `storyforge.yaml`; `--dry-run` shows them first.)_ Commit it with a message saying what was reviewed. If the art and the canon disagree, the fix is the art (re-render it, or point `production.cover_artwork` at art that matches) or the canon — never the acknowledgement. Recording a review the author did not do is exactly the silent pass this check exists to prevent.
+
+Two more cases get their own warning, and both mean the check did not run rather than that it passed: no canon file carries a parseable `canon_updated`, and the file could not be read. Unknown freshness is not freshness, and `--accept-style-reference` refuses in both — there is nothing to record. A file an image model cannot read — an SVG compositing source, say — is warned about and still listed, because the one reference that is sometimes the only one is never dropped silently; recording a review does not clear that warning.
 
 A prior illustration is used as a style reference only if it was ingested **on or after** the newest `canon_updated` date in `reference/canon/`. Art rendered before the canon that now governs it was directed by rules that no longer apply, and feeding it back in teaches the new render exactly the drift the canon was rewritten to remove — which is how a whole set inherits a mistake through the visual key.
 
@@ -325,7 +345,7 @@ manuscript/illustration-packet/
 
 **Anchors in the packet are byte-identical to their canon files**, wrapped in `<!-- canon-embed: id -->` markers so that can be checked mechanically. Likeness continuity across separately generated images is nothing but the same string arriving every time, so if the packet's wording is the one you want, put it in the canon file and regenerate — do not edit the packet, and never revise an anchor a rendered illustration already used.
 
-**Read the README's "What this packet cannot tell you" section aloud to the author.** It lists every gap in the data the packet was built from: a row with no beat or no subject, a `canon_refs` entry with no canon file, an entity whose visual state nobody stated at that scene, a book-level canon file still holding TODO text, rows whose art direction was never written, and whether the contradiction audit has ever run. Those are the places the packet is thinner than it looks, and the moment to fix them is before a generation session spends money on them.
+**Read the README's "What this packet cannot tell you" section aloud to the author.** It lists every gap in the data the packet was built from: a row with no beat or no subject, a `canon_refs` entry with no canon file, an entity whose visual state nobody stated at that scene, a book-level canon file still holding TODO text, rows whose art direction was never written, and whether the contradiction audit has ever run, and a cover not recorded as reviewed against the current canon (see *The cover is reviewed against the canon* above — the entry names `--accept-style-reference`, and that is a review to do with the author, not a command to run past them). Those are the places the packet is thinner than it looks, and the moment to fix them is before a generation session spends money on them.
 
 **Reference images are never copied** — README lists project-relative paths and the author uploads from disk. A copy would be a second thing to invalidate on every re-render, and it would be the one part of the bundle that does not travel to another machine. README's upload step also carries a **Read this before you upload** block whenever the list is shorter than the ingested art suggests: renders excluded as pre-canon, a `--no-prior-refs` build, or the cap. A cover-only list is not the same thing as having nothing to reference, and uploading the cover alone generates the rest of the set with no likeness reference.
 
@@ -590,6 +610,7 @@ Every artifact gets its own commit:
 - Assembled the packet? Commit and push it. It is a render, so it belongs in the same commit as whatever it was rendered from when both moved.
 - Ingested illustrations? Commit and push the files, the updated plan, and the scene files together, so the marker and the art it points at land in the same commit.
 - Superseded an illustration? Commit and push.
+- Recorded a cover review (`--accept-style-reference`)? Commit and push `storyforge.yaml`, naming what was reviewed against which canon date.
 - Ran a sequence review? Commit the checklist, then commit each drift fix separately.
 
 ```bash
