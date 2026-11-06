@@ -27,6 +27,22 @@ def _git(project_dir: str, *args: str, check: bool = True) -> subprocess.Complet
     )
 
 
+def in_work_tree(project_dir: str) -> bool:
+    """True when project_dir is inside a git work tree.
+
+    Never `os.path.isdir(project_dir/.git)`: that is False for a project in a
+    subfolder of its repo (every storyforge-evals book is `projects/<book>/`)
+    and in a worktree or submodule, where `.git` is a file, and the callers
+    that gated on it skipped their git work with nothing said (#520). False
+    too when git isn't installed; a caller that then can't do its work says so.
+    """
+    try:
+        r = _git(project_dir, 'rev-parse', '--is-inside-work-tree', check=False)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    return r.returncode == 0 and r.stdout.strip() == 'true'
+
+
 def has_gh() -> bool:
     """Check if the gh CLI is available."""
     try:
@@ -399,34 +415,52 @@ def _push(project_dir: str) -> bool:
     return True
 
 
-def commit_partial_work(project_dir: str) -> None:
-    """Commit any partial work during interrupted shutdown."""
-    if not os.path.isdir(os.path.join(project_dir, '.git')):
-        return
+def commit_partial_work(project_dir: str) -> bool:
+    """Commit partial work during an interrupted shutdown. True if committed.
 
-    # Check for staged or unstaged changes in key dirs
+    Commits what changed under the pipeline's output folders plus anything
+    already staged inside project_dir, through `commit_and_push(paths=)`, so
+    a sibling project's edits or staged files in the same repo neither count
+    as changes nor ride along (#520: a bare `diff --cached --quiet` and
+    `commit` took the whole index). Nothing to commit says nothing; work
+    that can't be committed (not in a git work tree, git failing, the commit
+    failing) is a WARNING, and "Partial work committed." is logged only when
+    it was.
+    """
+    if not in_work_tree(project_dir):
+        log(f'WARNING: {project_dir} is not inside a git work tree (or git is not '
+            f'installed), so partial work was not committed.')
+        return False
+
     dirs_to_check = [
         'working/evaluations/', 'working/logs/', 'working/scores/',
         'working/costs/', 'working/timeline/', 'scenes/', 'reference/',
     ]
-    has_changes = False
-    r = _git(project_dir, 'diff', '--cached', '--quiet', check=False)
-    if r.returncode != 0:
-        has_changes = True
-    else:
-        for d in dirs_to_check:
-            r = _git(project_dir, 'status', '--porcelain', d, check=False)
-            if r.stdout.strip():
-                has_changes = True
-                break
+    # Both scoped to the project (`-- .`, its folders): from a subfolder of
+    # its repo an unscoped check sees a sibling project's changes too
+    staged = _git(project_dir, 'diff', '--cached', '--name-only', '--relative',
+                  '--no-renames', '-z', '--', '.', check=False)
+    changed = _git(project_dir, 'status', '--porcelain', '--', *dirs_to_check,
+                   check=False)
+    for r, what in ((staged, 'git diff --cached'), (changed, 'git status')):
+        if r.returncode != 0:
+            log(f'WARNING: could not check for partial work ({what} exited '
+                f'{r.returncode}: {(r.stderr or "").strip()[:200]}), so none was '
+                f'committed.')
+            return False
+    staged_files = [f for f in staged.stdout.split('\0') if f]
+    if not staged_files and not changed.stdout.strip():
+        return False
 
-    if has_changes:
-        log('Committing partial work before exit...')
-        for d in dirs_to_check:
-            _git(project_dir, 'add', d, check=False)
-        _git(project_dir, 'commit', '-m', 'Interrupted: partial work saved', check=False)
-        _git(project_dir, 'push', check=False)
+    log('Committing partial work before exit...')
+    if commit_and_push(project_dir, 'Interrupted: partial work saved',
+                       dirs_to_check + staged_files):
         log('Partial work committed.')
+        return True
+    if last_commit_error == NOTHING_TO_COMMIT:
+        log('No partial work to commit (what changed is gitignored).')
+    # A failed commit is already a WARNING from commit_and_push
+    return False
 
 
 # ============================================================================
@@ -505,7 +539,7 @@ def _paths(project_dir: str, *args: str) -> list[str]:
 def _project_tree(project_dir: str) -> tuple[list[str], str]:
     """Every file in the project, relative to it, and a note on how they were
     found ('' when git listed them)."""
-    if _git(project_dir, 'rev-parse', '--is-inside-work-tree', check=False).returncode == 0:
+    if in_work_tree(project_dir):
         tracked = _paths(project_dir, 'ls-files')
         untracked = _paths(project_dir, 'ls-files', '--others', '--exclude-standard')
         listed = set(tracked) | set(untracked)
