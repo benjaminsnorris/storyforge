@@ -299,7 +299,7 @@ Run `storyforge validate --structural` to score story quality from CSV data. Thi
 
 Each dimension produces a 0-1 score with a target threshold. Scores below target come with craft-grounded diagnosis (why it matters to the reader) and specific CSV-level prescriptions. Output adapts to coaching level (full/coach/strict).
 
-Scores persist to `working/scores/structural-latest.csv` and show deltas on re-run, enabling a tight improvement loop: score → fix CSVs → re-score → see movement.
+Scores persist to `working/scores/structural-latest.csv` (each row stamped with `computed_at` and `inputs`, a hash of the reference files scored, so a stale file can be told from a current one; `structural_staleness` checks it) and show deltas on re-run, enabling a tight improvement loop: score → fix CSVs → re-score → see movement.
 
 ### Post-Draft Fidelity Scoring
 
