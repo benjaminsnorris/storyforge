@@ -1045,48 +1045,6 @@ def _full_instructions(pass_name: str, purpose: str, api_mode: bool) -> str:
 
 
 # ============================================================================
-# Change verification
-# ============================================================================
-
-class GitCheckError(Exception):
-    """Git failed while `verify_revision_changes` was looking."""
-
-
-def verify_revision_changes(head_before: str, project_dir: str) -> bool:
-    """Whether a revision pass changed the project.
-
-    True for commits since head_before that touch the project, uncommitted
-    changes (staged or unstaged) inside it, or untracked files in its
-    scenes/ or reference/. Every check is scoped to the project (`-- .`), so
-    in a repo holding several projects (`projects/<book>/`) a sibling's work
-    doesn't count; and a git that fails raises `GitCheckError` with git's
-    message rather than reading as a change (#520 review SF-F).
-    """
-    from storyforge.git import _git
-
-    def run(*args: str, ok=(0,)):
-        try:
-            r = _git(project_dir, *args, check=False)
-        except OSError as e:
-            raise GitCheckError(f'git could not be run: {e}') from e
-        if r.returncode not in ok:
-            raise GitCheckError(f'git {args[0]} failed: '
-                                f'{(r.stderr or "").strip()[:200] or r.returncode}')
-        return r
-
-    if run('rev-list', '--count', f'{head_before}..HEAD', '--', '.').stdout.strip() != '0':
-        return True
-    # `diff --quiet`: 0 no changes, 1 changes, anything else an error
-    if run('diff', '--quiet', '--', '.', ok=(0, 1)).returncode == 1:
-        return True
-    if run('diff', '--cached', '--quiet', '--', '.', ok=(0, 1)).returncode == 1:
-        return True
-    return bool(run('ls-files', '--others', '--exclude-standard', '-z',
-                    '--', 'scenes/', 'reference/').stdout.strip('\0'))
-
-
-
-# ============================================================================
 # CLI interface
 # ============================================================================
 
@@ -1167,26 +1125,6 @@ def main():
             print(prompt)
         except (FileNotFoundError, ValueError) as e:
             print(f'ERROR: {e}', file=sys.stderr)
-            sys.exit(1)
-
-    elif command == 'verify-changes':
-        # Usage: verify-changes <head_before> <project_dir>
-        if len(sys.argv) < 4:
-            print('Usage: verify-changes <head_before> <project_dir>',
-                  file=sys.stderr)
-            sys.exit(1)
-        head_before = sys.argv[2]
-        project_dir = sys.argv[3]
-        try:
-            has_changes = verify_revision_changes(head_before, project_dir)
-        except GitCheckError as e:
-            print(f'ERROR: could not check for changes: {e}', file=sys.stderr)
-            sys.exit(2)
-        if has_changes:
-            print('changes')
-            sys.exit(0)
-        else:
-            print('no-changes')
             sys.exit(1)
 
     else:
