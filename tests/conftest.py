@@ -5,11 +5,12 @@ and all assertion functions (now native pytest assertions).
 """
 
 import os
-import shutil
 import sys
 from pathlib import Path
 
 import pytest
+
+from fixture_helpers import FIXTURE_DIR, FIXTURE_DIR_GN, make_project
 
 # Add the Python library to the path
 TESTS_DIR = Path(__file__).parent
@@ -17,8 +18,6 @@ PLUGIN_DIR = TESTS_DIR.parent
 PYTHON_LIB = PLUGIN_DIR / 'scripts' / 'lib' / 'python'
 sys.path.insert(0, str(PYTHON_LIB))
 
-FIXTURE_DIR = TESTS_DIR / 'fixtures' / 'test-project'
-FIXTURE_DIR_GN = TESTS_DIR / 'fixtures' / 'test-project-gn'
 
 
 # A fixed Models API catalog, so model resolution never reaches the network in
@@ -114,10 +113,12 @@ def fixture_dir_gn():
 
 @pytest.fixture
 def project_dir_gn(tmp_path):
-    """A fresh copy of the graphic-novel fixture in a temp directory."""
-    dest = tmp_path / 'test-project-gn'
-    shutil.copytree(FIXTURE_DIR_GN, dest)
-    return str(dest)
+    """A fresh copy of the graphic-novel fixture in a temp directory.
+
+    Copies the files git would commit, so gitignored leftovers stay out;
+    outside a git work tree, everything (fixture_helpers.make_project).
+    """
+    return make_project(FIXTURE_DIR_GN, tmp_path / 'test-project-gn')
 
 
 @pytest.fixture
@@ -131,10 +132,10 @@ def project_dir(tmp_path):
     """A fresh copy of the test-project fixture in a temp directory.
 
     Use this when tests modify files — prevents contaminating the fixture.
+    Copies the files git would commit, so gitignored leftovers stay out;
+    outside a git work tree, everything (fixture_helpers.make_project).
     """
-    dest = tmp_path / 'test-project'
-    shutil.copytree(FIXTURE_DIR, dest)
-    return str(dest)
+    return make_project(FIXTURE_DIR, tmp_path / 'test-project')
 
 
 @pytest.fixture
