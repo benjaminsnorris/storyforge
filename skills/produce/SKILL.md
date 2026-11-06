@@ -144,7 +144,7 @@ git rev-parse --abbrev-ref HEAD
 
 **5. Commit and push** all changes to the new branch:
 ```bash
-git add -A && git commit -m "Produce: create chapter map and production settings" && git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
+git add -A -- . && git commit -m "Produce: create chapter map and production settings" && git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
 ```
 
 **6. Tell the author** how to run the assembly: `./storyforge assemble`. The script will detect this branch, create a draft PR, and track progress there.
@@ -220,7 +220,7 @@ Every artifact change gets its own commit before moving on:
 - Added front/back matter content? Commit and push.
 
 ```
-git add -A && git commit -m "Produce: {what was done}" && git push
+git add -A -- . && git commit -m "Produce: {what was done}" && git push
 ```
 
 ## The Chapter Map Format

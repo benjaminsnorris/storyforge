@@ -465,9 +465,6 @@ def mock_git(monkeypatch):
         def _run_review_phase(self, review_type, project_dir, pr_number=''):
             self.calls.append(('run_review_phase', review_type))
 
-        def _commit_partial_work(self, project_dir):
-            self.calls.append(('commit_partial_work',))
-
     mock = GitMock()
     monkeypatch.setattr('storyforge.git.current_branch', mock._current_branch)
     monkeypatch.setattr('storyforge.git._git', mock._git)
@@ -479,7 +476,6 @@ def mock_git(monkeypatch):
     monkeypatch.setattr('storyforge.git.create_draft_pr', mock._create_draft_pr)
     monkeypatch.setattr('storyforge.git.update_pr_task', mock._update_pr_task)
     monkeypatch.setattr('storyforge.git.run_review_phase', mock._run_review_phase)
-    monkeypatch.setattr('storyforge.git.commit_partial_work', mock._commit_partial_work)
 
     # Patch command module imports
     _git_attrs = [
@@ -490,7 +486,6 @@ def mock_git(monkeypatch):
         ('commit_and_push', mock._commit_and_push),
         ('update_pr_task', mock._update_pr_task),
         ('run_review_phase', mock._run_review_phase),
-        ('commit_partial_work', mock._commit_partial_work),
         ('_git', mock._git),
         ('has_gh', mock._has_gh),
         ('current_branch', mock._current_branch),

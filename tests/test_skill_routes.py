@@ -40,3 +40,20 @@ def test_status_stages_named_in_docs():
     docs = (PLUGIN_DIR / 'docs' / 'agent-reference.md').read_text(encoding='utf-8')
     assert 'Stages: spine / architecture / voice /' in docs
     assert {'voice', 'check'} <= set(get_args(Stage))
+
+
+def test_skill_commits_stage_only_the_project():
+    """#520 review (C-A): a bare `git add -A` stages the whole work tree, so
+    in a repo of several books (`projects/<book>/`) a skill's commit took a
+    sibling book's edits. `init` (a new repo of its own) and
+    `autonomous-prompt` (the plugin repo) are not book commits."""
+    bare = []
+    for skill_md in SKILLS_DIR.glob('*/SKILL.md'):
+        if skill_md.parent.name in ('init', 'autonomous-prompt'):
+            continue
+        lines = skill_md.read_text(encoding='utf-8').splitlines()
+        for n, line in enumerate(lines, 1):
+            if (re.search(r'git add (-A|--all|\.)(?! -- \.)(\s|`|$)', line)
+                    or 'git commit -a' in line):
+                bare.append(f'{skill_md.parent.name}:{n}')
+    assert bare == []

@@ -107,7 +107,7 @@ Work through each phase in this conversation:
 
 Write to `reference/scene-briefs.csv`.
 
-After each phase, commit: `git add -A && git commit -m "Extract: Phase N — [description]" && git push`
+After each phase, commit: `git add -A -- . && git commit -m "Extract: Phase N — [description]" && git push`
 
 ## Step 4: Reconcile and Validate
 
@@ -164,5 +164,5 @@ git rev-parse --abbrev-ref HEAD
 Each phase's output gets committed immediately:
 
 ```bash
-git add -A && git commit -m "Extract: Phase N — [description]" && git push
+git add -A -- . && git commit -m "Extract: Phase N — [description]" && git push
 ```

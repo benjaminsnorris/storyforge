@@ -208,5 +208,5 @@ git rev-parse --abbrev-ref HEAD
 After all steps complete, if any files changed in the **book project** (e.g. the publish manifest), commit and push:
 
 ```bash
-git add -A && git commit -m "Publish: update artifacts" && git push
+git add -A -- . && git commit -m "Publish: update artifacts" && git push
 ```

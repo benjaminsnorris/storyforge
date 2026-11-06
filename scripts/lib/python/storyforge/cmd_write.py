@@ -1056,7 +1056,8 @@ def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
                  gate_source_fix_path()])
 
     # Push
-    _git(project_dir, 'push', check=False)
+    from storyforge.git import _push
+    _push(project_dir)   # checked: a failed push is a WARNING
 
     r = _git(project_dir, 'rev-parse', '--short', 'HEAD', check=False)
     commit_short = r.stdout.strip() if r.returncode == 0 else 'unknown'
