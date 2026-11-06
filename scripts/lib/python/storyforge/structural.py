@@ -1007,65 +1007,38 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
     if n == 0:
         return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'intent'}]}
 
-    # Load MICE thread registry for type resolution
-    registry_types = {}  # canonical_id -> type
-    reg_path = os.path.join(ref_dir, 'mice-threads.csv') if ref_dir else ''
-    if reg_path and os.path.isfile(reg_path):
-        reg_rows = _read_csv(reg_path)
-        for row in reg_rows:
-            rid = _s(row.get('id')).strip()
-            rtype = (row.get('type') or '').strip()
-            if rid and rtype:
-                registry_types[rid] = rtype
-
-    def _resolve_type(tag):
-        """Extract thread type from tag, falling back to registry."""
-        if ':' in tag:
-            return tag.split(':')[0]
-        # Bare name — look up in registry
-        return registry_types.get(tag, 'unknown')
+    # Entries are read as validate reads them (enrich.resolve_mice_entries):
+    # 'inquiry:foo', 'foo' and an alias of it are one thread, the type comes
+    # from the registry; a malformed entry is left to validate, a name the
+    # registry lacks still counts under its own name (#272)
+    from storyforge.enrich import load_mice_registry, mice_span_gaps, resolve_mice_entries
+    alias_map, registry_types = ({}, {})
+    if ref_dir:
+        alias_map, registry_types = load_mice_registry(
+            os.path.join(ref_dir, 'mice-threads.csv'))
 
     # Parse all mice_threads entries
     # Track per thread: open_idx, close_idx, mention_indices, type
     threads = {}  # thread_name -> {'open': idx|None, 'close': idx|None, 'mentions': [idx], 'type': str}
-
-    def _normalize_tag(raw_tag):
-        """Strip type: prefix so 'inquiry:foo' and 'foo' map to the same thread."""
-        thread_type = _resolve_type(raw_tag)
-        bare = raw_tag.split(':', 1)[1] if ':' in raw_tag else raw_tag
-        return bare, thread_type
+    ops = {}  # thread_name -> {idx: {op}}
 
     for idx, sid in enumerate(scene_ids):
         intent = intent_map.get(sid) or {}
         mice_str = _s(intent.get('mice_threads')).strip()
         if not mice_str:
             continue
-        for entry in mice_str.split(';'):
-            entry = entry.strip()
-            if not entry:
-                continue
-            if entry.startswith('+'):
-                tag, thread_type = _normalize_tag(entry[1:])
-                if tag not in threads:
-                    threads[tag] = {'open': idx, 'close': None, 'mentions': [idx], 'type': thread_type}
-                else:
-                    threads[tag]['mentions'].append(idx)
-                    if threads[tag]['open'] is None:
-                        threads[tag]['open'] = idx
-            elif entry.startswith('-'):
-                tag, thread_type = _normalize_tag(entry[1:])
-                if tag not in threads:
-                    threads[tag] = {'open': None, 'close': idx, 'mentions': [idx], 'type': thread_type}
-                else:
-                    threads[tag]['close'] = idx
-                    threads[tag]['mentions'].append(idx)
-            else:
-                # Plain mention (no +/-)
-                tag, thread_type = _normalize_tag(entry)
-                if tag not in threads:
-                    threads[tag] = {'open': None, 'close': None, 'mentions': [idx], 'type': thread_type}
-                else:
-                    threads[tag]['mentions'].append(idx)
+        for op, tag, thread_type in resolve_mice_entries(mice_str, alias_map, registry_types,
+                                                         unregistered=True):
+            ops.setdefault(tag, {}).setdefault(idx, set()).add(op)
+            info = threads.setdefault(
+                tag, {'open': None, 'close': None, 'mentions': [], 'type': 'unknown'})
+            info['mentions'].append(idx)
+            if thread_type and info['type'] == 'unknown':
+                info['type'] = thread_type
+            if op == '+' and info['open'] is None:
+                info['open'] = idx
+            elif op == '-':
+                info['close'] = idx
 
     total_threads = len(threads)
     if total_threads == 0:
@@ -1086,13 +1059,11 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
     # --- 2. Dormancy ---
     dormant_count = 0
     for tag, info in threads.items():
-        mention_list = sorted(set(info['mentions']))
-        if len(mention_list) >= 2:
-            max_gap = 0
-            for i in range(1, len(mention_list)):
-                gap = mention_list[i] - mention_list[i - 1]
-                if gap > max_gap:
-                    max_gap = gap
+        # Inside the open..close span only, as hone.detect_mice_dormancy
+        # measures it: not before the open or after the close
+        gaps = [b - a for a, b in mice_span_gaps(info['mentions'], ops[tag])]
+        if gaps:
+            max_gap = max(gaps)
             if max_gap > 10:
                 dormant_count += 1
                 findings.append({

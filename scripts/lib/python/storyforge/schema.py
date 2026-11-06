@@ -8,7 +8,7 @@ import os
 import re
 
 from .elaborate import _read_csv, _FILE_MAP
-from .enrich import load_alias_map, load_mice_registry, VALID_MICE_TYPES
+from .enrich import load_alias_map, load_mice_registry, mice_entry_problem
 from .narrator import NARRATOR_POV
 
 
@@ -473,6 +473,12 @@ def _check_boolean(value: str) -> bool:
 def _check_mice(value: str, alias_map: dict, type_map: dict) -> list[dict]:
     """Check mice_threads entries for format, type, and name validity.
 
+    ``+name`` opens a thread, ``-name`` closes it and a bare ``name``
+    mentions it (F-020; what ``elaborate --stage mice-fill`` writes, #272);
+    each may carry a type, ``+type:name``. The per-entry rules are
+    :func:`enrich.mice_entry_problem`, which the dormancy and structure
+    readers share, so an entry validate accepts is one they count.
+
     Returns a list of error dicts, one per bad entry.  Each has keys
     'entry' (the raw text) and 'reason' (what's wrong).
     """
@@ -481,56 +487,9 @@ def _check_mice(value: str, alias_map: dict, type_map: dict) -> list[dict]:
         entry = entry.strip()
         if not entry:
             continue
-
-        # +name opens, -name closes, a bare name is a mention (F-020); each
-        # may carry a type: +type:name
-        rest = entry[1:] if entry[0] in ('+', '-') else entry
-        if not rest.strip():
-            problems.append({'entry': entry, 'reason': 'invalid format (expected +name, -name or name)'})
-            continue
-
-        if ':' in rest:
-            # Typed format: +type:name
-            type_part, _, name_part = rest.partition(':')
-            type_part = type_part.strip().lower()
-            name_part = name_part.strip()
-
-            if not type_part or not name_part:
-                problems.append({'entry': entry, 'reason': 'missing type or name'})
-                continue
-
-            if type_part not in VALID_MICE_TYPES:
-                problems.append({'entry': entry, 'reason': f'invalid type "{type_part}" (expected: milieu, inquiry, character, event)'})
-                continue
-        else:
-            # Bare format: +name — type resolved from registry
-            name_part = rest.strip()
-            type_part = ''
-
-        if not name_part:
-            problems.append({'entry': entry, 'reason': 'empty thread name'})
-            continue
-
-        # A thread name is a slug; with no registry to check it against,
-        # prose ("gatsby dream opens", "+ +x") must not pass as a mention
-        if not alias_map and not re.fullmatch(r'[\w][\w\'.-]*', name_part):
-            problems.append({'entry': entry, 'reason': 'thread name is not a slug'})
-            continue
-
-        # Check name against registry (if available)
-        if alias_map and name_part.lower() not in alias_map:
-            problems.append({'entry': entry, 'reason': f'thread name "{name_part}" not in mice-threads.csv'})
-            continue
-
-        # Check type matches registry (if available and type was specified)
-        if type_part and alias_map and type_map:
-            canonical = alias_map.get(name_part.lower())
-            if canonical and canonical in type_map:
-                expected_type = type_map[canonical]
-                if type_part != expected_type:
-                    problems.append({'entry': entry, 'reason': f'type "{type_part}" doesn\'t match registered type "{expected_type}"'})
-                    continue
-
+        _op, _thread, reason = mice_entry_problem(entry, alias_map, type_map)
+        if reason:
+            problems.append({'entry': entry, 'reason': reason})
     return problems
 
 

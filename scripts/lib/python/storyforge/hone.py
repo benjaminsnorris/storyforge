@@ -22,8 +22,9 @@ from storyforge.elaborate import (
 )
 from storyforge.enrich import (
     is_placeholder, load_alias_map, load_mice_registry, normalize_aliases,
-    normalize_mice_threads, reduce_boolean, split_mice_entries,
-    strip_parentheticals, strip_placeholders,
+    mice_span_gaps, normalize_mice_threads, parse_mice_entry, reduce_boolean,
+    resolve_mice_entries, split_mice_entries, strip_parentheticals,
+    strip_placeholders,
 )
 
 # ============================================================================
@@ -200,16 +201,8 @@ def _collect_physical_state_chain(ref_dir: str) -> list[tuple[str, str, str, str
     return chain
 
 
-def _split_mice(entry: str) -> tuple[str, str, str]:
-    """``+inquiry:who-is-gatsby`` → ``('+', 'inquiry', 'who-is-gatsby')``."""
-    entry = entry.strip()
-    prefix = ''
-    if len(entry) > 1 and entry[0] in '+-':
-        prefix, entry = entry[0], entry[1:]
-    type_part, sep, name = entry.partition(':')
-    if not sep:
-        return prefix, '', entry.strip()
-    return prefix, type_part.strip().lower(), name.strip()
+#: ``+inquiry:who-is-gatsby`` → ``('+', 'inquiry', 'who-is-gatsby')``
+_split_mice = parse_mice_entry
 
 
 def _split_entries(domain: str, value: str) -> list[str]:
@@ -2959,7 +2952,8 @@ def detect_mice_dormancy(ref_dir: str) -> list[dict]:
     if not os.path.isfile(registry_path):
         return []
 
-    registry = {r['id']: r for r in _read_csv(registry_path)}
+    registry = {((r.get('id') or '').strip() or (r.get('name') or '').strip()): r
+                for r in _read_csv(registry_path)}
     scenes_map = _read_csv_as_map(scenes_path)
     intent_map = _read_csv_as_map(intent_path) if os.path.isfile(intent_path) else {}
 
@@ -2968,50 +2962,34 @@ def detect_mice_dormancy(ref_dir: str) -> list[dict]:
         key=lambda sid: int(scenes_map[sid].get('seq', 0) or 0)
     )
 
-    # Build lookup: bare name -> registry ID (handles type:name registry keys)
-    bare_to_id = {}
-    for rid in registry:
-        bare_to_id[rid] = rid  # exact match
-        if ':' in rid:
-            bare_to_id[rid.split(':', 1)[1]] = rid  # bare name -> full ID
-
-    # Build per-thread mention indices
+    # An entry counts when validate accepts it: an open, a close or a bare
+    # mention (what mice-fill writes) of a registered thread, by id, name or
+    # alias in any case (#272)
+    alias_map, type_map = load_mice_registry(registry_path)
     thread_mentions = {}  # thread_id -> [scene_index]
+    thread_ops = {}  # thread_id -> {scene_index: {op}}
     for idx, sid in enumerate(ordered_ids):
-        mice = intent_map.get(sid, {}).get('mice_threads', '').strip()
-        if not mice:
-            continue
-        for entry in mice.split(';'):
-            entry = entry.strip()
-            if not entry:
-                continue
-            # Strip +/- prefix
-            name = entry.lstrip('+-')
-            # Try exact match first, then bare name (without type: prefix)
-            reg_id = bare_to_id.get(name)
-            if not reg_id and ':' in name:
-                reg_id = bare_to_id.get(name.split(':', 1)[1])
-            if reg_id:
-                thread_mentions.setdefault(reg_id, []).append(idx)
+        mice = intent_map.get(sid, {}).get('mice_threads', '')
+        for op, reg_id, _type in resolve_mice_entries(mice, alias_map, type_map):
+            thread_mentions.setdefault(reg_id, []).append(idx)
+            thread_ops.setdefault(reg_id, {}).setdefault(idx, set()).add(op)
 
-    # Find gaps
+    # Find gaps, only inside each thread's open..close span: a thread is not
+    # dormant before it opens or after it closes (enrich.mice_span_gaps)
     results = []
     for thread_id, indices in thread_mentions.items():
-        indices = sorted(set(indices))
-        if len(indices) < 2:
-            continue
-        for i in range(len(indices) - 1):
-            gap = indices[i + 1] - indices[i]
+        for before, after in mice_span_gaps(indices, thread_ops[thread_id]):
+            gap = after - before
             if gap > _DORMANCY_THRESHOLD:
-                gap_scene_ids = ordered_ids[indices[i] + 1:indices[i + 1]]
+                gap_scene_ids = ordered_ids[before + 1:after]
                 reg = registry.get(thread_id, {})
                 results.append({
                     'thread_id': thread_id,
                     'thread_name': reg.get('name', thread_id),
                     'thread_type': reg.get('type', 'unknown'),
                     'gap_size': gap,
-                    'before_scene': ordered_ids[indices[i]],
-                    'after_scene': ordered_ids[indices[i + 1]],
+                    'before_scene': ordered_ids[before],
+                    'after_scene': ordered_ids[after],
                     'gap_scenes': gap_scene_ids,
                 })
 

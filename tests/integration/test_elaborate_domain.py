@@ -2,7 +2,7 @@
 
 Focuses on functions not already tested in tests/test_elaborate.py:
   - CSV I/O internals (_read_csv, _read_csv_as_map, _write_csv, _file_for_column)
-  - _mice_type with registry resolution
+  - MICE entry types with registry resolution
   - _validate_physical_states (all three checks)
   - _validate_pacing (scene-type-rhythm, turning-point-variety)
   - _validate_knowledge edge cases
@@ -19,7 +19,6 @@ from storyforge.elaborate import (
     _read_csv_as_map,
     _write_csv,
     _file_for_column,
-    _mice_type,
     _check,
     _SCENES_COLS,
     _INTENT_COLS,
@@ -180,23 +179,28 @@ class TestCheck:
 
 
 class TestMiceType:
+    """A thread's type comes from the registry, else from the entry
+    (``enrich.resolve_mice_entries``; it replaced ``_mice_type``, #272)."""
+
+    @staticmethod
+    def _types(value, registry=None):
+        from storyforge.enrich import resolve_mice_entries
+        alias = {k: k for k in (registry or {})}
+        return [t for _op, _name, t in resolve_mice_entries(value, alias, registry or {})]
+
     def test_typed_thread_name(self):
-        assert _mice_type('inquiry:who-killed') == 'inquiry'
-        assert _mice_type('milieu:castle') == 'milieu'
-        assert _mice_type('character:alice-arc') == 'character'
-        assert _mice_type('event:the-war') == 'event'
+        assert self._types('+inquiry:who-killed;milieu:castle;-character:alice-arc;event:the-war') == \
+            ['inquiry', 'milieu', 'character', 'event']
 
     def test_bare_name_with_registry(self):
         registry = {'dex-secret': 'character', 'storm-front': 'event'}
-        assert _mice_type('dex-secret', registry) == 'character'
-        assert _mice_type('storm-front', registry) == 'event'
+        assert self._types('dex-secret;+storm-front', registry) == ['character', 'event']
 
     def test_bare_name_without_registry(self):
-        assert _mice_type('unknown-thread') == 'unknown'
+        assert self._types('unknown-thread') == ['']
 
-    def test_bare_name_not_in_registry(self):
-        registry = {'other': 'milieu'}
-        assert _mice_type('not-found', registry) == 'unknown'
+    def test_bare_name_not_in_registry_is_not_a_thread(self):
+        assert self._types('not-found', {'other': 'milieu'}) == []
 
 
 # ============================================================================
@@ -535,7 +539,7 @@ class TestValidateThreadsEdgeCases:
         t_checks = [c for c in report['checks'] if c['category'] == 'threads']
         unclosed = [c for c in t_checks if 'unclosed' in c.get('check', '')]
         assert len(unclosed) > 0
-        assert 'inquiry:mystery' in unclosed[0]['message']
+        assert "'mystery (opened in s01)'" in unclosed[0]['message']
         assert unclosed[0]['severity'] == 'advisory'
 
     def test_closing_never_opened_thread_flagged(self, tmp_path):

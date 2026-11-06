@@ -2427,8 +2427,11 @@ def prior_prose_mode(project_dir: str, override: str | None = None) -> str:
 
 
 def _threads(cell: str) -> set[str]:
-    return {t.strip().lstrip('+-').strip() for t in (cell or '').split(';')
-            if t.strip().lstrip('+-').strip()}
+    """The threads a mice_threads cell opens, closes or mentions, by name:
+    `+inquiry:who`, `who` and `-who` are one thread (#272)."""
+    from .enrich import parse_mice_entry, split_mice_entries
+    return {name.lower() for name in
+            (parse_mice_entry(t)[2] for t in split_mice_entries(cell)) if name}
 
 
 def prior_scenes(scene_id: str, project_dir: str, mode: str,

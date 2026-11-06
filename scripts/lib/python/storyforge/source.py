@@ -1006,6 +1006,7 @@ def build_source_bible(slug: str, tables: dict, nm: NameMap = EMPTY_MAP,
     and the cast is ordered and counted by the span. Places, threads and the
     timeline stay whole-source. Without one there is no `Adapted span:`
     line, one undivided events list, and whole-source cast counts."""
+    from storyforge.enrich import parse_mice_entry, split_mice_entries
     scenes = sorted(_as_dicts(tables.get('scenes.csv')), key=_seq)
     in_span = set(span) if span is not None else None
     intent = {r.get('id', ''): r for r in _as_dicts(tables.get('scene-intent.csv'))}
@@ -1078,8 +1079,10 @@ def build_source_bible(slug: str, tables: dict, nm: NameMap = EMPTY_MAP,
         for cid in filter(None, (c.strip() for c in it.get('on_stage', '').split(';'))):
             if inside:
                 on_stage_count[cid] = on_stage_count.get(cid, 0) + 1
-        for th in filter(None, (t.strip() for t in it.get('mice_threads', '').split(';'))):
-            thread_scenes.setdefault(th.lstrip('+-'), []).append(sid)
+        # An open, a close or a bare mention, typed or not (#272)
+        for name in dict.fromkeys(filter(None, (parse_mice_entry(t)[2] for t in
+                                                split_mice_entries(it.get('mice_threads', ''))))):
+            thread_scenes.setdefault(name, []).append(sid)
 
     out += ['', f'## Cast ({len(chars)} characters'
             + ('; POV and on-stage counts are within the adapted span)' if bounds else ')'),

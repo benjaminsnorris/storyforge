@@ -382,6 +382,11 @@ def load_mice_registry(csv_file: str) -> tuple[dict[str, str], dict[str, str]]:
 
         alias_map[name.lower()] = canonical
         alias_map[canonical.lower()] = canonical
+        # An older registry id carries its type (`inquiry:who-killed`); scene
+        # entries, and the mentions mice-fill writes, use the bare name (#272)
+        type_part, sep, bare = canonical.partition(':')
+        if sep and type_part.strip().lower() in VALID_MICE_TYPES and bare.strip():
+            alias_map.setdefault(bare.strip().lower(), canonical)
 
         if type_idx is not None and len(row) > type_idx:
             type_map[canonical] = row[type_idx].strip().lower()
@@ -408,6 +413,111 @@ _MICE_NOTE_RE = re.compile(r'^(.*?)(\[[^\]]*\])$', re.DOTALL)
 def split_mice_entries(mice_string: str) -> list[str]:
     """Split a mice_threads value into its entries."""
     return _MICE_SEPARATOR_RE.split(mice_string or '')
+
+
+#: The three kinds of mice_threads entry, by their operator: ``+name`` opens
+#: a thread, ``-name`` closes it, a bare ``name`` mentions it (F-020, #272)
+MICE_OPEN, MICE_CLOSE, MICE_MENTION = '+', '-', ''
+
+
+def parse_mice_entry(entry: str) -> tuple[str, str, str]:
+    """``+inquiry:who-killed`` → ``('+', 'inquiry', 'who-killed')``.
+
+    The operator is ``MICE_OPEN``, ``MICE_CLOSE`` or ``MICE_MENTION`` (no
+    operator); the type is ``''`` when the entry carries none. A bare
+    operator gives an empty name.
+    """
+    entry = (entry or '').strip()
+    op = MICE_MENTION
+    if entry[:1] in (MICE_OPEN, MICE_CLOSE):
+        op, entry = entry[0], entry[1:]
+    type_part, sep, name = entry.partition(':')
+    if not sep:
+        return op, '', entry.strip()
+    return op, type_part.strip().lower(), name.strip()
+
+
+def mice_entry_problem(entry: str, alias_map: dict[str, str],
+                       type_map: dict[str, str]) -> tuple[str, str, str]:
+    """``(op, thread, problem)`` for one mice_threads entry.
+
+    ``thread`` is the canonical registry id the entry names: its own name
+    when there is no registry or the registry lacks it, ``''`` for a
+    malformed entry. ``problem`` is ``''`` for a valid entry, else why it is
+    not one. Validation (``schema._check_mice``) reports the problems, and
+    the readers that count entries go through :func:`resolve_mice_entries`,
+    so validate and dormancy agree on what is a thread reference (#272).
+    """
+    op, type_part, name = parse_mice_entry(entry)
+    rest = entry.strip()[1:] if op else entry.strip()
+    if not rest.strip():
+        return op, '', 'invalid format (expected +name, -name or name)'
+    if ':' in rest:
+        if not type_part or not name:
+            return op, '', 'missing type or name'
+        if type_part not in VALID_MICE_TYPES:
+            return op, '', (f'invalid type "{type_part}" '
+                            '(expected: milieu, inquiry, character, event)')
+    if not name:
+        return op, '', 'empty thread name'
+    # A thread name is a slug; with no registry to check it against, prose
+    # ("gatsby dream opens", "+ +x") must not pass as a mention
+    if not alias_map:
+        if not re.fullmatch(r'[\w][\w\'.-]*', name):
+            return op, '', 'thread name is not a slug'
+        return op, name, ''
+    canonical = alias_map.get(name.lower())
+    if not canonical:
+        return op, name, f'thread name "{name}" not in mice-threads.csv'
+    expected = type_map.get(canonical) if type_map else None
+    if type_part and expected and type_part != expected:
+        return op, canonical, (f'type "{type_part}" doesn\'t match '
+                               f'registered type "{expected}"')
+    return op, canonical, ''
+
+
+def resolve_mice_entries(mice_string: str, alias_map: dict[str, str],
+                         type_map: dict[str, str],
+                         unregistered: bool = False) -> list[tuple[str, str, str]]:
+    """``[(op, canonical thread, type), ...]`` for the valid entries of a
+    mice_threads value; entries validation rejects are left out. The type
+    is the registry's, else the entry's, else ``''``.
+
+    With ``unregistered``, a well-formed entry naming a thread the registry
+    lacks (or with a type that disagrees with it) is kept under its own
+    name: structural checks still report how such a thread opens and closes,
+    while validate reports the name. Dormancy, which fills gaps from the
+    registry, reads only valid entries.
+    """
+    out = []
+    for entry in split_mice_entries(mice_string):
+        if not entry.strip():
+            continue
+        op, thread, problem = mice_entry_problem(entry, alias_map, type_map)
+        if thread and (unregistered or not problem):
+            out.append((op, thread, type_map.get(thread) or parse_mice_entry(entry)[1]))
+    return out
+
+
+def mice_span_gaps(indices: list[int], ops: dict[int, set[str]]) -> list[tuple[int, int]]:
+    """Consecutive pairs of a thread's scene indices that lie inside its
+    open..close span.
+
+    ``indices`` are the reading-order positions of the scenes that carry the
+    thread; ``ops`` maps a position to the operators there. A thread is not
+    dormant before it opens or after it closes: a mention outside the span
+    (foreshadowing before the open, an echo after the close) is valid and
+    not flagged, but the stretch between it and the span is not a gap to
+    fill. With no open the span starts at the first scene; with no close it
+    runs to the last.
+    """
+    positions = sorted(set(indices))
+    opens = [i for i in positions if MICE_OPEN in ops.get(i, ())]
+    closes = [i for i in positions if MICE_CLOSE in ops.get(i, ())]
+    start = opens[0] if opens else positions[0] if positions else 0
+    end = closes[-1] if closes else positions[-1] if positions else 0
+    return [(a, b) for a, b in zip(positions, positions[1:])
+            if a >= start and b <= end]
 
 
 def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
