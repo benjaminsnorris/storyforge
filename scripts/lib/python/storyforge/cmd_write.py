@@ -148,8 +148,9 @@ def main(argv=None):
             log('  Or use --interactive to run via claude -p instead.')
             sys.exit(1)
 
-    # Check for voice guide
-    _check_voice_guide(project_dir)
+    # The voice guide and key decisions the prompts carry (#596)
+    use_briefs = _detect_briefs(project_dir)
+    _check_reference_docs(project_dir, use_briefs, coaching, args.dry_run)
 
     # Build and filter scene list
     metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
@@ -258,8 +259,6 @@ def main(argv=None):
     log(f'Scene list: {" ".join(pending_ids)}')
     log('============================================')
 
-    # Detect briefs
-    use_briefs = _detect_briefs(project_dir)
     if write_mode == 'batch':
         log('Prior prose: none (batch drafts every scene at once)')
     elif write_mode == 'interactive':
@@ -386,18 +385,46 @@ class DraftOutcome(NamedTuple):
     #: each scene `--keep-going` committed provisionally, and why (#556)
     provisional: list = []
 
-def _check_voice_guide(project_dir: str) -> None:
-    """Warn if no voice guide is found."""
-    for vg in ('reference/voice-guide.md', 'reference/persistent-prompt.md'):
-        if os.path.isfile(os.path.join(project_dir, vg)):
-            return
-    custom_vg = read_yaml_field('reference.voice_guide', project_dir)
-    if not custom_vg:
-        custom_vg = read_yaml_field('voice_guide', project_dir)
-    if custom_vg and os.path.isfile(os.path.join(project_dir, custom_vg)):
+def _check_reference_docs(project_dir: str, use_briefs: bool, coaching: str,
+                          dry_run: bool) -> None:
+    """The voice guide and key decisions the drafting prompt carries (#596).
+
+    One that exists but can't be read stops the run (ERROR, exit 1, naming
+    it; SF-1): the prompt must not go out as if it weren't there. With no
+    voice guide to follow (missing, init's template, empty, or only
+    persistent-prompt.md, which the brief-based prompt doesn't read), a
+    full-coaching run drafts no prose (SF-2): the drafts would have no voice.
+    A dry run and coach/strict (which write briefs, not prose) say so and go
+    on. Key decisions left out (missing, template, empty) are a NOTE: a book
+    may have none (SF-4).
+    """
+    from storyforge.common import VOICE_GUIDE_REMEDY, doc_state, resolve_voice_guide
+    voice = resolve_voice_guide(project_dir, briefs=use_briefs)
+    for detail in voice.skipped:
+        log(f'WARNING: {detail}; passed over for the next voice guide.')
+    decisions = doc_state(project_dir, 'reference/key-decisions.md')
+    for state in (voice, decisions):
+        if state.kind == 'unreadable':
+            log(f'ERROR: {state.detail}. Fix the file (permissions, or save it as '
+                'UTF-8) and run again; nothing was drafted.')
+            sys.exit(1)
+    if decisions.kind != 'ok':
+        log(f'NOTE: {decisions.detail}, so the drafting prompts carry no key decisions.')
+    if voice.kind == 'ok':
+        log(f'Voice guide: {voice.path}')
         return
-    log('WARNING: No voice guide found. Drafting will proceed without voice constraints.')
-    log('  Expected: reference/voice-guide.md or reference/persistent-prompt.md')
+    remedy = VOICE_GUIDE_REMEDY
+    if voice.kind == 'unread':
+        remedy = (f'move its text into reference/voice-guide.md, or name it in '
+                  f'storyforge.yaml (artifacts.voice_guide.path), or run {VOICE_GUIDE_REMEDY}')
+    if coaching == 'full' and not dry_run:
+        log(f'ERROR: {voice.detail}: the drafting prompt would have no voice guide, and the '
+            f'drafts no voice to follow. Fill it first: {remedy}. Nothing was drafted.')
+        sys.exit(1)
+    why = ('a real run stops here' if coaching == 'full'
+           else f'{coaching} coaching writes no prose, so it goes on')
+    log(f'WARNING: {voice.detail}: the prompts have no voice guide ({why}). '
+        f'Fill it: {remedy}.')
 
 
 def _resolve_filter(args) -> tuple:

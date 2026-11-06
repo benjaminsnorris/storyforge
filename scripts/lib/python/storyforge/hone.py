@@ -15,7 +15,7 @@ import re
 
 from storyforge.brief_names import REWRITTEN_FILES
 from storyforge.narrator import NARRATOR_POV, is_narrator
-from storyforge.common import log
+from storyforge.common import log, reference_text
 
 from storyforge.elaborate import (
     _read_csv, _read_csv_as_map, _write_csv, _FILE_MAP, DELIMITER,
@@ -1922,17 +1922,9 @@ def hone_briefs(
         }
 
     # Load voice guide and character bible for prompt building
-    voice_guide = ''
-    voice_path = os.path.join(ref_dir, 'voice-guide.md')
-    if os.path.isfile(voice_path):
-        with open(voice_path, encoding='utf-8') as fh:
-            voice_guide = fh.read()
+    voice_guide = reference_text(os.path.join(ref_dir, 'voice-guide.md'))
 
-    char_bible = ''
-    char_path = os.path.join(ref_dir, 'character-bible.md')
-    if os.path.isfile(char_path):
-        with open(char_path, encoding='utf-8') as fh:
-            char_bible = fh.read()
+    char_bible = reference_text(os.path.join(ref_dir, 'character-bible.md'))
 
     from storyforge.api import invoke_to_file, extract_text_from_file
 
@@ -1941,8 +1933,8 @@ def hone_briefs(
     for issue in all_issues:
         by_scene.setdefault(issue['scene_id'], []).append(issue)
 
-    from storyforge.brief_names import reference_text
-    known_reference = reference_text(project_dir, exclude=REWRITTEN_FILES)
+    from storyforge.brief_names import reference_text as names_reference_text
+    known_reference = names_reference_text(project_dir, exclude=REWRITTEN_FILES)
     rejected: dict[str, list[str]] = {}
     changed_ids: list[str] = []
 
@@ -2693,11 +2685,7 @@ def hone_intent(
         }
 
     # Load voice guide
-    voice_guide = ''
-    voice_path = os.path.join(ref_dir, 'voice-guide.md')
-    if os.path.isfile(voice_path):
-        with open(voice_path, encoding='utf-8') as fh:
-            voice_guide = fh.read()
+    voice_guide = reference_text(os.path.join(ref_dir, 'voice-guide.md'))
 
     from storyforge.api import invoke_to_file, extract_text_from_file
 
@@ -2710,8 +2698,8 @@ def hone_intent(
     scenes_rewritten = (len(set(i['scene_id'] for i in not_subset_issues))
                         if det_fields_rewritten > 0 else 0)
     api_fields_rewritten = 0
-    from storyforge.brief_names import reference_text
-    known_reference = reference_text(project_dir, exclude=REWRITTEN_FILES)
+    from storyforge.brief_names import reference_text as names_reference_text
+    known_reference = names_reference_text(project_dir, exclude=REWRITTEN_FILES)
     rejected: dict[str, list[str]] = {}
     changed_ids: list[str] = []
     total_scenes = len(by_scene)

@@ -58,10 +58,15 @@ def _header(cfg: source.SourceConfig) -> str:
 
 def _rules_in_key_decisions(project_dir: str, cfg: source.SourceConfig) -> bool:
     """Whether `source.rules` names reference/key-decisions.md (or a section
-    of it), which every stage prompt carries whole (`_existing_refs`)."""
+    of it) and the prompt carries that file: every prompt with version rules
+    carries Key Decisions whole (the elaborate stages' `_existing_refs`,
+    drafting's `## Key Decisions`), unless it is missing, empty or still its
+    template (`reference_doc`), and then the rules are given in full."""
+    from .prompts_elaborate import reference_doc
     rel = (cfg.rules or '').partition('#')[0]
     return bool(rel) and os.path.normpath(source.resolve(project_dir, rel)) == \
-        os.path.normpath(os.path.join(project_dir, 'reference', 'key-decisions.md'))
+        os.path.normpath(os.path.join(project_dir, 'reference', 'key-decisions.md')) \
+        and bool(reference_doc(project_dir, 'key-decisions.md'))
 
 
 def _rules_text(rules: str) -> str:
@@ -78,16 +83,16 @@ def _rules_text(rules: str) -> str:
     return '\n' + '\n'.join(out) + '\n'
 
 
-def rules_block(project_dir: str, cfg: source.SourceConfig, *,
-                in_prompt: bool = True) -> str:
-    """The version rules for a prompt. `in_prompt`: the prompt also carries
-    Key Decisions whole (the elaborate stages), so rules kept there are
-    pointed to, not repeated (B-015: about 900 words twice in every stage
-    prompt). Raises SourceError as `source.read_rules` does."""
+def rules_block(project_dir: str, cfg: source.SourceConfig) -> str:
+    """The version rules for a prompt. Every prompt that has them also
+    carries Key Decisions whole when it has the author's text (the elaborate
+    stages, and drafting since #596), so rules kept there are pointed to,
+    not repeated (B-015: about 900 words twice in every stage prompt).
+    Raises SourceError as `source.read_rules` does."""
     rules = source.read_rules(project_dir, cfg)
     if not rules:
         return ''
-    if in_prompt and _rules_in_key_decisions(project_dir, cfg):
+    if _rules_in_key_decisions(project_dir, cfg):
         return ('\nThe version rules are in Key Decisions (its version rules section): '
                 'they bind every choice here.\n')
     return _rules_text(rules)
@@ -454,7 +459,8 @@ def drafting_section(project_dir: str, scene_id: str) -> str:
     """The `## Source` section of an adaptation's drafting prompt (B-025):
     the mode, the scene's source-map row (treatment and note), the prose of
     the source scenes it adapts (up to `DRAFT_SOURCE_MAX_WORDS`), and the
-    version rules. '' with no `source:` block, so other projects' prompts
+    version rules (pointed to when they are in a Key Decisions the prompt
+    carries, #596). '' with no `source:` block, so other projects' prompts
     are unchanged. Logs a WARNING for a scene not in the map, a source
     scene not found, and source prose left out; raises SourceError as
     `_cfg` and `source.read_rules` do."""
@@ -473,7 +479,7 @@ def drafting_section(project_dir: str, scene_id: str) -> str:
         parts.append('This scene is not in the source map, so no source passage is shown: '
                      'draft from the brief, and keep to the Source Bible and the version '
                      'rules.')
-        return '\n\n'.join(parts) + rules_block(project_dir, cfg, in_prompt=False)
+        return '\n\n'.join(parts) + rules_block(project_dir, cfg)
     treatment = row.get('treatment', '').strip()
     head = f'This scene\'s treatment of its source: **{treatment or "(none given)"}**'
     if row.get('note', '').strip():
@@ -484,7 +490,7 @@ def drafting_section(project_dir: str, scene_id: str) -> str:
         parts.append('An invented scene: it has no source passage. Invent only what the '
                      'brief and the version rules allow.' if treatment == 'invent'
                      else 'The map gives no source scene for it.')
-        return '\n\n'.join(parts) + rules_block(project_dir, cfg, in_prompt=False)
+        return '\n\n'.join(parts) + rules_block(project_dir, cfg)
     parts.append('Draft it while looking at the source passage below. The brief is still '
                  'the contract: where the brief, its treatment or the version rules depart '
                  'from the source, they win. Everywhere else the source wins over memory '
@@ -519,4 +525,4 @@ def drafting_section(project_dir: str, scene_id: str) -> str:
         parts.append(f'Source prose left out to keep this prompt under '
                      f'{DRAFT_SOURCE_MAX_WORDS:,} words of source text: '
                      f'{", ".join(left_out)}; they are in the Source Bible.')
-    return '\n\n'.join(parts) + rules_block(project_dir, cfg, in_prompt=False)
+    return '\n\n'.join(parts) + rules_block(project_dir, cfg)

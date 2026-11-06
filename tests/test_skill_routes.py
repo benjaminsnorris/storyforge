@@ -17,3 +17,26 @@ def test_every_named_skill_exists():
             if name not in existing:
                 missing.append(f'{skill_md.parent.name}: {name}')
     assert missing == []
+
+
+def test_forge_routes_voice_and_check_in_every_phase():
+    """#601 review (CR-2/TD-6): the voice and gate-check routes sat inside the
+    block forge reads only in an elaboration phase, and a successful briefs
+    stage sets `phase: drafting`, so forge never reached them. They belong in
+    Step 1, before that block."""
+    text = (SKILLS_DIR / 'forge' / 'SKILL.md').read_text(encoding='utf-8')
+    step2 = text.index('## Step 2')
+    for route in ('**`next.stage` is `check`**', '**`next.stage` is `voice`**'):
+        assert route in text and text.index(route) < step2, route
+    # a direct "draft" request and the write prerequisite check the voice
+    # blocker, not only that voice-guide.md exists (a template always does)
+    assert text.count('no `voice` blocker') >= 3
+
+
+def test_status_stages_named_in_docs():
+    from typing import get_args
+
+    from storyforge.status import Stage
+    docs = (PLUGIN_DIR / 'docs' / 'agent-reference.md').read_text(encoding='utf-8')
+    assert 'Stages: spine / architecture / voice /' in docs
+    assert {'voice', 'check'} <= set(get_args(Stage))

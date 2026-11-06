@@ -1,4 +1,5 @@
 import os
+import shutil
 from typing import get_args
 
 import pytest
@@ -170,6 +171,9 @@ def test_recommend_prose_and_terminal_stages():
     nxt, then = status._recommend('evaluate')
     assert nxt['command'] == 'storyforge evaluate'
     assert then is None
+    nxt, then = status._recommend('voice')
+    assert nxt['command'] == 'storyforge elaborate --stage voice'
+    assert then['stage'] == 'draft'
 
 
 def test_collect_blockers_positive_on_fixture(project_dir):
@@ -258,11 +262,16 @@ def test_no_phase_blocker_when_prereqs_met(tmp_path, monkeypatch):
     assert not any(b['source'] == 'phase' for b in v['blockers'])
 
 
+def _voice_guide(pd, text='# Voice Guide\n\nShort, plain sentences.\n'):
+    _write(os.path.join(pd, 'reference', 'voice-guide.md'), text)
+
+
 def test_all_solid_some_drafted_recommends_draft(tmp_path, monkeypatch):
     # All structure solid but not every scene drafted → phase 'draft'.
     pd = str(tmp_path)
     _write(os.path.join(pd, 'reference', 'scenes.csv'),
            "id|seq|status\ns1|1|drafted\ns2|2|briefed\n")
+    _voice_guide(pd)
     monkeypatch.setattr(status, 'ladder_states',
                         lambda pd_, medium='novel': _all_solid_ladder())
     v = status.build_status(pd)
@@ -305,7 +314,7 @@ def test_elaborate_stage_values_are_valid_cli_stages():
 def test_stage_and_rungstate_literals_are_complete():
     stages = set(get_args(status.Stage))
     assert set(status.LEVEL_NAMES.values()) <= stages
-    assert {'story-power', 'draft', 'evaluate'} <= stages
+    assert {'story-power', 'voice', 'draft', 'evaluate'} <= stages
     assert set(get_args(status.RungState)) == {'solid', 'thin', 'not_started'}
 
 
@@ -369,3 +378,170 @@ def test_render_human_shows_declared_phase_name_on_mismatch():
     assert "declared 'architecture'" in text
     assert 'THEN:' in text
     assert '[phase] upstream not solid' in text
+
+
+# --- #596: no drafting while the voice guide is missing or the template ---
+
+def _briefed(pd, statuses=('briefed', 'briefed')):
+    rows = ''.join(f's{i}|{i}|{st}\n' for i, st in enumerate(statuses, 1))
+    _write(os.path.join(pd, 'reference', 'scenes.csv'), 'id|seq|status\n' + rows)
+
+
+def _template_voice_guide(pd):
+    from storyforge.common import get_plugin_dir
+    with open(os.path.join(get_plugin_dir(), 'templates', 'reference',
+                           'voice-guide.md'), encoding='utf-8') as f:
+        _voice_guide(pd, f.read())
+
+
+@pytest.mark.parametrize('setup, problem', [
+    (lambda pd: None, 'is missing'),
+    (_template_voice_guide, "is still init's template"),
+    (lambda pd: _voice_guide(pd, '\n  \n'), 'is empty'),
+])
+def test_voice_rung_before_drafting(tmp_path, monkeypatch, setup, problem):
+    # The Telemachy pilot: L0-L6 solid, voice-guide.md still init's
+    # template, and status said NEXT `storyforge write`
+    pd = str(tmp_path)
+    _briefed(pd)
+    setup(pd)
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    v = status.build_status(pd)
+    assert v['phase'] == 'voice'
+    assert v['next']['stage'] == 'voice'
+    assert v['next']['command'] == 'storyforge elaborate --stage voice'
+    assert v['then']['stage'] == 'draft'
+    voice = [b for b in v['blockers'] if b['source'] == 'voice']
+    assert len(voice) == 1
+    assert f'reference/voice-guide.md {problem}' in voice[0]['detail']
+    assert 'storyforge elaborate --stage voice' in voice[0]['detail']
+    text = cmd_status.render_human(v)
+    assert 'NEXT:  Develop the voice guide  [storyforge elaborate --stage voice]' in text
+    assert '[voice] reference/voice-guide.md' in text
+
+
+def test_filled_voice_guide_is_no_blocker(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _briefed(pd)
+    _voice_guide(pd)
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'draft'
+    assert not any(b['source'] == 'voice' for b in v['blockers'])
+
+
+def test_voice_guide_reported_after_drafting(tmp_path, monkeypatch):
+    # Every scene drafted: evaluate stays next, the missing guide is said
+    pd = str(tmp_path)
+    _briefed(pd, ('drafted', 'drafted'))
+    _template_voice_guide(pd)
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'evaluate'
+    assert [b['source'] for b in v['blockers']][:1] == ['voice']
+
+
+def test_voice_rung_waits_for_upstream_rungs(tmp_path):
+    # An unfinished ladder still points at its own rung, not the voice guide
+    v = status.build_status(str(tmp_path))
+    assert v['next']['stage'] == 'logline'
+    assert not any(b['source'] == 'voice' for b in v['blockers'])
+
+
+def test_graphic_novel_has_no_voice_rung(tmp_path, monkeypatch):
+    # The GN script is written from voice-profile.csv, not voice-guide.md
+    pd = str(tmp_path)
+    _briefed(pd)
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    v = status.build_status(pd, 'graphic-novel')
+    assert v['next']['stage'] == 'draft'
+    assert not any(b['source'] == 'voice' for b in v['blockers'])
+
+
+def test_gate_waiting_keeps_voice_as_then(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _briefed(pd)
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    monkeypatch.setattr(status, 'gate_waiting', lambda pd_: [
+        {'scene_id': 's1', 'command': 'draft', 'reason': 'x'}])
+    v = status.build_status(pd)
+    assert v['next']['command'] == 'storyforge check --pending'
+    # TD-6: forge routes on next.stage; the phase's stage would send it to
+    # the Voice Stage instead of the gate check
+    assert v['next']['stage'] == 'check'
+    assert v['phase'] == 'voice'
+    assert v['then']['stage'] == 'voice'
+
+
+def test_gate_waiting_while_drafting_routes_to_the_check(tmp_path, monkeypatch):
+    # TD-6, the same before #596: next.stage was 'draft' with check's command
+    pd = str(tmp_path)
+    _briefed(pd)
+    _voice_guide(pd)
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    monkeypatch.setattr(status, 'gate_waiting', lambda pd_: [
+        {'scene_id': 's1', 'command': 'provisional', 'reason': 'x'}])
+    v = status.build_status(pd)
+    assert (v['next']['stage'], v['next']['command']) == ('check', status.CHECK_COMMAND)
+    assert v['then']['stage'] == 'draft'
+
+
+def test_a_voice_guide_named_in_yaml_satisfies_status(tmp_path, monkeypatch):
+    # CR-1: status reads the voice guide where write and the prompt do
+    pd = str(tmp_path)
+    _briefed(pd)
+    _write(os.path.join(pd, 'docs', 'voice.md'), '# Voice\n\nTerse.\n')
+    _write(os.path.join(pd, 'storyforge.yaml'),
+           'artifacts:\n  voice_guide:\n    path: docs/voice.md\n')
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'draft'
+    assert not any(b['source'] == 'voice' for b in v['blockers'])
+
+
+def test_only_persistent_prompt_is_a_voice_blocker(tmp_path, monkeypatch):
+    pd = str(tmp_path)
+    _briefed(pd)
+    _write(os.path.join(pd, 'reference', 'persistent-prompt.md'), 'Old voice.\n')
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    v = status.build_status(pd)
+    assert v['next']['stage'] == 'voice'
+    assert 'only reference/persistent-prompt.md' in v['blockers'][0]['detail']
+
+
+def test_every_elaborate_command_status_emits_is_a_valid_stage():
+    # TD-5/7: the stage status names after --stage must be one elaborate takes
+    from storyforge.cmd_elaborate import VALID_STAGES
+    emitted = []
+    for stage in get_args(status.Stage):
+        if stage in ('story-power', 'check'):
+            continue          # then-only / the gate: no _recommend branch of their own
+        nxt, then = status._recommend(stage)
+        emitted += [s['command'] for s in (nxt, then) if s]
+    elaborate = [c.split('--stage ', 1)[1] for c in emitted
+                 if c.startswith('storyforge elaborate --stage ')]
+    assert 'voice' in elaborate
+    assert set(elaborate) <= VALID_STAGES
+
+
+def test_status_names_the_voice_stage_on_the_fixture(project_dir, monkeypatch):
+    # end to end on a real project: the ladder solid, the guide the template
+    monkeypatch.setattr(status, 'ladder_states', lambda pd, medium='novel': [
+        {'level': lvl, 'name': name, 'state': 'solid', 'detail': ''}
+        for lvl, name in status.LEVEL_NAMES.items()])
+    monkeypatch.setattr(status, 'gate_waiting', lambda pd: [])
+    _template_voice_guide(project_dir)
+    v = status.build_status(project_dir)
+    assert v['next']['command'] == 'storyforge elaborate --stage voice'
+    shutil.copy(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'fixtures', 'test-project',
+                             'reference', 'voice-guide.md'),
+                os.path.join(project_dir, 'reference', 'voice-guide.md'))
+    assert status.build_status(project_dir)['next']['stage'] != 'voice'

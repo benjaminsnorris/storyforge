@@ -29,7 +29,8 @@ from datetime import datetime
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field,
     select_model, get_plugin_dir, install_signal_handlers,
-    get_coaching_level, build_shared_context,
+    get_coaching_level, build_shared_context, reference_text, resolve_voice_guide,
+    VOICE_GUIDE_REMEDY,
 )
 from storyforge.costs import estimate_cost, log_operation, print_summary
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
@@ -178,20 +179,23 @@ def _load_custom_evaluators(project_dir):
 # ============================================================================
 
 def _resolve_voice_guide(project_dir):
-    """Find and read voice guide content. Returns (path, content) or (None, '')."""
-    custom_vg = read_yaml_field('artifacts.voice_guide.path', project_dir)
-    if custom_vg:
-        vg_path = os.path.join(project_dir, custom_vg)
-        if os.path.isfile(vg_path):
-            return vg_path, open(vg_path).read()
+    """Find and read voice guide content. Returns (path, content) or (None, '').
 
-    for vg in ['references/voice-guide.md', 'reference/voice-guide.md',
-               'reference/persistent-prompt.md']:
-        vg_path = os.path.join(project_dir, vg)
-        if os.path.isfile(vg_path):
-            return vg_path, open(vg_path).read()
-
-    return None, ''
+    `common.resolve_voice_guide` (#596, CR-1), with the older
+    persistent-prompt.md: a candidate still init's template or empty is
+    passed over and said (the evaluators would read a template's guidance as
+    the book's voice); one that can't be read stops the evaluation (ERROR,
+    exit 1), naming it."""
+    voice = resolve_voice_guide(project_dir, briefs=False)
+    passed = voice.skipped + ((voice.detail,) if voice.kind in ('template', 'empty') else ())
+    for detail in passed:
+        log(f'WARNING: {detail}; left out of the evaluation. Fill it: {VOICE_GUIDE_REMEDY}.')
+    if voice.kind == 'unreadable':
+        log(f'ERROR: {voice.detail}')
+        sys.exit(1)
+    if voice.kind != 'ok':
+        return None, ''
+    return os.path.join(project_dir, voice.path), voice.text
 
 
 # ============================================================================
@@ -609,12 +613,18 @@ def _build_assessment_prompt(project_dir, eval_dir, eval_timestamp, scope_descri
 
     Returns (prompt, ref_count) or (None, 0) if no reference files.
     """
-    ref_files = []
-    for ref in ['reference/key-decisions.md',
-                'reference/voice-guide.md', 'references/voice-guide.md',
-                'reference/story-architecture.md', 'references/story-architecture.md']:
-        if os.path.isfile(os.path.join(project_dir, ref)):
-            ref_files.append(ref)
+    # a doc missing or still its template states no intention of the
+    # author's (F-130, #596); one that can't be read raises ReferenceDocError
+    voice = resolve_voice_guide(project_dir, briefs=False)
+    candidates = ['reference/key-decisions.md',
+                  *([voice.path] if voice.kind == 'ok' else []),
+                  'reference/story-architecture.md', 'references/story-architecture.md']
+    ref_text = {}
+    for ref in candidates:
+        text = reference_text(os.path.join(project_dir, ref), strip=False)
+        if text:
+            ref_text[ref] = text
+    ref_files = list(ref_text)
 
     if not ref_files:
         return None, 0
@@ -622,7 +632,7 @@ def _build_assessment_prompt(project_dir, eval_dir, eval_timestamp, scope_descri
     # Build sections based on which files exist
     sections = []
     for ref in ref_files:
-        if 'voice-guide' in ref:
+        if voice.kind == 'ok' and ref == voice.path:
             sections.append('## Voice Guide Alignment\nDid the prose deliver the voice described in the voice guide?')
         elif 'story-architecture' in ref:
             sections.append('## Story Architecture Alignment\nDid the structural intentions land?')
@@ -644,9 +654,8 @@ def _build_assessment_prompt(project_dir, eval_dir, eval_timestamp, scope_descri
 
         ref_inline = ''
         for ref in ref_files:
-            ref_path = os.path.join(project_dir, ref)
             ref_inline += f'\n===== REFERENCE: {ref} =====\n\n'
-            ref_inline += open(ref_path).read()
+            ref_inline += ref_text[ref]
             ref_inline += f'\n\n===== END REFERENCE: {ref} =====\n'
 
         prompt = f'''You are assessing the manuscript's execution against the author's stated intentions for "{project_title}."

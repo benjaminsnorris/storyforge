@@ -11,7 +11,10 @@ import re
 import sys
 from collections.abc import Collection, Mapping
 
-from .common import parse_yaml_scalar
+from .common import (
+    is_unfilled_template, parse_yaml_scalar, reference_text,
+    resolve_voice_guide,
+)
 
 
 # ============================================================================
@@ -654,7 +657,12 @@ def build_scene_prompt(scene_id: str, project_dir: str,
             craft engine, AI-tell vocabulary, voice profile) is provided via
             the API ``system`` parameter and should NOT be inlined in the
             user prompt. Project-specific weighted directives, scene briefs,
-            and per-scene overrides are still included.
+            and per-scene overrides are still included, and so are the key
+            decisions, which the system context doesn't carry (#596).
+
+    Raises:
+        common.ReferenceDocError: the voice guide or an inlined reference
+            file exists but can't be read.
 
     Returns:
         The assembled prompt string.
@@ -688,18 +696,16 @@ def build_scene_prompt(scene_id: str, project_dir: str,
     # --- Previous scene ---
     prev_scene = get_previous_scene(scene_id, project_dir)
 
-    # --- Voice guide ---
-    voice_guide = read_yaml_field(yaml_file, 'reference.voice_guide')
-    if not voice_guide:
-        voice_guide = read_yaml_field(yaml_file, 'voice_guide')
-    if not voice_guide:
-        if os.path.isfile(os.path.join(project_dir, 'reference', 'voice-guide.md')):
-            voice_guide = 'reference/voice-guide.md'
-        elif os.path.isfile(os.path.join(project_dir, 'reference', 'persistent-prompt.md')):
-            voice_guide = 'reference/persistent-prompt.md'
+    # --- Voice guide --- (this prompt names the file, so the older
+    # persistent-prompt.md counts: common.resolve_voice_guide)
+    voice = resolve_voice_guide(project_dir, briefs=False)
+    voice.raise_if_unreadable(project_dir)
+    voice_guide = voice.path if voice.kind == 'ok' else ''
 
     # --- Reference files ---
-    ref_files = list_reference_files(project_dir)
+    # a doc still its template is not the book's (F-130, #596)
+    ref_files = [rf for rf in list_reference_files(project_dir)
+                 if not is_unfilled_template(os.path.join(project_dir, rf))]
 
     ref_list = ''
     ref_inline = ''
@@ -707,10 +713,8 @@ def build_scene_prompt(scene_id: str, project_dir: str,
         for rf in ref_files:
             ref_list += f'\n- {rf}'
             if api_mode:
-                full_path = os.path.join(project_dir, rf)
-                if os.path.isfile(full_path):
-                    with open(full_path) as f:
-                        content = f.read()
+                content = reference_text(os.path.join(project_dir, rf), strip=False)
+                if content:
                     ref_inline += f'\n=== FILE: {rf} ===\n{content}\n=== END FILE ===\n'
 
     # --- Previous scene content (API mode) ---
@@ -810,6 +814,12 @@ def build_scene_prompt(scene_id: str, project_dir: str,
         lines.append('Reference materials (world bible, character bible, voice guide, '
                      'story architecture, craft engine, vocabulary constraints) have '
                      'been provided in the system context. Internalize them before writing.')
+        # the system context carries no key decisions (#596)
+        from .prompts_elaborate import reference_doc
+        decisions = _key_decisions_block(reference_doc(project_dir, 'key-decisions.md'))
+        if decisions:
+            lines.append('')
+            lines.append(decisions)
     elif api_mode:
         lines.append('')
         lines.append('The following reference materials contain the world bible, '
@@ -1837,6 +1847,18 @@ def _character_names(ref_dir: str) -> dict[str, str]:
             if (r.get('id') or '').strip()}
 
 
+def _key_decisions_block(decisions: str) -> str:
+    """The drafting prompt's `## Key Decisions` section ('' for none):
+    the author's settled decisions, the ones that govern prose (reading
+    level, POV, how an event is told) to be followed (#596)."""
+    if not decisions:
+        return ''
+    return ("## Key Decisions\n\n"
+            "The author's settled decisions for this book. Where one governs the "
+            "prose (reading level, sentence length, point of view, what the narration "
+            "may show and how an event is treated), follow it.\n\n" + decisions)
+
+
 def build_scene_prompt_from_briefs(
     scene_id: str,
     project_dir: str,
@@ -1862,7 +1884,9 @@ def build_scene_prompt_from_briefs(
                     Their brief rows are included for context.
         system_context: When True, shared reference material (voice guide,
             character bible, AI-tell vocabulary, voice profile) is provided
-            via the API ``system`` parameter and should NOT be inlined.
+            via the API ``system`` parameter and should NOT be inlined. The
+            key decisions are in the prompt either way: the system context
+            doesn't carry them (#596).
         voice_reference: The scene's current prose, for a rewrite (rethink
             plan §3.4, Phase 4 PR 5: rewrites draft from the plan and the
             binding ledger, the old prose a voice reference only). Shown at
@@ -1921,24 +1945,28 @@ def build_scene_prompt_from_briefs(
     if source_block:
         dep_block = f'{dep_block}\n\n{source_block}' if dep_block else source_block
 
-    # Voice guide (skipped when system_context provides it)
+    # Key decisions, voice guide and character bible, each left out when
+    # missing or still its template (F-130, #596). The key decisions go in
+    # with or without system_context, which doesn't carry them; the voice
+    # guide and character bible only without it, since it carries both.
+    # A doc that can't be read raises ReferenceDocError.
+    from .prompts_elaborate import reference_doc
+    decisions = reference_doc(project_dir, 'key-decisions.md')
+    decisions_block = _key_decisions_block(decisions)
+
     voice_guide = ''
     if not system_context:
-        voice_path = os.path.join(ref_dir, 'voice-guide.md')
-        if os.path.isfile(voice_path):
-            with open(voice_path) as f:
-                voice_guide = f"## Voice Guide\n\n{f.read().strip()}"
+        voice = resolve_voice_guide(project_dir)
+        voice.raise_if_unreadable(project_dir)
+        if voice.kind == 'ok':
+            voice_guide = f"## Voice Guide\n\n{voice.text}"
 
-    # Character bible entries for on-stage characters (skipped when system_context)
     char_block = ''
-    if not system_context:
-        char_path = os.path.join(ref_dir, 'character-bible.md')
-        if os.path.isfile(char_path):
-            on_stage = scene.get('on_stage', '')
-            if on_stage:
-                char_block = f"## Character Bible (on-stage: {on_stage})\n\n"
-                with open(char_path) as f:
-                    char_block += f.read().strip()
+    on_stage = scene.get('on_stage', '')
+    if not system_context and on_stage:
+        text = reference_doc(project_dir, 'character-bible.md')
+        if text:
+            char_block = f"## Character Bible (on-stage: {on_stage})\n\n{text}"
 
     # Physical state context
     state_block = ''
@@ -2191,6 +2219,8 @@ Do NOT add creative interpretation or suggestions."""
 {ledger_block}
 
 {calendar_block}
+
+{decisions_block}
 
 {voice_guide}
 

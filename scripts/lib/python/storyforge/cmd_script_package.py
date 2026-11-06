@@ -542,15 +542,16 @@ def _gather_style_cues(project_dir: str) -> StyleGuideCues:
 
 
 def _read_optional(path: str, head_lines: int | None = None) -> str:
-    """Read a file if it exists; return '' otherwise. Optionally truncate
-    to the first N lines so LLM prompts stay bounded."""
-    if not os.path.isfile(path):
-        return ''
-    try:
-        with open(path, encoding='utf-8') as f:
-            text = f.read()
-    except (OSError, UnicodeDecodeError):
-        return ''
+    """Read a file if it exists; return '' otherwise, and for a reference
+    doc still its template (F-130, #596). Optionally truncate
+    to the first N lines so LLM prompts stay bounded.
+
+    Raises:
+        common.ReferenceDocError: the file exists but can't be read (the
+            style guide would otherwise go out as if it weren't there).
+    """
+    from storyforge.common import reference_text
+    text = reference_text(path, strip=False)
     if head_lines:
         lines = text.splitlines()
         if len(lines) > head_lines:

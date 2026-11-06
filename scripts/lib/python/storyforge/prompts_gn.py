@@ -89,7 +89,7 @@ def build_drafting_prompt(
     """Build the system prompt that asks the model to draft one GN scene.
 
     Args:
-        project_dir: Path to the book project (reserved for future context).
+        project_dir: Path to the book project (its key decisions are read).
         scene_id: The scene ID being drafted.
         scene_row: Dict of scenes.csv columns for this scene.
         intent_row: Dict of scene-intent.csv columns for this scene.
@@ -110,6 +110,16 @@ def build_drafting_prompt(
         f"- {k}: {v}" for k, v in intent_row.items() if (v or '').strip()
     )
     brief_summary = _format_brief(brief_row)
+
+    # The author's settled decisions (content rules, POV, reading level for
+    # captions and balloons) bind the script as they bind prose (#596)
+    from storyforge.prompts_elaborate import reference_doc
+    decisions = reference_doc(project_dir, 'key-decisions.md')
+    decisions_section = (
+        "# Key decisions\n\nThe author's settled decisions for this book. Where one "
+        "governs the script (what may be shown and how, point of view, the reading "
+        f"level of captions and balloons), follow it.\n\n{decisions}\n\n"
+        if decisions else '')
 
     return f"""\
 You are drafting a graphic-novel scene as a panel-by-panel script for an
@@ -181,7 +191,7 @@ exception-cases.
 
 {voice_profile_text or '(default)'}
 
-{SCRIPT_FORMAT_INSTRUCTIONS}
+{decisions_section}{SCRIPT_FORMAT_INSTRUCTIONS}
 
 Now write the script for scene `{scene_id}`. Produce exactly {target_pages}
 pages. Begin with the H1 header `# Scene: {scene_id}` and follow the format

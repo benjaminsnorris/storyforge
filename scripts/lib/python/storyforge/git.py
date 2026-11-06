@@ -9,7 +9,10 @@ import subprocess
 import sys
 from datetime import datetime
 
-from storyforge.common import log, read_yaml_field, get_coaching_level, select_model, get_pipeline_file
+from storyforge.common import (
+    log, read_yaml_field, get_coaching_level, select_model, get_pipeline_file,
+    ReferenceDocError, reference_text,
+)
 
 
 # ============================================================================
@@ -978,9 +981,17 @@ def _run_recommend_step(review_type: str, project_dir: str, cycle_id: int) -> No
         (get_pipeline_file(project_dir), 'working/pipeline.csv'),
         (os.path.join(project_dir, 'reference', 'key-decisions.md'), 'reference/key-decisions.md'),
     ]:
-        if os.path.isfile(fpath) and os.path.getsize(fpath) < 51200:
-            with open(fpath) as f:
-                context_parts.append(f'=== FILE: {label} ===\n{f.read()}\n=== END FILE ===')
+        if not os.path.isfile(fpath) or os.path.getsize(fpath) >= 51200:
+            continue
+        # a key-decisions.md still its template records no decision (#596);
+        # recommendations are advice, so one unreadable file is said and left out
+        try:
+            text = reference_text(fpath, strip=False)
+        except ReferenceDocError as e:
+            log(f'WARNING: {e}; the recommendations are written without it')
+            continue
+        if text:
+            context_parts.append(f'=== FILE: {label} ===\n{text}\n=== END FILE ===')
 
     context = '\n'.join(context_parts)
 
