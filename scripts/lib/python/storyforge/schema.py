@@ -8,7 +8,8 @@ import os
 import re
 
 from .elaborate import _read_csv, _FILE_MAP
-from .enrich import load_alias_map, load_mice_registry, mice_entry_problem
+from . import mice
+from .enrich import load_alias_map
 from .narrator import NARRATOR_POV
 
 
@@ -470,27 +471,20 @@ def _check_boolean(value: str) -> bool:
     return value.strip().lower() in ('true', 'false', '')
 
 
-def _check_mice(value: str, alias_map: dict, type_map: dict) -> list[dict]:
+def _check_mice(value: str, registry: mice.Registry) -> list[dict]:
     """Check mice_threads entries for format, type, and name validity.
 
     ``+name`` opens a thread, ``-name`` closes it and a bare ``name``
     mentions it (F-020; what ``elaborate --stage mice-fill`` writes, #272);
-    each may carry a type, ``+type:name``. The per-entry rules are
-    :func:`enrich.mice_entry_problem`, which the dormancy and structure
-    readers share, so an entry validate accepts is one they count.
+    each may carry a type, ``+type:name``. The rules are :func:`mice.check`,
+    which every reader of mice_threads counts by, so an entry validate
+    accepts is one they count.
 
     Returns a list of error dicts, one per bad entry.  Each has keys
     'entry' (the raw text) and 'reason' (what's wrong).
     """
-    problems = []
-    for entry in value.split(';'):
-        entry = entry.strip()
-        if not entry:
-            continue
-        _op, _thread, reason = mice_entry_problem(entry, alias_map, type_map)
-        if reason:
-            problems.append({'entry': entry, 'reason': reason})
-    return problems
+    return [{'entry': r.entry.raw, 'reason': r.problem}
+            for r in mice.resolve(value, registry) if r.problem]
 
 
 def _check_registry(value: str, alias_map: dict, is_array: bool) -> list[str]:
@@ -630,8 +624,7 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
     # never passes as a knowledge fact.
     registries: dict[str, dict] = {}
     ledger_status: dict[str, str] = {}
-    mice_alias: dict[str, str] = {}
-    mice_type_map: dict[str, str] = {}
+    mice_registry = mice.registry_for('')
     if project_dir:
         reg_dir = os.path.join(project_dir, 'reference')
         ledger_rows = ledger.load_from(reg_dir)
@@ -649,9 +642,8 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
             elif col_schema['type'] == 'mice':
                 csv_name = col_schema['registry']
                 if csv_name not in registries:
-                    path = os.path.join(reg_dir, csv_name)
-                    mice_alias, mice_type_map = load_mice_registry(path)
-                    registries[csv_name] = mice_alias
+                    mice_registry = mice.registry_for(reg_dir)
+                    registries[csv_name] = mice_registry.lookup
 
     # Collect all scene IDs for continuity_deps validation
     scenes_path = os.path.join(ref_dir, 'scenes.csv')
@@ -809,9 +801,9 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                         })
 
                 elif constraint == 'mice':
-                    if project_dir and not mice_alias:
+                    if project_dir and not mice_registry.checked:
                         unchecked[schema['registry']] = unchecked.get(schema['registry'], 0) + 1
-                    problems = _check_mice(value, mice_alias, mice_type_map)
+                    problems = _check_mice(value, mice_registry)
                     if not problems:
                         passed += 1
                     else:
@@ -854,6 +846,15 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                 'file': ledger.LEDGER_FILE, 'row': '', 'column': '',
                 'value': '', 'constraint': 'ledger', 'reason': problem,
             })
+
+    # The MICE registry itself: a name or alias two threads share (no
+    # entry using it is read as either), or a file missing its columns
+    for problem in mice_registry.findings():
+        failed += 1
+        errors.append({
+            'file': mice.REGISTRY_FILE, 'row': '', 'column': '',
+            'value': '', 'constraint': 'mice-registry', 'reason': problem,
+        })
 
     # Medium-aware required-field checks
     if medium == 'graphic-novel':

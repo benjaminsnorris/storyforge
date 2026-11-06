@@ -180,13 +180,13 @@ class TestCheck:
 
 class TestMiceType:
     """A thread's type comes from the registry, else from the entry
-    (``enrich.resolve_mice_entries``; it replaced ``_mice_type``, #272)."""
+    (``mice.resolve``; it replaced ``_mice_type``, #272)."""
 
     @staticmethod
     def _types(value, registry=None):
-        from storyforge.enrich import resolve_mice_entries
-        alias = {k: k for k in (registry or {})}
-        return [t for _op, _name, t in resolve_mice_entries(value, alias, registry or {})]
+        from storyforge import mice
+        reg = mice.registry_from_rows([{'id': k, 'type': t} for k, t in (registry or {}).items()])
+        return [r.type for r in mice.resolve(value, reg) if r.valid]
 
     def test_typed_thread_name(self):
         assert self._types('+inquiry:who-killed;milieu:castle;-character:alice-arc;event:the-war') == \

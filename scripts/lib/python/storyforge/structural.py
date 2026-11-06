@@ -1007,41 +1007,54 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
     if n == 0:
         return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'intent'}]}
 
-    # Entries are read as validate reads them (enrich.resolve_mice_entries):
-    # 'inquiry:foo', 'foo' and an alias of it are one thread, the type comes
-    # from the registry; a malformed entry is left to validate, a name the
-    # registry lacks still counts under its own name (#272)
-    from storyforge.enrich import load_mice_registry, mice_span_gaps, resolve_mice_entries
-    alias_map, registry_types = ({}, {})
-    if ref_dir:
-        alias_map, registry_types = load_mice_registry(
-            os.path.join(ref_dir, 'mice-threads.csv'))
+    # Entries are read as validate reads them (mice.resolve): 'inquiry:foo',
+    # 'foo' and an alias of it are one thread, the type comes from the
+    # registry, a slug the registry lacks still counts (lower-cased). An entry
+    # that names no thread is not scored, and is listed in a finding (#272):
+    # revise and hone read this score without running validate
+    from storyforge import mice
+    registry = mice.registry_for(ref_dir)
 
     # Parse all mice_threads entries
     # Track per thread: open_idx, close_idx, mention_indices, type
     threads = {}  # thread_name -> {'open': idx|None, 'close': idx|None, 'mentions': [idx], 'type': str}
-    ops = {}  # thread_name -> {idx: {op}}
+    touches = {}  # thread_name -> {idx: {kind}}
+    unread = []   # "scene: 'entry'" naming no thread
 
     for idx, sid in enumerate(scene_ids):
         intent = intent_map.get(sid) or {}
         mice_str = _s(intent.get('mice_threads')).strip()
         if not mice_str:
             continue
-        for op, tag, thread_type in resolve_mice_entries(mice_str, alias_map, registry_types,
-                                                         unregistered=True):
-            ops.setdefault(tag, {}).setdefault(idx, set()).add(op)
+        for r in mice.resolve(mice_str, registry):
+            if not r.thread:
+                unread.append(f"{sid}: '{r.entry.raw}'")
+                continue
+            tag, thread_type, op = r.thread, r.type, r.kind
+            touches.setdefault(tag, {}).setdefault(idx, set()).add(op)
             info = threads.setdefault(
                 tag, {'open': None, 'close': None, 'mentions': [], 'type': 'unknown'})
             info['mentions'].append(idx)
             if thread_type and info['type'] == 'unknown':
                 info['type'] = thread_type
-            if op == '+' and info['open'] is None:
+            if op is mice.Kind.OPEN and info['open'] is None:
                 info['open'] = idx
-            elif op == '-':
+            elif op is mice.Kind.CLOSE:
                 info['close'] = idx
+
+    if unread:
+        findings.append({
+            'message': (f"{len(unread)} mice_threads entr{'y' if len(unread) == 1 else 'ies'} "
+                        f"name no thread and were not scored (storyforge validate says why): "
+                        + '; '.join(unread[:8]) + ('...' if len(unread) > 8 else '')),
+            'severity': 'important',
+            'fix_location': 'intent',
+        })
 
     total_threads = len(threads)
     if total_threads == 0:
+        if unread:
+            return {'score': 0.0, 'findings': findings}
         return {'score': 0.5, 'findings': [{'message': 'No MICE threads found', 'severity': 'minor', 'fix_location': 'intent'}]}
 
     # --- 1. Close ratio ---
@@ -1061,7 +1074,7 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
     for tag, info in threads.items():
         # Inside the open..close span only, as hone.detect_mice_dormancy
         # measures it: not before the open or after the close
-        gaps = [b - a for a, b in mice_span_gaps(info['mentions'], ops[tag])]
+        gaps = [b - a for a, b in mice.span_gaps(touches[tag])]
         if gaps:
             max_gap = max(gaps)
             if max_gap > 10:

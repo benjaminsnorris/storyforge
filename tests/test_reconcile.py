@@ -164,7 +164,8 @@ class TestApplyRegistryNormalization:
 
 class TestMiceNormalization:
     def test_bare_names(self, tmp_path):
-        from storyforge.enrich import normalize_mice_threads, load_mice_registry
+        from storyforge.enrich import normalize_mice_threads
+        from storyforge.mice import load_registry
 
         reg_path = str(tmp_path / 'mice-threads.csv')
         with open(reg_path, 'w') as f:
@@ -173,35 +174,37 @@ class TestMiceNormalization:
             f.write('vanishings|The Vanishings|inquiry|disappearances\n')
             f.write('zara-identity|Zara Identity|character|\n')
 
-        alias_map, type_map = load_mice_registry(reg_path)
+        registry = load_registry(reg_path)
 
-        assert normalize_mice_threads('+understory', alias_map, type_map) == '+understory'
-        assert normalize_mice_threads('-vanishings', alias_map, type_map) == '-vanishings'
-        assert normalize_mice_threads('zara-identity', alias_map, type_map) == 'zara-identity'
-        assert normalize_mice_threads('+understory;-vanishings;zara-identity', alias_map, type_map) == '+understory;-vanishings;zara-identity'
+        assert normalize_mice_threads('+understory', registry.lookup) == '+understory'
+        assert normalize_mice_threads('-vanishings', registry.lookup) == '-vanishings'
+        assert normalize_mice_threads('zara-identity', registry.lookup) == 'zara-identity'
+        assert normalize_mice_threads('+understory;-vanishings;zara-identity', registry.lookup) == '+understory;-vanishings;zara-identity'
 
     def test_typed_preserved_or_stripped(self, tmp_path):
-        from storyforge.enrich import normalize_mice_threads, load_mice_registry
+        from storyforge.enrich import normalize_mice_threads
+        from storyforge.mice import load_registry
 
         reg_path = str(tmp_path / 'mice-threads.csv')
         with open(reg_path, 'w') as f:
             f.write('id|name|type|aliases\n')
             f.write('understory|The Understory|milieu|\n')
 
-        alias_map, type_map = load_mice_registry(reg_path)
+        registry = load_registry(reg_path)
 
         # Typed input should output bare
-        assert normalize_mice_threads('+milieu:understory', alias_map, type_map) == '+understory'
+        assert normalize_mice_threads('+milieu:understory', registry.lookup) == '+understory'
         # Wrong type should be corrected
-        assert normalize_mice_threads('+inquiry:understory', alias_map, type_map) == '+understory'
+        assert normalize_mice_threads('+inquiry:understory', registry.lookup) == '+understory'
 
     def test_alias_resolution(self, tmp_path):
-        from storyforge.enrich import normalize_mice_threads, load_mice_registry
+        from storyforge.enrich import normalize_mice_threads
+        from storyforge.mice import load_registry
 
         reg_path = str(tmp_path / 'mice-threads.csv')
         with open(reg_path, 'w') as f:
             f.write('id|name|type|aliases\n')
             f.write('understory|The Understory|milieu|hidden world;the magical chicago\n')
 
-        alias_map, type_map = load_mice_registry(reg_path)
-        assert normalize_mice_threads('+hidden world', alias_map, type_map) == '+understory'
+        registry = load_registry(reg_path)
+        assert normalize_mice_threads('+hidden world', registry.lookup) == '+understory'

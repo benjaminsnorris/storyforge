@@ -11,7 +11,9 @@ import os
 import re
 import sys
 import tempfile
+from collections.abc import Mapping
 
+from . import mice
 from .prompts import (
     _read_csv_header_and_rows,
     read_csv_field,
@@ -327,258 +329,22 @@ def normalize_aliases(alias_map: dict[str, str], semicolon_string: str) -> str:
 # MICE Thread Normalization
 # ============================================================================
 
-#: Valid MICE thread types
-VALID_MICE_TYPES = frozenset({'milieu', 'inquiry', 'character', 'event'})
+def normalize_mice_threads(mice_string: str, lookup: Mapping[str, str]) -> str:
+    """Normalize a semicolon-separated mice_threads value: each entry's
+    thread is written as its canonical id, its operator and any note kept,
+    its type dropped (the registry holds it).
 
-
-def load_mice_registry(csv_file: str) -> tuple[dict[str, str], dict[str, str]]:
-    """Load MICE thread registry from a CSV with id|name|type|aliases columns.
-
-    Returns two dicts:
-      - alias_map: lowercased name/alias → canonical id (like load_alias_map)
-      - type_map: canonical id → registered type (milieu/inquiry/character/event)
+    Entries are read by :func:`mice.parse` and looked up by
+    :func:`mice.lookup_thread` (``type:name`` first, then the name) in
+    ``lookup`` (a :attr:`mice.Registry.lookup`). An entry that names no
+    thread there is left as written, for validation to report.
     """
-    if not csv_file or not os.path.isfile(csv_file):
-        return {}, {}
-
-    header, rows = _read_csv_header_and_rows(csv_file)
-    if not header:
-        return {}, {}
-
-    try:
-        name_idx = header.index('name')
-    except ValueError:
-        return {}, {}
-
-    try:
-        id_idx = header.index('id')
-    except ValueError:
-        id_idx = None
-
-    try:
-        type_idx = header.index('type')
-    except ValueError:
-        type_idx = None
-
-    try:
-        alias_idx = header.index('aliases')
-    except ValueError:
-        alias_idx = None
-
-    alias_map: dict[str, str] = {}
-    type_map: dict[str, str] = {}
-
-    for row in rows:
-        if len(row) <= name_idx:
-            continue
-        name = row[name_idx].strip()
-        if not name:
-            continue
-
-        if id_idx is not None and len(row) > id_idx and row[id_idx].strip():
-            canonical = row[id_idx].strip()
-        else:
-            canonical = name
-
-        alias_map[name.lower()] = canonical
-        alias_map[canonical.lower()] = canonical
-        # An older registry id carries its type (`inquiry:who-killed`); scene
-        # entries, and the mentions mice-fill writes, use the bare name (#272)
-        type_part, sep, bare = canonical.partition(':')
-        if sep and type_part.strip().lower() in VALID_MICE_TYPES and bare.strip():
-            alias_map.setdefault(bare.strip().lower(), canonical)
-
-        if type_idx is not None and len(row) > type_idx:
-            type_map[canonical] = row[type_idx].strip().lower()
-
-        if alias_idx is not None and len(row) > alias_idx and row[alias_idx]:
-            for alias in row[alias_idx].split(';'):
-                alias = alias.strip()
-                if alias:
-                    alias_map[alias.lower()] = canonical
-
-    return alias_map, type_map
-
-
-# The model sometimes joins MICE entries with commas despite the prompt
-# (`+a,+b`). A comma separates entries only when an operation or a type
-# follows it, so a comma inside a free-text name stays put.
-_MICE_SEPARATOR_RE = re.compile(
-    r';|,(?=\s*(?:[+-]|(?:milieu|inquiry|character|event)\s*:))', re.IGNORECASE)
-
-
-_MICE_NOTE_RE = re.compile(r'^(.*?)(\[[^\]]*\])$', re.DOTALL)
-
-
-def split_mice_entries(mice_string: str) -> list[str]:
-    """Split a mice_threads value into its entries."""
-    return _MICE_SEPARATOR_RE.split(mice_string or '')
-
-
-#: The three kinds of mice_threads entry, by their operator: ``+name`` opens
-#: a thread, ``-name`` closes it, a bare ``name`` mentions it (F-020, #272)
-MICE_OPEN, MICE_CLOSE, MICE_MENTION = '+', '-', ''
-
-
-def parse_mice_entry(entry: str) -> tuple[str, str, str]:
-    """``+inquiry:who-killed`` → ``('+', 'inquiry', 'who-killed')``.
-
-    The operator is ``MICE_OPEN``, ``MICE_CLOSE`` or ``MICE_MENTION`` (no
-    operator); the type is ``''`` when the entry carries none. A bare
-    operator gives an empty name.
-    """
-    entry = (entry or '').strip()
-    op = MICE_MENTION
-    if entry[:1] in (MICE_OPEN, MICE_CLOSE):
-        op, entry = entry[0], entry[1:]
-    type_part, sep, name = entry.partition(':')
-    if not sep:
-        return op, '', entry.strip()
-    return op, type_part.strip().lower(), name.strip()
-
-
-def mice_entry_problem(entry: str, alias_map: dict[str, str],
-                       type_map: dict[str, str]) -> tuple[str, str, str]:
-    """``(op, thread, problem)`` for one mice_threads entry.
-
-    ``thread`` is the canonical registry id the entry names: its own name
-    when there is no registry or the registry lacks it, ``''`` for a
-    malformed entry. ``problem`` is ``''`` for a valid entry, else why it is
-    not one. Validation (``schema._check_mice``) reports the problems, and
-    the readers that count entries go through :func:`resolve_mice_entries`,
-    so validate and dormancy agree on what is a thread reference (#272).
-    """
-    op, type_part, name = parse_mice_entry(entry)
-    rest = entry.strip()[1:] if op else entry.strip()
-    if not rest.strip():
-        return op, '', 'invalid format (expected +name, -name or name)'
-    if ':' in rest:
-        if not type_part or not name:
-            return op, '', 'missing type or name'
-        if type_part not in VALID_MICE_TYPES:
-            return op, '', (f'invalid type "{type_part}" '
-                            '(expected: milieu, inquiry, character, event)')
-    if not name:
-        return op, '', 'empty thread name'
-    # A thread name is a slug; with no registry to check it against, prose
-    # ("gatsby dream opens", "+ +x") must not pass as a mention
-    if not alias_map:
-        if not re.fullmatch(r'[\w][\w\'.-]*', name):
-            return op, '', 'thread name is not a slug'
-        return op, name, ''
-    canonical = alias_map.get(name.lower())
-    if not canonical:
-        return op, name, f'thread name "{name}" not in mice-threads.csv'
-    expected = type_map.get(canonical) if type_map else None
-    if type_part and expected and type_part != expected:
-        return op, canonical, (f'type "{type_part}" doesn\'t match '
-                               f'registered type "{expected}"')
-    return op, canonical, ''
-
-
-def resolve_mice_entries(mice_string: str, alias_map: dict[str, str],
-                         type_map: dict[str, str],
-                         unregistered: bool = False) -> list[tuple[str, str, str]]:
-    """``[(op, canonical thread, type), ...]`` for the valid entries of a
-    mice_threads value; entries validation rejects are left out. The type
-    is the registry's, else the entry's, else ``''``.
-
-    With ``unregistered``, a well-formed entry naming a thread the registry
-    lacks (or with a type that disagrees with it) is kept under its own
-    name: structural checks still report how such a thread opens and closes,
-    while validate reports the name. Dormancy, which fills gaps from the
-    registry, reads only valid entries.
-    """
-    out = []
-    for entry in split_mice_entries(mice_string):
-        if not entry.strip():
-            continue
-        op, thread, problem = mice_entry_problem(entry, alias_map, type_map)
-        if thread and (unregistered or not problem):
-            out.append((op, thread, type_map.get(thread) or parse_mice_entry(entry)[1]))
-    return out
-
-
-def mice_span_gaps(indices: list[int], ops: dict[int, set[str]]) -> list[tuple[int, int]]:
-    """Consecutive pairs of a thread's scene indices that lie inside its
-    open..close span.
-
-    ``indices`` are the reading-order positions of the scenes that carry the
-    thread; ``ops`` maps a position to the operators there. A thread is not
-    dormant before it opens or after it closes: a mention outside the span
-    (foreshadowing before the open, an echo after the close) is valid and
-    not flagged, but the stretch between it and the span is not a gap to
-    fill. With no open the span starts at the first scene; with no close it
-    runs to the last.
-    """
-    positions = sorted(set(indices))
-    opens = [i for i in positions if MICE_OPEN in ops.get(i, ())]
-    closes = [i for i in positions if MICE_CLOSE in ops.get(i, ())]
-    start = opens[0] if opens else positions[0] if positions else 0
-    end = closes[-1] if closes else positions[-1] if positions else 0
-    return [(a, b) for a, b in zip(positions, positions[1:])
-            if a >= start and b <= end]
-
-
-def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
-                           type_map: dict[str, str] | None = None) -> str:
-    """Normalize a semicolon-separated mice_threads value.
-
-    Each entry should be ``{+|-}{type}:{name}``.  The name portion is
-    resolved against *alias_map*.  If *type_map* is provided and the
-    resolved name has a registered type, the type in the entry is
-    corrected to match.
-
-    Entries that don't match the expected format pass through unchanged.
-
-    Args:
-        mice_string: Raw mice_threads value (semicolon-separated).
-        alias_map: Name/alias → canonical id mapping.
-        type_map: Optional canonical id → registered type mapping.
-
-    Returns:
-        Normalized semicolon-separated string.
-    """
-    if not mice_string or not alias_map:
+    if not mice_string or not lookup:
         return mice_string or ''
-
     result = []
-    for entry in split_mice_entries(mice_string):
-        entry = entry.strip()
-        if not entry:
-            continue
-
-        # A bracketed note after the name (`zara-identity[advance: ...]`, as
-        # a revision pass wrote them) is kept as is: its colon is not a
-        # type:name separator
-        note = ''
-        m = _MICE_NOTE_RE.match(entry)
-        if m:
-            entry, note = m.group(1).strip(), m.group(2)
-
-        # Determine prefix (+/-/none) and the rest
-        prefix = ''
-        rest = entry
-        if len(entry) > 1 and entry[0] in ('+', '-'):
-            prefix = entry[0]
-            rest = entry[1:]
-
-        # Split type:name if colon present
-        if ':' in rest:
-            type_part, _, name_part = rest.partition(':')
-            type_part = type_part.strip().lower()
-            name_part = name_part.strip()
-        else:
-            # Bare name — no type prefix
-            type_part = ''
-            name_part = rest.strip()
-
-        # Normalize the name via alias map
-        canonical = alias_map.get(name_part.lower(), name_part)
-
-        # Output bare canonical name — type lives in registry, not in references
-        result.append(f'{prefix}{canonical}{note}')
-
+    for e in mice.entries(mice_string):
+        thread = mice.lookup_thread(lookup, e) if e.name else ''
+        result.append(e.write(thread) if thread else e.raw)
     return ';'.join(result)
 
 
@@ -739,16 +505,15 @@ def load_registry_alias_maps(project_dir: str) -> dict[str, dict[str, str]]:
     from storyforge import ledger
 
     ref_dir = os.path.join(project_dir, 'reference')
-    mice_alias, mice_types = load_mice_registry(
-        os.path.join(ref_dir, 'mice-threads.csv'))
+    mice_registry = mice.registry_for(ref_dir)
     return {
         'characters': load_alias_map(os.path.join(ref_dir, 'characters.csv')),
         'locations': load_alias_map(os.path.join(ref_dir, 'locations.csv')),
         'motifs': load_alias_map(os.path.join(ref_dir, 'motif-taxonomy.csv')),
         'values': load_alias_map(os.path.join(ref_dir, 'values.csv')),
         'knowledge': ledger.alias_map(ledger.knowledge_view(ledger.load_from(ref_dir))),
-        'mice_threads': mice_alias,
-        'mice_types': mice_types,
+        'mice_threads': mice_registry.lookup,
+        'mice_types': mice_registry.types,
     }
 
 
@@ -783,7 +548,6 @@ def normalize_fields(result: dict[str, str],
     value_map = alias_maps.get('values', {})
     knowledge_map = alias_maps.get('knowledge', {})
     mice_map = alias_maps.get('mice_threads', {})
-    mice_types = alias_maps.get('mice_types', {})
 
     for field in _CHAR_FIELDS:
         if field in result and char_map:
@@ -801,8 +565,7 @@ def normalize_fields(result: dict[str, str],
         if field in result and knowledge_map:
             result[field] = normalize_aliases(knowledge_map, result[field])
     if 'mice_threads' in result and mice_map:
-        result['mice_threads'] = normalize_mice_threads(
-            result['mice_threads'], mice_map, mice_types)
+        result['mice_threads'] = normalize_mice_threads(result['mice_threads'], mice_map)
 
     return result
 

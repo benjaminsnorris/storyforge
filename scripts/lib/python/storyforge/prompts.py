@@ -2426,12 +2426,14 @@ def prior_prose_mode(project_dir: str, override: str | None = None) -> str:
     return value
 
 
-def _threads(cell: str) -> set[str]:
-    """The threads a mice_threads cell opens, closes or mentions, by name:
-    `+inquiry:who`, `who` and `-who` are one thread (#272)."""
-    from .enrich import parse_mice_entry, split_mice_entries
-    return {name.lower() for name in
-            (parse_mice_entry(t)[2] for t in split_mice_entries(cell)) if name}
+def _threads(cell: str, registry=None) -> set[str]:
+    """The threads a mice_threads cell opens, closes or mentions, read as
+    validate reads them (:func:`mice.resolve`): `+inquiry:who`, `who`,
+    `-who` and an alias of it are one thread (#272). An entry that names no
+    thread is left out (validate reports it)."""
+    from . import mice
+    registry = registry or mice.registry_for('')
+    return {r.thread for r in mice.resolve(cell, registry) if r.thread}
 
 
 def prior_scenes(scene_id: str, project_dir: str, mode: str,
@@ -2460,7 +2462,9 @@ def prior_scenes(scene_id: str, project_dir: str, mode: str,
             f'thread\'s latest) with it instead of the whole manuscript')
     if not earlier:
         return earlier
-    threads = {r['id']: _threads(r.get('mice_threads', '')) for r in rows}
+    from . import mice
+    registry = mice.registry_for(os.path.join(project_dir, 'reference'))
+    threads = {r['id']: _threads(r.get('mice_threads', ''), registry) for r in rows}
     chosen = {earlier[-1]}
     for thread in threads.get(scene_id, set()):
         latest = next((s for s in reversed(earlier) if thread in threads.get(s, set())), None)

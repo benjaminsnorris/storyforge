@@ -634,19 +634,18 @@ def _validate_threads(scenes_map, intent_map, checks, ref_dir=''):
     What is checked is the notation itself: each thread opens once ("+"),
     closes at most once ("-"), and is otherwise mentioned by bare name.
 
-    Entries are read as validate reads them (enrich.resolve_mice_entries):
-    ``+inquiry:who``, ``who`` and an alias of it are one thread. A malformed
-    entry is left to validate; a name the registry lacks is still followed
-    under its own name (validate reports the name). A mention outside the
-    thread's open..close span is not reported: before the open it is
-    foreshadowing (hone.find_mice_anomalies, Gatsby), after the close an
-    echo; dormancy is measured only inside the span (#272).
+    Entries are read as validate reads them (:func:`mice.resolve`):
+    ``+inquiry:who``, ``who`` and an alias of it are one thread. A slug the
+    registry lacks is still followed, lower-cased (validate reports the
+    name); an entry that names no thread (malformed, prose, a name two
+    threads share) is listed in a ``mice-unread`` finding. A thread that
+    closes before it opens is reported. A mention outside the thread's
+    open..close span is not: before the open it is foreshadowing
+    (hone.find_mice_anomalies, Gatsby), after the close an echo; dormancy is
+    measured only inside the span (#272).
     """
-    from .enrich import load_mice_registry, resolve_mice_entries
-    alias_map, registry_types = ({}, {})
-    if ref_dir:
-        alias_map, registry_types = load_mice_registry(
-            os.path.join(ref_dir, 'mice-threads.csv'))
+    from . import mice
+    registry = mice.registry_for(ref_dir)
     sorted_ids = sorted(scenes_map.keys(),
                         key=lambda sid: _seq_sort_key(scenes_map[sid]))
 
@@ -655,17 +654,20 @@ def _validate_threads(scenes_map, intent_map, checks, ref_dir=''):
     open_now = {}  # mice type -> [(thread, scene opened)] in opening order
     interleaved = []
     thread_type = {}  # thread -> its MICE type, from the registry or an entry
+    unread = []  # "scene: entry" naming no thread
     for sid in sorted_ids:
-        mice = intent_map.get(sid, {}).get('mice_threads', '')
-        for op, name, mtype in resolve_mice_entries(mice, alias_map, registry_types,
-                                                    unregistered=True):
+        for r in mice.resolve(intent_map.get(sid, {}).get('mice_threads', ''), registry):
+            if not r.thread:
+                unread.append(f"{sid}: '{r.entry.raw}'")
+                continue
+            name, mtype, op = r.thread, r.type, r.kind
             if mtype:
                 thread_type.setdefault(name, mtype)
-            if op == '+':
+            if op is mice.Kind.OPEN:
                 opens.setdefault(name, []).append(sid)
                 if len(opens[name]) == 1:
                     open_now.setdefault(thread_type.get(name, 'unknown'), []).append((name, sid))
-            elif op == '-':
+            elif op is mice.Kind.CLOSE:
                 closes.setdefault(name, []).append(sid)
                 stack = open_now.get(thread_type.get(name, 'unknown'), [])
                 names = [t for t, _ in stack]
@@ -700,6 +702,13 @@ def _validate_threads(scenes_map, intent_map, checks, ref_dir=''):
                 f"MICE thread '{name}' is closed in {sids[0]} but never opened",
                 scene_id=sids[0], severity='advisory',
             ))
+        elif sorted_ids.index(sids[0]) < sorted_ids.index(opens[name][0]):
+            checks.append(_check(
+                'threads', 'mice-ops', False,
+                f"MICE thread '{name}' closes in {sids[0]} before it opens in "
+                f"{opens[name][0]}; its dormancy is not measured",
+                scene_id=sids[0], severity='advisory',
+            ))
     if not any(c['check'] == 'mice-ops' and not c['passed'] for c in checks):
         checks.append(_check('threads', 'mice-ops', True,
                              'MICE threads open once and close at most once'))
@@ -712,6 +721,18 @@ def _validate_threads(scenes_map, intent_map, checks, ref_dir=''):
             + ('...' if len(interleaved) > 5 else ''),
             severity='advisory',
         ))
+
+    if unread:
+        checks.append(_check(
+            'threads', 'mice-unread', False,
+            f"{len(unread)} mice_threads entr{'y' if len(unread) == 1 else 'ies'} name no "
+            f"thread and were not read (validate says why): " + '; '.join(unread[:8])
+            + ('...' if len(unread) > 8 else ''),
+            severity='advisory',
+        ))
+    for problem in registry.findings():
+        checks.append(_check('threads', 'mice-registry', False,
+                             f'{mice.REGISTRY_FILE}: {problem}', severity='advisory'))
 
     unclosed = [f"{name} (opened in {sids[0]})" for name, sids in opens.items()
                 if name not in closes]

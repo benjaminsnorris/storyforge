@@ -357,10 +357,19 @@ def scene_acts(project_dir: str, column: str | None = None) -> dict[str, str]:
             for r in rows if r.get('id', '').strip()}
 
 
-def thread_ids(project_dir: str) -> set[str]:
-    """Thread ids in mice-threads.csv."""
-    _, rows = _read(project_dir, 'mice-threads.csv')
-    return {r.get('id', '').strip() for r in rows if r.get('id', '').strip()}
+def resolve_thread(project_dir: str, value: str) -> str:
+    """The thread ``value`` names, read as a mice_threads entry is
+    (:func:`mice.check`): a registered thread's id by its id, name, alias or
+    ``type:name``; otherwise the lower-cased name. '' when it names none."""
+    from storyforge import mice
+    registry = mice.registry_for(os.path.join(project_dir, 'reference'))
+    return mice.check(value.strip(), registry).thread if value.strip() else ''
+
+
+def is_registered_thread(project_dir: str, thread: str) -> bool:
+    """``thread`` (as :func:`resolve_thread` gives it) is in mice-threads.csv."""
+    from storyforge import mice
+    return thread in mice.registry_for(os.path.join(project_dir, 'reference')).names
 
 
 def resolve_character(project_dir: str, value: str) -> str:
@@ -379,16 +388,18 @@ def resolve_character(project_dir: str, value: str) -> str:
 
 
 def thread_scenes(project_dir: str, thread: str) -> set[str]:
-    """Scenes whose scene-intent `mice_threads` carries `thread` (an entry
-    like `+inquiry:map-anomaly` carries `map-anomaly`)."""
+    """Scenes whose scene-intent `mice_threads` opens, closes or mentions
+    `thread`, both read as validate reads them (:func:`mice.resolve`): by
+    id, name, alias or `type:name`, so `+inquiry:map-anomaly`, `map-anomaly`
+    and an alias of it are one thread (#272)."""
+    from storyforge import mice
+    target = resolve_thread(project_dir, thread)
+    if not target:
+        return set()
+    registry = mice.registry_for(os.path.join(project_dir, 'reference'))
     _, rows = _read(project_dir, 'scene-intent.csv')
-    out = set()
-    for r in rows:
-        for entry in (r.get('mice_threads') or '').split(';'):
-            name = entry.strip().lstrip('+-').split(':')[-1].strip()
-            if name and name == thread:
-                out.add(r.get('id', '').strip())
-    return out
+    return {r.get('id', '').strip() for r in rows
+            if any(e.thread == target for e in mice.resolve(r.get('mice_threads'), registry))}
 
 
 def select(rows: list[dict[str, str]], project_dir: str, scope: Scope,
@@ -441,7 +452,8 @@ def select(rows: list[dict[str, str]], project_dir: str, scope: Scope,
         titles.append(f'scenes {a}..{b}' if a != b else f'scene {a}')
     if scope.thread:
         scenes = thread_scenes(project_dir, scope.thread)
-        if not scenes and scope.thread not in thread_ids(project_dir):
+        if not scenes and not is_registered_thread(
+                project_dir, resolve_thread(project_dir, scope.thread)):
             raise ScopeError(f'{scope.thread!r} is not a thread in '
                              f'reference/mice-threads.csv or scene-intent.csv')
         if not scenes:

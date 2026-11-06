@@ -341,7 +341,7 @@ class TestMiceDormancy:
             f.write('id|name|type|aliases\n')
             f.write('test-thread|Test Thread|inquiry|\n')
 
-        gaps = detect_mice_dormancy(ref)
+        gaps = detect_mice_dormancy(ref).gaps
         assert len(gaps) == 1
         assert gaps[0]['thread_id'] == 'test-thread'
         assert gaps[0]['gap_size'] == 19
@@ -374,7 +374,7 @@ class TestMiceDormancy:
             f.write('id|name|type|aliases\n')
             f.write('test-thread|Test Thread|inquiry|\n')
 
-        gaps = detect_mice_dormancy(ref)
+        gaps = detect_mice_dormancy(ref).gaps
         # With bare mention at s10, max gap is 9 (not 19), below threshold of 8+
         # So we get two sub-gaps of 9, each just above threshold
         for g in gaps:
@@ -1146,7 +1146,7 @@ class TestGatsbyFieldShapes:
             assert not is_placeholder(entry), entry
 
     def test_comma_inside_a_free_text_thread_name_stays(self):
-        from storyforge.enrich import split_mice_entries
+        from storyforge.mice import split as split_mice_entries
         assert split_mice_entries('+inquiry:what does Gatsby want, really;-a') == \
             ['+inquiry:what does Gatsby want, really', '-a']
         assert split_mice_entries('a,+b,-c, inquiry:d') == ['a', '+b', '-c', ' inquiry:d']
