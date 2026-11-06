@@ -26,6 +26,9 @@ from storyforge.common import (
     _strip_yaml_value,
     parse_yaml_scalar,
     read_yaml_field,
+    StoryforgeYamlError,
+    read_artifact_field,
+    read_top_level_field,
     set_top_level_fields,
     update_artifact_entry,
     yaml_single_quote,
@@ -1022,3 +1025,90 @@ class TestSetTopLevelFields:
         assert path.read_text().endswith(
             '# production:\n#   author: ""\nproduction:\n'
             '  cover_artwork_sha256: "ab12"\n')
+
+    def test_the_template_shape_writes_where_it_reads(self, tmp_path):
+        """#303 CR-1: the template ships `production:` commented out, so a
+        partly uncommented block has column-0 comments between live keys. The
+        writer and the reader must agree that those do not end the block."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'production:\n'
+            '  author: "A"\n'
+            '#   language: en\n'
+            '#   scene_break: ornamental\n'
+            '  include_toc: true\n'
+            '#   cover_image:\n'
+            '\n'
+            'phase: drafting\n')
+        set_top_level_fields(str(tmp_path), 'production', [
+            ('cover_artwork_reviewed', '2026-07-29')])
+        assert read_yaml(str(tmp_path)) == (
+            'production:\n'
+            '  author: "A"\n'
+            '#   language: en\n'
+            '#   scene_break: ornamental\n'
+            '  include_toc: true\n'
+            '  cover_artwork_reviewed: "2026-07-29"\n'
+            '#   cover_image:\n'
+            '\n'
+            'phase: drafting\n')
+        assert read_top_level_field(str(tmp_path), 'production',
+                                    'cover_artwork_reviewed') == '2026-07-29'
+        assert read_top_level_field(str(tmp_path), 'production',
+                                    'include_toc') == 'true'
+
+    def test_the_reader_ignores_a_same_named_nested_key(self, tmp_path):
+        """#303 SF-3: a nested key must not stand in for the direct one."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'production:\n'
+            '  cover:\n'
+            '    cover_artwork_reviewed: "2099-01-01"\n'
+            '  language: en\n')
+        assert read_top_level_field(str(tmp_path), 'production',
+                                    'cover_artwork_reviewed') == ''
+
+    @pytest.mark.parametrize('header', [
+        'production: {}', 'production: {language: en}', 'production: ~',
+        'production: null'])
+    def test_a_one_line_block_is_an_error_naming_the_line(self, tmp_path,
+                                                          header):
+        """#303 SF-2: appending a second `production:` block makes a file a
+        YAML parser rejects, or one that silently drops the first block."""
+        path = tmp_path / 'storyforge.yaml'
+        original = f'project:\n  title: X\n{header}\nphase: drafting\n'
+        path.write_text(original)
+        with pytest.raises(StoryforgeYamlError, match='line 3'):
+            set_top_level_fields(str(tmp_path), 'production', [
+                ('cover_artwork_sha256', 'ab12')])
+        assert path.read_text() == original
+        assert read_top_level_field(str(tmp_path), 'production',
+                                    'language') == ''
+
+    def test_a_non_utf8_file_is_an_error_naming_it(self, tmp_path):
+        """#303 SF-7: not a bare UnicodeDecodeError traceback."""
+        path = tmp_path / 'storyforge.yaml'
+        path.write_bytes(b'production:\n  author: \xff\xfe\n')
+        with pytest.raises(StoryforgeYamlError, match='storyforge.yaml'):
+            set_top_level_fields(str(tmp_path), 'production', [
+                ('cover_artwork_sha256', 'ab12')])
+        with pytest.raises(StoryforgeYamlError, match='not valid UTF-8'):
+            update_artifact_entry(str(tmp_path), 'manuscript', exists=True)
+        assert read_top_level_field(str(tmp_path), 'production',
+                                    'author') == ''
+
+    def test_an_empty_block_gets_the_key(self, tmp_path):
+        path = tmp_path / 'storyforge.yaml'
+        path.write_text('production:\nphase: drafting\n')
+        set_top_level_fields(str(tmp_path), 'production', [
+            ('cover_artwork_sha256', 'ab12')])
+        assert path.read_text() == (
+            'production:\n  cover_artwork_sha256: "ab12"\nphase: drafting\n')
+
+
+class TestOneYamlWriter:
+    """#303 TD-1: both writers share one core, so the artifact writer reads
+    back what it wrote through the shared direct-key reader too."""
+
+    def test_artifact_round_trip(self, yaml_project):
+        update_artifact_entry(yaml_project, 'manuscript', updated='2026-08-06')
+        assert read_artifact_field(yaml_project, 'manuscript',
+                                   'updated') == '2026-08-06'

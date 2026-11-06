@@ -685,15 +685,7 @@ def update_artifact_entry(project_dir: str, artifact: str, *,
             f'{yaml_file} does not exist, so nothing was updated.')
         return False
 
-    # `newline=''` on both ends so line endings survive verbatim. The default
-    # universal-newline translation reads CRLF as LF and writes LF back,
-    # normalizing the *whole* file as a side effect of editing two values.
-    # Note this is deliberately the opposite policy from `write_plan`, which
-    # *forces* LF for CSVs: this function edits a file the author wrote, so it
-    # preserves what it finds, and `cleanup`'s `crlf_line_endings` check reports
-    # storyforge.yaml (since #314) rather than anything converting it.
-    with open(yaml_file, newline='') as f:
-        lines = f.readlines()
+    lines = _read_yaml_lines(yaml_file)
 
     span = _artifact_block_span(lines, artifact)
     if span is None:
@@ -707,29 +699,80 @@ def update_artifact_entry(project_dir: str, artifact: str, *,
             f'nothing updated.')
         return False
 
-    start, end, child_indent = span
-    # An inserted line has to match the file it lands in, or a CRLF project
-    # gains one stray LF line and `cleanup` reports mixed endings. Shared with
-    # the other two writers of this file so they cannot disagree — see
-    # `detect_newline`.
-    newline = detect_newline(''.join(lines))
     # One ordered list of (key, value), in the order the template lists them.
     # This was a `Final` tuple of key names plus a dict literal plus the keyword
     # parameters — three places to keep in sync, guarding nothing a caller could
     # violate anyway, since the two keyword-only parameters are the whole API.
-    writes = [('exists', None if exists is None else str(exists).lower()),
-              ('updated', (None if updated is None
-                           else _yaml_double_quote(updated)))]
+    writes = [(key, value) for key, value in (
+        ('exists', None if exists is None else str(exists).lower()),
+        ('updated', (None if updated is None
+                     else _yaml_double_quote(updated))))
+        if value is not None]
+    changed = _write_block_values(lines, span, writes)
+    if changed:
+        _write_yaml_lines(yaml_file, lines)
+    return changed
+
+
+class StoryforgeYamlError(ValueError):
+    """storyforge.yaml cannot be edited as asked. The message names the file
+    or the line and says what to change — raised rather than logged, because
+    the writers' callers asked for a value to be *recorded*, and carrying on
+    would report a record that was never made."""
+
+
+def _read_yaml_lines(yaml_file: str) -> list[str]:
+    """storyforge.yaml as lines with their own endings, for a writer.
+
+    `newline=''` so line endings survive verbatim. The default
+    universal-newline translation reads CRLF as LF and writes LF back,
+    normalizing the *whole* file as a side effect of editing two values. Note
+    this is deliberately the opposite policy from `write_plan`, which *forces*
+    LF for CSVs: the writers edit a file the author wrote, so they preserve what
+    they find, and `cleanup`'s `crlf_line_endings` check reports storyforge.yaml
+    (since #314) rather than anything converting it.
+
+    A file that is not UTF-8 is a `StoryforgeYamlError` naming it, not a bare
+    `UnicodeDecodeError` traceback.
+    """
+    try:
+        with open(yaml_file, newline='', encoding='utf-8') as f:
+            return f.readlines()
+    except UnicodeDecodeError as exc:
+        raise StoryforgeYamlError(
+            f'{yaml_file} is not valid UTF-8 ({exc.reason} at byte '
+            f'{exc.start}), so it cannot be edited. Re-save it as UTF-8.'
+        ) from exc
+
+
+def _write_yaml_lines(yaml_file: str, lines: list[str]) -> None:
+    """Write lines back verbatim — see `_read_yaml_lines` for `newline=''`."""
+    with open(yaml_file, 'w', newline='', encoding='utf-8') as f:
+        f.writelines(lines)
+
+
+def _write_block_values(lines: list[str], span: 'ArtifactBlock',
+                        writes: list[tuple[str, str]]) -> bool:
+    """Set each (key, already-quoted value) among `span`'s direct children.
+
+    The one implementation both writers of storyforge.yaml share
+    (`update_artifact_entry`, `set_top_level_fields`), so their key matching,
+    insertion and line endings cannot drift apart. Returns True if `lines`
+    changed; the caller writes only then, so a no-op does not dirty the file.
+    """
+    end = span.end
+    # An inserted line has to match the file it lands in, or a CRLF project
+    # gains one stray LF line and `cleanup` reports mixed endings. Shared with
+    # every writer of this file so they cannot disagree — see `detect_newline`.
+    newline = detect_newline(''.join(lines))
     changed = False
     for key, value in writes:
-        if value is None:
-            continue
-        result = _set_block_value(lines, start, end, key, value,
-                                  child_indent=child_indent)
+        result = _set_block_value(lines, span.first_child, end, key, value,
+                                  child_indent=span.child_indent)
         if result is None:
             # The key is absent from an otherwise valid block. Insert rather
             # than skip: the caller asked for the value to be recorded, and a
-            # silent no-op here is exactly the shape of the bug above.
+            # silent no-op here is exactly the shape of #276.
             #
             # Terminate the preceding line first. Without this, a file whose
             # last line has no newline gets the new key appended to it —
@@ -738,16 +781,11 @@ def update_artifact_entry(project_dir: str, artifact: str, *,
             # commits. #276's own consequence class, from #276's fix.
             if end and not lines[end - 1].endswith(('\n', '\r')):
                 lines[end - 1] += newline
-                changed = True
-            lines.insert(end, f'{child_indent}{key}: {value}{newline}')
+            lines.insert(end, f'{span.child_indent}{key}: {value}{newline}')
             end += 1
             changed = True
         elif result:
             changed = True
-
-    if changed:
-        with open(yaml_file, 'w', newline='') as f:
-            f.writelines(lines)
     return changed
 
 
@@ -817,19 +855,11 @@ def read_artifact_field(project_dir: str, artifact: str, key: str) -> str:
     `read_yaml_field` reads only two levels: `artifacts.voice_guide.path`
     through it was always '' (#596). Unreadable is absent, as there."""
     try:
-        with open(os.path.join(project_dir, 'storyforge.yaml'), encoding='utf-8') as f:
-            lines = f.read().splitlines()
-    except (OSError, UnicodeDecodeError):
+        lines = _read_yaml_lines(os.path.join(project_dir, 'storyforge.yaml'))
+    except (OSError, StoryforgeYamlError):
         return ''
     block = _artifact_block_span(lines, artifact)
-    if block is None:
-        return ''
-    key_re = re.compile(rf'^{re.escape(block.child_indent)}{re.escape(key)}:\s*(.*)$')
-    for line in lines[block.first_child:block.end]:
-        m = key_re.match(line)
-        if m:
-            return parse_yaml_scalar(m.group(1))
-    return ''
+    return '' if block is None else _direct_key_value(lines, block, key)
 
 
 def _artifact_span_failure(lines: list[str], artifact: str) -> str:
@@ -907,77 +937,124 @@ def _set_block_value(lines: list[str], start: int, end: int, key: str,
     return None
 
 
-def set_top_level_fields(project_dir: str, block: str,
-                         fields: list[tuple[str, str]]) -> bool:
-    """Set direct keys of one top-level block (`production:`), in place.
+def _top_level_block_span(lines: list[str], block: str) -> ArtifactBlock | None:
+    """Locate a top-level block's direct children, or None if it is absent.
 
-    Returns True if the file changed. The sibling of `update_artifact_entry` for
-    a block that is not an `artifacts:` entry, sharing its write discipline:
-    line-scoped (never a whole-file regex — #276), line endings preserved
-    (`newline=''`, `detect_newline`), comments kept, written only on change, and
-    every value double-quoted through `_yaml_double_quote` so it cannot open new
-    YAML. Values carry no `#` — see `_set_block_value` for why that matters.
+    The one definition of where a top-level block ends, shared by
+    `read_top_level_field` and `set_top_level_fields` so the reader and the
+    writer cannot disagree about it (#303 CR-1: the writer kept a column-0
+    comment inside `production:` while `read_yaml_field` stopped there, so a
+    record was written where it could not be read back). It follows YAML: a
+    comment line, at any indent, neither ends a block nor counts as a child,
+    which is the shape the template ships — a partly uncommented `production:`
+    with `#   language: en` lines between live keys. The block ends at the
+    first non-blank, non-comment line at column 0.
 
-    A key is matched only at the block's **own** child indent, read off its
-    first child line, so a same-named key nested deeper (under `cover:`, say) is
-    never rewritten in its place. A key absent from the block is inserted after
-    the block's last content line. A block absent from the file is appended,
-    because the caller is an explicit author action that asked for the values to
-    be recorded, and refusing for want of a header line would leave that action
-    with no way to succeed.
+    `child_indent` is read off the first child line, as `_artifact_block_span`
+    does, and `end` ignores trailing blank and comment lines.
+
+    Raises `StoryforgeYamlError` for a block written as a one-line value
+    (`production: {}`, `production: ~`, `production: null`): its keys cannot be
+    edited in place, and appending a second `production:` block would make the
+    file one a YAML parser rejects or that silently drops the first block.
     """
-    yaml_file = os.path.join(project_dir, 'storyforge.yaml')
-    if not os.path.isfile(yaml_file):
-        raise FileNotFoundError(f'{yaml_file} does not exist')
-    with open(yaml_file, newline='') as f:
-        lines = f.readlines()
-    newline = detect_newline(''.join(lines))
-
-    header = re.compile(rf'^{re.escape(block)}:\s*(?:#.*)?\r?\n?$')
-    top = next((i for i, line in enumerate(lines) if header.match(line)), None)
+    header = re.compile(rf'^{re.escape(block)}:(.*?)\r?\n?$')
+    top = None
+    for i, line in enumerate(lines):
+        m = header.match(line)
+        if not m:
+            continue
+        rest = m.group(1).strip()
+        if rest and not rest.startswith('#'):
+            raise StoryforgeYamlError(
+                f'storyforge.yaml line {i + 1} (`{line.strip()}`) gives '
+                f'`{block}` a one-line value, so its keys cannot be edited in '
+                f'place. Rewrite it as a block: `{block}:` on its own line, '
+                f'then one indented `key: value` per line.')
+        top = i
+        break
     if top is None:
-        if lines and not lines[-1].endswith(('\n', '\r')):
-            lines[-1] += newline
-        lines.append(f'{block}:{newline}')
-        for key, value in fields:
-            lines.append(f'  {key}: {_yaml_double_quote(value)}{newline}')
-        with open(yaml_file, 'w', newline='') as f:
-            f.writelines(lines)
-        return True
-
+        return None
     end = top + 1
     child_indent = ''
     for i in range(top + 1, len(lines)):
         line = lines[i]
-        if not line.strip():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
             continue
         if not line[0].isspace():
-            if line.startswith('#'):
-                continue  # a column-0 comment inside the block does not end it
             break
-        if line.lstrip().startswith('#'):
-            continue
         if not child_indent:
             child_indent = line[:len(line) - len(line.lstrip())]
         end = i + 1
-    child_indent = child_indent or '  '
+    return ArtifactBlock(top + 1, end, child_indent or '  ')
 
-    changed = False
-    for key, value in fields:
-        quoted = _yaml_double_quote(value)
-        result = _set_block_value(lines, top + 1, end, key, quoted,
-                                  child_indent=child_indent)
-        if result is None:
-            if end and not lines[end - 1].endswith(('\n', '\r')):
-                lines[end - 1] += newline
-            lines.insert(end, f'{child_indent}{key}: {quoted}{newline}')
-            end += 1
-            changed = True
-        elif result:
-            changed = True
+
+def _direct_key_value(lines: list[str], span: ArtifactBlock, key: str) -> str:
+    """`key`'s value among `span`'s direct children, or '' when absent.
+
+    Anchored to the block's own child indent, so a same-named key nested
+    deeper (`production.cover.cover_artwork_reviewed`) is never read in its
+    place — the `common.read_yaml_field` gotcha (#303 SF-3).
+    """
+    key_re = re.compile(
+        rf'^{re.escape(span.child_indent)}{re.escape(key)}:\s*(.*)$')
+    for line in lines[span.first_child:span.end]:
+        m = key_re.match(line.rstrip('\r\n'))
+        if m:
+            return parse_yaml_scalar(m.group(1))
+    return ''
+
+
+def read_top_level_field(project_dir: str, block: str, key: str) -> str:
+    """One direct key of a top-level block (`production.cover_artwork`), or ''.
+
+    Reads exactly what `set_top_level_fields` writes: same block boundary,
+    same child indent. Unreadable, absent, or a one-line block is '' — the
+    caller's "not recorded" — never an exception, because readers run on every
+    command; `set_top_level_fields` is where a malformed block is reported.
+    """
+    yaml_file = os.path.join(project_dir, 'storyforge.yaml')
+    try:
+        lines = _read_yaml_lines(yaml_file)
+        span = _top_level_block_span(lines, block)
+    except (OSError, StoryforgeYamlError):
+        return ''
+    return '' if span is None else _direct_key_value(lines, span, key)
+
+
+def set_top_level_fields(project_dir: str, block: str,
+                         fields: list[tuple[str, str]]) -> bool:
+    """Set direct keys of one top-level block (`production:`), in place.
+
+    Returns True if the file changed. Shares `update_artifact_entry`'s core —
+    `_read_yaml_lines`, `_write_block_values`, `_write_yaml_lines` — so it is
+    line-scoped (never a whole-file regex, #276), preserves line endings and
+    comments, writes only on change, and double-quotes every value through
+    `_yaml_double_quote` so it cannot open new YAML. Values carry no `#` — see
+    `_set_block_value` for why that matters.
+
+    A block absent from the file is appended, because the caller is an
+    explicit author action that asked for the values to be recorded. Raises
+    `StoryforgeYamlError` (naming the line or file) for a one-line block or a
+    non-UTF-8 file, and `FileNotFoundError` when there is no storyforge.yaml.
+    """
+    yaml_file = os.path.join(project_dir, 'storyforge.yaml')
+    if not os.path.isfile(yaml_file):
+        raise FileNotFoundError(f'{yaml_file} does not exist')
+    lines = _read_yaml_lines(yaml_file)
+    quoted = [(key, _yaml_double_quote(value)) for key, value in fields]
+    span = _top_level_block_span(lines, block)
+    appended = span is None
+    if span is None:
+        newline = detect_newline(''.join(lines))
+        if lines and not lines[-1].endswith(('\n', '\r')):
+            lines[-1] += newline
+        lines.append(f'{block}:{newline}')
+        span = ArtifactBlock(len(lines), len(lines), '  ')
+    changed = _write_block_values(lines, span, quoted) or appended
     if changed:
-        with open(yaml_file, 'w', newline='') as f:
-            f.writelines(lines)
+        _write_yaml_lines(yaml_file, lines)
     return changed
 
 
