@@ -184,8 +184,8 @@ def main(argv=None):
     for sid in scene_ids:
         sf = os.path.join(project_dir, 'scenes', f'{sid}.md')
         if os.path.isfile(sf):
-            with open(sf) as f:
-                total_words += len(f.read().split())
+            from storyforge.illustrations import read_scene_prose
+            total_words += len(read_scene_prose(sf).split())
     avg_words = max(total_words // max(scene_count, 1), 100)
     cue_cost = 0.0 if args.skip_phase1 else estimate_cost('extraction', scene_count, avg_words, cue_model)
     if timeline_mode == 'batch':

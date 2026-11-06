@@ -35,7 +35,7 @@ from storyforge.git import (
     update_pr_task, has_gh,
 )
 from storyforge.cli import add_scene_filter_args, resolve_filter_args, apply_coaching_override
-from storyforge.illustrations import strip_markers
+from storyforge.illustrations import read_scene_prose, strip_markers
 from storyforge.api import (
     invoke_to_file, extract_text, extract_text_from_file, extract_usage,
     calculate_cost_from_usage, submit_batch, poll_batch, download_batch_results,
@@ -1059,8 +1059,7 @@ def _load_scene_texts(scene_ids, project_dir):
     for sid in scene_ids:
         path = os.path.join(scenes_dir, f'{sid}.md')
         if os.path.isfile(path):
-            with open(path, encoding='utf-8') as f:
-                texts[sid] = f.read()
+            texts[sid] = read_scene_prose(path)
     return texts
 
 
@@ -1289,8 +1288,7 @@ def _avg_word_count(metadata_csv: str, scene_ids: list, scenes_dir: str) -> int:
     for sid in scene_ids:
         sf = os.path.join(scenes_dir, f'{sid}.md')
         if os.path.isfile(sf):
-            with open(sf) as f:
-                total += len(f.read().split())
+            total += len(read_scene_prose(sf).split())
             count += 1
     return (total // count) if count > 0 else 3000
 

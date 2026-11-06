@@ -96,8 +96,8 @@ def _prose(project_dir: str, sid: str) -> str:
     path = os.path.join(project_dir, 'scenes', f'{sid}.md')
     if not os.path.isfile(path):
         return ''
-    with open(path, encoding='utf-8') as f:
-        return f.read().strip()
+    from .illustrations import read_scene_prose
+    return read_scene_prose(path).strip()
 
 
 @dataclass

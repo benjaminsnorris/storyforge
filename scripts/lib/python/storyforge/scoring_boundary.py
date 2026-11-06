@@ -16,6 +16,7 @@ from storyforge.common import (
 )
 from storyforge.costs import log_operation
 from storyforge.elaborate import _read_csv
+from storyforge.illustrations import read_scene_prose
 from storyforge.scoring_state import (
     VALID_BOUNDARY_VERDICTS, append_verdict, get_verdict,
 )
@@ -409,8 +410,7 @@ def _collect_per_brief_vs_draft(
         ])
         upstream = '\n'.join(upstream_parts)
         try:
-            with open(draft_path, encoding='utf-8') as f:
-                downstream = f.read()
+            downstream = read_scene_prose(draft_path)
         except (OSError, UnicodeDecodeError) as e:
             log(f'  [6->7 / {sid}] skip: could not read draft ({e})')
             continue

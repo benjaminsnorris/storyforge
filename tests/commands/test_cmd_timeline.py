@@ -232,6 +232,36 @@ class TestMainCostThreshold:
             main([])
         assert exc_info.value.code == 1
 
+    def test_cost_forecast_word_count_excludes_illustration_markers(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        """#280: the cue forecast's average counts prose words, not markers."""
+        monkeypatch.setattr('storyforge.cmd_timeline.detect_project_root', lambda: project_dir)
+        _patch_interactive(monkeypatch)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        _ensure_scene_files(project_dir)
+        mock_costs.threshold_ok = False
+        seen = []
+
+        def fake_estimate(operation, count, avg_words, model):
+            if operation == 'extraction':
+                seen.append(avg_words)
+            return 0.0
+        monkeypatch.setattr('storyforge.cmd_timeline.estimate_cost', fake_estimate)
+
+        def forecast():
+            with pytest.raises(SystemExit):
+                main(['--scenes', 'act1-sc01'])
+            return seen[-1]
+
+        clean = forecast()
+        path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        with open(path, encoding='utf-8') as f:
+            prose = f.read()
+        markers = ''.join(f'\n![[illus:lf-{i:02d}]]\n' for i in range(5))
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(markers + '\n' + prose)
+        assert forecast() == clean > 100
+
 
 # ============================================================================
 # main — embedded mode

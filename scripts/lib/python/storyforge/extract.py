@@ -16,6 +16,7 @@ from typing import Any
 from .enrich import load_registry_alias_maps, normalize_fields  # noqa: F401
 from .enrich import is_placeholder, normalize_aliases, reduce_boolean, strip_placeholders
 from .common import log
+from .illustrations import read_scene_prose
 from .ledger import is_commitment
 from .prompts import read_yaml_field
 
@@ -36,8 +37,7 @@ def _read_all_scenes(project_dir: str) -> dict[str, str]:
     for fname in sorted(os.listdir(scenes_dir)):
         if fname.endswith('.md'):
             scene_id = fname[:-3]
-            with open(os.path.join(scenes_dir, fname), encoding='utf-8') as f:
-                result[scene_id] = f.read()
+            result[scene_id] = read_scene_prose(os.path.join(scenes_dir, fname))
     return result
 
 
