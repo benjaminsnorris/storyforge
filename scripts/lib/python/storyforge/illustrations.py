@@ -590,9 +590,11 @@ def strip_markers(text: str) -> str:
     in place. The result is byte-identical to the prose before the marker
     landed, for every placement.
 
-    Every prose consumer — word counts, deterministic scorers, revision
-    prompts — must go through this. A marker scored as a sentence perturbs
-    rhythm variance, and a marker counted as a word inflates word_count.
+    Every prose consumer — word counts, deterministic scorers, prompts —
+    must go through this; `read_scene_prose` does it for a scene file. (A
+    revision pass rewrites the file itself; `preserve_markers` restores the
+    markers it drops.) A marker scored as a sentence perturbs rhythm
+    variance, and a marker counted as a word inflates word_count.
     """
     if '![[illus:' not in text:
         return text

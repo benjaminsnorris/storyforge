@@ -164,7 +164,7 @@ Pipeline: Seed → Pitch (Logline → Synopsis → Act-shape) → Spine → Arch
 
 `storyforge illustrate` (refuses GN projects). Invariants that must not break:
 - **Never add anything to `content_html`.** Bookshelf derives highlight offsets from visible text; the marker is stripped and emitted as `illustrations: [{key, after_paragraph}]`. `tests/test_illustrate_cmd.py` asserts byte-identity — don't weaken it. `after_paragraph` counts top-level `<p>` only.
-- **Markers (`![[illus:id]]`) are never prose** — strip them (`illustrations.strip_markers`) before scoring, word counts, or analysis.
+- **Markers (`![[illus:id]]`) are never prose** — read scene text for scoring, word counts, analysis or a prompt through `illustrations.read_scene_prose(path)` (or `strip_markers` / `count_prose_words` on text you already hold). Only writers, assembly, byte comparisons and the marker validator read a scene file raw (docs/history.md, #280).
 - **Canon anchors are verbatim strings** (`## Embeddable block` in `reference/canon/**`), reused identically in every prompt; never revise one a rendered image used.
 - **Plan `status` only moves forward**; staleness is a stated reason (`stale_render_reason`), never a demotion.
 - **The packet (`manuscript/illustration-packet/`) is a render** — regenerated wholesale, never hand-edited. Prompt bodies live in `reference/illustration-prompts/`.
