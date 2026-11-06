@@ -1,6 +1,10 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--tb=short --cov=scripts/lib/python/storyforge --cov-report=term-missing:skip-covered --cov-fail-under=73"
+# Temp is deleted as each passing test ends, and only the last failing run's
+# tree is kept, so repeated runs can't fill the disk (#296).
+tmp_path_retention_count = 1
+tmp_path_retention_policy = "failed"
 
 [tool.coverage.run]
 source = ["scripts/lib/python/storyforge"]
