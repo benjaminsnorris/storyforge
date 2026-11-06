@@ -143,6 +143,13 @@ class GateResult:
     #: on commit (#558): the earlier commitments kept as they were, read from
     #: paragraphs the new prose has unchanged and in place (`steady_facts`)
     steady: list[str] = field(default_factory=list)
+    #: on commit (#599): proposed rows dropped as a reading again of a kept
+    #: (`steady`) fact, `(statement, kept id)`: reported, never silent
+    reread: list[tuple[str, str]] = field(default_factory=list)
+    #: on commit (#599): proposed rows committed as new facts that read much
+    #: like a kept fact of the same subject and type (`_RESTATES`), `(statement,
+    #: kept id)`, for the author to judge: a second fact or a copy
+    restates: list[tuple[str, str]] = field(default_factory=list)
     #: on commit: registry rows (the author's) whose `supersedes`/`depends_on`
     #: names a commitment this version removed (`row → id`): a re-check
     #: replaces only commitments, so the author must fix the link
@@ -1791,23 +1798,36 @@ def _keep_steady(project_dir: str, result: GateResult, old_rows: list[dict[str, 
     re-extraction and counted as changed, 18 re-checks): keep each earlier
     commitment read from a paragraph the prose still has unchanged and in
     place (`steady_facts`) exactly as it was, same id and statement, and
-    drop each proposed row that reads one of them again: its quote lies
-    within that same paragraph, and it states the same fact or its quote
-    shares four words in a row with the kept one's; or (#599) its quote
-    lies within any unchanged paragraph and it has the type and the
-    statement's first words (`extract.statement_opening`) of a kept one: a
-    re-check reads prose that hasn't changed at all, and extraction may
-    quote another sentence for the same fact ("split open and bled", "splits
-    and bleeds"), which would otherwise be added beside the kept fact. A
-    proposed row from a changed paragraph is never matched to a kept fact
-    (#558's second review: a changed paragraph's new fact sharing four
-    words with a kept one was dropped, and nothing was re-checked). Only
-    the changed paragraphs' facts are new readings, so only they can count
-    as changed. A steady
-    fact re-extraction left out is kept too, never dropped silently. Without
-    the earlier prose (no git, nothing recorded) nothing is kept, and
+    drop each proposed row that reads one of them again (one worded
+    otherwise is listed in `result.reread`, logged and reported: never a
+    silent drop). A proposed row reads a kept
+    fact again when its quote lies within one unchanged paragraph and
+    either
+
+    - that is the kept fact's paragraph, and it states the same fact or its
+      quote shares four words in a row with the kept one's (#558); or
+    - (#599) it has the kept fact's subject and type and says nothing the
+      kept statement doesn't, or the kept statement says nothing it doesn't
+      (`_says_the_same`): a re-check reads prose that hasn't changed at all,
+      and extraction may quote another paragraph for a fact the scene has
+      ("Tarren's Hollow had 412 people" read again as "... 412 people
+      living there").
+
+    A row stating the same fact as an earlier commitment that is not kept
+    is never dropped (#599's review, CR-1b): it carries that fact's id
+    (`_carry_ids`), and dropping it would delete the fact and re-check its
+    dependents though its prose never changed. A row from a changed
+    paragraph is never matched to a kept fact (#558's second review: a
+    changed paragraph's new fact sharing four words with a kept one was
+    dropped, and nothing was re-checked). A row kept as new that reads much
+    like a kept fact of its subject and type (`_RESTATES`) is listed in
+    `result.restates` for the author to judge. Only the changed paragraphs'
+    facts are new readings, so only they can count as changed. A steady fact
+    re-extraction left out is kept too, never dropped silently. Without the
+    earlier prose (no git, nothing recorded) nothing is kept, and
     `prose_notes` says so. Runs before the hold-back, which then applies to
     the kept facts too."""
+    from storyforge.common import log
     if not old_rows:
         return
     earlier, why = gated_prose(project_dir, result.scene_id)
@@ -1815,34 +1835,116 @@ def _keep_steady(project_dir: str, result: GateResult, old_rows: list[dict[str, 
         result.prose_notes.append(f'{result.scene_id}: {why}, so every earlier fact the new '
                                   f'reading words differently counts as changed')
         return
-    from storyforge.extract import statement_opening
     where = steady_facts(old_rows, earlier, prose)
     kept = [copy.deepcopy(o) for o in old_rows if o['id'] in where]
     if not kept:
         return
     new_paras = _paragraphs(prose)
     steady = set(_steady_pairs(earlier, prose).values())
-    openings = {(o.get('type') or '', statement_opening(o.get('statement') or ''))
-                for o in kept}
+    # CR-1b: what carries an earlier fact's id is never a re-reading
+    not_kept = {ledger.fact_key(o) for o in old_rows if o['id'] not in where}
 
-    def again(p: dict[str, str]) -> bool:
+    def same_fact(p: dict[str, str], o: dict[str, str]) -> bool:
+        return (_subject(p) == _subject(o) and (p.get('type') or '') == (o.get('type') or '')
+                and _says_the_same(p.get('statement') or '', o.get('statement') or ''))
+
+    def reads_again(p: dict[str, str]) -> dict[str, str] | None:
+        """The kept fact `p` reads again, or None."""
+        if ledger.fact_key(p) in not_kept:
+            return None
         q = p.get('quote') or ''
         at = {j for j, para in enumerate(new_paras) if _quote_spans(q, list(para))}
         if len(at) != 1:
-            return False
+            return None
         j = at.pop()
         if j not in steady:
-            return False
-        opening = statement_opening(p.get('statement') or '')
-        if opening and (p.get('type') or '', opening) in openings:
-            return True   # the same fact read from another sentence (#599)
+            return None
         qw = _words(q)
-        return any(where[o['id']] == j and (
-            ledger.fact_key(p) == ledger.fact_key(o)
-            or _shared_run(qw, _words(o.get('quote') or '')) >= _MIN_QUOTE_WORDS)
-            for o in kept)
-    result.proposed = kept + [p for p in result.proposed if not again(p)]
+        for o in kept:
+            if where[o['id']] == j and (
+                    ledger.fact_key(p) == ledger.fact_key(o)
+                    or _shared_run(qw, _words(o.get('quote') or '')) >= _MIN_QUOTE_WORDS):
+                return o
+        return next((o for o in kept if same_fact(p, o)), None)
+
+    fresh = []
+    for p in result.proposed:
+        o = reads_again(p)
+        if o is None:
+            fresh.append(p)
+            continue
+        if ledger.fact_key(p) == ledger.fact_key(o):
+            continue   # the kept fact word for word: nothing is lost
+        result.reread.append((p.get('statement') or '', o['id']))
+        log(f'  NOTE: {result.scene_id}: not recorded, a reading again of {o["id"]} '
+            f'(unchanged prose): "{_one_line(p.get("statement") or "")[:160]}"')
+    for p in fresh:
+        o = next((o for o in kept if _subject(p) == _subject(o)
+                  and (p.get('type') or '') == (o.get('type') or '')
+                  and _overlap(p.get('statement') or '', o.get('statement') or '')
+                  >= _RESTATES), None)
+        if o is not None:
+            result.restates.append((p.get('statement') or '', o['id']))
+            log(f'  NOTE: {result.scene_id}: recorded as a new fact, but it reads much like '
+                f'{o["id"]}; check it is not a copy: "'
+                f'{_one_line(p.get("statement") or "")[:160]}"')
+    result.proposed = kept + fresh
     result.steady = [o['id'] for o in kept]
+
+
+def _subject(row: dict[str, str]) -> str:
+    return (row.get('subject') or '').strip().casefold()
+
+
+#: Words that carry no fact of their own (#599): left out when two
+#: statements are compared (`_content_words`)
+_FUNCTION_WORDS = frozenset(
+    'a an the and or but nor of to in on at by for from with into onto upon as is are was '
+    'were be been being has have had do does did that this these those it its his her hers '
+    'their theirs him them he she they i you we me my your our us who whom whose which what '
+    'when where while than then so there s t'.split())
+
+#: `_overlap` at or above which a new fact is listed as reading much like a
+#: kept one (`GateResult.restates`). The pilot's (#599): the scab "split open
+#: and bled" / "splits and bleeds a thin line of blood" 0.54; Medon's warning
+#: reworded 0.65; "Telemachus tells Pisistratus ..." 0.58, but its subjects
+#: differ, so it isn't compared. A survey that "marked a temple" / "marked a
+#: well" is 0.71 too: overlap can't tell a rewording from a different fact,
+#: which is why it only lists, and `_says_the_same` decides a drop
+_RESTATES = 0.5
+
+
+def _content_words(statement: str) -> set[str]:
+    """`statement`'s words less `_FUNCTION_WORDS`, lowercased, with a plural
+    or tense ending taken off (-s, -es, -ed, -ing; three letters kept)."""
+    out = set()
+    for w in re.findall(r'[a-z0-9]+', statement.lower()):
+        if w in _FUNCTION_WORDS:
+            continue
+        for end in ('ing', 'ed', 'es', 's'):
+            if w.endswith(end) and not w.endswith('ss') and len(w) - len(end) >= 3:
+                w = w[:-len(end)]
+                break
+        out.add(w)
+    return out
+
+
+def _says_the_same(a: str, b: str) -> bool:
+    """Whether one statement says nothing the other doesn't: the content
+    words of one all in the other's (`_content_words`). Containment, not a
+    similarity score (#599's review): "marked a temple" and "marked a well"
+    share all but one word and are different facts; "had 412 people" and
+    "had 412 people living there" are one. A rewording that changes words
+    ("split open and bled" / "splits and bleeds") is not the same by this
+    test; it is kept, and listed in `restates`."""
+    wa, wb = _content_words(a), _content_words(b)
+    return bool(wa) and bool(wb) and (wa <= wb or wb <= wa)
+
+
+def _overlap(a: str, b: str) -> float:
+    """The content words two statements share, of all they have (Jaccard)."""
+    wa, wb = _content_words(a), _content_words(b)
+    return len(wa & wb) / len(wa | wb) if wa | wb else 0.0
 
 
 def _shared_run(a: str, b: str) -> int:
@@ -2599,6 +2701,16 @@ def _from_reading(f: Finding) -> str:
     return f' [reading {f.reading}]' if f.reading > 1 else ''
 
 
+def reread_lines(result: GateResult) -> list[str]:
+    """#599: the proposed rows dropped as a reading again of a kept fact, and
+    those recorded as new that read much like one, as NOTE lines."""
+    lines = [f'NOTE (not recorded: a reading again of {rid}, from unchanged prose): '
+             f'{_one_line(st)}' for st, rid in result.reread]
+    lines += [f'NOTE (recorded as a new fact, but reads much like {rid}; check it is not a '
+              f'copy): {_one_line(st)}' for st, rid in result.restates]
+    return lines
+
+
 def report_lines(result: GateResult) -> list[str]:
     """The gate's verdict on a scene as one-line strings (log lines, list
     items): everything that stopped the commit, then what is reported
@@ -2682,6 +2794,7 @@ def report_lines(result: GateResult) -> list[str]:
                      f'{len(result.steady)} fact(s)')
     for note in result.prose_notes:
         lines.append(f'NOTE (re-check): {_one_line(note)}')
+    lines += reread_lines(result)
     if result.committed:
         lines.append(f'COMMITTED{" (provisionally: listed " + PENDING_PATH + ")" if result.provisional else ""}: {len(result.proposed)} fact(s)'
                      + (f'; quotes filled: {", ".join(result.quotes_filled)}'
@@ -2999,6 +3112,9 @@ class Recheck:
     spent: float = 0.0
     #: what the caller's run had spent and reserved before this call
     spent_before: float = 0.0
+    #: what the re-checks that passed did not record, or recorded as new that
+    #: reads like a kept fact (`reread_lines`), each `scene: line` (#599)
+    notes: list[str] = field(default_factory=list)
 
 
 def recheck_queue(project_dir: str, skip: set[str] | frozenset[str] = frozenset()) -> list[str]:
@@ -3076,6 +3192,7 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
             run.left = recheck_queue(project_dir, skip)
             return run
         run.passed.append(sid)
+        run.notes += [f'{sid}: {line}' for line in reread_lines(result)]
 
 
 def _writer(project_dir: str, scene_id: str) -> str:

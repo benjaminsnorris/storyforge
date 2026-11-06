@@ -2559,36 +2559,149 @@ class TestSteadyParagraphs:
         assert result.committed
         assert ledger.file_problems(ledger.ledger_path(project_dir)) == []
 
-    def test_a_recheck_does_not_add_a_reworded_fact_the_scene_has(
-            self, project_dir, tmp_path):
-        """'The scab ... split open and bled' read again as 'splits and
-        bleeds', quoted from another paragraph: the same fact, not a second."""
+    TAPPED = 'She tapped the empty space on the map'
+
+    def _statements(self, project_dir):
+        return {r['statement']: r['id'] for r in self._mine(project_dir)}
+
+    def test_a_recheck_drops_a_reading_again_that_says_nothing_new_and_says_so(
+            self, project_dir, tmp_path, capsys):
+        """A fact the scene has, read again from another unchanged paragraph
+        in words that add nothing, is not a second fact; the drop is
+        reported and logged (#599's review, T-2)."""
         self._git(project_dir)
         old = self._first(project_dir, tmp_path)['tarrens-hollow']
-        reworded = _commitment(subject='tarrens-hollow',
-                               statement="Tarren's Hollow had 412 people living there",
-                               quote=self.LIVES)
-        result = _gate(project_dir, tmp_path, [reworded, self._temple()], command='recheck')
+        again = _commitment(subject='tarrens-hollow',
+                            statement="Tarren's Hollow had 412 people living there",
+                            quote=self.LIVES)
+        result = _gate(project_dir, tmp_path, [again, self._temple()], command='recheck')
         self._recheck_ok(project_dir, result)
         mine = [r for r in self._mine(project_dir) if r['subject'] == 'tarrens-hollow']
         assert mine == [old]
         assert result.changed == [] and result.recheck == []
+        assert result.reread == [(again['statement'], old['id'])]
+        assert any(line.startswith(f'NOTE (not recorded: a reading again of {old["id"]}')
+                   and 'living there' in line for line in gate.report_lines(result))
+        assert f'a reading again of {old["id"]}' in capsys.readouterr().out
 
-    def test_a_recheck_adds_a_different_fact_beginning_alike_under_a_new_id(
+    def test_a_recheck_keeps_a_reworded_fact_under_a_new_id_and_lists_it(
             self, project_dir, tmp_path):
-        """'Telemachus tells Pisistratus that his father ...': a different
-        fact whose statement begins as one the scene has gets the next id."""
+        """The pilot's scab ("split open and bled" / "splits and bleeds"):
+        words changed, so containment can't call it the same; it is kept as a
+        new fact with the next id and listed for the author."""
         self._git(project_dir)
         old = self._first(project_dir, tmp_path)['tarrens-hollow']
-        other = _commitment(subject='dorren-hayle', type='knowledge', mutable='state',
+        reworded = _commitment(subject='tarrens-hollow',
+                               statement="Tarren's village had 412 people",
+                               quote=self.LIVES)
+        result = _gate(project_dir, tmp_path, [reworded, self._temple()], command='recheck')
+        self._recheck_ok(project_dir, result)
+        assert self._statements(project_dir)[reworded['statement']] not in (old['id'], '')
+        assert result.reread == [] and result.restates == [(reworded['statement'], old['id'])]
+        assert any('reads much like ' + old['id'] in line for line in gate.report_lines(result))
+
+    def test_a_recheck_keeps_a_fact_of_another_subject_beginning_alike(
+            self, project_dir, tmp_path):
+        """The pilot's case 3 ("Telemachus tells Pisistratus that his father
+        ...", subjects telemachus and pisistratus): same type, same opening,
+        another subject: a fact of its own, under the next id (#599's
+        review, CR-1 (a): it was dropped and the gate said committed)."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        other = _commitment(subject='dorren-hayle',
                             statement="Tarren's Hollow had 412 people, Dorren recalls",
                             quote=self.LIVES)
+        assert other['type'] == old['type']
         # the kept fact not read again: the new one is the first to begin so
         result = _gate(project_dir, tmp_path, [other, self._temple()], command='recheck')
         self._recheck_ok(project_dir, result)
-        ids = {r['statement']: r['id'] for r in self._mine(project_dir)}
+        ids = self._statements(project_dir)
         assert ids[old['statement']] == old['id']
         assert ids[other['statement']] == old['id'] + '-2'
+        assert result.reread == [] and result.restates == []
+
+    def test_a_recheck_keeps_a_different_fact_of_the_same_subject(
+            self, project_dir, tmp_path):
+        """CR-1 (b): "... the old survey marked a well" is not "... marked a
+        temple", though all but one word is the same."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        well = self._temple('Dorren knows the old survey marked a well')
+        well['quote'] = self.LIVES
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                               self._temple(), well], command='recheck')
+        self._recheck_ok(project_dir, result)
+        assert well['statement'] in self._statements(project_dir)
+        assert result.reread == []
+
+    def test_a_redraft_keeps_a_different_fact_from_another_unchanged_paragraph(
+            self, project_dir, tmp_path):
+        """CR-1 (c): a redraft's new reading of an unchanged paragraph that
+        says something the kept facts don't is recorded."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        self._edit(project_dir, 'She returned to the new map. Nothing.',
+                   'She returned to the new map. Nothing at all.')
+        well = self._temple('Dorren knows the old survey marked a well')
+        well['quote'] = self.TAPPED
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                               self._temple(), well], command='redraft')
+        assert result.committed
+        assert well['statement'] in self._statements(project_dir)
+
+    def test_a_redraft_drops_the_same_fact_from_another_unchanged_paragraph(
+            self, project_dir, tmp_path):
+        """CR-1 (c), decided by #558's rule: an unchanged paragraph's facts
+        are kept as they were, and only a changed paragraph's are new
+        readings. The same fact read from another unchanged paragraph is a
+        reading again, in a redraft as in a re-check, and reported."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)
+        self._edit(project_dir, 'She returned to the new map. Nothing.',
+                   'She returned to the new map. Nothing at all.')
+        again = self._temple('Dorren knows that the old survey marked a temple there')
+        again['quote'] = self.TAPPED
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                               self._temple(), again], command='redraft')
+        assert result.committed
+        assert again['statement'] not in self._statements(project_dir)
+        assert result.reread == [(again['statement'], old['dorren-hayle']['id'])]
+
+    def test_an_earlier_fact_not_kept_is_never_dropped_as_a_reading_again(
+            self, project_dir, tmp_path):
+        """CR-1b: the census fact's paragraph changed, so it isn't kept; the
+        redraft reads it again from the unchanged temple paragraph (its
+        quote shares four words with the kept temple fact's). Dropping that
+        row would delete the census fact and re-check what depends on it,
+        though the fact is still there."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)
+        self._edit(project_dir, 'should have been exactly here',
+                   'should have been right here')
+        census = _commitment(subject='tarrens-hollow', quote=self.TEMPLE)
+        result = _gate(project_dir, tmp_path, [census, self._temple()], command='redraft')
+        assert result.committed
+        assert self._statements(project_dir)[census['statement']] == \
+            old['tarrens-hollow']['id']
+        assert old['tarrens-hollow']['id'] not in result.changed
+        assert result.reread == []
+
+    def test_a_reworded_copy_quoted_across_paragraphs_is_kept_and_listed(
+            self, project_dir, tmp_path):
+        """T-4: a reading whose quote lies in no one paragraph can't be
+        placed in unchanged prose, so it is never dropped as a reading
+        again; when it reads much like a kept fact it is listed, so the
+        copy is the author's to see. Kept rather than dropped: dropping on
+        the statement alone would drop facts from changed prose too."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        across = _commitment(subject='tarrens-hollow',
+                             statement="Tarren's Hollow had 412 people counted",
+                             quote='should have been exactly here. She tapped the empty space')
+        result = _gate(project_dir, tmp_path, [across, self._temple()], command='recheck')
+        self._recheck_ok(project_dir, result)
+        assert self._statements(project_dir)[across['statement']] == old['id'] + '-2'
+        assert result.restates == [(across['statement'], old['id'])]
 
     def test_a_changed_paragraphs_fact_beginning_as_a_kept_one_gets_a_new_id(
             self, project_dir, tmp_path):

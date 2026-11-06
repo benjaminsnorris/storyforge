@@ -1017,17 +1017,12 @@ def unplaced_rows(rows, order):
             and r['scene_id'].strip() not in order]
 
 
-def statement_opening(statement: str) -> str:
-    """A statement's first words as a commitment id has them ('' for none):
-    two statements with the same opening get the same id but for a suffix."""
-    return '-'.join(re.sub(r'[^a-z0-9]+', '-', statement.lower()).strip('-').split('-')[:6])
-
-
 def commitment_id(scene_id: str, statement: str, taken: set[str] | frozenset[str]) -> str:
     """`{scene_id}--{first words of the statement}`, unique in `taken` (the
     ledger's ids): `-2`, `-3`, ... on a collision (#599: a reworded fact, or
     a different fact beginning alike, has the same opening)."""
-    base = f'{scene_id}--{statement_opening(statement)}'.rstrip('-')
+    words = re.sub(r'[^a-z0-9]+', '-', statement.lower()).strip('-').split('-')
+    base = f'{scene_id}--{"-".join(words[:6])}'.rstrip('-')
     rid, n = base, 2
     while rid in taken:
         rid, n = f'{base}-{n}', n + 1
