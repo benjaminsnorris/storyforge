@@ -2567,8 +2567,9 @@ class StyleReference(TypedDict):
     dangling_symlink: str
     #: Hex sha256 of the artwork's bytes (through any symlink), or '' if it
     #: could not be read. A content digest, not an mtime: an mtime belongs to
-    #: the working copy, so a fresh clone or a `cp` cleared the old check and a
-    #: `touch` raised it, with nothing about the art changing (#303).
+    #: the working copy, so a fresh clone, a `cp` or a `touch` (all stamping
+    #: now) cleared the old check, and restoring an old date raised it, with
+    #: nothing about the art changing (#303).
     digest: str
     #: `production.cover_artwork_sha256` as recorded, '' when absent.
     reviewed_digest: str
@@ -3084,9 +3085,15 @@ def run_accept_style_reference(project_dir: str, dry_run: bool) -> int:
             f'keys are not where the reader looks. Check the `production:` '
             f'block by hand.')
         return 1
+    # SF-6: the record is a canon *date*, like every other canon staleness
+    # check here (`stale_render_reason`, the reference chain), so an edit that
+    # leaves the newest `canon_updated` where it is cannot re-raise it. Said
+    # at the moment of recording, where it can change what the author does.
     log(f'Recorded that `{style["path"]}` was reviewed against the canon as of '
-        f'{canon_cutoff} ({record}). The staleness warning returns if the canon '
-        f'is updated past that date or the artwork\'s bytes change.')
+        f'{canon_cutoff} ({record}). The staleness warning returns when the '
+        f'newest `canon_updated` moves off {canon_cutoff} or the artwork\'s '
+        f'bytes change — so when you edit canon later, update that file\'s '
+        f'`canon_updated`, or the edit will not re-raise it.')
     # Re-resolved from disk rather than assumed: the record is only as good as
     # what the reader now makes of it, and any warning unrelated to the canon
     # is still the author's to fix.

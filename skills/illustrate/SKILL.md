@@ -270,10 +270,10 @@ The cover is staleness-checked, and never *excluded* for it, because dropping it
 So the check is the author's recorded review: `production.cover_artwork_sha256` (the bytes they looked at) and `production.cover_artwork_reviewed` (the newest `canon_updated` they looked at them against). `storyforge illustrate --accept-style-reference` writes both; nothing else does. The WARNING fires when:
 
 - no review is recorded yet (the first time a book has both a cover and dated canon);
-- the canon has been updated **after** the recorded date;
+- the newest `canon_updated` is no longer the recorded date — updated after the review, or moved earlier (a date corrected, the newest canon file removed);
 - the art's bytes no longer match the recorded digest — replaced, re-exported, or `production.cover_artwork` pointed at a different file. The acknowledgement is of specific bytes, not of a filename.
 
-No file date is read, so a fresh clone, a copy, or a `touch` neither clears nor raises it.
+No file date is read, so a fresh clone, a copy, or a `touch` neither clears nor raises it. The canon side **is** a date, as in every canon staleness check: an edit that leaves the newest `canon_updated` unchanged — a second edit the same day, or a file whose date you didn't bump — does not re-raise it. When you edit canon, update that file's `canon_updated`.
 
 **When you see it, do the review — don't just run the command.** Open the cover beside the canon files whose `canon_updated` is at or after the recorded date (or all of `reference/canon/` the first time), and say what you see: does the art still carry the palette, the register, and every anchor the canon now states? Then ask the author. If they agree the two still match — or the canon was written from this art and the change was elsewhere — run:
 
@@ -281,7 +281,7 @@ No file date is read, so a fresh clone, a copy, or a `touch` neither clears nor 
 [plugin_path]/storyforge illustrate --accept-style-reference
 ```
 
-_(No API calls. Writes two keys under `production:` in `storyforge.yaml`; `--dry-run` shows them first.)_ Commit it with a message saying what was reviewed. If the art and the canon disagree, the fix is the art (re-render it, or point `production.cover_artwork` at art that matches) or the canon — never the acknowledgement. Recording a review the author did not do is exactly the silent pass this check exists to prevent.
+_(No API calls. Writes two keys under `production:` in `storyforge.yaml`, then reads them back and fails unless the review now reads as current; `--dry-run` shows them first. Run it on its own or before `--prompts`/`--package` — it cannot be combined with `--diagnose`, and if it refuses, nothing after it runs.)_ It refuses while any canon file lacks a usable `canon_updated` (it names them): a review cannot be recorded against canon that has no date, and edits to such a file could never re-raise the check. Date those files first. Commit it with a message saying what was reviewed. If the art and the canon disagree, the fix is the art (re-render it, or point `production.cover_artwork` at art that matches) or the canon — never the acknowledgement. Recording a review the author did not do is exactly the silent pass this check exists to prevent.
 
 Two more cases get their own warning, and both mean the check did not run rather than that it passed: no canon file carries a parseable `canon_updated`, and the file could not be read. Unknown freshness is not freshness, and `--accept-style-reference` refuses in both — there is nothing to record. A file an image model cannot read — an SVG compositing source, say — is warned about and still listed, because the one reference that is sometimes the only one is never dropped silently; recording a review does not clear that warning.
 

@@ -3073,8 +3073,8 @@ def test_a_declared_path_that_does_not_exist_with_no_convention(in_project):
 # and the cover is often what canon was written *from*, so on a real book whose
 # cover was supplied from outside the pipeline the check fired on every run with
 # no clearing action: it could not be re-rendered and nothing newer existed. And
-# an mtime is the working copy's, not the art's — a clone cleared it, a touch
-# raised it. The check stays; the verdict is now the author's recorded review of
+# an mtime is the working copy's, not the art's — a clone, `cp` or `touch`
+# cleared it, restoring an old date raised it. The check stays; the verdict is now the author's recorded review of
 # specific bytes against a specific canon date.
 # ----------------------------------------------------------------------------
 
@@ -3568,6 +3568,35 @@ def test_accept_names_an_unwritable_yaml(in_project, capsys):
     out = capsys.readouterr().out
     assert 'storyforge.yaml is not valid UTF-8' in out
     assert 'Nothing recorded' in out
+
+
+def test_accept_says_a_canon_edit_must_move_canon_updated(in_project, capsys):
+    """#303 SF-6: the record is the canon's date, like every canon staleness
+    check, so an edit that leaves the newest `canon_updated` in place is
+    invisible. Said where it can change what the author does."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _style_ref(in_project)
+    _accept_style_reference(in_project)
+    out = capsys.readouterr().out
+    assert "update that file's `canon_updated`" in out
+
+
+def test_a_canon_edit_that_keeps_its_date_is_the_documented_limit(in_project):
+    """Pins SF-6's chosen behaviour: same newest date, same verdict — and
+    bumping the date is what re-raises it."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _style_ref(in_project)
+    _accept_style_reference(in_project)
+    _write_entity_canon(in_project, 'characters', 'leo', 'Eleven years old.',
+                        canon_updated='2026-07-20')
+    assert cmd_illustrate.resolve_style_reference(in_project)['review'] == \
+        'current'
+    _write_entity_canon(in_project, 'characters', 'leo', 'Eleven years old.',
+                        canon_updated='2026-07-21')
+    assert cmd_illustrate.resolve_style_reference(in_project)['review'] == \
+        'canon_changed'
 
 
 def test_accepting_does_not_clear_unrelated_warnings(in_project, capsys):
