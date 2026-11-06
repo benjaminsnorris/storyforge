@@ -619,6 +619,24 @@ class TestMigrateFiles:
         assert not os.path.isfile(os.path.join(ref, 'commitments.csv'))
         assert ledger.legacy_files(ref) == list(ledger.LEGACY_FILES)
 
+    def test_rows_the_ledger_would_refuse_stop_and_change_nothing(
+            self, project_dir, monkeypatch):
+        """#599's review (TD-5, T-5): the migration writes through the same
+        id checks as every other ledger write."""
+        ref = _legacy_ref(project_dir)
+        real = ledger.migration_blockers
+
+        def doubled(ref_dir):
+            migration, problems = real(ref_dir)
+            migration.rows.append(dict(migration.rows[0]))
+            return migration, problems
+        monkeypatch.setattr(ledger, 'migration_blockers', doubled)
+        result = ledger.migrate_files(ref)
+        assert result.status == 'stopped'
+        assert any('would be on 2 rows' in p for p in result.problems)
+        assert not os.path.isfile(os.path.join(ref, 'commitments.csv'))
+        assert ledger.legacy_files(ref) == list(ledger.LEGACY_FILES)
+
     def test_dry_run_changes_nothing(self, project_dir):
         ref = _legacy_ref(project_dir)
         result = ledger.migrate_files(ref, dry_run=True)
@@ -743,6 +761,72 @@ class TestFileProblems:
 
     def test_the_fixture_has_none(self, project_dir):
         assert ledger.file_problems(ledger.ledger_path(project_dir)) == []
+
+    @pytest.mark.parametrize('ids, needle', [
+        (['a', 'a'], "id 'a' would be on 2 rows \\(from s1, s2\\)"),
+        ([''], 'a row of s1 has no id: "fact 0"'),
+        (['a '], "id 'a ' \\(s1\\) has surrounding whitespace"),
+    ])
+    def test_save_never_writes_a_ledger_load_refuses(self, project_dir, ids, needle):
+        """#599: a re-check wrote an id on two rows, and every later command
+        then stopped. The write is refused instead, and nothing written."""
+        from storyforge import audit
+        path = ledger.ledger_path(project_dir)
+        rows = ledger.load(project_dir)
+        before = open(path, encoding='utf-8').read()
+        log = os.path.join(project_dir, audit.LOG_PATH)
+        logged = open(log, encoding='utf-8').read() if os.path.isfile(log) else None
+        extra = [dict(rows[0], id=rid, statement=f'fact {n}', scene_id=f's{n + 1}')
+                 for n, rid in enumerate(ids)]
+        with pytest.raises(ledger.LedgerError, match='not written \\(test\\)') as e:
+            ledger.save(project_dir, rows + extra, command='test')
+        assert 'line' not in str(e.value)   # SF-4: no line of a file never written
+        with pytest.raises(ledger.LedgerError, match=needle):
+            ledger.save(project_dir, rows + extra, command='test')
+        assert open(path, encoding='utf-8').read() == before
+        assert (open(log, encoding='utf-8').read() if os.path.isfile(log) else None) == logged
+        ledger.load(project_dir)
+
+    def test_a_save_with_a_breaking_cell_writes_and_logs_nothing(self, project_dir):
+        """T-3: the cell is refused before the audit log is touched."""
+        from storyforge import audit
+        path = ledger.ledger_path(project_dir)
+        rows = ledger.load(project_dir)
+        before = open(path, encoding='utf-8').read()
+        log = os.path.join(project_dir, audit.LOG_PATH)
+        snap = os.path.join(project_dir, audit.SNAPSHOT_PATH)
+        seen = [open(f, encoding='utf-8').read() if os.path.isfile(f) else None
+                for f in (log, snap)]
+        with pytest.raises(ValueError, match='holds a "\\|"'):
+            ledger.save(project_dir, rows + [dict(rows[0], id='x', mutable='a|b')],
+                        command='test')
+        assert open(path, encoding='utf-8').read() == before
+        assert [open(f, encoding='utf-8').read() if os.path.isfile(f) else None
+                for f in (log, snap)] == seen
+
+    def test_a_write_that_fails_part_way_leaves_the_file_as_it_was(
+            self, tmp_path, monkeypatch):
+        """T-6: written to a temporary file and moved over the ledger, so a
+        full disk mid-write never leaves it truncated."""
+        path = str(tmp_path / 'commitments.csv')
+        write_ledger(path, [_row('a')])
+        before = open(path, encoding='utf-8').read()
+
+        def full(*a, **k):
+            raise OSError(28, 'No space left on device')
+        monkeypatch.setattr(ledger.os, 'replace', full)
+        with pytest.raises(OSError, match='No space'):
+            write_ledger(path, [_row('a'), _row('b')])
+        assert open(path, encoding='utf-8').read() == before
+        assert os.listdir(tmp_path) == ['commitments.csv']   # no temporary file left
+
+    def test_a_row_that_would_break_the_file_writes_nothing(self, tmp_path):
+        path = str(tmp_path / 'commitments.csv')
+        write_ledger(path, [_row('a')])
+        before = open(path, encoding='utf-8').read()
+        with pytest.raises(ValueError):
+            write_ledger(path, [_row('a'), _row('b|c')])
+        assert open(path, encoding='utf-8').read() == before
 
 
 class TestCommitmentsAndRegistry:

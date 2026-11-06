@@ -1767,7 +1767,8 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
     from storyforge.elaborate import get_scene
     from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps
     from storyforge.extract import (COMMITMENT_PROBLEMS, COMMITMENTS_SCHEMA,
-                                    MAX_KNOWN_COMMITMENTS, build_commitments_prompt,
+                                    MAX_KNOWN_COMMITMENTS, MISQUOTE, NO_QUOTE,
+                                    build_commitments_prompt,
                                     commitment_rows, known_for_scene,
                                     parse_commitments_response, unplaced_rows)
 
@@ -1793,6 +1794,10 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                     and r.get('resolves', '').strip() in order:
                 r['resolves'] = ''
     done = {r['scene_id'] for r in rows if r.get('introduced_by') == ledger.COMMITMENTS_PASS}
+    # an id a link names, where it is or not, is never minted again (#599's
+    # review, TD-1): the link would land on a different fact
+    from storyforge.audit import brief_fact_ids
+    linked = ledger.linked_ids(rows) | brief_fact_ids(project_dir)
     problems = {kind: [] for kind in COMMITMENT_PROBLEMS}
     unplaced = unplaced_rows(rows, order)
     if unplaced and not dry_run:
@@ -1858,7 +1863,8 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
             _log_api_usage(persistence_log, 'extract-persistence', scene_id, model, project_dir)
         new = commitment_rows(verdict.kept, scene_id, scene_text, rows, known, recorded,
                               subjects, ledger.COMMITMENTS_PASS, problems,
-                              own_writers=(ledger.COMMITMENTS_PASS,))
+                              own_writers=(ledger.COMMITMENTS_PASS,),
+                              reserved=linked)
         rows.extend(new)
         written += len(new)
         dropped += len(verdict.dropped)
@@ -1869,8 +1875,8 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         for entry, why in verdict.dropped:
             log(f'    not recorded: {entry["statement"][:160]} ({why[:120]})')
 
-    for kind, what in (('quote', 'quote(s) not found verbatim in their scene'),
-                       ('no quote', 'commitment(s) with no quote'),
+    for kind, what in ((MISQUOTE, 'quote(s) not found verbatim in their scene'),
+                       (NO_QUOTE, 'commitment(s) with no quote'),
                        ('subject', 'subject(s) not a character or location id, kept as '
                                    'written (an object has no registry)'),
                        ('supersedes', '"supersedes" naming no earlier commitment, dropped'),

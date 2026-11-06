@@ -212,7 +212,7 @@ def load_dashboard_data(project_dir: str, *, strict: bool = False) -> dict:
     locations_csv = os.path.join(project_dir, 'reference/locations.csv')
     values_csv = os.path.join(project_dir, 'reference/values.csv')
     mice_threads_csv = os.path.join(project_dir, 'reference/mice-threads.csv')
-    structural_csv = os.path.join(project_dir, 'working/scores/structural-latest.csv')
+    from storyforge.structural import current_structural_rows
     repetition_csv = os.path.join(project_dir, 'working/scores/latest/repetition-latest.csv')
     fidelity_csv = os.path.join(project_dir, 'working/scores/latest/fidelity-scores.csv')
     fidelity_rationale_csv = os.path.join(project_dir, 'working/scores/latest/fidelity-rationale.csv')
@@ -290,7 +290,8 @@ def load_dashboard_data(project_dir: str, *, strict: bool = False) -> dict:
         'narrative_rationales': csv_to_records(narrative_rationale_csv),
         'fidelity_scores': csv_to_records(fidelity_csv),
         'fidelity_rationales': csv_to_records(fidelity_rationale_csv),
-        'structural_scores': csv_to_records(structural_csv),
+        # the saved score when it is current, else computed now, unsaved (#600)
+        'structural_scores': current_structural_rows(project_dir),
         'repetition_scores': csv_to_records(repetition_csv),
         'brief_quality': brief_quality,
         'project': {

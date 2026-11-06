@@ -3,6 +3,7 @@ The API is mocked at `api._api_request`: a request with tools is the
 checker, one whose schema asks for `verdicts` the persistence check, any
 other extraction."""
 
+import copy
 import json
 import os
 from unittest.mock import patch
@@ -481,41 +482,55 @@ class TestRecheck:
         assert gate.pending(project_dir)[self.LATER]['reason'] == 'its own problem'
 
     def test_carried_ids_and_fresh_ids_never_collide(self):
+        # extraction's ids never repeat an old one (`_extract`'s `reserved`)
         old = [{'id': 's--b', 'subject': '', 'type': 'world', 'statement': 'B', 'scene_id': 's'}]
-        proposed = [{'id': 's--b', 'subject': '', 'type': 'world', 'statement': 'A'},
-                    {'id': 's--b-2', 'subject': '', 'type': 'world', 'statement': 'B',
-                     'supersedes': 's--b'}]
-        gate._carry_ids(proposed, old, [], 's')
+        proposed = [{'id': 's--b-2', 'subject': '', 'type': 'world', 'statement': 'A'},
+                    {'id': 's--b-3', 'subject': '', 'type': 'world', 'statement': 'B',
+                     'supersedes': 's--b-2'},
+                    {'id': 's--c', 'subject': '', 'type': 'world', 'statement': 'C',
+                     'depends_on': 's--b-3'}]
+        gate._carry_ids(proposed, old, [])
         ids = [p['id'] for p in proposed]
-        assert ids[1] == 's--b' and ids[0] not in ('s--b', 's--b-2') and len(set(ids)) == 2
-        assert proposed[1]['supersedes'] == ids[0]   # it meant the first proposed row
+        assert ids == ['s--b-2', 's--b', 's--c']
+        assert proposed[1]['supersedes'] == 's--b-2'   # it meant the first proposed row
+        assert proposed[2]['depends_on'] == 's--b'     # follows its row's carried id
 
     def test_a_new_row_never_takes_a_kept_rows_id(self):
         """Beowulf B-034: a steady fact kept with its id, and a new fact from
         a changed paragraph that extraction gave the same id (the statements
         begin alike), both came out of the gate as
         'scyld-ship-given-to-sea--scyld-came-to-the-danes-as': the ledger
-        then wouldn't load."""
+        then wouldn't load. Since #599 extraction mints it `-2` (the old ids
+        are reserved) and `_carry_ids` leaves both ids as they are."""
         kept = {'id': 's--scyld-came', 'subject': 'scyld', 'type': 'trait',
                 'statement': 'Scyld came as a foundling', 'scene_id': 's'}
-        new = {'id': 's--scyld-came', 'subject': 'scyld', 'type': 'physical',
+        new = {'id': 's--scyld-came-2', 'subject': 'scyld', 'type': 'physical',
                'statement': 'Scyld came in an unmanned boat'}
         proposed = [dict(kept), new]
-        gate._carry_ids(proposed, [kept], [], 's')
-        assert proposed[0]['id'] == 's--scyld-came'
-        assert proposed[1]['id'] != 's--scyld-came'
+        gate._carry_ids(proposed, [kept], [kept['id']])
+        assert [p['id'] for p in proposed] == ['s--scyld-came', 's--scyld-came-2']
+
+    def test_two_kept_rows_stating_one_fact_keep_their_own_ids(self):
+        """A kept row keeps its id even when an earlier kept row states the
+        same fact (a ledger with the fact twice): renaming it would break
+        the links to it."""
+        a = {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'A', 'scene_id': 's'}
+        b = dict(a, id='s--a-again')
+        proposed = [dict(a), dict(b)]
+        gate._carry_ids(proposed, [a, b], [a['id'], b['id']])
+        assert [p['id'] for p in proposed] == ['s--a', 's--a-again']
 
     def test_a_new_row_sharing_a_kept_id_keeps_links_to_the_kept_one(self):
         kept = {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'A',
                 'scene_id': 's'}
         proposed = [dict(kept),
-                    {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'C'},
+                    {'id': 's--a-2', 'subject': '', 'type': 'world', 'statement': 'C'},
                     {'id': 's--d', 'subject': '', 'type': 'world', 'statement': 'D',
-                     'depends_on': 's--a'}]
-        gate._carry_ids(proposed, [kept], [], 's')
+                     'depends_on': 's--a-2'}]
+        gate._carry_ids(proposed, [kept], [kept['id']])
         assert len({p['id'] for p in proposed}) == 3
         # extraction's link names its own row, never the kept one
-        assert proposed[2]['depends_on'] == proposed[1]['id']
+        assert proposed[2]['depends_on'] == proposed[1]['id'] == 's--a-2'
 
     def _recheck(self, project_dir, tmp_path, findings=()):
         def fake(path, body, **k):
@@ -1566,6 +1581,18 @@ class TestSecondFixRound(_FixRounds):
         assert out.prose == 'v1' and out.result is r1 and len(dirs) == 3
         assert out.notes[0].startswith('the check after fix round 2 failed (cut off)')
 
+    def test_a_refused_ledger_write_after_round_two_says_so(self, monkeypatch, tmp_path):
+        """SF-4: a refused write after a later round was reported as a
+        failed check."""
+        r1 = self._result('b')
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), r1,
+                                  gate.LedgerWriteRefused('s: ledger write refused: x')],
+                                 [('v1', []), ('v2', [])])
+        assert out.prose == 'v1' and out.result is r1
+        assert out.notes[0].startswith('the ledger write after fix round 2 was refused '
+                                       '(s: ledger write refused: x)')
+
     def test_a_first_round_error_still_carries_the_first_run(self, monkeypatch, tmp_path):
         first = self._result('a')
         with pytest.raises(gate.GateError) as e:
@@ -1630,6 +1657,406 @@ class TestSecondFixRound(_FixRounds):
         assert '- "eight days" became "five days"' in prompt
         assert "don't guess again" in prompt and 'change the rest' in prompt
         assert '## Earlier fixes' not in gate.build_fix_prompt('s', 'Prose.', ['x'])
+
+
+class TestReextractAMisquote(_FixRounds):
+    """#598 (Telemachy, 2026-11-05): a fix's re-check failed only on
+    extraction's quote ("she would sit in his father's seat" for the prose's
+    "he"). The fix edits prose, so nothing could repair it; the scene
+    failed, and `write --keep-going` stopped the run with 18 scenes left. A
+    second extraction of the same prose passed."""
+
+    SAID = "she would sit in his father's seat"
+
+    def _misquote(self, *tags, kind='quote', fact='a-fact', quote=SAID):
+        r = self._result(*tags)
+        rid = f'{SCENE}--{fact}'
+        r.problems = {kind: [f'{SCENE}: {rid}']}
+        r.proposed = [{'id': rid, 'quote': '' if kind == 'no quote' else quote}]
+        return r
+
+    def test_a_recheck_failing_only_on_a_misquote_extracts_again_and_passes(
+            self, monkeypatch, tmp_path, capsys):
+        e1 = [{'find': 'a', 'replace': 'b', 'problem': 1}]
+        out, dirs, seen = self._run(monkeypatch, tmp_path,
+                                    [self._result('a'), self._misquote(), self._result()],
+                                    [('v1', e1)])
+        logs = out.log_dir
+        assert dirs == [logs, os.path.join(logs, 'recheck'), os.path.join(logs, 'reextract')]
+        assert out.result.passed and out.prose == 'v1'
+        assert len(out.rounds) == 1 and len(seen) == 1   # no fix was spent on it
+        said = capsys.readouterr().out
+        # SF-3 (#602's review): the fact, what was quoted, and what re-runs
+        assert (f'{SCENE}: the extractor misquoted the prose ({SCENE}--a-fact: "{self.SAID}" '
+                f'is not in the scene); gating the same prose again (extraction and the '
+                f'check), not sending it to the fix' in said)
+        assert out.reextraction == gate.Reextraction(
+            [f'{SCENE}--a-fact: "{self.SAID}" is not in the scene'], gate.REGATE_PASSED)
+        assert out.reextraction.summary().endswith(
+            'so the same prose was gated again (extraction and the check): it passed')
+
+    def test_a_misquote_after_the_last_round_extracts_again(self, monkeypatch, tmp_path):
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), self._result('b'), self._misquote(),
+                                  self._result()],
+                                 [('v1', [{'find': 'a', 'replace': 'b'}]),
+                                  ('v2', [{'find': 'b', 'replace': 'c'}])])
+        logs = out.log_dir
+        assert dirs[-1] == os.path.join(logs, 'reextract') and len(dirs) == 4
+        assert out.result.passed and out.prose == 'v2'
+
+    def test_a_missing_quote_is_the_extractors_too(self, monkeypatch, tmp_path):
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), self._misquote(kind='no quote'),
+                                  self._result()],
+                                 [('v1', [{'find': 'a', 'replace': 'b'}])])
+        assert out.result.passed and len(dirs) == 3
+        # SF-3: a missing quote is not called a quote not in the scene
+        assert out.reextraction.slips == [f'{SCENE}--a-fact: no quote']
+
+    def test_a_long_quote_is_cut_and_many_slips_are_counted(self):
+        r = self._misquote(quote='word ' * 40)
+        r.problems['quote'] += [f'{SCENE}: {SCENE}--b', f'{SCENE}: {SCENE}--c',
+                                f'{SCENE}: {SCENE}--d']
+        slips = gate._describe_slips(r)
+        assert slips[0] == (f'{SCENE}--a-fact: "' + ('word ' * 12).strip() + '…" is not in '
+                            f'the scene')
+        assert slips[1] == f'{SCENE}--b: its quote is not in the scene'   # no such row
+        assert gate._slip_text(slips).endswith(f'{SCENE}--c: its quote is not in the scene; '
+                                               f'and 1 more')
+
+    def test_a_second_misquote_is_reported_not_repaired(self, monkeypatch, tmp_path):
+        """No fuzzy match: the prose's words never replace the quote."""
+        again = self._misquote(fact='b-fact', quote='he sat in the seat')
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), self._misquote(), again],
+                                 [('v1', [{'find': 'a', 'replace': 'b'}])])
+        assert len(dirs) == 3 and out.result is again and not out.result.passed
+        # SF-4 (#602's review): both runs' slips, the first's kept beside the second's
+        r = out.reextraction
+        assert (r.outcome, r.others) == (gate.REGATE_FAILED, False)
+        assert r.slips == [f'{SCENE}--a-fact: "{self.SAID}" is not in the scene']
+        assert r.again == [f'{SCENE}--b-fact: "he sat in the seat" is not in the scene']
+        assert (f'misquoted the prose ({SCENE}--a-fact: ' in r.summary()
+                and f'it misquoted the prose again ({SCENE}--b-fact: ' in r.summary()
+                and "no quote is replaced with the prose's words" in r.summary())
+        # the stop rule stands: a commit would write the wrong quote
+        again._ctx = object()   # as a finished gate run has
+        assert gate.can_commit_provisionally(out.result) == (
+            'extraction left problems a commit would write')
+
+    def test_findings_the_reextraction_brings_go_to_the_next_fix(self, monkeypatch, tmp_path):
+        out, dirs, seen = self._run(monkeypatch, tmp_path,
+                                    [self._result('a'), self._misquote(), self._result('b'),
+                                     self._result()],
+                                    [('v1', [{'find': 'a', 'replace': 'b'}]),
+                                     ('v2', [{'find': 'b', 'replace': 'c'}])])
+        logs = out.log_dir
+        assert dirs == [logs, os.path.join(logs, 'recheck'), os.path.join(logs, 'reextract'),
+                        os.path.join(logs, 'recheck-2')]
+        assert self.fix_dirs == [logs, os.path.join(logs, 'reextract')]   # beside its run
+        assert seen[1][0] == 'v1' and out.result.passed and len(out.rounds) == 2
+
+    def test_once_per_invocation(self, monkeypatch, tmp_path):
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), self._misquote(), self._result('b'),
+                                  self._misquote()],
+                                 [('v1', [{'find': 'a', 'replace': 'b'}]),
+                                  ('v2', [{'find': 'b', 'replace': 'c'}])])
+        assert len(dirs) == 4 and not out.result.passed and out.result.unresolved
+        # the one there was: its run went on to round 2's fix
+        assert out.reextraction.outcome == gate.REGATE_FAILED and out.reextraction.others
+        assert out.reextraction.summary().endswith('it stopped on other problems (listed)')
+
+    def test_round_ones_reroll_is_the_one_reextraction(self, monkeypatch, tmp_path, capsys):
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._misquote(), self._misquote()], [])
+        assert len(dirs) == 2 and not out.result.passed
+        assert out.reextraction.outcome == gate.REGATE_FAILED   # misquoted again
+        assert 'the extractor misquoted the prose' in capsys.readouterr().out
+
+    def test_a_reroll_for_another_extraction_problem_is_no_reextraction(self, monkeypatch,
+                                                                         tmp_path):
+        """SF-2 (#602's review): only a re-gate for slips is reported as one."""
+        first = self._result()
+        first.problems = {'ends': [f'{SCENE}: some-state']}
+        out, dirs, _ = self._run(monkeypatch, tmp_path, [first, self._misquote()], [])
+        assert len(dirs) == 2 and out.reextraction is None   # and no second regate
+
+    def test_another_extraction_problem_beside_it_is_not_retried(self, monkeypatch, tmp_path):
+        mixed = self._misquote()
+        mixed.problems['supersedes'] = [f'{SCENE}: nothing-offered']
+        out, dirs, _ = self._run(monkeypatch, tmp_path, [self._result('a', 'c'), mixed],
+                                 [('v1', [{'find': 'a', 'replace': 'b'}])])
+        assert len(dirs) == 2 and out.result is mixed and out.reextraction is None
+
+    def test_a_finding_beside_it_goes_to_the_fix_not_a_reextraction(self, monkeypatch,
+                                                                    tmp_path):
+        """The mixed case: the fix's re-check extracts the edited prose anyway."""
+        out, dirs, seen = self._run(monkeypatch, tmp_path,
+                                    [self._result('a', 'c'), self._misquote('b'),
+                                     self._result()],
+                                    [('v1', [{'find': 'a', 'replace': 'b'}]),
+                                     ('v2', [{'find': 'b', 'replace': 'c'}])])
+        logs = out.log_dir
+        assert dirs == [logs, os.path.join(logs, 'recheck'), os.path.join(logs, 'recheck-2')]
+        assert len(seen) == 2 and out.result.passed and out.reextraction is None
+
+    def test_a_reextraction_that_fails_keeps_the_verdict_before_it(self, monkeypatch, tmp_path):
+        r1 = self._misquote()
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), r1, gate.GateError('cut off')],
+                                 [('v1', [{'find': 'a', 'replace': 'b'}])])
+        assert out.result is r1 and out.prose == 'v1' and len(dirs) == 3
+        assert out.reextraction.outcome == gate.REGATE_ERROR
+        assert out.reextraction.summary().endswith(
+            'which could not finish (cut off); the verdict before it stands')
+
+    def test_an_unexpected_error_after_the_last_round_keeps_its_edits(self, monkeypatch,
+                                                                       tmp_path):
+        """SF-5 (#602's review): an exception other than GateError escaped
+        to write's catch-all, which keeps the prose as drafted: both
+        rounds' edits were lost and nothing said so."""
+        r2 = self._misquote()
+        out, dirs, _ = self._run(monkeypatch, tmp_path,
+                                 [self._result('a'), self._result('b'), r2,
+                                  KeyError('proposed')],
+                                 [('v1', [{'find': 'a', 'replace': 'b'}]),
+                                  ('v2', [{'find': 'b', 'replace': 'c'}])])
+        assert out.prose == 'v2' and out.fixed and len(out.rounds) == 2
+        assert out.result is r2 and len(dirs) == 4
+        assert out.reextraction.outcome == gate.REGATE_ERROR
+        assert "could not finish (KeyError: 'proposed')" in out.reextraction.summary()
+
+    def test_an_unexpected_error_in_a_later_round_keeps_round_ones_edits(self, monkeypatch,
+                                                                       tmp_path):
+        r1 = self._misquote()
+        out, _, _ = self._run(monkeypatch, tmp_path,
+                              [self._result('a'), r1, OSError('disk full')],
+                              [('v1', [{'find': 'a', 'replace': 'b'}])])
+        assert out.prose == 'v1' and out.result is r1
+        assert 'could not finish (OSError: disk full)' in out.reextraction.summary()
+
+    def test_a_partial_fix_run_failing_only_on_a_misquote_extracts_again(self, monkeypatch,
+                                                                          tmp_path):
+        """T-3 (#602's review): the run `_partial_fix` keeps is a re-check too."""
+        e1 = [{'find': 'a', 'replace': 'b'}, {'find': 'c', 'replace': 'd'}]
+        part_run = self._misquote()
+        monkeypatch.setattr(gate, '_worse', lambda *a: 'fix round 1 left more problems')
+        monkeypatch.setattr(gate, '_partial_fix',
+                            lambda *a, **k: ([e1[0]], 'vp', part_run, '1 edit'))
+        out, dirs, seen = self._run(monkeypatch, tmp_path,
+                                    [self._result('a', 'c'), self._result('e', 'f', 'g'),
+                                     self._result()],
+                                    [('v1', e1)])
+        logs = out.log_dir
+        assert dirs == [logs, os.path.join(logs, 'recheck'), os.path.join(logs, 'reextract')]
+        assert out.result.passed and out.prose == 'vp' and len(seen) == 1
+        assert out.reextraction.outcome == gate.REGATE_PASSED
+
+    def test_an_inherited_finding_beside_a_misquote_is_extracted_again(self, monkeypatch,
+                                                                       tmp_path):
+        """T-3: an inherited contradiction doesn't block, so the misquote is
+        all that stopped the re-check; the fix is never sent the inherited one."""
+        r1 = self._misquote('old')
+        r1.inherited = list(r1.check.findings)
+        done = self._result('old')
+        done.inherited = list(done.check.findings)
+        out, dirs, seen = self._run(monkeypatch, tmp_path, [self._result('a'), r1, done],
+                                    [('v1', [{'find': 'a', 'replace': 'b'}])])
+        assert out.result is done and done.passed and len(dirs) == 3 and len(seen) == 1
+
+    def test_only_extractor_slips(self):
+        assert gate._only_extractor_slips(self._misquote()) == [
+            f'quote: {SCENE}: {SCENE}--a-fact']
+        assert gate._only_extractor_slips(self._misquote(kind='no quote')) == [
+            f'no quote: {SCENE}: {SCENE}--a-fact']
+        assert gate._only_extractor_slips(self._result()) == []          # passed
+
+    # T-1 (#602's review): each guard, alone beside a misquote, stops the
+    # retry (mutating any one of them left every test passing)
+
+    def test_a_finding_beside_the_slip_is_not_slips_only(self):
+        assert gate._only_extractor_slips(self._misquote('a')) == []
+
+    def test_a_halt_beside_the_slip_is_not_slips_only(self):
+        from storyforge.audit import Halt
+        r = self._misquote()
+        r.halts = [Halt('fixed', 'some-fact', 'it changes')]
+        assert gate._only_extractor_slips(r) == []
+
+    def test_a_plan_conflict_beside_the_slip_is_not_slips_only(self):
+        r = self._misquote('a')
+        r.plan_conflicts = list(r.findings)
+        assert r.fixable == [] and gate._only_extractor_slips(r) == []
+
+    def test_an_unverified_finding_beside_the_slip_is_not_slips_only(self):
+        from storyforge.checker import Finding
+        r = self._misquote()
+        r.check.unverified = [Finding('contradiction', 'TIM', 'q', 'act1-sc01', 'e', '', 'w',
+                                      problem='its quote is not in the scene')]
+        assert gate._only_extractor_slips(r) == []
+
+    def test_an_unruled_dispute_beside_the_slip_is_not_slips_only(self):
+        r = self._misquote()
+        from storyforge.checker import Dispute
+        r.check.unruled = [Dispute('plan-fact', 'the plan says', 'the scene says')]
+        assert gate._only_extractor_slips(r) == []
+
+    @pytest.mark.parametrize('kind', [k for k in gate.UNRESOLVED
+                                      if k not in gate._EXTRACTOR_SLIPS])
+    def test_another_extraction_problem_beside_the_slip_is_not_slips_only(self, kind):
+        r = self._misquote()
+        r.problems[kind] = ['x']
+        assert gate._only_extractor_slips(r) == []
+
+    def test_an_inherited_finding_beside_the_slip_is_slips_only(self):
+        """An inherited contradiction doesn't block: the slip is all that does."""
+        r = self._misquote('a')
+        r.inherited = list(r.check.findings)
+        assert gate._only_extractor_slips(r) == [f'quote: {SCENE}: {SCENE}--a-fact']
+
+    def test_the_slips_are_extraction_problems_that_block(self):
+        """TD-3: one spelling of each kind, shared with extraction."""
+        from storyforge import extract
+        assert gate._EXTRACTOR_SLIPS == (extract.MISQUOTE, extract.NO_QUOTE)
+        assert set(gate._EXTRACTOR_SLIPS) <= set(gate.UNRESOLVED)
+        assert set(gate._EXTRACTOR_SLIPS) <= set(extract.COMMITMENT_PROBLEMS)
+
+    def test_one_regate_per_call(self):
+        once = gate._OneRegate()
+        assert not once.taken and once.take() and once.taken and not once.take()
+
+
+@pytest.mark.real_gate
+def test_a_misquote_after_a_fix_no_longer_stops_write(project_dir, tmp_path, capsys):
+    """#598 end to end, through write's gate step with `--keep-going`: the
+    first run's contradiction is fixed, the re-check's extraction misquotes
+    the prose, and a second extraction of the same prose passes. The scene
+    is committed, so the run goes on, and the re-extraction's spend is a
+    `gate` row like the other runs'."""
+    from storyforge import cmd_write
+    scene_file = os.path.join(project_dir, 'scenes', f'{SCENE}.md')
+    with open(scene_file, encoding='utf-8') as f:
+        assert HERE in f.read()
+    right = 'Blank parchment. Not even a contour line.'
+    quotes = iter([right, 'Blank vellum. Not even a contour line.', right])
+    calls = []
+
+    def fake(path, body, **k):
+        prompt = body['messages'][0]['content']
+        if 'tools' in body:
+            calls.append('check')
+            return _text({'findings': [_contradiction()] if HERE in prompt else [],
+                          'kept': []})
+        if 'edits' in json.dumps(body.get('output_config', {})):
+            calls.append('fix')
+            return _text({'edits': [{'problem': 1, 'find': HERE,
+                                     'replace': 'a village of some size'}]})
+        calls.append('extract')
+        return _text({'commitments': [_commitment(statement='The map is blank there',
+                                                  quote=next(quotes))]})
+    with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+        passed, why = cmd_write._gate_drafted_scene(project_dir, SCENE, scene_file, 'draft',
+                                                    str(tmp_path / 'logs'), keep_going=True)
+    assert (passed, why) == (True, '')
+    assert calls == ['extract', 'check', 'fix', 'extract', 'check', 'extract', 'check']
+    said = capsys.readouterr().out
+    assert 'Gate passed' in said
+    # SF-2 (#602's review): the author can see a misquote happened
+    assert ('NOTE: the extractor misquoted the prose (' in said
+            and '"Blank vellum. Not even a contour line." is not in the scene), so the same '
+                'prose was gated again (extraction and the check): it passed' in said)
+    mine = [r for r in ledger.load(project_dir) if r['scene_id'] == SCENE
+            and ledger.is_commitment(r)]
+    assert [r['quote'] for r in mine] == [right]
+    with open(scene_file, encoding='utf-8') as f:
+        assert 'a village of some size' in f.read()
+    assert SCENE not in gate.pending(project_dir)
+    with open(os.path.join(project_dir, 'working', 'costs', 'ledger.csv')) as f:
+        ops = [line.split('|') for line in f.read().splitlines()]
+    op, tokens = ops[0].index('operation'), ops[0].index('input_tokens')
+    # every reply 1 token: three gate runs of extraction, persistence and
+    # the check, the re-extraction's included, and the one fix
+    assert sum(int(r[tokens]) for r in ops[1:] if r[op] == 'gate') == 9
+    assert sum(int(r[tokens]) for r in ops[1:] if r[op] == 'gate-fix') == 1
+
+
+@pytest.mark.real_gate
+def test_a_second_misquote_still_stops_write(project_dir, tmp_path):
+    """The stop rule stands (#598): a scene whose quote is still not the
+    prose's would commit a wrong quote, so it isn't committed provisionally."""
+    from storyforge import cmd_write
+    scene_file = os.path.join(project_dir, 'scenes', f'{SCENE}.md')
+    wrong = 'Blank vellum. Not even a contour line.'
+    quotes = iter(['Blank parchment. Not even a contour line.', wrong, wrong])
+    calls = []
+
+    def fake(path, body, **k):
+        prompt = body['messages'][0]['content']
+        calls.append('check' if 'tools' in body else 'fix' if 'edits' in json.dumps(
+            body.get('output_config', {})) else 'extract')
+        if 'tools' in body:
+            return _text({'findings': [_contradiction()] if HERE in prompt else [],
+                          'kept': []})
+        if 'edits' in json.dumps(body.get('output_config', {})):
+            return _text({'edits': [{'problem': 1, 'find': HERE,
+                                     'replace': 'a village of some size'}]})
+        return _text({'commitments': [_commitment(statement='The map is blank there',
+                                                  quote=next(quotes))]})
+    with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+        passed, why = cmd_write._gate_drafted_scene(project_dir, SCENE, scene_file, 'draft',
+                                                    str(tmp_path / 'logs'), keep_going=True)
+    assert not passed and 'EXTRACTION: quote' in why
+    assert not why.startswith('provisional')
+    # T-2 (#602's review): the re-extraction ran (a third extraction)
+    assert calls == ['extract', 'check', 'fix', 'extract', 'check', 'extract', 'check']
+    # SF-1: the pending reason says the extractor misquoted, twice
+    row = gate.pending(project_dir)[SCENE]
+    assert row['command'] == 'draft'
+    assert ('so the same prose was gated again (extraction and the check): it misquoted the '
+            'prose again (' in row['reason'])
+    assert "no quote is replaced with the prose's words" in row['reason']
+
+
+@pytest.mark.real_gate
+def test_a_reextraction_that_crashes_keeps_the_fixed_prose_and_says_so(project_dir, tmp_path,
+                                                                       monkeypatch):
+    """SF-5 (#602's review), through write: the fix's edit is written to the
+    scene, and the pending reason names the error, not "the gate failed
+    unexpectedly" with the prose as drafted."""
+    from storyforge import cmd_write
+    scene_file = os.path.join(project_dir, 'scenes', f'{SCENE}.md')
+    quotes = iter(['Blank parchment. Not even a contour line.',
+                   'Blank vellum. Not even a contour line.'])
+
+    def fake(path, body, **k):
+        prompt = body['messages'][0]['content']
+        if 'tools' in body:
+            return _text({'findings': [_contradiction()] if HERE in prompt else [],
+                          'kept': []})
+        if 'edits' in json.dumps(body.get('output_config', {})):
+            return _text({'edits': [{'problem': 1, 'find': HERE,
+                                     'replace': 'a village of some size'}]})
+        return _text({'commitments': [_commitment(statement='The map is blank there',
+                                                  quote=next(quotes))]})
+    real, runs = gate.gate_scene, []
+
+    def gate_run(*a, **k):
+        runs.append(k['log_dir'])
+        if len(runs) == 3:
+            raise KeyError('id')
+        return real(*a, **k)
+    monkeypatch.setattr(gate, 'gate_scene', gate_run)
+    with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+        passed, why = cmd_write._gate_drafted_scene(project_dir, SCENE, scene_file, 'draft',
+                                                    str(tmp_path / 'logs'), keep_going=True)
+    assert not passed and runs[-1].endswith('reextract')
+    with open(scene_file, encoding='utf-8') as f:
+        assert 'a village of some size' in f.read()
+    reason = gate.pending(project_dir)[SCENE]['reason']
+    assert "could not finish (KeyError: 'id'); the verdict before it stands" in reason
+    assert 'failed unexpectedly' not in reason
 
 
 class TestFirstFixNeverWorse(_FixRounds):
@@ -2536,6 +2963,326 @@ class TestSteadyParagraphs:
         ids = {r['id'] for r in self._mine(project_dir)}
         assert old['tarrens-hollow']['id'] not in ids
         assert [st for st, _ in result.held_back] == [old['tarrens-hollow']['statement']]
+
+    # #599 (Telemachy pilot): `check --pending`'s re-checks read prose that
+    # hasn't changed, and extraction quoted another sentence for a fact the
+    # scene already had; the ledger was then written with an id on two rows
+    LIVES = 'Four hundred and twelve people going about their lives'
+
+    def _recheck_ok(self, project_dir, result):
+        assert result.committed
+        assert ledger.file_problems(ledger.ledger_path(project_dir)) == []
+
+    TAPPED = 'She tapped the empty space on the map'
+
+    def _statements(self, project_dir):
+        return {r['statement']: r['id'] for r in self._mine(project_dir)}
+
+    def test_a_recheck_drops_a_reading_again_that_says_nothing_new_and_says_so(
+            self, project_dir, tmp_path, capsys):
+        """A fact the scene has, read again from another unchanged paragraph
+        in words that add nothing, is not a second fact; the drop is
+        reported and logged (#599's review, T-2)."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        again = _commitment(subject='tarrens-hollow',
+                            statement="Tarren's Hollow had 412 people living there",
+                            quote=self.LIVES)
+        result = _gate(project_dir, tmp_path, [again, self._temple()], command='recheck')
+        self._recheck_ok(project_dir, result)
+        mine = [r for r in self._mine(project_dir) if r['subject'] == 'tarrens-hollow']
+        assert mine == [old]
+        assert result.changed == [] and result.recheck == []
+        assert result.reread == [(again['statement'], old['id'])]
+        assert any(line.startswith(f'NOTE (not recorded: a reading again of {old["id"]}')
+                   and 'living there' in line for line in gate.report_lines(result))
+        assert f'a reading again of {old["id"]}' in capsys.readouterr().out
+
+    def test_a_recheck_keeps_a_reworded_fact_under_a_new_id_and_lists_it(
+            self, project_dir, tmp_path):
+        """The pilot's scab ("split open and bled" / "splits and bleeds"):
+        words changed, so containment can't call it the same; it is kept as a
+        new fact with the next id and listed for the author."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        reworded = _commitment(subject='tarrens-hollow',
+                               statement="Tarren's village had 412 people",
+                               quote=self.LIVES)
+        result = _gate(project_dir, tmp_path, [reworded, self._temple()], command='recheck')
+        self._recheck_ok(project_dir, result)
+        assert self._statements(project_dir)[reworded['statement']] not in (old['id'], '')
+        assert result.reread == [] and result.restates == [(reworded['statement'], old['id'])]
+        assert any('reads much like ' + old['id'] in line for line in gate.report_lines(result))
+
+    def test_a_recheck_keeps_a_fact_of_another_subject_beginning_alike(
+            self, project_dir, tmp_path):
+        """The pilot's case 3 ("Telemachus tells Pisistratus that his father
+        ...", subjects telemachus and pisistratus): same type, same opening,
+        another subject: a fact of its own, under the next id (#599's
+        review, CR-1 (a): it was dropped and the gate said committed)."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        other = _commitment(subject='dorren-hayle',
+                            statement="Tarren's Hollow had 412 people, Dorren recalls",
+                            quote=self.LIVES)
+        assert other['type'] == old['type']
+        # the kept fact not read again: the new one is the first to begin so
+        result = _gate(project_dir, tmp_path, [other, self._temple()], command='recheck')
+        self._recheck_ok(project_dir, result)
+        ids = self._statements(project_dir)
+        assert ids[old['statement']] == old['id']
+        assert ids[other['statement']] == old['id'] + '-2'
+        assert result.reread == [] and result.restates == []
+
+    def test_a_recheck_keeps_a_different_fact_of_the_same_subject(
+            self, project_dir, tmp_path):
+        """CR-1 (b): "... the old survey marked a well" is not "... marked a
+        temple", though all but one word is the same."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        well = self._temple('Dorren knows the old survey marked a well')
+        well['quote'] = self.LIVES
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                               self._temple(), well], command='recheck')
+        self._recheck_ok(project_dir, result)
+        assert well['statement'] in self._statements(project_dir)
+        assert result.reread == []
+
+    def test_a_redraft_keeps_a_different_fact_from_another_unchanged_paragraph(
+            self, project_dir, tmp_path):
+        """CR-1 (c): a redraft's new reading of an unchanged paragraph that
+        says something the kept facts don't is recorded."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        self._edit(project_dir, 'She returned to the new map. Nothing.',
+                   'She returned to the new map. Nothing at all.')
+        well = self._temple('Dorren knows the old survey marked a well')
+        well['quote'] = self.TAPPED
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                               self._temple(), well], command='redraft')
+        assert result.committed
+        assert well['statement'] in self._statements(project_dir)
+
+    def test_a_redraft_drops_the_same_fact_from_another_unchanged_paragraph(
+            self, project_dir, tmp_path):
+        """CR-1 (c), decided by #558's rule: an unchanged paragraph's facts
+        are kept as they were, and only a changed paragraph's are new
+        readings. The same fact read from another unchanged paragraph is a
+        reading again, in a redraft as in a re-check, and reported."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)
+        self._edit(project_dir, 'She returned to the new map. Nothing.',
+                   'She returned to the new map. Nothing at all.')
+        again = self._temple('Dorren knows that the old survey marked a temple there')
+        again['quote'] = self.TAPPED
+        result = _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                               self._temple(), again], command='redraft')
+        assert result.committed
+        assert again['statement'] not in self._statements(project_dir)
+        assert result.reread == [(again['statement'], old['dorren-hayle']['id'])]
+
+    def test_an_earlier_fact_not_kept_is_never_dropped_as_a_reading_again(
+            self, project_dir, tmp_path):
+        """CR-1b: the census fact's paragraph changed, so it isn't kept; the
+        redraft reads it again from the unchanged temple paragraph (its
+        quote shares four words with the kept temple fact's). Dropping that
+        row would delete the census fact and re-check what depends on it,
+        though the fact is still there."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)
+        self._edit(project_dir, 'should have been exactly here',
+                   'should have been right here')
+        census = _commitment(subject='tarrens-hollow', quote=self.TEMPLE)
+        result = _gate(project_dir, tmp_path, [census, self._temple()], command='redraft')
+        assert result.committed
+        assert self._statements(project_dir)[census['statement']] == \
+            old['tarrens-hollow']['id']
+        assert old['tarrens-hollow']['id'] not in result.changed
+        assert result.reread == []
+
+    def test_a_reworded_copy_quoted_across_paragraphs_is_kept_and_listed(
+            self, project_dir, tmp_path):
+        """T-4: a reading whose quote lies in no one paragraph can't be
+        placed in unchanged prose, so it is never dropped as a reading
+        again; when it reads much like a kept fact it is listed, so the
+        copy is the author's to see. Kept rather than dropped: dropping on
+        the statement alone would drop facts from changed prose too."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        across = _commitment(subject='tarrens-hollow',
+                             statement="Tarren's Hollow had 412 people counted",
+                             quote='should have been exactly here. She tapped the empty space')
+        result = _gate(project_dir, tmp_path, [across, self._temple()], command='recheck')
+        self._recheck_ok(project_dir, result)
+        assert self._statements(project_dir)[across['statement']] == old['id'] + '-2'
+        assert result.restates == [(across['statement'], old['id'])]
+
+    def test_a_changed_paragraphs_fact_beginning_as_a_kept_one_gets_a_new_id(
+            self, project_dir, tmp_path):
+        """Beowulf B-034 through the gate: a kept fact and a new one from a
+        changed paragraph whose statements begin alike."""
+        self._git(project_dir)
+        old = self._first(project_dir, tmp_path)['tarrens-hollow']
+        self._edit(project_dir, 'She returned to the new map. Nothing.',
+                   'She returned to the new map. Nothing. A mill had stood by the river.')
+        mill = _commitment(subject='tarrens-hollow',
+                           statement="Tarren's Hollow had 412 people and a mill",
+                           quote='A mill had stood by the river')
+        result = _gate(project_dir, tmp_path, [mill, self._temple()], command='redraft')
+        self._recheck_ok(project_dir, result)
+        ids = {r['statement']: r['id'] for r in self._mine(project_dir)}
+        assert ids[old['statement']] == old['id']
+        assert ids[mill['statement']] == old['id'] + '-2'
+
+    CENSUS_ID = 'act1-sc02--tarren-s-hollow-had-412-people'
+
+    def test_an_id_a_ledger_link_names_is_never_minted_again(self, project_dir, tmp_path):
+        """#599's review (TD-1/SF-2): an id the ledger no longer has but a
+        later fact's `supersedes` still names, minted again, would put that
+        link on a different fact."""
+        self._add_later(project_dir, id='later-hollow', subject='tarrens-hollow',
+                        statement='The hollow is empty', supersedes=self.CENSUS_ID)
+        _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow')])
+        ids = [r['id'] for r in self._mine(project_dir)]
+        assert ids == [self.CENSUS_ID + '-2']
+
+    def test_an_id_a_brief_names_is_never_minted_again(self, project_dir, tmp_path):
+        path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+        with open(path, encoding='utf-8') as f:
+            lines = f.read().split('\n')
+        header = lines[0].split('|')
+        cells = lines[1].split('|')
+        k = header.index('knowledge_in')
+        cells[k] = ';'.join(filter(None, [cells[k], self.CENSUS_ID]))
+        lines[1] = '|'.join(cells)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines))
+        _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow')])
+        assert [r['id'] for r in self._mine(project_dir)] == [self.CENSUS_ID + '-2']
+
+    def test_reserved_is_the_old_ids_and_every_id_a_link_names(self):
+        loaded = [{'id': 'a', 'supersedes': 'gone;b', 'depends_on': 'c'}, {'id': 'b'}]
+        assert gate._reserved_ids({'s--x'}, loaded, {'brief-fact'}) == {
+            's--x', 'gone', 'b', 'c', 'brief-fact'}
+
+    def test_a_new_row_with_an_old_id_stops_the_commit(self):
+        """TD-2: `_carry_ids` checks what it relies on: a row minted without
+        the reserved ids, neither kept nor carried, never keeps an old id."""
+        old = {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'A',
+               'scene_id': 's'}
+        stray = {'id': 's--a', 'subject': '', 'type': 'world', 'statement': 'B',
+                 'scene_id': 's'}
+        with pytest.raises(GateError, match="'s--a' has the id of an earlier commitment"):
+            gate._carry_ids([stray], [old], [])
+
+    def test_reserved_ids_are_required(self):
+        from storyforge.extract import COMMITMENT_PROBLEMS, commitment_rows
+        with pytest.raises(TypeError, match='reserved'):
+            commitment_rows([], 's', '', [], [], [], {}, 'draft',
+                            {k: [] for k in COMMITMENT_PROBLEMS},
+                            own_writers=ledger.COMMITMENT_WRITERS)
+
+    def test_a_commit_that_would_repeat_an_id_writes_nothing(
+            self, project_dir, tmp_path, monkeypatch):
+        """Whatever slips past the ids, the ledger is never written as one
+        the next command can't load: the gate stops, nothing written."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        path = ledger.ledger_path(project_dir)
+        before = open(path, encoding='utf-8').read()
+
+        def collide(proposed, old_rows, *_):
+            for p in proposed:
+                p['id'] = old_rows[0]['id']
+        monkeypatch.setattr(gate, '_carry_ids', collide)
+        with pytest.raises(gate.LedgerWriteRefused,
+                           match="ledger write refused: .*'act1-sc02--tarren-s-hollow"
+                                 "-had-412-people' would be on 2 rows \\(from act1-sc02\\)"):
+            _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                          self._temple()], command='recheck')
+        assert open(path, encoding='utf-8').read() == before
+
+    def test_a_refused_commit_leaves_the_result_as_it_was(
+            self, project_dir, tmp_path, monkeypatch):
+        """TD-3: a refused write never leaves the result half-committed (ids
+        carried, steady facts kept, `changed` set) for the caller to read."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        self._edit(project_dir, 'Roads, wells, the little', 'Roads and wells, the little')
+        seen = {}
+        real = gate._commit
+
+        def watch(project_dir_, result, *a, **k):
+            seen['before'] = copy.deepcopy({k_: v for k_, v in vars(result).items()
+                                            if k_ != '_ctx'})
+            seen['result'] = result
+            return real(project_dir_, result, *a, **k)
+
+        def refuse(*a, **k):
+            raise ledger.LedgerError('refused')
+        monkeypatch.setattr(gate, '_commit', watch)
+        monkeypatch.setattr(ledger, 'save', refuse)
+        with pytest.raises(gate.LedgerWriteRefused, match='ledger write refused: refused'):
+            _gate(project_dir, tmp_path, [_commitment(subject='tarrens-hollow'),
+                                          self._temple('Dorren knows the survey shows a temple')],
+                  command='redraft')
+        after = {k: v for k, v in vars(seen['result']).items() if k != '_ctx'}
+        assert after == seen['before'] and not seen['result'].committed
+        assert seen['result'].steady == [] and seen['result'].changed == []
+
+    def test_a_cell_that_would_break_its_row_is_a_refused_write(
+            self, project_dir, tmp_path, monkeypatch):
+        """SF-3: the ValueError a breaking cell raises was not caught, and it
+        stopped `check --pending --keep-going`; it is a refused write, and a
+        re-check that hits it is listed failed."""
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        path = ledger.ledger_path(project_dir)
+        before = open(path, encoding='utf-8').read()
+        gate.mark_pending(project_dir, SCENE, gate.RECHECK, 're-check: x changed 1 fact(s)')
+
+        def corrupt(proposed, old_rows, *_):
+            proposed[0]['mutable'] = 'state|fixed'
+        monkeypatch.setattr(gate, '_carry_ids', corrupt)
+
+        def fake(path_, body, **k):
+            if 'tools' in body:
+                return _text({'findings': [], 'kept': []})
+            return _text({'commitments': [_commitment(subject='tarrens-hollow'),
+                                          self._temple()]})
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+            run = gate.recheck_pending(project_dir, log_dir=str(tmp_path / 'rc'),
+                                       extract_model='m', check_model='m')
+        assert run.failed == SCENE and 'ledger write refused' in run.why
+        assert gate.pending(project_dir)[SCENE]['command'] == gate.RECHECK_FAILED
+        assert open(path, encoding='utf-8').read() == before
+
+    def test_a_recheck_that_would_repeat_an_id_is_listed_failed(
+            self, project_dir, tmp_path, monkeypatch):
+        self._git(project_dir)
+        self._first(project_dir, tmp_path)
+        path = ledger.ledger_path(project_dir)
+        before = open(path, encoding='utf-8').read()
+        gate.mark_pending(project_dir, SCENE, gate.RECHECK, 're-check: x changed 1 fact(s)')
+
+        def collide(proposed, old_rows, *_):
+            for p in proposed:
+                p['id'] = old_rows[0]['id']
+        monkeypatch.setattr(gate, '_carry_ids', collide)
+
+        def fake(path, body, **k):
+            if 'tools' in body:
+                return _text({'findings': [], 'kept': []})
+            return _text({'commitments': [_commitment(subject='tarrens-hollow'),
+                                          self._temple()]})
+        with patch('storyforge.api._api_request', side_effect=_with_persistence(fake)):
+            run = gate.recheck_pending(project_dir, log_dir=str(tmp_path / 'rc'),
+                                       extract_model='m', check_model='m')
+        assert run.failed == SCENE and 'ledger write refused' in run.why
+        assert 'would be on 2 rows' in run.why
+        assert gate.pending(project_dir)[SCENE]['command'] == gate.RECHECK_FAILED
+        assert open(path, encoding='utf-8').read() == before
+        ledger.load(project_dir)   # the next command can read it
 
     def test_a_moved_paragraph_is_not_steady(self):
         earlier = 'One para here.\n\nTwo para here.\n\nThree para here.'
