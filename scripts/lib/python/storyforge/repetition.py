@@ -246,8 +246,10 @@ def scan_manuscript(project_dir: str,
     for sid in scene_ids:
         path = os.path.join(scenes_dir, f'{sid}.md')
         if os.path.isfile(path):
-            # markers are never prose (#280): `![[illus:` in every
-            # illustrated scene would be a cross-chapter repeated phrase
+            # markers are never prose (#280). A marker never repeats itself
+            # (each id is unique and tokenizes as one word); the harm is that
+            # one between two paragraphs splits a real repeated phrase that
+            # runs across them, hiding that finding
             scene_texts[sid] = read_scene_prose(path)
 
     return scan_scenes(scene_texts)
