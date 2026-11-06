@@ -60,7 +60,21 @@ def test_parse_keeps_people_and_drops_groups():
         {'word': 'Unasked', 'person': True, 'id': 'x', 'name': 'X', 'aliases': []},
     ]), cands, registry_ids={'hrothgar'})
     assert rows == [{'id': 'ecgtheow', 'name': 'Ecgtheow', 'role': 'referenced',
-                     'aliases': 'Edgetheow'}]
+                     'aliases': 'Edgetheow', 'pronouns': ''}]
+
+
+def test_parse_keeps_readable_pronouns_only():
+    """#513: a person's pronouns as the passages use them; a value
+    `pronoun_key` can't read is left empty for validate to name."""
+    cands = [Candidate('Wealhtheow', 9, ['a']), Candidate('Unferth', 7, ['a'])]
+    rows = parse_census(_reply([
+        {'word': 'Wealhtheow', 'person': True, 'id': 'wealhtheow', 'name': 'Wealhtheow',
+         'aliases': [], 'pronouns': 'she/her'},
+        {'word': 'Unferth', 'person': True, 'id': 'unferth', 'name': 'Unferth',
+         'aliases': [], 'pronouns': 'unclear'},
+    ]), cands, registry_ids=set())
+    assert [(r['id'], r['pronouns']) for r in rows] == [('wealhtheow', 'she/her'),
+                                                        ('unferth', '')]
 
 
 def test_prompt_lists_words_passages_and_registry():
@@ -69,6 +83,7 @@ def test_prompt_lists_words_passages_and_registry():
     assert 'Atreus (135 mentions)' in prompt and 'a: the son of Atreus' in prompt
     assert 'agamemnon — Agamemnon' in prompt
     assert 'Judge from the passages only' in prompt
+    assert "`pronouns`, he, she, they or it as the passages use them" in prompt
 
 
 def test_run_census_appends_rows_and_writes_the_list(project_dir, monkeypatch):

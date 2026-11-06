@@ -94,7 +94,7 @@ KNOWLEDGE_CATEGORIES = frozenset({
 })
 
 _REGISTRY_COLUMNS = {
-    'characters': ['id', 'name', 'role', 'aliases'],
+    'characters': ['id', 'name', 'role', 'aliases', 'pronouns'],
     'locations': ['id', 'name', 'aliases'],
     'values': ['id', 'name', 'aliases'],
     'mice-threads': ['id', 'name', 'type', 'aliases'],
@@ -149,7 +149,7 @@ _DOMAIN_TARGETS = {
 # Fields a NEW line supplies, after the id. Derived columns (knowledge
 # origin; physical-state acquired/resolves) are filled by code.
 _NEW_FIELDS = {
-    'characters': ['name', 'role'],
+    'characters': ['name', 'role', 'pronouns'],
     'locations': ['name'],
     'values': ['name'],
     'mice-threads': ['name', 'type'],
@@ -469,9 +469,10 @@ _DOMAIN_NOUN = {
 def _domain_rules(domain: str) -> str:
     from storyforge.schema import MAX_FACT_NAME_WORDS
     return {
-        'characters': """- NEW fields: `N | NEW | id | name | role`
+        'characters': """- NEW fields: `N | NEW | id | name | role | pronouns`
 - id: kebab-case slug of the full name (e.g., kael-davreth); name: display name (e.g., Kael Davreth)
 - role: protagonist, antagonist, supporting, minor, or referenced
+- pronouns: he, she, they or it, only when the reference makes them plain (Mrs Hale, the old woman, her brother); otherwise leave it empty (`N | NEW | id | name | role |`). Never guess from a first name
 - Variants of one person are one entry (Kael, kael, Kael Davreth); a group ("the Buchanans") maps to each member's id""",
         'locations': """- NEW fields: `N | NEW | id | name`
 - id: kebab-case slug (e.g., resonance-chamber); name: canonical display name (e.g., Resonance Chamber)
@@ -700,7 +701,16 @@ def _first_scene_with(ref_dir: str, column: str, entry_id: str) -> str:
 
 
 def _derive_columns(domain: str, ref_dir: str, row: dict[str, str]) -> None:
-    if domain == 'knowledge':
+    if domain == 'characters':
+        # A NEW character's pronouns (#513): a value `pronoun_key` can't
+        # read would block validate as if the author had written it, so it
+        # is left empty, which validate names as missing
+        from storyforge.schema import pronoun_key
+        if pronoun_key(row.get('pronouns', '')) is None:
+            log(f"  characters: {row['id']}'s pronouns {row['pronouns']!r} can't be read; "
+                f"left empty for the author")
+            row['pronouns'] = ''
+    elif domain == 'knowledge':
         row.setdefault('aliases', '')
         row['origin'] = _first_scene_with(ref_dir, 'knowledge_out', row['id']) or 'backstory'
     elif domain == 'physical-states':

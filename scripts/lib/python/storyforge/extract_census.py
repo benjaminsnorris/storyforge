@@ -22,7 +22,8 @@ adaptation: Ecgtheow's feud is why Beowulf owes Hrothgar.
    earlier run is not asked again, so a row the author deleted stays
    deleted.
 3. **Add**: each person becomes a `characters.csv` row with role
-   `referenced`, aliases from the answer; nothing else is changed. Every
+   `referenced`, aliases and pronouns (as the passages use them, else
+   empty: #513) from the answer; nothing else is changed. Every
    candidate and answer goes into `working/census.csv`, which is also the
    record of what was answered.
 """
@@ -155,7 +156,7 @@ def _schema() -> dict:
     from .extract import _object, _STR, _STR_LIST
     return _object({'names': {'type': 'array', 'items': _object({
         'word': _STR, 'person': {'type': 'boolean'}, 'id': _STR, 'name': _STR,
-        'aliases': _STR_LIST})}})
+        'aliases': _STR_LIST, 'pronouns': _STR})}})
 
 
 CENSUS_SCHEMA = _schema()
@@ -182,7 +183,7 @@ Judge from the passages only, not from what you know of the work.
 
 ## Answer
 
-`names`: one entry per word above, in order. `word`: the word as given. `person`: true or false. For a person: `id`, a new lowercase-hyphen id from the name as the text spells it (e.g. `ecgtheow`); `name`, the name as the text spells it; `aliases`, other spellings or forms of this one person's name the passages show, never a group ("the sons of X") or another person. For a word that is another form of someone already in the registry, `person` is false."""
+`names`: one entry per word above, in order. `word`: the word as given. `person`: true or false. For a person: `id`, a new lowercase-hyphen id from the name as the text spells it (e.g. `ecgtheow`); `name`, the name as the text spells it; `aliases`, other spellings or forms of this one person's name the passages show, never a group ("the sons of X") or another person; `pronouns`, he, she, they or it as the passages use them for this person, or empty when they don't show. For a word that is another form of someone already in the registry, `person` is false."""
 
 
 def parse_census(reply: str, candidates: list[Candidate], registry_ids: set[str]) -> list[dict]:
@@ -190,6 +191,7 @@ def parse_census(reply: str, candidates: list[Candidate], registry_ids: set[str]
     none already in the registry, no group aliases."""
     from .extract import _json_answer
     from .hone import _slugify, is_group_reference
+    from .schema import pronoun_key
     data = _json_answer(reply, CENSUS_SCHEMA)
     words = {c.word for c in candidates}
     rows, seen = [], set(registry_ids)
@@ -202,8 +204,14 @@ def parse_census(reply: str, candidates: list[Candidate], registry_ids: set[str]
             continue
         aliases = [a.strip() for a in entry.get('aliases') or []
                    if a.strip() and a.strip().lower() != name.lower() and not is_group_reference(a)]
+        # The passages' pronouns (#513); one `pronoun_key` can't read is
+        # left empty, which validate names as missing, not as the author's
+        # error
+        pronouns = str(entry.get('pronouns') or '').strip()
+        if pronoun_key(pronouns) is None:
+            pronouns = ''
         rows.append({'id': rid, 'name': name, 'role': 'referenced',
-                     'aliases': ';'.join(dict.fromkeys(aliases))})
+                     'aliases': ';'.join(dict.fromkeys(aliases)), 'pronouns': pronouns})
         seen.add(rid)
     return rows
 

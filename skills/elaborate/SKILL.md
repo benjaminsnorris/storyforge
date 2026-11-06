@@ -61,7 +61,7 @@ Read all registry files in `reference/` to know the canonical IDs for normalized
 | `motifs` | motif-taxonomy.csv |
 | `mice_threads` | mice-threads.csv (`+id` where the thread opens, `-id` where it closes, bare `id` where a scene mentions it; `type:id` when two threads share a name) |
 
-**When the author introduces a new character, location, value, knowledge fact, motif, or MICE thread that does not exist in a registry:** add it to the appropriate registry CSV first, then use the new ID in scene data.
+**When the author introduces a new character, location, value, knowledge fact, motif, or MICE thread that does not exist in a registry:** add it to the appropriate registry CSV first, then use the new ID in scene data. A new character's row gets its `pronouns` (`he`, `she`, `they`, `it`, or a slash form such as `she/her`) when the author has said or the story makes them plain; otherwise leave the cell empty for the author (validate names it), never guess.
 
 **The narrator as POV.** A scene the book's narrator tells, through no one character's eyes (an epic's omniscient voice, a frame narrator), has `pov` `narrator`. It is reserved: never add it to characters.csv, and it never needs to be in `on_stage`. A narrator who is a person (a first-person teller, named or not) is a character with an id like any other, never `narrator`. Whether the narrator may hold scenes is the author's call, on a line of `reference/key-decisions.md`: `narrator_pov: allowed` (the default), `limited N` (validate flags more than N narrator scenes) or `off` (validate and the scene-map floor check flag every narrator scene). Ask the author when the book has narrated scenes and key-decisions.md doesn't say.
 

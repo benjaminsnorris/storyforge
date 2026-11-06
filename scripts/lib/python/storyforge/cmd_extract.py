@@ -944,8 +944,9 @@ def _hone_characters(project_dir: str, ref_dir: str) -> tuple[str, bool]:
     """Hone's character registry pass (`hone --domain characters`: the
     character part of phase 2's registry pass, so no value or MICE cell is
     normalized). It adds each new id to characters.csv, with the role hone
-    gives it and no pronouns (the author's to fill: #513), or maps it to
-    an existing one; it rewrites names as ids in every scene's casts and
+    gives it and pronouns only where the reference makes them plain (#513;
+    the rest are the author's to fill), or maps it to an existing one; it
+    rewrites names as ids in every scene's casts and
     pov, and may drop a reference it decides is no character. Returns a
     note for the review and whether it failed. What it changed but could
     not commit is committed with the review."""
@@ -972,7 +973,8 @@ def _hone_characters(project_dir: str, ref_dir: str) -> tuple[str, bool]:
     added = len([r for r in _read_csv(path) if r.get('id')]) - before
     left = find_unresolved('characters', ref_dir)
     note = (f'hone --domain characters added {added} character(s) to characters.csv '
-            f'(role as hone gives it; pronouns left blank for the author).')
+            f'(role as hone gives it; pronouns only where the name makes them plain, '
+            f'the rest left blank for the author).')
     if left:
         log(f'  WARNING: {len(left)} cast reference(s) are still not in the registry '
             f'(see hone\'s log above: a mapping call cut off, or answered with no id)')
