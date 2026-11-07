@@ -1037,8 +1037,29 @@ def commitment_id(scene_id: str, statement: str, taken: Set[str]) -> str:
 MISQUOTE = 'quote'
 NO_QUOTE = 'no quote'
 #: The kinds `commitment_rows` reports, each a list of strings in `problems`
+#: An `ends` that moved a state's end to this scene from a later one
+#: (`commitment_rows` with `order`; #621)
+ENDS_MOVED = 'ends moved'
+#: A `supersedes` or `ends` naming an offered fact's id without its
+#: `<scene>--` prefix, read as that fact (#620)
+ID_PREFIX = 'id prefix'
 COMMITMENT_PROBLEMS = (MISQUOTE, NO_QUOTE, 'subject', 'supersedes', 'disagrees',
-                       'ends', 'ends fixed', 'ends registry', 'ends again', 'cap', 'unplaced')
+                       'ends', 'ends fixed', 'ends registry', 'ends again', 'cap', 'unplaced',
+                       ENDS_MOVED, ID_PREFIX)
+
+
+def _offered_id(ref: str, offered: dict[str, dict[str, str]]) -> str | None:
+    """The offered fact `ref` names: its id, or (#620, Telemachy: the
+    extractor wrote `after-mentes-s-departure-telemachus-believes` for
+    `mentes-counsels-telemachus--after-mentes-s-departure-telemachus-believes`)
+    the one offered id that is `ref` with a `<scene>--` prefix. None for no
+    such fact, or more than one."""
+    if ref in offered:
+        return ref
+    if '--' in ref:
+        return None
+    hits = [i for i in offered if i.endswith(f'--{ref}')]
+    return hits[0] if len(hits) == 1 else None
 
 
 def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
@@ -1047,7 +1068,8 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
                     introduced_by: str, problems: dict[str, list[str]],
                     own_writers: tuple[str, ...],
                     registry_is_plan: bool = False, *,
-                    reserved: Set[str]) -> list[dict[str, str]]:
+                    reserved: Set[str],
+                    order: dict[str, int] | None = None) -> list[dict[str, str]]:
     """Ledger rows for one scene's parsed commitments (`parse_commitments_response`).
 
     Each is binding, `origin=prose`, `introduced_by`, with an id that no row
@@ -1069,7 +1091,18 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
     plan differ) or nothing offered, an `ends` naming nothing offered or
     a fact that isn't a state (`ends fixed`; not applied),
     another writer's state (`ends registry`) or a state already ended
-    elsewhere.
+    elsewhere (`ends again`).
+
+    A `supersedes` or `ends` naming an offered fact's id without its
+    `<scene>--` prefix is read as that fact when exactly one offered id
+    matches (`_offered_id`; listed in `ID_PREFIX`, #620). With `order`
+    (scene id -> reading position; the gate passes it), a state whose end
+    is a scene *after* this one is ended here instead, and listed in
+    `ENDS_MOVED` (#621: a re-gate gave an earlier scene's fact a new id, a
+    later scene's re-check ended it, and the scene between, which ends it in
+    the book, then stopped on `ends again`). A state ends once, at its
+    first end in reading order; the caller re-checks what leaned on the
+    later end.
     """
     from .common import csv_safe
     from . import ledger
@@ -1096,6 +1129,10 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
                 problems['subject'].append(f'{scene_id}: {csv_safe(subject)}')
         row['subject'] = subject
         if item['supersedes']:
+            named = _offered_id(item['supersedes'], offered)
+            if named is not None and named != item['supersedes']:
+                problems[ID_PREFIX].append(f'{scene_id}: {item["supersedes"]} -> {named}')
+                item['supersedes'] = named
             target = offered.get(item['supersedes'])
             if target is not None and registry_is_plan and not ledger.is_commitment(target):
                 problems['disagrees'].append(f'{scene_id}: {item["supersedes"]} '
@@ -1108,6 +1145,10 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
             else:
                 problems['supersedes'].append(f'{scene_id}: {item["supersedes"]}')
         for gone in item['ends']:
+            named = _offered_id(gone, offered)
+            if named is not None and named != gone:
+                problems[ID_PREFIX].append(f'{scene_id}: {gone} -> {named}')
+                gone = named
             old = offered.get(gone)
             ends = (old or {}).get('resolves', '').strip()
             if old is None:
@@ -1119,6 +1160,10 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
             elif (old.get('introduced_by') or '').strip() not in own_writers:
                 problems['ends registry'].append(
                     f'{scene_id}: {gone} (resolves: {ends or "blank"})')
+            elif (ends and order is not None and scene_id in order and ends in order
+                  and order[ends] > order[scene_id]):
+                problems[ENDS_MOVED].append(f'{scene_id}: {gone} (was: {ends})')
+                old['resolves'] = scene_id
             elif ends:
                 problems['ends again'].append(f'{scene_id}: {gone} (resolves: {ends})')
             else:

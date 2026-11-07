@@ -1892,6 +1892,8 @@ def _run_phase_4(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
                                          'a scene its resolves doesn\'t say; check resolves'),
                        ('ends again', 'state(s) the prose ends that already end '
                                       'elsewhere; kept the first'),
+                       ('id prefix', 'link(s) naming an offered fact\'s id without its '
+                                     'scene prefix, read as that fact'),
                        ('cap', f'scene(s) offered only {MAX_KNOWN_COMMITMENTS} of the '
                                'facts in force (left out in brackets)')):
         if problems[kind]:
