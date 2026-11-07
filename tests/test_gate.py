@@ -214,6 +214,27 @@ class TestEnds:
         assert result.committed
         assert {r['id']: r for r in ledger.load(project_dir)}['bleeding']['resolves'] == SCENE
 
+    def test_ending_a_state_a_later_scene_ended_moves_its_end_here(
+            self, project_dir, tmp_path):
+        """#621 (Telemachy): a re-gate gave scene 2's belief a new id, a later
+        scene's re-check ended it, and scene 3, which ends it in the book,
+        stopped on `ends again`. A state ends at its first end in reading
+        order; the later scene is listed for a re-check."""
+        self._state(project_dir, 'bleeding', 'draft')
+        rows = ledger.load(project_dir)
+        next(r for r in rows if r['id'] == 'bleeding')['resolves'] = 'act2-sc01'
+        ledger.save(project_dir, rows, command='test')
+        result = _gate(project_dir, tmp_path, [_commitment(ends=['bleeding'])])
+        assert result.committed and not result.unresolved
+        assert {r['id']: r for r in ledger.load(project_dir)}['bleeding']['resolves'] == SCENE
+        assert result.problems['ends moved'] == [f'{SCENE}: bleeding (was: act2-sc01)']
+        assert 'bleeding' in result.changed
+        # the scene that ended it before is re-checked (#622's review)
+        assert 'act2-sc01' in result.recheck
+        assert gate.pending(project_dir)['act2-sc01']['command'] == gate.RECHECK
+        assert any(line.startswith('NOTE (a state a later scene ended')
+                   for line in gate.report_lines(result))
+
     def test_ending_a_registry_state_goes_to_the_checker_and_is_not_applied(
             self, project_dir, tmp_path):
         self._state(project_dir, 'limp', 'extract')
@@ -661,6 +682,144 @@ class TestRecheckReview468:
         gate.mark_pending(project_dir, self.LATER, 'recheck', 'x')
         run = gate.recheck_pending(project_dir, log_dir=str(tmp_path), spent_before=0.9)
         assert run.over_budget and seen == ['act1-sc02', self.LATER]
+
+
+class TestRecheckReextracts:
+    """#620 (Telemachy, 2026-11-07): a re-check's extractor joined two
+    sentences across a dialogue tag into one quote; the re-check stopped and
+    left 27 later scenes pending. A re-check (and `check --pending`) whose
+    run only the extractor's slips stopped gates the same prose once more."""
+    LATER = 'act2-sc01'
+
+    def _misquote(self, sid):
+        r = gate.GateResult(sid, check=None)
+        rid = f'{sid}--a-fact'
+        r.problems = {'quote': [f'{sid}: {rid}']}
+        r.proposed = [{'id': rid, 'quote': 'My mother says I am. For my part'}]
+        return r
+
+    def _passed(self, sid):
+        r = gate.GateResult(sid, check=None)
+        r.committed = True
+        return r
+
+    def _run(self, project_dir, tmp_path, monkeypatch, runs):
+        gate.mark_pending(project_dir, self.LATER, 'recheck', 'x')
+        calls = []
+
+        def fake(pd, sid, **k):
+            calls.append(k)
+            r = runs[len(calls) - 1](sid)
+            if r.passed:
+                gate.clear_pending(pd, sid)
+            return r
+        monkeypatch.setattr(gate, 'gate_scene', fake)
+        monkeypatch.setattr(gate, '_writer', lambda pd, sid: 'draft')
+        return gate.recheck_pending(project_dir, log_dir=str(tmp_path)), calls
+
+    def test_a_misquote_alone_is_extracted_again_and_passes(
+            self, project_dir, tmp_path, monkeypatch, capsys):
+        run, calls = self._run(project_dir, tmp_path, monkeypatch,
+                               [self._misquote, self._passed])
+        assert run.passed == [self.LATER] and not run.failed
+        assert len(calls) == 2 and calls[1]['log_dir'].endswith('reextract')
+        assert calls[1]['introduced_by'] == 'draft' and calls[1]['prose'] is None
+        assert run.spent == pytest.approx(2 * gate.RECHECK_COST_PER_SCENE)
+        assert 'gated again (extraction and the check): it passed' in capsys.readouterr().out
+
+    def test_a_second_misquote_is_kept_and_reported(self, project_dir, tmp_path, monkeypatch):
+        run, calls = self._run(project_dir, tmp_path, monkeypatch,
+                               [self._misquote, self._misquote])
+        assert len(calls) == 2 and run.failed == self.LATER
+        reason = gate.pending(project_dir)[self.LATER]['reason']
+        assert 'misquoted the prose again' in reason and 'misquoted the prose again' in run.why
+
+    def test_a_reextraction_that_fails_keeps_the_first_run(
+            self, project_dir, tmp_path, monkeypatch):
+        def boom(sid):
+            raise GateError('extraction failed: HTTP 500')
+        run, calls = self._run(project_dir, tmp_path, monkeypatch, [self._misquote, boom])
+        assert len(calls) == 2 and run.failed == self.LATER
+        assert 'which could not finish' in gate.pending(project_dir)[self.LATER]['reason']
+        assert run.spent == pytest.approx(2 * gate.RECHECK_COST_PER_SCENE)
+
+    def test_a_bug_in_the_reextraction_is_not_blamed_on_the_extractor(
+            self, project_dir, tmp_path, monkeypatch):
+        """#622's review (SF): there are no fix edits to keep on a re-check,
+        so an exception that isn't `GateError` propagates."""
+        def bug(sid):
+            raise KeyError('id')
+        with pytest.raises(KeyError):
+            self._run(project_dir, tmp_path, monkeypatch, [self._misquote, bug])
+
+    def test_no_reextraction_over_the_threshold(self, project_dir, tmp_path, monkeypatch):
+        monkeypatch.setenv('STORYFORGE_COST_THRESHOLD', str(gate.RECHECK_COST_PER_SCENE * 1.5))
+        run, calls = self._run(project_dir, tmp_path, monkeypatch,
+                               [self._misquote, self._passed])
+        assert len(calls) == 1 and run.failed == self.LATER
+        assert 'not run: it would pass the cost threshold' in run.why
+        assert run.spent == pytest.approx(gate.RECHECK_COST_PER_SCENE)
+
+    def test_a_passing_recheck_reports_the_links_it_applied(
+            self, project_dir, tmp_path, monkeypatch):
+        """#622's review (SF-H2): a moved end or an id read without its
+        prefix in a re-check reached no log."""
+        def applied(sid):
+            r = self._passed(sid)
+            r.problems = {'ends moved': [f'{sid}: a--x (was: c)'], 'id prefix': []}
+            return r
+        run, _ = self._run(project_dir, tmp_path, monkeypatch, [applied])
+        assert run.notes == [f'{self.LATER}: NOTE (a state a later scene ended is ended here, '
+                             f'its first end in reading order; the later scene is listed for '
+                             f'a re-check): {self.LATER}: a--x (was: c)']
+
+    def test_a_finding_is_not_extracted_again(self, project_dir, tmp_path, monkeypatch):
+        from storyforge.checker import CheckResult, Finding
+
+        def found(sid):
+            f = Finding('contradiction', 'TIM', 'q', 'act1-sc01', 'e', '', 'why')
+            r = self._misquote(sid)
+            r.check = CheckResult(sid, findings=[f])
+            return r
+        run, calls = self._run(project_dir, tmp_path, monkeypatch, [found])
+        assert len(calls) == 1 and run.failed == self.LATER
+
+    def test_check_pending_extracts_again_too(self, project_dir, tmp_path, monkeypatch):
+        from storyforge import cmd_check, costs
+        gate.mark_pending(project_dir, self.LATER, 'recheck', 'x')
+        runs = [self._misquote, self._passed]
+        calls = []
+
+        def fake(pd, sid, **k):
+            calls.append(k)
+            r = runs[len(calls) - 1](sid)
+            if r.passed:
+                gate.clear_pending(pd, sid)
+            return r
+        monkeypatch.setattr(gate, 'gate_scene', fake)
+        monkeypatch.setattr(gate, '_writer', lambda pd, sid: 'draft')
+        run = cmd_check._check_scenes(project_dir, [self.LATER], str(tmp_path),
+                                      costs.RunBudget())
+        assert len(calls) == 2 and run.passed == 1
+        at = run.report.index(f'## {self.LATER}: passed')
+        assert run.report[at + 2].startswith('- NOTE (re-extraction): the extractor misquoted')
+
+    def test_check_pending_names_a_second_misquote_in_the_pending_reason(
+            self, project_dir, tmp_path, monkeypatch):
+        from storyforge import cmd_check, costs
+        gate.mark_pending(project_dir, self.LATER, 'recheck', 'x')
+        monkeypatch.setattr(gate, 'gate_scene', lambda pd, sid, **k: self._misquote(sid))
+        monkeypatch.setattr(gate, '_writer', lambda pd, sid: 'draft')
+        cmd_check._check_scenes(project_dir, [self.LATER], str(tmp_path), costs.RunBudget())
+        assert 'misquoted the prose again' in gate.pending(project_dir)[self.LATER]['reason']
+
+
+def test_every_extraction_problem_blocks_or_is_reported():
+    """#622's review (TD): a kind in neither list never reaches a report."""
+    from storyforge import extract
+    kinds = set(extract.COMMITMENT_PROBLEMS) | {'rejected'}
+    assert set(gate.UNRESOLVED) | set(gate.REPORTED) == kinds
+    assert not set(gate.UNRESOLVED) & set(gate.REPORTED)
 
 
 class TestRejected:

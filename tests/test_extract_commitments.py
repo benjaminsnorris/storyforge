@@ -606,3 +606,101 @@ class TestCommitmentIds:
                               reserved={'s--a-b-c-d-e-f-2'})
         assert [r['id'] for r in out] == ['s--a-b-c-d-e-f-3', 's--a-b-c-d-e-f-4',
                                           's--a-b-c-d-e-f-5']
+
+
+class TestLinksToOfferedFacts:
+    """#620: a link naming an offered fact's id without its `<scene>--`
+    prefix is read as that fact; #621: with `order`, a state a later scene
+    ended is ended here, its first end in reading order."""
+
+    def _state(self, rid, scene, resolves=''):
+        row = {c: '' for c in ledger.COLUMNS}
+        row.update(id=rid, scene_id=scene, type='knowledge', subject='telemachus',
+                   statement=rid, quote='q', origin='prose', status='binding',
+                   mutable='state', introduced_by='draft', resolves=resolves)
+        return row
+
+    def _rows(self, found, offered, order=None):
+        from storyforge.extract import COMMITMENT_PROBLEMS, commitment_rows
+        problems = {k: [] for k in COMMITMENT_PROBLEMS}
+        out = commitment_rows(found, 'b', 'q', list(offered), list(offered), [], {},
+                              'revise', problems, own_writers=ledger.COMMITMENT_WRITERS,
+                              registry_is_plan=True, reserved=set(), order=order)
+        return out, problems
+
+    def _found(self, **over):
+        return [dict({'type': 'knowledge', 'subject': '', 'statement': 'He believes it',
+                      'quote': 'q', 'mutable': 'state', 'supersedes': '', 'ends': []}, **over)]
+
+    def test_a_supersedes_without_the_scene_prefix_names_the_one_fact(self):
+        old = self._state('a--he-thinks-father-dead', 'a')
+        out, problems = self._rows(self._found(supersedes='he-thinks-father-dead'), [old])
+        assert out[0]['supersedes'] == 'a--he-thinks-father-dead'
+        assert problems['supersedes'] == []
+        assert problems['id prefix'] == ['b: he-thinks-father-dead -> a--he-thinks-father-dead']
+
+    def test_an_ends_without_the_scene_prefix_ends_the_one_fact(self):
+        old = self._state('a--he-thinks-father-dead', 'a')
+        _, problems = self._rows(self._found(ends=['he-thinks-father-dead']), [old])
+        assert old['resolves'] == 'b' and problems['ends'] == []
+
+    def test_two_facts_with_that_suffix_are_not_guessed(self):
+        offered = [self._state('a--he-thinks', 'a'), self._state('c--he-thinks', 'c')]
+        out, problems = self._rows(self._found(supersedes='he-thinks'), offered)
+        assert out[0]['supersedes'] == ''
+        assert problems['supersedes'] == [
+            'b: he-thinks (matches a--he-thinks, c--he-thinks; not guessed)']
+        assert problems['id prefix'] == []
+
+    def test_an_ambiguous_ends_is_not_guessed(self):
+        offered = [self._state('a--he-thinks', 'a'), self._state('c--he-thinks', 'c')]
+        _, problems = self._rows(self._found(ends=['he-thinks']), offered)
+        assert [r['resolves'] for r in offered] == ['', '']
+        assert problems['ends'] == ['b: he-thinks (matches a--he-thinks, c--he-thinks; '
+                                    'not guessed)']
+
+    def test_a_wrong_scene_prefix_is_not_matched(self):
+        old = self._state('a--he-thinks-father-dead', 'a')
+        out, problems = self._rows(self._found(supersedes='zz--he-thinks-father-dead'), [old])
+        assert out[0]['supersedes'] == ''
+        assert problems['supersedes'] == ['b: zz--he-thinks-father-dead']
+
+    def test_an_id_the_ledger_has_is_never_matched_by_suffix(self):
+        """#622's review (SF-M5): a registry id with no prefix, left out of
+        the offer, is not re-pointed at an offered fact ending in it."""
+        from storyforge.extract import COMMITMENT_PROBLEMS, commitment_rows
+        reg = self._state('village-vanished', '')
+        reg['introduced_by'] = 'extract'
+        old = self._state('a--village-vanished', 'a')
+        problems = {k: [] for k in COMMITMENT_PROBLEMS}
+        out = commitment_rows(self._found(supersedes='village-vanished'), 'b', 'q',
+                              [reg, old], [old], [], {}, 'revise', problems,
+                              own_writers=ledger.COMMITMENT_WRITERS,
+                              registry_is_plan=True, reserved=set())
+        assert out[0]['supersedes'] == '' and problems['id prefix'] == []
+
+    def test_an_end_by_a_later_scene_moves_here(self):
+        """#621: scene c (later) ended a's state; b, between, ends it now."""
+        old = self._state('a--father-dead-2', 'a', resolves='c')
+        _, problems = self._rows(self._found(ends=['a--father-dead-2']), [old],
+                                 order={'a': 0, 'b': 1, 'c': 2})
+        assert old['resolves'] == 'b'
+        assert problems['ends again'] == []
+        assert problems['ends moved'] == ['b: a--father-dead-2 (was: c)']
+
+    def test_an_end_by_an_earlier_scene_is_still_ends_again(self):
+        old = self._state('a--father-dead-2', 'a', resolves='b')
+        from storyforge.extract import COMMITMENT_PROBLEMS, commitment_rows
+        problems = {k: [] for k in COMMITMENT_PROBLEMS}
+        commitment_rows(self._found(ends=['a--father-dead-2']), 'c', 'q', [old], [old], [], {},
+                        'revise', problems, own_writers=ledger.COMMITMENT_WRITERS,
+                        registry_is_plan=True, reserved=set(),
+                        order={'a': 0, 'b': 1, 'c': 2})
+        assert old['resolves'] == 'b'
+        assert problems['ends again'] == ['c: a--father-dead-2 (resolves: b)']
+
+    def test_without_order_a_later_end_is_still_ends_again(self):
+        old = self._state('a--father-dead-2', 'a', resolves='c')
+        _, problems = self._rows(self._found(ends=['a--father-dead-2']), [old])
+        assert old['resolves'] == 'c' and problems['ends moved'] == []
+        assert problems['ends again'] == ['b: a--father-dead-2 (resolves: c)']
