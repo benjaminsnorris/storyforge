@@ -899,7 +899,8 @@ class TestCompleteCycleSourceFidelity:
         monkeypatch.setattr(cmd_score, 'commit_and_push', lambda p, msg, *a: commits.append(msg))
         monkeypatch.setattr(cmd_score, 'check_threshold', lambda cost: True)
         _write(adapted, {'scenes/olympus-council-meets.md': 'Zeus spoke. ' * 10})
-        # cycle 1 scored the council; the door's reply couldn't be read
+        # cycle 1 has the council's result, and its incomplete.txt (written
+        # below, as a run whose door reply failed would) lists the door
         _run(adapted, 'prose', ['olympus-council-meets'])
         cycle = os.path.join(adapted, 'working', 'scores', 'cycle-1')
         hashes = '\n'.join(f'{s}|{sf.target_hash(sf.target_text(adapted, s, "prose"))}'
@@ -929,7 +930,7 @@ class TestCompleteCycleSourceFidelity:
         assert e.value.code == 1
         assert open(os.path.join(incomplete.dir, 'incomplete.txt')).read() == (
             'source fidelity (prose): athena-at-the-door\n')
-        assert len(incomplete.api.calls) == 2           # asked once more, then failed
+        assert len(incomplete.api.calls) == 2   # the call and its one re-ask, both unreadable
         assert incomplete.commits == ['Score: complete cycle 1 (still incomplete)']
 
     def test_without_prose_hashes_the_source_fidelity_hashes_are_checked(
@@ -942,3 +943,119 @@ class TestCompleteCycleSourceFidelity:
         assert e.value.code == 1
         assert "olympus-council-meets changed since it was scored" in capsys.readouterr().out
         assert incomplete.api.calls == []
+
+    def test_a_scene_with_nothing_to_check_now_stays_listed(self, adapted, incomplete, capsys):
+        """C4/SF-8: a scene the map now invents was cleared without being checked."""
+        from storyforge import cmd_score
+        _write(adapted, {'reference/source-map.csv': open(source.source_map_path(adapted))
+                         .read().replace('minerva-visits;assembly-called|compress',
+                                         '|invent')})
+        with pytest.raises(SystemExit) as e:
+            cmd_score.main(['--complete-cycle'])
+        assert e.value.code == 1
+        assert open(os.path.join(incomplete.dir, 'incomplete.txt')).read() == (
+            'source fidelity (prose): athena-at-the-door\n')
+        assert 'nothing to check now' in capsys.readouterr().out
+        assert incomplete.api.calls == []
+
+    def test_a_run_that_cannot_start_puts_the_items_back(self, adapted, incomplete,
+                                                          monkeypatch, capsys):
+        """C5/SF-7: the error used to replace the list of scenes."""
+        from storyforge import cmd_score
+
+        def boom(*a, **k):
+            raise source.SourceError('the imported source changed')
+        monkeypatch.setattr('storyforge.source_fidelity.run', boom)
+        with pytest.raises(SystemExit):
+            cmd_score.main(['--complete-cycle'])
+        assert open(os.path.join(incomplete.dir, 'incomplete.txt')).read() == (
+            'source fidelity (prose): athena-at-the-door\n')
+        assert 'the imported source changed' in capsys.readouterr().out
+
+    @pytest.mark.parametrize('break_it, message', [
+        (lambda p: os.remove(source.source_map_path(p)), 'source-map'),
+        (lambda p: _write(p, {'storyforge.yaml': 'project:\n  title: "T"\n'}),
+         'no `source:` block'),
+    ])
+    def test_a_missing_map_or_source_block_is_refused_up_front(
+            self, adapted, incomplete, capsys, break_it, message):
+        from storyforge import cmd_score
+        break_it(adapted)
+        with pytest.raises(SystemExit) as e:
+            cmd_score.main(['--complete-cycle'])
+        assert e.value.code == 1 and message in capsys.readouterr().out
+        assert incomplete.api.calls == [] and incomplete.commits == []
+
+    def test_a_broken_source_fidelity_file_is_refused(self, adapted, incomplete, capsys):
+        from storyforge import cmd_score
+        _write(incomplete.dir, {sf.SCORES_FILE: 'id|nonsense\nx|y\n'})
+        with pytest.raises(SystemExit) as e:
+            cmd_score.main(['--complete-cycle'])
+        assert e.value.code == 1 and 'the header must be' in capsys.readouterr().out
+        assert incomplete.api.calls == []
+
+    @pytest.mark.parametrize('edit_brief', [False, True])
+    def test_a_brief_part_checks_the_briefs(self, adapted, incomplete, capsys, edit_brief):
+        from storyforge import cmd_score
+        _run(adapted, 'brief', ['olympus-council-meets'])
+        incomplete.api.calls.clear()
+        _write(incomplete.dir, {'incomplete.txt': 'source fidelity (brief): athena-at-the-door\n'})
+        if edit_brief:
+            path = os.path.join(adapted, 'reference', 'scene-briefs.csv')
+            _write(adapted, {'reference/scene-briefs.csv': open(path).read().replace(
+                'Athena wants Odysseus freed', 'Athena wants him home')})
+            with pytest.raises(SystemExit) as e:
+                cmd_score.main(['--complete-cycle'])
+            assert e.value.code == 1
+            assert 'olympus-council-meets (brief) changed since' in capsys.readouterr().out
+            assert incomplete.api.calls == []
+        else:
+            cmd_score.main(['--complete-cycle'])
+            assert 'Prose and briefs unchanged since cycle-1' in capsys.readouterr().out
+            assert ('athena-at-the-door', 'brief') in {
+                (r['id'], r['target']) for r in sf.read_scores(incomplete.dir)}
+
+
+class TestCompleteCycleBeforeThisChange:
+    """A cycle scored before #617/#618: the old header, no hash files, and
+    incomplete.txt lines without a target."""
+
+    def _old(self, adapted, fake_api, monkeypatch, items):
+        from storyforge import cmd_score
+        monkeypatch.setattr(cmd_score, 'detect_project_root', lambda: adapted)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'k')
+        for name in ('create_branch', 'ensure_branch_pushed', 'commit_and_push'):
+            monkeypatch.setattr(cmd_score, name, lambda *a, **k: None)
+        monkeypatch.setattr(cmd_score, 'check_threshold', lambda cost: True)
+        _write(adapted, {'scenes/olympus-council-meets.md': 'Zeus spoke. ' * 10})
+        cycle = os.path.join(adapted, 'working', 'scores', 'cycle-3')
+        h = sf.target_hash(sf.target_text(adapted, 'olympus-council-meets', 'prose'))
+        _write(cycle, {
+            sf.SCORES_FILE: f'{OLD_HEADER}\nolympus-council-meets|prose|{h}|5|5|5|5|5|5|5.0|0|0\n',
+            sf.RATIONALE_FILE: 'id|target|element|tag|evidence|authority\n',
+            'incomplete.txt': ''.join(f'{i}\n' for i in items)})
+        return cycle
+
+    def test_a_full_cycles_line_is_read_as_prose(self, adapted, fake_api, monkeypatch, capsys):
+        from storyforge import cmd_score
+        cycle = self._old(adapted, fake_api, monkeypatch,
+                          ['source fidelity: athena-at-the-door'])
+        cmd_score.main(['--complete-cycle'])
+        out = capsys.readouterr().out
+        assert 'checked the 1 results its source-fidelity file hashes' in out
+        assert not os.path.exists(os.path.join(cycle, 'incomplete.txt'))
+        lines = open(os.path.join(cycle, sf.SCORES_FILE)).read().splitlines()
+        assert lines[0] == '|'.join(sf.SCORE_COLUMNS)
+        assert any(l.startswith('athena-at-the-door|prose|') for l in lines)
+
+    def test_a_source_only_cycles_line_is_not_guessed(self, adapted, fake_api, monkeypatch,
+                                                      capsys):
+        from storyforge import cmd_score
+        cycle = self._old(adapted, fake_api, monkeypatch, [
+            'scene scores: not run (score --source-fidelity only)',
+            'source fidelity: athena-at-the-door'])
+        with pytest.raises(SystemExit) as e:
+            cmd_score.main(['--complete-cycle'])
+        assert e.value.code == 1
+        assert "doesn't say whether briefs or prose" in capsys.readouterr().out
+        assert fake_api.calls == [] and os.path.exists(os.path.join(cycle, 'incomplete.txt'))
