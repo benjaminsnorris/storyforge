@@ -2,6 +2,8 @@
 
 This novel adapts a source. You are comparing one scene's {TARGET_KIND} against the source scene(s) it adapts, to find every place it departs from the source and to say whether each departure was authorized.
 
+**The scene you are checking is `{SCENE_ID}`.** Every row of your output starts with `{SCENE_ID}`, never with a source scene's id.
+
 This is not a quality judgment, and a departure is not a fault. An adaptation is meant to depart where its plan says so: a compressed scene drops beats, a POV shift changes whose eyes we see through, and the version rules may soften or cut what the source shows. What this evaluation catches is **drift**: a departure nothing authorized.
 
 Names differ from the source on purpose (the adaptation's name map); a renamed person or place is not a departure. Judge substance, not wording.
@@ -9,6 +11,12 @@ Names differ from the source on purpose (the adaptation's name map); a renamed p
 ## The source scene(s)
 
 {SOURCE_DATA}
+
+## The neighbouring book scenes' sources
+
+The adaptation often moves material between neighbouring scenes: a beat the source tells in this scene may be told in the book scene before or after it, and a beat this scene tells may come from a neighbour's source scene. These are the book scenes either side of `{SCENE_ID}` (the nearest before and after it in reading order that adapt a source scene) and the source scenes they adapt. They are context only: you are not checking them.
+
+{NEIGHBOURS}
 
 ## How this scene adapts them
 
@@ -22,7 +30,7 @@ Treatments: `dramatize` (the source scene played as a scene), `compress` (severa
 
 {RULES}
 
-## The adaptation's {TARGET_KIND}
+## The adaptation's {TARGET_KIND}: `{SCENE_ID}`
 
 {TARGET_DATA}
 
@@ -40,11 +48,13 @@ For each element, compare the adaptation's {TARGET_KIND} with the source scenes'
 List every departure: something the source has that the adaptation drops or changes, or something the adaptation adds that the source doesn't have. Tag each one:
 
 - `deliberate`: the treatment or its note explains it, or a version rule calls for it. Name which in `authority` (e.g. `treatment: compress`, `note`, `rule: the YA version softens the killing`)
+- `moved`: the beat is not lost or invented, only moved between this scene and a neighbour. Either this scene tells something from a neighbour's source scene, or a beat of this scene's source is told in a neighbour instead (its map note or its source says so). Name the neighbour's book scene id in `authority` (e.g. `from: <neighbour id>`, `to: <neighbour id>`)
+- `staging`: connective invention that changes no event, fact or outcome of the source: physical business, a character's interiority, a transition, a setting detail, an ending extended past the source's last beat without adding an event. {STAGING}
 - `drift`: nothing above authorizes it. `authority` is `none`
 
 A departure belongs to one of those six elements. If it is only in the brief's `title`, `pov`, `conflict`, `crisis` or `decision`, name that field as its element: it is listed, not scored.
 
-Then score each element 1-5 on **drift only**. A deliberate departure never lowers a score.
+Then score each element 1-5 on **drift only**. A `deliberate`, `moved` or `staging` departure never lowers a score.
 
 - **5:** no drift
 - **4:** minor drift that changes nothing downstream
@@ -62,4 +72,4 @@ id|goal|outcome|key_actions|key_dialogue|on_stage|knowledge_out
 
 DEPARTURES
 id|element|tag|departure|authority
-{SCENE_ID}|element|deliberate or drift|one sentence: what the source has and what the adaptation does instead|what authorizes it, or none
+{SCENE_ID}|element|deliberate, moved, staging or drift|one sentence: what the source has and what the adaptation does instead|what authorizes it (for moved, the neighbour's book scene id), or none

@@ -158,7 +158,7 @@ class TestParseFixes:
          'more than one SCORES row'),
         (REPLY.replace('athena-at-the-door|5|2', 'other-scene|5|2'), "a row for 'other-scene'"),
         (REPLY.replace('yes|none', 'yes | really|none'), 'cells, not 5'),
-        (REPLY.replace('yes|none', 'yes|treatment: compress'), 'deliberate or drift'),
+        (REPLY.replace('yes|none', 'yes|treatment: compress'), 'drift has none'),
         (REPLY.replace('|deliberate|the assembly is folded into the visit|',
                        '|deliberate||'), 'says nothing'),
     ])
@@ -187,7 +187,7 @@ class TestRun:
         cycle = os.path.join(adapted, 'working', 'scores', 'cycle-1')
         scores = open(os.path.join(cycle, sf.SCORES_FILE)).read().splitlines()
         assert scores[0] == '|'.join(sf.SCORE_COLUMNS)
-        assert any(l.startswith('athena-at-the-door|brief|') and l.endswith('|1|1') for l in scores)
+        assert any(l.startswith('athena-at-the-door|brief|') and l.endswith('|1|1|0|0') for l in scores)
         rat = open(os.path.join(cycle, sf.RATIONALE_FILE)).read()
         assert 'athena-at-the-door|brief|outcome|drift|' in rat
         assert 'athena-at-the-door|brief|key_actions|deliberate|' in rat
@@ -444,3 +444,250 @@ class TestKnowledgeAndNotedFields:
         r = sf.parse_response(text, 'athena-at-the-door', 'brief', 'h')
         assert [d['element'] for d in r.departures] == ['key_actions', field]
         assert set(r.scores) == set(sf.ELEMENTS)
+
+
+# ----------------------------------------------------------------------------
+# #617: neighbours' sources, and the `moved` and `staging` tags
+# ----------------------------------------------------------------------------
+
+FOUR_SCENES = {
+    'reference/scenes.csv': ('id|seq|title|pov\n'
+                             'olympus-council-meets|1|Council|narrator\n'
+                             'athena-at-the-door|2|At the Door|telemachus\n'
+                             'telemachus-sails-at-night|3|Night|telemachus\n'
+                             'the-ship-sails|4|Ship|telemachus\n'),
+    'reference/source-map.csv': (
+        'scene_id|source_scenes|treatment|note\n'
+        'olympus-council-meets|gods-debate|dramatize|\n'
+        'athena-at-the-door|minerva-visits;assembly-called|compress|two days in one\n'
+        'telemachus-sails-at-night||invent|\n'
+        'the-ship-sails|ship-sails;assembly-called|compress|the last of the assembly\n'),
+}
+
+MOVED = REPLY.replace(
+    'athena-at-the-door|outcome|drift|the source\'s outcome is no-but; the brief makes it yes|none',
+    'athena-at-the-door|key_dialogue|moved|"Cast off" comes from the next scene\'s source|'
+    'from: the-ship-sails\n'
+    'athena-at-the-door|key_actions|staging|Athena pauses at the threshold|rule: connective only')
+
+
+class TestNeighbours:
+    def test_the_nearest_mapped_scene_either_side(self, adapted):
+        _write(adapted, FOUR_SCENES)
+        rows = source.map_rows_by_scene(source.read_source_map(adapted))
+        order = sf.reading_order(adapted)
+        # the invented scene between is passed over
+        assert sf.neighbours('athena-at-the-door', order, rows) == (
+            'olympus-council-meets', 'the-ship-sails')
+        assert sf.neighbours('olympus-council-meets', order, rows) == (
+            None, 'athena-at-the-door')
+        assert sf.neighbours('not-a-scene', order, rows) == (None, None)
+
+    def test_the_prompt_shows_them_by_book_id(self, adapted):
+        _write(adapted, FOUR_SCENES)
+        plan = _plan(adapted, 'athena-at-the-door', 'prose')
+        near = plan.prompt.split("## The neighbouring book scenes' sources")[1].split(
+            '## How this scene adapts them')[0]
+        assert '### The book scene before it: `olympus-council-meets`' in near
+        assert '#### odyssey:gods-debate: The Gods Debate' in near
+        assert '### The book scene after it: `the-ship-sails`' in near
+        assert '**Its map row:** `compress`. the last of the assembly' in near
+        assert '#### odyssey:ship-sails' in near
+        # a source scene this scene adapts too is named, not shown twice
+        assert 'It also adapts odyssey:assembly-called, shown above' in near
+        assert '#### odyssey:assembly-called' not in near
+        # only this scene's own row says Treatment
+        assert plan.prompt.count('**Treatment:**') == 1
+        assert '`moved`' in plan.prompt and '`staging`' in plan.prompt
+        assert plan.neighbours >= {'olympus-council-meets', 'the-ship-sails',
+                                   'ship-sails', 'odyssey:ship-sails'}
+
+    def test_a_scene_with_no_mapped_neighbour_says_so(self, adapted):
+        p = _plan(adapted, 'athena-at-the-door').prompt
+        assert ('### The book scene after it: none (no scene after this one adapts a '
+                'source scene)') in p
+
+    def test_staging_follows_the_mode(self, adapted):
+        assert 'mode is `faithful`, so `staging` is allowed only when' in _plan(
+            adapted, 'athena-at-the-door').prompt
+        _write(adapted, {'storyforge.yaml': YAML.format(extra='  mode: free')})
+        assert 'mode is `free`, which allows connective invention' in _plan(
+            adapted, 'athena-at-the-door').prompt
+
+
+class TestNewTags:
+    NEAR = frozenset({'the-ship-sails', 'ship-sails', 'odyssey:ship-sails'})
+
+    def test_moved_and_staging_are_read_and_are_not_drift(self):
+        r = sf.parse_response(MOVED, 'athena-at-the-door', 'prose', 'h',
+                              neighbours=self.NEAR, mode='faithful')
+        assert [d['tag'] for d in r.departures] == ['deliberate', 'moved', 'staging']
+        assert r.count('drift') == 0 and r.count('moved') == 1 and r.count('staging') == 1
+        assert r.departures[1]['authority'] == 'from: the-ship-sails'
+
+    @pytest.mark.parametrize('authority', ['from: odyssey:ship-sails', 'to ship-sails'])
+    def test_moved_may_name_the_neighbours_source_scene(self, authority):
+        text = MOVED.replace('from: the-ship-sails', authority)
+        assert sf.parse_response(text, 'athena-at-the-door', 'prose', 'h',
+                                 neighbours=self.NEAR).count('moved') == 1
+
+    @pytest.mark.parametrize('authority, near, message', [
+        ('from: the next scene', NEAR, r'names no neighbouring scene \(ship-sails, the-ship-sails\)'),
+        ('from: the-ship-sails-two', NEAR, 'names no neighbouring scene'),
+        ('from: the-ship-sails', frozenset(), 'this scene has none'),
+        ('none', NEAR, 'a moved departure on key_dialogue with no authority'),
+    ])
+    def test_moved_must_name_a_neighbour(self, authority, near, message):
+        with pytest.raises(sf.SourceFidelityError, match=message):
+            sf.parse_response(MOVED.replace('from: the-ship-sails', authority),
+                              'athena-at-the-door', 'prose', 'h', neighbours=near)
+
+    def test_staging_in_faithful_mode_needs_a_rule_or_the_note(self):
+        text = MOVED.replace('rule: connective only', 'mode: free')
+        with pytest.raises(sf.SourceFidelityError, match='only a version rule or the note'):
+            sf.parse_response(text, 'athena-at-the-door', 'prose', 'h',
+                              neighbours=self.NEAR, mode='faithful')
+        assert sf.parse_response(text, 'athena-at-the-door', 'prose', 'h',
+                                 neighbours=self.NEAR, mode='free').count('staging') == 1
+        with pytest.raises(sf.SourceFidelityError, match='staging departure .* no authority'):
+            sf.parse_response(MOVED.replace('rule: connective only', 'none'),
+                              'athena-at-the-door', 'prose', 'h', neighbours=self.NEAR)
+
+    def test_counts_are_written_and_reported(self, adapted, fake_api, capsys):
+        _write(adapted, FOUR_SCENES)
+        fake_api.replies['compress'] = MOVED
+        results, skipped, failed = _run(adapted, 'prose', ['athena-at-the-door'])
+        assert failed == {}
+        row = sf.read_scores(os.path.join(adapted, 'working', 'scores', 'cycle-1'))[0]
+        assert (row['drift'], row['deliberate'], row['moved'], row['staging']) == (
+            '0', '1', '1', '1')
+        sf.report(results, skipped, failed, 'prose')
+        assert ('0 drift in 0 scenes; not drift: 1 deliberate, 1 moved, 1 staging'
+                in capsys.readouterr().out)
+        # revise reads drift only
+        assert sf.latest_drift(adapted) == {}
+
+
+OLD_HEADER = 'id|target|target_hash|' + '|'.join(sf.ELEMENTS) + '|overall|drift|deliberate'
+
+
+class TestOlderCycles:
+    def _old_cycle(self, adapted):
+        cycle = os.path.join(adapted, 'working', 'scores', 'cycle-1')
+        h = sf.target_hash(sf.target_text(adapted, 'athena-at-the-door', 'prose'))
+        _write(cycle, {
+            sf.SCORES_FILE: f'{OLD_HEADER}\nathena-at-the-door|prose|{h}|5|2|5|5|5|5|4.4|1|0\n',
+            sf.RATIONALE_FILE: ('id|target|element|tag|evidence|authority\n'
+                                'athena-at-the-door|prose|outcome|drift|x|none\n')})
+        return cycle
+
+    def test_an_older_cycle_is_read_with_the_new_counts_empty(self, adapted):
+        cycle = self._old_cycle(adapted)
+        row = sf.read_scores(cycle)[0]
+        assert row['drift'] == '1' and row['moved'] == '' and row['staging'] == ''
+        assert sf.latest_drift(adapted) == {'athena-at-the-door': ['prose outcome: x']}
+
+    def test_merging_into_an_older_cycle_writes_the_new_header(self, adapted, fake_api):
+        cycle = self._old_cycle(adapted)
+        _run(adapted, 'brief', ['athena-at-the-door'])
+        lines = open(os.path.join(cycle, sf.SCORES_FILE)).read().splitlines()
+        assert lines[0] == '|'.join(sf.SCORE_COLUMNS)
+        old = next(l for l in lines if l.startswith('athena-at-the-door|prose|'))
+        assert old.endswith('|1|0||')       # not counted, not zero
+
+
+# ----------------------------------------------------------------------------
+# #618: a reply naming the source scene, and one re-ask
+# ----------------------------------------------------------------------------
+
+ONE_SOURCE_MAP = ('scene_id|source_scenes|treatment|note\n'
+                  'olympus-council-meets|gods-debate|dramatize|\n'
+                  'athena-at-the-door|minerva-visits|dramatize|\n'
+                  'telemachus-sails-at-night||invent|\n')
+
+
+class TestSourceIdInTheReply:
+    @pytest.fixture
+    def one_source(self, adapted):
+        _write(adapted, {'reference/source-map.csv': ONE_SOURCE_MAP})
+        return adapted
+
+    @pytest.mark.parametrize('named', ['minerva-visits', 'odyssey:minerva-visits'])
+    def test_rows_naming_the_one_source_scene_are_the_scenes(self, one_source, named):
+        plan = _plan(one_source, 'athena-at-the-door', 'prose')
+        assert plan.aliases == {'minerva-visits', 'odyssey:minerva-visits'}
+        r = sf.parse_response(REPLY.replace('athena-at-the-door', named), 'athena-at-the-door',
+                              'prose', 'h', aliases=plan.aliases)
+        assert r.scene_id == 'athena-at-the-door' and r.remapped == named
+        assert r.count('drift') == 1
+
+    def test_the_prompt_names_the_book_scene_first(self, one_source):
+        p = _plan(one_source, 'athena-at-the-door', 'prose').prompt
+        assert p.index('**The scene you are checking is `athena-at-the-door`.**') < p.index(
+            '### odyssey:minerva-visits')
+
+    def test_a_scene_adapting_several_has_no_alias(self, adapted):
+        assert _plan(adapted, 'athena-at-the-door').aliases == frozenset()
+        with pytest.raises(sf.SourceFidelityError, match="a row for 'minerva-visits'"):
+            sf.parse_response(REPLY.replace('athena-at-the-door', 'minerva-visits'),
+                              'athena-at-the-door', 'brief', 'h')
+
+    def test_another_book_scenes_id_is_never_an_alias(self, adapted):
+        """A source scene sharing its id with a book scene is named only as slug:id."""
+        _write(adapted, {
+            'reference/scenes.csv': ('id|seq|title|pov\n'
+                                     'athena-at-the-door|1|At the Door|telemachus\n'
+                                     'ship-sails|2|Ship|telemachus\n'),
+            'reference/source-map.csv': ('scene_id|source_scenes|treatment|note\n'
+                                         'athena-at-the-door|ship-sails|dramatize|\n'
+                                         'ship-sails|ship-sails|dramatize|\n')})
+        assert _plan(adapted, 'athena-at-the-door', 'prose').aliases == {'odyssey:ship-sails'}
+
+    def test_the_run_reads_it_and_says_so(self, one_source, monkeypatch, capsys):
+        monkeypatch.setattr('storyforge.api.invoke_to_file',
+                            lambda prompt, model, log_file, *a, **k: _response(
+                                REPLY.replace('athena-at-the-door', 'minerva-visits')))
+        monkeypatch.setattr('storyforge.costs.log_operation', lambda *a, **k: None)
+        results, _skipped, failed = _run(one_source, 'prose', ['athena-at-the-door'])
+        assert failed == {} and results[0].scene_id == 'athena-at-the-door'
+        sf.report(results, {}, failed, 'prose')
+        assert ('the reply named its source scene minerva-visits in place of '
+                'athena-at-the-door') in capsys.readouterr().out
+
+
+class TestReask:
+    @pytest.fixture
+    def api(self, monkeypatch):
+        calls, costed, replies = [], [], []
+
+        def invoke_to_file(prompt, model, log_file, *a, **k):
+            calls.append((prompt, os.path.basename(log_file)))
+            return _response(replies.pop(0))
+        monkeypatch.setattr('storyforge.api.invoke_to_file', invoke_to_file)
+        monkeypatch.setattr('storyforge.costs.log_operation',
+                            lambda p, op, model, *a, **k: costed.append((op, k['target'])))
+        return type('Api', (), {'calls': calls, 'costed': costed, 'replies': replies})
+
+    def test_a_bad_reply_is_asked_again_once_with_what_was_wrong(self, adapted, api, capsys):
+        api.replies[:] = ['I could not compare these.', REPLY]
+        results, _skipped, failed = _run(adapted, 'brief', ['athena-at-the-door'])
+        assert failed == {} and results[0].count('drift') == 1
+        assert len(api.calls) == 2
+        second, log_name = api.calls[1]
+        assert log_name == 'source-fidelity-brief-athena-at-the-door-retry.json'
+        assert '## Your earlier reply could not be used' in second
+        assert 'no score for goal' in second and 'I could not compare these.' in second
+        assert api.costed == [('score-source-fidelity-brief', 'athena-at-the-door')] * 2
+        assert 'could not be read (no score for goal' in capsys.readouterr().out
+
+    def test_a_second_bad_reply_is_a_failure(self, adapted, api):
+        api.replies[:] = ['I could not compare these.', REPLY.replace('|deliberate|', '|maybe|')]
+        results, _skipped, failed = _run(adapted, 'brief', ['athena-at-the-door'])
+        assert results == [] and len(api.calls) == 2
+        why = failed['athena-at-the-door']
+        assert "departure tag 'maybe'" in why and 'asked twice' in why
+
+    def test_a_good_reply_is_asked_once(self, adapted, api):
+        api.replies[:] = [REPLY]
+        _run(adapted, 'brief', ['athena-at-the-door'])
+        assert len(api.calls) == 1

@@ -4,11 +4,23 @@ The same shape as brief fidelity (`scoring.build_fidelity_prompt`), with the
 source scenes on the left-hand side: one call per mapped scene (score uses
 the evaluation tier, Sonnet) compares the scene's brief, or its prose, with the source scenes it adapts
 (`reference/source-map.csv`) on `ELEMENTS`, lists every departure and tags it
-`deliberate` (the map row's treatment or note, or a version rule under
-`source.rules`, authorizes it) or `drift` (nothing does). Elements are scored
-1-5 on drift only, so a deliberate departure is never penalized. With a
-`range:`, a scene whose map row names a source scene outside it is not
-checked (it is broken data, which validate blocks on).
+(`TAGS`): `deliberate` (the map row's treatment or note, or a version rule
+under `source.rules`, authorizes it), `moved` (a beat moved to or from a
+neighbouring book scene: the prompt also shows the nearest mapped scene
+before and after this one, with their map rows and source scenes, and the
+authority names the neighbour), `staging` (connective invention that
+changes no event, fact or outcome; in `free` mode, or in `faithful` mode
+when a version rule or the note allows it) or `drift` (nothing does).
+Elements are scored 1-5 on drift only, so no other tag is penalized; drift
+is what revise reads (#617: the Telemachy pilot's 80 drift were 24 moved,
+46 staging, 8 false alarms and 2 real departures). With a `range:`, a scene
+whose map row names a source scene outside it is not checked (it is broken
+data, which validate blocks on).
+
+A reply whose rows name the one source scene the map row names in place of
+the book scene's id is read as the book scene's (#618), and is said in the
+log. A reply that can't be parsed is asked again once, with what was wrong;
+both calls are logged and costed.
 
 Output, in the score cycle's directory: `source-fidelity.csv`
 (`SCORE_COLUMNS`) and `source-fidelity-rationale.csv` (`RATIONALE_COLUMNS`),
@@ -30,12 +42,16 @@ from storyforge import source
 from storyforge.common import csv_safe, log
 
 ELEMENTS = ('goal', 'outcome', 'key_actions', 'key_dialogue', 'on_stage', 'knowledge_out')
-TAGS = ('deliberate', 'drift')
+TAGS = ('deliberate', 'moved', 'staging', 'drift')
 TARGETS = ('brief', 'prose')
 
 SCORES_FILE = 'source-fidelity.csv'
 RATIONALE_FILE = 'source-fidelity-rationale.csv'
-SCORE_COLUMNS = ['id', 'target', 'target_hash', *ELEMENTS, 'overall', 'drift', 'deliberate']
+SCORE_COLUMNS = ['id', 'target', 'target_hash', *ELEMENTS, 'overall', 'drift', 'deliberate',
+                 'moved', 'staging']
+# The header before `moved` and `staging` (#617): a cycle scored then is still
+# read, its rows' counts for the new tags empty (not counted, not zero)
+_OLDER_SCORE_COLUMNS = (SCORE_COLUMNS[:-2],)
 RATIONALE_COLUMNS = ['id', 'target', 'element', 'tag', 'evidence', 'authority']
 
 # The brief fields a brief target shows (knowledge_out with its statements)
@@ -71,6 +87,7 @@ class Result:
     target_hash: str
     scores: dict[str, int]
     departures: list[dict[str, str]] = field(default_factory=list)
+    remapped: str = ''    # the source scene id the reply's rows named in place of scene_id
 
     def __post_init__(self):
         if self.target not in TARGETS:
@@ -143,7 +160,8 @@ def target_hash(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]
 
 
-def _source_side(project_dir: str, refs: list[tuple[str, str]], tables=None) -> str:
+def _source_side(project_dir: str, refs: list[tuple[str, str]], tables=None,
+                 heading: str = '###') -> str:
     from storyforge.prompts_source import _Tables
     t = tables or _Tables(project_dir)
     blocks = []
@@ -152,7 +170,7 @@ def _source_side(project_dir: str, refs: list[tuple[str, str]], tables=None) -> 
         brief = t.row(slug, 'scene-briefs.csv', sid)
         intent = t.row(slug, 'scene-intent.csv', sid)
         facts = {k: r.get('statement', '') for k, r in t.table(slug, 'commitments.csv').items()}
-        lines = [f'### {slug}:{sid}' + (f': {scene["title"]}' if scene.get('title') else '')]
+        lines = [f'{heading} {slug}:{sid}' + (f': {scene["title"]}' if scene.get('title') else '')]
         summary = scene.get('summary', '') or intent.get('function', '')
         for key, val in (('summary', summary), ('pov', scene.get('pov', '')),
                          ('on_stage', intent.get('on_stage', ''))):
@@ -211,28 +229,107 @@ def source_fixed_outcomes(project_dir: str) -> list[str]:
 @dataclass(frozen=True)
 class Plan:
     """What one scene's check needs, or why it can't be checked: exactly one
-    of `prompt` (with its `target_hash`) and `skip`."""
+    of `prompt` (with its `target_hash`) and `skip`. `aliases`, `neighbours`
+    and `mode` are what `parse_response` needs to read the reply."""
     scene_id: str
     prompt: str = ''
     target_hash: str = ''
     skip: str = ''        # why there is no prompt ('' when there is one)
     broken: bool = False  # the skip means the data is wrong, not that there's nothing to do
+    aliases: frozenset = frozenset()     # reply row ids read as scene_id (#618)
+    neighbours: frozenset = frozenset()  # what a `moved` authority may name (#617)
+    mode: str = ''
 
     def __post_init__(self):
         if bool(self.prompt) == bool(self.skip) or bool(self.prompt) != bool(self.target_hash):
             raise ValueError(f'{self.scene_id}: a Plan has a prompt and its hash, or a skip')
 
 
+def _is_mapped(row: dict | None) -> bool:
+    return bool(row and row.get('treatment') != 'invent'
+                and source.split_ids(row.get('source_scenes', '')))
+
+
+def reading_order(project_dir: str) -> list[str]:
+    """The active scenes' ids in reading order (`source.active_scenes`)."""
+    return [r['id'] for r in source.active_scenes(project_dir)]
+
+
+def neighbours(scene_id: str, order: list[str],
+               map_rows: dict[str, dict]) -> tuple[str | None, str | None]:
+    """The nearest book scene before and after `scene_id` in `order` whose
+    map row names source scenes (invented and unmapped scenes are passed
+    over); None for none, or when the scene isn't in `order`."""
+    if scene_id not in order:
+        return None, None
+    i = order.index(scene_id)
+    before = next((s for s in reversed(order[:i]) if _is_mapped(map_rows.get(s))), None)
+    after = next((s for s in order[i + 1:] if _is_mapped(map_rows.get(s))), None)
+    return before, after
+
+
+def _id_forms(ref: tuple[str, str], cat: dict) -> set[str]:
+    """The ways a reply can name a source scene: `slug:id`, and the bare id
+    when the catalogue resolves it to that scene."""
+    slug, sid = ref
+    return {f'{slug}:{sid}'} | ({sid} if source.resolve_source_id(sid, cat) == ref else set())
+
+
+def _neighbour_side(project_dir: str, scene_id: str, own: list[tuple[str, str]],
+                    order: list[str], map_rows: dict[str, dict], cat: dict,
+                    spans: dict, source_tables) -> tuple[str, frozenset]:
+    """The neighbours' block of the prompt, and the names a `moved`
+    authority may use (their book ids and their source scenes' ids)."""
+    blocks, names = [], set()
+    for where, nid in zip(('before', 'after'), neighbours(scene_id, order, map_rows)):
+        if nid is None:
+            blocks.append(f'### The book scene {where} it: none (no scene {where} this one '
+                          f'adapts a source scene)')
+            continue
+        row = map_rows[nid]
+        names.add(nid)
+        lines = [f'### The book scene {where} it: `{nid}`',
+                 f'**Its map row:** `{row.get("treatment", "")}`'
+                 + (f'. {row["note"].strip()}' if row.get('note', '').strip() else '')]
+        refs = [source.resolve_source_id(r, cat) for r in source.split_ids(row['source_scenes'])]
+        if any(r is None for r in refs) or any(source.outside_range(r, spans) for r in refs):
+            lines.append('(Its source scenes are not in the imported source, or are outside '
+                         'the adapted range, so they are not shown.)')
+        else:
+            for r in refs:
+                names |= _id_forms(r, cat)
+            shared = [f'{slug}:{sid}' for slug, sid in refs if (slug, sid) in own]
+            if shared:
+                lines.append(f'It also adapts {", ".join(shared)}, shown above as this '
+                             f'scene\'s own source.')
+            new = [r for r in refs if r not in own]
+            if new:
+                lines.append(_source_side(project_dir, new, source_tables, heading='####'))
+        blocks.append('\n'.join(lines))
+    return '\n\n'.join(blocks), frozenset(names)
+
+
+#: What the prompt says about `staging`, by mode
+_STAGING = {
+    'free': ('This adaptation\'s mode is `free`, which allows connective invention: name '
+             '`mode: free`, or the version rule that allows it, in `authority`.'),
+    'faithful': ('This adaptation\'s mode is `faithful`, so `staging` is allowed only when a '
+                 'version rule or this scene\'s note allows connective invention: name it in '
+                 '`authority` (`rule: ...` or `note`). Otherwise connective invention is `drift`.'),
+}
+
+
 def plan_scene(project_dir: str, scene_id: str, target: str, plugin_dir: str,
                cfg: source.SourceConfig, map_rows: dict[str, dict],
                rules: str, tables: dict | None = None,
                cat: dict | None = None, source_tables=None,
-               spans: dict | None = None) -> Plan:
-    """One scene's check, or why there is none. `cat` and `spans` (each
-    source's adapted scene ids, from `source.spans`) are read when not given; a caller
-    planning many scenes passes them. A map row naming a source scene outside
-    its source's `range:` is broken: only the range is being adapted, and
-    validate blocks on it."""
+               spans: dict | None = None, order: list[str] | None = None) -> Plan:
+    """One scene's check, or why there is none. `cat`, `spans` (each
+    source's adapted scene ids, from `source.spans`) and `order` (the reading
+    order, `reading_order`) are read when not given; a caller planning many
+    scenes passes them. A map row naming a source scene outside its source's
+    `range:` is broken: only the range is being adapted, and validate blocks
+    on it."""
     if target not in TARGETS:
         raise ValueError(f'target must be one of {TARGETS}')
     row = map_rows.get(scene_id)
@@ -254,6 +351,17 @@ def plan_scene(project_dir: str, scene_id: str, target: str, plugin_dir: str,
     if text is None:
         return Plan(scene_id, skip='no brief' if target == 'brief' else 'no prose')
 
+    order = order if order is not None else reading_order(project_dir)
+    if source_tables is None:
+        from storyforge.prompts_source import _Tables
+        source_tables = _Tables(project_dir)
+    near, near_names = _neighbour_side(project_dir, scene_id, refs, order, map_rows, cat,
+                                       spans, source_tables)
+    # A reply naming the one source scene in place of the book scene (#618);
+    # never another book scene's id
+    aliases = _id_forms(refs[0], cat) if len(refs) == 1 else set()
+    aliases -= set(order) - {scene_id}
+
     template_path = os.path.join(plugin_dir, 'scripts', 'prompts', 'scoring',
                                  'source-fidelity.md')
     with open(template_path, encoding='utf-8') as f:
@@ -261,6 +369,8 @@ def plan_scene(project_dir: str, scene_id: str, target: str, plugin_dir: str,
     kind = 'brief' if target == 'brief' else 'prose'
     prompt = (template
               .replace('{SOURCE_DATA}', _source_side(project_dir, refs, source_tables))
+              .replace('{NEIGHBOURS}', near)
+              .replace('{STAGING}', _STAGING.get(cfg.mode, _STAGING['faithful']))
               .replace('{TREATMENT}', row.get('treatment', ''))
               .replace('{NOTE}', row.get('note', '') or '(none)')
               .replace('{MODE}', cfg.mode)
@@ -268,22 +378,50 @@ def plan_scene(project_dir: str, scene_id: str, target: str, plugin_dir: str,
               .replace('{TARGET_DATA}', text)
               .replace('{TARGET_KIND}', kind)
               .replace('{SCENE_ID}', scene_id))
-    return Plan(scene_id, prompt=prompt, target_hash=target_hash(text))
+    return Plan(scene_id, prompt=prompt, target_hash=target_hash(text),
+                aliases=frozenset(aliases), neighbours=near_names, mode=cfg.mode)
 
 
 # ============================================================================
 # Parsing
 # ============================================================================
 
-def parse_response(response: str, scene_id: str, target: str, hash_: str) -> Result:
+def _authority_problem(tag: str, element: str, authority: str,
+                       neighbours: frozenset, mode: str) -> str:
+    """Why a departure's authority doesn't fit its tag, or ''."""
+    none = authority.lower() in ('', 'none')
+    if tag == 'drift':
+        return '' if none else (f'a drift departure on {element} that names an authority '
+                                f'({authority}): drift has none')
+    if none:
+        return f'a {tag} departure on {element} with no authority'
+    if tag == 'moved' and not any(re.search(rf'(?<![\w-]){re.escape(n)}(?![\w-])', authority)
+                                  for n in neighbours):
+        return (f'a moved departure on {element} whose authority ({authority}) names no '
+                f'neighbouring scene' + (f' ({", ".join(sorted(n for n in neighbours if ":" not in n))})'
+                                         if neighbours else ': this scene has none'))
+    if (tag == 'staging' and mode == 'faithful'
+            and not re.match(r'(rule|note)\b', authority.strip().lower())):
+        return (f'a staging departure on {element} authorized by {authority}: in faithful '
+                f'mode only a version rule or the note allows connective invention')
+    return ''
+
+
+def parse_response(response: str, scene_id: str, target: str, hash_: str, *,
+                   aliases=frozenset(), neighbours=frozenset(), mode: str = 'free') -> Result:
     """The reply's SCORES and DEPARTURES. Raises SourceFidelityError when an
     element has no 1-5 score, or a departure names an unknown element or tag,
-    says nothing, or is `deliberate` with no authority: a result with a
-    misread tag would send the wrong scenes to revise."""
+    says nothing, or its authority doesn't fit its tag (`_authority_problem`:
+    `drift` has none; `moved` names a `neighbours` scene; `staging` in
+    `faithful` mode a rule or the note): a result with a misread tag would
+    send the wrong scenes to revise. Rows naming one of `aliases` (the one
+    source scene the map row names) are read as `scene_id`'s, and the Result
+    says so (`remapped`)."""
     scores: dict[str, int] = {}
     departures: list[dict[str, str]] = []
     problems: list[str] = []
     score_rows = 0
+    remapped = ''
     section = None
     for line in response.splitlines():
         s = line.strip().strip('`')
@@ -298,6 +436,8 @@ def parse_response(response: str, scene_id: str, target: str, hash_: str) -> Res
         parts = [p.strip() for p in s.split('|')]
         if parts[0] == 'id' or section is None:
             continue
+        if parts[0] != scene_id and parts[0] in aliases:
+            remapped, parts[0] = parts[0], scene_id
         if parts[0] != scene_id:
             problems.append(f'a row for {parts[0]!r}, not {scene_id}')
             continue
@@ -323,33 +463,32 @@ def parse_response(response: str, scene_id: str, target: str, hash_: str) -> Res
             if element not in ELEMENTS and element not in NOTED_FIELDS:
                 problems.append(f'departure element {element!r}')
             elif tag not in TAGS:
-                problems.append(f'departure tag {tag!r} (deliberate or drift)')
+                problems.append(f'departure tag {tag!r} ({", ".join(TAGS)})')
             elif not evidence:
                 problems.append(f'a {tag} departure on {element} that says nothing')
-            elif tag == 'deliberate' and authority.lower() in ('', 'none'):
-                problems.append(f'a deliberate departure on {element} with no authority')
-            elif tag == 'drift' and authority.lower() not in ('', 'none'):
-                problems.append(f'a drift departure on {element} that names an authority '
-                                f'({authority}): deliberate or drift?')
+            elif why := _authority_problem(tag, element, authority, frozenset(neighbours), mode):
+                problems.append(why)
             else:
                 departures.append({'element': element, 'tag': tag, 'evidence': evidence,
-                                   'authority': authority if tag == 'deliberate' else 'none'})
+                                   'authority': 'none' if tag == 'drift' else authority})
     missing = [el for el in ELEMENTS if el not in scores]
     if missing and not problems:
         problems.append(f'no score for {", ".join(missing)}')
     if problems:
         raise SourceFidelityError(f'{scene_id}: ' + '; '.join(problems))
-    return Result(scene_id, target, hash_, scores, departures)
+    return Result(scene_id, target, hash_, scores, departures, remapped)
 
 
 # ============================================================================
 # Files
 # ============================================================================
 
-def _read(path: str, columns: list[str]) -> list[dict[str, str]]:
-    """A results file's rows ([] when there is none). Raises SourceError for
-    one that can't be read, has another header, or a row with the wrong
-    number of cells: drift read from it would be wrong."""
+def _read(path: str, columns: list[str], older: tuple = ()) -> list[dict[str, str]]:
+    """A results file's rows ([] when there is none), keyed by `columns`. A
+    file with one of the `older` headers is read too, the columns it lacks
+    empty. Raises SourceError for one that can't be read, has another header,
+    or a row with the wrong number of cells: drift read from it would be
+    wrong."""
     if not os.path.isfile(path):
         return []
     try:
@@ -359,14 +498,15 @@ def _read(path: str, columns: list[str]) -> list[dict[str, str]]:
         raise source.SourceError(f'{path} could not be read ({e})') from e
     if not lines:
         return []
-    if lines[0].split('|') != columns:
+    header = lines[0].split('|')
+    if header != columns and header not in [list(h) for h in older]:
         raise source.SourceError(f'{path}: the header must be {"|".join(columns)}; '
                                  f're-run score --source-fidelity')
     rows = [l.split('|') for l in lines[1:]]
-    bad = [n for n, r in enumerate(rows, 2) if len(r) != len(columns)]
+    bad = [n for n, r in enumerate(rows, 2) if len(r) != len(header)]
     if bad:
         raise source.SourceError(f'{path} line {bad[0]}: wrong number of cells')
-    return [dict(zip(columns, r)) for r in rows]
+    return [{c: dict(zip(header, r)).get(c, '') for c in columns} for r in rows]
 
 
 def _write(path: str, columns: list[str], rows: list[dict[str, str]]) -> None:
@@ -383,19 +523,25 @@ def write_results(results: list[Result], out_dir: str) -> None:
     done = {(r.scene_id, r.target) for r in results}
     scores_path = os.path.join(out_dir, SCORES_FILE)
     rat_path = os.path.join(out_dir, RATIONALE_FILE)
-    scores = [r for r in _read(scores_path, SCORE_COLUMNS)
+    scores = [r for r in _read(scores_path, SCORE_COLUMNS, _OLDER_SCORE_COLUMNS)
               if (r.get('id'), r.get('target')) not in done]
     rats = [r for r in _read(rat_path, RATIONALE_COLUMNS)
             if (r.get('id'), r.get('target')) not in done]
     for res in results:
         row = {'id': res.scene_id, 'target': res.target, 'target_hash': res.target_hash,
-               'overall': res.overall, 'drift': res.count('drift'),
-               'deliberate': res.count('deliberate')}
+               'overall': res.overall, **{tag: res.count(tag) for tag in TAGS}}
         row.update({el: res.scores[el] for el in ELEMENTS})
         scores.append(row)
         rats += [{'id': res.scene_id, 'target': res.target, **d} for d in res.departures]
     _write(scores_path, SCORE_COLUMNS, scores)
     _write(rat_path, RATIONALE_COLUMNS, rats)
+
+
+def read_scores(cycle_dir: str) -> list[dict[str, str]]:
+    """A cycle's `source-fidelity.csv` rows ([] when there is none), an
+    older cycle's included (its `moved`/`staging` empty). Raises SourceError
+    as `_read` does."""
+    return _read(os.path.join(cycle_dir, SCORES_FILE), SCORE_COLUMNS, _OLDER_SCORE_COLUMNS)
 
 
 def _cycles(project_dir: str) -> list[str]:
@@ -431,7 +577,8 @@ def drift_state(project_dir: str) -> DriftState:
     seen: set[tuple[str, str]] = set()
     for cycle in _cycles(project_dir):
         rats = _read(os.path.join(cycle, RATIONALE_FILE), RATIONALE_COLUMNS)
-        for row in _read(os.path.join(cycle, SCORES_FILE), SCORE_COLUMNS):
+        for row in _read(os.path.join(cycle, SCORES_FILE), SCORE_COLUMNS,
+                         _OLDER_SCORE_COLUMNS):
             key = (row['id'], row['target'])
             if key in seen or key[1] not in TARGETS:
                 continue
@@ -461,6 +608,20 @@ def latest_drift(project_dir: str) -> dict[str, list[str]]:
 # ============================================================================
 # Running
 # ============================================================================
+
+#: Appended to the prompt when a reply can't be read: one re-ask (#618)
+RETRY_NOTE = '''
+
+## Your earlier reply could not be used
+
+Your earlier reply to this prompt is below. It could not be read: {problem}.
+
+Write the whole output again, in the Output Format above, with that fixed. Every row starts with `{scene_id}`.
+
+<earlier_reply>
+{reply}
+</earlier_reply>
+'''
 
 def run(project_dir: str, scene_ids: list[str], target: str, *, plugin_dir: str,
         out_dir: str, log_dir: str, model: str, system: list | None = None,
@@ -496,20 +657,19 @@ def run(project_dir: str, scene_ids: list[str], target: str, *, plugin_dir: str,
     cat = source.catalogue(project_dir, cfg)
     spans = source.spans(project_dir, cfg)
     src_tables = _Tables(project_dir)
+    order = reading_order(project_dir)
     plans = {sid: plan_scene(project_dir, sid, target, plugin_dir, cfg, map_rows, rules,
-                             tables, cat, src_tables, spans)
+                             tables, cat, src_tables, spans, order)
              for sid in scene_ids}
     skipped = {sid: p.skip for sid, p in plans.items() if p.skip and not p.broken}
     broken = {sid: p.skip for sid, p in plans.items() if p.broken}
     todo = [sid for sid, p in plans.items() if not p.skip]
     os.makedirs(log_dir, exist_ok=True)
 
-    def check(sid: str) -> Result:
-        plan = plans[sid]
-        log_file = os.path.join(log_dir, f'source-fidelity-{target}-{sid}.json')
+    def ask(sid: str, prompt: str, log_file: str) -> str:
         if os.path.exists(log_file):
             os.remove(log_file)   # never read an earlier run's reply as this one's
-        response = invoke_to_file(plan.prompt, model, log_file, 2048, system=system)
+        response = invoke_to_file(prompt, model, log_file, 2048, system=system)
         usage = extract_usage(response)
         log_operation(project_dir, f'score-source-fidelity-{target}', model,
                       usage['input_tokens'], usage['output_tokens'],
@@ -519,7 +679,30 @@ def run(project_dir: str, scene_ids: list[str], target: str, *, plugin_dir: str,
         problem = stop_problem(response)
         if problem:
             raise SourceFidelityError(f'{sid}: {problem}')
-        return parse_response(extract_text(response), sid, target, plan.target_hash)
+        return extract_text(response)
+
+    def check(sid: str) -> Result:
+        plan = plans[sid]
+        log_file = os.path.join(log_dir, f'source-fidelity-{target}-{sid}.json')
+        retry_file = os.path.join(log_dir, f'source-fidelity-{target}-{sid}-retry.json')
+        if os.path.exists(retry_file):
+            os.remove(retry_file)
+        read = dict(scene_id=sid, target=target, hash_=plan.target_hash,
+                    aliases=plan.aliases, neighbours=plan.neighbours, mode=plan.mode)
+        reply = ask(sid, plan.prompt, log_file)
+        try:
+            return parse_response(reply, **read)
+        except SourceFidelityError as e:
+            first = str(e).removeprefix(f'{sid}: ')
+        # One re-ask, saying what was wrong; a second failure is the failure
+        log(f'  {sid}: the reply could not be read ({first}); asking again once')
+        reply = ask(sid, plan.prompt + RETRY_NOTE.format(problem=first, scene_id=sid,
+                                                          reply=reply.strip()),
+                    retry_file)
+        try:
+            return parse_response(reply, **read)
+        except SourceFidelityError as e:
+            raise SourceFidelityError(f'{e} (asked twice; the first reply: {first})') from e
 
     outcomes = run_parallel(todo, check, max_workers=parallel,
                             label=f'source fidelity ({target})')
@@ -538,13 +721,21 @@ def run(project_dir: str, scene_ids: list[str], target: str, *, plugin_dir: str,
 
 def report(results: list[Result], skipped: dict[str, str], failed: dict[str, str],
            target: str) -> None:
-    """Log what the run found and what it couldn't check."""
+    """Log what the run found and what it couldn't check: the departures
+    counted by tag, every drift, and every reply read under its source
+    scene's id."""
     if results:
         avg = sum(r.overall for r in results) / len(results)
         drift = [r for r in results if r.count('drift')]
+        counts = {tag: sum(r.count(tag) for r in results) for tag in TAGS}
         log(f'  Source fidelity ({target}): {len(results)} scenes, avg {avg:.1f}/5; '
-            f'{sum(r.count("deliberate") for r in results)} deliberate departures, '
-            f'{sum(r.count("drift") for r in results)} drift in {len(drift)} scenes')
+            f'{counts["drift"]} drift in {len(drift)} scenes; not drift: '
+            f'{counts["deliberate"]} deliberate, {counts["moved"]} moved, '
+            f'{counts["staging"]} staging')
+        for r in results:
+            if r.remapped:
+                log(f'    note: {r.scene_id}: the reply named its source scene '
+                    f'{r.remapped} in place of {r.scene_id}; read as {r.scene_id}\'s')
         for r in drift:
             for d in r.departures:
                 if d['tag'] == 'drift':
