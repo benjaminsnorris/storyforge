@@ -81,10 +81,15 @@ UNRESOLVED = (MISQUOTE, NO_QUOTE, 'supersedes', 'ends', 'ends again', 'rejected'
 #: scene id that isn't a scene, an `ends` naming a fixed fact (one can't
 #: end, so the link is never applied and the row is right without it:
 #: G-028, #556, an extraction slip that stopped an unattended run)
-REPORTED = ('disagrees', 'ends registry', 'subject', 'cap', 'unplaced', 'ends fixed')
+#: `ends moved` and `id prefix` (#620, #621) are links read and applied, said
+REPORTED = ('disagrees', 'ends registry', 'subject', 'cap', 'unplaced', 'ends fixed',
+            'ends moved', 'id prefix')
 #: What a report line says each `REPORTED` kind means, where its name alone
 #: doesn't (#564: `NOTE (cap): scene (62)` said nothing of what was cut)
 _REPORTED_LABEL = {
+    'ends moved': 'a state a later scene ended is ended here, its first end in reading '
+                  'order; what leaned on the later end is re-checked',
+    'id prefix': 'a link named a fact\'s id without its scene prefix; read as that fact',
     'cap': 'facts in force left out of what extraction was offered, over the cap '
            '(extract.MAX_KNOWN_COMMITMENTS); the scene\'s people and place kept first',
 }
@@ -299,7 +304,7 @@ def _extract(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, s
     dropped.extend((e['statement'], why) for e, why in verdict.dropped)
     return commitment_rows(verdict.kept, scene_id, prose, rows, known, recorded, subjects,
                            introduced_by, problems, own_writers=ledger.COMMITMENT_WRITERS,
-                           registry_is_plan=True, reserved=reserved)
+                           registry_is_plan=True, reserved=reserved, order=order)
 
 
 def _disputes(result: GateResult, rows: list[dict[str, str]]) -> list[Dispute]:
@@ -2966,10 +2971,11 @@ def _say_misquoted(scene_id: str, run: GateResult) -> None:
         f'gating the same prose again (extraction and the check), not sending it to the fix')
 
 
-def _reextract(project_dir: str, scene_id: str, command: str, prose: str, run: GateResult,
-               logs: str, *, extract_model: str | None,
+def _reextract(project_dir: str, scene_id: str, command: str, prose: str | None,
+               run: GateResult, logs: str, *, extract_model: str | None,
                check_model: str | None, before: Snapshot | None,
-               fallback_dir: str) -> tuple[GateResult, str, Reextraction]:
+               fallback_dir: str, introduced_by: str | None = None
+               ) -> tuple[GateResult, str, Reextraction]:
     """#598 (Telemachy, 2026-11-05): a re-check after a fix failed only on a
     quote the extractor changed ("she would sit" for the prose's "he would
     sit"); the fix edits prose, so it had nothing to do, and `write
@@ -2992,18 +2998,49 @@ def _reextract(project_dir: str, scene_id: str, command: str, prose: str, run: G
     error): `GateError`, or any other exception (#602's review SF-5: one
     escaping here lost the fix rounds' edits to write's catch-all, which
     keeps the prose as drafted). The prose is unchanged, so the run before
-    is still its verdict."""
+    is still its verdict. `prose` None is the scene file (a re-check's),
+    and `introduced_by` is passed on (`gate_unchanged`)."""
     _say_misquoted(scene_id, run)
     run_dir = os.path.join(logs, 'reextract')
     try:
         again = gate_scene(project_dir, scene_id, command=command, prose=prose,
                            log_dir=run_dir, extract_model=extract_model,
-                           check_model=check_model, before=before)
+                           check_model=check_model, before=before,
+                           introduced_by=introduced_by)
     except GateError as e:
         return run, fallback_dir, Reextraction.of(run, error=str(e))
     except Exception as e:   # a bug or an I/O failure: say it, keep the fixes
         return run, fallback_dir, Reextraction.of(run, error=f'{type(e).__name__}: {e}')
     return again, run_dir, Reextraction.of(run, again)
+
+
+def gate_unchanged(project_dir: str, scene_id: str, *, command: str, log_dir: str,
+                   introduced_by: str | None = None, extract_model: str | None = None,
+                   check_model: str | None = None) -> tuple[GateResult, Reextraction | None]:
+    """`gate_scene` of the scene file as it stands (a re-check, `check
+    --pending`), never editing it, with #598's one re-extraction when the
+    extractor's slips alone stopped it (`_only_extractor_slips`, `_reextract`;
+    logged in `log_dir/reextract`). #620 (Telemachy, 2026-11-07): a
+    re-check's extractor joined two sentences across a dialogue tag into one
+    quote, and the stop left 27 later scenes pending; #598 gave only
+    `gate_and_fix` the re-extraction. Returns the run kept and the
+    `Reextraction` (None when there was none), for the caller to log and put
+    in a pending reason: a second misquote is kept and reported, never
+    fuzzy-matched; a re-extraction that can't finish keeps the first run.
+
+    Raises:
+        GateError: from the first run (the re-extraction's is caught).
+    """
+    result = gate_scene(project_dir, scene_id, command=command, log_dir=log_dir,
+                        extract_model=extract_model, check_model=check_model,
+                        introduced_by=introduced_by)
+    if not _only_extractor_slips(result):
+        return result, None
+    result, _, reextraction = _reextract(
+        project_dir, scene_id, command, None, result, log_dir,
+        extract_model=extract_model, check_model=check_model, before=None,
+        fallback_dir=log_dir, introduced_by=introduced_by)
+    return result, reextraction
 
 
 def _one_line(text: str) -> str:
@@ -3500,20 +3537,25 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
         try:
             logs = run_log_dir(os.path.join(log_dir, 'recheck'), sid)
             log(f'  logs: {os.path.relpath(logs, project_dir)}')
-            result = gate_scene(project_dir, sid, command='recheck', log_dir=logs,
-                                extract_model=extract_model, check_model=check_model,
-                                introduced_by=_writer(project_dir, sid))
+            result, reextraction = gate_unchanged(
+                project_dir, sid, command='recheck', log_dir=logs,
+                extract_model=extract_model, check_model=check_model,
+                introduced_by=_writer(project_dir, sid))
         except GateError as e:
             why = ' '.join(str(e).split())
             mark_pending(project_dir, sid, RECHECK_FAILED, f're-check could not run: {why}')
             run.failed, run.why, run.left = sid, why, recheck_queue(project_dir, skip)
             return run
+        if reextraction is not None:
+            run.spent += RECHECK_COST_PER_SCENE   # the re-extraction is a second run
+            log(f'  {sid}: {reextraction.summary()}')
         if not result.passed:
             lines = blocking_lines(report_lines(result))
+            said = f' ({reextraction.summary()})' if reextraction is not None else ''
             mark_pending(project_dir, sid, RECHECK_FAILED,
                          f're-check did not pass: {len(lines)} problem(s): '
-                         + '; '.join(_one_line(x) for x in lines[:3]))
-            run.failed, run.why, run.result = sid, '; '.join(lines[:3]), result
+                         + '; '.join(_one_line(x) for x in lines[:3]) + said)
+            run.failed, run.why, run.result = sid, '; '.join(lines[:3]) + said, result
             run.left = recheck_queue(project_dir, skip)
             return run
         run.passed.append(sid)
