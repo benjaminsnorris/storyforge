@@ -1418,7 +1418,8 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
     try:
         fixed_toward_source = _write_commit(project_dir, result, holding, rows, old_rows,
                                             order, ended_before, revised_rejection, names,
-                                            name_notes, prose, command, scene_id)
+                                            name_notes, prose, command, scene_id,
+                                            loaded=ctx.loaded)
     except BaseException:
         vars(result).update(saved)
         rows[:] = saved_rows
@@ -1429,7 +1430,8 @@ def _commit(project_dir: str, result: GateResult, holding: list[Finding] | None 
 
 
 def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_before,
-                  revised_rejection, names, name_notes, prose, command, scene_id) -> bool:
+                  revised_rejection, names, name_notes, prose, command, scene_id,
+                  loaded=()) -> bool:
     """`_commit`'s changes to `result` and `rows`, ending in the ledger
     write; returns whether the scene was fixed toward its source."""
     _source_supersede(result, rows)
@@ -1455,6 +1457,12 @@ def _write_commit(project_dir, result, holding, rows, old_rows, order, ended_bef
         # names it, as `audit --mark rejected` tells the author it will
         briefs = audit.leaning_scenes(project_dir, revised_rejection) if revised_rejection else {}
         named = {b for v in briefs.values() for b in v}
+        # #621: a state whose end moved here from a later scene: that scene
+        # ended it, and is re-checked (the moved row no longer names it)
+        newly_ended = ledger.ended_by(new, scene_id) - ended_before
+        named |= {end for r in loaded if r['id'] in newly_ended
+                  for end in [(r.get('resolves') or '').strip()]
+                  if end and end != scene_id}
         # only what follows the scene can depend on how the scene changed
         later = sorted({s for s in set(found.scenes) | named
                         if s in order and order[s] > order[scene_id]}, key=order.get)

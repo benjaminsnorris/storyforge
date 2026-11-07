@@ -229,6 +229,9 @@ class TestEnds:
         assert {r['id']: r for r in ledger.load(project_dir)}['bleeding']['resolves'] == SCENE
         assert result.problems['ends moved'] == [f'{SCENE}: bleeding (was: act2-sc01)']
         assert 'bleeding' in result.changed
+        # the scene that ended it before is re-checked (#622's review)
+        assert 'act2-sc01' in result.recheck
+        assert gate.pending(project_dir)['act2-sc01']['command'] == gate.RECHECK
         assert any(line.startswith('NOTE (a state a later scene ended')
                    for line in gate.report_lines(result))
 

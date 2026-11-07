@@ -798,21 +798,32 @@ class TestDeferRechecksToLaterPasses:
         gate.mark_pending(project_dir, 'act1-sc02', gate.RECHECK, 'x')
         gate.mark_pending(project_dir, 'new-x1', gate.RECHECK_FAILED, 'y')
         lines = ['act1-sc02: x', 'new-x1: y']
-        assert cmd_revise._not_deferred(project_dir, lines) == lines
-        monkeypatch.setattr(cmd_revise, '_LATER_PASSES', frozenset({'act1-sc02', 'new-x1'}))
+        assert cmd_revise._not_deferred(project_dir, lines, frozenset()) == lines
         # a failed re-check still blocks: the author acts on it
-        assert cmd_revise._not_deferred(project_dir, lines) == ['new-x1: y']
+        assert cmd_revise._not_deferred(project_dir, lines,
+                                        frozenset({'act1-sc02', 'new-x1'})) == ['new-x1: y']
+
+    def test_a_deferred_recheck_does_not_stop_a_pass_before_it_starts(self, project_dir):
+        """#622's review: the pass-start check (`_exit_if_pass_blocked`) still
+        exited on a re-check deferred to a later pass."""
+        gate.mark_pending(project_dir, 'act1-sc02', gate.RECHECK, 'x')
+        cmd_revise._exit_if_pass_blocked(project_dir, 'act2-sc01', frozenset({'act1-sc02'}))
+        with pytest.raises(SystemExit):
+            cmd_revise._exit_if_pass_blocked(project_dir, 'act2-sc01')
+        gate.mark_pending(project_dir, 'act1-sc02', gate.RECHECK_FAILED, 'x')
+        with pytest.raises(SystemExit):
+            cmd_revise._exit_if_pass_blocked(project_dir, 'act2-sc01',
+                                             frozenset({'act1-sc02'}))
 
     def test_the_gated_scenes_rechecks_skip_later_passes_scenes(
             self, project_dir, monkeypatch, tmp_path):
         skips = []
-        monkeypatch.setattr(cmd_revise, '_LATER_PASSES', frozenset({'act2-sc01'}))
         monkeypatch.setattr(cmd_revise, '_commit', lambda *a, **k: None)
         monkeypatch.setattr(cmd_write, '_gate_drafted_scene', lambda *a, **k: (True, ''))
         monkeypatch.setattr(cmd_write, 'budgeted_recheck',
                             lambda pd, ld, skip, budget, reserved=0.0: skips.append(set(skip)))
         cmd_revise._gate_pass_scenes(project_dir, ['act1-sc01', 'act1-sc02'], 'p',
-                                     str(tmp_path))
+                                     str(tmp_path), deferred=frozenset({'act2-sc01'}))
         assert skips == [{'act1-sc02', 'act2-sc01'}, {'act2-sc01'}]
 
     def test_after_the_last_pass_what_is_left_is_rechecked_once(self, monkeypatch):
