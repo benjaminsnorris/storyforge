@@ -75,9 +75,11 @@ def parse_args(argv):
                         help='Score only deterministic principles (no API calls)')
     parser.add_argument('--readability', action='store_true',
                         help='Print each scene\'s reading level (Flesch-Kincaid grade) '
-                             'and the book\'s, against project.reading_level when set. '
-                             'No API calls, no cycle, nothing written. A scoring '
-                             'cycle also writes it, to readability.csv.')
+                             'and the pooled figure for the scenes in scope (the book\'s '
+                             'with no filter), against project.reading_level when set. '
+                             'No API calls, no cycle, nothing written. Every scoring '
+                             'cycle (full or --deterministic) also writes it, to '
+                             'readability.csv. Prose projects only.')
     parser.add_argument('--parallel', type=int,
                         default=int(os.environ.get('STORYFORGE_SCORE_PARALLEL', '6')),
                         help='Parallel workers for direct mode (default: 6)')
@@ -1029,8 +1031,8 @@ def _log_latest_kept(project_dir, cycle):
 
 
 def _reading_target_or_exit(project_dir):
-    """project.reading_level as (low, high) grades, or None when unset; a
-    value that isn't a grade or range is an ERROR, exit 1."""
+    """project.reading_level as a `readability.ReadingTarget`, or None when
+    unset; a value that isn't a grade or range is an ERROR, exit 1."""
     from storyforge.readability import read_target
     try:
         return read_target(project_dir)
@@ -1040,47 +1042,60 @@ def _reading_target_or_exit(project_dir):
 
 
 def _write_readability(scene_ids, project_dir, cycle_dir, target):
-    """The cycle's reading level: readability.csv (a row per scene and a
-    BOOK row) and the summary in the log. A measure, not a principle: it
-    never enters scene-scores.csv."""
+    """The cycle's reading level: readability.csv (a row per scene and an
+    ALL row pooling them) and the summary in the log, with a WARNING naming
+    any scene it couldn't measure. A measure, not a principle: it never
+    enters scene-scores.csv."""
     from storyforge import readability
-    rows, missing = readability.measure_scenes(scene_ids, project_dir)
+    measured = readability.measure_scenes(scene_ids, project_dir)
     path = os.path.join(cycle_dir, 'readability.csv')
-    readability.write_csv(path, rows, target)
-    for line in readability.summary_lines(rows, target):
+    readability.write_csv(path, measured.rows, target)
+    for line in readability.summary_lines(measured, target):
         log(line)
-    if missing:
-        log(f'WARNING: reading level not measured for {len(missing)} scene(s) '
-            f'with no file: {" ".join(missing)}')
     log(f'Reading level: {path}')
+
+
+#: what `--readability` can't be combined with: each would be dropped
+_READABILITY_EXCLUSIVE = ('source_fidelity', 'deterministic', 'principles', 'direct',
+                          'deep', 'diagnosis_only', 'no_apply', 'interactive')
 
 
 def _run_readability_only(args):
     """`score --readability`: print the reading level of the scenes in
-    scope (--scenes/--act/--from-seq) and the book's. No API, nothing written."""
+    scope (--scenes/--act/--from-seq) and their pooled figure (the book's
+    with no filter). No API call, no cycle, nothing written. A scene that
+    can't be read is an ERROR, exit 1, after the table."""
     from storyforge import readability
+    clash = [f'--{name.replace("_", "-")}' for name in _READABILITY_EXCLUSIVE
+             if getattr(args, name, None)]
+    if clash:
+        log(f'ERROR: --readability prints the reading level only; '
+            f'it can\'t be combined with {", ".join(clash)}')
+        sys.exit(1)
     project_dir = detect_project_root()
     target = _reading_target_or_exit(project_dir)
     metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
     filter_mode, filter_value, _ = _resolve_filter(args)
     ids = apply_scene_filter(metadata_csv, build_scene_list(metadata_csv),
                              filter_mode, filter_value)
-    rows, missing = readability.measure_scenes(ids, project_dir)
-    if not rows:
-        log('ERROR: No drafted scene files found for the selected scope.')
-        sys.exit(1)
-    width = max(len(r.scene_id) for r in rows)
-    print(f'{"scene":<{width}}  words  w/sent  grade  narration  target')
-    for r in rows:
-        g, n = r.all.grade, r.narration.grade
-        print(f'{r.scene_id:<{width}}  {r.all.words:>5}  {r.all.words_per_sentence:>6.1f}  '
-              f'{"" if g is None else f"{g:.1f}":>5}  '
-              f'{"" if n is None else f"{n:.1f}":>9}  {readability.verdict(g, target)}')
-    print()
-    for line in readability.summary_lines(rows, target):
+    measured = readability.measure_scenes(ids, project_dir)
+    if measured.rows:
+        width = max(len(r.scene_id) for r in measured.rows)
+        print(f'{"scene":<{width}}  words  w/sent  grade  narration  target')
+        for r in measured.rows:
+            print(f'{r.scene_id:<{width}}  {r.whole.words:>5}  '
+                  f'{r.whole.words_per_sentence:>6.1f}  {r.whole.grade:>5.1f}  '
+                  f'{readability._fmt(r.narration.grade):>9}  '
+                  f'{readability.verdict(r.whole.grade, target)}')
+        print()
+    for line in readability.summary_lines(measured, target):
         print(line)
-    if missing:
-        print(f'Not drafted ({len(missing)}): {" ".join(missing)}')
+    if any(why.startswith("can't be read") for why in measured.unmeasured.values()):
+        log('ERROR: scene file(s) above can\'t be read; fix them and run again.')
+        sys.exit(1)
+    if not measured.rows:
+        log('ERROR: No scene in scope has prose to measure.')
+        sys.exit(1)
 
 
 def _score_repetition(scene_ids, project_dir, cycle_dir):
