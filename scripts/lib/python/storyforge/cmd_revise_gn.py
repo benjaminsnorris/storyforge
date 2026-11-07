@@ -167,7 +167,7 @@ def _resolve_target_scenes(args, metadata_csv):
     return list(all_ids)
 
 
-def _revise_one_scene(scene_id, project_dir, model, args):
+def _revise_one_scene(scene_id, project_dir, model, args, key_decisions):
     """Revise a single scene.
 
     Side effects (only on the success path, all gated past the dry-run return):
@@ -237,7 +237,6 @@ def _revise_one_scene(scene_id, project_dir, model, args):
                 ),
             }
 
-    from storyforge.prompts_elaborate import reference_doc
     char_visuals, loc_visuals = _build_visual_refs(project_dir)
     voice_text = _build_voice_text(project_dir)
 
@@ -252,7 +251,7 @@ def _revise_one_scene(scene_id, project_dir, model, args):
         voice_profile_text=voice_text,
         score_findings=score_findings,
         eval_findings=eval_findings,
-        key_decisions=reference_doc(project_dir, 'key-decisions.md'),
+        key_decisions=key_decisions,
     )
 
     if args.dry_run:
@@ -309,6 +308,23 @@ def _revise_one_scene(scene_id, project_dir, model, args):
     }
 
 
+def _read_key_decisions(project_dir: str) -> str:
+    """reference/key-decisions.md's text for every scene's prompt, read once
+    before the branch and the PR: one that exists but can't be read stops
+    the run (ERROR, exit 1, nothing revised); missing, empty or a template
+    is a NOTE, and the prompts carry none (as prose revise, #596)."""
+    from storyforge.common import doc_state
+    state = doc_state(project_dir, 'reference/key-decisions.md')
+    if state.kind == 'unreadable':
+        log(f'ERROR: {state.detail}. Fix the file (permissions, or save it as UTF-8) '
+            'and run again; nothing was revised.')
+        sys.exit(1)
+    if state.kind != 'ok':
+        log(f'NOTE: {state.detail}, so the revision prompts carry no key decisions.')
+        return ''
+    return state.text
+
+
 def _build_pr_body(scene_ids):
     """Build a PR body with a per-scene task list."""
     lines = ['## Revision pass — graphic-novel mode', '']
@@ -341,6 +357,8 @@ def main(argv=None):
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)
     set_log_file(os.path.join(log_dir, 'revise-gn-log.txt'))
+
+    key_decisions = _read_key_decisions(project_dir)
 
     metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
 
@@ -400,7 +418,7 @@ def main(argv=None):
     revised_count = 0
     for sid in scene_ids:
         log(f'  Revising {sid}...')
-        _, result = _revise_one_scene(sid, project_dir, model, args)
+        _, result = _revise_one_scene(sid, project_dir, model, args, key_decisions)
 
         if args.dry_run and result.get('dry_run'):
             print(f'===== DRY RUN: {sid} =====')

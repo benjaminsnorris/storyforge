@@ -427,7 +427,8 @@ def test_write_and_revise_note_missing_key_decisions(project_dir, capsys, setup,
     assert f'NOTE: {detail}, so the drafting prompts carry no key decisions' in text
     _note_reference_docs(project_dir)
     out = capsys.readouterr()
-    assert f'NOTE: {detail}' in out.out + out.err
+    assert (f'NOTE: {detail}, so the prose passes and redrafts carry no key decisions'
+            in out.out + out.err)
 
 
 def test_rules_are_given_in_full_when_key_decisions_are_left_out(project_dir, monkeypatch):

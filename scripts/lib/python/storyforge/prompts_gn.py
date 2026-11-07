@@ -286,7 +286,7 @@ def build_revision_prompt(
     voice_profile_text,
     score_findings,
     eval_findings,
-    key_decisions='',
+    key_decisions,
 ):
     """Build a prompt asking Claude to revise a drafted GN panel script.
 
@@ -306,8 +306,9 @@ def build_revision_prompt(
         voice_profile_text: voice-profile.csv content.
         score_findings: List of deterministic score findings (may be empty).
         eval_findings: List of persona eval findings (may be empty).
-        key_decisions: reference/key-decisions.md's text ('' for none);
-            they bind a revision as they bind the draft (#596).
+        key_decisions: reference/key-decisions.md's text ('' for none),
+            required so no caller leaves them out by omission; they bind a
+            revision as they bind the draft (#596).
 
     Returns:
         Prompt string for Claude.
