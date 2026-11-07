@@ -36,9 +36,15 @@ from harness import Gate, Suite, SuiteOutput
 MIN_REPLAYED = 15  # below this the rate is too noisy to gate on
 #: A judgement, set at 2 before the calendar re-record's result; that
 #: recording (v1.127.0) passes 3, which Ben accepted (2026-11-02) as
-#: which-cases-reintroduce noise, so 3 is the ceiling (#488). E6's runs
-#: predate the gate, so the unflagged count's spread is unmeasured
-MAX_UNFLAGGED = 3
+#: which-cases-reintroduce noise, so 3 was the ceiling (#488). E6's runs
+#: predate the gate, so the unflagged count's spread is unmeasured.
+#: Raised to 4 (Ben, 2026-11-06, #513): v1.156.0's recording passes 4
+#: (governor-016, shared-dark-030, shared-dark-037, thornwall-026). A live
+#: A/B of the checker on those four scenes' requests caught 0 of 12 with the
+#: old calendar wording and 0 of 12 with the new, so the change didn't cause
+#: it: these are checker misses on this run's redrafts (governor-016 is the
+#: known stone-cutters inference miss since #478)
+MAX_UNFLAGGED = 4
 
 
 def run(ctx):

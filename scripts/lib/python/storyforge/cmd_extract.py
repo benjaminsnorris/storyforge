@@ -715,6 +715,15 @@ def _run_census(project_dir, log_dir):
         f'{result.remembered} answered before, {result.asked} asked about (used '
         f'{result.min_mentions}+ times); {len(result.added)} person(s) added as referenced: '
         f'{names}. Every word and answer: {CENSUS_FILE}')
+    if result.pronouns_given:
+        # The model's reading of the passages, written unmarked to
+        # characters.csv: named so the author can confirm them (#513, SF-2)
+        log(f'  Census: pronouns from the passages, to confirm in characters.csv: '
+            + ', '.join(f'{n} ({p})' for n, p in result.pronouns_given))
+    if result.pronouns_unread:
+        log(f'  WARNING: census: {len(result.pronouns_unread)} pronoun answer(s) could not '
+            f'be used and were left empty: '
+            + ', '.join(f'{n} ({a!r})' for n, a in result.pronouns_unread))
     if result.failed:
         log(f'  WARNING: census: {len(result.failed)} word(s) not checked (a call failed)')
     return result
@@ -944,8 +953,8 @@ def _hone_characters(project_dir: str, ref_dir: str) -> tuple[str, bool]:
     """Hone's character registry pass (`hone --domain characters`: the
     character part of phase 2's registry pass, so no value or MICE cell is
     normalized). It adds each new id to characters.csv, with the role hone
-    gives it and no pronouns (the author's to fill: #513), or maps it to
-    an existing one; it rewrites names as ids in every scene's casts and
+    gives it and no pronouns (a name is no evidence: the author fills
+    them, #513), or maps it to an existing one; it rewrites names as ids in every scene's casts and
     pov, and may drop a reference it decides is no character. Returns a
     note for the review and whether it failed. What it changed but could
     not commit is committed with the review."""

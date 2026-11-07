@@ -342,15 +342,17 @@ def test_reintroductions_the_gate_listed_are_flagged_not_unflagged(monkeypatch, 
     assert gates['reintroduced_unflagged'].passed     # 2 is within the gate
 
 
-def test_the_unflagged_ceiling_is_the_accepted_three():
-    """#488: v1.127.0's recording passes 3, accepted 2026-11-02; raising the
-    ceiling again is a second, visible edit here."""
+def test_the_unflagged_ceiling_is_the_accepted_four():
+    """#488: v1.127.0's recording passed 3, accepted 2026-11-02; #513:
+    v1.156.0's passes 4, accepted 2026-11-06 after a checker A/B showed the
+    wording change didn't cause it. Raising the ceiling again is a visible
+    edit here."""
     import importlib
     suite = importlib.import_module('suites.e8_revision_safety')
-    assert suite.MAX_UNFLAGGED == 3
+    assert suite.MAX_UNFLAGGED == 4
     from harness import Gate
-    assert Gate('reintroduced_unflagged', 3, '<=', suite.MAX_UNFLAGGED).passed
-    assert not Gate('reintroduced_unflagged', 4, '<=', suite.MAX_UNFLAGGED).passed
+    assert Gate('reintroduced_unflagged', 4, '<=', suite.MAX_UNFLAGGED).passed
+    assert not Gate('reintroduced_unflagged', 5, '<=', suite.MAX_UNFLAGGED).passed
 
 
 def test_a_naturalness_fix_that_rewrites_nothing_is_pass_halted_with_why(monkeypatch):

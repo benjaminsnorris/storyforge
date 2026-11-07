@@ -22,7 +22,8 @@ adaptation: Ecgtheow's feud is why Beowulf owes Hrothgar.
    earlier run is not asked again, so a row the author deleted stays
    deleted.
 3. **Add**: each person becomes a `characters.csv` row with role
-   `referenced`, aliases from the answer; nothing else is changed. Every
+   `referenced`, aliases and pronouns (as the passages use them, else
+   empty: #513) from the answer; nothing else is changed. Every
    candidate and answer goes into `working/census.csv`, which is also the
    record of what was answered.
 """
@@ -153,15 +154,19 @@ BATCH = 100
 
 def _schema() -> dict:
     from .extract import _object, _STR, _STR_LIST
+    from .schema import VALID_PRONOUNS
     return _object({'names': {'type': 'array', 'items': _object({
         'word': _STR, 'person': {'type': 'boolean'}, 'id': _STR, 'name': _STR,
-        'aliases': _STR_LIST})}})
+        'aliases': _STR_LIST,
+        'pronouns': {'type': 'string', 'enum': ['', *sorted(VALID_PRONOUNS)]}})}})
 
 
 CENSUS_SCHEMA = _schema()
 
 
 def build_census_prompt(candidates: list[Candidate], registry: list[dict[str, str]]) -> str:
+    from .schema import VALID_PRONOUNS
+    choices = ', '.join(sorted(VALID_PRONOUNS))
     listed = '\n'.join(
         f'- {c.word} ({c.mentions} mentions)\n' + '\n'.join(f'    {p}' for p in c.passages)
         for c in candidates)
@@ -182,14 +187,22 @@ Judge from the passages only, not from what you know of the work.
 
 ## Answer
 
-`names`: one entry per word above, in order. `word`: the word as given. `person`: true or false. For a person: `id`, a new lowercase-hyphen id from the name as the text spells it (e.g. `ecgtheow`); `name`, the name as the text spells it; `aliases`, other spellings or forms of this one person's name the passages show, never a group ("the sons of X") or another person. For a word that is another form of someone already in the registry, `person` is false."""
+`names`: one entry per word above, in order. `word`: the word as given. `person`: true or false. For a person: `id`, a new lowercase-hyphen id from the name as the text spells it (e.g. `ecgtheow`); `name`, the name as the text spells it; `aliases`, other spellings or forms of this one person's name the passages show, never a group ("the sons of X") or another person; `pronouns`, one of {choices} as the passages use them for this person, or empty when they don't show. For a word that is another form of someone already in the registry, `person` is false."""
+
+
+#: The key of a parsed row holding the model's pronoun answer as given
+#: (`parse_census`); `run_census` takes it off before writing the row
+ANSWER_KEY = '_pronouns_answer'
 
 
 def parse_census(reply: str, candidates: list[Candidate], registry_ids: set[str]) -> list[dict]:
     """New registry rows from a census reply: one per person, ids slugged,
-    none already in the registry, no group aliases."""
+    none already in the registry, no group aliases, `pronouns` only as
+    `schema.model_pronouns` takes them (the answer as given in
+    `ANSWER_KEY`)."""
     from .extract import _json_answer
     from .hone import _slugify, is_group_reference
+    from .schema import model_pronouns
     data = _json_answer(reply, CENSUS_SCHEMA)
     words = {c.word for c in candidates}
     rows, seen = [], set(registry_ids)
@@ -202,8 +215,14 @@ def parse_census(reply: str, candidates: list[Candidate], registry_ids: set[str]
             continue
         aliases = [a.strip() for a in entry.get('aliases') or []
                    if a.strip() and a.strip().lower() != name.lower() and not is_group_reference(a)]
+        # The passages' pronouns (#513), only as `model_pronouns` takes
+        # them; the answer as given is kept in `ANSWER_KEY` for the caller
+        # to log and record (it is not a registry column)
+        answer = str(entry.get('pronouns') or '').strip()
+        pronouns, _ = model_pronouns(answer)
         rows.append({'id': rid, 'name': name, 'role': 'referenced',
-                     'aliases': ';'.join(dict.fromkeys(aliases))})
+                     'aliases': ';'.join(dict.fromkeys(aliases)), 'pronouns': pronouns,
+                     ANSWER_KEY: answer})
         seen.add(rid)
     return rows
 
@@ -214,6 +233,11 @@ class CensusResult:
     asked: int = 0
     added: list[dict] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
+    #: (name, pronouns) of each person added with pronouns, for the author
+    #: to confirm: the model's reading of the passages (#513)
+    pronouns_given: list[tuple[str, str]] = field(default_factory=list)
+    #: (name, answer) of each pronoun answer that couldn't be used (left empty)
+    pronouns_unread: list[tuple[str, str]] = field(default_factory=list)
     note: str = ''
     min_mentions: int = MIN_MENTIONS
     remembered: int = 0       # words answered on an earlier run, not asked again
@@ -278,6 +302,9 @@ def run_census(project_dir: str, model: str, log_dir: str, on_usage=None,
     registry = read_registry(ref_dir, 'characters')
     ids = {r['id'] for r in registry if r.get('id')}
     answered: dict[str, str] = dict(before)
+    #: word -> the pronoun answer for the person it names, as given
+    said: dict[str, str] = {}
+    from .schema import VALID_PRONOUNS
     os.makedirs(log_dir, exist_ok=True)
     for n in range(0, len(ask), BATCH):
         chunk = ask[n:n + BATCH]
@@ -296,29 +323,39 @@ def run_census(project_dir: str, model: str, log_dir: str, on_usage=None,
             result.failed += [c.word for c in chunk]
             continue
         for row in new:
+            answer = row.pop(ANSWER_KEY, '')
+            if row['pronouns']:
+                result.pronouns_given.append((row['name'], row['pronouns']))
+            elif answer:
+                result.pronouns_unread.append((row['name'], answer))
+                log(f"  WARNING: census: {row['name']}'s pronouns answer {answer!r} is not one "
+                    f"of {', '.join(sorted(VALID_PRONOUNS))}; left empty for the author")
             ids.add(row['id'])
             result.added.append(row)
-        people = {r['name'].lower() for r in new}
         for c in chunk:
-            answered[c.word] = 'person' if c.word.lower() in people or any(
-                c.word.lower() == a.lower() for r in new for a in r['aliases'].split(';')) \
-                else 'not a new person'
+            row = next((r for r in new if c.word.lower() == r['name'].lower() or any(
+                c.word.lower() == a.lower() for a in r['aliases'].split(';'))), None)
+            answered[c.word] = 'person' if row else 'not a new person'
+            if row:
+                said[c.word] = row['pronouns'] or next(
+                    (a for n, a in result.pronouns_unread if n == row['name']), '')
     if result.added:
         write_registry(ref_dir, 'characters', registry + result.added)
     path = os.path.join(project_dir, CENSUS_FILE)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', newline='', encoding='utf-8') as f:
         w = csv.writer(f, delimiter='|', lineterminator='\n')
-        w.writerow(['word', 'mentions', 'scenes', 'answer'])
+        w.writerow(['word', 'mentions', 'scenes', 'answer', 'pronouns'])
         for c in found:
             answer = (answered.get(c.word) or ('not checked' if c.word in result.failed else
                       f'below {min_mentions} mentions' if c.mentions < min_mentions else
                       'not asked (over the limit)'))
-            w.writerow([c.word, c.mentions, len(c.scenes), answer])
+            w.writerow([c.word, c.mentions, len(c.scenes), answer,
+                        said.get(c.word, '')])
         # Answers from earlier runs for words now in the registry (or gone
         # from the text) stay on record
         counted = {c.word for c in found}
         for word, answer in before.items():
             if word not in counted:
-                w.writerow([word, '', '', answer])
+                w.writerow([word, '', '', answer, ''])
     return result

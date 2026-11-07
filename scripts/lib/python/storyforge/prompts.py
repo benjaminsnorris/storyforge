@@ -1783,8 +1783,8 @@ def _calendar_block(scene_id: str, project_dir: str) -> str:
     undated = [sid for sid in sorted(order, key=order.get)
                if sid != scene_id and sid in scenes and not is_dated(scenes[sid])]
     return ('## The Calendar\n\n'
-            "Each dated scene's day in the story's calendar (scenes.csv), in reading order"
-            + (f'; this scene is {scene_when(here)}' if is_dated(here) else
+            "The story's calendar (scenes.csv): each scene with a day or a time of day, in "
+            'reading order' + (f'; this scene is {scene_when(here)}' if is_dated(here) else
                '; this scene has no day') + '. '
             'Every elapsed time, day count or date the scene states ("a week ago", '
             '"ten days since", "three nights out") must fit these days and the days of the '
@@ -1830,8 +1830,8 @@ def revision_calendar_block(scene_ids: Collection[str], project_dir: str,
     undated = [sid for sid in sorted(order, key=order.get)
                if sid in scenes and not is_dated(scenes[sid])]
     return ('## The Calendar\n\n'
-            "Each dated scene's day in the story's calendar (scenes.csv), in reading order; "
-            'the scenes this pass revises are marked. Every elapsed time, day count or date a '
+            "The story's calendar (scenes.csv): each scene with a day or a time of day, in "
+            'reading order; the scenes this pass revises are marked. Every elapsed time, day count or date a '
             'revised scene states ("a week ago", "ten days since", "three nights out") must fit '
             'these days and the days of the scenes whose events it counts from. Add or change a '
             'span only where the pass needs to; where you do, make it fit, or use a vaguer '
@@ -2096,14 +2096,18 @@ def build_scene_prompt_from_briefs(
     if target_words and str(target_words).strip() and int(str(target_words).strip() or 0) > 0:
         word_target_line = f"\n**Target length: ~{target_words} words.** Prefer economy — achieve through implication what would take twice the words in exposition. Do not pad to reach the target; stop when the scene is complete."
 
-    # Key dialogue checklist
+    # Key dialogue checklist; what a speaker label means when a brief field
+    # the prompt shows has one (#513)
+    from .speaker_labels import LABEL_READING, has_label
+    reading = (f' {LABEL_READING}' if any(has_label(scene.get(f, ''))
+                                          for f in ('key_dialogue', 'key_actions', 'outcome'))
+               else '')
     key_dialogue = scene.get('key_dialogue', '').strip()
-    dialogue_checklist = ''
-    if key_dialogue:
-        lines = [d.strip() for d in key_dialogue.split(';') if d.strip()]
-        if lines:
-            items = '\n'.join(f'  - [ ] {line}' for line in lines)
-            dialogue_checklist = f"\n\n**Key dialogue checklist — every line below MUST appear in the scene (verbatim or close paraphrase). Do not end the scene until all are delivered:**\n{items}"
+    lines = [d.strip() for d in key_dialogue.split(';') if d.strip()]
+    dialogue_checklist = f'\n\n{reading.strip()}' if reading else ''
+    if lines:
+        items = '\n'.join(f'  - [ ] {line}' for line in lines)
+        dialogue_checklist = f"\n\n**Key dialogue checklist — every line below MUST appear in the scene (verbatim or close paraphrase). Do not end the scene until all are delivered:**{reading}\n{items}"
 
     states_checklist = _states_checklist(scene, ref_dir)
 

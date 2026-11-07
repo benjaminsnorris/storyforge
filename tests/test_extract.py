@@ -497,6 +497,10 @@ class TestKnowledgeIdsAtSource:
         assert 'IDs only, never sentences' in prompt
         assert 'at most 15 words' in prompt
         assert 'an empty list is a valid value' in prompt
+        # 3b's summary is kept in scenes.csv (extract-upper-layers PR 0), so
+        # the prompt says so and gives schema.py's limit (rethink status)
+        summary = next(x for x in prompt.splitlines() if x.startswith('- scene_summary:'))
+        assert 'at most 35 words' in summary and "kept as the scene's summary" in summary
 
     def test_parses_new_facts(self):
         from storyforge.extract import parse_knowledge_response

@@ -485,6 +485,7 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
     registries_section += f'\n{src}\n' if src else ''
 
     from .schema import OUTCOME_GUIDE   # schema imports elaborate
+    from .speaker_labels import LABEL_RULE
     return f"""You are writing the drafting contracts for a novel — the scene-level briefs that define exactly what happens in each scene, in enough detail that scenes can be drafted independently and still cohere.
 
 {context}
@@ -521,7 +522,7 @@ For each scene that needs a brief, define the complete drafting contract:
 - **physical_state_in**: Semicolon-separated state IDs that on-stage characters carry INTO this scene. Use EXACT IDs from prior scenes' physical_state_out. Only track states that affect capability, appearance, or equipment — injuries, items gained/lost, abilities changed, visible changes, fatigue. Not temporary emotions or scene-local conditions.
 - **physical_state_out**: physical_state_in plus 0-2 NEW states acquired during this scene, minus any states that resolve during this scene.
 - **key_actions**: Semicolon-separated concrete things that happen
-- **key_dialogue**: Specific lines or exchanges that must appear in the prose, semicolon-separated, each labelled with its speaker as `Name: "line"` (the name exactly as in characters.csv, no title or possessive; the label repeated after each `;`), so the gate can check who says it
+- **key_dialogue**: Specific lines or exchanges that must appear in the prose, semicolon-separated. {LABEL_RULE}
 - **emotions**: Semicolon-separated emotional beats in sequence
 - **motifs**: Semicolon-separated recurring images/symbols deployed
 - **subtext**: ONE sentence, max 150 characters. The gap between what a character says/does and what they mean. Format: "X says A but means B; don't state B" or "The tension is Z; show through [behavior], never name it." NOT a paragraph. NOT multiple clauses chained with semicolons. If no meaningful subtext, leave empty.

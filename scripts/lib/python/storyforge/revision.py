@@ -569,6 +569,7 @@ def build_revision_prompt(
     intent_path = os.path.join(project_dir, 'reference', 'scene-intent.csv')
     briefs_path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
     if os.path.isfile(intent_path) or os.path.isfile(briefs_path):
+        from storyforge.speaker_labels import LABEL_READING, has_label
         intent_lines = [
             '\n## Intent-Beat Protection\n',
             '**CRITICAL:** Before cutting or rewriting the final 30% of any scene, verify that '
@@ -598,6 +599,9 @@ def build_revision_prompt(
                 intent_lines.extend(beat_parts)
 
         if len(intent_lines) > 2:  # More than just header
+            # What a speaker label in the beats means (#513)
+            if any(has_label(line) for line in intent_lines[2:]):
+                intent_lines[1] = intent_lines[1].rstrip('\n') + ' ' + LABEL_READING + '\n'
             intent_section = '\n'.join(intent_lines)
 
     # The story's calendar, with this pass's scenes marked; what it can't

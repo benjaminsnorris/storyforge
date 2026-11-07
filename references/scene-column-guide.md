@@ -168,13 +168,15 @@ Bad facts (too granular, no scene depends on them):
 **How to improve:** Either update the prose to include the contracted beats, or update the brief if the prose found something better.
 
 **Labelling who speaks a scripted line.** The gate treats a quoted line in the brief as the brief's own words: if the book contradicts it, that is a plan conflict for you to settle, not an error for the fixer. When the prose splits the line with a speech tag (`"Left hand on the case," he said. "Right hand free."`), the gate checks the tag against the speaker the brief names, but only if the brief names one in a form it can read:
-- `Name: "line"` or `"line" — Name`. The name is written exactly as in characters.csv (a name, an alias or the id), with no title before it and no possessive (`Thomas's`).
+- `Name: "line"` or `"line" — Name`. Start the label with the name exactly as characters.csv writes it (a name, an alias or the id, of any length): add nothing before it (no title the row doesn't have: `Mr. Carver` only when that is the row's name or an alias) and no possessive (`Thomas's`). A label may start with "and" or "then" (`— and Croy: "..."`).
 - Put only the speaker after a dash. Anything after the name (`— Thomas, flat`) is fine, but a dash clause that ends in a colon is read as the next line's label.
 - Name one character per label. `Thomas and Elena:` or `Silas turns to Croy, who says:` is not read.
 - Repeat the label after each `;` and on each quoted line. An unquoted line has no speaker.
 - Fill in `pronouns` in characters.csv, so that a tag like `she said` can be checked too.
 
 A line without a label in one of these forms is still matched, but its speaker is not checked. The gate's report says which (`speaker checked` / `speaker not checked`).
+
+Storyforge's own brief writers write `Name: "line"` (elaborate's briefs stage, extraction and enrich), or keep a label and add one only where the text they are given says who speaks (hone's brief rewrites and revise's source-drift fix). A label naming someone not in characters.csv is reported as such (`speaker not checked: the brief's label "…" names no one in characters.csv`). Prose books only: a graphic novel's `key_dialogue` is matched verbatim in the panel script. Briefs written before v1.156.0 keep the lines they have: label them by hand where it matters.
 
 ### continuity_deps — Parallel Drafting Groups
 **Why it matters:** Scenes with no dependencies can be drafted simultaneously. Minimizing deps maximizes parallelism and reduces drafting time/cost.

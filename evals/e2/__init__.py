@@ -68,8 +68,11 @@ PRECISION_TARGET = 0.8
 FLOORS = {
     'e2-carol': {'recall_PHY': 0.0, 'recall_TIM': 0.0, 'recall_KNO': 0.0,
                  'recall_REL': 0.0, 'recall_TRT': 0.0, 'precision': 0.0, 'flags': 1},
-    'e2-carol-checker': {'recall_PHY': 0.6667, 'recall_TIM': 0.8, 'recall_KNO': 1.0,
-                         'recall_REL': 0.8, 'recall_TRT': 0.5, 'precision': 0.7742,
+    # recall_PHY 0.6667 -> 0.8333, recall_TRT 0.5 -> 0.6667, precision
+    # 0.7742 -> 0.8387 (#513, v1.156.0): re-recorded for the calendar note's
+    # wording; one run, so a gain within the checker's run-to-run spread
+    'e2-carol-checker': {'recall_PHY': 0.8333, 'recall_TIM': 0.8, 'recall_KNO': 1.0,
+                         'recall_REL': 0.8, 'recall_TRT': 0.6667, 'precision': 0.8387,
                          'flags': 31},
     # neither corpus suite has a REL case (E1 is thin on REL)
     # precision 0.4 -> 0.3333, flags 5 -> 6 (#542, v1.146.4, a decision):

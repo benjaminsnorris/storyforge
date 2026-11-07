@@ -386,8 +386,8 @@ def _calendar_note(book: Book, at: str) -> str:
     here = book.when(at) if dated(at) else ''
     example = at if here else next(sid for sid in sorted(book.order, key=book.order.get)
                                    if dated(sid))
-    return ('\n\n**The calendar.** The scene list gives each dated scene\'s day in the '
-            'story\'s calendar (from scenes.csv)' + (f'; this scene is {here}' if here else
+    return ('\n\n**The calendar.** The scene list gives each scene\'s day and time of '
+            'day in the story\'s calendar (from scenes.csv), where it has them' + (f'; this scene is {here}' if here else
             '; this scene has no day') + '. Check every elapsed time, day count, date or '
             'age the scene states ("a week ago", "ten days since", "on day five") against '
             'it and against the days the other scenes give for the events it counts from. '

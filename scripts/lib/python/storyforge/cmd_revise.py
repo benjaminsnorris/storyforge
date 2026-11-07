@@ -1812,6 +1812,7 @@ def _source_drift_fix(project_dir: str, scene_id: str, scene: dict, intent: dict
     there is none (its map row or source scenes are gone)."""
     from storyforge import source
     from storyforge.prompts_source import source_scene_block
+    from storyforge.speaker_labels import keep_section
 
     row = ctx.rows.get(scene_id)
     if row is None:
@@ -1860,6 +1861,8 @@ The scene as written:
 
 Drift found:
 {drift_lines}
+
+{keep_section(project_dir)}
 
 Rewrite the brief so it adapts the source again: undo each drift listed, keep every departure the treatment, its note or the version rules allow, and keep what isn't drift as it is. Use this novel's names, never the source prose's. OUTCOME is one of yes, no, yes-but, no-and, no-but. KEY_ACTIONS and KEY_DIALOGUE are semicolon-separated. Do not introduce any person, place or event that is in neither the source scenes nor this scene.
 

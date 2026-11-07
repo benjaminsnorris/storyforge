@@ -1013,6 +1013,37 @@ class TestParseMappingResponse:
         assert new_rows == [{'id': 'nick', 'name': 'Nick Carraway', 'role': 'protagonist'}]
         assert skipped == {5}
 
+    def test_a_new_character_gets_no_pronouns(self):
+        """#513's review (P-6): the mapping sees names, not prose, and a name
+        is no evidence of pronouns, so a NEW line's extra field is not
+        read."""
+        from storyforge.hone import parse_mapping_response
+        _, new_rows, _ = parse_mapping_response(
+            'characters', '1 | NEW | mrs-hale | Mrs Hale | minor | she\n', 1, set())
+        assert new_rows == [{'id': 'mrs-hale', 'name': 'Mrs Hale', 'role': 'minor'}]
+
+    def test_the_prompt_asks_for_no_pronouns(self, tmp_path):
+        from storyforge.hone import build_mapping_prompt
+        ref = tmp_path / 'reference'
+        ref.mkdir()
+        (ref / 'characters.csv').write_text('id|name|role|aliases|pronouns\n')
+        p = build_mapping_prompt('characters', str(ref),
+                                 [{'text': 'Mrs Hale', 'scenes': ['s1'], 'key': 'k'}])
+        assert '`N | NEW | id | name | role`' in p and 'pronoun' not in p
+
+    def test_new_rows_empty_and_the_authors_kept(self, tmp_path):
+        """P-6 and T-3: a new character's pronouns cell is empty (the
+        author's to fill), and the author's own pronouns survive."""
+        from storyforge.hone import apply_mapping, read_registry
+        ref = tmp_path / 'reference'
+        ref.mkdir()
+        (ref / 'characters.csv').write_text('id|name|role|aliases|pronouns\n'
+                                            'tom|Tom|supporting||he\n')
+        apply_mapping('characters', str(ref), [], {},
+                      [{'id': 'kael', 'name': 'Kael', 'role': 'minor'}])
+        assert [(r['id'], r['pronouns']) for r in read_registry(str(ref), 'characters')] \
+            == [('tom', 'he'), ('kael', '')]
+
     def test_new_with_registered_id_maps_to_it(self):
         from storyforge.hone import parse_mapping_response
         mapping, new_rows, _ = parse_mapping_response(
