@@ -355,10 +355,16 @@ def _check_scenes(project_dir: str, scene_ids: list[str], log_dir: str, budget,
             # this check's own logs: an earlier check of the scene keeps its own
             logs = gate.run_log_dir(os.path.join(log_dir, 'check'), scene_id)
             log(f'  logs: {os.path.relpath(logs, project_dir)}')
-            result = gate.gate_scene(
+            # #620: one re-extraction when the extractor's slips alone stop it
+            result, reextraction = gate.gate_unchanged(
                 project_dir, scene_id, command='recheck' if recheck else 'advisor',
                 log_dir=logs,
-                introduced_by=gate._writer(project_dir, scene_id) if recheck else None)
+                introduced_by=gate._writer(project_dir, scene_id) if recheck else None,
+                afford=lambda: check_threshold(
+                    budget.committed((len(rest) + 2) * gate.RECHECK_COST_PER_SCENE)))
+            said = reextraction.summary() if reextraction is not None else ''
+            if said:
+                log(f'  {scene_id}: {said}')
         except gate.GateError as e:
             why = ' '.join(str(e).split())
             log(f'ERROR: {why}' + (f' (provisional: {earlier[0]}, earlier, has not passed)'
@@ -374,6 +380,8 @@ def _check_scenes(project_dir: str, scene_ids: list[str], log_dir: str, budget,
                                             f'passed)' if earlier else ''))
             for line in lines:
                 log(f'  {line}')
+            if said:   # under this scene's heading (#622's review, SF-M3)
+                lines = [f'NOTE (re-extraction): {said}'] + lines
             report += [f'## {scene_id}: {verdict}', ''] + [f'- {line}' for line in lines] \
                 + ([] if lines else ['- nothing to report']) + ['']
             if result.passed:
@@ -417,7 +425,8 @@ def _check_scenes(project_dir: str, scene_ids: list[str], log_dir: str, budget,
                 problems = gate.blocking_lines(lines)
                 gate.mark_pending(project_dir, scene_id, listed_as,
                                   f'{sum(1 for x in lines if not x.startswith(("NOTE", "COMMITTED")))} '
-                                  f'problem(s); see {REPORT_PATH}')
+                                  f'problem(s); see {REPORT_PATH}'
+                                  + (f' ({said})' if said else ''))
                 run.failures[scene_id] = problems or ['did not pass (see the report)']
                 if _contradictions(result):
                     run.recorded.add(scene_id)

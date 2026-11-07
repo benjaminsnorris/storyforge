@@ -652,8 +652,12 @@ class TestNaturalnessForecast:
     the re-checks' budget. Costs here: a scene's fix and redraft $3, a pass
     $10; naturalness has 3 passes."""
 
-    def _setup(self, project_dir, monkeypatch, mock_git, threshold, charge=0.0, fixed=()):
+    def _setup(self, project_dir, monkeypatch, mock_git, threshold, charge=0.0, fixed=(),
+               gate_runs=None):
         revise_tests._run_pass_setup(project_dir, monkeypatch, 'craft')
+        # the gate's foreseen runs are #619's (TestDeferRechecksToLaterPasses)
+        monkeypatch.setattr(cmd_revise, '_foreseen_gate_runs',
+                            lambda *a: gate_runs or cmd_revise.GateForecast(0, 0, 0))
         monkeypatch.setattr(cmd_revise, '_detect_upstream_scenes',
                             lambda p, rows: ['act1-sc01'])
         monkeypatch.setattr(cmd_revise, '_upstream_fix_cost', lambda p, ids: 3.0 * len(ids))
@@ -699,6 +703,24 @@ class TestNaturalnessForecast:
             'Raise STORYFORGE_COST_THRESHOLD, or fix the briefs of act1-sc01 first ' \
             '(`storyforge hone`), or start from a later pass (`storyforge revise N`)' in out
 
+    def test_the_foreseen_gate_runs_count_against_the_threshold(
+            self, mock_api, mock_git, project_dir, monkeypatch, capsys):
+        """#619: a "~$4.51" plan cost ~$80: the forecast left out the gate on
+        each rewritten scene; now the gate on each planned rewrite counts
+        against the threshold, and what it can't count is named."""
+        seen = self._setup(project_dir, monkeypatch, mock_git, 34,
+                           gate_runs=cmd_revise.GateForecast(4, 6, 9, ('pass 2: x',)))
+        with pytest.raises(SystemExit) as e:
+            main(['--naturalness'])
+        assert e.value.code == 1 and seen == [] and mock_api.call_count == 0
+        out = capsys.readouterr().out
+        gate_cost = 4 * gate.RECHECK_COST_PER_SCENE
+        assert f'Cost forecast: ~${33 + gate_cost:.2f}' in out
+        assert f'the gate on the 4 scene rewrite(s) they name ~${gate_cost:.2f}' in out
+        assert 'what the full-scope passes rewrite, up to 6 scene(s)' in out
+        assert 're-checks of the 9 scene(s) after them that no pass rewrites' in out
+        assert 'WARNING: pass 2: x' in out
+
     def test_a_later_start_forecasts_only_the_passes_it_runs(
             self, mock_api, mock_git, project_dir, monkeypatch, capsys):
         """CR-L1: `revise 3 --naturalness` forecast all 3 passes."""
@@ -740,3 +762,191 @@ class TestNaturalnessForecast:
         out = capsys.readouterr().out
         assert 'spent so far ~$30.00 + forecast ~$30.00 = ~$60.00 is over the cost ' \
             f'threshold ($50): {done}' in out
+
+
+class TestDeferRechecksToLaterPasses:
+    """#619 (Telemachy, 2026-11-07): a one-scene pass at the book's start
+    re-checked the 27 scenes after it (~$26) that the act passes then
+    rewrote and gated again. A re-check of a scene a later pass of the plan
+    rewrites waits for that pass's gate, and doesn't block the scenes gated
+    before it; what's left is re-checked once, after the last pass."""
+
+    def _plan(self, *passes):
+        return [dict({'name': f'p{i}', 'status': 'pending', 'fix_location': 'craft',
+                      'scope': 'full', 'targets': '', 'owed': ''}, **p)
+                for i, p in enumerate(passes, 1)]
+
+    def test_the_scenes_later_passes_rewrite(self, project_dir):
+        plan = self._plan({'scope': 'act1-sc01'},
+                          {'scope': 'targeted', 'targets': 'act1-sc02;new-x1'},
+                          {'scope': 'act2-sc01', 'status': 'completed'},
+                          {'scope': 'act2-sc01', 'fix_location': 'structural'})
+        assert cmd_revise._later_pass_scenes(project_dir, plan, 1, 4) == {'act1-sc02', 'new-x1'}
+        assert cmd_revise._later_pass_scenes(project_dir, plan, 2, 4) == frozenset()
+
+    def test_owed_scenes_are_what_a_pass_rewrites(self, project_dir):
+        plan = self._plan({}, {'scope': 'full', 'owed': 'act2-sc01'})
+        assert cmd_revise._later_pass_scenes(project_dir, plan, 1, 2) == {'act2-sc01'}
+
+    def test_a_scope_that_cannot_be_resolved_defers_nothing(self, project_dir):
+        plan = self._plan({}, {'scope': 'no-such-scene'})
+        assert cmd_revise._later_pass_scenes(project_dir, plan, 1, 2) == frozenset()
+
+    def test_the_foreseen_gate_runs(self, project_dir):
+        """Two rewrites; of the scenes with prose after act1-sc02, act2-sc01
+        is rewritten too, so new-x1 is the one scene a re-check can reach."""
+        plan = self._plan({'scope': 'act1-sc02'}, {'scope': 'act2-sc01'},
+                          {'scope': 'act1-sc01', 'status': 'completed'})
+        f = cmd_revise._foreseen_gate_runs(project_dir, plan, 1, 3)
+        assert (f.rewrites, f.full_upto, f.recheck_scenes, f.notes) == (2, 0, 1, ())
+
+    def test_a_scene_two_passes_rewrite_counts_twice_and_a_start_skips_earlier(
+            self, project_dir):
+        plan = self._plan({'scope': 'act1-sc01'}, {'scope': 'act1-sc02'},
+                          {'scope': 'act1-sc02'})
+        assert cmd_revise._foreseen_gate_runs(project_dir, plan, 2, 3).rewrites == 2
+
+    def test_a_full_pass_is_named_not_counted(self, project_dir):
+        """A full pass may rewrite any scene: its gate runs are named in the
+        forecast, never counted against the threshold."""
+        f = cmd_revise._foreseen_gate_runs(project_dir, self._plan({}), 1, 1)
+        assert f.rewrites == 0 and f.full_upto == 4 and f.recheck_scenes == 0
+
+    def test_hone_and_structural_passes_foresee_nothing(self, project_dir):
+        plan = self._plan({'fix_location': 'brief'}, {'fix_location': 'structural'})
+        assert cmd_revise._foreseen_gate_runs(project_dir, plan, 1, 2) == (0, 0, 0, ())
+
+    def test_what_cannot_be_foreseen_says_so(self, project_dir, monkeypatch):
+        plan = self._plan({'scope': 'no-such-scene'}, {'scope': 'act1-sc02'})
+        f = cmd_revise._foreseen_gate_runs(project_dir, plan, 1, 2)
+        assert f.rewrites == 1 and f.notes[0].startswith("pass 1: scope 'no-such-scene'")
+        from storyforge import ledger
+
+        def bad(pd):
+            raise ValueError('scene x has no seq')
+        monkeypatch.setattr(ledger, 'scene_order', bad)
+        f = cmd_revise._foreseen_gate_runs(project_dir, plan, 2, 2)
+        assert f.recheck_scenes is None and 'no seq' in f.notes[-1]
+
+    def test_a_pass_that_left_a_planned_scene_alone_rechecks_it_first(
+            self, project_dir, monkeypatch, tmp_path):
+        """#622's review (CR-1): pass 1's re-check of act1-sc02 waited for
+        pass 2, whose reply rewrote only act2-sc01; act1-sc02 then blocked
+        pass 2's gating and the session stopped."""
+        gate.mark_pending(project_dir, 'act1-sc02', gate.RECHECK, 'x')
+        calls = []
+
+        def recheck(pd, ld, skip, budget, reserved=0.0):
+            calls.append(set(skip))
+            gate.clear_pending(pd, 'act1-sc02')
+        monkeypatch.setattr(cmd_revise, '_commit', lambda *a, **k: None)
+        monkeypatch.setattr(cmd_write, '_gate_drafted_scene', lambda *a, **k: (True, ''))
+        monkeypatch.setattr(cmd_write, 'budgeted_recheck', recheck)
+        out = cmd_revise._gate_pass_scenes(project_dir, ['act2-sc01'], 'p', str(tmp_path))
+        assert out == [] and calls[0] == {'act2-sc01'}
+
+    def test_a_deferred_recheck_does_not_block(self, project_dir, monkeypatch):
+        gate.mark_pending(project_dir, 'act1-sc02', gate.RECHECK, 'x')
+        gate.mark_pending(project_dir, 'new-x1', gate.RECHECK_FAILED, 'y')
+        lines = ['act1-sc02: x', 'new-x1: y']
+        assert cmd_revise._not_deferred(project_dir, lines, frozenset()) == lines
+        # a failed re-check still blocks: the author acts on it
+        assert cmd_revise._not_deferred(project_dir, lines,
+                                        frozenset({'act1-sc02', 'new-x1'})) == ['new-x1: y']
+
+    def test_a_deferred_recheck_does_not_stop_a_pass_before_it_starts(self, project_dir):
+        """#622's review: the pass-start check (`_exit_if_pass_blocked`) still
+        exited on a re-check deferred to a later pass."""
+        gate.mark_pending(project_dir, 'act1-sc02', gate.RECHECK, 'x')
+        cmd_revise._exit_if_pass_blocked(project_dir, 'act2-sc01', frozenset({'act1-sc02'}))
+        with pytest.raises(SystemExit):
+            cmd_revise._exit_if_pass_blocked(project_dir, 'act2-sc01')
+        gate.mark_pending(project_dir, 'act1-sc02', gate.RECHECK_FAILED, 'x')
+        with pytest.raises(SystemExit):
+            cmd_revise._exit_if_pass_blocked(project_dir, 'act2-sc01',
+                                             frozenset({'act1-sc02'}))
+
+    def test_the_gated_scenes_rechecks_skip_later_passes_scenes(
+            self, project_dir, monkeypatch, tmp_path):
+        skips = []
+        monkeypatch.setattr(cmd_revise, '_commit', lambda *a, **k: None)
+        monkeypatch.setattr(cmd_write, '_gate_drafted_scene', lambda *a, **k: (True, ''))
+        monkeypatch.setattr(cmd_write, 'budgeted_recheck',
+                            lambda pd, ld, skip, budget, reserved=0.0: skips.append(set(skip)))
+        cmd_revise._gate_pass_scenes(project_dir, ['act1-sc01', 'act1-sc02'], 'p',
+                                     str(tmp_path), deferred=frozenset({'act2-sc01'}))
+        assert skips == [{'act1-sc02', 'act2-sc01'}, {'act2-sc01'}]
+
+    def test_after_the_last_pass_what_is_left_is_rechecked_once(self, monkeypatch):
+        from storyforge.gate import Recheck
+        calls = []
+
+        def fake(pd, ld, skip, budget, reserved=0.0):
+            calls.append(set(skip))
+            return Recheck(failed='act2-sc01', why='a contradiction')
+        monkeypatch.setattr(cmd_write, 'budgeted_recheck', fake)
+        why = cmd_revise._final_rechecks('/p', '/l')
+        assert calls == [set()] and why.startswith('act2-sc01 (re-checked after the last pass')
+        monkeypatch.setattr(cmd_write, 'budgeted_recheck', lambda *a, **k: None)
+        assert cmd_revise._final_rechecks('/p', '/l') == ''
+
+
+class TestDeferralThroughMain:
+    """#622's review (T-3): the pass loop hands each pass the scenes later
+    passes may rewrite, and what is left after the last pass is re-checked
+    once; one that fails there exits 1, after the summary."""
+
+    def _run(self, project_dir, monkeypatch, mock_git, final, argv=()):
+        import subprocess as sp
+        from storyforge import costs
+        _run_pass_setup(project_dir, monkeypatch, 'craft')
+        rows = revise_tests._make_plan_rows(('a', 'b'))
+        rows[0]['scope'], rows[1]['scope'] = 'act1-sc01', 'act2-sc01'
+        revise_tests._write_plan(project_dir, rows)
+        n = [0]
+
+        def run(cmd, **kwargs):
+            joined = ' '.join(str(c) for c in cmd)
+            if 'build-prompt' in joined:
+                return sp.CompletedProcess(cmd, 0, stdout='Revision prompt.', stderr='')
+            if 'extract-scenes' in joined:
+                n[0] += 1
+                with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md'), 'w') as f:
+                    f.write(f'Revised prose {n[0]}.\n')
+                return sp.CompletedProcess(cmd, 0, stdout='Wrote: act1-sc01\n', stderr='')
+            return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
+        monkeypatch.setattr('subprocess.run', run)
+        monkeypatch.setattr(cmd_revise.time, 'sleep', lambda s: None)
+        seen, finals = [], []
+
+        def gate_pass(pd, ids, name, ld, before=None, deferred=frozenset()):
+            seen.append(deferred)
+            return []
+        monkeypatch.setattr(cmd_revise, '_gate_pass_scenes', gate_pass)
+
+        def budgeted(pd, ld, skip, budget, reserved=0.0):
+            finals.append(set(skip))
+            return final
+        monkeypatch.setattr(cmd_write, 'budgeted_recheck', budgeted)
+        monkeypatch.setattr(costs, 'log_operation', lambda *a, **k: None)
+        return seen, finals
+
+    def test_each_pass_gets_the_later_passes_scenes(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        mock_api.set_response('=== SCENE: act1-sc01 === ...')
+        deferred, finals = self._run(project_dir, monkeypatch, mock_git, None)
+        main([])
+        assert deferred == [frozenset({'act2-sc01'}), frozenset()]
+        assert finals == [set()]   # the final re-check, nothing skipped
+
+    def test_a_final_recheck_that_fails_exits_1(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        mock_api.set_response('=== SCENE: act1-sc01 === ...')
+        self._run(project_dir, monkeypatch, mock_git,
+                  gate.Recheck(failed='new-x1', why='a contradiction'))
+        with pytest.raises(SystemExit) as e:
+            main([])
+        assert e.value.code == 1
+        out = capsys.readouterr().out
+        assert 'a re-check they owed did not finish: new-x1 (re-checked after the last' in out
+        assert 'All revision passes are done' not in out
