@@ -114,12 +114,7 @@ def build_drafting_prompt(
     # The author's settled decisions (content rules, POV, reading level for
     # captions and balloons) bind the script as they bind prose (#596)
     from storyforge.prompts_elaborate import reference_doc
-    decisions = reference_doc(project_dir, 'key-decisions.md')
-    decisions_section = (
-        "# Key decisions\n\nThe author's settled decisions for this book. Where one "
-        "governs the script (what may be shown and how, point of view, the reading "
-        f"level of captions and balloons), follow it.\n\n{decisions}\n\n"
-        if decisions else '')
+    decisions_section = _decisions_section(reference_doc(project_dir, 'key-decisions.md'))
 
     return f"""\
 You are drafting a graphic-novel scene as a panel-by-panel script for an
@@ -270,6 +265,16 @@ def _format_findings(score_findings, eval_findings):
     return '\n'.join(blocks).rstrip()
 
 
+def _decisions_section(decisions: str) -> str:
+    """The drafting and revision prompts' `# Key decisions` section ('' for
+    none)."""
+    return (
+        "# Key decisions\n\nThe author's settled decisions for this book. Where one "
+        "governs the script (what may be shown and how, point of view, the reading "
+        f"level of captions and balloons), follow it.\n\n{decisions}\n\n"
+        if decisions else '')
+
+
 def build_revision_prompt(
     scene_id,
     scene_row,
@@ -281,6 +286,7 @@ def build_revision_prompt(
     voice_profile_text,
     score_findings,
     eval_findings,
+    key_decisions,
 ):
     """Build a prompt asking Claude to revise a drafted GN panel script.
 
@@ -300,6 +306,9 @@ def build_revision_prompt(
         voice_profile_text: voice-profile.csv content.
         score_findings: List of deterministic score findings (may be empty).
         eval_findings: List of persona eval findings (may be empty).
+        key_decisions: reference/key-decisions.md's text ('' for none),
+            required so no caller leaves them out by omission; they bind a
+            revision as they bind the draft (#596).
 
     Returns:
         Prompt string for Claude.
@@ -313,6 +322,7 @@ def build_revision_prompt(
         f"- {k}: {v}" for k, v in intent_row.items() if (v or '').strip()
     )
     brief_summary = _format_brief(brief_row)
+    decisions_section = _decisions_section(key_decisions)
 
     findings_block = _format_findings(score_findings, eval_findings)
     if findings_block:
@@ -386,7 +396,7 @@ Specifically:
 
 {script_text}
 
-{findings_section}{SCRIPT_FORMAT_INSTRUCTIONS}
+{decisions_section}{findings_section}{SCRIPT_FORMAT_INSTRUCTIONS}
 
 {revision_directive}
 

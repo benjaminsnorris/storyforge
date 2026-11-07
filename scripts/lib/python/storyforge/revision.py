@@ -625,6 +625,16 @@ def build_revision_prompt(
         "voice guide, take the voice from the book's existing scenes instead: their "
         'register, rhythm, diction and each POV character\'s way of thinking and speaking.\n')
 
+    # The author's key decisions, as drafting has them (#596): one that
+    # governs the prose (reading level, POV, how an event is told) binds a
+    # revision pass as much as a draft. `common.build_shared_context` leaves
+    # key-decisions.md out, so the prompt carries them in every mode.
+    from storyforge.prompts import key_decisions_block
+    from storyforge.prompts_elaborate import reference_doc
+    decisions_section = key_decisions_block(reference_doc(project_dir, 'key-decisions.md'))
+    if decisions_section:
+        decisions_section = '\n' + decisions_section
+
     # New scene creation instructions
     new_scenes_section = ''
     if new_scene_ids:
@@ -723,6 +733,7 @@ def build_revision_prompt(
         f'## Purpose\n\n{purpose}\n',
         f'## Scope\n\nThis pass covers {file_count} scene file(s):\n\n{file_block}',
         no_voice_section,
+        decisions_section,
         config_section,
         intent_section,
         calendar_section,
@@ -1087,6 +1098,9 @@ def main():
             sys.exit(1)
 
     elif command == 'build-prompt':
+        # a reference doc that exists but can't be read: an ERROR line, not
+        # a traceback, for the caller to show (#616's review, SF-3)
+        from storyforge.common import ReferenceDocError
         if len(sys.argv) < 6:
             print('Usage: build-prompt <pass_name> <purpose> <scope> <project_dir> [options]',
                   file=sys.stderr)
@@ -1129,7 +1143,7 @@ def main():
                 system_context=system_context,
             )
             print(prompt)
-        except (FileNotFoundError, ValueError) as e:
+        except (FileNotFoundError, ValueError, ReferenceDocError) as e:
             print(f'ERROR: {e}', file=sys.stderr)
             sys.exit(1)
 

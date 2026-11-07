@@ -52,6 +52,9 @@ def parse_args(argv):
     parser.add_argument('--principles', type=str, default=None,
                         help='Comma-separated principles to score '
                              '(default: all six)')
+    parser.add_argument('--readability', action='store_true',
+                        help='Not for graphic novels: reading level is measured '
+                             'on prose only (an ERROR here)')
     return parser.parse_args(argv)
 
 
@@ -305,6 +308,10 @@ def _resolve_target_scenes(args, metadata_csv):
 
 def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
+    if args.readability:
+        log('ERROR: score --readability measures prose; a graphic-novel project '
+            'has no reading level to measure.')
+        sys.exit(1)
 
     install_signal_handlers()
 

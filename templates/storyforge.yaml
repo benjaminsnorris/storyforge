@@ -23,6 +23,7 @@ project:
   genre: "PROJECT_GENRE"                # Primary genre (e.g., "fantasy", "thriller", "literary fiction")
   subgenre:                             # Optional: narrower classification (e.g., "urban fantasy", "techno-thriller")
   target_words: 80000                   # Target manuscript word count
+  reading_level:                        # Optional: target Flesch-Kincaid grade, "6" or "5-7" (prose; score reports against it)
   logline: "PROJECT_LOGLINE"            # 1-2 sentence pitch: protagonist + conflict + stakes
   # Coaching level — controls how proactive Claude is with creative decisions:
   #   full   — Claude proposes, drafts, and revises. Maximum creative partnership.

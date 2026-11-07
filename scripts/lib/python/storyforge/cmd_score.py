@@ -73,6 +73,13 @@ def parse_args(argv):
                              '(e.g. prose_repetition,prose_naturalness)')
     parser.add_argument('--deterministic', action='store_true',
                         help='Score only deterministic principles (no API calls)')
+    parser.add_argument('--readability', action='store_true',
+                        help='Print each scene\'s reading level (Flesch-Kincaid grade) '
+                             'and the pooled figure for the scenes in scope (the book\'s '
+                             'with no filter), against project.reading_level when set. '
+                             'No API calls, no cycle, nothing written. Every scoring '
+                             'cycle (full or --deterministic) also writes it, to '
+                             'readability.csv. Prose projects only.')
     parser.add_argument('--parallel', type=int,
                         default=int(os.environ.get('STORYFORGE_SCORE_PARALLEL', '6')),
                         help='Parallel workers for direct mode (default: 6)')
@@ -554,6 +561,9 @@ def main(argv=None):
     if args.source_fidelity:
         _run_source_fidelity_only(args)
         return
+    if args.readability:
+        _run_readability_only(args)
+        return
 
     from datetime import datetime
     session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
@@ -570,6 +580,7 @@ def main(argv=None):
     from storyforge.ledger import exit_if_not_migrated
     exit_if_not_migrated(project_dir)  # the registries live in the ledger
     log(f'Project root: {project_dir}')
+    reading_target = _reading_target_or_exit(project_dir)  # before anything is spent
 
     title = (read_yaml_field('project.title', project_dir)
              or read_yaml_field('title', project_dir) or 'Unknown')
@@ -689,6 +700,7 @@ def main(argv=None):
                 metadata_csv, cycle_dir,
             )
             return
+        _write_readability(scene_ids, project_dir, cycle_dir, reading_target)
         _run_deterministic_only(
             targeted_principles, scene_ids, project_dir, cycle, cycle_dir,
             plugin_dir, weights_file, title,
@@ -941,6 +953,7 @@ def main(argv=None):
             _score_rhythm(scene_ids, project_dir, cycle_dir)
         elif det_principle == 'economy_clarity':
             _score_economy(scene_ids, project_dir, cycle_dir)
+    _write_readability(scene_ids, project_dir, cycle_dir, reading_target)
 
     # =========================================================================
     # Improvement cycle
@@ -1015,6 +1028,74 @@ def _log_latest_kept(project_dir, cycle):
             log(f'latest stays on {kept}: cycle-{cycle} has unscored parts')
     else:
         log(f'latest not created: cycle-{cycle} has unscored parts')
+
+
+def _reading_target_or_exit(project_dir):
+    """project.reading_level as a `readability.ReadingTarget`, or None when
+    unset; a value that isn't a grade or range is an ERROR, exit 1."""
+    from storyforge.readability import read_target
+    try:
+        return read_target(project_dir)
+    except ValueError as e:
+        log(f'ERROR: {e} in storyforge.yaml')
+        sys.exit(1)
+
+
+def _write_readability(scene_ids, project_dir, cycle_dir, target):
+    """The cycle's reading level: readability.csv (a row per scene and an
+    ALL row pooling them) and the summary in the log, with a WARNING naming
+    any scene it couldn't measure. A measure, not a principle: it never
+    enters scene-scores.csv."""
+    from storyforge import readability
+    measured = readability.measure_scenes(scene_ids, project_dir)
+    path = os.path.join(cycle_dir, 'readability.csv')
+    readability.write_csv(path, measured.rows, target)
+    for line in readability.summary_lines(measured, target):
+        log(line)
+    log(f'Reading level: {path}')
+
+
+#: what `--readability` can't be combined with: each would be dropped
+_READABILITY_EXCLUSIVE = ('source_fidelity', 'deterministic', 'principles', 'direct',
+                          'deep', 'diagnosis_only', 'no_apply', 'interactive')
+
+
+def _run_readability_only(args):
+    """`score --readability`: print the reading level of the scenes in
+    scope (--scenes/--act/--from-seq) and their pooled figure (the book's
+    with no filter). No API call, no cycle, nothing written. A scene that
+    can't be read is an ERROR, exit 1, after the table."""
+    from storyforge import readability
+    clash = [f'--{name.replace("_", "-")}' for name in _READABILITY_EXCLUSIVE
+             if getattr(args, name, None)]
+    if clash:
+        log(f'ERROR: --readability prints the reading level only; '
+            f'it can\'t be combined with {", ".join(clash)}')
+        sys.exit(1)
+    project_dir = detect_project_root()
+    target = _reading_target_or_exit(project_dir)
+    metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    filter_mode, filter_value, _ = _resolve_filter(args)
+    ids = apply_scene_filter(metadata_csv, build_scene_list(metadata_csv),
+                             filter_mode, filter_value)
+    measured = readability.measure_scenes(ids, project_dir)
+    if measured.rows:
+        width = max(len(r.scene_id) for r in measured.rows)
+        print(f'{"scene":<{width}}  words  w/sent  grade  narration  target')
+        for r in measured.rows:
+            print(f'{r.scene_id:<{width}}  {r.whole.words:>5}  '
+                  f'{r.whole.words_per_sentence:>6.1f}  {r.whole.grade:>5.1f}  '
+                  f'{readability._fmt(r.narration.grade):>9}  '
+                  f'{readability.verdict(r.whole.grade, target)}')
+        print()
+    for line in readability.summary_lines(measured, target):
+        print(line)
+    if any(why.startswith("can't be read") for why in measured.unmeasured.values()):
+        log('ERROR: scene file(s) above can\'t be read; fix them and run again.')
+        sys.exit(1)
+    if not measured.rows:
+        log('ERROR: No scene in scope has prose to measure.')
+        sys.exit(1)
 
 
 def _score_repetition(scene_ids, project_dir, cycle_dir):

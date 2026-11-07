@@ -661,6 +661,25 @@ class TestMainDirect:
                       os.path.isdir(os.path.join(scores_dir, d))]
         assert len(cycle_dirs) >= 1
 
+    def test_direct_cycle_writes_readability(self, mock_api, mock_git, mock_costs,
+                                             project_dir, monkeypatch):
+        # #616's review, T-3: the API-backed cycle measures reading level too
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        mock_api.set_response_fn(_every_part(self._scoring_response()))
+
+        main(['--direct', '--scenes', 'act1-sc02'])
+
+        scores_dir = os.path.join(project_dir, 'working', 'scores')
+        cycle = sorted(d for d in os.listdir(scores_dir) if d.startswith('cycle-'))[-1]
+        with open(os.path.join(scores_dir, cycle, 'readability.csv')) as f:
+            lines = f.read().splitlines()
+        assert [l.split('|')[0] for l in lines[1:]] == ['act1-sc02', 'ALL']
+        with open(os.path.join(scores_dir, cycle, 'scene-scores.csv')) as f:
+            header = set(f.readline().strip().split('|'))
+        assert not header & {'grade', 'narration_grade', 'words_per_sentence'}
+
     def test_direct_creates_branch_and_pr(self, mock_api, mock_git, mock_costs,
                                           project_dir, monkeypatch):
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')

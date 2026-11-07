@@ -1582,6 +1582,7 @@ def _run_deterministic_score(project_dir: str,
     prev_dir = os.path.join(scores_base, f'cycle-{highest}') if highest > 0 else '-'
     if prev_dir != '-' and not os.path.isdir(prev_dir):
         prev_dir = '-'
+    _loop_readability(scene_ids, project_dir, cycle_dir)
     generate_diagnosis(cycle_dir, prev_dir, weights_file)
 
     # Update latest symlink
@@ -1592,6 +1593,20 @@ def _run_deterministic_score(project_dir: str,
 
     diag_rows = _read_diagnosis(cycle_dir)
     return cycle_dir, diag_rows
+
+
+def _loop_readability(scene_ids: list[str], project_dir: str, cycle_dir: str) -> None:
+    """The loop's score cycles write readability.csv as `score`'s do. A bad
+    project.reading_level, mid-loop, is a WARNING and the file is written
+    with no target column filled, rather than stopping paid work."""
+    from storyforge import readability
+    from storyforge.cmd_score import _write_readability
+    try:
+        target = readability.read_target(project_dir)
+    except ValueError as e:
+        log(f'WARNING: {e}; reading level written without a target')
+        target = None
+    _write_readability(scene_ids, project_dir, cycle_dir, target)
 
 
 def _run_lightweight_score(project_dir: str, scene_ids: list[str],
@@ -1667,6 +1682,7 @@ def _run_lightweight_score(project_dir: str, scene_ids: list[str],
     if highest > 0:
         prev_dir = os.path.join(scores_base, f'cycle-{highest}')
 
+    _loop_readability(scene_ids, project_dir, cycle_dir)
     generate_diagnosis(cycle_dir, prev_dir or '-', weights_file)
 
     # latest stays on the last complete cycle (as in cmd_score)
@@ -2665,8 +2681,11 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
     log(f'  Building revision prompt...')
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        log(f'  ERROR building prompt: {result.stderr[:500]}')
-        return
+        # the cause is the end of stderr (a traceback's last line); stop
+        # rather than go on to re-score a pass that never ran
+        log(f'  ERROR building prompt: {result.stderr.strip()[-1500:]}')
+        log('  The pass is not marked completed; nothing more was revised.')
+        sys.exit(1)
 
     prompt = result.stdout
     _log_prompt_warnings(result.stderr)
@@ -3129,7 +3148,8 @@ def main(argv=None):
 def _note_reference_docs(project_dir: str) -> None:
     """Tell the author what the revision prompts leave out (#596, SF-3/SF-4):
     with no voice guide they take the voice from the existing scenes (a
-    WARNING); key decisions missing or a template are a NOTE. One that
+    WARNING); key decisions missing, empty or a template are a NOTE (the
+    prose passes and redrafts carry them when there are some). One that
     exists but can't be read stops the session (ERROR, exit 1)."""
     from storyforge.common import VOICE_GUIDE_REMEDY, doc_state, resolve_voice_guide
     voice = resolve_voice_guide(project_dir)
@@ -3143,7 +3163,7 @@ def _note_reference_docs(project_dir: str) -> None:
         log(f'WARNING: {voice.detail}: the revision prompts have no voice guide and take '
             f"the voice from the book's existing scenes. Fill it: {VOICE_GUIDE_REMEDY}.")
     if decisions.kind != 'ok':
-        log(f'NOTE: {decisions.detail}, so a scene redrafted from its brief carries no '
+        log(f'NOTE: {decisions.detail}, so the prose passes and redrafts carry no '
             'key decisions.')
 
 

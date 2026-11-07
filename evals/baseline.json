@@ -1,15 +1,15 @@
 {
   "cost": {
-    "calls": 3467,
-    "input_tokens": 14457345,
-    "output_tokens": 3839445,
-    "replayed_calls": 3467,
+    "calls": 3460,
+    "input_tokens": 14488945,
+    "output_tokens": 3837284,
+    "replayed_calls": 3460,
     "unpriced_calls": 0,
-    "usd_if_live": 101.1086,
+    "usd_if_live": 100.4317,
     "usd_spent": 0.0
   },
-  "git_dirty": true,
-  "git_sha": "9c613beede3efe92931822763b5007b40e2e152d",
+  "git_dirty": false,
+  "git_sha": "07f712debe0b33d3c18aa21f384478ae7ed39d5b",
   "mode": "replay",
   "results": [
     {
@@ -82,7 +82,7 @@
       },
       "mode": "replay",
       "notes": [],
-      "started_at": "2026-11-07T03:12:29+00:00",
+      "started_at": "2026-11-07T07:43:20+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -140,7 +140,7 @@
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 1.37,
+      "duration_s": 1.74,
       "error": null,
       "gates": [
         {
@@ -213,7 +213,7 @@
         "missed 37 of 37: e2-carol-001, e2-carol-002, e2-carol-003, e2-carol-004, e2-carol-005, e2-carol-006, e2-carol-007, e2-carol-008, e2-carol-009, e2-carol-010, e2-carol-011, e2-carol-012, e2-carol-013, e2-carol-014, e2-carol-015, e2-carol-016, e2-carol-017, e2-carol-018, e2-carol-019, e2-carol-020, e2-carol-021, e2-carol-022, e2-carol-023, e2-carol-024, e2-carol-025, e2-carol-026, e2-carol-027, e2-carol-028, e2-carol-029, e2-carol-030, e2-carol-031, e2-carol-032, e2-carol-033, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
-      "started_at": "2026-11-07T03:12:29+00:00",
+      "started_at": "2026-11-07T07:43:20+00:00",
       "status": "pass",
       "suite": "e2-carol"
     },
@@ -277,7 +277,7 @@
         "usd_spent": 0.0
       },
       "description": "The gate checker on errors injected into A Christmas Carol",
-      "duration_s": 6.76,
+      "duration_s": 3.65,
       "error": null,
       "gates": [
         {
@@ -349,7 +349,7 @@
         "1 unverified finding(s) (quotes not in the text they name) not counted as flags; the gate blocks on them: scrooge-raises-bobs-salary: '' is not a promise of this scene's brief",
         "0 flag(s) on unedited controls; 0 benign case(s) flagged"
       ],
-      "started_at": "2026-11-07T03:12:31+00:00",
+      "started_at": "2026-11-07T07:43:22+00:00",
       "status": "pass",
       "suite": "e2-carol-checker"
     },
@@ -397,7 +397,7 @@
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 34.99,
+      "duration_s": 40.87,
       "error": null,
       "gates": [
         {
@@ -463,7 +463,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-11-07T03:12:37+00:00",
+      "started_at": "2026-11-07T07:43:25+00:00",
       "status": "pass",
       "suite": "e2-corpus-drift"
     },
@@ -513,7 +513,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 57.09,
+      "duration_s": 43.79,
       "error": null,
       "gates": [
         {
@@ -579,7 +579,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-11-07T03:13:12+00:00",
+      "started_at": "2026-11-07T07:44:06+00:00",
       "status": "pass",
       "suite": "e2-corpus-validate"
     },
@@ -620,7 +620,7 @@
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 13.05,
+      "duration_s": 14.18,
       "error": null,
       "gates": [
         {
@@ -703,7 +703,7 @@
         "thornwall-030 (ivra-visits-sera): captured",
         "The commitments pass is judged after the persistence check, as phase 4 records it: persistence_dropped counts the facts it dropped over every scene judged."
       ],
-      "started_at": "2026-11-07T03:14:09+00:00",
+      "started_at": "2026-11-07T07:44:50+00:00",
       "status": "pass",
       "suite": "e3-extraction"
     },
@@ -726,7 +726,7 @@
         "usd_spent": 0.0
       },
       "description": "Draft shared-dark Act 1 with write; CP10k, BPS, length, voice",
-      "duration_s": 9.61,
+      "duration_s": 10.25,
       "error": null,
       "gates": [
         {
@@ -837,7 +837,7 @@
         "Prior prose: full.",
         "Judge stands in for the plan's human spot-check (still owed). Drafted sequentially and gated, as write does by default; batch mode is refused under a cassette."
       ],
-      "started_at": "2026-11-07T03:14:22+00:00",
+      "started_at": "2026-11-07T07:45:04+00:00",
       "status": "pass",
       "suite": "e4-generation"
     },
@@ -912,7 +912,7 @@
         "name-surfaces: 2 mismatch(es) in the rewrite, 1 from the plan and ledger alone\n    PHY: At 2:47 the original has both of Hank's hands flat on the table on either side of the pad, while the redraft has his left hand pinned under \n    PHY: In the original the coworker who calls Claire's name is standing in the parking lot, while in the redraft the coworker is leaning out of a d\n    ledger only, KNO: In the original the name memory is a fragment that is not Harmon's; in the redraft it is explicitly something Harmon heard and filed away.",
         "voicemail: 2 mismatch(es) in the rewrite, 2 from the plan and ledger alone\n    PHY: What covered Maren's head during the captivity memory differs: a hood in the original, a pillowcase in the redraft.\n    REL: In the original, Claire is called Marie's sister when describing where Marie made the call; the redraft calls Claire Marie's daughter there.\n    ledger only, PHY: Where the Post-it with Marie's number was stuck while Maren listened to the messages: on the edge of her laptop in the original, on the top \n    ledger only, REL: Whose kitchen Marie was sitting in: the original calls Claire Marie's sister here, while the redraft calls Claire her daughter."
       ],
-      "started_at": "2026-11-07T03:14:32+00:00",
+      "started_at": "2026-11-07T07:45:14+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -990,18 +990,18 @@
         "christmas-carol/run2: 25 flag(s)",
         "christmas-carol/run1: 25 flag(s)"
       ],
-      "started_at": "2026-11-07T03:14:33+00:00",
+      "started_at": "2026-11-07T07:45:15+00:00",
       "status": "pass",
       "suite": "e7-classics"
     },
     {
       "by_code": {
         "KNO": {
-          "reintroduced": 1,
+          "reintroduced": 0,
           "replayed": 3
         },
         "PHY": {
-          "reintroduced": 1,
+          "reintroduced": 0,
           "replayed": 11
         },
         "REL": {
@@ -1022,16 +1022,16 @@
         }
       },
       "cost": {
-        "calls": 479,
-        "input_tokens": 1856693,
-        "output_tokens": 667015,
-        "replayed_calls": 479,
+        "calls": 472,
+        "input_tokens": 1888293,
+        "output_tokens": 664854,
+        "replayed_calls": 472,
         "unpriced_calls": 0,
-        "usd_if_live": 51.9404,
+        "usd_if_live": 51.2635,
         "usd_spent": 0.0
       },
       "description": "Current revision passes vs the E1 errors past passes introduced",
-      "duration_s": 26.78,
+      "duration_s": 27.33,
       "error": null,
       "gates": [
         {
@@ -1042,7 +1042,7 @@
           "threshold": 15
         },
         {
-          "actual": 4,
+          "actual": 2,
           "name": "reintroduced_unflagged",
           "op": "<=",
           "passed": true,
@@ -1057,8 +1057,8 @@
         }
       ],
       "metrics": {
-        "clean_gate_failed": 6,
-        "errors_per_10k_words": 1.268,
+        "clean_gate_failed": 5,
+        "errors_per_10k_words": 0.63,
         "family.brief-fix.reintroduced": 0,
         "family.brief-fix.replayed": 1,
         "family.hone-physical-states.reintroduced": 0,
@@ -1071,18 +1071,18 @@
         "family.naturalness-upstream.replayed": 1,
         "family.redraft-from-brief.reintroduced": 2,
         "family.redraft-from-brief.replayed": 16,
-        "family.revision-plan.reintroduced": 2,
+        "family.revision-plan.reintroduced": 0,
         "family.revision-plan.replayed": 7,
         "gate_counts_missing": 1,
         "gate_extraction": 1,
-        "gate_inherited": 7,
-        "gate_new": 5,
+        "gate_inherited": 12,
+        "gate_new": 4,
         "gate_plan_conflicts": 3,
         "gate_unfinished": 0,
         "halted": 6,
-        "reintroduced": 4,
-        "reintroduced_unflagged": 4,
-        "reintroduction_rate": 0.129,
+        "reintroduced": 2,
+        "reintroduced_unflagged": 2,
+        "reintroduction_rate": 0.065,
         "replayed": 31,
         "unreplayable": 15
       },
@@ -1097,7 +1097,7 @@
         "excluded 1: unreplayable: the --state pass logged the pre-pass prose faithfully (\"Two relit. Two still dark.\"); the error is the log going stale after a later prose fix (37bc78e), which a replay of the pass cannot show (lantern-folk-032)",
         "excluded 1: unreplayable: the introducing commit wrote both sides (the six years and the nine), so the pre-pass project has no established fact for the replay to contradict (thornwall-028)",
         "governor-013 (walking-the-eastern-development): not_present",
-        "governor-014 (elias-disarms): consistent (the gate did not pass it: listed pending) [gate: 1 new]",
+        "governor-014 (elias-disarms): consistent [gate: 4 already in the book]",
         "governor-016 (routine-maintenance): reintroduced \u2014 \"The stone-cutters on Block Fourteen were working the north course again.\"",
         "governor-018 (acceptable-losses): halted, nothing written \u2014 redraft of acceptable-losses refused: model refused the request (cyber)",
         "governor-020 (junction-fourteen): consistent",
@@ -1114,10 +1114,10 @@
         "lantern-folk-030 (a04-the-great-lamp): not_present",
         "lantern-folk-031 (a01-moving-night): not_present",
         "lantern-folk-033 (a10-the-lamp-goes-dark): consistent",
-        "shared-dark-030 (woodpile): reintroduced [gate: 1 already in the book] \u2014 \"She pressed them against her thighs, denim rough under the stiff leather of her gloves, and held them there until the sh\"",
+        "shared-dark-030 (woodpile): not_present [gate: 1 already in the book]",
         "shared-dark-034 (call): not_present [gate: 1 already in the book]",
         "shared-dark-035 (phone-call): consistent",
-        "shared-dark-037 (theory): reintroduced \u2014 \"I was on the bed in the other room with the door open.\"",
+        "shared-dark-037 (theory): consistent",
         "shared-dark-038 (decision): consistent [gate: 1 already in the book]",
         "shared-dark-040 (claire): not_present [gate counts not collected]",
         "shared-dark-041 (missing-persons): halted, nothing written \u2014 upstream brief fix rewrote nothing for missing-persons: named Getting",
@@ -1129,12 +1129,12 @@
         "thornwall-026 (thessan-rides): reintroduced \u2014 \"He had signed the transfer papers without a tremor in the pen and thanked her for her service, and she had ridden out be\"",
         "thornwall-027 (thessan-at-verath): not_present [gate: 1 already in the book]",
         "thornwall-029 (evidence-room): not_present",
-        "thornwall-030 (ivra-seals-archive): consistent",
+        "thornwall-030 (ivra-seals-archive): consistent [gate: 1 already in the book]",
         "thornwall-033 (shell-breaks-open): consistent",
         "thornwall-035 (riders-approach): halted, nothing written \u2014 upstream brief fix rewrote nothing for riders-approach: named Meanwhile",
         "thornwall-037 (evening-visit): consistent"
       ],
-      "started_at": "2026-11-07T03:14:33+00:00",
+      "started_at": "2026-11-07T07:45:16+00:00",
       "status": "pass",
       "suite": "e8-revision-safety"
     },
@@ -1150,7 +1150,7 @@
         "usd_spent": 0.0
       },
       "description": "Extract phase 5 leaves a complete, floor-passing project",
-      "duration_s": 0.52,
+      "duration_s": 0.67,
       "error": null,
       "gates": [
         {
@@ -1241,7 +1241,7 @@
       "notes": [
         "status next: evaluate"
       ],
-      "started_at": "2026-11-07T03:15:00+00:00",
+      "started_at": "2026-11-07T07:45:43+00:00",
       "status": "pass",
       "suite": "e9-reference"
     },
@@ -1288,7 +1288,7 @@
         "usd_spent": 0.0
       },
       "description": "Phase 4: rejecting an E1 error's established fact re-checks the scene that contradicted it",
-      "duration_s": 8.92,
+      "duration_s": 8.43,
       "error": null,
       "gates": [
         {
@@ -1378,13 +1378,13 @@
         "thornwall-030 (ivra-visits-sera \u2192 ivra-seals-archive): captured ivra-visits-sera--garren-s-watch-s-decline-took, HIT, set 14; unrelated: ivra-visits-sera--garren-s-watch-s-decline-took: no subject: every later scene with a binding world fact is taken as depending on it",
         "recall: of the cases judged captured, the share whose re-check set holds a contradicting scene (the scenes the reject flow lists now, or the ones its revision lists). Commitments exist only for the extracted subset (each case's establishing and contradicting scenes and up to 2 controls), and phase 4 is offered the subset's facts only, so set_fraction_mean is a floor; control_inclusion is an upper bound on needless inclusion (controls sit next to the two sides)."
       ],
-      "started_at": "2026-11-07T03:15:01+00:00",
+      "started_at": "2026-11-07T07:45:44+00:00",
       "status": "pass",
       "suite": "recheck-set"
     }
   ],
   "schema_version": 1,
   "status": "pass",
-  "storyforge_version": "1.156.0",
+  "storyforge_version": "1.157.0",
   "suite_count": 12
 }

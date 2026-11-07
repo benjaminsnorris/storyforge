@@ -608,3 +608,54 @@ def test_revise_aborts_when_branch_creation_fails(project_dir_gn, monkeypatch):
     assert open(scene_path).read() == INITIAL_DRAFT
     scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
     assert get_field(scenes_csv, 'the-blank-page', 'status') == 'drafted'
+
+
+# ---------------------------------------------------------------------------
+# Key decisions (#616): read once up front, carried by every prompt
+# ---------------------------------------------------------------------------
+
+def _gn_dry_run(project_dir_gn, monkeypatch, capsys):
+    from storyforge import cmd_revise_gn
+    monkeypatch.chdir(project_dir_gn)
+    _seed_draft(project_dir_gn, 'the-blank-page')
+    _seed_score_findings(project_dir_gn, 'the-blank-page', [
+        {'kind': 'balloon_too_long', 'detail': 'x', 'severity': 'high'}])
+    cmd_revise_gn.main(['the-blank-page', '--dry-run', '--no-branch'])
+    out = capsys.readouterr()
+    return out.out + out.err
+
+
+def test_gn_revise_passes_key_decisions(project_dir_gn, monkeypatch, capsys):
+    # T-2: the wiring, not just the builder
+    with open(os.path.join(project_dir_gn, 'reference', 'key-decisions.md'), 'w') as f:
+        f.write('# Key Decisions\n\n## Panels\n\nGN-DECISION-MARK\n')
+    text = _gn_dry_run(project_dir_gn, monkeypatch, capsys)
+    assert '# Key decisions' in text and 'GN-DECISION-MARK' in text
+
+
+def test_gn_revise_notes_missing_key_decisions(project_dir_gn, monkeypatch, capsys):
+    # SF-2
+    path = os.path.join(project_dir_gn, 'reference', 'key-decisions.md')
+    if os.path.exists(path):
+        os.remove(path)
+    text = _gn_dry_run(project_dir_gn, monkeypatch, capsys)
+    assert 'NOTE: reference/key-decisions.md is missing, so the revision prompts carry ' \
+           'no key decisions' in text
+    assert '# Key decisions' not in text
+
+
+def test_gn_revise_stops_before_the_branch_on_unreadable_key_decisions(
+        project_dir_gn, monkeypatch):
+    # SF-1/CR-2: nothing created, nothing spent
+    from storyforge import cmd_revise_gn, git as git_helpers
+    monkeypatch.chdir(project_dir_gn)
+    with open(os.path.join(project_dir_gn, 'reference', 'key-decisions.md'), 'wb') as f:
+        f.write(b'\xff\xfe')
+
+    def boom(*a, **k):
+        raise AssertionError('no branch or PR before the check')
+    monkeypatch.setattr(git_helpers, 'create_branch', boom)
+    monkeypatch.setattr(git_helpers, 'create_draft_pr', boom)
+    with pytest.raises(SystemExit) as e:
+        cmd_revise_gn.main(['the-blank-page'])
+    assert e.value.code == 1
