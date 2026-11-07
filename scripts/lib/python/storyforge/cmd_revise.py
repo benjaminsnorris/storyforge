@@ -1942,6 +1942,8 @@ def _source_drift_scenes(project_dir: str, quiet: bool = False) -> dict[str, lis
         log(f'  Source fidelity: {len(state.stale)} result(s) scored on a brief or prose '
             f'changed since, not used: {", ".join(state.stale[:10])}'
             + (' ...' if len(state.stale) > 10 else '') + '; re-run score --source-fidelity')
+    if state.pretag:
+        log(f'  Source fidelity: {state.pretag_line()}')
     if state.drift and cfg.mode == 'free':
         log(f'  Source drift in {len(state.drift)} scene(s), left as it is (mode: free): '
             f'{", ".join(sorted(state.drift))}')

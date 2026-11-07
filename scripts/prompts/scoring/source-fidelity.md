@@ -48,9 +48,9 @@ For each element, compare the adaptation's {TARGET_KIND} with the source scenes'
 List every departure: something the source has that the adaptation drops or changes, or something the adaptation adds that the source doesn't have. Tag each one:
 
 - `deliberate`: the treatment or its note explains it, or a version rule calls for it. Name which in `authority` (e.g. `treatment: compress`, `note`, `rule: the YA version softens the killing`)
-- `moved`: the beat is not lost or invented, only moved between this scene and a neighbour. Either this scene tells something from a neighbour's source scene, or a beat of this scene's source is told in a neighbour instead (its map note or its source says so). Name the neighbour's book scene id in `authority` (e.g. `from: <neighbour id>`, `to: <neighbour id>`)
-- `staging`: connective invention that changes no event, fact or outcome of the source: physical business, a character's interiority, a transition, a setting detail, an ending extended past the source's last beat without adding an event. {STAGING}
-- `drift`: nothing above authorizes it. `authority` is `none`
+- `moved`: the beat is not lost or invented, only moved between this scene and a neighbour. Either this scene tells something from a neighbour's source scene, or a beat of this scene's source is told in a neighbour instead (its map note or its source says so). Name the neighbour in `authority`: its book scene id, or the id of the source scene it adapts (e.g. `from: <neighbour id>`, `to: <neighbour id>`). Use `moved` only when a neighbour is shown above
+- `staging`: connective invention that changes no event, fact or outcome of the source: physical business, a character's interiority, a transition, a setting detail, an ending extended past the source's last beat without adding an event. Never on `outcome` or `knowledge_out`: a changed outcome or a new fact is not staging. {STAGING}
+- `drift`: nothing above authorizes it. `authority` is `none`, and only a drift has `none`
 
 A departure belongs to one of those six elements. If it is only in the brief's `title`, `pov`, `conflict`, `crisis` or `decision`, name that field as its element: it is listed, not scored.
 
@@ -64,7 +64,7 @@ Then score each element 1-5 on **drift only**. A `deliberate`, `moved` or `stagi
 
 ## Output Format
 
-Output ONLY these two blocks, pipe-delimited, with the block names `SCORES` and `DEPARTURES` on lines of their own (no markdown headings, no code fences). Each score is a whole number from 1 to 5. Write exactly one SCORES row. Leave the DEPARTURES block with just its header when there are none. Never use `|` inside a field; `authority` is `none` for every drift.
+Output ONLY these two blocks, pipe-delimited, with the block names `SCORES` and `DEPARTURES` on lines of their own (no markdown headings, no code fences). Each score is a whole number from 1 to 5. Write exactly one SCORES row. Leave the DEPARTURES block with just its header when there are none. Never use `|` inside a field; `authority` is `none` for every drift and only for a drift.
 
 SCORES
 id|goal|outcome|key_actions|key_dialogue|on_stage|knowledge_out

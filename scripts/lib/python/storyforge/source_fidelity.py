@@ -10,17 +10,21 @@ neighbouring book scene: the prompt also shows the nearest mapped scene
 before and after this one, with their map rows and source scenes, and the
 authority names the neighbour), `staging` (connective invention that
 changes no event, fact or outcome; in `free` mode, or in `faithful` mode
-when a version rule or the note allows it) or `drift` (nothing does).
-Elements are scored 1-5 on drift only, so no other tag is penalized; drift
-is what revise reads (#617: the Telemachy pilot's 80 drift were 24 moved,
-46 staging, 8 false alarms and 2 real departures). With a `range:`, a scene
-whose map row names a source scene outside it is not checked (it is broken
-data, which validate blocks on).
+when a version rule or the scene's note, which must exist, allows it; never
+on `outcome` or `knowledge_out`) or `drift` (nothing does). The prompt asks
+for elements scored 1-5 on drift only; the code doesn't check that the
+scores follow the drift. Drift is what revise reads (#617: the Telemachy
+pilot's 80 drift were 24 moved, 46 staging, 8 false alarms and 2 real
+departures). A `moved ... to: <neighbour>` claim is confirmed against the
+neighbour's result in the same run, and a WARNING lists those that aren't.
+With a `range:`, a scene whose map row names a source scene outside it is
+not checked (it is broken data, which validate blocks on).
 
 A reply whose rows name the one source scene the map row names in place of
-the book scene's id is read as the book scene's (#618), and is said in the
-log. A reply that can't be parsed is asked again once, with what was wrong;
-both calls are logged and costed.
+the book scene's id is read as the book scene's (#618), logged, and kept in
+the scores file's `remapped` column. A reply that can't be parsed is asked
+again once, with what was wrong; both calls are logged and costed. A refused
+or cut-off reply is not asked again: it is the failure.
 
 Output, in the score cycle's directory: `source-fidelity.csv`
 (`SCORE_COLUMNS`) and `source-fidelity-rationale.csv` (`RATIONALE_COLUMNS`),
@@ -48,10 +52,17 @@ TARGETS = ('brief', 'prose')
 SCORES_FILE = 'source-fidelity.csv'
 RATIONALE_FILE = 'source-fidelity-rationale.csv'
 SCORE_COLUMNS = ['id', 'target', 'target_hash', *ELEMENTS, 'overall', 'drift', 'deliberate',
-                 'moved', 'staging']
-# The header before `moved` and `staging` (#617): a cycle scored then is still
-# read, its rows' counts for the new tags empty (not counted, not zero)
-_OLDER_SCORE_COLUMNS = (SCORE_COLUMNS[:-2],)
+                 'moved', 'staging', 'remapped']
+# The header before `moved`, `staging` and `remapped` (#617, #618): a cycle
+# scored then is still read, its rows' new cells empty (not counted, not zero)
+_OLDER_SCORE_COLUMNS = (
+    ['id', 'target', 'target_hash', 'goal', 'outcome', 'key_actions', 'key_dialogue',
+     'on_stage', 'knowledge_out', 'overall', 'drift', 'deliberate'],
+)
+# Elements staging can't be on: a changed outcome or new fact is not staging
+_NO_STAGING = ('outcome', 'knowledge_out')
+# Elements whose staging departures report() lists, not only counts
+_STAGING_LISTED = ('goal', 'key_actions', 'key_dialogue')
 RATIONALE_COLUMNS = ['id', 'target', 'element', 'tag', 'evidence', 'authority']
 
 # The brief fields a brief target shows (knowledge_out with its statements)
@@ -95,6 +106,11 @@ class Result:
         if set(self.scores) != set(ELEMENTS) or not all(
                 isinstance(v, int) and 1 <= v <= 5 for v in self.scores.values()):
             raise ValueError(f'{self.scene_id}: scores must be 1-5 for exactly {ELEMENTS}')
+        for d in self.departures:
+            if (set(d) != {'element', 'tag', 'evidence', 'authority'}
+                    or d['element'] not in ELEMENTS + NOTED_FIELDS or d['tag'] not in TAGS
+                    or not d['evidence'] or (d['authority'] == 'none') != (d['tag'] == 'drift')):
+                raise ValueError(f'{self.scene_id}: departure {d!r}')
 
     @property
     def overall(self) -> float:
@@ -102,6 +118,8 @@ class Result:
         return round(_power_mean([float(v) for v in self.scores.values()]), 1)
 
     def count(self, tag: str) -> int:
+        if tag not in TAGS:
+            raise ValueError(f'tag {tag!r} (one of {", ".join(TAGS)})')
         return sum(1 for d in self.departures if d['tag'] == tag)
 
 
@@ -227,22 +245,54 @@ def source_fixed_outcomes(project_dir: str) -> list[str]:
 # ============================================================================
 
 @dataclass(frozen=True)
+class ReplyRules:
+    """What reading one scene's reply needs (#617, #618): the adaptation's
+    `mode`; `aliases`, the ids read as the scene's own (the one source scene
+    its map row names); `neighbours`, (name, book scene id) pairs a `moved`
+    authority may name (each neighbour's book id and its source scenes'
+    ids); and whether the scene's map row has a note and the project has
+    version rules, which a faithful `staging` authority must point at."""
+    mode: str
+    aliases: frozenset = frozenset()
+    neighbours: tuple = ()
+    has_note: bool = False
+    has_rules: bool = False
+
+    def __post_init__(self):
+        if self.mode not in source.MODES:
+            raise ValueError(f'mode {self.mode!r} (one of {", ".join(source.MODES)})')
+
+    @property
+    def names(self) -> frozenset:
+        return frozenset(n for n, _ in self.neighbours)
+
+    def neighbour_named(self, authority: str) -> str | None:
+        """The neighbour's book id an authority names, or None."""
+        for name, book_id in sorted(self.neighbours, key=lambda p: -len(p[0])):
+            if re.search(rf'(?<![\w:-]){re.escape(name)}(?![\w-])', authority):
+                return book_id
+        return None
+
+
+@dataclass(frozen=True)
 class Plan:
     """What one scene's check needs, or why it can't be checked: exactly one
-    of `prompt` (with its `target_hash`) and `skip`. `aliases`, `neighbours`
-    and `mode` are what `parse_response` needs to read the reply."""
+    of `prompt` (with its `target_hash` and the `rules` for reading the
+    reply) and `skip`. `notes` are WARNINGs about the prompt (neighbours not
+    known or not shown)."""
     scene_id: str
     prompt: str = ''
     target_hash: str = ''
     skip: str = ''        # why there is no prompt ('' when there is one)
     broken: bool = False  # the skip means the data is wrong, not that there's nothing to do
-    aliases: frozenset = frozenset()     # reply row ids read as scene_id (#618)
-    neighbours: frozenset = frozenset()  # what a `moved` authority may name (#617)
-    mode: str = ''
+    rules: ReplyRules | None = None
+    notes: tuple = ()
 
     def __post_init__(self):
-        if bool(self.prompt) == bool(self.skip) or bool(self.prompt) != bool(self.target_hash):
-            raise ValueError(f'{self.scene_id}: a Plan has a prompt and its hash, or a skip')
+        if (bool(self.prompt) == bool(self.skip) or bool(self.prompt) != bool(self.target_hash)
+                or bool(self.prompt) != (self.rules is not None)):
+            raise ValueError(f'{self.scene_id}: a Plan has a prompt, its hash and its rules, '
+                             f'or a skip')
 
 
 def _is_mapped(row: dict | None) -> bool:
@@ -256,12 +306,13 @@ def reading_order(project_dir: str) -> list[str]:
 
 
 def neighbours(scene_id: str, order: list[str],
-               map_rows: dict[str, dict]) -> tuple[str | None, str | None]:
+               map_rows: dict[str, dict]) -> tuple[str | None, str | None] | None:
     """The nearest book scene before and after `scene_id` in `order` whose
     map row names source scenes (invented and unmapped scenes are passed
-    over); None for none, or when the scene isn't in `order`."""
+    over), None on a side with none. None, not known, when the scene isn't
+    in `order` (cut, merged, archived, or not in scenes.csv)."""
     if scene_id not in order:
-        return None, None
+        return None
     i = order.index(scene_id)
     before = next((s for s in reversed(order[:i]) if _is_mapped(map_rows.get(s))), None)
     after = next((s for s in order[i + 1:] if _is_mapped(map_rows.get(s))), None)
@@ -277,17 +328,25 @@ def _id_forms(ref: tuple[str, str], cat: dict) -> set[str]:
 
 def _neighbour_side(project_dir: str, scene_id: str, own: list[tuple[str, str]],
                     order: list[str], map_rows: dict[str, dict], cat: dict,
-                    spans: dict, source_tables) -> tuple[str, frozenset]:
-    """The neighbours' block of the prompt, and the names a `moved`
-    authority may use (their book ids and their source scenes' ids)."""
-    blocks, names = [], set()
-    for where, nid in zip(('before', 'after'), neighbours(scene_id, order, map_rows)):
+                    spans: dict, source_tables) -> tuple[str, tuple, tuple]:
+    """The neighbours' block of the prompt, the (name, book id) pairs a
+    `moved` authority may use (each neighbour's book id and its source
+    scenes' ids), and WARNINGs: neighbours not known, or a neighbour whose
+    source scenes can't be shown."""
+    near = neighbours(scene_id, order, map_rows)
+    if near is None:
+        return ('### Neighbouring scenes: unknown (this scene is not in the reading order: '
+                'it has no seq, or is cut or merged). Do not use `moved`.', (),
+                (f'{scene_id} is not in the reading order, so its neighbours are unknown '
+                 f'and `moved` can\'t be used',))
+    blocks, names, notes = [], set(), []
+    for where, nid in zip(('before', 'after'), near):
         if nid is None:
             blocks.append(f'### The book scene {where} it: none (no scene {where} this one '
                           f'adapts a source scene)')
             continue
         row = map_rows[nid]
-        names.add(nid)
+        names.add((nid, nid))
         lines = [f'### The book scene {where} it: `{nid}`',
                  f'**Its map row:** `{row.get("treatment", "")}`'
                  + (f'. {row["note"].strip()}' if row.get('note', '').strip() else '')]
@@ -295,9 +354,12 @@ def _neighbour_side(project_dir: str, scene_id: str, own: list[tuple[str, str]],
         if any(r is None for r in refs) or any(source.outside_range(r, spans) for r in refs):
             lines.append('(Its source scenes are not in the imported source, or are outside '
                          'the adapted range, so they are not shown.)')
+            notes.append(f'{scene_id}: the neighbouring scene {nid}\'s source scenes are not '
+                         f'in the imported source or outside the range, so they are not shown '
+                         f'(run validate)')
         else:
             for r in refs:
-                names |= _id_forms(r, cat)
+                names |= {(n, nid) for n in _id_forms(r, cat)}
             shared = [f'{slug}:{sid}' for slug, sid in refs if (slug, sid) in own]
             if shared:
                 lines.append(f'It also adapts {", ".join(shared)}, shown above as this '
@@ -306,7 +368,7 @@ def _neighbour_side(project_dir: str, scene_id: str, own: list[tuple[str, str]],
             if new:
                 lines.append(_source_side(project_dir, new, source_tables, heading='####'))
         blocks.append('\n'.join(lines))
-    return '\n\n'.join(blocks), frozenset(names)
+    return '\n\n'.join(blocks), tuple(sorted(names)), tuple(notes)
 
 
 #: What the prompt says about `staging`, by mode
@@ -314,8 +376,9 @@ _STAGING = {
     'free': ('This adaptation\'s mode is `free`, which allows connective invention: name '
              '`mode: free`, or the version rule that allows it, in `authority`.'),
     'faithful': ('This adaptation\'s mode is `faithful`, so `staging` is allowed only when a '
-                 'version rule or this scene\'s note allows connective invention: name it in '
-                 '`authority` (`rule: ...` or `note`). Otherwise connective invention is `drift`.'),
+                 'version rule above or this scene\'s note allows connective invention: start '
+                 '`authority` with `rule:` or `note`. Otherwise connective invention is '
+                 '`drift`.'),
 }
 
 
@@ -347,6 +410,7 @@ def plan_scene(project_dir: str, scene_id: str, target: str, plugin_dir: str,
     if outside:
         return Plan(scene_id, skip=f'its source scenes {", ".join(outside)} are outside the '
                                    f'adapted range (run validate)', broken=True)
+    tables = tables or _project_tables(project_dir)
     text = target_text(project_dir, scene_id, target, tables)
     if text is None:
         return Plan(scene_id, skip='no brief' if target == 'brief' else 'no prose')
@@ -355,12 +419,12 @@ def plan_scene(project_dir: str, scene_id: str, target: str, plugin_dir: str,
     if source_tables is None:
         from storyforge.prompts_source import _Tables
         source_tables = _Tables(project_dir)
-    near, near_names = _neighbour_side(project_dir, scene_id, refs, order, map_rows, cat,
-                                       spans, source_tables)
+    near, near_names, notes = _neighbour_side(project_dir, scene_id, refs, order, map_rows,
+                                              cat, spans, source_tables)
     # A reply naming the one source scene in place of the book scene (#618);
-    # never another book scene's id
+    # never another book scene's id, cut ones included
     aliases = _id_forms(refs[0], cat) if len(refs) == 1 else set()
-    aliases -= set(order) - {scene_id}
+    aliases -= set(tables['scenes.csv']) - {scene_id}
 
     template_path = os.path.join(plugin_dir, 'scripts', 'prompts', 'scoring',
                                  'source-fidelity.md')
@@ -378,16 +442,18 @@ def plan_scene(project_dir: str, scene_id: str, target: str, plugin_dir: str,
               .replace('{TARGET_DATA}', text)
               .replace('{TARGET_KIND}', kind)
               .replace('{SCENE_ID}', scene_id))
-    return Plan(scene_id, prompt=prompt, target_hash=target_hash(text),
-                aliases=frozenset(aliases), neighbours=near_names, mode=cfg.mode)
+    rules_ = ReplyRules(cfg.mode, frozenset(aliases), near_names,
+                        has_note=bool(row.get('note', '').strip()),
+                        has_rules=bool((rules or '').strip()))
+    return Plan(scene_id, prompt=prompt, target_hash=target_hash(text), rules=rules_,
+                notes=notes)
 
 
 # ============================================================================
 # Parsing
 # ============================================================================
 
-def _authority_problem(tag: str, element: str, authority: str,
-                       neighbours: frozenset, mode: str) -> str:
+def _authority_problem(tag: str, element: str, authority: str, rules: ReplyRules) -> str:
     """Why a departure's authority doesn't fit its tag, or ''."""
     none = authority.lower() in ('', 'none')
     if tag == 'drift':
@@ -395,28 +461,49 @@ def _authority_problem(tag: str, element: str, authority: str,
                                 f'({authority}): drift has none')
     if none:
         return f'a {tag} departure on {element} with no authority'
-    if tag == 'moved' and not any(re.search(rf'(?<![\w-]){re.escape(n)}(?![\w-])', authority)
-                                  for n in neighbours):
+    if tag == 'moved' and rules.neighbour_named(authority) is None:
+        books = sorted({b for _, b in rules.neighbours})
         return (f'a moved departure on {element} whose authority ({authority}) names no '
-                f'neighbouring scene' + (f' ({", ".join(sorted(n for n in neighbours if ":" not in n))})'
-                                         if neighbours else ': this scene has none'))
-    if (tag == 'staging' and mode == 'faithful'
-            and not re.match(r'(rule|note)\b', authority.strip().lower())):
-        return (f'a staging departure on {element} authorized by {authority}: in faithful '
-                f'mode only a version rule or the note allows connective invention')
+                f'neighbouring scene' + (f' ({", ".join(books)})' if books
+                                         else ': this scene has none shown'))
+    if tag == 'staging' and element in _NO_STAGING:
+        return (f'a staging departure on {element}: a changed outcome or a new fact is not '
+                f'staging')
+    if tag == 'staging' and rules.mode == 'faithful':
+        lead = authority.strip().lower()
+        if re.match(r'(version )?rules?\b', lead):
+            if not rules.has_rules:
+                return (f'a staging departure on {element} authorized by {authority}: this '
+                        f'project has no version rules')
+        elif re.match(r'note\b', lead):
+            if not rules.has_note:
+                return (f'a staging departure on {element} authorized by {authority}: this '
+                        f'scene\'s map row has no note')
+        else:
+            return (f'a staging departure on {element} authorized by {authority}: in faithful '
+                    f'mode only a version rule or the note allows connective invention '
+                    f'(start the authority with `rule:` or `note`)')
     return ''
 
 
-def parse_response(response: str, scene_id: str, target: str, hash_: str, *,
-                   aliases=frozenset(), neighbours=frozenset(), mode: str = 'free') -> Result:
-    """The reply's SCORES and DEPARTURES. Raises SourceFidelityError when an
-    element has no 1-5 score, or a departure names an unknown element or tag,
-    says nothing, or its authority doesn't fit its tag (`_authority_problem`:
-    `drift` has none; `moved` names a `neighbours` scene; `staging` in
-    `faithful` mode a rule or the note): a result with a misread tag would
-    send the wrong scenes to revise. Rows naming one of `aliases` (the one
+def _clean_authority(cell: str) -> str:
+    """An authority cell without the backticks and quotes models put round it."""
+    return re.sub(r'[`"]', '', cell).strip().strip("'").strip()
+
+
+def parse_response(response: str, scene_id: str, target: str, hash_: str,
+                   rules: ReplyRules) -> Result:
+    """The reply's SCORES and DEPARTURES, read by the scene's `rules`.
+    Raises SourceFidelityError when an element has no 1-5 score, or a
+    departure names an unknown element or tag, says nothing, or its
+    authority doesn't fit its tag (`_authority_problem`: `drift` has none;
+    `moved` names a neighbour; `staging` is never on outcome or
+    knowledge_out, and in `faithful` mode names a rule the project has or
+    the note the scene has): a result with a misread tag would send the
+    wrong scenes to revise. Rows naming one of `rules.aliases` (the one
     source scene the map row names) are read as `scene_id`'s, and the Result
     says so (`remapped`)."""
+    aliases = rules.aliases
     scores: dict[str, int] = {}
     departures: list[dict[str, str]] = []
     problems: list[str] = []
@@ -459,14 +546,15 @@ def parse_response(response: str, scene_id: str, target: str, hash_: str, *,
                 # a | inside the text would cut the evidence short
                 problems.append(f'a DEPARTURES row with {len(parts)} cells, not 5')
                 continue
-            element, tag, evidence, authority = parts[1], parts[2].lower(), parts[3], parts[4]
+            element, tag, evidence = parts[1], parts[2].strip('`*').lower(), parts[3]
+            authority = _clean_authority(parts[4])
             if element not in ELEMENTS and element not in NOTED_FIELDS:
                 problems.append(f'departure element {element!r}')
             elif tag not in TAGS:
                 problems.append(f'departure tag {tag!r} ({", ".join(TAGS)})')
             elif not evidence:
                 problems.append(f'a {tag} departure on {element} that says nothing')
-            elif why := _authority_problem(tag, element, authority, frozenset(neighbours), mode):
+            elif why := _authority_problem(tag, element, authority, rules):
                 problems.append(why)
             else:
                 departures.append({'element': element, 'tag': tag, 'evidence': evidence,
@@ -529,7 +617,8 @@ def write_results(results: list[Result], out_dir: str) -> None:
             if (r.get('id'), r.get('target')) not in done]
     for res in results:
         row = {'id': res.scene_id, 'target': res.target, 'target_hash': res.target_hash,
-               'overall': res.overall, **{tag: res.count(tag) for tag in TAGS}}
+               'overall': res.overall, 'remapped': res.remapped,
+               **{tag: res.count(tag) for tag in TAGS}}
         row.update({el: res.scores[el] for el in ELEMENTS})
         scores.append(row)
         rats += [{'id': res.scene_id, 'target': res.target, **d} for d in res.departures]
@@ -539,8 +628,8 @@ def write_results(results: list[Result], out_dir: str) -> None:
 
 def read_scores(cycle_dir: str) -> list[dict[str, str]]:
     """A cycle's `source-fidelity.csv` rows ([] when there is none), an
-    older cycle's included (its `moved`/`staging` empty). Raises SourceError
-    as `_read` does."""
+    older cycle's included (its `moved`/`staging`/`remapped` empty). Raises
+    SourceError as `_read` does."""
     return _read(os.path.join(cycle_dir, SCORES_FILE), SCORE_COLUMNS, _OLDER_SCORE_COLUMNS)
 
 
@@ -562,14 +651,22 @@ class DriftState:
     drift: dict[str, list[str]] = field(default_factory=dict)  # scene -> drift lines
     stale: list[str] = field(default_factory=list)    # scored on a brief/prose since changed
     checked: int = 0                                   # (scene, target) results read
+    pretag: int = 0     # current results scored before moved/staging (their drift may be either)
+
+    def pretag_line(self) -> str:
+        """What to say about `pretag` ('' for none)."""
+        return (f'{self.pretag} source-fidelity result(s) predate the moved/staging tags, so '
+                f'their drift may include moved or connective material; re-score to reclassify'
+                if self.pretag else '')
 
 
 def drift_state(project_dir: str) -> DriftState:
     """Drift from each scene's newest source-fidelity result per target, only
     where the brief or prose scored is unchanged since (its hash matches);
-    results scored on something since changed are listed `stale`. An empty
-    state for a project without a source block. Raises SourceError for a
-    results file that can't be read (see `_read`)."""
+    results scored on something since changed are listed `stale`, and
+    current results from before the moved/staging tags are counted
+    (`pretag`). An empty state for a project without a source block. Raises
+    SourceError for a results file that can't be read (see `_read`)."""
     state = DriftState()
     if source.read_config(project_dir) is None:
         return state
@@ -588,6 +685,8 @@ def drift_state(project_dir: str) -> DriftState:
             if current is None or target_hash(current) != row['target_hash']:
                 state.stale.append(f'{key[0]} ({key[1]})')
                 continue
+            if row['moved'] == '' and row['staging'] == '':
+                state.pretag += 1
             lines = [f'{key[1]} {r["element"]}: {r["evidence"]}' for r in rats
                      if (r['id'], r['target']) == key and r['tag'] == 'drift']
             if str(len(lines)) != row['drift']:
@@ -664,6 +763,9 @@ def run(project_dir: str, scene_ids: list[str], target: str, *, plugin_dir: str,
     skipped = {sid: p.skip for sid, p in plans.items() if p.skip and not p.broken}
     broken = {sid: p.skip for sid, p in plans.items() if p.broken}
     todo = [sid for sid, p in plans.items() if not p.skip]
+    for sid in todo:
+        for note in plans[sid].notes:
+            log(f'  WARNING: {note}')
     os.makedirs(log_dir, exist_ok=True)
 
     def ask(sid: str, prompt: str, log_file: str) -> str:
@@ -687,8 +789,7 @@ def run(project_dir: str, scene_ids: list[str], target: str, *, plugin_dir: str,
         retry_file = os.path.join(log_dir, f'source-fidelity-{target}-{sid}-retry.json')
         if os.path.exists(retry_file):
             os.remove(retry_file)
-        read = dict(scene_id=sid, target=target, hash_=plan.target_hash,
-                    aliases=plan.aliases, neighbours=plan.neighbours, mode=plan.mode)
+        read = dict(scene_id=sid, target=target, hash_=plan.target_hash, rules=plan.rules)
         reply = ask(sid, plan.prompt, log_file)
         try:
             return parse_response(reply, **read)
@@ -716,14 +817,46 @@ def run(project_dir: str, scene_ids: list[str], target: str, *, plugin_dir: str,
             failed[sid] = str(out) if out is not None else 'not run (interrupted)'
     if results:
         write_results(results, out_dir)
+        unconfirmed = unconfirmed_moves(results, {sid: plans[sid].rules for sid in todo})
+        if unconfirmed:
+            log(f'  WARNING: {len(unconfirmed)} moved departure(s) not confirmed by the '
+                f'neighbour\'s result in this run (left as moved):')
+            for line in unconfirmed:
+                log(f'    {line}')
     return results, skipped, failed
+
+
+def unconfirmed_moves(results: list[Result], rules: dict[str, ReplyRules]) -> list[str]:
+    """Each `moved` departure whose authority says `to` a neighbour that
+    has no result in `results`, or whose result has no `moved` departure
+    naming this scene back (#617 review, SF-6). One line each; a check, not
+    a reclassification."""
+    by_id = {r.scene_id: r for r in results}
+    out = []
+    for r in results:
+        for d in r.departures:
+            if d['tag'] != 'moved' or not re.match(r'\s*to\b', d['authority'], re.I):
+                continue
+            nid = rules[r.scene_id].neighbour_named(d['authority'])
+            other = by_id.get(nid)
+            if other is None:
+                why = 'it has no result in this run'
+            elif any(o['tag'] == 'moved'
+                     and rules[nid].neighbour_named(o['authority']) == r.scene_id
+                     for o in other.departures):
+                continue
+            else:
+                why = 'its result has no moved departure naming this scene'
+            out.append(f'{r.scene_id} {d["element"]} to {nid}: {why}')
+    return out
 
 
 def report(results: list[Result], skipped: dict[str, str], failed: dict[str, str],
            target: str) -> None:
     """Log what the run found and what it couldn't check: the departures
-    counted by tag, every drift, and every reply read under its source
-    scene's id."""
+    counted by tag, every drift, every staging departure on goal,
+    key_actions or key_dialogue (where staging could hide a changed event),
+    and every reply read under its source scene's id."""
     if results:
         avg = sum(r.overall for r in results) / len(results)
         drift = [r for r in results if r.count('drift')]
@@ -732,6 +865,10 @@ def report(results: list[Result], skipped: dict[str, str], failed: dict[str, str
             f'{counts["drift"]} drift in {len(drift)} scenes; not drift: '
             f'{counts["deliberate"]} deliberate, {counts["moved"]} moved, '
             f'{counts["staging"]} staging')
+        for r in results:
+            for d in r.departures:
+                if d['tag'] == 'staging' and d['element'] in _STAGING_LISTED:
+                    log(f'    staging {r.scene_id} {d["element"]}: {d["evidence"]}')
         for r in results:
             if r.remapped:
                 log(f'    note: {r.scene_id}: the reply named its source scene '
