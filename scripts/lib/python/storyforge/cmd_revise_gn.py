@@ -237,6 +237,7 @@ def _revise_one_scene(scene_id, project_dir, model, args):
                 ),
             }
 
+    from storyforge.prompts_elaborate import reference_doc
     char_visuals, loc_visuals = _build_visual_refs(project_dir)
     voice_text = _build_voice_text(project_dir)
 
@@ -251,6 +252,7 @@ def _revise_one_scene(scene_id, project_dir, model, args):
         voice_profile_text=voice_text,
         score_findings=score_findings,
         eval_findings=eval_findings,
+        key_decisions=reference_doc(project_dir, 'key-decisions.md'),
     )
 
     if args.dry_run:

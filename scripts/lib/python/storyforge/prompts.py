@@ -819,7 +819,7 @@ def build_scene_prompt(scene_id: str, project_dir: str,
                      'been provided in the system context. Internalize them before writing.')
         # the system context carries no key decisions (#596)
         from .prompts_elaborate import reference_doc
-        decisions = _key_decisions_block(reference_doc(project_dir, 'key-decisions.md'))
+        decisions = key_decisions_block(reference_doc(project_dir, 'key-decisions.md'))
         if decisions:
             lines.append('')
             lines.append(decisions)
@@ -1850,10 +1850,11 @@ def _character_names(ref_dir: str) -> dict[str, str]:
             if (r.get('id') or '').strip()}
 
 
-def _key_decisions_block(decisions: str) -> str:
-    """The drafting prompt's `## Key Decisions` section ('' for none):
-    the author's settled decisions, the ones that govern prose (reading
-    level, POV, how an event is told) to be followed (#596)."""
+def key_decisions_block(decisions: str) -> str:
+    """The `## Key Decisions` section of the drafting and revision-pass
+    prompts ('' for none): the author's settled decisions, the ones that
+    govern prose (reading level, POV, how an event is told) to be followed
+    (#596)."""
     if not decisions:
         return ''
     return ("## Key Decisions\n\n"
@@ -1955,7 +1956,7 @@ def build_scene_prompt_from_briefs(
     # A doc that can't be read raises ReferenceDocError.
     from .prompts_elaborate import reference_doc
     decisions = reference_doc(project_dir, 'key-decisions.md')
-    decisions_block = _key_decisions_block(decisions)
+    decisions_block = key_decisions_block(decisions)
 
     voice_guide = ''
     if not system_context:

@@ -625,6 +625,15 @@ def build_revision_prompt(
         "voice guide, take the voice from the book's existing scenes instead: their "
         'register, rhythm, diction and each POV character\'s way of thinking and speaking.\n')
 
+    # The author's key decisions, as drafting has them (#596): one that
+    # governs the prose (reading level, POV, how an event is told) binds a
+    # revision pass as much as a draft. No system block carries them.
+    from storyforge.prompts import key_decisions_block
+    from storyforge.prompts_elaborate import reference_doc
+    decisions_section = key_decisions_block(reference_doc(project_dir, 'key-decisions.md'))
+    if decisions_section:
+        decisions_section = '\n' + decisions_section
+
     # New scene creation instructions
     new_scenes_section = ''
     if new_scene_ids:
@@ -723,6 +732,7 @@ def build_revision_prompt(
         f'## Purpose\n\n{purpose}\n',
         f'## Scope\n\nThis pass covers {file_count} scene file(s):\n\n{file_block}',
         no_voice_section,
+        decisions_section,
         config_section,
         intent_section,
         calendar_section,

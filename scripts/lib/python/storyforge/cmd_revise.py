@@ -3129,7 +3129,8 @@ def main(argv=None):
 def _note_reference_docs(project_dir: str) -> None:
     """Tell the author what the revision prompts leave out (#596, SF-3/SF-4):
     with no voice guide they take the voice from the existing scenes (a
-    WARNING); key decisions missing or a template are a NOTE. One that
+    WARNING); key decisions missing or a template are a NOTE (the passes and
+    redrafts carry them when there are some). One that
     exists but can't be read stops the session (ERROR, exit 1)."""
     from storyforge.common import VOICE_GUIDE_REMEDY, doc_state, resolve_voice_guide
     voice = resolve_voice_guide(project_dir)
@@ -3143,8 +3144,7 @@ def _note_reference_docs(project_dir: str) -> None:
         log(f'WARNING: {voice.detail}: the revision prompts have no voice guide and take '
             f"the voice from the book's existing scenes. Fill it: {VOICE_GUIDE_REMEDY}.")
     if decisions.kind != 'ok':
-        log(f'NOTE: {decisions.detail}, so a scene redrafted from its brief carries no '
-            'key decisions.')
+        log(f'NOTE: {decisions.detail}, so the revision prompts carry no key decisions.')
 
 
 def _main(argv=None):
