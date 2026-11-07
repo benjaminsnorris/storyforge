@@ -34,6 +34,8 @@ Read the following files to understand the full context:
   - `narrative-scores.csv` -- novel-level narrative framework alignment (if exists)
   - `narrative-rationale.csv` -- rationale for narrative scores (if exists)
   - `repetition-latest.csv` -- deterministic cross-chapter repetition scores (pr-1 through pr-4 markers)
+  - `source-fidelity.csv` / `source-fidelity-rationale.csv` -- adaptations only: each scene's prose (or brief) against the source scenes it adapts. Departures are tagged `deliberate` (the map row or a version rule), `moved` (to or from the neighbouring book scene), `staging` (connective invention that changes no event; allowed in `free` mode, or by a rule in `faithful` mode) or `drift`. Only drift lowers the scores and goes to revise; the CSV counts each tag. When the author asks how far the book departs, report drift, not the total
+  - `incomplete.txt` -- present only in a cycle with unscored parts (such a cycle never becomes `latest`). `./storyforge score --complete-cycle` re-scores just those parts into it (see "Filling in an incomplete cycle")
   - `readability.csv` -- reading level per scene (Flesch-Kincaid grade, words a sentence, narration grade) and an `ALL` row pooling the scenes scored; with `project.reading_level` set, each is below, within or above it. Not a principle. Prose only. `./storyforge score --readability` prints it free, with no cycle
 - `working/tuning.csv` -- history of weight tuning decisions (if exists)
 - `working/exemplars.csv` -- bank of high-scoring passages (if exists)
@@ -272,6 +274,18 @@ When `project.medium: graphic-novel` is set, scoring runs a completely different
 **Output:** Per-scene JSON at `working/scores/latest/{scene_id}.json` and an aggregate `working/scores/latest/summary.csv`.
 
 **Complement with `evaluate`:** `./storyforge evaluate` runs three subjective evaluator personas — panel-composition, pacing, and dialogue critics — that flag issues the deterministic scorers can't catch (inconsistent character silhouettes, page-turn beat quality, voice differentiation). Run both for full feedback.
+
+### Filling in an incomplete cycle
+
+A cycle with an `incomplete.txt` lists what it couldn't score (a reply that couldn't be read twice, a failed call). Rather than re-scoring the book:
+
+```bash
+[plugin_path]/storyforge score --complete-cycle --dry-run   # the parts and their forecast
+[plugin_path]/storyforge score --complete-cycle             # newest incomplete cycle
+[plugin_path]/storyforge score --complete-cycle 5           # or a given one
+```
+
+It fills source fidelity scenes, acts, novel-level character or genre, and narrative, into the same cycle; when nothing is left, `incomplete.txt` is removed and the cycle becomes `latest` (unless a newer cycle already is). Scene scores and brief fidelity are not filled: re-score the cycle for those. It refuses when a scene's prose changed since the cycle was scored (cycles scored before prose hashes were kept are checked only where their source-fidelity results hash the prose, and it says so). After filling act or novel-level scores, offer `score --diagnosis-only` to remake the diagnosis and proposals.
 
 **Run mode in GN projects:** Present Option A / Option B as usual, but note there is no API cost for scoring. The evaluate command does invoke Claude (3 personas per scene).
 
