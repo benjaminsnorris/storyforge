@@ -14,10 +14,13 @@ Usage:
     storyforge score --direct --deep --act 2
     storyforge score --dry-run              # Show what would be scored
     storyforge score --no-apply             # Report proposals, never apply them (evals)
+    storyforge score --complete-cycle       # Fill in the newest incomplete cycle's gaps
 """
 
 import argparse
+import hashlib
 import json
+from dataclasses import dataclass
 import os
 import re
 import subprocess
@@ -129,6 +132,18 @@ def parse_args(argv):
                              'scenes they adapt, and nothing else. A full scoring '
                              'run (without --principles/--deterministic) already '
                              'checks the prose.')
+    parser.add_argument('--complete-cycle', nargs='?', const='newest', default=None,
+                        metavar='CYCLE',
+                        help='Re-score only the parts an incomplete cycle\'s incomplete.txt '
+                             'lists (source fidelity scenes, acts, novel-level character or '
+                             'genre, narrative) into that same cycle; with every part filled, '
+                             'the file is cleared, the diagnosis rebuilt, and the cycle '
+                             'becomes latest (unless a newer cycle is). CYCLE is N or '
+                             'cycle-N (default: the newest incomplete cycle). Refuses when '
+                             'what those parts read changed since the cycle was scored '
+                             '(prose, briefs for brief parts, and the reference files act '
+                             'and novel-level scoring read). Scene scores and brief fidelity '
+                             'are not filled: re-score the cycle for those.')
     parser.add_argument('--text-fidelity', action='store_true',
                         help='Check the upper tiers (logline, synopsis, act-shape, theme, '
                              'spine, architecture) against the book\'s prose: split into '
@@ -551,6 +566,11 @@ def main(argv=None):
     exit_if_bad_threshold()   # before anything is spent
     _incomplete.clear()
 
+    # --complete-cycle first, so it refuses every flag it would drop
+    if args.complete_cycle is not None:
+        _run_complete_cycle(args)
+        return
+
     # Elaboration entry points short-circuit the prose-scoring flow.
     # (--semantic is a modifier on --compare, not a standalone trigger.)
     if (args.level is not None or args.all_levels or args.compare or args.drift
@@ -791,6 +811,10 @@ def main(argv=None):
                        cycle_dir, targeted_principles)
         return
 
+    # What prose and inputs this cycle scores, so --complete-cycle can tell
+    # if they changed
+    _write_prose_hashes(scene_ids, project_dir, cycle_dir)
+
     # Load evaluation template and criteria
     diagnostics_csv = os.path.join(plugin_dir, 'references', 'diagnostics.csv')
     guide_file = os.path.join(plugin_dir, 'references', 'principle-guide.md')
@@ -852,7 +876,7 @@ def main(argv=None):
     if failed:
         log(f'WARNING: this cycle has no scene scores for {", ".join(failed)} '
             f'(refused, cut off or failed); re-score them before relying on it')
-        _incomplete.append(f'scene scores: {", ".join(failed)}')
+        _incomplete.append(_item_scene_scores(failed))
     update_pr_task(f'Scene-level scoring ({scene_count} scenes)', project_dir)
 
     # =========================================================================
@@ -968,6 +992,7 @@ def main(argv=None):
             cycle, cycle_dir, project_dir, weights_file, plugin_dir,
             intent_csv, title, no_apply=args.no_apply,
         )
+    _record_weights_hash(project_dir, cycle_dir)
     update_pr_task('Diagnosis and proposals', project_dir)
     update_pr_task('Improvement cycle', project_dir)
 
@@ -1057,7 +1082,8 @@ def _write_readability(scene_ids, project_dir, cycle_dir, target):
 
 #: what `--readability` can't be combined with: each would be dropped
 _READABILITY_EXCLUSIVE = ('source_fidelity', 'deterministic', 'principles', 'direct',
-                          'deep', 'diagnosis_only', 'no_apply', 'interactive')
+                          'deep', 'diagnosis_only', 'no_apply', 'interactive',
+                          'complete_cycle')
 
 
 def _run_readability_only(args):
@@ -1720,7 +1746,7 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
     unscored = [sid for sid in requested if sid not in scored_ids]
     if unscored:
         log(f'  WARNING: no fidelity scores for {", ".join(unscored)}')
-        _incomplete.append(f'fidelity: {", ".join(unscored)}')
+        _incomplete.append(_item_fidelity(unscored))
 
     if results:
         write_fidelity_csv(results, cycle_dir)
@@ -1738,10 +1764,13 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
 
 
 def _run_source_fidelity(scene_ids, target, project_dir, plugin_dir, cycle_dir, log_dir,
-                         model, system, parallel) -> bool:
+                         model, system, parallel, required=False, keep_items=None) -> bool:
     """Run source fidelity on the scenes; a scene it couldn't score is named
-    and counted in `_incomplete`. Returns True when every check that ran gave
-    a result."""
+    and counted in `_incomplete`. With `required` (--complete-cycle: these
+    scenes were listed as missing), a scene with nothing to check now is
+    listed too, with a WARNING. When the run can't start, `keep_items` (the
+    incomplete.txt lines being filled) go back as they were, else a `not
+    run` item. Returns True when every check that ran gave a result."""
     from storyforge import source as source_mod, source_fidelity
     log(f'Running source fidelity on {"briefs" if target == "brief" else "prose"}...')
     try:
@@ -1752,12 +1781,18 @@ def _run_source_fidelity(scene_ids, target, project_dir, plugin_dir, cycle_dir, 
         # Anything, not only SourceError: in a full run the craft scores are
         # already paid for, and the cycle still has to be marked and committed
         log(f'  WARNING: source fidelity not run: {type(e).__name__}: {e}')
-        _incomplete.append(f'source fidelity: {e}')
+        _incomplete.extend(keep_items if keep_items else [_item_source_not_run(target, e)])
         return False
     source_fidelity.report(results, skipped, failed, target)
-    if failed:
-        _incomplete.append(f'source fidelity: {", ".join(failed)}')
-    return not failed
+    unfilled = list(failed)
+    if required and skipped:
+        log(f'  WARNING: listed as missing but nothing to check now, so still listed: '
+            + '; '.join(f'{sid} ({why})' for sid, why in skipped.items()))
+        unfilled += list(skipped)
+    if unfilled:
+        # the target named, so --complete-cycle can re-check these
+        _incomplete.append(_item_source(target, unfilled))
+    return not unfilled
 
 
 def _run_source_fidelity_only(args) -> None:
@@ -1815,6 +1850,9 @@ def _run_source_fidelity_only(args) -> None:
         if p.skip:
             log(f'  {"ERROR" if p.broken else "not checked"}: {p.scene_id} ({p.skip})')
     if args.dry_run:
+        for p in todo:
+            for note in p.notes:
+                log(f'  WARNING: {note}')
         return
     if not todo:
         log('ERROR: nothing to check' + ('' if scene_ids else ' (no scene matched the filter)'))
@@ -1844,8 +1882,7 @@ def _run_source_fidelity_only(args) -> None:
                               log_dir, model, system, args.parallel)
     if new_cycle:
         from storyforge.project import mark_cycle_incomplete
-        mark_cycle_incomplete(cycle_dir, ['scene scores: not run (score --source-fidelity '
-                                          'only)'] + _incomplete)
+        mark_cycle_incomplete(cycle_dir, [ITEM_SOURCE_ONLY] + _incomplete)
     rel = os.path.relpath(cycle_dir, project_dir)
     commit_and_push(project_dir, f'Score: source fidelity ({args.source_fidelity}), '
                                  f'{os.path.basename(cycle_dir)}', ['working/'])
@@ -1856,14 +1893,575 @@ def _run_source_fidelity_only(args) -> None:
         sys.exit(1)
 
 
+# ============================================================================
+# --complete-cycle: fill in an incomplete cycle's gaps (#618)
+# ============================================================================
+
+#: Each scored scene's prose hash (`source_fidelity.target_hash` of its prose,
+#: as source fidelity records it), written by every LLM scoring cycle (not
+#: --deterministic) and merged by id when a later run scores into the cycle
+PROSE_HASHES_FILE = 'prose-hashes.csv'
+PROSE_HASHES_HEADER = ['id', 'prose_hash']
+
+#: The other inputs act, novel-level and narrative scoring read, hashed at
+#: score time (craft weights after the improvement cycle, since the filled
+#: parts read the weights the cycle left): {name: candidate paths, first found}
+INPUT_HASHES_FILE = 'input-hashes.csv'
+INPUT_HASHES_HEADER = ['input', 'hash']
+SCORED_INPUTS = {
+    'scenes.csv': ('reference/scenes.csv',),
+    'scene-intent.csv': ('reference/scene-intent.csv',),
+    'character-bible.md': ('reference/character-bible.md', 'references/character-bible.md'),
+    'story-architecture.md': ('reference/story-architecture.md',
+                              'references/story-architecture.md'),
+    'chapter-map.csv': ('reference/chapter-map.csv',),
+    'craft-weights.csv': ('working/craft-weights.csv',),
+}
+#: An input hash that changed between two runs into the same cycle
+MIXED = 'changed-within-cycle'
+
+#: What `--complete-cycle` can't be combined with: each would be dropped.
+#: (Checked by identity with None and False: `--level 0` is a level.)
+_COMPLETE_EXCLUSIVE = ('source_fidelity', 'readability', 'deterministic', 'principles',
+                       'diagnosis_only', 'scenes', 'act', 'from_seq', 'direct', 'deep',
+                       'interactive', 'no_apply', 'level', 'all_levels', 'compare', 'drift',
+                       'boundary', 'all_boundaries', 'scope', 'semantic', 'bible_consistency',
+                       'story_power', 'text_fidelity')
+
+_NOVEL_SECTION_NAMES = ('character', 'genre')
+
+
+# --- incomplete.txt items: one formatter each, read back by _completion_parts
+
+def _item_scene_scores(ids):
+    return f'scene scores: {", ".join(ids)}'
+
+
+ITEM_SOURCE_ONLY = 'scene scores: not run (score --source-fidelity only)'
+
+
+def _item_fidelity(ids):
+    return f'fidelity: {", ".join(ids)}'
+
+
+def _item_source(target, ids):
+    return f'source fidelity ({target}): {", ".join(ids)}'
+
+
+def _item_source_not_run(target, error):
+    first = (str(error).strip().splitlines() or [type(error).__name__])[0]
+    return f'source fidelity ({target}) not run: {first}'
+
+
+def _item_act(label, unreadable=False):
+    return f'act {label}' + (': unreadable reply' if unreadable else '')
+
+
+def _item_novel(section=None):
+    return ('novel-level scoring' if section is None
+            else f'novel-level {section} scores: unreadable reply')
+
+
+def _item_narrative(unreadable=False):
+    return 'narrative scoring' + (': unreadable reply' if unreadable else '')
+
+
+def _item_no_template(part):
+    return f'{part}: no template'
+
+
+def _hash_text(text):
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]
+
+
+def _read_hash_file(path, header):
+    """{key: hash} from a cycle's hash file, or None when there is none.
+    Raises SourceError for one that can't be read, has another header or a
+    row that isn't two cells: a check read from it would be wrong."""
+    from storyforge.source import SourceError
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding='utf-8') as f:
+            lines = [l for l in f.read().splitlines() if l.strip()]
+    except (OSError, UnicodeDecodeError) as e:
+        raise SourceError(f'{path} could not be read ({e})') from e
+    if not lines or lines[0].split('|') != header:
+        raise SourceError(f'{path}: the header must be {"|".join(header)}')
+    out = {}
+    for n, line in enumerate(lines[1:], 2):
+        cells = line.split('|')
+        if len(cells) != 2 or not cells[0]:
+            raise SourceError(f'{path} line {n}: wrong number of cells')
+        out[cells[0]] = cells[1]
+    return out
+
+
+def read_prose_hashes(cycle_dir):
+    """A cycle's {scene id: prose hash} ('' for no prose), or None when it
+    records none. Raises SourceError as `_read_hash_file` does."""
+    return _read_hash_file(os.path.join(cycle_dir, PROSE_HASHES_FILE), PROSE_HASHES_HEADER)
+
+
+def read_input_hashes(cycle_dir):
+    """A cycle's {input: hash} (`SCORED_INPUTS`), or None when it records
+    none. Raises SourceError as `_read_hash_file` does."""
+    return _read_hash_file(os.path.join(cycle_dir, INPUT_HASHES_FILE), INPUT_HASHES_HEADER)
+
+
+def _write_hash_file(path, header, rows):
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        f.write('\n'.join(['|'.join(header)] + [f'{k}|{v}' for k, v in rows.items()]) + '\n')
+
+
+def _current_prose_hash(project_dir, sid, tables=None):
+    from storyforge.source_fidelity import target_text, target_hash
+    text = target_text(project_dir, sid, 'prose', tables)
+    return target_hash(text) if text else ''
+
+
+def _current_input_hashes(project_dir):
+    out = {}
+    for name, candidates in SCORED_INPUTS.items():
+        path = next((os.path.join(project_dir, c) for c in candidates
+                     if os.path.isfile(os.path.join(project_dir, c))), None)
+        if path is None:
+            out[name] = ''
+            continue
+        with open(path, encoding='utf-8', errors='replace') as f:
+            out[name] = _hash_text(f.read())
+    return out
+
+
+def _write_prose_hashes(scene_ids, project_dir, cycle_dir):
+    """Record what this run scores: each scene's prose hash, merged by id
+    into the cycle's prose-hashes.csv (a run over some scenes keeps the
+    others' rows), and the other inputs' hashes in input-hashes.csv, an
+    input that differs from an earlier run into the cycle marked `MIXED`.
+    A hash file that can't be read is replaced, with a WARNING."""
+    from storyforge.source import SourceError
+    try:
+        prose = read_prose_hashes(cycle_dir) or {}
+    except SourceError as e:
+        log(f'WARNING: {e}; rewriting it from this run\'s scenes only')
+        prose = {}
+    for sid in scene_ids:
+        prose[sid] = _current_prose_hash(project_dir, sid)
+    _write_hash_file(os.path.join(cycle_dir, PROSE_HASHES_FILE), PROSE_HASHES_HEADER, prose)
+    try:
+        before = read_input_hashes(cycle_dir)
+    except SourceError as e:
+        log(f'WARNING: {e}; rewriting it')
+        before = None
+    now = _current_input_hashes(project_dir)
+    if before is not None:
+        now = {k: (v if before.get(k, v) == v else MIXED) for k, v in now.items()}
+    _write_hash_file(os.path.join(cycle_dir, INPUT_HASHES_FILE), INPUT_HASHES_HEADER, now)
+
+
+def _record_weights_hash(project_dir, cycle_dir):
+    """After the improvement cycle: the craft weights the cycle left."""
+    from storyforge.source import SourceError
+    try:
+        rows = read_input_hashes(cycle_dir)
+    except SourceError:
+        return   # _write_prose_hashes said so; the check will refuse
+    if rows is not None and rows.get('craft-weights.csv') != MIXED:
+        rows['craft-weights.csv'] = _current_input_hashes(project_dir)['craft-weights.csv']
+        _write_hash_file(os.path.join(cycle_dir, INPUT_HASHES_FILE), INPUT_HASHES_HEADER,
+                         rows)
+
+
+_PART_KINDS = ('source', 'act', 'novel', 'narrative')
+
+
+@dataclass(frozen=True)
+class _Part:
+    """One incomplete.txt item `--complete-cycle` can fill."""
+    kind: str           # one of _PART_KINDS
+    item: str           # the incomplete.txt line
+    target: str = ''    # source: 'prose' or 'brief'
+    ids: tuple = ()     # source: scene ids; act: its label; novel: sections
+
+    def __post_init__(self):
+        ok = {
+            'source': self.target in ('prose', 'brief') and bool(self.ids),
+            'act': not self.target and len(self.ids) == 1 and bool(self.ids[0]),
+            'novel': (not self.target and bool(self.ids)
+                      and set(self.ids) <= set(_NOVEL_SECTION_NAMES)),
+            'narrative': not self.target and not self.ids,
+        }.get(self.kind, False)
+        if not ok or not self.item:
+            raise ValueError(f'_Part({self.kind!r}, {self.item!r}, {self.target!r}, '
+                             f'{self.ids!r})')
+
+
+def _completion_parts(items, known_ids, source_only):
+    """Split a cycle's incomplete.txt items (written by the `_item_*`
+    formatters) into the parts `--complete-cycle` fills and [(item, why it
+    can't)]. `known_ids` are the project's scene ids; `source_only` says the
+    cycle came from `score --source-fidelity`."""
+    parts, cannot = [], []
+    for item in items:
+        m = re.match(r'^source fidelity(?: \((prose|brief)\))? not run: ', item)
+        if m:
+            cannot.append((item, 'source fidelity did not run at all; run score '
+                                 f'--source-fidelity {"briefs" if m.group(1) == "brief" else "prose"}'))
+            continue
+        m = re.match(r'^source fidelity(?: \((prose|brief)\))?: (.+)$', item)
+        if m:
+            ids = tuple(i.strip() for i in m.group(2).split(','))
+            if not all(i in known_ids for i in ids):
+                # an older cycle's "source fidelity: <error>"
+                cannot.append((item, 'source fidelity did not run; run score '
+                                     '--source-fidelity'))
+            elif m.group(1) is None and source_only:
+                # written before the target was recorded: briefs or prose?
+                cannot.append((item, "it doesn't say whether briefs or prose; run score "
+                                     '--source-fidelity'))
+            else:
+                # without a target, a full cycle's: those check the prose
+                parts.append(_Part('source', item, m.group(1) or 'prose', ids))
+            continue
+        m = re.match(r'^act (\S+?)(?:: unreadable reply)?$', item)
+        if m:
+            parts.append(_Part('act', item, ids=(m.group(1),)))
+            continue
+        m = re.match(r'^novel-level (character|genre) scores: unreadable reply$', item)
+        if m:
+            parts.append(_Part('novel', item, ids=(m.group(1),)))
+            continue
+        if item == _item_novel():
+            parts.append(_Part('novel', item, ids=_NOVEL_SECTION_NAMES))
+            continue
+        if item in (_item_narrative(), _item_narrative(unreadable=True)):
+            parts.append(_Part('narrative', item))
+            continue
+        if item == ITEM_SOURCE_ONLY:
+            why = 'the cycle holds source fidelity only'
+        elif item.startswith('scene scores:'):
+            why = ('scene scores feed the diagnosis, proposals and score history; '
+                   're-score the cycle')
+        elif item.startswith('fidelity:'):
+            why = 'brief fidelity is written whole; re-score the cycle'
+        elif item.endswith(': no template'):
+            why = 'its prompt template is missing'
+        else:
+            why = 'not a part --complete-cycle fills; re-score the cycle'
+        cannot.append((item, why))
+    return parts, cannot
+
+
+def _cycle_number(name):
+    m = re.match(r'^(?:cycle-)?(\d+)$', name or '')
+    return int(m.group(1)) if m else None
+
+
+def _find_incomplete_cycle(scores_dir, wanted):
+    """(number, dir) of the cycle `--complete-cycle` names: `newest` is the
+    highest-numbered cycle with an incomplete.txt (exit 1 when there is
+    none); N or cycle-N must exist (exit 1 when it doesn't), and may be
+    complete: the caller says there is nothing to fill."""
+    from storyforge.project import INCOMPLETE_MARKER
+    if wanted == 'newest':
+        names = os.listdir(scores_dir) if os.path.isdir(scores_dir) else []
+        found = sorted((_cycle_number(name), os.path.join(scores_dir, name))
+                       for name in names if name.startswith('cycle-')
+                       and _cycle_number(name) is not None
+                       and os.path.isfile(os.path.join(scores_dir, name, INCOMPLETE_MARKER)))
+        if not found:
+            log('ERROR: no score cycle is incomplete (none has an incomplete.txt)')
+            sys.exit(1)
+        return found[-1]
+    n = _cycle_number(wanted)
+    path = os.path.join(scores_dir, f'cycle-{n}')
+    if n is None or not os.path.isdir(path):
+        log(f'ERROR: --complete-cycle {wanted}: no such cycle (give N or cycle-N)')
+        sys.exit(1)
+    return n, path
+
+
+def _prose_check(project_dir, cycle_dir, cycle, brief_too):
+    """(what changed since the cycle scored it, a line saying what was
+    checked). Scenes: the cycle's prose-hashes.csv when it has one, plus the
+    hashes its source-fidelity results record (prose, and briefs when
+    `brief_too`); without prose-hashes.csv the line says what that leaves
+    unchecked. Raises SourceError for a hash or source-fidelity file that
+    can't be read."""
+    from storyforge import source_fidelity as sf
+    tables = sf._project_tables(project_dir)
+
+    def now(sid, target):
+        text = sf.target_text(project_dir, sid, target, tables)
+        return sf.target_hash(text) if text else ''
+
+    prose = read_prose_hashes(cycle_dir)
+    changed = [sid for sid, h in (prose or {}).items() if now(sid, 'prose') != h]
+    checked = {(sid, 'prose') for sid in (prose or {})}
+    sf_rows = [r for r in sf.read_scores(cycle_dir)
+               if (r['target'] == 'prose' or (brief_too and r['target'] == 'brief'))
+               and (r['id'], r['target']) not in checked]
+    for r in sf_rows:
+        if now(r['id'], r['target']) != r['target_hash']:
+            changed.append(r['id'] if r['target'] == 'prose' else f'{r["id"]} (brief)')
+    what = 'Prose and briefs' if brief_too else 'Prose'
+    if prose is not None:
+        line = (f'{what} unchanged since cycle-{cycle} was scored ({len(checked)} scenes'
+                + (f', {sum(r["target"] == "brief" for r in sf_rows)} briefs' if brief_too
+                   else '') + ' checked)')
+    elif sf_rows:
+        line = (f'NOTE: cycle-{cycle} records no prose hashes (it was scored before they '
+                f'were kept): checked the {len(sf_rows)} results its source-fidelity file '
+                f'hashes; a change to any other scene since is not detected')
+    else:
+        line = (f'NOTE: cycle-{cycle} records no prose hashes (it was scored before they '
+                f'were kept): whether the prose changed since is not checked')
+    return sorted(set(changed)), line
+
+
+def _input_check(project_dir, cycle_dir):
+    """The scored inputs (`SCORED_INPUTS`) that changed since the cycle
+    recorded them, or None when it records none. Raises SourceError for a
+    file that can't be read."""
+    recorded = read_input_hashes(cycle_dir)
+    if recorded is None:
+        return None
+    now = _current_input_hashes(project_dir)
+    return sorted(k for k in SCORED_INPUTS
+                  if recorded.get(k) == MIXED or recorded.get(k, '') != now[k])
+
+
+def _rebuild_diagnosis(cycle, cycle_dir, project_dir, weights_file):
+    """The cycle's diagnosis from its scores as they are now; proposals are
+    not made or applied (the cycle's run did that)."""
+    from storyforge.scoring import generate_diagnosis
+    prev_dir = os.path.join(project_dir, 'working', 'scores', f'cycle-{cycle - 1}')
+    generate_diagnosis(cycle_dir, prev_dir if os.path.isdir(prev_dir) else '-',
+                       weights_file)
+    log(f'Diagnosis rebuilt from cycle-{cycle}\'s filled-in scores (no proposals applied)')
+
+
+def _move_latest(project_dir, scores_dir, cycle):
+    """Point latest at the completed cycle unless a newer cycle is latest.
+    Returns False (with an ERROR) when latest can't be read: it is left as
+    it is."""
+    latest = os.path.join(scores_dir, 'latest')
+    if os.path.lexists(latest) and not os.path.islink(latest):
+        log(f'ERROR: {latest} is not a symlink; latest left as it is')
+        return False
+    if os.path.islink(latest):
+        current = _cycle_number(os.path.basename(os.readlink(latest).rstrip('/')))
+        if current is None:
+            log(f'ERROR: latest points at {os.readlink(latest)}, not a cycle; left as it is')
+            return False
+        if current > cycle:
+            log(f'cycle-{cycle} is complete; latest stays on the newer cycle-{current}')
+            return True
+    _update_latest_link(project_dir, cycle)
+    log(f'cycle-{cycle} is complete')
+    return True
+
+
+def _run_complete_cycle(args):
+    """`score --complete-cycle [CYCLE]`: re-score only the parts the
+    cycle's incomplete.txt lists, into that cycle. Refuses (exit 1, nothing
+    spent) when what those parts read changed since the cycle was scored:
+    scenes' prose (and briefs, for brief source-fidelity parts), and for
+    act, novel-level and narrative parts the other inputs (`SCORED_INPUTS`;
+    a cycle that records none can't have those filled). With every part
+    filled the file is cleared, act/novel/narrative scores rebuild the
+    diagnosis (no proposals applied), and the cycle becomes latest unless a
+    newer cycle already is. A part it can't fill, or that fails again,
+    stays listed and the run exits 1."""
+    from storyforge.project import INCOMPLETE_MARKER, mark_cycle_incomplete
+    from storyforge.ledger import exit_if_not_migrated
+    from storyforge import source as source_mod, source_fidelity
+    clash = [f'--{name.replace("_", "-")}' for name in _COMPLETE_EXCLUSIVE
+             if getattr(args, name, None) is not None
+             and getattr(args, name) is not False]
+    if clash:
+        log(f"ERROR: --complete-cycle fills in what a cycle is missing; it can't be "
+            f'combined with {", ".join(clash)}')
+        sys.exit(1)
+    project_dir = detect_project_root()
+    exit_if_not_migrated(project_dir)
+    scores_dir = os.path.join(project_dir, 'working', 'scores')
+    cycle, cycle_dir = _find_incomplete_cycle(scores_dir, args.complete_cycle)
+    marker = os.path.join(cycle_dir, INCOMPLETE_MARKER)
+    if not os.path.isfile(marker):
+        log(f'cycle-{cycle} has no incomplete.txt: nothing to fill in')
+        return
+    with open(marker, encoding='utf-8') as f:
+        items = [l.strip() for l in f.read().splitlines() if l.strip()]
+
+    metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    intent_csv = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    known = [i for i in get_column(metadata_csv, 'id') if i]
+    parts, cannot = _completion_parts(items, set(known), ITEM_SOURCE_ONLY in items)
+
+    try:
+        prose_hashes = read_prose_hashes(cycle_dir)
+        inputs_changed = _input_check(project_dir, cycle_dir)
+    except source_mod.SourceError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    # The cycle's scenes: what it hashed, in reading order
+    order = build_scene_list(metadata_csv, min_words=0)
+    cycle_ids = [i for i in order if i in (prose_hashes or {})]
+    acts_scored = {get_field(metadata_csv, i, 'act') for i in cycle_ids}
+    for part in [p for p in parts if p.kind != 'source']:
+        if prose_hashes is None or inputs_changed is None:
+            why = ('the cycle records no hashes of the prose and inputs it scored (it '
+                   'predates them), so a part filled now could score other text; '
+                   're-score the cycle')
+        elif not cycle_ids or (part.kind == 'act' and part.ids[0] not in acts_scored):
+            why = 'the cycle records no scored scenes for it; re-score the cycle'
+        else:
+            continue
+        parts.remove(part)
+        cannot.append((part.item, why))
+
+    brief_too = any(p.kind == 'source' and p.target == 'brief' for p in parts)
+    try:
+        changed, checked = _prose_check(project_dir, cycle_dir, cycle, brief_too)
+    except source_mod.SourceError as e:
+        log(f'ERROR: {e}')
+        sys.exit(1)
+    if any(p.kind != 'source' for p in parts) and inputs_changed:
+        changed += inputs_changed
+    if changed:
+        log(f"ERROR: cycle-{cycle} can't be filled in: {', '.join(changed)} changed since "
+            f'it was scored, so the parts filled in would score other text than the rest. '
+            f'Re-score instead (storyforge score).')
+        sys.exit(1)
+    log(checked)
+
+    log(f'Filling in cycle-{cycle}:')
+    for p in parts:
+        log(f'  {p.item}')
+    for item, why in cannot:
+        log(f"  can't fill: {item} ({why})")
+    if not parts:
+        log(f"ERROR: nothing in cycle-{cycle}'s incomplete.txt is a part --complete-cycle "
+            f'fills')
+        sys.exit(1)
+
+    plugin_dir = get_plugin_dir()
+    prompts_dir = os.path.join(plugin_dir, 'scripts', 'prompts', 'scoring')
+    weights_file = os.path.join(project_dir, 'working', 'craft-weights.csv')
+    log_dir = os.path.join(project_dir, 'working', 'logs')
+    model = select_model('evaluation')
+    source_parts = [p for p in parts if p.kind == 'source']
+    cost = 0.0
+    if source_parts:
+        try:
+            cfg = source_mod.read_config(project_dir)
+            if cfg is None:
+                raise source_mod.SourceError('storyforge.yaml has no `source:` block')
+            source_mod.require_imported(project_dir, cfg)
+            rows = source_mod.read_source_map(project_dir)
+            if rows is None:
+                raise source_mod.SourceError(f'there is no reference/{source_mod.SOURCE_MAP} '
+                                             f'yet (elaborate --stage map writes it)')
+            rules = source_mod.read_rules(project_dir, cfg)
+            spans = source_mod.spans(project_dir, cfg)
+        except source_mod.SourceError as e:
+            log(f'ERROR: {e}')
+            sys.exit(1)
+        by_scene = source_mod.map_rows_by_scene(rows)
+        cat = source_mod.catalogue(project_dir, cfg)
+        reading = source_fidelity.reading_order(project_dir)
+        plans = [source_fidelity.plan_scene(project_dir, sid, p.target, plugin_dir, cfg,
+                                            by_scene, rules, cat=cat, spans=spans,
+                                            order=reading)
+                 for p in source_parts for sid in p.ids]
+        todo = [pl for pl in plans if not pl.skip]
+        for pl in plans:
+            if pl.skip:
+                log(f'  WARNING: {pl.scene_id} has nothing to check now ({pl.skip}); '
+                    f'it stays listed')
+        words = (sum(len(pl.prompt.split()) for pl in todo) // len(todo)) if todo else 0
+        cost += estimate_cost('fidelity', len(todo), words, model)
+    for label in sorted({p.ids[0] for p in parts if p.kind == 'act'}):
+        words = sum(len(read_scene_prose(os.path.join(scenes_dir, f'{i}.md')).split())
+                    for i in cycle_ids if get_field(metadata_csv, i, 'act') == label
+                    and os.path.isfile(os.path.join(scenes_dir, f'{i}.md')))
+        cost += estimate_cost('score', 1, words, model)
+    whole = sum(1 for kind in ('novel', 'narrative') if any(p.kind == kind for p in parts))
+    if whole:
+        cost += estimate_cost('score', whole,
+                              _avg_word_count(metadata_csv, cycle_ids, scenes_dir), model)
+    log(f'Cost forecast: ~${cost:.2f} ({model}; a floor: the shared context sent with '
+        f'each call is not counted)')
+    if args.dry_run:
+        return
+    if not check_threshold(cost):
+        log('Cost threshold check declined. Aborting.')
+        sys.exit(1)
+    _check_llm_preconditions('--complete-cycle', dry_run=False)
+
+    create_branch('score', project_dir)
+    ensure_branch_pushed(project_dir)
+    system = build_shared_context(project_dir, model=model)
+    _incomplete.clear()
+    for target in ('prose', 'brief'):
+        mine = [p for p in source_parts if p.target == target]
+        if mine:
+            _run_source_fidelity([sid for p in mine for sid in p.ids], target, project_dir,
+                                 plugin_dir, cycle_dir, log_dir, model, system, args.parallel,
+                                 required=True, keep_items=[p.item for p in mine])
+    acts = {p.ids[0] for p in parts if p.kind == 'act'}
+    if acts:
+        _run_act_scoring(cycle_ids, metadata_csv, scenes_dir, cycle_dir, log_dir, prompts_dir,
+                         weights_file, model, plugin_dir, False, project_dir, system=system,
+                         only_acts=acts)
+    sections = tuple(dict.fromkeys(s for p in parts if p.kind == 'novel' for s in p.ids))
+    if sections:
+        _run_novel_scoring(len(cycle_ids), metadata_csv, intent_csv, project_dir, cycle_dir,
+                           log_dir, prompts_dir, weights_file, model, plugin_dir, False,
+                           system=system, sections=sections)
+    if any(p.kind == 'narrative' for p in parts):
+        title = (read_yaml_field('project.title', project_dir)
+                 or read_yaml_field('title', project_dir) or 'Unknown')
+        _run_narrative_scoring(title, metadata_csv, project_dir, cycle_dir, log_dir,
+                               prompts_dir, weights_file, False, system=system)
+
+    remaining = [item for item, _ in cannot] + list(dict.fromkeys(_incomplete))
+    mark_cycle_incomplete(cycle_dir, remaining)
+    latest_ok = True
+    if not remaining:
+        if any(p.kind != 'source' for p in parts):
+            _rebuild_diagnosis(cycle, cycle_dir, project_dir, weights_file)
+            stale = [n for n in ('proposals.csv', 'report.html')
+                     if os.path.isfile(os.path.join(cycle_dir, n))]
+            if stale:
+                log(f"NOTE: cycle-{cycle}'s {' and '.join(stale)} are from its first run, "
+                    f'before these scores; `storyforge score --diagnosis-only` remakes '
+                    f'them from the latest cycle')
+        latest_ok = _move_latest(project_dir, scores_dir, cycle)
+    commit_and_push(project_dir, f'Score: complete cycle {cycle}'
+                    + (' (still incomplete)' if remaining else ''),
+                    ['working/scores/', 'working/costs/', 'working/logs/'])
+    if remaining:
+        log(f'ERROR: cycle-{cycle} is still incomplete:')
+        for item in remaining:
+            log(f'  {item}')
+    if remaining or not latest_ok:
+        sys.exit(1)
+
+
 def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
                      prompts_dir, weights_file, sonnet_model, plugin_dir,
-                     dry_run, project_dir, system=None):
-    """Run act-level scoring."""
+                     dry_run, project_dir, system=None, only_acts=None):
+    """Run act-level scoring: every act of `scene_ids`, or only the
+    labels in `only_acts` (--complete-cycle), where an act that isn't
+    scored, for want of scenes or a label scenes.csv no longer has, stays
+    listed in `_incomplete` with a WARNING."""
     act_template_file = os.path.join(prompts_dir, 'act-level.md')
     if not os.path.isfile(act_template_file):
         log('WARNING: Act-level template not found, skipping')
-        _incomplete.append('act-level scoring: no template')
+        _incomplete.append(_item_no_template('act-level scoring'))
         return
 
     with open(act_template_file) as f:
@@ -1872,10 +2470,17 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
     # Discover unique acts
     act_values = get_column(metadata_csv, 'act')
     acts = list(dict.fromkeys(v for v in act_values if v))  # unique, ordered
+    if only_acts is not None:
+        acts = [a for a in acts if a in only_acts]
 
     from storyforge.scoring import (
         extract_rubric_section, build_weighted_text, parse_score_output, merge_score_files,
     )
+
+    for label in sorted((only_acts or set()) - set(acts)):
+        log(f'  WARNING: act {label} is listed as missing but no scene is in it now; '
+            f'it stays listed')
+        _incomplete.append(_item_act(label))
 
     for act_label in acts:
         act_scenes_text = ''
@@ -1896,6 +2501,10 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
 
         if act_scene_count == 0:
             log(f'  Skipping act {act_label}: no scored scenes')
+            if only_acts is not None:
+                log(f'  WARNING: act {act_label} is listed as missing but has no scored '
+                    f'scenes; it stays listed')
+                _incomplete.append(_item_act(act_label))
             continue
 
         narrative_rubric = extract_rubric_section('Narrative Frameworks', plugin_dir)
@@ -1942,20 +2551,37 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
                 log(f'  Act {act_label} scored')
             else:
                 log(f'  WARNING: no scores could be read from act {act_label}\'s reply')
-                _incomplete.append(f'act {act_label}: unreadable reply')
+                _incomplete.append(_item_act(act_label, unreadable=True))
         except Exception as e:
             log(f'  WARNING: Failed to score act {act_label}: {e}')
-            _incomplete.append(f'act {act_label}')
+            _incomplete.append(_item_act(act_label))
+
+
+#: The novel-level reply's sections: (file prefix, block marker prefix)
+_NOVEL_SECTIONS = (('character', 'CHARACTER'), ('genre', 'GENRE'))
+
+#: Appended to the novel-level prompt to re-ask for the sections that
+#: couldn't be read (#618)
+_NOVEL_RETRY_NOTE = '''
+
+## Your earlier reply could not be used in full
+
+Your earlier reply had no {blocks} block that could be read. Reply with only {these}, in the Output Format above: each block name on a line of its own ending in a colon (no markdown, no code fences), then its header row, then its rows, pipe-delimited.
+'''
 
 
 def _run_novel_scoring(scene_count, metadata_csv, intent_csv, project_dir,
                        cycle_dir, log_dir, prompts_dir, weights_file,
-                       sonnet_model, plugin_dir, dry_run, system=None):
-    """Run novel-level character + genre scoring."""
+                       sonnet_model, plugin_dir, dry_run, system=None,
+                       sections=('character', 'genre')):
+    """Run novel-level character + genre scoring, writing only `sections`
+    (a re-score filling in an incomplete cycle writes only what is
+    missing). A section whose scores can't be read from the reply is asked
+    for again once, saying which; a second failure leaves it incomplete."""
     novel_template_file = os.path.join(prompts_dir, 'novel-level.md')
     if not os.path.isfile(novel_template_file):
         log('WARNING: Novel-level template not found, skipping')
-        _incomplete.append('novel-level scoring: no template')
+        _incomplete.append(_item_no_template('novel-level scoring'))
         return
 
     with open(novel_template_file) as f:
@@ -2002,6 +2628,8 @@ def _run_novel_scoring(scene_count, metadata_csv, intent_csv, project_dir,
 
     log('  Scoring novel-level character + genre...')
     log_file = os.path.join(log_dir, 'score-novel-level.json')
+    for stale in ('score-novel-level-retry.json', 'score-novel-level-retry.log'):
+        _safe_remove(os.path.join(log_dir, stale))   # an earlier run's re-ask
 
     try:
         response = invoke_to_file(prompt, sonnet_model, log_file, 4096,
@@ -2014,27 +2642,58 @@ def _run_novel_scoring(scene_count, metadata_csv, intent_csv, project_dir,
         with open(text_log, 'w') as f:
             f.write(text)
 
-        # Parse character scores
-        for section, marker_prefix in [('character', 'CHARACTER'), ('genre', 'GENRE')]:
-            scores_csv, rationale_csv = parse_score_output(
-                text,
-                score_marker=f'{marker_prefix}_SCORES',
-                rationale_marker=f'{marker_prefix}_RATIONALE',
-            )
+        def parse(reply):
+            return {section: parse_score_output(reply, score_marker=f'{marker}_SCORES',
+                                                rationale_marker=f'{marker}_RATIONALE')
+                    for section, marker in _NOVEL_SECTIONS if section in sections}
+
+        parsed = parse(text)
+        unread = [sec for sec, (scores_csv, _) in parsed.items() if not scores_csv]
+        retried = False
+        if unread:
+            # One re-ask for the sections that couldn't be read
+            markers = [m for sec, m in _NOVEL_SECTIONS if sec in unread]
+            blocks = ' or '.join(f'{m}_SCORES:' for m in markers)
+            these = ', '.join(f'{m}_SCORES: and {m}_RATIONALE:' for m in markers)
+            log(f'  The novel-level reply had no readable {blocks} block; asking again once')
+            retry_log = os.path.join(log_dir, 'score-novel-level-retry.json')
+            try:
+                retry = invoke_to_file(
+                    prompt + _NOVEL_RETRY_NOTE.format(blocks=blocks, these=these),
+                    sonnet_model, retry_log, 4096, system=system)
+                _log_api_usage(retry_log, 'score', 'novel-level', sonnet_model, project_dir)
+                retry_text = extract_text(retry)
+                retried = True
+                with open(os.path.join(log_dir, 'score-novel-level-retry.log'), 'w') as f:
+                    f.write(retry_text)
+                again = parse(retry_text)
+                for sec in unread:
+                    if again[sec][0]:
+                        parsed[sec] = again[sec]
+            except Exception as e:
+                log(f'  WARNING: the novel-level re-ask failed: {e}')
+
+        for section, (scores_csv, rationale_csv) in parsed.items():
+            rationale_file = os.path.join(cycle_dir, f'{section}-rationale.csv')
             if scores_csv:
                 with open(os.path.join(cycle_dir, f'{section}-scores.csv'), 'w') as f:
                     f.write(scores_csv)
+                if not rationale_csv and os.path.isfile(rationale_file):
+                    log(f'  WARNING: the {section} scores came with no rationale; the '
+                        f'earlier {section}-rationale.csv no longer matches them and is removed')
+                    os.remove(rationale_file)
             else:
-                log(f'  WARNING: no {section} scores could be read from the novel-level reply')
-                _incomplete.append(f'novel-level {section} scores: unreadable reply')
-            if rationale_csv:
-                with open(os.path.join(cycle_dir, f'{section}-rationale.csv'), 'w') as f:
+                log(f'  WARNING: no {section} scores could be read from the novel-level reply'
+                    + (' (asked twice)' if section in unread and retried else ''))
+                _incomplete.append(_item_novel(section))
+            if scores_csv and rationale_csv:
+                with open(rationale_file, 'w') as f:
                     f.write(rationale_csv)
 
         log('  Novel-level scoring complete')
     except Exception as e:
         log(f'  WARNING: Novel-level scoring failed: {e}')
-        _incomplete.append('novel-level scoring')
+        _incomplete.append(_item_novel())
 
 
 def _run_narrative_scoring(title, metadata_csv, project_dir, cycle_dir,
@@ -2044,7 +2703,7 @@ def _run_narrative_scoring(title, metadata_csv, project_dir, cycle_dir,
     narrative_template_file = os.path.join(prompts_dir, 'novel-narrative.md')
     if not os.path.isfile(narrative_template_file):
         log(f'WARNING: Narrative template not found at {narrative_template_file}, skipping')
-        _incomplete.append('narrative scoring: no template')
+        _incomplete.append(_item_no_template('narrative scoring'))
         return
 
     with open(narrative_template_file) as f:
@@ -2100,17 +2759,18 @@ def _run_narrative_scoring(title, metadata_csv, project_dir, cycle_dir,
         if scores_csv:
             with open(narr_scores, 'w') as f:
                 f.write(scores_csv)
-        if rationale_csv:
-            with open(narr_rationale, 'w') as f:
-                f.write(rationale_csv)
-        if os.path.isfile(narr_scores):
+            if rationale_csv:
+                with open(narr_rationale, 'w') as f:
+                    f.write(rationale_csv)
+        # judged by this reply, not by a file an earlier run left
+        if scores_csv:
             log(f'  Narrative scores saved to {os.path.basename(narr_scores)}')
         else:
             log('  WARNING: Failed to parse narrative scores')
-            _incomplete.append('narrative scoring: unreadable reply')
+            _incomplete.append(_item_narrative(unreadable=True))
     except Exception as e:
         log(f'  WARNING: Narrative scoring API call failed: {e}')
-        _incomplete.append('narrative scoring')
+        _incomplete.append(_item_narrative())
 
 
 def _count_high_priority(diagnosis_file: str) -> int:
