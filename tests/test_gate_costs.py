@@ -173,4 +173,4 @@ class TestSpendLoggingEdges:
         from storyforge import cmd_revise
         src = inspect.getsource(cmd_revise)
         assert "print_summary(project_dir, ('revise', 'gate', 'gate-fix')" in src
-        assert 'for the gate on each' in src
+        assert 'the gate on the' in src and '_foreseen_gate_runs' in src   # #619

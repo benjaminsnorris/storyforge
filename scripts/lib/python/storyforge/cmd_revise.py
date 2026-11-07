@@ -395,6 +395,76 @@ def _commit(project_dir: str, message: str, paths: list[str] | None = None) -> N
 #: its own); None outside a run (a helper called directly, as the tests do)
 _RUN_BUDGET = None
 
+#: The scenes the plan's passes after the current one will rewrite and gate
+#: (`_later_pass_scenes`; #619): a re-check of one is deferred to that
+#: pass's gate, which re-reads it anyway, and doesn't block the scenes
+#: gated before it. Set by `main` before each pass; empty outside a plan run
+_LATER_PASSES: frozenset[str] = frozenset()
+
+#: fix_locations whose pass rewrites no prose itself (hone edits briefs or
+#: intent; structural and registry passes edit reference files)
+_NOT_PROSE = ('brief', 'intent', 'structural', 'registry')
+
+
+def _plan_pass_scenes(project_dir: str, plan_rows: list[dict], pass_num: int) -> set[str]:
+    """The scenes plan pass `pass_num` will rewrite, as `main` resolves its
+    scope (owed scenes first, then a scene-level pass's targets, then its
+    scope); empty for a pass that rewrites no prose or whose scope can't
+    be resolved (nothing is deferred to it)."""
+    from storyforge.revision import resolve_scope
+    if _read_pass_field(plan_rows, pass_num, 'fix_location') in _NOT_PROSE:
+        return set()
+    scope = _read_pass_field(plan_rows, pass_num, 'scope')
+    targets = _read_pass_field(plan_rows, pass_num, 'targets')
+    owed = _read_pass_field(plan_rows, pass_num, 'owed')
+    if owed:
+        scope = owed.replace(';', ',')
+    elif scope in ('scene-level', 'targeted'):
+        scope = targets.replace(';', ',') if targets else 'full'
+    try:
+        paths = resolve_scope(scope, project_dir)
+    except (ValueError, FileNotFoundError, OSError):
+        return set()
+    return {os.path.splitext(os.path.basename(p))[0] for p in paths}
+
+
+def _later_pass_scenes(project_dir: str, plan_rows: list[dict], pass_num: int,
+                       total_passes: int) -> frozenset[str]:
+    """The scenes the not-completed passes after `pass_num` will rewrite."""
+    out: set[str] = set()
+    for i in range(pass_num + 1, total_passes + 1):
+        if _read_pass_field(plan_rows, i, 'status') != 'completed':
+            out |= _plan_pass_scenes(project_dir, plan_rows, i)
+    return frozenset(out)
+
+
+def _foreseen_gate_runs(project_dir: str, plan_rows: list[dict], start_pass: int,
+                        total_passes: int) -> tuple[int, int]:
+    """(#619) What a plan's gate will run, foreseen before anything is
+    spent: the scene rewrites its not-completed passes plan (one gate run
+    each; a scene two passes rewrite counts twice), and the most re-checks
+    it can make, the scenes with prose after the first rewritten one that no
+    pass rewrites (each re-checked at most once, after the last pass
+    rewriting a scene before it; only those leaning on a changed fact are)."""
+    from storyforge import ledger
+    passes = [_plan_pass_scenes(project_dir, plan_rows, i)
+              for i in range(start_pass, total_passes + 1)
+              if _read_pass_field(plan_rows, i, 'status') != 'completed']
+    rewritten = set().union(*passes) if passes else set()
+    if not rewritten:
+        return 0, 0
+    try:
+        order = ledger.scene_order(project_dir)
+    except (ValueError, OSError):
+        return sum(len(p) for p in passes), 0
+    first = min((order[s] for s in rewritten if s in order), default=None)
+    if first is None:
+        return sum(len(p) for p in passes), 0
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    later = [s for s, n in order.items() if n > first and s not in rewritten
+             and os.path.isfile(os.path.join(scenes_dir, f'{s}.md'))]
+    return sum(len(p) for p in passes), len(later)
+
 
 def _run_budget():
     """The run's cost budget, or a fresh unmetered one when a helper is
@@ -674,7 +744,7 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
     for i, sid in enumerate(ordered):
         rest = ordered[i + 1:]
         try:
-            blocking = cmd_write._gate_blockers(project_dir, sid)
+            blocking = _not_deferred(project_dir, cmd_write._gate_blockers(project_dir, sid))
         except gate.GateError as e:
             log(f'  ERROR: {e}')
             return _pend_ungated(project_dir, ordered[i:], pass_name, str(e))
@@ -699,9 +769,11 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
             return ([f'{sid} (the gate did not pass it: {why})']
                     + _pend_ungated(project_dir, rest, pass_name, f'the gate stopped at {sid}'))
         # one budget for the session: the pass's spend and the gate runs
-        # still owed (the rest of this pass) come first
+        # still owed (the rest of this pass) come first. A scene a later
+        # pass rewrites is re-read by its gate there (#619)
+        _log_deferred(project_dir, sid)
         run = cmd_write.budgeted_recheck(project_dir, os.path.join(log_dir, 'gate'),
-                                         set(rest), budget,
+                                         set(rest) | _LATER_PASSES, budget,
                                          reserved=len(rest) * gate.RECHECK_COST_PER_SCENE)
         if run is not None:
             if run.failed:
@@ -711,6 +783,51 @@ def _gate_pass_scenes(project_dir: str, scene_ids: list[str], pass_name: str,
                 trouble = (f'{", ".join(run.left)} (listed for a re-check after {sid}, not '
                            f'run: over the cost threshold; `storyforge check --pending`)')
     return [trouble] if trouble else []
+
+
+def _not_deferred(project_dir: str, blocking: list[str]) -> list[str]:
+    """`blocking` (`cmd_write._gate_blockers`' `id: reason` lines) without
+    the scenes waiting only on a re-check that a later pass's gate will make
+    (`_LATER_PASSES`, #619): their facts are in the ledger, and that gate
+    lists what follows them for a re-check if they change."""
+    if not _LATER_PASSES:
+        return blocking
+    from storyforge import gate
+    waiting = gate.pending(project_dir)
+    return [b for b in blocking
+            if not ((sid := b.split(':', 1)[0]) in _LATER_PASSES
+                    and waiting.get(sid, {}).get('command') == gate.RECHECK)]
+
+
+def _log_deferred(project_dir: str, after: str) -> None:
+    """Name the re-checks deferred to a later pass's gate (#619)."""
+    if not _LATER_PASSES:
+        return
+    from storyforge import gate
+    held = [s for s in gate.recheck_queue(project_dir) if s in _LATER_PASSES]
+    if held:
+        log(f'  Re-checks after {after} deferred to a later pass of this plan, which '
+            f'rewrites and gates them: {len(held)} scene(s) ({", ".join(held[:8])}'
+            + (' ...' if len(held) > 8 else '') + ')')
+
+
+def _final_rechecks(project_dir: str, log_dir: str) -> str:
+    """After the last pass: re-check what is still listed (#619: a deferred
+    re-check whose pass didn't reach it, or one listed when the last pass
+    gated nothing), once, under the run's budget. Returns why one didn't
+    pass or run ('' when all did, or none was listed)."""
+    from storyforge import cmd_write, gate
+    run = cmd_write.budgeted_recheck(project_dir, os.path.join(log_dir, 'gate'), set(),
+                                     _run_budget())
+    if run is None:
+        return ''
+    if run.failed:
+        return (f'{run.failed} (re-checked after the last pass and did not pass: {run.why}; '
+                f'listed in {gate.PENDING_PATH})')
+    if run.over_budget:
+        return (f'{", ".join(run.left)} (listed for a re-check, not run: over the cost '
+                f'threshold; `storyforge check --pending`)')
+    return ''
 
 
 def _pend_ungated(project_dir: str, scene_ids: list[str], pass_name: str,
@@ -3140,9 +3257,13 @@ def main(argv=None):
     """`_main`, metered: the cost threshold is one budget for the session
     (`costs.RunBudget`), so the re-checks after each gated scene get only
     what the passes, redrafts and gate runs before them left."""
+    global _LATER_PASSES
     from storyforge import api
-    with api.metered() as meter, _budget_scope(meter):
-        return _main(argv)
+    try:
+        with api.metered() as meter, _budget_scope(meter):
+            return _main(argv)
+    finally:
+        _LATER_PASSES = frozenset()
 
 
 def _note_reference_docs(project_dir: str) -> None:
@@ -3168,6 +3289,7 @@ def _note_reference_docs(project_dir: str) -> None:
 
 
 def _main(argv=None):
+    global _LATER_PASSES
     from datetime import datetime
     args = parse_args(argv or [])
     install_signal_handlers()
@@ -3356,19 +3478,23 @@ def _main(argv=None):
         per_pass = _pass_cost(project_dir, revise_model)
         pass_forecast = per_pass * pending
         from storyforge import gate
-        # the gate's run on each scene a pass rewrites is extra, and how many
-        # scenes a pass rewrites isn't known here (F-151)
-        log(f'Cost forecast: ~${fix_forecast + pass_forecast:.2f}: '
+        gated_n, recheck_n = _foreseen_gate_runs(project_dir, plan_rows, start_pass,
+                                                 total_passes)
+        gate_forecast = gated_n * gate.RECHECK_COST_PER_SCENE
+        recheck_forecast = recheck_n * gate.RECHECK_COST_PER_SCENE
+        log(f'Cost forecast: ~${fix_forecast + pass_forecast + gate_forecast:.2f}: '
             + (f'brief fixes and redrafts for {len(upstream_scenes)} scene(s) '
                f'~${fix_forecast:.2f} (the gate on each redraft included), then '
                if upstream_scenes else '')
-            + f'{pending} passes @ ~${per_pass:.2f}, plus about '
-              f'${gate.RECHECK_COST_PER_SCENE:.2f} for the gate on each rewritten scene')
+            + f'{pending} passes @ ~${per_pass:.2f}, and the gate on the {gated_n} scene '
+              f'rewrite(s) they plan ~${gate_forecast:.2f} (fixes extra); re-checks of the '
+              f'scenes after them that no pass rewrites, run once, up to {recheck_n} '
+              f'(~${recheck_forecast:.2f}), only those whose facts lean on what changed')
         # One budget for the session (#503's review, CR-1): the gate on what
         # the passes rewrite always runs, and the re-checks get what the
         # actual spend, the gate and the work still to come leave
         _exit_if_over_threshold(
-            fix_forecast + pass_forecast, 'nothing revised',
+            fix_forecast + pass_forecast + gate_forecast, 'nothing revised',
             (f'fix the briefs of {", ".join(upstream_scenes)} first (`storyforge hone`), '
              f'or ' if upstream_scenes else '')
             + 'start from a later pass (`storyforge revise N`)')
@@ -3481,6 +3607,8 @@ def _main(argv=None):
             continue
 
         log(f'--- Pass {pass_num}/{total_passes}: {pass_name} ---')
+        _LATER_PASSES = (_later_pass_scenes(project_dir, plan_rows, pass_num, total_passes)
+                         if not args.dry_run else frozenset())
         if _RUN_BUDGET is not None and not args.dry_run:
             # the passes after this one are forecast-approved: the re-checks
             # in this one may not take their share
@@ -3970,6 +4098,10 @@ Rules:
                 log('Pausing 10s before next pass...')
                 time.sleep(10)
 
+    _LATER_PASSES = frozenset()
+    # #619: what the passes deferred and didn't reach, re-checked once
+    recheck_left = '' if args.dry_run else _final_rechecks(project_dir, log_dir)
+
     # Batch redraft deferred scenes
     if defer_redraft and redraft_needed:
         log(f'\n=== Batch Redraft: {len(redraft_needed)} scenes ===')
@@ -4029,6 +4161,12 @@ Rules:
 
     if redraft_error:
         _report_redraft_error(redraft_error)
+        log('============================================')
+        sys.exit(1)
+
+    if recheck_left:
+        log(f'ERROR: the passes are in, but a re-check they owed did not finish: '
+            f'{recheck_left}. Fix it and run `storyforge check --pending`.')
         log('============================================')
         sys.exit(1)
 
