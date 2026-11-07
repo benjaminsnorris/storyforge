@@ -1209,3 +1209,225 @@ class TestFidelityIncompleteReply:
             'direct', 'm', '')
 
         assert 'No fidelity results to process' in capsys.readouterr().out
+
+
+# ============================================================================
+# #618: the novel-level re-ask, prose hashes, and --complete-cycle
+# ============================================================================
+
+_SCENE_TABLE = ('principle|score|deficits|evidence_lines\n'
+                'prose_naturalness|4|Some stiff phrasing|12,45\n')
+_NOVEL_NO_GENRE = 'CHARACTER_SCORES:\nid|character_arc\ndorren|4\n\nThe genre is fine.\n'
+_GENRE_ONLY = 'GENRE_SCORES:\nid|genre_contract\nnovel|4\n'
+
+
+def _novel_replies(*novel):
+    """Every part answered, the novel-level prompt with `novel` in turn (the
+    last one repeated)."""
+    good = _every_part(_SCENE_TABLE)
+    queue = list(novel)
+
+    def reply(prompt):
+        if 'You are scoring a novel against novel-level' in prompt:
+            return queue.pop(0) if len(queue) > 1 else queue[0]
+        return good(prompt)
+    return reply
+
+
+def _direct(project_dir, monkeypatch, *flags):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr('storyforge.cmd_score.detect_project_root', lambda: project_dir)
+    main(['--direct', '--scenes', 'act1-sc01', *flags])
+
+
+def _cycle_dir(project_dir):
+    return os.path.join(project_dir, 'working', 'scores',
+                        f'cycle-{get_current_cycle(project_dir)}')
+
+
+def _novel_calls(mock_api):
+    return [c for c in mock_api.calls_for('invoke_to_file')
+            if 'You are scoring a novel against novel-level' in c['prompt']]
+
+
+class TestNovelLevelReask:
+    def test_an_unreadable_genre_block_is_asked_for_again_once(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        mock_api.set_response_fn(_novel_replies(_NOVEL_NO_GENRE, _GENRE_ONLY))
+        _direct(project_dir, monkeypatch)              # complete: no exit 1
+
+        novel = _novel_calls(mock_api)
+        assert len(novel) == 2
+        assert novel[1]['log_file'].endswith('score-novel-level-retry.json')
+        assert 'Your earlier reply had no GENRE_SCORES: block' in novel[1]['prompt']
+        assert 'CHARACTER_SCORES: and' not in novel[1]['prompt']   # only what's missing
+        assert [o['target'] for o in mock_costs.operations
+                if o.get('target') == 'novel-level'] == ['novel-level'] * 2
+        cycle = _cycle_dir(project_dir)
+        assert 'novel|4' in open(os.path.join(cycle, 'genre-scores.csv')).read()
+        assert 'dorren|4' in open(os.path.join(cycle, 'character-scores.csv')).read()
+        assert 'asking again once' in capsys.readouterr().out
+
+    def test_a_second_failure_leaves_the_cycle_incomplete(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        mock_api.set_response_fn(_novel_replies(_NOVEL_NO_GENRE))
+        with pytest.raises(SystemExit) as exc:
+            _direct(project_dir, monkeypatch)
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert 'no genre scores could be read from the novel-level reply (asked twice)' in out
+        assert 'novel-level genre scores: unreadable reply' in out.split('is incomplete')[1]
+
+    def test_a_readable_reply_is_asked_once(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        mock_api.set_response_fn(_every_part(_SCENE_TABLE))
+        _direct(project_dir, monkeypatch)
+        assert len(_novel_calls(mock_api)) == 1
+
+
+class TestCompleteCycle:
+    def _incomplete_cycle(self, mock_api, project_dir, monkeypatch):
+        """A direct run whose novel-level genre block can't be read, twice."""
+        mock_api.set_response_fn(_novel_replies(_NOVEL_NO_GENRE))
+        with pytest.raises(SystemExit):
+            _direct(project_dir, monkeypatch)
+        cycle = _cycle_dir(project_dir)
+        assert os.path.isfile(os.path.join(cycle, 'incomplete.txt'))
+        mock_api.calls.clear()
+        return cycle
+
+    def test_a_full_cycle_records_its_prose_hashes(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch):
+        from storyforge.source_fidelity import target_hash, target_text
+        mock_api.set_response_fn(_every_part(_SCENE_TABLE))
+        _direct(project_dir, monkeypatch)
+        lines = open(os.path.join(_cycle_dir(project_dir), 'prose-hashes.csv')).read()
+        h = target_hash(target_text(project_dir, 'act1-sc01', 'prose'))
+        assert lines == f'id|prose_hash\nact1-sc01|{h}\n'
+
+    def test_it_fills_in_only_the_missing_part_and_moves_latest(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        cycle = self._incomplete_cycle(mock_api, project_dir, monkeypatch)
+        character = open(os.path.join(cycle, 'character-scores.csv')).read()
+        assert not os.path.lexists(os.path.join(project_dir, 'working', 'scores', 'latest'))
+        mock_api.set_response_fn(_novel_replies(
+            'CHARACTER_SCORES:\nid|character_arc\ndorren|1\n\n' + _GENRE_ONLY))
+        capsys.readouterr()
+
+        main(['--complete-cycle'])
+
+        prompts = [c['prompt'] for c in mock_api.calls_for('invoke_to_file')]
+        assert len(prompts) == 1 and 'You are scoring a novel against' in prompts[0]
+        assert 'novel|4' in open(os.path.join(cycle, 'genre-scores.csv')).read()
+        # the part that was there is left as it was
+        assert open(os.path.join(cycle, 'character-scores.csv')).read() == character
+        assert not os.path.exists(os.path.join(cycle, 'incomplete.txt'))
+        latest = os.path.join(project_dir, 'working', 'scores', 'latest')
+        assert os.readlink(latest) == os.path.basename(cycle)
+        out = capsys.readouterr().out
+        assert 'Prose unchanged since' in out and 'is complete' in out
+        assert '--diagnosis-only' in out
+        commits = [c[1] for c in mock_git.calls_for('commit_and_push')]
+        assert commits[-1] == f'Score: complete cycle {get_current_cycle(project_dir)}'
+
+    def test_it_refuses_when_the_prose_changed(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        cycle = self._incomplete_cycle(mock_api, project_dir, monkeypatch)
+        with open(os.path.join(project_dir, 'scenes', 'act1-sc01.md'), 'a') as f:
+            f.write('\nA new line.\n')
+        with pytest.raises(SystemExit) as exc:
+            main(['--complete-cycle'])
+        assert exc.value.code == 1
+        assert "can't be filled in: act1-sc01 changed since" in capsys.readouterr().out
+        assert mock_api.calls_for('invoke_to_file') == []
+        assert os.path.isfile(os.path.join(cycle, 'incomplete.txt'))
+
+    def test_a_cycle_without_hashes_says_so(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        cycle = self._incomplete_cycle(mock_api, project_dir, monkeypatch)
+        os.remove(os.path.join(cycle, 'prose-hashes.csv'))
+        mock_api.set_response_fn(_every_part(_SCENE_TABLE))
+        capsys.readouterr()
+        main(['--complete-cycle', os.path.basename(cycle)])
+        assert ('records no prose hashes (it was scored before they were kept): whether the '
+                'prose changed since is not checked') in capsys.readouterr().out
+
+    def test_a_part_it_cannot_fill_stays_listed(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        cycle = self._incomplete_cycle(mock_api, project_dir, monkeypatch)
+        with open(os.path.join(cycle, 'incomplete.txt'), 'a') as f:
+            f.write('scene scores: act1-sc02\n')
+        mock_api.set_response_fn(_every_part(_SCENE_TABLE))
+        with pytest.raises(SystemExit) as exc:
+            main(['--complete-cycle'])
+        assert exc.value.code == 1
+        assert open(os.path.join(cycle, 'incomplete.txt')).read() == 'scene scores: act1-sc02\n'
+        assert os.path.isfile(os.path.join(cycle, 'genre-scores.csv'))
+        assert not os.path.lexists(os.path.join(project_dir, 'working', 'scores', 'latest'))
+        out = capsys.readouterr().out
+        assert "can't fill: scene scores: act1-sc02 (scene scores feed the diagnosis" in out
+
+    def test_an_older_cycle_completed_leaves_latest_on_a_newer_one(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        cycle = self._incomplete_cycle(mock_api, project_dir, monkeypatch)
+        start_new_cycle(project_dir)
+        mock_api.set_response_fn(_every_part(_SCENE_TABLE))
+        _direct(project_dir, monkeypatch)
+        newer = os.readlink(os.path.join(project_dir, 'working', 'scores', 'latest'))
+        assert newer != os.path.basename(cycle)
+        main(['--complete-cycle', os.path.basename(cycle)])
+        assert os.readlink(os.path.join(project_dir, 'working', 'scores', 'latest')) == newer
+        assert f'latest stays on the newer {newer}' in capsys.readouterr().out
+
+    def test_dry_run_spends_nothing(
+            self, mock_api, mock_git, mock_costs, project_dir, monkeypatch, capsys):
+        cycle = self._incomplete_cycle(mock_api, project_dir, monkeypatch)
+        main(['--complete-cycle', '--dry-run'])
+        assert mock_api.calls_for('invoke_to_file') == []
+        assert os.path.isfile(os.path.join(cycle, 'incomplete.txt'))
+        assert 'novel-level genre scores: unreadable reply' in capsys.readouterr().out
+
+    @pytest.mark.parametrize('flags, message', [
+        (['--scenes', 'act1-sc01'], '--scenes'),
+        (['--source-fidelity', 'prose'], '--source-fidelity'),
+    ])
+    def test_other_modes_are_refused(self, project_dir, monkeypatch, capsys, flags, message):
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root', lambda: project_dir)
+        with pytest.raises(SystemExit) as exc:
+            main(['--complete-cycle', *flags])
+        assert exc.value.code == 1 and message in capsys.readouterr().out
+
+    def test_no_incomplete_cycle(self, project_dir, monkeypatch, capsys):
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root', lambda: project_dir)
+        with pytest.raises(SystemExit) as exc:
+            main(['--complete-cycle'])
+        assert exc.value.code == 1 and 'no score cycle is incomplete' in capsys.readouterr().out
+
+
+class TestCompletionParts:
+    def test_items_are_split_into_parts_and_the_rest(self):
+        from storyforge.cmd_score import _completion_parts
+        parts, cannot = _completion_parts([
+            'source fidelity (prose): a, b',
+            'source fidelity: c',                         # before the target was recorded
+            'source fidelity: there is no reference/source-map.csv yet',
+            'act 2: unreadable reply', 'act 3',
+            'novel-level genre scores: unreadable reply', 'novel-level scoring',
+            'narrative scoring: unreadable reply',
+            'scene scores: d', 'fidelity: a', 'act-level scoring: no template',
+        ], {'a', 'b', 'c', 'd'}, source_only=False)
+        assert [(p.kind, p.target, p.ids) for p in parts] == [
+            ('source', 'prose', ('a', 'b')), ('source', 'prose', ('c',)),
+            ('act', '', ('2',)), ('act', '', ('3',)),
+            ('novel', '', ('genre',)), ('novel', '', ('character', 'genre')),
+            ('narrative', '', ())]
+        assert [item for item, _ in cannot] == [
+            'source fidelity: there is no reference/source-map.csv yet', 'scene scores: d',
+            'fidelity: a', 'act-level scoring: no template']
+
+    def test_an_old_source_only_item_names_no_target(self):
+        from storyforge.cmd_score import _completion_parts
+        parts, cannot = _completion_parts(
+            ['scene scores: not run (score --source-fidelity only)', 'source fidelity: a'],
+            {'a'}, source_only=True)
+        assert parts == [] and 'whether briefs or prose' in cannot[1][1]

@@ -691,3 +691,63 @@ class TestReask:
         api.replies[:] = [REPLY]
         _run(adapted, 'brief', ['athena-at-the-door'])
         assert len(api.calls) == 1
+
+
+class TestCompleteCycleSourceFidelity:
+    """#618: `score --complete-cycle` re-checks only the scenes an incomplete
+    cycle lists, into that cycle."""
+
+    @pytest.fixture
+    def incomplete(self, adapted, fake_api, monkeypatch):
+        from storyforge import cmd_score
+        monkeypatch.setattr(cmd_score, 'detect_project_root', lambda: adapted)
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'k')
+        commits = []
+        for name in ('create_branch', 'ensure_branch_pushed'):
+            monkeypatch.setattr(cmd_score, name, lambda *a, **k: None)
+        monkeypatch.setattr(cmd_score, 'commit_and_push', lambda p, msg, *a: commits.append(msg))
+        monkeypatch.setattr(cmd_score, 'check_threshold', lambda cost: True)
+        _write(adapted, {'scenes/olympus-council-meets.md': 'Zeus spoke. ' * 10})
+        # cycle 1 scored the council; the door's reply couldn't be read
+        _run(adapted, 'prose', ['olympus-council-meets'])
+        cycle = os.path.join(adapted, 'working', 'scores', 'cycle-1')
+        hashes = '\n'.join(f'{s}|{sf.target_hash(sf.target_text(adapted, s, "prose"))}'
+                           for s in ('olympus-council-meets', 'athena-at-the-door'))
+        _write(cycle, {'incomplete.txt': 'source fidelity (prose): athena-at-the-door\n',
+                       'prose-hashes.csv': f'id|prose_hash\n{hashes}\n'})
+        fake_api.calls.clear()
+        return type('C', (), {'dir': cycle, 'commits': commits, 'api': fake_api})
+
+    def test_only_the_listed_scene_is_checked(self, adapted, incomplete):
+        from storyforge import cmd_score
+        cmd_score.main(['--complete-cycle'])
+        assert len(incomplete.api.calls) == 1
+        assert '`athena-at-the-door`' in incomplete.api.calls[0]
+        rows = sf.read_scores(incomplete.dir)
+        assert {(r['id'], r['target']) for r in rows} == {
+            ('olympus-council-meets', 'prose'), ('athena-at-the-door', 'prose')}
+        assert not os.path.exists(os.path.join(incomplete.dir, 'incomplete.txt'))
+        assert os.readlink(os.path.join(adapted, 'working', 'scores', 'latest')) == 'cycle-1'
+        assert incomplete.commits == ['Score: complete cycle 1']
+
+    def test_a_scene_that_fails_again_stays_listed(self, adapted, incomplete):
+        from storyforge import cmd_score
+        incomplete.api.replies['compress'] = 'no idea'
+        with pytest.raises(SystemExit) as e:
+            cmd_score.main(['--complete-cycle', '1'])
+        assert e.value.code == 1
+        assert open(os.path.join(incomplete.dir, 'incomplete.txt')).read() == (
+            'source fidelity (prose): athena-at-the-door\n')
+        assert len(incomplete.api.calls) == 2           # asked once more, then failed
+        assert incomplete.commits == ['Score: complete cycle 1 (still incomplete)']
+
+    def test_without_prose_hashes_the_source_fidelity_hashes_are_checked(
+            self, adapted, incomplete, capsys):
+        from storyforge import cmd_score
+        os.remove(os.path.join(incomplete.dir, 'prose-hashes.csv'))
+        _write(adapted, {'scenes/olympus-council-meets.md': 'Zeus spoke at length. ' * 10})
+        with pytest.raises(SystemExit) as e:
+            cmd_score.main(['--complete-cycle'])
+        assert e.value.code == 1
+        assert "olympus-council-meets changed since it was scored" in capsys.readouterr().out
+        assert incomplete.api.calls == []
