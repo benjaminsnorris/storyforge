@@ -34,7 +34,7 @@ Read the following files to understand the full context:
   - `narrative-scores.csv` -- novel-level narrative framework alignment (if exists)
   - `narrative-rationale.csv` -- rationale for narrative scores (if exists)
   - `repetition-latest.csv` -- deterministic cross-chapter repetition scores (pr-1 through pr-4 markers)
-  - `readability.csv` -- reading level per scene (Flesch-Kincaid grade, words a sentence, narration grade) and a `BOOK` row; against `project.reading_level` when set. Not a principle. `./storyforge score --readability` prints it free, with no cycle
+  - `readability.csv` -- reading level per scene (Flesch-Kincaid grade, words a sentence, narration grade) and an `ALL` row pooling the scenes scored; with `project.reading_level` set, each is below, within or above it. Not a principle. Prose only. `./storyforge score --readability` prints it free, with no cycle
 - `working/tuning.csv` -- history of weight tuning decisions (if exists)
 - `working/exemplars.csv` -- bank of high-scoring passages (if exists)
 - `scenes/author-scores.csv` -- author's own scores (if exists)
