@@ -670,6 +670,8 @@ def run_recheck(project_dir: str, log_dir: str, skip: set[str] | frozenset[str] 
                                spent_before=spent_before)
     for sid in run.passed:
         log(f'  Re-check passed: {sid}')
+    for note in run.notes:   # what a passing re-check didn't record or applied (#599, #622)
+        log(f'  {note}')
     if run.failed:
         log(f'  ERROR: the re-check of {run.failed} did not pass: {run.why}. It stays in '
             f'{gate_pending_path()}' + (f', and so do {", ".join(run.left)}' if run.left else '')

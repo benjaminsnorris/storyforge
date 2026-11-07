@@ -647,8 +647,37 @@ class TestLinksToOfferedFacts:
     def test_two_facts_with_that_suffix_are_not_guessed(self):
         offered = [self._state('a--he-thinks', 'a'), self._state('c--he-thinks', 'c')]
         out, problems = self._rows(self._found(supersedes='he-thinks'), offered)
-        assert out[0]['supersedes'] == '' and problems['supersedes'] == ['b: he-thinks']
+        assert out[0]['supersedes'] == ''
+        assert problems['supersedes'] == [
+            'b: he-thinks (matches a--he-thinks, c--he-thinks; not guessed)']
         assert problems['id prefix'] == []
+
+    def test_an_ambiguous_ends_is_not_guessed(self):
+        offered = [self._state('a--he-thinks', 'a'), self._state('c--he-thinks', 'c')]
+        _, problems = self._rows(self._found(ends=['he-thinks']), offered)
+        assert [r['resolves'] for r in offered] == ['', '']
+        assert problems['ends'] == ['b: he-thinks (matches a--he-thinks, c--he-thinks; '
+                                    'not guessed)']
+
+    def test_a_wrong_scene_prefix_is_not_matched(self):
+        old = self._state('a--he-thinks-father-dead', 'a')
+        out, problems = self._rows(self._found(supersedes='zz--he-thinks-father-dead'), [old])
+        assert out[0]['supersedes'] == ''
+        assert problems['supersedes'] == ['b: zz--he-thinks-father-dead']
+
+    def test_an_id_the_ledger_has_is_never_matched_by_suffix(self):
+        """#622's review (SF-M5): a registry id with no prefix, left out of
+        the offer, is not re-pointed at an offered fact ending in it."""
+        from storyforge.extract import COMMITMENT_PROBLEMS, commitment_rows
+        reg = self._state('village-vanished', '')
+        reg['introduced_by'] = 'extract'
+        old = self._state('a--village-vanished', 'a')
+        problems = {k: [] for k in COMMITMENT_PROBLEMS}
+        out = commitment_rows(self._found(supersedes='village-vanished'), 'b', 'q',
+                              [reg, old], [old], [], {}, 'revise', problems,
+                              own_writers=ledger.COMMITMENT_WRITERS,
+                              registry_is_plan=True, reserved=set())
+        assert out[0]['supersedes'] == '' and problems['id prefix'] == []
 
     def test_an_end_by_a_later_scene_moves_here(self):
         """#621: scene c (later) ended a's state; b, between, ends it now."""

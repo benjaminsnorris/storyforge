@@ -1036,30 +1036,35 @@ def commitment_id(scene_id: str, statement: str, taken: Set[str]) -> str:
 #: one (`gate._EXTRACTOR_SLIPS`, #598)
 MISQUOTE = 'quote'
 NO_QUOTE = 'no quote'
-#: The kinds `commitment_rows` reports, each a list of strings in `problems`
 #: An `ends` that moved a state's end to this scene from a later one
 #: (`commitment_rows` with `order`; #621)
 ENDS_MOVED = 'ends moved'
 #: A `supersedes` or `ends` naming an offered fact's id without its
 #: `<scene>--` prefix, read as that fact (#620)
 ID_PREFIX = 'id prefix'
+#: The kinds `commitment_rows` reports, each a list of strings in `problems`
 COMMITMENT_PROBLEMS = (MISQUOTE, NO_QUOTE, 'subject', 'supersedes', 'disagrees',
                        'ends', 'ends fixed', 'ends registry', 'ends again', 'cap', 'unplaced',
                        ENDS_MOVED, ID_PREFIX)
 
 
-def _offered_id(ref: str, offered: dict[str, dict[str, str]]) -> str | None:
-    """The offered fact `ref` names: its id, or (#620, Telemachy: the
-    extractor wrote `after-mentes-s-departure-telemachus-believes` for
+def _offered_id(ref: str, offered: dict[str, dict[str, str]],
+                known_ids: Set[str] = frozenset()) -> tuple[str | None, list[str]]:
+    """The offered fact `ref` names, and the offered ids it could mean when
+    it is ambiguous: its id, or (#620, Telemachy: the extractor wrote
+    `after-mentes-s-departure-telemachus-believes` for
     `mentes-counsels-telemachus--after-mentes-s-departure-telemachus-believes`)
-    the one offered id that is `ref` with a `<scene>--` prefix. None for no
-    such fact, or more than one."""
+    the one offered id that is `ref` with a `<scene>--` prefix. A `ref`
+    that is any id in `known_ids` (the ledger's, the scene's own recorded
+    facts) is never matched by suffix, and neither is one holding `--` (a
+    wrong scene prefix). (None, []) for no such fact; (None, the matches)
+    for more than one, never guessed."""
     if ref in offered:
-        return ref
-    if '--' in ref:
-        return None
-    hits = [i for i in offered if i.endswith(f'--{ref}')]
-    return hits[0] if len(hits) == 1 else None
+        return ref, []
+    if '--' in ref or ref in known_ids:
+        return None, []
+    hits = sorted(i for i in offered if i.endswith(f'--{ref}'))
+    return (hits[0], []) if len(hits) == 1 else (None, hits)
 
 
 def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
@@ -1109,6 +1114,16 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
     taken = {r['id'] for r in rows} | set(reserved)
     offered = {r['id']: r for r in known}
     here = {r['id']: r for r in recorded}
+    known_ids = {r['id'] for r in rows} | set(here)
+
+    def _link(ref: str) -> tuple[str, list[str]]:
+        """`ref` as the offered id it names (`_offered_id`; a resolved
+        prefix is reported, `ID_PREFIX`), and the ids it could mean."""
+        named, could = _offered_id(ref, offered, known_ids)
+        if named is not None and named != ref:
+            problems[ID_PREFIX].append(f'{scene_id}: {ref} -> {named}')
+            return named, []
+        return ref, could
     from .quotes import quote_in
     out = []
     for item in found:
@@ -1129,26 +1144,25 @@ def commitment_rows(found: list[dict], scene_id: str, scene_text: str,
                 problems['subject'].append(f'{scene_id}: {csv_safe(subject)}')
         row['subject'] = subject
         if item['supersedes']:
-            named = _offered_id(item['supersedes'], offered)
-            if named is not None and named != item['supersedes']:
-                problems[ID_PREFIX].append(f'{scene_id}: {item["supersedes"]} -> {named}')
-                item['supersedes'] = named
-            target = offered.get(item['supersedes'])
-            if target is not None and registry_is_plan and not ledger.is_commitment(target):
-                problems['disagrees'].append(f'{scene_id}: {item["supersedes"]} '
-                                             f'(prose: {row["id"]})')
+            ref, could = _link(item['supersedes'])
+            target = offered.get(ref)
+            if could:
+                problems['supersedes'].append(f'{scene_id}: {ref} (matches '
+                                              f'{", ".join(could)}; not guessed)')
+            elif target is not None and registry_is_plan and not ledger.is_commitment(target):
+                problems['disagrees'].append(f'{scene_id}: {ref} (prose: {row["id"]})')
             elif target is not None:
-                row['supersedes'] = item['supersedes']
-            elif item['supersedes'] in here:
-                problems['disagrees'].append(f'{scene_id}: {item["supersedes"]} '
-                                             f'(prose: {row["id"]})')
+                row['supersedes'] = ref
+            elif ref in here:
+                problems['disagrees'].append(f'{scene_id}: {ref} (prose: {row["id"]})')
             else:
-                problems['supersedes'].append(f'{scene_id}: {item["supersedes"]}')
+                problems['supersedes'].append(f'{scene_id}: {ref}')
         for gone in item['ends']:
-            named = _offered_id(gone, offered)
-            if named is not None and named != gone:
-                problems[ID_PREFIX].append(f'{scene_id}: {gone} -> {named}')
-                gone = named
+            gone, could = _link(gone)
+            if could:
+                problems['ends'].append(f'{scene_id}: {gone} (matches {", ".join(could)}; '
+                                        f'not guessed)')
+                continue
             old = offered.get(gone)
             ends = (old or {}).get('resolves', '').strip()
             if old is None:
