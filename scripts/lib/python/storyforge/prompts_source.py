@@ -32,8 +32,10 @@ _BRIEF_FIELDS = ('goal', 'conflict', 'outcome', 'crisis', 'decision',
                  'key_actions', 'key_dialogue', 'knowledge_out', 'emotions', 'subtext')
 
 
-#: how to re-voice a translation's lines (#615): the drafting and revision
-#: prompts of an adaptation carry it, and the voice stage's
+#: how to re-voice a translation's lines (#615): an adaptation's drafting
+#: prompt carries it for a scene with a source passage (`drafting_section`),
+#: its revision prompt always (`register.revision_section`), and the voice
+#: stage's prompt quotes it
 REVOICE_RULE = (
     'Re-voice the source in this novel\'s grammar, not the translator\'s. A banned '
     'word list catches "thee" and "quoth"; it doesn\'t catch the translation\'s '

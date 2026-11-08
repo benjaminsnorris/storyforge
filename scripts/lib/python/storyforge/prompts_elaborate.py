@@ -619,9 +619,10 @@ def build_voice_prompt(project_dir: str, plugin_dir: str,
     # An adaptation re-voices its source's speeches (#615): the guide sets the
     # register for that, and declares the few exemptions the register check
     # honours, rather than a list of period words to keep
-    from .prompts_source import REVOICE_RULE, _cfg as _source_cfg
+    from . import source as _source
+    from .prompts_source import REVOICE_RULE
     adaptation_section = ''
-    if _source_cfg(project_dir) is not None:
+    if _source.read_config(project_dir) is not None:
         adaptation_section = (
             '- **Re-voicing the source**: This novel adapts a source, often an older '
             'translation. Say how its speeches and set pieces are re-voiced in this '
@@ -632,8 +633,8 @@ def build_voice_prompt(project_dir: str, plugin_dir: str,
             'section listing only the older diction this book deliberately allows, one '
             'bullet each: the exact phrase in double quotes and the reason after it '
             '(`- "by my faith" (an oath)`), or `- scene: <scene-id>` for a scene told '
-            'wholly in an older voice (a frame narrator). Keep it short; write "(none)" '
-            'if the book allows none. The register check skips exactly these.\n')
+            'wholly in an older voice (a frame narrator). Keep it short; leave the '
+            'section empty if the book allows none. The register check skips exactly these.\n')
 
     return f"""You are developing the voice of a {medium_label} — the prose register, per-character voice fingerprints, and style rules that every scene must embody.
 
