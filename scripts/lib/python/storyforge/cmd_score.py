@@ -83,6 +83,14 @@ def parse_args(argv):
                              'No API calls, no cycle, nothing written. Every scoring '
                              'cycle (full or --deterministic) also writes it, to '
                              'readability.csv. Prose projects only.')
+    parser.add_argument('--register', action='store_true',
+                        help='Print the register check for the scenes in scope (the '
+                             'book\'s with no filter): a source translation\'s archaic '
+                             'words, grammar and idiom carried into the prose, and runs '
+                             'of dialogue copied from the source scene a scene adapts '
+                             '(#615). Skips what the voice guide\'s "Register exemptions" '
+                             'allow. No API calls, no cycle, nothing written. Prose '
+                             'projects only.')
     parser.add_argument('--parallel', type=int,
                         default=int(os.environ.get('STORYFORGE_SCORE_PARALLEL', '6')),
                         help='Parallel workers for direct mode (default: 6)')
@@ -586,6 +594,9 @@ def main(argv=None):
     if args.readability:
         _run_readability_only(args)
         return
+    if args.register:
+        _run_register_only(args)
+        return
 
     from datetime import datetime
     session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
@@ -1085,9 +1096,44 @@ def _write_readability(scene_ids, project_dir, cycle_dir, target):
 
 
 #: what `--readability` can't be combined with: each would be dropped
-_READABILITY_EXCLUSIVE = ('source_fidelity', 'deterministic', 'principles', 'direct',
+_READABILITY_EXCLUSIVE = ('source_fidelity', 'register', 'deterministic', 'principles',
+                          'direct',
                           'deep', 'diagnosis_only', 'no_apply', 'interactive',
                           'complete_cycle')
+
+
+#: what `--register` can't be combined with: each would be dropped
+_REGISTER_EXCLUSIVE = ('source_fidelity', 'readability', 'deterministic', 'principles',
+                       'direct', 'deep', 'diagnosis_only', 'no_apply', 'interactive',
+                       'complete_cycle')
+
+
+def _run_register_only(args):
+    """`score --register`: print the register check's findings for the
+    scenes in scope (--scenes/--act/--from-seq). No API call, no cycle,
+    nothing written. Findings exit 0 (they are for the author to judge); a
+    scene that can't be read is an ERROR, exit 1, after the report."""
+    from storyforge import register
+    clash = [f'--{name.replace("_", "-")}' for name in _REGISTER_EXCLUSIVE
+             if getattr(args, name, None)]
+    if clash:
+        log(f'ERROR: --register prints the register check only; '
+            f'it can\'t be combined with {", ".join(clash)}')
+        sys.exit(1)
+    project_dir = detect_project_root()
+    metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    filter_mode, filter_value, _ = _resolve_filter(args)
+    ids = apply_scene_filter(metadata_csv, build_scene_list(metadata_csv),
+                             filter_mode, filter_value)
+    if not ids:
+        log('ERROR: No scene in scope.')
+        sys.exit(1)
+    checked = register.check_scenes(ids, project_dir)
+    for line in register.report_lines(checked):
+        print(line)
+    if any(why.startswith("can't be read") for why in checked.unchecked.values()):
+        log('ERROR: scene file(s) above can\'t be read; fix them and run again.')
+        sys.exit(1)
 
 
 def _run_readability_only(args):
@@ -1928,7 +1974,8 @@ MIXED = 'changed-within-cycle'
 
 #: What `--complete-cycle` can't be combined with: each would be dropped.
 #: (Checked by identity with None and False: `--level 0` is a level.)
-_COMPLETE_EXCLUSIVE = ('source_fidelity', 'readability', 'deterministic', 'principles',
+_COMPLETE_EXCLUSIVE = ('source_fidelity', 'readability', 'register', 'deterministic',
+                       'principles',
                        'diagnosis_only', 'scenes', 'act', 'from_seq', 'direct', 'deep',
                        'interactive', 'no_apply', 'level', 'all_levels', 'compare', 'drift',
                        'boundary', 'all_boundaries', 'scope', 'semantic', 'bible_consistency',
