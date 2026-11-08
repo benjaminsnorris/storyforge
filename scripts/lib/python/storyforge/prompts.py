@@ -719,6 +719,15 @@ def build_scene_prompt(scene_id: str, project_dir: str,
                 content = reference_text(os.path.join(project_dir, rf), strip=False)
                 if content:
                     ref_inline += f'\n=== FILE: {rf} ===\n{content}\n=== END FILE ===\n'
+        # A series' shared canon (`series.canon`), which the system context
+        # carries when there is one; outside the project, so listed by path
+        from .series import canon_files, canon_text
+        if api_mode:
+            for label, content in canon_text(project_dir):
+                ref_inline += f'\n=== {label} ===\n{content}\n=== END FILE ===\n'
+        else:
+            for shown, abs_path in canon_files(project_dir):
+                ref_list += f'\n- {abs_path} (series canon: shared by every book in the series)'
 
     # --- Previous scene content (API mode) ---
     prev_scene_content = ''
@@ -1971,6 +1980,12 @@ def build_scene_prompt_from_briefs(
         text = reference_doc(project_dir, 'character-bible.md')
         if text:
             char_block = f"## Character Bible (on-stage: {on_stage})\n\n{text}"
+    if not system_context:
+        # a series' shared canon, which the system context carries otherwise
+        from .series import canon_text
+        canon = '\n\n'.join(f'## {label}\n\n{text}' for label, text in canon_text(project_dir))
+        if canon:
+            char_block = f'{char_block}\n\n{canon}' if char_block else canon
 
     # Physical state context
     state_block = ''

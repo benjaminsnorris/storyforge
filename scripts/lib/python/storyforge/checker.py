@@ -23,6 +23,8 @@ the book it sees.
   template bible is left out (F-130), and the prompt names what is. They
   are sent uncapped, as drafting's shared context sends them, with their
   own cache breakpoint; one that can't be read as UTF-8 is a `CheckError`.
+  A series' shared canon (`series.canon`) goes with them, each file as
+  `series-canon-<file name>`.
 - The earlier scenes follow them in the system prompt, whole: the story so
   far (`prompts.prior_scenes` in `full` mode whatever drafting's
   `drafting.prior_prose`; past `prompts.FULL_MAX_WORDS`, the window, and
@@ -325,9 +327,11 @@ class Book:
 
 def reference_docs(project_dir: str) -> dict[str, str]:
     """The bibles with the author's text, by file name, in `REFERENCE_DOCS`
-    order. A missing or blank file, or one still identical to its template
-    (`common.is_unfilled_template`), is left out: a template's guidance
-    would read as the book's facts."""
+    order, then the series canon's files (`series.canon`) as
+    `series-canon-<file name>`. A missing or blank bible, or one still
+    identical to its template (`common.is_unfilled_template`), is left out:
+    a template's guidance would read as the book's facts. A series canon
+    that can't be read is a `CheckError` (the commands check it first)."""
     from storyforge.common import is_unfilled_template
     docs = {}
     for name in REFERENCE_DOCS:
@@ -343,6 +347,20 @@ def reference_docs(project_dir: str) -> dict[str, str]:
                              f'the checker needs it') from e
         if text.strip() and not is_unfilled_template(path):
             docs[name] = text
+    # A series' shared canon, which every scene must agree with too; named by
+    # a file name (a finding cites one) that no book bible has
+    from storyforge.series import SeriesError, canon_docs
+    try:
+        canon = canon_docs(project_dir)
+    except SeriesError as e:
+        raise CheckError(f'the series canon can\'t be read ({e}); the checker needs it') from e
+    for shown, text in canon:
+        name = f'series-canon-{os.path.basename(shown)}'
+        n = 2
+        while name in docs:
+            stem, ext = os.path.splitext(f'series-canon-{os.path.basename(shown)}')
+            name, n = f'{stem}-{n}{ext}', n + 1
+        docs[name] = text
     return docs
 
 
