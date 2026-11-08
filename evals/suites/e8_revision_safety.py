@@ -44,6 +44,12 @@ MIN_REPLAYED = 15  # below this the rate is too noisy to gate on
 #: old calendar wording and 0 of 12 with the new, so the change didn't cause
 #: it: these are checker misses on this run's redrafts (governor-016 is the
 #: known stone-cutters inference miss since #478)
+#: #614 (2026-11-07) read the four checker requests: none is a checker miss.
+#: Each sentence fits the pre-pass book the replay runs on, e.g. its
+#: terrace-row puts the stone-cutters on Block Fourteen too. The judge
+#: checks against the case labels instead (status doc, "#614's diagnosis").
+#: The ceiling stays 4 until E8 counts only what the replay's own book
+#: contradicts.
 MAX_UNFLAGGED = 4
 
 
