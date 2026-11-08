@@ -229,7 +229,7 @@ def mock_api(monkeypatch):
                            fallback=False):
             self.calls.append({
                 'fn': 'invoke_to_file', 'fallback': fallback, 'prompt': prompt, 'model': model,
-                'log_file': log_file, 'max_tokens': max_tokens,
+                'log_file': log_file, 'max_tokens': max_tokens, 'timeout': timeout,
                 'system': system, 'output_schema': output_schema,
             })
             response = self._get_response_dict(prompt)
