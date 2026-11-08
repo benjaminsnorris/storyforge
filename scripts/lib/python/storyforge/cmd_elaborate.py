@@ -45,17 +45,29 @@ from storyforge.pages import (
 # ============================================================================
 
 
-# The answer budget for each stage's reply (api.invoke adds THINKING_ALLOWANCE
-# on top, clamped to the model's output limit). The map writes every scene's
-# row, intent and source-map row in one reply, and the briefs a dozen fields
-# per scene. At 16,384 a 42-scene map ran out in thinking (G-018); at 32,000
-# the map of the whole Iliad (239 source scenes into about 50) spent 47,424
-# of 48,000 tokens thinking (iliad-teen, 2026-11-07). Only generated tokens
-# are billed, so these stages ask for the model's whole output (128k on the
-# current models). A reply that long takes up to about 25 minutes at the
-# ~95 tokens a second the Iliad's map ran at, so they wait 50.
-STAGE_ANSWER_TOKENS = {'map': 112000, 'briefs': 112000}
-STAGE_TIMEOUT = {'map': 3000, 'briefs': 3000}
+# Stages that ask for the model's whole output (`api.max_output_tokens`)
+# rather than the default answer budget. The map writes every scene's row,
+# intent and source-map row in one reply, and the briefs a dozen fields per
+# scene. Fixed budgets kept running out in thinking: 16,384 on a 42-scene map
+# (G-018), then 32,000 (48,000 with the thinking allowance) on the map of the
+# whole Iliad, 239 source scenes into about 50, which spent 47,424 tokens
+# thinking (#627). Briefs gets the same by analogy. Only generated tokens are
+# billed, so the headroom is free.
+WHOLE_OUTPUT_STAGES = frozenset({'map', 'briefs'})
+#: tokens a second a whole-output reply is given time for: the Iliad's map
+#: ran at about 95, so a full reply has about twice the time it needs
+WHOLE_OUTPUT_TOKENS_PER_SECOND = 40
+
+
+def stage_budget(stage: str, model: str) -> tuple[int, int | None]:
+    """(max_tokens, timeout) for a stage's API call: the model's whole
+    output and time to write it for `WHOLE_OUTPUT_STAGES`, else the default
+    answer budget and timeout (None)."""
+    if stage not in WHOLE_OUTPUT_STAGES:
+        return 16384, None
+    from storyforge.api import API_TIMEOUT, max_output_tokens
+    tokens = max_output_tokens(model)
+    return tokens, max(API_TIMEOUT, tokens // WHOLE_OUTPUT_TOKENS_PER_SECOND)
 
 
 def _python_lib():
@@ -1963,10 +1975,10 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         else:
             log(f'Invoking API for {stage} (model: {stage_model})...')
             try:
+                budget, wait = stage_budget(stage, stage_model)
                 stage_response = invoke_to_file(
-                    prompt, stage_model, stage_log,
-                    max_tokens=STAGE_ANSWER_TOKENS.get(stage, 16384), system=system,
-                    **({'timeout': STAGE_TIMEOUT[stage]} if stage in STAGE_TIMEOUT else {}))
+                    prompt, stage_model, stage_log, max_tokens=budget, system=system,
+                    **({'timeout': wait} if wait else {}))
                 claude_rc = 0
             except Exception as e:
                 log(f'ERROR: API invocation failed: {e}')
@@ -1993,8 +2005,9 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                 log_operation(project_dir, f'elaborate-{stage}', stage_model,
                               usage['input_tokens'], usage['output_tokens'],
                               cost, target=stage)
-            except Exception:
-                pass
+            except Exception as e:
+                log(f'WARNING: the {stage} call\'s cost was not logged ({e}); '
+                    f'its usage is in {stage_log}')
 
         # A reply cut off at max_tokens holds a partial (or no) block: say so,
         # rather than "no output blocks", and apply none of it (G-018)
@@ -2008,6 +2021,10 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                 + '); nothing was applied and the phase is not advanced. '
                 + ('Brief fewer scenes at a time with --scene a,b,c. '
                    if stage == 'briefs' else '')
+                + ('The reply already had the model\'s whole output, so a larger '
+                   'budget is not available: re-run it (how long the model thinks '
+                   'varies), or narrow the source with a `range` in the source block. '
+                   if stage == 'map' else '')
                 + f'See the reply: {stage_log}')
             sys.exit(1)
 
