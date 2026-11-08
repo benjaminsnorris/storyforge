@@ -55,6 +55,9 @@ def parse_args(argv):
     parser.add_argument('--readability', action='store_true',
                         help='Not for graphic novels: reading level is measured '
                              'on prose only (an ERROR here)')
+    parser.add_argument('--register', action='store_true',
+                        help='Not for graphic novels: the register check reads '
+                             'prose only (an ERROR here)')
     return parser.parse_args(argv)
 
 
@@ -311,6 +314,10 @@ def main(argv=None):
     if args.readability:
         log('ERROR: score --readability measures prose; a graphic-novel project '
             'has no reading level to measure.')
+        sys.exit(1)
+    if args.register:
+        log('ERROR: score --register checks prose; a graphic-novel project has '
+            'none to check.')
         sys.exit(1)
 
     install_signal_handlers()
