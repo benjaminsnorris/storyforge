@@ -616,6 +616,25 @@ def build_voice_prompt(project_dir: str, plugin_dir: str,
             'character\'s, and a voice-profile row with character `narrator` (the one row '
             'that is not a characters.csv id).\n')
 
+    # An adaptation re-voices its source's speeches (#615): the guide sets the
+    # register for that, and declares the few exemptions the register check
+    # honours, rather than a list of period words to keep
+    from .prompts_source import REVOICE_RULE, _cfg as _source_cfg
+    adaptation_section = ''
+    if _source_cfg(project_dir) is not None:
+        adaptation_section = (
+            '- **Re-voicing the source**: This novel adapts a source, often an older '
+            'translation. Say how its speeches and set pieces are re-voiced in this '
+            'book\'s register. The drafting rule is: ' + REVOICE_RULE + ' Don\'t write a '
+            'list of period or medieval nouns to keep: a period word is kept only where '
+            'a scene makes it plain, and the default is the plain modern word.\n'
+            '- **Register exemptions**: End the guide with a `## Register exemptions` '
+            'section listing only the older diction this book deliberately allows, one '
+            'bullet each: the exact phrase in double quotes and the reason after it '
+            '(`- "by my faith" (an oath)`), or `- scene: <scene-id>` for a scene told '
+            'wholly in an older voice (a frame narrator). Keep it short; write "(none)" '
+            'if the book allows none. The register check skips exactly these.\n')
+
     return f"""You are developing the voice of a {medium_label} — the prose register, per-character voice fingerprints, and style rules that every scene must embody.
 
 {context}
@@ -644,7 +663,7 @@ Write a comprehensive voice guide as a markdown document covering:
   - How they speak in dialogue vs. how they narrate
 - **Style rules**: Specific rules the prose must follow (e.g., "no weather openings", "interiority in present tense", "never name emotions directly")
 - **Prohibited patterns**: Constructions, words, or moves that break this book's voice
-{narrator_section}
+{narrator_section}{adaptation_section}
 Output in a fenced block labeled `voice-guide`:
 
 ```voice-guide

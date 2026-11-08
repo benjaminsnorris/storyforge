@@ -635,6 +635,14 @@ def build_revision_prompt(
     if decisions_section:
         decisions_section = '\n' + decisions_section
 
+    # An adaptation's register (#615): the re-voicing rule and the register
+    # check's findings in these scenes; nothing without a `source:` block
+    from storyforge.register import revision_section
+    register_section = revision_section(
+        project_dir, [os.path.splitext(os.path.basename(p))[0] for p in existing_paths])
+    if register_section:
+        register_section = '\n' + register_section
+
     # New scene creation instructions
     new_scenes_section = ''
     if new_scene_ids:
@@ -734,6 +742,7 @@ def build_revision_prompt(
         f'## Scope\n\nThis pass covers {file_count} scene file(s):\n\n{file_block}',
         no_voice_section,
         decisions_section,
+        register_section,
         config_section,
         intent_section,
         calendar_section,
