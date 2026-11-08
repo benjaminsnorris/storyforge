@@ -82,7 +82,11 @@ _REGISTRIES = ('characters.csv', 'locations.csv')
 
 
 class SourceError(Exception):
-    """A `source:` block, name map or source project that can't be used."""
+    """A `source:` block, name map or source project that can't be used.
+
+    Also the base of `series.SeriesError` (a `series:` block or canon file),
+    so a handler here catches that too: never turn one into a quiet fallback
+    on a path that builds a prompt, or the canon is dropped from it."""
 
 
 # ============================================================================

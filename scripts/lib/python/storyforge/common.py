@@ -1338,7 +1338,8 @@ def build_shared_context(project_dir: str, model: str = '') -> list[dict]:
 
     Two-tier structure:
     - Tier 1 (1h TTL): Plugin-level references (craft engine, rubrics, AI-tell words)
-    - Tier 2 (5m TTL): Project-level references (bibles, voice guide, registries)
+    - Tier 2 (5m TTL): Project-level references (bibles, voice guide, registries,
+      an adaptation's source bibles, a series' shared canon)
 
     Results are cached in-process so repeated calls don't re-read files.
 
@@ -1401,6 +1402,12 @@ def build_shared_context(project_dir: str, model: str = '') -> list[dict]:
     # An adaptation's source bibles (#477); none without a `source:` block
     from storyforge.prompts_source import bibles_text
     for label, content in bibles_text(project_dir):
+        tier2_blocks.append({'type': 'text', 'text': f'=== {label} ===\n\n{content}'})
+        tier2_chars += len(content) + len(label) + 10
+
+    # A series' shared canon, read in place; none without `series.canon`
+    from storyforge.series import canon_text
+    for label, content in canon_text(project_dir):
         tier2_blocks.append({'type': 'text', 'text': f'=== {label} ===\n\n{content}'})
         tier2_chars += len(content) + len(label) + 10
 

@@ -864,6 +864,8 @@ def main(argv=None):
     _cut_off.clear()
 
     project_dir = detect_project_root()
+    from storyforge.series import require_canon
+    require_canon(project_dir)  # a bad series canon stops here, before a branch or spend
     plugin_dir = get_plugin_dir()
 
     log_dir = os.path.join(project_dir, 'working', 'logs')

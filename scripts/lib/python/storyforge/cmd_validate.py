@@ -136,6 +136,20 @@ def main(argv=None):
         except source_mod.SourceError as e:
             source_result['lines'].append(f"Pronouns: the source's can't be read ({e})")
 
+    # A series' shared canon: only for a project with a `series:` block, so
+    # every other project's report and exit code are as before. Its findings
+    # are in source's shape, `check`/`category` 'series'
+    from storyforge import series as series_mod
+    series_result = None
+    try:
+        lines = series_mod.summary_lines(project_dir)
+        if lines:
+            series_result = {'lines': lines, 'findings': []}
+    except series_mod.SeriesError as e:
+        problem = source_mod.finding('blocking', str(e))
+        problem.update(check='series', category='series')
+        series_result = {'lines': [], 'findings': [problem]}
+
     structural_scores = None
     scores_previous = None
     if args.structural:
@@ -165,6 +179,8 @@ def main(argv=None):
         # Only an adaptation's report has the key: --json for every other
         # project is unchanged
         combined['source'] = source_result
+    if series_result is not None:
+        combined['series'] = series_result
 
     if args.json_output:
         print(json.dumps(combined))
@@ -178,8 +194,10 @@ def main(argv=None):
     canon_ok = not canon_result['errors']
     source_ok = source_result is None or not any(
         f['severity'] == 'blocking' for f in source_result['findings'])
+    series_ok = series_result is None or not any(
+        f['severity'] == 'blocking' for f in series_result['findings'])
     sys.exit(0 if structural_ok and schema_ok and illustrations_ok and canon_ok
-             and source_ok else 1)
+             and source_ok and series_ok else 1)
 
 
 def _status_logger(args):
@@ -276,6 +294,15 @@ def _print_human_readable(combined):
         for f in source['findings']:
             where = f' {f["scene_id"]}:' if f['scene_id'] else ''
             print(f'    [{f["severity"]}]{where} {f["message"]}')
+
+    series = combined.get('series')
+    if series is not None:
+        print()
+        print('--- Series canon ---')
+        for line in series['lines']:
+            print(f'  {line}')
+        for f in series['findings']:
+            print(f'  [{f["severity"]}] {f["message"]}')
 
     if flashbacks:
         share = sum(f['share'] for f in flashbacks)

@@ -3373,6 +3373,8 @@ def _main(argv=None):
     session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     project_dir = detect_project_root()
+    from storyforge.series import require_canon
+    require_canon(project_dir)  # a bad series canon stops here, before a branch or spend
     # the re-checks after each gated scene check the threshold: a bad value
     # stops the run here, not after the passes were paid for
     from storyforge.costs import exit_if_bad_threshold
