@@ -379,14 +379,9 @@ SYNC_TRACKED_PATHS = [
     'reference/outline.md',
 ]
 
-# Regex (relative to a project folder) for the sync-tracked paths whose
-# change makes the hook run. Defined here so it can be unit-tested.
-HOOK_PATH_FILTER = (
-    r'^reference/(scenes|scene-intent|scene-briefs|spine|architecture)\.csv$'
-    r'|^reference/(scenes-review|spine|architecture|outline)\.md$'
-)
-# The same paths as staged, relative to the repo root: group 1 is the
-# project folder ('' for a project at the root, else ending in '/').
+# Regex for the sync-tracked paths as staged, relative to the repo root:
+# group 1 is the project folder ('' for a project at the root, else ending
+# in '/'). The hook runs sync for each such folder holding storyforge.yaml.
 HOOK_STAGED_FILTER = (
     r'^(.*/)?(reference/(scenes|scene-intent|scene-briefs|spine|architecture)\.csv'
     r'|reference/(scenes-review|spine|architecture|outline)\.md)$'
@@ -401,7 +396,8 @@ HOOK_SCRIPT = f"""#!/usr/bin/env bash
 #
 # One hook serves every Storyforge project in the repository: a project at
 # the repo root and any number in subfolders (projects/<book>/). For each
-# project folder (one holding storyforge.yaml) the staged change touches:
+# project folder (one holding storyforge.yaml) whose sync-tracked files the
+# commit stages:
 #   1. Refuse the commit if any of its sync-tracked files has *unstaged*
 #      changes, so sync can't bundle unrelated work into the commit.
 #   2. Run `storyforge sync` in that folder. Refuse the commit if sync
@@ -416,23 +412,43 @@ if [ "${{STORYFORGE_SYNC_SKIP:-}}" = "1" ]; then
     exit 0
 fi
 
+START=$(pwd)
 ROOT=$(git rev-parse --show-toplevel)
+# Pin git (here and in the `storyforge sync` this hook starts) to the real
+# work tree and index. In a linked worktree git runs hooks with GIT_DIR set,
+# which makes the current folder the top of the work tree: after `cd` into
+# projects/<book>/, every path would be read and staged at the repo root.
+export GIT_WORK_TREE="$ROOT"
+case "${{GIT_INDEX_FILE:-}}" in
+    ''|/*) ;;
+    *) export GIT_INDEX_FILE="$START/$GIT_INDEX_FILE" ;;
+esac
 cd "$ROOT"
 
-# The project folders the staged change touches, each written as "P:<dir>"
-# (<dir> is '' for the repo root, else ends in '/'), kept only when the
-# folder holds storyforge.yaml (docs/reference/scenes.csv is not a project).
-# -z stops git quoting paths that hold spaces or non-ASCII letters.
+# Every staged path. -z stops git quoting paths that hold non-ASCII letters,
+# quotes or backslashes. A failure here must refuse the commit, not read as
+# "nothing staged".
+if ! STAGED=$(git diff --cached --name-only -z | tr '\\0' '\\n'; exit "${{PIPESTATUS[0]}}"); then
+    echo "ERROR: storyforge sync hook could not list the staged files; commit refused." >&2
+    echo "(Set STORYFORGE_SYNC_SKIP=1 to bypass.)" >&2
+    exit 1
+fi
+
+# The project folders whose sync-tracked files the commit stages, each as
+# "P:<dir>" (<dir> is '' for the repo root, else ends in '/'), kept only
+# when the folder holds storyforge.yaml.
 PROJECTS=""
 while IFS= read -r ENTRY; do
+    [ -n "$ENTRY" ] || continue
     DIR=${{ENTRY#P:}}
     if [ -f "$ROOT/${{DIR}}storyforge.yaml" ]; then
         PROJECTS="$PROJECTS$ENTRY
 "
+    else
+        echo "storyforge sync hook: skipped ${{DIR:-./}} (no storyforge.yaml there)" >&2
     fi
 done <<EOF_STAGED
-$(git diff --cached --name-only -z | tr '\\0' '\\n' \\
-    | sed -nE 's#{HOOK_STAGED_FILTER}#P:\\1#p' | sort -u)
+$(printf '%s\\n' "$STAGED" | sed -nE 's#{HOOK_STAGED_FILTER}#P:\\1#p' | sort -u)
 EOF_STAGED
 if [ -z "$PROJECTS" ]; then
     exit 0
@@ -464,7 +480,10 @@ while IFS= read -r ENTRY; do
     cd "$ROOT/$DIR"
 
     # Step 1: refuse if a sync-tracked file has unstaged working-tree changes.
-    UNSTAGED=$(git diff --name-only --relative -- {' '.join(SYNC_TRACKED_PATHS)} || true)
+    if ! UNSTAGED=$(git diff --name-only --relative -- {' '.join(SYNC_TRACKED_PATHS)}); then
+        echo "ERROR: storyforge sync hook could not check $LABEL for unstaged changes; commit refused." >&2
+        exit 1
+    fi
     if [ -n "$UNSTAGED" ]; then
         echo "" >&2
         echo "ERROR: storyforge sync refuses to run with unstaged scene changes in $LABEL:" >&2
@@ -484,11 +503,14 @@ while IFS= read -r ENTRY; do
         exit 1
     fi
 
-    # Step 3: stage whatever sync produced. No `|| true` — a failure here
-    # means the commit would land with stale files and we want to know.
+    # Step 3: stage whatever sync produced. A failure refuses the commit:
+    # it would land with stale files.
     for f in {' '.join(SYNC_TRACKED_PATHS)}; do
         if [ -f "$f" ]; then
-            git add "$f"
+            if ! git add "$f"; then
+                echo "ERROR: storyforge sync hook could not stage ${{DIR}}$f; commit refused." >&2
+                exit 1
+            fi
         fi
     done
     cd "$ROOT"
@@ -559,7 +581,7 @@ def install_hook(project_dir):
         f.write(hook_content)
     os.chmod(hook_path, 0o755)
     log(f'Installed pre-commit hook at {hook_path}')
-    log('  It syncs every Storyforge project in this repository a commit touches.')
+    log('  It syncs each Storyforge project in this repository whose sync-tracked files a commit stages.')
     if runner:
         log(f'  Hook will invoke: {runner}')
     return hook_path

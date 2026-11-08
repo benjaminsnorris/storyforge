@@ -163,9 +163,23 @@ def test_hook_syncs_each_touched_project_only(tmp_path, hook_env):
     assert _committed(repo, 'projects/other/reference/scenes-review.md') is None
 
 
-def test_hook_ignores_reference_csv_outside_a_project(tmp_path, hook_env):
+def _stub_runner(tmp_path, body):
+    """An environment whose `storyforge` is a stub shell script."""
+    bin_dir = tmp_path / 'stub-bin'
+    bin_dir.mkdir(exist_ok=True)
+    stub = bin_dir / 'storyforge'
+    stub.write_text('#!/bin/sh\n' + body)
+    stub.chmod(0o755)
+    env = dict(os.environ)
+    env['PATH'] = f'{bin_dir}{os.pathsep}{env.get("PATH", "")}'
+    env.pop('STORYFORGE_SYNC_SKIP', None)
+    return env
+
+
+def test_hook_ignores_reference_csv_outside_a_project(tmp_path):
     """A `reference/scenes.csv` in a folder without storyforge.yaml isn't
-    a project: the commit goes through without running sync."""
+    a project: the commit goes through without running sync, and the hook
+    says it skipped the folder."""
     repo = str(tmp_path / 'repo')
     _init_repo(repo)
     project = make_project(FIXTURE_DIR, tmp_path / 'repo' / 'book')
@@ -173,11 +187,108 @@ def test_hook_ignores_reference_csv_outside_a_project(tmp_path, hook_env):
     with open(os.path.join(repo, 'docs', 'reference', 'scenes.csv'), 'w') as f:
         f.write('id|title\nx|y\n')
     install_hook(project)
-    env = dict(hook_env)
-    env['PATH'] = '/usr/bin:/bin'  # no runner: sync would fail closed
+    marker = tmp_path / 'sync-ran'
+    env = _stub_runner(tmp_path, f'touch "{marker}"\n')
     _git(repo, 'add', 'docs')
     r = _git(repo, 'commit', '-m', 'docs', check=False, env=env)
     assert r.returncode == 0, r.stderr
+    assert not marker.exists(), 'sync must not run for a folder that is not a project'
+    assert 'skipped docs/ (no storyforge.yaml there)' in r.stderr
+
+
+def test_hook_root_project_commit_without_tracked_paths_needs_no_runner(tmp_path):
+    """Review (CR-2): an empty staged-list line read as the root project, so
+    every commit in a root project needed the runner."""
+    root = make_project(FIXTURE_DIR, tmp_path / 'book')
+    _init_repo(root)
+    _commit_all(root)
+    hook = install_hook(root)
+    # no runner anywhere: a stale baked path, nothing on PATH
+    with open(hook, encoding='utf-8') as f:
+        content = f.read().replace(_default_runner_path(), '/nonexistent/storyforge')
+    with open(hook, 'w', encoding='utf-8') as f:
+        f.write(content)
+    env = dict(os.environ, PATH='/usr/bin:/bin')
+    env.pop('STORYFORGE_HOME', None)
+    with open(os.path.join(root, 'README.md'), 'w') as f:
+        f.write('hi\n')
+    _git(root, 'add', 'README.md')
+    r = _git(root, 'commit', '-m', 'readme', check=False, env=env)
+    assert r.returncode == 0, r.stderr
+
+
+def test_hook_syncs_two_projects_in_one_commit(tmp_path, hook_env):
+    """Review (T-3): the loop syncs and stages every touched project."""
+    repo = str(tmp_path / 'evals')
+    _init_repo(repo)
+    a = make_project(FIXTURE_DIR, tmp_path / 'evals' / 'projects' / 'a')
+    b = make_project(FIXTURE_DIR, tmp_path / 'evals' / 'projects' / 'b')
+    _commit_all(repo)
+    install_hook(a)
+    for proj, title in ((a, 'Title In A'), (b, 'Title In B')):
+        scenes = os.path.join(proj, 'reference', 'scenes.csv')
+        update_field(scenes, 'act1-sc01', 'title', title)
+        _git(repo, 'add', os.path.relpath(scenes, repo))
+    r = _git(repo, 'commit', '-m', 'both', check=False, env=hook_env)
+    assert r.returncode == 0, r.stderr
+    assert 'Title In A' in _committed(repo, 'projects/a/reference/scenes-review.md')
+    assert 'Title In B' in _committed(repo, 'projects/b/reference/scenes-review.md')
+
+
+def test_hook_refuses_commit_when_sync_fails_in_second_project(tmp_path):
+    """Review (T-4): a failing sync in any touched project refuses the
+    commit and names the project."""
+    repo = str(tmp_path / 'evals')
+    _init_repo(repo)
+    a = make_project(FIXTURE_DIR, tmp_path / 'evals' / 'projects' / 'a')
+    b = make_project(FIXTURE_DIR, tmp_path / 'evals' / 'projects' / 'b')
+    _commit_all(repo)
+    install_hook(a)
+    env = _stub_runner(tmp_path, 'case "$(pwd)" in */projects/b) exit 3;; esac\nexit 0\n')
+    for proj in (a, b):
+        scenes = os.path.join(proj, 'reference', 'scenes.csv')
+        update_field(scenes, 'act1-sc01', 'title', 'Changed')
+        _git(repo, 'add', os.path.relpath(scenes, repo))
+    head = _git(repo, 'rev-parse', 'HEAD').stdout
+    r = _git(repo, 'commit', '-m', 'x', check=False, env=env)
+    assert r.returncode != 0
+    assert 'project projects/b/' in r.stderr
+    assert _git(repo, 'rev-parse', 'HEAD').stdout == head
+
+
+def test_hook_handles_non_ascii_project_folder(tmp_path, hook_env):
+    """Review (T-6): git quotes non-ASCII paths unless -z; the hook must
+    still find the project."""
+    repo = str(tmp_path / 'evals')
+    _init_repo(repo)
+    project = make_project(FIXTURE_DIR, tmp_path / 'evals' / 'projects' / 'café')
+    _commit_all(repo)
+    install_hook(project)
+    r = _edit_and_commit(repo, project, hook_env)
+    assert r.returncode == 0, r.stderr
+    assert 'A New Title' in _committed(repo, 'projects/café/reference/scenes-review.md')
+
+
+def test_hook_fails_closed_when_staged_files_cannot_be_listed(tmp_path, hook_env):
+    """Review (SF-2): a failing `git diff --cached` refuses the commit
+    rather than reading as nothing staged."""
+    root = make_project(FIXTURE_DIR, tmp_path / 'book')
+    _init_repo(root)
+    _commit_all(root)
+    hook = install_hook(root)
+    real_git = subprocess.run(['which', 'git'], capture_output=True, text=True).stdout.strip()
+    wrap = tmp_path / 'gitwrap'
+    wrap.mkdir()
+    (wrap / 'git').write_text(
+        '#!/bin/sh\nif [ "$1" = diff ] && [ "$2" = --cached ]; then '
+        'echo "fatal: index file corrupt" >&2; exit 128; fi\n'
+        f'exec "{real_git}" "$@"\n')
+    (wrap / 'git').chmod(0o755)
+    env = dict(hook_env)
+    env['PATH'] = f'{wrap}{os.pathsep}{env["PATH"]}'
+    r = subprocess.run([hook], cwd=root, capture_output=True, text=True, env=env)
+    assert r.returncode == 1
+    assert 'could not list the staged files' in r.stderr
 
 
 def test_hook_refuses_unstaged_changes_in_subfolder_project(tmp_path, hook_env):
@@ -207,6 +318,41 @@ def test_hook_fires_from_worktree(tmp_path, hook_env):
     assert r.returncode == 0, r.stderr
     review = _committed(wt, 'reference/scenes-review.md')
     assert review and 'A New Title' in review
+
+
+def test_hook_from_worktree_stages_subfolder_project_in_place(tmp_path, hook_env):
+    """Review (SF-1): in a linked worktree git runs hooks with GIT_DIR set,
+    so after `cd projects/book` git took that folder as the work tree's top
+    and committed reference/ files at the repo root."""
+    repo = str(tmp_path / 'evals')
+    _init_repo(repo)
+    make_project(FIXTURE_DIR, tmp_path / 'evals' / 'projects' / 'book')
+    _commit_all(repo)
+    wt = str(tmp_path / 'wt')
+    _git(repo, 'worktree', 'add', '-q', '-b', 'side', wt)
+    project = os.path.join(wt, 'projects', 'book')
+    install_hook(project)
+    r = _edit_and_commit(wt, project, hook_env)
+    assert r.returncode == 0, r.stderr
+    files = _git(wt, 'show', '--name-only', '--format=', 'HEAD').stdout.split('\n')
+    assert 'projects/book/reference/scenes-review.md' in files
+    assert not any(f.startswith('reference/') for f in files), files
+    assert 'A New Title' in _committed(wt, 'projects/book/reference/scenes-review.md')
+    assert _git(wt, 'status', '--porcelain').stdout.strip() == ''
+
+
+def test_hook_commit_all_in_subfolder_project(tmp_path, hook_env):
+    """`git commit -a` (a temporary index) works for a subfolder project."""
+    repo = str(tmp_path / 'evals')
+    _init_repo(repo)
+    project = make_project(FIXTURE_DIR, tmp_path / 'evals' / 'projects' / 'book')
+    _commit_all(repo)
+    install_hook(project)
+    update_field(os.path.join(project, 'reference', 'scenes.csv'), 'act1-sc01', 'title', 'All')
+    _git(repo, 'add', '-N', '.')
+    r = _git(repo, 'commit', '-a', '-m', 'all', check=False, env=hook_env)
+    assert r.returncode == 0, r.stderr
+    assert 'All' in _committed(repo, 'projects/book/reference/scenes-review.md')
 
 
 # --- sync's own reads in a subfolder project -------------------------------
