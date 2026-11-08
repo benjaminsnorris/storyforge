@@ -46,11 +46,14 @@ MIN_REPLAYED = 15  # below this the rate is too noisy to gate on
 #: known stone-cutters inference miss since #478)
 #: #614 (2026-11-07) read the four checker requests: none is a checker miss.
 #: Each sentence fits the pre-pass book the replay runs on, e.g. its
-#: terrace-row puts the stone-cutters on Block Fourteen too. The judge
-#: checks against the case labels instead (status doc, "#614's diagnosis").
-#: The ceiling stays 4 until E8 counts only what the replay's own book
-#: contradicts.
-MAX_UNFLAGGED = 4
+#: terrace-row puts the stone-cutters on Block Fourteen too. An audit of
+#: every replayed case against its pre-pass book found three whose error
+#: that book already carries (governor-016, thornwall-026, thornwall-030);
+#: they are in `e8.EXCLUDED_CASES` with why. Without them the current
+#: recording counts 0 unflagged, so the ceiling is 2 (Ben, 2026-11-07): a
+#: margin for which-cases-reintroduce noise that still fails on two real
+#: misses, which 4 would not have.
+MAX_UNFLAGGED = 2
 
 
 def run(ctx):
