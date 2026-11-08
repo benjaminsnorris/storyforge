@@ -161,6 +161,16 @@ def _live_request(path: str, body: dict | None, method: str, timeout: int) -> di
                 continue
             raise RuntimeError(f'API returned HTTP {e.code}: {error_body[:500]}') from e
         except (URLError, TimeoutError, OSError) as e:
+            timed_out = (isinstance(e, TimeoutError)
+                         or isinstance(getattr(e, 'reason', None), TimeoutError))
+            if timed_out and timeout > API_TIMEOUT:
+                # a long call (elaborate's map, a revision pass) that timed
+                # out has already waited its whole timeout; a retry would wait
+                # as long again, and the server may bill both attempts
+                raise RuntimeError(
+                    f'API request timed out after {timeout}s; not retried, since a '
+                    f'retry would wait as long again. The attempt may still be billed '
+                    f'and is not in the cost ledger.') from e
             if attempt < API_RETRIES:
                 from storyforge.common import log
                 log(f'  API connection error: {e}, retrying ({attempt}/{API_RETRIES})...')
