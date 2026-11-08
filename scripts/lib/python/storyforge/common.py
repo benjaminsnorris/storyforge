@@ -1404,6 +1404,12 @@ def build_shared_context(project_dir: str, model: str = '') -> list[dict]:
         tier2_blocks.append({'type': 'text', 'text': f'=== {label} ===\n\n{content}'})
         tier2_chars += len(content) + len(label) + 10
 
+    # A series' shared canon, read in place; none without `series.canon`
+    from storyforge.series import canon_text
+    for label, content in canon_text(project_dir):
+        tier2_blocks.append({'type': 'text', 'text': f'=== {label} ===\n\n{content}'})
+        tier2_chars += len(content) + len(label) + 10
+
     # --- Apply cache_control breakpoints ---
     blocks = []
 

@@ -16,6 +16,7 @@ This document defines the complete schema for the `storyforge.yaml` file that li
 | `production` | Formatting, metadata, and output settings for manuscript assembly |
 | `parts` | Optional book parts (physical divisions with title pages) for multi-part books. Structural acts live in `scenes.csv` `act`, not here |
 | `source` | Optional. The Storyforge project(s) this one adapts: a retelling, an expansion, a rewrite of an earlier draft |
+| `series` | Optional. A canon shared with the other books of a series, read in place from outside the project |
 
 ---
 
@@ -280,6 +281,28 @@ Every character and location in the source's registries needs a row, even an unc
 ### `reference/source-map.csv`
 
 `scene_id|source_scenes|treatment|note`, one row per adaptation scene, plus one `cut` row per source scene left out (empty `scene_id`, the source scene in `source_scenes`, the reason in `note`). `source_scenes` is `;`-separated source scene ids, written `slug:id` when two sources share an id. Treatments: `dramatize`, `compress`, `expand`, `pov-shift`, `reorder`, `invent` (no source scene), `cut`.
+
+---
+
+## `series`
+
+Optional. Several books that share one canon (the gods as a system, a cast across the series, places, one timeline) point at it instead of each keeping a copy:
+
+```yaml
+series:
+  canon:
+    - ../../homer/series-bible/gods.md
+    - ../../homer/series-bible/cast.md
+    - ../../homer/series-bible/timeline.md
+```
+
+`canon:` is a list of paths, or one path on its line, relative to the project (or absolute, or `~/...`). A directory means its `.md` files in name order; list the files instead when the directory also holds notes or open questions that aren't canon. A file named twice is read once.
+
+**What uses it.** Every prompt that carries the project's bibles carries the canon too, after them, each file labelled `Series Canon (<path>)`: the shared system context (drafting, revision, scoring, evaluation; the gate checks against the ledger and doesn't carry it) and the elaborate stages' reference materials. The first file opens with a line saying the canon is shared and the book's own bibles add to it and never contradict it.
+
+**Read-only.** Storyforge never writes to the canon. The book's own `reference/` bibles hold what is particular to that book, and the stages that rewrite a bible rewrite the book's. Don't symlink the canon into `reference/`: a stage that rewrites that bible would rewrite the shared file for every book.
+
+**Errors.** A path that isn't there, a directory with no `.md` file, a file that is empty or not UTF-8, or a key other than `canon` stops every command that builds a prompt (`ERROR: series.canon: ...`) and is a blocking finding in `validate`, which otherwise prints `Series canon: N file(s), W words, read from outside the project`. Without a `series:` block nothing changes. `project.series_name` and `project.series_position` are the book's metadata and are separate from this block.
 
 ---
 

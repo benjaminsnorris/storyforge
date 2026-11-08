@@ -136,6 +136,17 @@ def main(argv=None):
         except source_mod.SourceError as e:
             source_result['lines'].append(f"Pronouns: the source's can't be read ({e})")
 
+    # A series' shared canon: only for a project with `series.canon`, so
+    # every other project's report and exit code are as before
+    from storyforge import series as series_mod
+    series_result = None
+    try:
+        line = series_mod.summary_line(project_dir)
+        if line:
+            series_result = {'line': line, 'error': ''}
+    except series_mod.SeriesError as e:
+        series_result = {'line': '', 'error': str(e)}
+
     structural_scores = None
     scores_previous = None
     if args.structural:
@@ -165,6 +176,8 @@ def main(argv=None):
         # Only an adaptation's report has the key: --json for every other
         # project is unchanged
         combined['source'] = source_result
+    if series_result is not None:
+        combined['series'] = series_result
 
     if args.json_output:
         print(json.dumps(combined))
@@ -178,8 +191,9 @@ def main(argv=None):
     canon_ok = not canon_result['errors']
     source_ok = source_result is None or not any(
         f['severity'] == 'blocking' for f in source_result['findings'])
+    series_ok = series_result is None or not series_result['error']
     sys.exit(0 if structural_ok and schema_ok and illustrations_ok and canon_ok
-             and source_ok else 1)
+             and source_ok and series_ok else 1)
 
 
 def _status_logger(args):
@@ -276,6 +290,15 @@ def _print_human_readable(combined):
         for f in source['findings']:
             where = f' {f["scene_id"]}:' if f['scene_id'] else ''
             print(f'    [{f["severity"]}]{where} {f["message"]}')
+
+    series = combined.get('series')
+    if series is not None:
+        print()
+        print('--- Series canon ---')
+        if series['error']:
+            print(f'  [blocking] {series["error"]}')
+        else:
+            print(f'  {series["line"]}')
 
     if flashbacks:
         share = sum(f['share'] for f in flashbacks)

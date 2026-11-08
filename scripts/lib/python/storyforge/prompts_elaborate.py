@@ -92,7 +92,7 @@ def _existing_refs(project_dir: str, shared: bool = False) -> str:
 
     With `shared`, the prompt goes with the shared system context, so the
     docs that context carries (the bibles, the voice guide, the source
-    bibles) are left out and the rest are kept. A doc still holding its
+    bibles, the series canon) are left out and the rest are kept. A doc still holding its
     template text is skipped (F-130)."""
     sections = []
     for name, label, in_shared in _REFERENCE_DOCS:
@@ -108,6 +108,11 @@ def _existing_refs(project_dir: str, shared: bool = False) -> str:
     # An adaptation's source bibles (#477); none without a `source:` block
     from .prompts_source import bibles_text
     for label, content in bibles_text(project_dir):
+        sections.append(f"### {label}\n\n{content}")
+
+    # A series' shared canon (`series.canon`); the shared context carries it too
+    from .series import canon_text
+    for label, content in canon_text(project_dir):
         sections.append(f"### {label}\n\n{content}")
 
     return '\n\n'.join(sections) if sections else '(no reference materials yet)'
