@@ -339,20 +339,38 @@ def test_reintroductions_the_gate_listed_are_flagged_not_unflagged(monkeypatch, 
     assert 'reintroduced' not in gates    # reported, not gated (2026-11-01)
     assert (gates['reintroduced_unflagged'].op, gates['reintroduced_unflagged'].threshold) == (
         '<=', suite.MAX_UNFLAGGED)
-    assert gates['reintroduced_unflagged'].passed     # 2 is within the gate
+    assert gates['reintroduced_unflagged'].passed == (2 <= suite.MAX_UNFLAGGED)
 
 
-def test_the_unflagged_ceiling_is_the_accepted_four():
-    """#488: v1.127.0's recording passed 3, accepted 2026-11-02; #513:
-    v1.156.0's passes 4, accepted 2026-11-06 after a checker A/B showed the
-    wording change didn't cause it. Raising the ceiling again is a visible
-    edit here."""
+def test_the_unflagged_ceiling_fails_on_two_misses():
+    """#488: 3 (2026-11-02); #513: 4 (2026-11-06). #614 (2026-11-07)
+    excluded the cases whose pre-pass book already carries the error,
+    leaving 0 unflagged; the ceiling is 1, so two real misses fail.
+    Raising it again is a visible edit here."""
     import importlib
     suite = importlib.import_module('suites.e8_revision_safety')
-    assert suite.MAX_UNFLAGGED == 4
+    assert suite.MAX_UNFLAGGED == 1
     from harness import Gate
-    assert Gate('reintroduced_unflagged', 4, '<=', suite.MAX_UNFLAGGED).passed
-    assert not Gate('reintroduced_unflagged', 5, '<=', suite.MAX_UNFLAGGED).passed
+    assert Gate('reintroduced_unflagged', 1, '<=', suite.MAX_UNFLAGGED).passed
+    assert not Gate('reintroduced_unflagged', 2, '<=', suite.MAX_UNFLAGGED).passed
+
+
+def test_every_excluded_case_is_a_real_case():
+    """The ceiling is calibrated with these exclusions: a renamed or
+    relabelled case would silently stop being excluded."""
+    from e1 import load_cases
+    ids = {c['id'] for c in load_cases()}
+    assert set(e8.EXCLUDED_CASES) <= ids, set(e8.EXCLUDED_CASES) - ids
+
+
+def test_cases_whose_pre_pass_book_carries_the_error_are_excluded():
+    """#614: governor-016, thornwall-026 and thornwall-030 write what the
+    pre-pass book already says; they are excluded with why, never replayed."""
+    for case_id in ('governor-016', 'thornwall-026', 'thornwall-030'):
+        assert case_id in e8.EXCLUDED_CASES
+        assert 'pre-pass' in e8.EXCLUDED_CASES[case_id]
+        with pytest.raises(LookupError, match='pre-pass'):
+            e8.prepare({'id': case_id, 'repo': 'nowhere'}, '/nowhere')
 
 
 def test_a_naturalness_fix_that_rewrites_nothing_is_pass_halted_with_why(monkeypatch):

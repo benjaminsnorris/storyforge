@@ -83,6 +83,14 @@ def parse_args(argv):
                              'No API calls, no cycle, nothing written. Every scoring '
                              'cycle (full or --deterministic) also writes it, to '
                              'readability.csv. Prose projects only.')
+    parser.add_argument('--register', action='store_true',
+                        help='Print the register check for the scenes in scope (the '
+                             'book\'s with no filter): a source translation\'s archaic '
+                             'words, grammar and idiom carried into the prose, and runs '
+                             'of dialogue copied from the source scene a scene adapts '
+                             '(#615). Skips what the voice guide\'s "Register exemptions" '
+                             'allow. No API calls, no cycle, nothing written. Prose '
+                             'projects only.')
     parser.add_argument('--parallel', type=int,
                         default=int(os.environ.get('STORYFORGE_SCORE_PARALLEL', '6')),
                         help='Parallel workers for direct mode (default: 6)')
@@ -573,6 +581,16 @@ def main(argv=None):
         _run_complete_cycle(args)
         return
 
+    # The free modes refuse what they'd drop before anything else is
+    # dispatched: an elaboration flag or --source-fidelity used to win
+    # silently, and spend (#615's review, R-9)
+    if args.readability:
+        _refuse_clash(args, '--readability', 'prints the reading level only',
+                      _READABILITY_EXCLUSIVE)
+    if args.register:
+        _refuse_clash(args, '--register', 'prints the register check only',
+                      _REGISTER_EXCLUSIVE)
+
     # Elaboration entry points short-circuit the prose-scoring flow.
     # (--semantic is a modifier on --compare, not a standalone trigger.)
     if (args.level is not None or args.all_levels or args.compare or args.drift
@@ -585,6 +603,9 @@ def main(argv=None):
         return
     if args.readability:
         _run_readability_only(args)
+        return
+    if args.register:
+        _run_register_only(args)
         return
 
     from datetime import datetime
@@ -1084,10 +1105,59 @@ def _write_readability(scene_ids, project_dir, cycle_dir, target):
     log(f'Reading level: {path}')
 
 
-#: what `--readability` can't be combined with: each would be dropped
-_READABILITY_EXCLUSIVE = ('source_fidelity', 'deterministic', 'principles', 'direct',
-                          'deep', 'diagnosis_only', 'no_apply', 'interactive',
-                          'complete_cycle')
+#: the elaboration flags `main` dispatches before the prose modes
+_ELABORATION_FLAGS = ('level', 'all_levels', 'compare', 'drift', 'boundary',
+                      'all_boundaries', 'scope', 'semantic', 'bible_consistency',
+                      'story_power', 'text_fidelity')
+
+#: what `--readability` can't be combined with: each would be dropped (or,
+#: for an elaboration flag or --source-fidelity, run instead)
+_READABILITY_EXCLUSIVE = ('source_fidelity', 'register', 'deterministic', 'principles',
+                          'direct', 'deep', 'diagnosis_only', 'no_apply', 'interactive',
+                          'complete_cycle') + _ELABORATION_FLAGS
+
+#: what `--register` can't be combined with, likewise
+_REGISTER_EXCLUSIVE = ('source_fidelity', 'readability', 'deterministic', 'principles',
+                       'direct', 'deep', 'diagnosis_only', 'no_apply', 'interactive',
+                       'complete_cycle') + _ELABORATION_FLAGS
+
+
+def _given(args, name):
+    """Whether a flag was given: by identity with None and False, since
+    `--level 0` is a level."""
+    value = getattr(args, name, None)
+    return value is not None and value is not False
+
+
+def _refuse_clash(args, flag, what, exclusive):
+    """ERROR, exit 1, when `args` holds a flag `flag` can't be combined with."""
+    clash = [f'--{name.replace("_", "-")}' for name in exclusive if _given(args, name)]
+    if clash:
+        log(f"ERROR: {flag} {what}; it can't be combined with {', '.join(clash)}")
+        sys.exit(1)
+
+
+def _run_register_only(args):
+    """`score --register`: print the register check's findings for the
+    scenes in scope (--scenes/--act/--from-seq). No API call, no cycle,
+    nothing written. Findings exit 0 (they are for the author to judge); a
+    scene that can't be read is an ERROR, exit 1, after the report."""
+    from storyforge import register
+    _refuse_clash(args, '--register', 'prints the register check only', _REGISTER_EXCLUSIVE)
+    project_dir = detect_project_root()
+    metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    filter_mode, filter_value, _ = _resolve_filter(args)
+    ids = apply_scene_filter(metadata_csv, build_scene_list(metadata_csv),
+                             filter_mode, filter_value)
+    if not ids:
+        log('ERROR: No scene in scope.')
+        sys.exit(1)
+    checked = register.check_scenes(ids, project_dir)
+    for line in register.report_lines(checked):
+        print(line)
+    if checked.unreadable:
+        log('ERROR: scene file(s) above can\'t be read; fix them and run again.')
+        sys.exit(1)
 
 
 def _run_readability_only(args):
@@ -1096,12 +1166,8 @@ def _run_readability_only(args):
     with no filter). No API call, no cycle, nothing written. A scene that
     can't be read is an ERROR, exit 1, after the table."""
     from storyforge import readability
-    clash = [f'--{name.replace("_", "-")}' for name in _READABILITY_EXCLUSIVE
-             if getattr(args, name, None)]
-    if clash:
-        log(f'ERROR: --readability prints the reading level only; '
-            f'it can\'t be combined with {", ".join(clash)}')
-        sys.exit(1)
+    _refuse_clash(args, '--readability', 'prints the reading level only',
+                  _READABILITY_EXCLUSIVE)
     project_dir = detect_project_root()
     target = _reading_target_or_exit(project_dir)
     metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
@@ -1928,7 +1994,8 @@ MIXED = 'changed-within-cycle'
 
 #: What `--complete-cycle` can't be combined with: each would be dropped.
 #: (Checked by identity with None and False: `--level 0` is a level.)
-_COMPLETE_EXCLUSIVE = ('source_fidelity', 'readability', 'deterministic', 'principles',
+_COMPLETE_EXCLUSIVE = ('source_fidelity', 'readability', 'register', 'deterministic',
+                       'principles',
                        'diagnosis_only', 'scenes', 'act', 'from_seq', 'direct', 'deep',
                        'interactive', 'no_apply', 'level', 'all_levels', 'compare', 'drift',
                        'boundary', 'all_boundaries', 'scope', 'semantic', 'bible_consistency',

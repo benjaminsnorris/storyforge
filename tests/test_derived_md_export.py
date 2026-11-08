@@ -203,9 +203,9 @@ def test_hook_path_filter_matches_new_paths():
     """The sync hook's path regex should fire on spine.csv / architecture.csv
     edits and on the derived MDs."""
     import re
-    from storyforge.cmd_sync import HOOK_PATH_FILTER
+    from storyforge.cmd_sync import HOOK_STAGED_FILTER
 
-    rx = re.compile(HOOK_PATH_FILTER, re.MULTILINE)
+    rx = re.compile(HOOK_STAGED_FILTER)
     for good in (
         'reference/spine.csv',
         'reference/architecture.csv',

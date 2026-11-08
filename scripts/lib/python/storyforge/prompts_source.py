@@ -32,6 +32,23 @@ _BRIEF_FIELDS = ('goal', 'conflict', 'outcome', 'crisis', 'decision',
                  'key_actions', 'key_dialogue', 'knowledge_out', 'emotions', 'subtext')
 
 
+#: how to re-voice a translation's lines (#615): an adaptation's drafting
+#: prompt carries it for a scene with a source passage (`drafting_section`),
+#: its revision prompt always (`register.revision_section`), and the voice
+#: stage's prompt quotes it
+REVOICE_RULE = (
+    'Re-voice the source in this novel\'s grammar, not the translator\'s. A banned '
+    'word list catches "thee" and "quoth"; it doesn\'t catch the translation\'s '
+    'syntax and idiom, and those must go too: no "bade him go", "befell", "a '
+    'twelvemonth", "by my troth", "I\'ll not" or "I\'d not", "fail of" for "fail in", '
+    '"while my lord is from home", "him that keeps it", "it was he", no fronted verbs '
+    '("Then came hooves on the flags") and no inversions ("But that you\'re Gawain, I '
+    'doubt"). Where the source says a thing twice in a doublet, say it once. Keep a '
+    'period noun only where the scene makes its meaning plain; otherwise use the plain '
+    'word. Older diction is allowed only where the voice guide\'s "Register exemptions" '
+    'list allows it (an oath, quoted liturgy, a cry, a frame narrator\'s turn).')
+
+
 def _cfg(project_dir: str) -> source.SourceConfig | None:
     """The source block, or None; raises SourceError when a source isn't
     imported (a prompt would promise a source and show none of it)."""
@@ -496,7 +513,8 @@ def drafting_section(project_dir: str, scene_id: str) -> str:
                  'from the source, they win. Everywhere else the source wins over memory '
                  'and over any earlier scene\'s retelling: its events, their order, who '
                  'does what, and the substance of every speech. Never copy the '
-                 'translation\'s wording; write it in this novel\'s voice.')
+                 'translation\'s wording; write it in this novel\'s voice.'
+                 + ' ' + REVOICE_RULE)
     cat = source.catalogue(project_dir, cfg)
     budget = DRAFT_SOURCE_MAX_WORDS
     missing, left_out = [], []

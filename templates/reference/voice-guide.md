@@ -179,3 +179,9 @@ Words, phrases, or constructions that recur deliberately throughout the novel. T
 | | | |
 | | | |
 | | | |
+
+---
+
+## Register exemptions
+
+For a retelling of an older text: the older diction this book deliberately allows, so `storyforge score --register` (and the revision prompt's register list) skips it. One bullet each, the exact phrase in double quotes with the reason after it (an oath, quoted liturgy, a hunting cry), or `scene:` and a scene id for a scene told wholly in an older voice, such as a frame narrator's. Keep it short; everything else is re-voiced in modern grammar. Leave the section empty if the book allows none.

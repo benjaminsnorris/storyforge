@@ -98,6 +98,20 @@ EXCLUDED_CASES = {
                          'fix (37bc78e), which a replay of the pass cannot show'),
     'thornwall-028': ('the introducing commit wrote both sides (the six years and the nine), so '
                       'the pre-pass project has no established fact for the replay to contradict'),
+    # #614's audit (2026-11-07): the pre-pass book already carries the
+    # case's error elsewhere, so a replay that writes it agrees with the
+    # book it runs on and the gate is right to pass it. Re-check these if a
+    # case's introducing commit or the corpus is relabelled.
+    'governor-016': ('the pre-pass book already has the stone-cutters on Block Fourteen: '
+                     'terrace-row ("The stone-cutters on Block Fourteen had stopped for their '
+                     'afternoon break"), the continuity tracker, and the scene\'s own brief'),
+    'thornwall-026': ('the pre-pass book already has the cooperative Greenhollow Warden: '
+                      'thessan-at-verath ("his signature on the transfer papers steady") and '
+                      'thessan-rides ("had signed every form") say what the replay is judged '
+                      'for writing'),
+    'thornwall-030': ('the pre-pass ivra-seals-archive already says "declining allotments over '
+                      'nine years"; the introducing commit (48a7d28) only changed a colon to a '
+                      'period, so the error predates the pass'),
 }
 
 # storyforge-migrate-elaborate's scenes.csv columns

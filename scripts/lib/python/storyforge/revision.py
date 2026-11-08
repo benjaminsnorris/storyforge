@@ -635,6 +635,15 @@ def build_revision_prompt(
     if decisions_section:
         decisions_section = '\n' + decisions_section
 
+    # An adaptation's register (#615): the re-voicing rule and the register
+    # check's findings in these scenes; nothing without a `source:` block
+    from storyforge.register import revision_section
+    register_section = revision_section(
+        project_dir, [os.path.splitext(os.path.basename(p))[0] for p in existing_paths],
+        warn=lambda msg: print(msg, file=sys.stderr))
+    if register_section:
+        register_section = '\n' + register_section
+
     # New scene creation instructions
     new_scenes_section = ''
     if new_scene_ids:
@@ -734,6 +743,7 @@ def build_revision_prompt(
         f'## Scope\n\nThis pass covers {file_count} scene file(s):\n\n{file_block}',
         no_voice_section,
         decisions_section,
+        register_section,
         config_section,
         intent_section,
         calendar_section,
@@ -1101,6 +1111,7 @@ def main():
         # a reference doc that exists but can't be read: an ERROR line, not
         # a traceback, for the caller to show (#616's review, SF-3)
         from storyforge.common import ReferenceDocError
+        from storyforge.source import SourceError
         if len(sys.argv) < 6:
             print('Usage: build-prompt <pass_name> <purpose> <scope> <project_dir> [options]',
                   file=sys.stderr)
@@ -1143,7 +1154,7 @@ def main():
                 system_context=system_context,
             )
             print(prompt)
-        except (FileNotFoundError, ValueError, ReferenceDocError) as e:
+        except (FileNotFoundError, ValueError, ReferenceDocError, SourceError) as e:
             print(f'ERROR: {e}', file=sys.stderr)
             sys.exit(1)
 

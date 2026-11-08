@@ -74,6 +74,15 @@ def _is_git_repo(project_dir):
     return _git(project_dir, 'rev-parse', '--git-dir').returncode == 0
 
 
+def _head_spec(path_rel):
+    """`HEAD:./<path>`: the path in HEAD relative to the project folder.
+
+    A bare `HEAD:<path>` is relative to the repo root, so for a project in a
+    subfolder (`projects/<book>/`) every file looked absent from HEAD (#612).
+    """
+    return f'HEAD:./{path_rel}'
+
+
 def _is_dirty(project_dir, path_rel):
     """Return True if `path_rel` differs from HEAD (or is untracked).
 
@@ -85,7 +94,7 @@ def _is_dirty(project_dir, path_rel):
     """
     abs_path = os.path.join(project_dir, path_rel)
     # File absent from HEAD → dirty iff it exists on disk (new file).
-    in_head = _git(project_dir, 'cat-file', '-e', f'HEAD:{path_rel}')
+    in_head = _git(project_dir, 'cat-file', '-e', _head_spec(path_rel))
     if in_head.returncode != 0:
         return os.path.isfile(abs_path)
     diff = _git(project_dir, 'diff', '--quiet', 'HEAD', '--', path_rel)
@@ -99,7 +108,7 @@ def _is_dirty(project_dir, path_rel):
 
 def _file_in_head(project_dir, path_rel):
     """True if the path exists in HEAD (i.e. is tracked + committed)."""
-    return _git(project_dir, 'cat-file', '-e', f'HEAD:{path_rel}').returncode == 0
+    return _git(project_dir, 'cat-file', '-e', _head_spec(path_rel)).returncode == 0
 
 
 # ============================================================================
@@ -370,28 +379,31 @@ SYNC_TRACKED_PATHS = [
     'reference/outline.md',
 ]
 
-# Regex the hook uses to decide whether the current commit touches any
-# sync-tracked path. Defined here so it can be unit-tested in Python.
-HOOK_PATH_FILTER = (
-    r'^reference/(scenes|scene-intent|scene-briefs|spine|architecture)\.csv$'
-    r'|^reference/(scenes-review|spine|architecture|outline)\.md$'
+# Regex for the sync-tracked paths as staged, relative to the repo root:
+# group 1 is the project folder ('' for a project at the root, else ending
+# in '/'). The hook runs sync for each such folder holding storyforge.yaml.
+HOOK_STAGED_FILTER = (
+    r'^(.*/)?(reference/(scenes|scene-intent|scene-briefs|spine|architecture)\.csv'
+    r'|reference/(scenes-review|spine|architecture|outline)\.md)$'
 )
 
-HOOK_SCRIPT = f'''#!/usr/bin/env bash
+HOOK_SCRIPT = f"""#!/usr/bin/env bash
 # Installed by `storyforge sync --install-hook`. Keeps the scene CSVs
 # (scenes.csv, scene-intent.csv, scene-briefs.csv), the structural-anchor
 # CSVs (spine.csv, architecture.csv), and their derived markdown
-# renderings (scenes-review.md, spine.md, architecture.md) in sync
-# before each commit.
+# renderings (scenes-review.md, spine.md, architecture.md, outline.md) in
+# sync before each commit.
 #
-# Behavior:
-#   1. Skip unless the staged change touches a sync-tracked path.
-#   2. Refuse the commit if any sync-tracked file has *unstaged* changes,
-#      so sync can't accidentally bundle unrelated work into the commit.
-#   3. Run `storyforge sync`. Refuse the commit if sync writes a conflict
-#      report or otherwise exits non-zero.
-#   4. Stage every sync-tracked file that exists so anything sync produced
-#      lands in the commit.
+# One hook serves every Storyforge project in the repository: a project at
+# the repo root and any number in subfolders (projects/<book>/). For each
+# project folder (one holding storyforge.yaml) whose sync-tracked files the
+# commit stages:
+#   1. Refuse the commit if any of its sync-tracked files has *unstaged*
+#      changes, so sync can't bundle unrelated work into the commit.
+#   2. Run `storyforge sync` in that folder. Refuse the commit if sync
+#      writes a conflict report or otherwise exits non-zero.
+#   3. Stage every sync-tracked file there so what sync produced lands in
+#      the commit.
 #
 # Bypass for one-off cases: STORYFORGE_SYNC_SKIP=1 git commit ...
 set -e
@@ -400,28 +412,49 @@ if [ "${{STORYFORGE_SYNC_SKIP:-}}" = "1" ]; then
     exit 0
 fi
 
-# Step 1: only run if the staged change touches a sync-tracked path.
-if ! git diff --cached --name-only \\
-        | grep -E '{HOOK_PATH_FILTER}' \\
-        >/dev/null 2>&1; then
-    exit 0
-fi
+START=$(pwd)
+ROOT=$(git rev-parse --show-toplevel)
+# Pin git (here and in the `storyforge sync` this hook starts) to the real
+# work tree and index. In a linked worktree git runs hooks with GIT_DIR set,
+# which makes the current folder the top of the work tree: after `cd` into
+# projects/<book>/, every path would be read and staged at the repo root.
+export GIT_WORK_TREE="$ROOT"
+case "${{GIT_INDEX_FILE:-}}" in
+    ''|/*) ;;
+    *) export GIT_INDEX_FILE="$START/$GIT_INDEX_FILE" ;;
+esac
+cd "$ROOT"
 
-# Step 2: refuse if any sync-tracked file has unstaged working-tree changes.
-# (Otherwise sync would mix those edits into the commit, or be blocked by
-# a spurious "both dirty" conflict.)
-UNSTAGED=$(git diff --name-only -- {' '.join(SYNC_TRACKED_PATHS)} || true)
-if [ -n "$UNSTAGED" ]; then
-    echo "" >&2
-    echo "ERROR: storyforge sync refuses to run with unstaged scene changes:" >&2
-    echo "$UNSTAGED" | sed 's/^/  /' >&2
-    echo "" >&2
-    echo "Stash, stage, or revert those changes, then commit again." >&2
+# Every staged path. -z stops git quoting paths that hold non-ASCII letters,
+# quotes or backslashes. A failure here must refuse the commit, not read as
+# "nothing staged".
+if ! STAGED=$(git diff --cached --name-only -z | tr '\\0' '\\n'; exit "${{PIPESTATUS[0]}}"); then
+    echo "ERROR: storyforge sync hook could not list the staged files; commit refused." >&2
     echo "(Set STORYFORGE_SYNC_SKIP=1 to bypass.)" >&2
     exit 1
 fi
 
-# Step 3: find the storyforge runner. Tries (1) PATH, (2) $STORYFORGE_HOME
+# The project folders whose sync-tracked files the commit stages, each as
+# "P:<dir>" (<dir> is '' for the repo root, else ends in '/'), kept only
+# when the folder holds storyforge.yaml.
+PROJECTS=""
+while IFS= read -r ENTRY; do
+    [ -n "$ENTRY" ] || continue
+    DIR=${{ENTRY#P:}}
+    if [ -f "$ROOT/${{DIR}}storyforge.yaml" ]; then
+        PROJECTS="$PROJECTS$ENTRY
+"
+    else
+        echo "storyforge sync hook: skipped ${{DIR:-./}} (no storyforge.yaml there)" >&2
+    fi
+done <<EOF_STAGED
+$(printf '%s\\n' "$STAGED" | sed -nE 's#{HOOK_STAGED_FILTER}#P:\\1#p' | sort -u)
+EOF_STAGED
+if [ -z "$PROJECTS" ]; then
+    exit 0
+fi
+
+# Find the storyforge runner. Tries (1) PATH, (2) $STORYFORGE_HOME
 # override, (3) the absolute path baked in at install time. Fails closed
 # if none resolve — silent exit-0 here would let desync ship.
 DEFAULT_RUNNER='__STORYFORGE_RUNNER_PATH__'
@@ -440,22 +473,51 @@ else
     exit 1
 fi
 
-if ! "$SF" sync; then
-    echo "" >&2
-    echo "storyforge sync refused the commit." >&2
-    echo "See working/sync-conflict.md (or the error above) and resolve, " >&2
-    echo "then 'git add' and retry." >&2
-    exit 1
-fi
+while IFS= read -r ENTRY; do
+    [ -n "$ENTRY" ] || continue
+    DIR=${{ENTRY#P:}}
+    LABEL=${{DIR:-./}}
+    cd "$ROOT/$DIR"
 
-# Step 4: stage whatever sync produced. No `|| true` — a failure here means
-# the commit would land with stale files and we want to know about it.
-for f in {' '.join(SYNC_TRACKED_PATHS)}; do
-    if [ -f "$f" ]; then
-        git add "$f"
+    # Step 1: refuse if a sync-tracked file has unstaged working-tree changes.
+    if ! UNSTAGED=$(git diff --name-only --relative -- {' '.join(SYNC_TRACKED_PATHS)}); then
+        echo "ERROR: storyforge sync hook could not check $LABEL for unstaged changes; commit refused." >&2
+        exit 1
     fi
-done
-'''
+    if [ -n "$UNSTAGED" ]; then
+        echo "" >&2
+        echo "ERROR: storyforge sync refuses to run with unstaged scene changes in $LABEL:" >&2
+        echo "$UNSTAGED" | sed 's/^/  /' >&2
+        echo "" >&2
+        echo "Stash, stage, or revert those changes, then commit again." >&2
+        echo "(Set STORYFORGE_SYNC_SKIP=1 to bypass.)" >&2
+        exit 1
+    fi
+
+    # Step 2: sync this project.
+    if ! "$SF" sync; then
+        echo "" >&2
+        echo "storyforge sync refused the commit (project $LABEL)." >&2
+        echo "See ${{DIR}}working/sync-conflict.md (or the error above) and resolve, " >&2
+        echo "then 'git add' and retry." >&2
+        exit 1
+    fi
+
+    # Step 3: stage whatever sync produced. A failure refuses the commit:
+    # it would land with stale files.
+    for f in {' '.join(SYNC_TRACKED_PATHS)}; do
+        if [ -f "$f" ]; then
+            if ! git add "$f"; then
+                echo "ERROR: storyforge sync hook could not stage ${{DIR}}$f; commit refused." >&2
+                exit 1
+            fi
+        fi
+    done
+    cd "$ROOT"
+done <<EOF_PROJECTS
+$PROJECTS
+EOF_PROJECTS
+"""
 
 
 def _default_runner_path():
@@ -473,17 +535,34 @@ def _default_runner_path():
     return candidate if os.path.isfile(candidate) else ''
 
 
-def install_hook(project_dir):
-    """Write the pre-commit hook into the project's .git/hooks/. Returns path.
+def _hooks_dir(project_dir):
+    """The repository's hooks folder, as git resolves it.
 
+    `git rev-parse --git-path hooks` handles a project in a subfolder, a
+    worktree or submodule (where `.git` is a file), and `core.hooksPath`.
+    Exits with an error outside a git repository.
+    """
+    r = _git(project_dir, 'rev-parse', '--git-path', 'hooks')
+    if r.returncode != 0:
+        log(f'ERROR: {project_dir} is not inside a git repository '
+            f'({r.stderr.strip() or "git rev-parse failed"})')
+        sys.exit(1)
+    path = r.stdout.strip()
+    return path if os.path.isabs(path) else os.path.normpath(os.path.join(project_dir, path))
+
+
+def install_hook(project_dir):
+    """Write the pre-commit hook into the repository's hooks folder. Returns
+    its path.
+
+    One hook serves every Storyforge project in the repository (see
+    `HOOK_SCRIPT`), so installing from any of them installs it for all.
     The current plugin's runner path is baked into the hook so that the
     installed hook keeps working without requiring `storyforge` on PATH or
     any env-var setup. Re-run --install-hook after moving the plugin.
     """
-    hooks_dir = os.path.join(project_dir, '.git', 'hooks')
-    if not os.path.isdir(hooks_dir):
-        log(f'ERROR: {hooks_dir} not found — is this a git repository?')
-        sys.exit(1)
+    hooks_dir = _hooks_dir(project_dir)
+    os.makedirs(hooks_dir, exist_ok=True)
     hook_path = os.path.join(hooks_dir, HOOK_FILENAME)
     if os.path.isfile(hook_path):
         with open(hook_path, encoding='utf-8') as f:
@@ -502,6 +581,7 @@ def install_hook(project_dir):
         f.write(hook_content)
     os.chmod(hook_path, 0o755)
     log(f'Installed pre-commit hook at {hook_path}')
+    log('  It syncs each Storyforge project in this repository whose sync-tracked files a commit stages.')
     if runner:
         log(f'  Hook will invoke: {runner}')
     return hook_path

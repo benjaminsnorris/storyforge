@@ -403,9 +403,9 @@ def test_hook_path_filter_matches_expected_paths():
     """Regression: the regex the hook uses to decide whether to fire must
     match every sync-tracked path and reject lookalikes."""
     import re
-    from storyforge.cmd_sync import HOOK_PATH_FILTER
+    from storyforge.cmd_sync import HOOK_STAGED_FILTER
 
-    rx = re.compile(HOOK_PATH_FILTER, re.MULTILINE)
+    rx = re.compile(HOOK_STAGED_FILTER)
     for good in (
         'reference/scenes.csv',
         'reference/scene-intent.csv',
@@ -422,9 +422,23 @@ def test_hook_path_filter_matches_expected_paths():
         'scenes-review.md',                # wrong directory
         'reference/scenes.csv.bak',        # extension boundary
         'reference/scene-briefs.csv.tmp',  # extension boundary
-        'docs/reference/scenes.csv',       # wrong directory prefix
+        'myreference/scenes.csv',          # folder name boundary
     ):
         assert not rx.search(bad), f'hook must not fire for {bad!r}'
+    # group 1 is the project folder the path belongs to
+    assert rx.match('reference/scenes.csv').group(1) is None
+    assert rx.match('projects/b/reference/scenes.csv').group(1) == 'projects/b/'
+    assert rx.match('docs/reference/scenes.csv').group(1) == 'docs/'
+
+
+def test_hook_staged_filter_matches_every_sync_tracked_path():
+    """Every path sync tracks makes the hook run, at the root or nested."""
+    import re
+    from storyforge.cmd_sync import HOOK_STAGED_FILTER, SYNC_TRACKED_PATHS
+    rx = re.compile(HOOK_STAGED_FILTER)
+    for path in SYNC_TRACKED_PATHS:
+        assert rx.match(path), path
+        assert rx.match(f'projects/a b/{path}').group(1) == 'projects/a b/'
 
 
 def test_csv_rels_includes_spine_and_architecture():
