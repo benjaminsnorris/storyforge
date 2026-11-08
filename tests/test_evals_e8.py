@@ -339,21 +339,28 @@ def test_reintroductions_the_gate_listed_are_flagged_not_unflagged(monkeypatch, 
     assert 'reintroduced' not in gates    # reported, not gated (2026-11-01)
     assert (gates['reintroduced_unflagged'].op, gates['reintroduced_unflagged'].threshold) == (
         '<=', suite.MAX_UNFLAGGED)
-    assert gates['reintroduced_unflagged'].passed     # 2 is within the gate
+    assert gates['reintroduced_unflagged'].passed == (2 <= suite.MAX_UNFLAGGED)
 
 
-def test_the_unflagged_ceiling_is_two():
-    """#488: v1.127.0's recording passed 3, accepted 2026-11-02; #513:
-    v1.156.0's passes 4, accepted 2026-11-06. #614 (2026-11-07) excluded the
-    cases whose pre-pass book already carries the error, leaving 0
-    unflagged, and set the ceiling to 2. Raising it again is a visible edit
-    here."""
+def test_the_unflagged_ceiling_fails_on_two_misses():
+    """#488: 3 (2026-11-02); #513: 4 (2026-11-06). #614 (2026-11-07)
+    excluded the cases whose pre-pass book already carries the error,
+    leaving 0 unflagged; the ceiling is 1, so two real misses fail.
+    Raising it again is a visible edit here."""
     import importlib
     suite = importlib.import_module('suites.e8_revision_safety')
-    assert suite.MAX_UNFLAGGED == 2
+    assert suite.MAX_UNFLAGGED == 1
     from harness import Gate
-    assert Gate('reintroduced_unflagged', 2, '<=', suite.MAX_UNFLAGGED).passed
-    assert not Gate('reintroduced_unflagged', 3, '<=', suite.MAX_UNFLAGGED).passed
+    assert Gate('reintroduced_unflagged', 1, '<=', suite.MAX_UNFLAGGED).passed
+    assert not Gate('reintroduced_unflagged', 2, '<=', suite.MAX_UNFLAGGED).passed
+
+
+def test_every_excluded_case_is_a_real_case():
+    """The ceiling is calibrated with these exclusions: a renamed or
+    relabelled case would silently stop being excluded."""
+    from e1 import load_cases
+    ids = {c['id'] for c in load_cases()}
+    assert set(e8.EXCLUDED_CASES) <= ids, set(e8.EXCLUDED_CASES) - ids
 
 
 def test_cases_whose_pre_pass_book_carries_the_error_are_excluded():

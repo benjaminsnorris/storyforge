@@ -34,26 +34,15 @@ from e8 import (DATA_FAMILIES, GATE_COUNT_KEYS, PassHalted, family, judge, prepa
 from harness import Gate, Suite, SuiteOutput
 
 MIN_REPLAYED = 15  # below this the rate is too noisy to gate on
-#: A judgement, set at 2 before the calendar re-record's result; that
-#: recording (v1.127.0) passes 3, which Ben accepted (2026-11-02) as
-#: which-cases-reintroduce noise, so 3 was the ceiling (#488). E6's runs
-#: predate the gate, so the unflagged count's spread is unmeasured.
-#: Raised to 4 (Ben, 2026-11-06, #513): v1.156.0's recording passes 4
-#: (governor-016, shared-dark-030, shared-dark-037, thornwall-026). A live
-#: A/B of the checker on those four scenes' requests caught 0 of 12 with the
-#: old calendar wording and 0 of 12 with the new, so the change didn't cause
-#: it: these are checker misses on this run's redrafts (governor-016 is the
-#: known stone-cutters inference miss since #478)
-#: #614 (2026-11-07) read the four checker requests: none is a checker miss.
-#: Each sentence fits the pre-pass book the replay runs on, e.g. its
-#: terrace-row puts the stone-cutters on Block Fourteen too. An audit of
-#: every replayed case against its pre-pass book found three whose error
-#: that book already carries (governor-016, thornwall-026, thornwall-030);
-#: they are in `e8.EXCLUDED_CASES` with why. Without them the current
-#: recording counts 0 unflagged, so the ceiling is 2 (Ben, 2026-11-07): a
-#: margin for which-cases-reintroduce noise that still fails on two real
-#: misses, which 4 would not have.
-MAX_UNFLAGGED = 2
+#: The gate passes while `reintroduced_unflagged <= MAX_UNFLAGGED`.
+#: History (details in the rethink status doc): 3 from #488 (2026-11-02);
+#: 4 from #513 (2026-11-06), when four reintroductions were read as checker
+#: misses. #614 (2026-11-07) found they weren't: each fits the pre-pass book
+#: the replay runs on. Its audit excluded the three cases whose pre-pass book
+#: already carries the error (`e8.EXCLUDED_CASES`), leaving 0 unflagged.
+#: Now 1 (Ben, 2026-11-07): one miss of margin for which-cases-reintroduce
+#: noise; two real misses fail the gate.
+MAX_UNFLAGGED = 1
 
 
 def run(ctx):
