@@ -187,7 +187,8 @@ def _dispatch(module) -> None:
     A ``ledger.LedgerError`` (knowledge.csv or physical-states.csv still on
     disk, or a ledger with a duplicate or blank id, a bad header or a short
     row) exits 1 with its message rather than a traceback, as does a
-    ``source.SourceError`` (a `source:` block or name map that can't be used),
+    ``source.SourceError`` (a `source:` block or name map that can't be used,
+    or a `series:` block or canon file, `series.SeriesError`),
     or a ``costs.ThresholdError`` (`STORYFORGE_COST_THRESHOLD` isn't a number;
     the commands that check the threshold stop on it up front, this catches
     the rest), or a ``common.ReferenceDocError`` (a reference doc a prompt

@@ -1338,7 +1338,8 @@ def build_shared_context(project_dir: str, model: str = '') -> list[dict]:
 
     Two-tier structure:
     - Tier 1 (1h TTL): Plugin-level references (craft engine, rubrics, AI-tell words)
-    - Tier 2 (5m TTL): Project-level references (bibles, voice guide, registries)
+    - Tier 2 (5m TTL): Project-level references (bibles, voice guide, registries,
+      an adaptation's source bibles, a series' shared canon)
 
     Results are cached in-process so repeated calls don't re-read files.
 

@@ -296,13 +296,19 @@ series:
     - ../../homer/series-bible/timeline.md
 ```
 
-`canon:` is a list of paths, or one path on its line, relative to the project (or absolute, or `~/...`). A directory means its `.md` files in name order; list the files instead when the directory also holds notes or open questions that aren't canon. A file named twice is read once.
+`canon:` is a block list of paths, or one path on its line, relative to the project (or absolute, or `~/...`). A directory means the files directly in it whose names end in `.md` (any case), sorted by name; list the files instead when the directory also holds notes or open questions that aren't canon. A file named twice is read once.
 
-**What uses it.** Every prompt that carries the project's bibles carries the canon too, after them, each file labelled `Series Canon (<path>)`: the shared system context (drafting, revision, scoring, evaluation; the gate checks against the ledger and doesn't carry it) and the elaborate stages' reference materials. The first file opens with a line saying the canon is shared and the book's own bibles add to it and never contradict it.
+**What reads it.** Each file is labelled `Series Canon (<path>)`, and the first opens with a line saying the canon is shared and the book's own bibles add to it and never contradict it:
+- the shared system context, after the book's bibles and any source bibles: every direct-API run that sends it (drafting, revision, scoring, evaluation, elaborate, extract, enrich, scenes-setup, timeline);
+- the elaborate stages' reference materials when no system context carries it;
+- the drafting prompt when no system context does (`--interactive` and `--dry-run`): inline in API mode, by path in the list of files to read otherwise;
+- the gate's continuity checker, beside the book's bibles (each file as `series-canon-<file name>`), so a scene that contradicts the canon is a finding.
+
+Hone, illustrate and the graphic-novel commands don't read it.
 
 **Read-only.** Storyforge never writes to the canon. The book's own `reference/` bibles hold what is particular to that book, and the stages that rewrite a bible rewrite the book's. Don't symlink the canon into `reference/`: a stage that rewrites that bible would rewrite the shared file for every book.
 
-**Errors.** A path that isn't there, a directory with no `.md` file, a file that is empty or not UTF-8, or a key other than `canon` stops every command that builds a prompt (`ERROR: series.canon: ...`) and is a blocking finding in `validate`, which otherwise prints `Series canon: N file(s), W words, read from outside the project`. Without a `series:` block nothing changes. `project.series_name` and `project.series_position` are the book's metadata and are separate from this block.
+**Errors.** A canon that can't be used is never skipped. These are errors: a `series:` block that names no canon; a value that isn't a path (`~`, `null`, a flow list like `[a.md, b.md]`); `series:` given twice, indented under another block, or `canon:` at the top level; a key other than `canon`; a path that isn't there; a directory that can't be listed or holds no `.md` file; a file that is empty or not UTF-8. `write`, `revise`, `score`, `evaluate`, `elaborate` and `extract` check the canon first, before a forecast, a branch or a call, and stop with `ERROR: storyforge.yaml: ...` (the block) or `ERROR: series.canon: ...` (a path or file). `validate` makes it a blocking finding, and otherwise prints `Series canon: N file(s), W words, read in place and never written` and the files. Without a `series:` block nothing changes. `project.series_name` and `project.series_position` are the book's metadata and are separate from this block.
 
 ---
 
