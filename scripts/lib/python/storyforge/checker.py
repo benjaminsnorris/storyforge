@@ -189,6 +189,8 @@ class Finding:
     def message(self) -> str:
         what = (f'contradicts {self.source}'
                 if self.kind == 'contradiction' else 'breaks the brief')
+        if self.code == 'BLK':   # blocking.BLOCKING_CODE: the scene against itself (#626)
+            what = "breaks the scene's own blocking"
         ref = f' [{self.fact_id}]' if self.fact_id else ''
         return f'{self.code} {what}{ref}: "{self.scene_quote}" — {self.explanation}'
 

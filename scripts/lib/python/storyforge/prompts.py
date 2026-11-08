@@ -1087,6 +1087,9 @@ def _build_full_steps(scene_id: str, scene_title: str,
         lines.append('- Advance MICE threads as appropriate per the scene '
                      'outline')
         lines.append("- Maintain consistency with the previous scene's ending")
+        lines.append('- Keep the blocking straight within the scene: what each '
+                     'hand holds, left and right, sitting or standing, what is '
+                     "worn. A full hand can't do anything else until it lets go")
         lines.append('')
         lines.append('Write ONLY the scene prose. Do not include any YAML '
                      'frontmatter or metadata.')
@@ -1157,6 +1160,9 @@ def _build_full_steps(scene_id: str, scene_title: str,
         lines.append('- Advance MICE threads as appropriate per the scene '
                      'outline')
         lines.append("- Maintain consistency with the previous scene's ending")
+        lines.append('- Keep the blocking straight within the scene: what each '
+                     'hand holds, left and right, sitting or standing, what is '
+                     "worn. A full hand can't do anything else until it lets go")
         lines.append('')
         lines.append(f'Save the scene to: scenes/{scene_id}.md')
         lines.append('')
@@ -2187,6 +2193,7 @@ Do NOT follow it with a reflection, a thematic echo, or a landscape-as-metaphor 
 - Do NOT add characters not listed in on_stage
 - Do NOT resolve threads not listed in mice_threads for this scene
 - Acknowledge all action-gating physical states — characters cannot use injured limbs, don't have lost equipment — unless the brief has them do it
+- Keep the blocking straight within the scene: track what each hand holds, left and right, who is sitting, standing, lying or mounted, and what each person wears. A hand that holds something can't do anything else until it lets go; a hand on one side can't touch the other side without the text reaching across; a closed helm or a shut door limits what can be seen and felt
 
 Output the scene prose only. No metadata, no frontmatter, no commentary."""
 

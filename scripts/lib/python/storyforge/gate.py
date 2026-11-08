@@ -64,6 +64,7 @@ from functools import cached_property
 from typing import NamedTuple
 
 from storyforge import audit, ledger, persistence
+from storyforge.blocking import BLOCKING_CODE, BlockingError, check_blocking
 from storyforge.checker import (GATE_READINGS, CheckError, CheckResult, Dispute, Finding,
                                check_scene)
 from storyforge.extract import ENDS_MOVED, ID_PREFIX, MISQUOTE, NO_QUOTE
@@ -71,6 +72,10 @@ from storyforge.extract import ENDS_MOVED, ID_PREFIX, MISQUOTE, NO_QUOTE
 #: The commands whose prose the gate commits (`ledger.COMMITMENT_WRITERS`
 #: without the extract pass)
 GATE_COMMANDS = tuple(w for w in ledger.COMMITMENT_WRITERS if w != ledger.COMMITMENTS_PASS)
+
+#: Whether the gate reads each scene's blocking too (`blocking.check_blocking`,
+#: #626): one more call per scene, on the checker's model
+GATE_BLOCKING = True
 
 #: Extraction problems that would commit a wrong row: they block the commit
 UNRESOLVED = (MISQUOTE, NO_QUOTE, 'supersedes', 'ends', 'ends again', 'rejected')
@@ -1308,6 +1313,18 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
         error = GateError(str(e))
         error.run = getattr(e, 'run', None)
         raise error from e
+    if GATE_BLOCKING:
+        # The scene against itself (#626): the checker reads it against the
+        # book; this reads its blocking alone. Its findings join the check's,
+        # so they are sorted, reported, fixed and accepted the same way
+        try:
+            blocked = check_blocking(project_dir, scene_id, prose=prose, model=check_model,
+                                     log_file=os.path.join(log_dir,
+                                                           f'gate-blocking-{scene_id}.json'))
+        except BlockingError as e:
+            raise GateError(str(e)) from e
+        result.check.findings.extend(blocked.findings)
+        result.check.unverified.extend(blocked.unverified)
     _classify(result, project_dir, before, already_reported)
     result._ctx = _CommitContext(rows, loaded, old_rows, ended_before, revised_rejection,
                                  names, name_notes, order, prose, command)
@@ -2180,7 +2197,13 @@ def problems_to_fix(result: GateResult) -> list[str]:
                           + [(f, True) for f in result.unverified]):
         tag = (f'UNVERIFIED (the check\'s quotes did not hold up: {f.problem}; edit only '
                f'if the scene clearly contradicts the book) ' if unverified else '')
-        if f.kind == 'contradiction':
+        if f.code == BLOCKING_CODE:
+            # The scene against itself (#626): either side may be the slip
+            against = (f', against "{f.established_quote}" in the same scene'
+                       if f.established_quote and f.established_quote != f.scene_quote else '')
+            lines.append(f'{tag}{f.code} blocking: the scene says "{f.scene_quote}"{against}. '
+                         f'{f.explanation}')
+        elif f.kind == 'contradiction':
             lines.append(f'{tag}{f.code} contradiction: the scene says "{f.scene_quote}", '
                          f'but {f.source} establishes "{f.established_quote}". {f.explanation}')
         else:
@@ -2233,6 +2256,12 @@ def build_fix_prompt(scene_id: str, prose: str, problems: list[str],
                  'again: take the value the problem quotes from the book, or remove the '
                  'detail. Where it changed only part of something (one pronoun of several, '
                  'one mention of a name), change the rest.\n\n' + '\n\n'.join(parts) + '\n')
+    blocking = ''
+    if any(f'{BLOCKING_CODE} blocking:' in p for p in problems):
+        blocking = ('- A BLK blocking problem is the scene against itself, not against the book: '
+                    'change whichever side is the slip, with the fewest words that make the '
+                    'action physically possible (free the hand before it does something else, '
+                    'name the right hand or side, add the movement that was skipped).\n')
     return f"""A continuity check found these problems in scene {scene_id}. Fix each with the smallest edit to the scene's prose that resolves it.
 
 ## Problems
@@ -2244,7 +2273,7 @@ def build_fix_prompt(scene_id: str, prose: str, problems: list[str],
 - Change the scene so it agrees with what the book established; never assume the established fact is the one that is wrong. A problem marked UNVERIFIED may be the check's mistake: edit for it only if the scene clearly contradicts the book.
 - Take the book's value, never a new one. When a name, number, age, date, duration, place or relationship is wrong, use the one the problem quotes from the book. If the problem doesn't say what the right value is, remove the detail or make it vague ("years ago", "a neighbour") instead of choosing another: any new specific you invent is one more thing that can contradict the book.
 - Fix the scene's words, not the book's people: don't rename a character, change who someone is, or move an event to make a contradiction go away.
-- A broken promise: add or change the fewest words that deliver it, in the scene's voice, where it fits the action.
+{blocking}- A broken promise: add or change the fewest words that deliver it, in the scene's voice, where it fits the action.
 - Each edit replaces `find`, words copied exactly from the scene that occur in it once, with `replace`. Keep `find` short: the sentence or clause that changes. Edits must not overlap.
 - Change nothing else: no polishing, no other improvements. `problem` is the number of the problem the edit fixes.
 - If a problem is a false alarm (the scene does not actually contradict anything), make no edit for it.
@@ -3468,8 +3497,10 @@ def accept_blocked(project_dir: str, scene_id: str) -> list[dict[str, str]]:
 #: persistence call (Sonnet) and `GATE_READINGS` checks (Opus, the story so
 #: far cached). E4's one-reading gate ran about $0.35-0.45 a scene on
 #: shared-dark, and a second reading about $0.35 more against a cold cache
-#: (E8, 2026-11-01); rounded up.
-RECHECK_COST_PER_SCENE = 0.6 + 0.35 * (GATE_READINGS - 1)
+#: (E8, 2026-11-01); rounded up. The blocking reading (#626) is one more
+#: call per reading on the scene alone (`blocking.BLOCKING_READINGS`), about
+#: $0.04 each on gawain (#626); rounded up.
+RECHECK_COST_PER_SCENE = 0.6 + 0.35 * (GATE_READINGS - 1) + (0.05 if GATE_BLOCKING else 0)
 
 
 #: What `write`'s token-model forecast prices one drafted scene's gate at
