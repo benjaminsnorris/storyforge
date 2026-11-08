@@ -33,6 +33,17 @@ STUB_MODEL_CATALOG = [
 
 
 @pytest.fixture(autouse=True)
+def _gate_blocking_off(request, monkeypatch):
+    """The gate's blocking read (`gate.GATE_BLOCKING`, #626) is one more API
+    call per gated scene, which the gate tests' API fakes don't answer. It is
+    off except in tests marked `blocking_read`, which answer it."""
+    if request.node.get_closest_marker('blocking_read'):
+        return
+    import storyforge.gate as gate
+    monkeypatch.setattr(gate, 'GATE_BLOCKING', False)
+
+
+@pytest.fixture(autouse=True)
 def _stub_model_catalog(monkeypatch):
     import storyforge.common as common
     monkeypatch.setattr(common, '_catalog', [dict(m) for m in STUB_MODEL_CATALOG])

@@ -1,15 +1,15 @@
 {
   "cost": {
-    "calls": 3406,
-    "input_tokens": 14293433,
-    "output_tokens": 3764427,
-    "replayed_calls": 3406,
+    "calls": 3630,
+    "input_tokens": 15103215,
+    "output_tokens": 3995300,
+    "replayed_calls": 3630,
     "unpriced_calls": 0,
-    "usd_if_live": 94.7912,
+    "usd_if_live": 106.6966,
     "usd_spent": 0.0
   },
   "git_dirty": false,
-  "git_sha": "27688f62614a3ef8c574b23d13b2b94ba83253e0",
+  "git_sha": "9aeaa60c887d73d2d07f944ee60bd408a63673b6",
   "mode": "replay",
   "results": [
     {
@@ -82,7 +82,7 @@
       },
       "mode": "replay",
       "notes": [],
-      "started_at": "2026-11-08T04:35:14+00:00",
+      "started_at": "2026-11-08T08:15:15+00:00",
       "status": "pass",
       "suite": "e1-corpus"
     },
@@ -140,7 +140,7 @@
         "usd_spent": 0.0
       },
       "description": "Detection of labelled errors injected into A Christmas Carol",
-      "duration_s": 1.17,
+      "duration_s": 1.26,
       "error": null,
       "gates": [
         {
@@ -213,7 +213,7 @@
         "missed 37 of 37: e2-carol-001, e2-carol-002, e2-carol-003, e2-carol-004, e2-carol-005, e2-carol-006, e2-carol-007, e2-carol-008, e2-carol-009, e2-carol-010, e2-carol-011, e2-carol-012, e2-carol-013, e2-carol-014, e2-carol-015, e2-carol-016, e2-carol-017, e2-carol-018, e2-carol-019, e2-carol-020, e2-carol-021, e2-carol-022, e2-carol-023, e2-carol-024, e2-carol-025, e2-carol-026, e2-carol-027, e2-carol-028, e2-carol-029, e2-carol-030, e2-carol-031, e2-carol-032, e2-carol-033, e2-carol-034, e2-carol-035, e2-carol-036, e2-carol-037",
         "1 distinct flag(s), fewer than 5: the precision gate counts precision as 0"
       ],
-      "started_at": "2026-11-08T04:35:14+00:00",
+      "started_at": "2026-11-08T08:15:15+00:00",
       "status": "pass",
       "suite": "e2-carol"
     },
@@ -277,7 +277,7 @@
         "usd_spent": 0.0
       },
       "description": "The gate checker on errors injected into A Christmas Carol",
-      "duration_s": 2.03,
+      "duration_s": 2.31,
       "error": null,
       "gates": [
         {
@@ -349,7 +349,7 @@
         "1 unverified finding(s) (quotes not in the text they name) not counted as flags; the gate blocks on them: scrooge-raises-bobs-salary: '' is not a promise of this scene's brief",
         "0 flag(s) on unedited controls; 0 benign case(s) flagged"
       ],
-      "started_at": "2026-11-08T04:35:15+00:00",
+      "started_at": "2026-11-08T08:15:16+00:00",
       "status": "pass",
       "suite": "e2-carol-checker"
     },
@@ -397,7 +397,7 @@
         "usd_spent": 0.0
       },
       "description": "Timeline drift check vs real E1 errors",
-      "duration_s": 28.18,
+      "duration_s": 38.16,
       "error": null,
       "gates": [
         {
@@ -463,7 +463,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-11-08T04:35:17+00:00",
+      "started_at": "2026-11-08T08:15:18+00:00",
       "status": "pass",
       "suite": "e2-corpus-drift"
     },
@@ -513,7 +513,7 @@
         "usd_spent": 0.0
       },
       "description": "Deterministic continuity checks vs real E1 errors",
-      "duration_s": 42.64,
+      "duration_s": 48.31,
       "error": null,
       "gates": [
         {
@@ -579,7 +579,7 @@
         "excluded 25: holdout",
         "excluded 54: tree predates reference/scenes.csv"
       ],
-      "started_at": "2026-11-08T04:35:45+00:00",
+      "started_at": "2026-11-08T08:15:56+00:00",
       "status": "pass",
       "suite": "e2-corpus-validate"
     },
@@ -620,7 +620,7 @@
         "usd_spent": 0.0
       },
       "description": "Today's extraction vs the facts E1 errors contradicted",
-      "duration_s": 9.97,
+      "duration_s": 11.93,
       "error": null,
       "gates": [
         {
@@ -703,30 +703,36 @@
         "thornwall-030 (ivra-visits-sera): captured",
         "The commitments pass is judged after the persistence check, as phase 4 records it: persistence_dropped counts the facts it dropped over every scene judged."
       ],
-      "started_at": "2026-11-08T04:36:28+00:00",
+      "started_at": "2026-11-08T08:16:45+00:00",
       "status": "pass",
       "suite": "e3-extraction"
     },
     {
       "by_code": {
         "PRM": {
-          "broken_promises": 1
+          "broken_promises": 2
         },
         "REL": {
+          "contradictions": 1
+        },
+        "TIM": {
+          "contradictions": 4
+        },
+        "WLD": {
           "contradictions": 1
         }
       },
       "cost": {
-        "calls": 412,
-        "input_tokens": 1974354,
-        "output_tokens": 378289,
-        "replayed_calls": 412,
+        "calls": 481,
+        "input_tokens": 2198214,
+        "output_tokens": 434604,
+        "replayed_calls": 481,
         "unpriced_calls": 0,
-        "usd_if_live": 22.6183,
+        "usd_if_live": 24.7895,
         "usd_spent": 0.0
       },
       "description": "Draft shared-dark Act 1 with write; CP10k, BPS, length, voice",
-      "duration_s": 8.93,
+      "duration_s": 9.22,
       "error": null,
       "gates": [
         {
@@ -738,111 +744,83 @@
         }
       ],
       "metrics": {
-        "bps": 0.1,
+        "bps": 0.095,
         "bps_all": 0.087,
-        "broken_promises": 1,
+        "broken_promises": 2,
         "broken_promises_all": 2,
-        "checker_flags": 3,
-        "contradictions": 1,
+        "checker_flags": 1,
+        "contradictions": 6,
         "contradictions_all": 7,
-        "contradictions_in_failed": 5,
-        "contradictions_passed": 2,
-        "cp10k": 1.074,
-        "cp10k_all": 3.073,
-        "cp10k_checker_all": 1.317,
-        "cp10k_passed": 1.168,
-        "gate_catch_rate": 0.6,
-        "gate_caught": 3,
-        "gate_failed": 6,
-        "gate_false_alarm": 3,
-        "gate_fixed": 10,
-        "gate_missed": 2,
-        "length_drift": 0.091,
+        "contradictions_in_failed": 1,
+        "contradictions_passed": 6,
+        "cp10k": 2.871,
+        "cp10k_all": 3.104,
+        "cp10k_checker_all": 0.443,
+        "cp10k_passed": 2.761,
+        "gate_catch_rate": 0.143,
+        "gate_caught": 1,
+        "gate_failed": 1,
+        "gate_false_alarm": 0,
+        "gate_fixed": 12,
+        "gate_missed": 6,
+        "length_drift": 0.062,
         "refused": 0,
         "scenes": 23,
-        "scenes_passed": 17,
-        "scenes_to_first_gate_failure": 10,
+        "scenes_passed": 22,
+        "scenes_to_first_gate_failure": 21,
         "target_words_all": 21370,
-        "voi": 4.772,
+        "voi": 4.804,
         "voi_author": 4.652,
-        "words": 9313,
-        "words_all": 22777
+        "words": 20902,
+        "words_all": 22550
       },
       "mode": "replay",
       "notes": [
-        "claires-cold: 989 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "harmons-hands: 788 words, 0 contradiction(s), 1 broken promise(s), gate clean\n    PRM knowledge_out: The scene sets Claire in an industrial space (steel door, concrete floor, aluminum window, work light), but it never shows Hank perceiving the ocean, the wind o",
-        "waking-maren: 957 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "waking-hank: 854 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "the-school: 889 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "advocate: 1070 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "maren-runs: 866 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "engineer: 1045 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "name-surfaces: 859 words, 0 contradiction(s), 0 broken promise(s), gate clean",
-        "voicemail: 996 words, 1 contradiction(s), 0 broken promise(s), gate caught\n    REL: Marie Renaud calls Claire her daughter, but the reference establishes Marie as Claire's sister.",
-        "missing-persons: 1366 words, 0 contradiction(s), 0 broken promise(s), gate false alarm (after write would have stopped)",
-        "driving-west: 839 words, 0 contradiction(s), 0 broken promise(s), gate false alarm (after write would have stopped)",
-        "pewter-town: 1295 words, 1 contradiction(s), 0 broken promise(s), gate missed (after write would have stopped)\n    REL: Marie is presented as a woman in her mid-thirties, Claire's peer and sister, but in the earlier voicemail scene Marie identifies Claire as her daughter.",
-        "diner: 1205 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
-        "two-hours: 1172 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
-        "plan: 994 words, 3 contradiction(s), 0 broken promise(s), gate caught (after write would have stopped)\n    REL: Maren, impersonating Marie, calls Claire her sister, but in the voicemails Marie identified Claire as her daughter.\n    TIM: Maren places the clerk's office call 'this morning, or yesterday', but it happened on Monday, before she took leave, slept through another 2:47, and drove to th\n    TIM: The scene sets the night as Saturday, but Maren took leave on a Tuesday and the coastal investigation is only a day or two later.",
-        "dark-road: 930 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
-        "building: 1012 words, 1 contradiction(s), 0 broken promise(s), gate missed (after write would have stopped)\n    TIM: The scene says Maren has heard the sea from the chair on three nights, but earlier scenes put her past at least a fourth 2:47 dream before Coos Bay.",
-        "twelve-minutes: 929 words, 0 contradiction(s), 1 broken promise(s), gate clean (after write would have stopped)\n    PRM knowledge_out: The scene puts Harmon's house a quarter mile off to the south, up the slope, not to the east (which matches the earlier floor plan where the south door faced th",
-        "claire: 1072 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
-        "drive: 911 words, 1 contradiction(s), 0 broken promise(s), gate caught (after write would have stopped)\n    TIM: Hank tells the dispatcher Claire was held for eleven days, but the same night has repeatedly been established as day ten of her captivity.",
-        "bench: 1191 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
-        "eleven-days: 548 words, 0 contradiction(s), 0 broken promise(s), gate false alarm (after write would have stopped)",
-        "checker eleven-days: the text says \"three days\" (about 3 day(s)), but the calendar puts it 0 day(s) on",
-        "checker plan: a Saturday 1 day(s) after voicemail's Monday",
-        "checker eleven-days: a Sunday 0 day(s) after plan's Saturday",
-        "gate: 23 scene(s) gated, 10 fixed, 6 still failing after the fixes (write would stop at the first; E4 drafts on): voicemail, missing-persons, driving-west, plan, drive, eleven-days",
-        "  voicemail: PLAN CONFLICT (the brief's own words contradict the book; fix the brief or character-bible.md) [reading 2]: REL contradicts character-bible.md: \"\"Hi. This is Marie Renaud. My daughter Claire hasn't ca",
-        "  voicemail: NOTE (unplaced): maren-reads-bridge-somatically; hank-contamination-through-hands; hanks-professional-language-colonized",
-        "  voicemail: NOTE (not recorded, judged not to last beyond the scene): The bookstore below Maren's apartment closed at seven that evening. (Bookstore closing time that evening is set dressing; the bookstore below ",
-        "  missing-persons: CONTRADICTION: TIM contradicts advocate: \"Delgado filed the supplemental as an exhibit. Alvarez is taking it up Thursday.\" \u2014 The calendar puts this scene on the morning of day 1, the same morning as S",
-        "  missing-persons: CONTRADICTION [reading 2]: TIM contradicts the calendar (scenes.csv): \"It was seven-forty. Carolyn got to the office at seven-thirty and ate a yogurt at her desk before anyone could talk to her.\" \u2014 Th",
-        "  missing-persons: NOTE (unplaced): maren-reads-bridge-somatically; hank-contamination-through-hands; hanks-professional-language-colonized",
-        "  missing-persons: NOTE (brief items in words, no ledger fact; checked as words): physical_state_in: no sleep 4 nights; physical_state_in: somatic dissociation from recurring dreams; physical_state_out: decision-committ",
-        "  missing-persons: NOTE (not recorded, judged not to last beyond the scene): Maren writes her intake notes in small square print on a legal pad, and she copied the NamUs record onto a legal pad. (Her writing style on a ",
-        "  driving-west: CONTRADICTION: TIM contradicts the calendar (scenes.csv): \"He'd looked at the legal pad on the dash, the fourth sheet folded back. Floor plan. *Occupant.* The name in his own block capitals under it.\"",
-        "  driving-west: NOTE (unplaced): maren-reads-bridge-somatically; hank-contamination-through-hands; hanks-professional-language-colonized",
-        "  driving-west: NOTE (brief items in words, no ledger fact; checked as words): physical_state_in: no sleep three hours, tremor in hands, running on residual adrenaline and contaminated dream-knowledge; physical_state",
-        "  driving-west: NOTE (not recorded, judged not to last beyond the scene): Hank is driving his truck west on Highway 20 over the Cascades pass, holding it at fifty-five with the cruise control unused. (Momentary drivi",
-        "  plan: PLAN CONFLICT (the brief's own words contradict the book; fix the brief or voicemail): TIM contradicts voicemail: \"Small department, Saturday night, that's most of what they've got.\" \u2014 Earlier scenes ",
-        "  plan: NOTE (facts in force left out of what extraction was offered, over the cap (extract.MAX_KNOWN_COMMITMENTS); the scene's people and place kept first): plan (70)",
-        "  plan: NOTE (unplaced): maren-reads-bridge-somatically; hank-contamination-through-hands; hanks-professional-language-colonized",
-        "  plan: NOTE (brief items in words, no ledger fact; checked as words): physical_state_in: no sleep 36h; physical_state_in: soaked clothing; physical_state_in: elevated stress response; physical_state_out: han",
-        "  plan: NOTE (not recorded, judged not to last beyond the scene): Maren's jacket is wet across the shoulders from the last pullout south of Bandon, and the damp has soaked through to her shirt. (Wet jacket is",
-        "  drive: EXTRACTION: quote: drive: drive--the-zip-ties-lay-cut-on",
-        "  drive: PLAN CONFLICT (the brief's own words contradict the book; fix the brief or claire): TIM contradicts claire [claire--claire-s-arms-had-been-bound]: \"Said there was a woman who'd been held for eleven da",
-        "  drive: NOTE (plan fact kept, link not applied; the check found no contradiction): jaw-locked-hank (\"Jaw locked from prolonged clenching and stress\") vs \"the state ends in this scene (the plan says it ends at",
-        "  drive: NOTE (facts in force left out of what extraction was offered, over the cap (extract.MAX_KNOWN_COMMITMENTS); the scene's people and place kept first): drive (135)",
+        "claires-cold: 955 words, 1 contradiction(s), 0 broken promise(s), gate missed\n    TIM: The scene implies Claire has been held longer than nine days, since she has lost count of the days past nine, but the reference fixes her captivity at nine days",
+        "harmons-hands: 788 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "waking-maren: 1040 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "waking-hank: 1065 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "the-school: 912 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "advocate: 984 words, 1 contradiction(s), 0 broken promise(s), gate missed\n    REL: The scene has Maren call Delgado by the first name 'Danny', which merges him with Danny Vasquez, who is listed in the character list as a separate person.",
+        "maren-runs: 950 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "engineer: 951 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "name-surfaces: 819 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "voicemail: 922 words, 1 contradiction(s), 0 broken promise(s), gate missed\n    TIM: Marie's first voicemail, left when Claire was already missing with her car still at work, is dated eleven days ago, but earlier scenes and the reference fix Cla",
+        "missing-persons: 1436 words, 1 contradiction(s), 0 broken promise(s), gate missed\n    TIM: The scene says Maren holds a sensory inventory of Claire's 'last nine days', but Marie's first voicemail reporting Claire missing was timestamped eleven days ag",
+        "driving-west: 780 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "pewter-town: 1329 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "diner: 1099 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "two-hours: 1117 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "plan: 971 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "dark-road: 869 words, 1 contradiction(s), 0 broken promise(s), gate missed\n    WLD: The scene puts Harmon's drive at an unmarked gap with no mailbox, a quarter mile before box 4718, with the cattle guard forty yards down it; earlier scenes plac",
+        "building: 1101 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "twelve-minutes: 917 words, 0 contradiction(s), 0 broken promise(s), gate clean",
+        "claire: 1077 words, 0 contradiction(s), 2 broken promise(s), gate clean\n    PRM goal: The scene ends with Maren holding Claire, who is still zip-tied to the chair: the ties are never cut and Claire is never brought out of the building, so the ext\n    PRM knowledge_out: Claire is still bound inside the building at the end of the scene, so she has not yet been recovered from captivity.",
+        "drive: 820 words, 1 contradiction(s), 0 broken promise(s), gate caught\n    TIM: Hank tells 911 that Claire was held for eleven days, but the reference material and earlier scenes put her captivity at nine days, and this same scene says nine",
+        "bench: 1175 words, 1 contradiction(s), 0 broken promise(s), gate missed (after write would have stopped)\n    PHY: The charge nurse is said to have cut Claire's scrubs off, but Claire was wearing jeans in captivity and when she was rescued.",
+        "eleven-days: 473 words, 0 contradiction(s), 0 broken promise(s), gate clean (after write would have stopped)",
+        "checker voicemail: a Friday 1 day(s) after waking-maren's Tuesday",
+        "gate: 23 scene(s) gated, 12 fixed, 1 still failing after the fixes (write would stop at the first; E4 drafts on): drive",
+        "  drive: PLAN CONFLICT (the brief's own words contradict the book; fix the brief or character-bible.md): TIM contradicts character-bible.md: \"Said there was a woman who'd been held for eleven days and they wer",
+        "  drive: PLAN CONFLICT (the brief's own words contradict the book; fix the brief or prep): PHY contradicts prep: \"He called 911 from his phone on the dash.\" \u2014 Here Hank calls on his own phone and gives his nam",
+        "  drive: NOTE (facts in force left out of what extraction was offered, over the cap (extract.MAX_KNOWN_COMMITMENTS); the scene's people and place kept first): drive (187)",
         "  drive: NOTE (unplaced): maren-reads-bridge-somatically; hank-contamination-through-hands; hanks-professional-language-colonized",
         "  drive: NOTE (brief items in words, no ledger fact; checked as words): physical_state_in: no sleep 36h; physical_state_in: operational fatigue; physical_state_in: somatic contamination residue; physical_state",
-        "  drive: NOTE (not recorded, judged not to last beyond the scene): Harmon's house window flickers blue, white, blue (a television) as they leave. (The flickering window is momentary set dressing, though it imp",
-        "  eleven-days: CONTRADICTION: TIM contradicts fire-ostrowski: \"The clock on the nightstand said 3:47.\" \u2014 fire-ostrowski tells the same waking: Hank on his back, hands palms down on the sheet smelling of gasoline, Ro",
-        "  eleven-days: NOTE (plan fact kept, link not applied; the check found no contradiction): somatic-residue-hands-hank (\"Hands burning with involuntary somatic residue from dream-inhabitation\") vs \"They smelled of gas",
-        "  eleven-days: NOTE (plan fact kept, link not applied; the check found no contradiction): sleep-deprivation-hank (\"Cumulative sleep deprivation across multiple nights\") vs \"the state ends in this scene (the plan say",
-        "  eleven-days: NOTE (plan fact kept, link not applied; the check found no contradiction): exhaustion-hank (\"Profound physical exhaustion from sleeplessness and somatic strain\") vs \"the state ends in this scene (the ",
-        "  eleven-days: NOTE (plan fact kept, link not applied; the check found no contradiction): tremor-left-hand-hank (\"Intermittent tremor in left hand from stress and dream residue\") vs \"the state ends in this scene (th",
-        "  eleven-days: NOTE (plan fact kept, link not applied; the check found no contradiction): scalded-hands-hank (\"Hands scalded pink to red from compulsive hot-water washing\") vs \"the state ends in this scene (the plan",
-        "  eleven-days: NOTE (facts in force left out of what extraction was offered, over the cap (extract.MAX_KNOWN_COMMITMENTS); the scene's people and place kept first): eleven-days (152)",
-        "  eleven-days: NOTE (unplaced): maren-reads-bridge-somatically; hank-contamination-through-hands; hanks-professional-language-colonized",
-        "  eleven-days: NOTE (kept, not filled): knowledge_out: not a fact the brief promises",
-        "  eleven-days: NOTE (brief items in words, no ledger fact; checked as words): physical_state_in: baseline; knowledge_out: dale-allen-harmon-has-been-arraigned-on-kidnapping-and-unlawful-imprisonment-charges-entered-",
-        "  eleven-days: NOTE (not recorded, judged not to last beyond the scene): The clock on Hank's bedroom nightstand read 3:47 when he woke. (Redundant with the 3:47 detail in fact 13; specific clock reading is a momenta",
+        "  drive: NOTE (not recorded, judged not to last beyond the scene): Claire lies across the truck's bench seat with her head in Maren's lap and her knees bent, with Rook beside her. (Her position on the seat in ",
         "cp10k, contradictions, broken_promises, bps and words count the scenes write would have drafted: up to the first refusal, or through the first gate failure, inclusive (before this measure they counted every scene; those figures are now *_all). scenes, length_drift and voi cover every drafted scene. The *_all figures count every drafted scene (the scenes after the first failure are drafted from a ledger missing its facts). cp10k_passed is the rate in the scenes the gate passed, anywhere in the act (what write would commit). gate_caught / gate_missed / gate_false_alarm are per scene against the judge's contradictions, over every drafted scene.",
         "The gate's checker and the judge are both Opus continuity reviews, so part of a CP10k drop may be the two agreeing; the human spot-check is still owed.",
         "Prior prose: full.",
         "Judge stands in for the plan's human spot-check (still owed). Drafted sequentially and gated, as write does by default; batch mode is refused under a cassette."
       ],
-      "started_at": "2026-11-08T04:36:38+00:00",
+      "started_at": "2026-11-08T08:16:57+00:00",
       "status": "pass",
       "suite": "e4-generation"
     },
     {
       "by_code": {
+        "KNO": {
+          "mismatches": 1
+        },
         "PHY": {
           "mismatches": 10
         },
@@ -855,15 +833,15 @@
       },
       "cost": {
         "calls": 60,
-        "input_tokens": 540725,
-        "output_tokens": 109456,
+        "input_tokens": 542404,
+        "output_tokens": 109672,
         "replayed_calls": 60,
         "unpriced_calls": 0,
-        "usd_if_live": 4.3504,
+        "usd_if_live": 4.3615,
         "usd_spent": 0.0
       },
       "description": "Rewrite from plan + ledger; facts the rewrite changes",
-      "duration_s": 1.04,
+      "duration_s": 1.11,
       "error": null,
       "gates": [
         {
@@ -874,14 +852,14 @@
           "threshold": 10
         },
         {
-          "actual": 1.3,
+          "actual": 1.4,
           "name": "mismatches_per_scene",
           "op": "<=",
           "passed": true,
           "threshold": 2.3
         },
         {
-          "actual": 3.8,
+          "actual": 3.3,
           "name": "ledger_only.mismatches_per_scene",
           "op": "<=",
           "passed": true,
@@ -889,30 +867,31 @@
         }
       ],
       "metrics": {
-        "ledger_only.KNO": 4,
-        "ledger_only.PHY": 31,
+        "ledger_only.KNO": 3,
+        "ledger_only.PHY": 26,
         "ledger_only.REL": 1,
-        "ledger_only.TIM": 2,
-        "ledger_only.mismatches": 38,
-        "ledger_only.mismatches_per_scene": 3.8,
-        "mismatches": 13,
-        "mismatches_per_scene": 1.3,
+        "ledger_only.TIM": 1,
+        "ledger_only.TRT": 2,
+        "ledger_only.mismatches": 33,
+        "ledger_only.mismatches_per_scene": 3.3,
+        "mismatches": 14,
+        "mismatches_per_scene": 1.4,
         "scenes": 10
       },
       "mode": "replay",
       "notes": [
-        "claires-cold: 2 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    PHY: In the original the door makes a particular creak on its hinges; in the redraft the hinges make no sound.\n    PHY: In the original, when she is lifted, blood or fluid runs down her left shin; in the redraft it runs into the crease behind her left knee.\n    ledger only, PHY: In the original the door makes its particular creak as he enters; in the redraft the hinges are silent.\n    ledger only, PHY: In the original the heater's warmth reaches her shins; in the redraft it warms only a strip along her right ribs and hip.\n    ledger only, PHY: In the original he moves the heater six inches closer this visit because it has got colder; in the redraft he sets it in the same place ever\n    ledger only, PHY: In the original he tilts the hood fabric away from her mouth to give her water; in the redraft the water is poured through the hood, soaking",
-        "harmons-hands: 0 mismatch(es) in the rewrite, 2 from the plan and ledger alone\n    ledger only, PHY: The man's hands are described as steady all night in the original, but in the redraft his right hand visibly trembles.\n    ledger only, PHY: The woman's breathing is fast and elevated in the original, but even and conserving in the redraft.",
-        "waking-maren: 1 mismatch(es) in the rewrite, 6 from the plan and ledger alone\n    TIM: At the end of the scene the original shows time has passed (the clock reads 3:02), while the redraft has the clock still showing 2:47 after \n    ledger only, PHY: The device showing 2:47 with a green glow on waking is an alarm clock in the original but a phone on the nightstand in the redraft.\n    ledger only, PHY: On waking, Maren is already sitting up in the original, but lying on her back in the redraft.\n    ledger only, PHY: She drinks the water from a glass in the original but from a mug taken out of the dish rack in the redraft.\n    ledger only, PHY: Her voice saying 'Third night' sounds clinical in the original but comes out cracked in the redraft.\n    ledger only, PHY: At the end of the scene the original has her turn off the kitchen light and stand in the dark, while the redraft has her stand under the lig\n    ledger only, TIM: The closing time is 3:02 by the bedroom clock in the original, while the redraft implies about 3:06 (a stove clock nineteen minutes slow rea",
-        "waking-hank: 2 mismatch(es) in the rewrite, 2 from the plan and ledger alone\n    TIM: The original says the sleep-washing episodes have happened for three nights, while the redraft says the body had been doing this all week.\n    PHY: In the original the pencil lies beside the facedown legal pad; in the redraft it is laid across the pad.\n    ledger only, PHY: The original has the pencil lying beside the legal pad; the redraft has it placed on top of the pad.\n    ledger only, PHY: When he swears, Rook is standing in the kitchen doorway in the original, but lying down with her head on her paws in the redraft.",
-        "the-school: 1 mismatch(es) in the rewrite, 5 from the plan and ledger alone\n    PHY: The hand Hank instinctively places flat against the wall is his left in the original but his right in the redraft.\n    ledger only, PHY: Where Rook is when Hank pulls his hand off the wall: inside the gym at the entrance in the original, still in the truck in the redraft.\n    ledger only, PHY: The crossed-out sentence is struck with a single line and stays legible in the original, but is struck with two lines so no letters show in \n    ledger only, PHY: The thumb scar is on the left hand (the one he holds up after touching the wall) in the original, but on the right thumb in the redraft.\n    ledger only, PHY: The gym floor is rubber in the original but maple in the redraft.\n    ledger only, PHY: The 'stress field' sentence is written and crossed out inside the gym during the assessment in the original, but is written and crossed out ",
-        "advocate: 1 mismatch(es) in the rewrite, 7 from the plan and ledger alone\n    PHY: In the original, Sofia's final hand position mirrors the palms-up posture Maren held at the start; in the redraft, her palms are down, the r\n    ledger only, PHY: The finger(s) that first started trembling differ: the left ring finger in the original, the first two fingers of the left hand in the redra\n    ledger only, TIM: The tremor begins at 12:15 in Sofia's timeline in the original, but at the 11:52 deadbolt moment in the redraft.\n    ledger only, KNO: In the original Sofia does not notice Maren's distress during the flashback; in the redraft she is watching her.\n    ledger only, PHY: After Maren's 'people say that' reassurance, Sofia's thumb keeps working the marks in the original but stops in the redraft.\n    ledger only, PHY: During the phone call Maren's left hand is pressed flat against the wall in the original but hangs at her side in the redraft.\n    ledger only, KNO: Receipt of the motion is confirmed by Delgado in the original, but by the clerk in the redraft.\n    ledger only, PHY: In the bathroom Maren lowers herself to the floor with her knuckles on the floor tile in the original, but stays standing with her fists aga",
-        "maren-runs: 1 mismatch(es) in the rewrite, 5 from the plan and ledger alone\n    PHY: During the flinch, the original has her hands splayed open at her sides; the redraft has her fingers splayed palms-out in front of her face.\n    ledger only, PHY: Her running breath pattern differs: three strides in and three out in the original, two in and two out in the redraft.\n    ledger only, PHY: During the flinch her hands splay open at her sides in the original, but fly up to her face in the redraft.\n    ledger only, PHY: After the flinch her stride count resets to zero and she starts again from one in the original, but in the redraft she resumes from where it\n    ledger only, PHY: On reaching the east approach her hands have already stopped shaking in the original, but are still shaking in the redraft and only stop aft\n    ledger only, PHY: When she stumbles, her weight pitches forward in the original but sideways in the redraft.",
-        "engineer: 1 mismatch(es) in the rewrite, 4 from the plan and ledger alone\n    PHY: After whining at Hank, Rook stays where she is in the original, but in the redraft she closes the distance and leans her shoulder against hi\n    ledger only, PHY: The east entrance door frame is wood in the original but steel/metal in the redraft.\n    ledger only, KNO: In the original Danny exclaims \"Hell\" on discovering the missing anchors; in the redraft Hank says it while Danny waits.\n    ledger only, PHY: At the start of the scene Danny is up a ladder on the west wall probing mortar with a screwdriver in the original, but standing by the bleac\n    ledger only, PHY: After Rook whines, she stays put in the original but comes over and leans against Hank's leg in the redraft.",
-        "name-surfaces: 2 mismatch(es) in the rewrite, 1 from the plan and ledger alone\n    PHY: At 2:47 the original has both of Hank's hands flat on the table on either side of the pad, while the redraft has his left hand pinned under \n    PHY: In the original the coworker who calls Claire's name is standing in the parking lot, while in the redraft the coworker is leaning out of a d\n    ledger only, KNO: In the original the name memory is a fragment that is not Harmon's; in the redraft it is explicitly something Harmon heard and filed away.",
-        "voicemail: 2 mismatch(es) in the rewrite, 2 from the plan and ledger alone\n    PHY: What covered Maren's head during the captivity memory differs: a hood in the original, a pillowcase in the redraft.\n    REL: In the original, Claire is called Marie's sister when describing where Marie made the call; the redraft calls Claire Marie's daughter there.\n    ledger only, PHY: Where the Post-it with Marie's number was stuck while Maren listened to the messages: on the edge of her laptop in the original, on the top \n    ledger only, REL: Whose kitchen Marie was sitting in: the original calls Claire Marie's sister here, while the redraft calls Claire her daughter."
+        "claires-cold: 2 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    PHY: In the original the door makes a particular creak despite being oiled; in the redraft it swings silently.\n    TIM: In the original her left fingers only tingled yesterday and are thickly numb today; in the redraft they were already thickly dead yesterday \n    ledger only, PHY: The water he gives her is room temperature in the original but cold in the redraft.\n    ledger only, PHY: In the original he tilts the hood fabric away from her mouth so she drinks directly; in the redraft the bottle presses the fabric against he\n    ledger only, PHY: The heater's warmth reaches her shins in the original but only her right side in the redraft.",
+        "harmons-hands: 1 mismatch(es) in the rewrite, 2 from the plan and ledger alone\n    PHY: Before he plugs the space heater in, the original shows its coil orange through the grate, while the redraft shows the coil dark.\n    ledger only, PHY: The distance he moves the heater closer to her differs: six inches in the original, four inches in the redraft.\n    ledger only, PHY: The sound the woman makes behind the hood is low in the original but high in the redraft.",
+        "waking-maren: 2 mismatch(es) in the rewrite, 2 from the plan and ledger alone\n    TIM: At the end of the scene the original's clock has moved on to 3:02, but in the redraft it still reads 2:47.\n    PHY: In the original Maren turns the kitchen light off at the end and stands in the dark, but in the redraft the fluorescent light is still on an\n    ledger only, TIM: At the end of the scene, after the kitchen episode, the original has the clock reading 3:02, while the redraft has the clock still reading 2\n    ledger only, PHY: In the original Maren is already sitting up when the scene opens at 2:47, while in the redraft she is lying still and only sits up afterward",
+        "waking-hank: 1 mismatch(es) in the rewrite, 1 from the plan and ledger alone\n    PHY: When the hot water tank started to give out, the original has the temperature dropping by half a degree and then another, while the redraft \n    ledger only, PHY: When he finds the legal pad on the counter, the original has it lying facedown with the pencil beside it, whereas the redraft has the pencil",
+        "the-school: 1 mismatch(es) in the rewrite, 5 from the plan and ledger alone\n    PHY: The hand Hank instinctively places flat on the wall to span the cracks is his left in the original but his right in the redraft.\n    ledger only, PHY: The hand Hank spreads against the wall is his left in the original but his right in the redraft.\n    ledger only, PHY: The gym lights are off in the original, but in the redraft the overheads are on at half-bank.\n    ledger only, KNO: In the original Hank consciously writes the 'stress field' sentence and stops mid-sentence; in the redraft he finds a completed line in the \n    ledger only, PHY: The rejected sentence is struck through with a single line in the original but with two lines in the redraft.\n    ledger only, PHY: Back in the truck, Rook rests her chin on the center console in the original, whereas in the redraft she pointedly stays on her side and doe",
+        "advocate: 1 mismatch(es) in the rewrite, 5 from the plan and ledger alone\n    PHY: How much longer Sofia's stride is as she leaves differs: half an inch in the original, half a step in the redraft.\n    ledger only, PHY: The finger that first begins to tremble during the interview is a different finger.\n    ledger only, PHY: Where Maren moves her trembling hand differs: to her lap in the original, to the table's edge in the redraft.\n    ledger only, TRT: Sofia's account is told in strict chronological order in the original but comes out in fragmented pieces in the redraft.\n    ledger only, KNO: In the original Delgado comes on the line and confirms receipt of the motion; in the redraft only the clerk files and confirms it.\n    ledger only, PHY: In the bathroom Maren sits on the floor with her knuckles on the floor tile in the original, but stays standing and leans her fists against ",
+        "maren-runs: 1 mismatch(es) in the rewrite, 6 from the plan and ledger alone\n    PHY: The sleeping man under the tarp is by the east rail in the original but by the north rail in the redraft.\n    ledger only, PHY: Her settled running breath pattern differs: three strides in and three out in the original, two in and one out in the redraft.\n    ledger only, PHY: During the flinch her hands splay open at her sides in the original, but fly up to her face in the redraft.\n    ledger only, PHY: After the flinch her stride count resets to zero in the original, but continues from where it left off (235, 240, reaching 406 at the east a\n    ledger only, PHY: After resuming, she deliberately dials her pace back to the old tempo in the original, but runs the descent harder than the pace called for \n    ledger only, PHY: The Willamette is flat and gray in the original, but brown and fast in the redraft.\n    ledger only, PHY: At the east approach she presses her hands flat against the railing again in the original, whereas in the redraft she runs another block and",
+        "engineer: 2 mismatch(es) in the rewrite, 5 from the plan and ledger alone\n    PHY: At the end of the scene the original has Hank keep his hand in his pocket, while the redraft has him resting his right hand on Rook's head.\n    PHY: The mortar joint depth Danny calls out from the ladder differs between the two versions.\n    ledger only, PHY: In the original the bolt snaps off, leaving a corroded stub in his fingers; in the redraft the whole shank pulls out of the sill plate intac\n    ledger only, PHY: The east entrance door frame is wood in the original but steel in the redraft.\n    ledger only, TRT: After Hank responds to her whine, Rook stays put in the original but crosses to him and leans against his knee in the redraft.\n    ledger only, PHY: In the original Danny stays on the ladder looking at the exposed connection while Hank looks up from the floor; in the redraft Danny climbs \n    ledger only, KNO: Danny says \"Hell\" on discovering the missing anchors in the original, whereas in the redraft Hank says it.",
+        "name-surfaces: 2 mismatch(es) in the rewrite, 1 from the plan and ledger alone\n    PHY: The lighting over the parking lot where Claire's name was called differs: fluorescent in the original, sodium in the redraft.\n    KNO: In the original the name fragment is not Harmon's memory, while the redraft makes it something Harmon himself heard.\n    ledger only, PHY: In the original the pen is already at hand at the table; in the redraft he has to get up and fetch it from a cup by the toaster.",
+        "voicemail: 1 mismatch(es) in the rewrite, 3 from the plan and ledger alone\n    REL: Claire's relationship to Marie at the moment Marie makes calls from Claire's apartment differs: the original calls Claire Marie's sister in \n    ledger only, PHY: Where the Post-it with Marie's number is stuck differs: the original has it on the edge of the laptop, the redraft on the edge of the kitche\n    ledger only, PHY: In the original all seven messages come from the same number; in the redraft the seventh comes from a different number.\n    ledger only, REL: Whose apartment Marie was in when she left the seventh message: the original calls it her sister's kitchen, the redraft her daughter's apart"
       ],
-      "started_at": "2026-11-08T04:36:47+00:00",
+      "started_at": "2026-11-08T08:17:06+00:00",
       "status": "pass",
       "suite": "e5-roundtrip"
     },
@@ -940,7 +919,7 @@
         "usd_spent": 0.0
       },
       "description": "Continuity flags raised on classics with no known errors",
-      "duration_s": 0.16,
+      "duration_s": 0.2,
       "error": null,
       "gates": [
         {
@@ -990,7 +969,7 @@
         "christmas-carol/run2: 25 flag(s)",
         "christmas-carol/run1: 25 flag(s)"
       ],
-      "started_at": "2026-11-08T04:36:48+00:00",
+      "started_at": "2026-11-08T08:17:07+00:00",
       "status": "pass",
       "suite": "e7-classics"
     },
@@ -1010,28 +989,28 @@
         },
         "TIM": {
           "reintroduced": 0,
-          "replayed": 4
+          "replayed": 5
         },
         "TRT": {
-          "reintroduced": 0,
-          "replayed": 9
+          "reintroduced": 1,
+          "replayed": 12
         }
       },
       "cost": {
-        "calls": 418,
-        "input_tokens": 1692781,
-        "output_tokens": 591997,
-        "replayed_calls": 418,
+        "calls": 573,
+        "input_tokens": 2277024,
+        "output_tokens": 766339,
+        "replayed_calls": 573,
         "unpriced_calls": 0,
-        "usd_if_live": 45.623,
+        "usd_if_live": 55.3461,
         "usd_spent": 0.0
       },
       "description": "Current revision passes vs the E1 errors past passes introduced",
-      "duration_s": 21.15,
+      "duration_s": 28.95,
       "error": null,
       "gates": [
         {
-          "actual": 28,
+          "actual": 32,
           "name": "replayed",
           "op": ">=",
           "passed": true,
@@ -1053,8 +1032,8 @@
         }
       ],
       "metrics": {
-        "clean_gate_failed": 5,
-        "errors_per_10k_words": 0.0,
+        "clean_gate_failed": 7,
+        "errors_per_10k_words": 0.295,
         "family.brief-fix.reintroduced": 0,
         "family.brief-fix.replayed": 1,
         "family.hone-physical-states.reintroduced": 0,
@@ -1064,22 +1043,22 @@
         "family.illustrate-state.reintroduced": 0,
         "family.illustrate-state.replayed": 3,
         "family.naturalness-upstream.reintroduced": 0,
-        "family.naturalness-upstream.replayed": 1,
-        "family.redraft-from-brief.reintroduced": 0,
-        "family.redraft-from-brief.replayed": 14,
+        "family.naturalness-upstream.replayed": 2,
+        "family.redraft-from-brief.reintroduced": 1,
+        "family.redraft-from-brief.replayed": 17,
         "family.revision-plan.reintroduced": 0,
         "family.revision-plan.replayed": 6,
-        "gate_counts_missing": 1,
-        "gate_extraction": 1,
-        "gate_inherited": 11,
-        "gate_new": 4,
-        "gate_plan_conflicts": 3,
+        "gate_counts_missing": 2,
+        "gate_extraction": 0,
+        "gate_inherited": 13,
+        "gate_new": 34,
+        "gate_plan_conflicts": 0,
         "gate_unfinished": 0,
-        "halted": 6,
-        "reintroduced": 0,
+        "halted": 2,
+        "reintroduced": 1,
         "reintroduced_unflagged": 0,
-        "reintroduction_rate": 0.0,
-        "replayed": 28,
+        "reintroduction_rate": 0.031,
+        "replayed": 32,
         "unreplayable": 18
       },
       "mode": "replay",
@@ -1096,16 +1075,16 @@
         "excluded 1: unreplayable: the pre-pass book already has the stone-cutters on Block Fourteen: terrace-row (\"The stone-cutters on Block Fourteen had stopped for their afternoon break\"), the continuity tracker, and the scene's own brief (governor-016)",
         "excluded 1: unreplayable: the pre-pass ivra-seals-archive already says \"declining allotments over nine years\"; the introducing commit (48a7d28) only changed a colon to a period, so the error predates the pass (thornwall-030)",
         "governor-013 (walking-the-eastern-development): not_present",
-        "governor-014 (elias-disarms): consistent [gate: 4 already in the book]",
-        "governor-018 (acceptable-losses): halted, nothing written \u2014 redraft of acceptable-losses refused: model refused the request (cyber)",
+        "governor-014 (elias-disarms): consistent [gate: 5 already in the book]",
+        "governor-018 (acceptable-losses): not_present (the gate did not pass it: listed pending) [gate: 9 new, 1 already in the book]",
         "governor-020 (junction-fourteen): consistent",
-        "governor-022 (article-twelve): halted, nothing written \u2014 redraft of article-twelve refused: model refused the request (cyber)",
-        "governor-023 (acceptable-losses): consistent [gate: 1 already in the book]",
-        "governor-024 (acceptable-losses): halted, nothing written \u2014 redraft of acceptable-losses refused: model refused the request (cyber)",
-        "governor-025 (haddons-reckoning): not_present (the gate did not pass it: listed pending) [gate: 1 plan conflict, 1 already in the book]",
-        "governor-026 (the-governors-vigil): not_present (the gate did not pass it: listed pending) [gate: 3 new, 1 already in the book]",
-        "governor-027 (elias-agrees-to-the-terms): not_present (the gate did not pass it: listed pending) [gate: 1 extraction]",
-        "governor-028 (order): halted, nothing written \u2014 1 scene(s) not re-drafted: order (no response)",
+        "governor-022 (article-twelve): consistent",
+        "governor-023 (acceptable-losses): consistent (the gate did not pass it: listed pending) [gate: 1 new]",
+        "governor-024 (acceptable-losses): reintroduced (the gate did not pass it: listed pending) [gate: 9 new, 1 already in the book] \u2014 \"A woman named Erdel, seventy-one, first floor.\"",
+        "governor-025 (haddons-reckoning): not_present (the gate did not pass it: listed pending) [gate: 1 new]",
+        "governor-026 (the-governors-vigil): not_present (the gate did not pass it: listed pending) [gate: 2 new, 2 already in the book]",
+        "governor-027 (elias-agrees-to-the-terms): not_present",
+        "governor-028 (order): not_present [gate counts not collected]",
         "lantern-folk-015 (a09-the-worst-night): consistent",
         "lantern-folk-020 (a06-standing-guard): consistent",
         "lantern-folk-029 (a10-the-lamp-goes-dark): consistent",
@@ -1117,20 +1096,20 @@
         "shared-dark-035 (phone-call): consistent",
         "shared-dark-037 (theory): consistent",
         "shared-dark-038 (decision): consistent [gate: 1 already in the book]",
-        "shared-dark-040 (claire): not_present [gate counts not collected]",
+        "shared-dark-040 (claire): consistent [gate counts not collected]",
         "shared-dark-041 (missing-persons): halted, nothing written \u2014 upstream brief fix rewrote nothing for missing-persons: named Getting",
         "thornwall-020 (confession-on-the-wall): consistent",
         "thornwall-022 (undefended-flame): not_present",
         "thornwall-023 (journals-of-the-east-wing): consistent (the gate did not pass it: listed pending) [gate: 1 new]",
-        "thornwall-024 (evening-visit): not_present (the gate did not pass it: listed pending) [gate: 2 plan conflict]",
-        "thornwall-025 (thessan-vigil): consistent",
+        "thornwall-024 (evening-visit): not_present (the gate did not pass it: listed pending) [gate: 10 new]",
+        "thornwall-025 (thessan-vigil): consistent (the gate did not pass it: listed pending) [gate: 1 new]",
         "thornwall-027 (thessan-at-verath): not_present [gate: 1 already in the book]",
         "thornwall-029 (evidence-room): not_present",
         "thornwall-033 (shell-breaks-open): consistent",
         "thornwall-035 (riders-approach): halted, nothing written \u2014 upstream brief fix rewrote nothing for riders-approach: named Meanwhile",
         "thornwall-037 (evening-visit): consistent"
       ],
-      "started_at": "2026-11-08T04:36:48+00:00",
+      "started_at": "2026-11-08T08:17:07+00:00",
       "status": "pass",
       "suite": "e8-revision-safety"
     },
@@ -1146,7 +1125,7 @@
         "usd_spent": 0.0
       },
       "description": "Extract phase 5 leaves a complete, floor-passing project",
-      "duration_s": 0.48,
+      "duration_s": 0.47,
       "error": null,
       "gates": [
         {
@@ -1237,7 +1216,7 @@
       "notes": [
         "status next: evaluate"
       ],
-      "started_at": "2026-11-08T04:37:09+00:00",
+      "started_at": "2026-11-08T08:17:36+00:00",
       "status": "pass",
       "suite": "e9-reference"
     },
@@ -1284,7 +1263,7 @@
         "usd_spent": 0.0
       },
       "description": "Phase 4: rejecting an E1 error's established fact re-checks the scene that contradicted it",
-      "duration_s": 7.74,
+      "duration_s": 9.39,
       "error": null,
       "gates": [
         {
@@ -1374,13 +1353,13 @@
         "thornwall-030 (ivra-visits-sera \u2192 ivra-seals-archive): captured ivra-visits-sera--garren-s-watch-s-decline-took, HIT, set 14; unrelated: ivra-visits-sera--garren-s-watch-s-decline-took: no subject: every later scene with a binding world fact is taken as depending on it",
         "recall: of the cases judged captured, the share whose re-check set holds a contradicting scene (the scenes the reject flow lists now, or the ones its revision lists). Commitments exist only for the extracted subset (each case's establishing and contradicting scenes and up to 2 controls), and phase 4 is offered the subset's facts only, so set_fraction_mean is a floor; control_inclusion is an upper bound on needless inclusion (controls sit next to the two sides)."
       ],
-      "started_at": "2026-11-08T04:37:09+00:00",
+      "started_at": "2026-11-08T08:17:37+00:00",
       "status": "pass",
       "suite": "recheck-set"
     }
   ],
   "schema_version": 1,
   "status": "pass",
-  "storyforge_version": "1.161.0",
+  "storyforge_version": "1.161.1",
   "suite_count": 12
 }

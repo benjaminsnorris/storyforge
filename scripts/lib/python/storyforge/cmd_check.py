@@ -8,6 +8,7 @@ Usage:
     storyforge check --pending                 # every scene waiting on the gate
     storyforge check --pending --keep-going    # ... all of them, not stopping at a failure
     storyforge check --accept act1-sc03        # accept what stopped it, then --pending
+    storyforge check --blocking                # only each scene's blocking, reported (#626)
 
 For prose the author wrote (rethink plan §3.2, "in advisor mode, step 3
 becomes a report"): each scene, in reading order, goes through the gate
@@ -78,6 +79,9 @@ from dataclasses import dataclass, field
 from storyforge.common import detect_project_root, install_signal_handlers, log, set_log_file
 
 REPORT_PATH = 'working/check-report.md'
+BLOCKING_REPORT_PATH = 'working/blocking-report.md'
+#: `--blocking`'s forecast per scene: one call on the scene alone
+BLOCKING_COST_PER_SCENE = 0.1   # BLOCKING_READINGS readings, about $0.04 each
 
 
 def parse_args(argv):
@@ -100,6 +104,11 @@ def parse_args(argv):
                              'exit 1 if any failed. Results for scenes after one that fails '
                              'are provisional: they are checked against a ledger without '
                              'its current facts.')
+    parser.add_argument('--blocking', action='store_true',
+                        help='Only read each scene\'s blocking (hands, sides, posture, what '
+                             'is worn, objects): one call per scene, no ledger, no commit. '
+                             'Reports to working/blocking-report.md; exit 1 on a finding. '
+                             'With no scenes named, every scene with prose.')
     parser.add_argument('--accept', metavar='SCENES',
                         help='Comma-separated scene IDs: accept the contradictions that '
                              'stopped each one\'s last gate run (no model call)')
@@ -132,6 +141,12 @@ def main(argv=None):
         return
     from storyforge.costs import exit_if_bad_threshold
     exit_if_bad_threshold()   # the re-checks and --pending's forecast check it
+    if args.blocking:
+        if args.pending or args.keep_going:
+            log('ERROR: --blocking reads the scenes you name (or every scene); it takes no '
+                '--pending or --keep-going.')
+            sys.exit(1)
+        sys.exit(_blocking_report(args, project_dir))
     if not (args.positional or args.scenes or args.act or args.from_seq or args.pending):
         log('ERROR: name the scenes to check (an id, a range, --scenes, --act, --from-seq '
             'or --pending).')
@@ -599,3 +614,79 @@ def _named(args) -> list[str]:
     if len(args.positional) == 2:
         return list(args.positional)
     return []
+
+
+def _blocking_report(args, project_dir: str) -> int:
+    """`check --blocking` (#626): each named scene's blocking alone
+    (`blocking.check_blocking`), reported, nothing committed. Every scene
+    with prose when none is named. The exit code: 0 clean, 1 a finding, a
+    scene that couldn't be read, or a selection that isn't scenes."""
+    from storyforge.blocking import BlockingError, check_blocking
+    from storyforge.costs import check_threshold, cost_threshold
+    from storyforge.runner import run_parallel
+    from storyforge import api
+    from storyforge import ledger
+    order = ledger.scene_order(project_dir)
+    if args.positional or args.scenes or args.act or args.from_seq:
+        scene_ids = _scene_ids(args, project_dir)
+        unknown = [s for s in _named(args) if s not in scene_ids]
+        if unknown:
+            log(f'ERROR: not scenes that can be checked: {", ".join(unknown)}')
+            return 1
+    else:
+        scene_ids = list(order)
+    scene_ids = [s for s in sorted(scene_ids, key=lambda s: order.get(s, -1))
+                 if os.path.isfile(os.path.join(project_dir, 'scenes', f'{s}.md'))]
+    if not scene_ids:
+        log('ERROR: no scene with prose matches.')
+        return 1
+    forecast = len(scene_ids) * BLOCKING_COST_PER_SCENE
+    log(f'{len(scene_ids)} scene(s) to read for blocking, forecast about ${forecast:.2f}')
+    if not check_threshold(forecast):
+        log(f'ERROR: that is over the cost threshold (${cost_threshold():g}): nothing read.')
+        return 1
+    log_dir = os.path.join(project_dir, 'working', 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+
+    def one(sid):
+        return check_blocking(project_dir, sid,
+                              log_file=os.path.join(log_dir, f'blocking-{sid}.json'))
+
+    with api.metered() as meter:
+        results = run_parallel(scene_ids, one, label='scene')
+    try:
+        meter.log(project_dir, 'blocking', '')
+    except Exception as e:
+        log(f'WARNING: could not log the cost of the blocking read: {e}')
+    lines = ['# Blocking', '']
+    status = 0
+    total = 0
+    for sid in scene_ids:
+        r = results.get(sid)
+        if isinstance(r, Exception) or r is None:
+            why = r if isinstance(r, BlockingError) else f'{type(r).__name__}: {r}'
+            lines += [f'## {sid}', '', f'- NOT READ: {why}', '']
+            log(f'{sid}: NOT READ: {why}')
+            status = 1
+            continue
+        if not (r.findings or r.unverified):
+            continue
+        status = 1
+        lines += [f'## {sid}', '']
+        for f in r.findings:
+            other = (f' (against "{f.established_quote}")'
+                     if f.established_quote != f.scene_quote else '')
+            lines.append(f'- "{f.scene_quote}"{other}: {f.explanation}')
+            total += 1
+        for f in r.unverified:
+            lines.append(f'- UNVERIFIED ({f.problem}): "{f.scene_quote}": {f.explanation}')
+            total += 1
+        lines.append('')
+    if total == 0 and status == 0:
+        lines.append('Every scene read holds together.')
+    path = os.path.join(project_dir, BLOCKING_REPORT_PATH)
+    with open(path, 'w', encoding='utf-8') as fh:
+        fh.write('\n'.join(lines) + '\n')
+    log(f'{total} blocking finding(s) in {len(scene_ids)} scene(s): {BLOCKING_REPORT_PATH}')
+    return status
+

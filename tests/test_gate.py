@@ -2793,7 +2793,7 @@ class TestTwoReadings:
     def test_the_recheck_forecast_prices_every_reading(self):
         """#483 review SF-6: a re-check is GATE_READINGS checks."""
         from storyforge import gate
-        assert gate.RECHECK_COST_PER_SCENE == pytest.approx(0.95)
+        assert gate.RECHECK_COST_PER_SCENE == pytest.approx(1.0)   # + the blocking read (#626)
 
 
 def gate_blocking(result):

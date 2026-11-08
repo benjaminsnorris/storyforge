@@ -6,6 +6,9 @@ addopts = "--tb=short --cov=scripts/lib/python/storyforge --cov-report=term-miss
 # the new run passes, so at most one run's leftovers sit on disk (#296).
 tmp_path_retention_count = 1
 tmp_path_retention_policy = "failed"
+markers = [
+    "blocking_read: the gate's blocking read (#626) stays on; every other test turns it off (conftest)",
+]
 
 [tool.coverage.run]
 source = ["scripts/lib/python/storyforge"]
