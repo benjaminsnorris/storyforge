@@ -346,3 +346,17 @@ class TestCheckBlockingCommand:
         code = self._main(project_dir, monkeypatch, ['--blocking', '--pending'],
                           lambda b: _text({'findings': []}))
         assert code == 1
+
+
+class TestCheckBlockingHelp:
+    """#629: the help said "one call per scene" while the check reads each
+    scene `BLOCKING_READINGS` times."""
+
+    def test_help_states_the_readings(self, capsys):
+        from storyforge import cmd_check
+        from storyforge.blocking import BLOCKING_READINGS
+        with pytest.raises(SystemExit):
+            cmd_check.parse_args(['--help'])
+        out = ' '.join(capsys.readouterr().out.split())
+        assert 'one call per scene' not in out
+        assert f'{BLOCKING_READINGS} readings per scene' in out

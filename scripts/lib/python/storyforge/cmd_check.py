@@ -76,6 +76,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 
+from storyforge.blocking import BLOCKING_READINGS
 from storyforge.common import detect_project_root, install_signal_handlers, log, set_log_file
 
 REPORT_PATH = 'working/check-report.md'
@@ -106,7 +107,8 @@ def parse_args(argv):
                              'its current facts.')
     parser.add_argument('--blocking', action='store_true',
                         help='Only read each scene\'s blocking (hands, sides, posture, what '
-                             'is worn, objects): one call per scene, no ledger, no commit. '
+                             f'is worn, objects): {BLOCKING_READINGS} readings per scene, '
+                             'no ledger, no commit. '
                              'Reports to working/blocking-report.md; exit 1 on a finding. '
                              'With no scenes named, every scene with prose.')
     parser.add_argument('--accept', metavar='SCENES',
