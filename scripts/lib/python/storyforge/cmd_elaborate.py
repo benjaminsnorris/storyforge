@@ -46,12 +46,16 @@ from storyforge.pages import (
 
 
 # The answer budget for each stage's reply (api.invoke adds THINKING_ALLOWANCE
-# on top). The map writes every scene's row, intent and source-map row in one
-# reply, and the briefs a dozen fields per scene; at 16,384 a 42-scene map
-# ran out in thinking (G-018). A reply that long takes several minutes, so
-# those stages also wait longer than API_TIMEOUT.
-STAGE_ANSWER_TOKENS = {'map': 32000, 'briefs': 32000}
-STAGE_TIMEOUT = {'map': 1500, 'briefs': 1500}
+# on top, clamped to the model's output limit). The map writes every scene's
+# row, intent and source-map row in one reply, and the briefs a dozen fields
+# per scene. At 16,384 a 42-scene map ran out in thinking (G-018); at 32,000
+# the map of the whole Iliad (239 source scenes into about 50) spent 47,424
+# of 48,000 tokens thinking (iliad-teen, 2026-11-07). Only generated tokens
+# are billed, so these stages ask for the model's whole output (128k on the
+# current models). A reply that long takes up to about 25 minutes at the
+# ~95 tokens a second the Iliad's map ran at, so they wait 50.
+STAGE_ANSWER_TOKENS = {'map': 112000, 'briefs': 112000}
+STAGE_TIMEOUT = {'map': 3000, 'briefs': 3000}
 
 
 def _python_lib():

@@ -3,7 +3,10 @@
 On the Gawain novel the map stage's reply spent 29k of its 32k output tokens
 thinking and stopped mid-table; the stage said only that the reply had "no
 source-map-csv block" and "no output blocks" (G-018). The map and briefs
-stages now get a larger answer budget and a longer timeout."""
+stages now get a larger answer budget and a longer timeout. At 32,000 the
+map of the whole Iliad (239 source scenes) spent 47,424 of 48,000 tokens
+thinking (iliad-teen, 2026-11-07); they now ask for the model's whole
+output."""
 
 import os
 
@@ -58,3 +61,14 @@ def test_map_and_briefs_get_the_larger_budget_and_timeout(novel, mock_api):
     call = [c for c in mock_api.calls if c['fn'] == 'invoke_to_file'][0]
     assert call['max_tokens'] == STAGE_ANSWER_TOKENS['map'] > 16384
     assert STAGE_TIMEOUT['briefs'] > 600 and STAGE_ANSWER_TOKENS['briefs'] > 16384
+
+
+def test_map_and_briefs_ask_for_the_whole_output_and_wait_for_it():
+    """Regression (iliad-teen): 32,000 + the thinking allowance ran out in
+    thinking on a 239-scene source. The budget reaches the model's 128k
+    output, and the timeout covers it at the ~95 tokens a second that map
+    ran at, with room to spare."""
+    from storyforge.api import THINKING_ALLOWANCE
+    for stage in ('map', 'briefs'):
+        assert STAGE_ANSWER_TOKENS[stage] + THINKING_ALLOWANCE >= 128000
+        assert STAGE_TIMEOUT[stage] >= (STAGE_ANSWER_TOKENS[stage] + THINKING_ALLOWANCE) / 50
