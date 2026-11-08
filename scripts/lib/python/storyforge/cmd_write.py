@@ -109,6 +109,8 @@ def main(argv=None):
     apply_coaching_override(args)
 
     project_dir = detect_project_root()
+    from storyforge.series import require_canon
+    require_canon(project_dir)  # a bad series canon stops here, before a branch or spend
     exit_if_bad_threshold()   # a bad value crashed the forecast check with a traceback
     from storyforge.ledger import exit_if_not_migrated, exit_if_unordered
     exit_if_not_migrated(project_dir)  # the registries live in the ledger
@@ -788,10 +790,13 @@ def _forecast(project_dir: str, pending_ids: list[str], metadata_csv: str,
     if write_mode == 'direct':
         earlier = _forecast_earlier_words(project_dir, pending_ids, prior_prose, avg_words)
         from storyforge.common import build_shared_context
+        from storyforge.series import SeriesError
         from storyforge.source import SourceError
         try:
             shared = sum(len(b.get('text', '')) for b in
                          build_shared_context(project_dir, model)) // 4
+        except SeriesError:
+            raise   # never a forecast without the canon (main checks it first)
         except (OSError, SourceError) as e:   # a source not imported, ...
             log(f'WARNING: the forecast leaves out the shared context ({e})')
     return costs.forecast_write(

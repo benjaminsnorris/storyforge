@@ -328,6 +328,8 @@ def _run_elaboration_scoring(args) -> None:
     from storyforge.common import get_medium
 
     project_dir = detect_project_root()
+    from storyforge.series import require_canon
+    require_canon(project_dir)  # a bad series canon stops here, before a branch or spend
     medium = get_medium(project_dir) or 'novel'
 
     _validate_flag_combinations(args)
@@ -597,6 +599,8 @@ def main(argv=None):
         score_mode = 'batch'
 
     project_dir = detect_project_root()
+    from storyforge.series import require_canon
+    require_canon(project_dir)  # a bad series canon stops here, before a branch or spend
     from storyforge.ledger import exit_if_not_migrated
     exit_if_not_migrated(project_dir)  # the registries live in the ledger
     log(f'Project root: {project_dir}')
@@ -1802,6 +1806,8 @@ def _run_source_fidelity_only(args) -> None:
     from storyforge.ledger import exit_if_not_migrated
 
     project_dir = detect_project_root()
+    from storyforge.series import require_canon
+    require_canon(project_dir)  # a bad series canon stops here, before a branch or spend
     exit_if_not_migrated(project_dir)
     try:
         cfg = source_mod.read_config(project_dir)
@@ -2284,6 +2290,8 @@ def _run_complete_cycle(args):
             f'combined with {", ".join(clash)}')
         sys.exit(1)
     project_dir = detect_project_root()
+    from storyforge.series import require_canon
+    require_canon(project_dir)  # a bad series canon stops here, before a branch or spend
     exit_if_not_migrated(project_dir)
     scores_dir = os.path.join(project_dir, 'working', 'scores')
     cycle, cycle_dir = _find_incomplete_cycle(scores_dir, args.complete_cycle)
