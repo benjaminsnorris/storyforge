@@ -178,7 +178,7 @@ OPTIONAL_CSV_COLUMNS: dict[str, set[str]] = {
 }
 EXPECTED_WORKING_DIRS = set(
     'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup '
-    'stage-sheets'.split()
+    'stage-sheets typed-state'.split()
 )
 
 # Graphic-novel schema overrides — these replace/augment the base schemas for

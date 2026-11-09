@@ -89,6 +89,13 @@ GATE_BLOCKING = True
 #: Either way the findings are BLK against the scene itself
 BLOCKING_METHODS = ('read', 'stage-sheet')
 GATE_BLOCKING_METHOD = 'read'
+#: Whether the gate runs the continuity checks (#648, plan A2:
+#: `continuity.check_continuity`): one structured call on a small model
+#: reads the scene's typed state (none on a re-check of unchanged prose,
+#: which reads its saved file), and code compares it with the book. Its
+#: findings join the check's and block like any continuity error; what it
+#: couldn't check goes to `GateResult.state_notes`, reported, never blocking
+GATE_CONTINUITY = True
 
 #: Extraction problems that would commit a wrong row: they block the commit
 UNRESOLVED = (MISQUOTE, NO_QUOTE, 'supersedes', 'ends', 'ends again', 'rejected')
@@ -259,6 +266,9 @@ class GateResult:
     #: #647: what the stage sheet couldn't check (`StageResult.notes`), for
     #: the log and the report; never blocking
     stage_notes: list[str] = field(default_factory=list)
+    #: #648: what the continuity checks couldn't check, and advisory names
+    #: (`ContinuityResult.notes`), for the log and the report; never blocking
+    state_notes: list[str] = field(default_factory=list)
     #: what `_commit` needs from the run (`_CommitContext`); None until the
     #: run reaches the check
     _ctx: 'object' = field(default=None, repr=False, compare=False)
@@ -1535,6 +1545,8 @@ def _gate_scene(project_dir: str, scene_id: str, *, command: str, prose: str | N
     if result.blocking_note:
         from storyforge.common import log
         log(f'  {scene_id}: {result.blocking_note}')
+    if GATE_CONTINUITY:
+        _check_continuity(project_dir, scene_id, prose, rows, log_dir, result)
     # #642: a `must` line's words, checked by code
     result.check.findings.extend(_verbatim_findings(project_dir, scene_id, prose, result.check))
     _classify(result, project_dir, before, already_reported, prose=prose)
@@ -3441,6 +3453,35 @@ def _read_blocking(project_dir: str, scene_id: str, prose: str, check_model: str
         raise GateError(str(e)) from e
 
 
+def _check_continuity(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
+                      log_dir: str, result: 'GateResult') -> None:
+    """The continuity checks (#648): their findings join the check's (a
+    finding on the same words with the same code as one the check or the
+    blocking read already made is left out, so one slip isn't two;
+    for the sun, also a stage sheet's BLK on those words), their
+    notes go to `result.state_notes`, logged and reported. The scene's
+    typed state is read against the ledger without its earlier commitments
+    (`rows`, as the checker reads it) and saved. A failure is a
+    `GateError`: the scene can't be checked."""
+    from storyforge.common import log
+    from storyforge.continuity import ContinuityError, check_continuity, overlaps
+    try:
+        got = check_continuity(project_dir, scene_id, prose=prose, rows=rows,
+                               log_file=os.path.join(log_dir, f'gate-state-{scene_id}.json'))
+    except ContinuityError as e:
+        raise GateError(str(e)) from e
+    have = result.check.findings + result.check.unverified
+    for f in got.findings:
+        # the stage sheet checks the sun too (#647): its BLK on these words is this slip
+        same = (f.code, BLOCKING_CODE) if f.explanation.startswith('(typed state, sky)') \
+            else (f.code,)
+        if not any(g.code in same and overlaps(g.scene_quote, f.scene_quote) for g in have):
+            result.check.findings.append(f)
+    result.state_notes = list(got.notes)
+    if got.notes:
+        log(f'  {scene_id}: continuity, not checked: {"; ".join(got.notes)}')
+
+
 def gate_unchanged(project_dir: str, scene_id: str, *, command: str, log_dir: str,
                    introduced_by: str | None = None, extract_model: str | None = None,
                    check_model: str | None = None,
@@ -3657,6 +3698,9 @@ def report_lines(result: GateResult) -> list[str]:
     if result.stage_notes:
         lines.append('NOTE (stage sheet, not checked): '
                      + _one_line('; '.join(result.stage_notes)))
+    if result.state_notes:
+        lines.append('NOTE (continuity, not checked or advisory): '
+                     + _one_line('; '.join(result.state_notes)))
     if result.steady:
         lines.append(f'NOTE (kept as they were, read from paragraphs the prose has unchanged): '
                      f'{len(result.steady)} fact(s)')
