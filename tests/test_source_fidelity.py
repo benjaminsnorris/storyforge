@@ -460,6 +460,24 @@ class TestKnowledgeAndNotedFields:
             'athena-at-the-door|g|c|yes|c|d|a|"x"|odysseus-on-ogygia|odysseus-on-ogygia\n')})
         assert 'knowledge_out' not in sf.target_text(adapted, 'athena-at-the-door', 'brief')
 
+    def test_a_brief_with_no_goal_is_still_a_brief(self, adapted):
+        """#643's review CR-1: goal is a craft-framework field, optional since
+        #643, so a brief without one is scored, not skipped as 'no brief'."""
+        _write(adapted, {'reference/scene-briefs.csv': (
+            'id|goal|conflict|outcome|crisis|decision|key_actions|key_dialogue|'
+            'knowledge_in|knowledge_out\n'
+            'athena-at-the-door||||||she knocks|"Go"||\n')})
+        text = sf.target_text(adapted, 'athena-at-the-door', 'brief')
+        assert text and '**key_actions:** she knocks' in text
+        assert _plan(adapted, 'athena-at-the-door').skip != 'no brief'
+
+    def test_an_empty_brief_row_is_no_brief(self, adapted):
+        _write(adapted, {'reference/scene-briefs.csv': (
+            'id|goal|conflict|outcome|crisis|decision|key_actions|key_dialogue|'
+            'knowledge_in|knowledge_out\n'
+            'athena-at-the-door|||||||||\n')})
+        assert sf.target_text(adapted, 'athena-at-the-door', 'brief') is None
+
     def test_the_prompt_says_carried_facts_are_left_out(self, adapted):
         assert 'facts carried in from earlier scenes are left out' in \
             _plan(adapted, 'athena-at-the-door').prompt

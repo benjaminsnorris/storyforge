@@ -122,9 +122,9 @@ flagged = detect_abstract_fields(briefs_map)
 
 **Over-specified beats** — too many key_actions for the scene's word count. A 2,500-word scene with 5 key_actions forces one mandatory beat every 500 words, leaving no room for atmosphere, interiority, or organic pacing. Rule of thumb: 2-3 key_actions per 2,500 words. Flag scenes where `len(key_actions.split(';')) > target_words / 800`.
 
-**Prescriptive dialogue** — exact quotes in `key_dialogue` make surrounding prose contort to deliver specific lines. Better to use dialogue direction ("Dorren rationalizes the anomaly using institutional language") than exact lines ("The eastern readings are within acceptable variance"). Flag scenes where `key_dialogue` contains quoted strings. When a scripted line is kept, label its speaker (`Name: "line"`, the name as in characters.csv; see `references/scene-column-guide.md`) so the gate can check who says it.
+**Prescriptive dialogue** — exact quotes in `key_dialogue` make surrounding prose contort to deliver specific lines. Better to use dialogue direction ("Dorren rationalizes the anomaly using institutional language") than exact lines ("The eastern readings are within acceptable variance"). Flag scenes where `key_dialogue` contains quoted strings (not a `must:` line: that one the author keeps word for word on purpose). When a scripted line is kept, label its speaker (`Name: "line"`, the name as in characters.csv; see `references/scene-column-guide.md`) so the gate can check who says it.
 
-**`must:` beats are the author's.** A `key_actions` or `key_dialogue` item that starts with `must:` is a beat the author requires: the gate stops a scene that breaks it (other broken promises are only advisory), and its quoted words must be in the prose word for word. Never cut, merge, reword or unmark one, and never add `must:` yourself; offer it to the author when they want the gate to require a beat. See `references/scene-schema.md`. Trimming an over-specified brief keeps every `must:` beat (and counts it).
+**`must:` beats are the author's.** A `key_actions` or `key_dialogue` item that starts with `must:` is a beat the author requires: the gate stops a scene that breaks it (other broken promises are only advisory), and its quoted words must be in the prose word for word. Never cut, merge, reword or unmark one, and never add `must:` yourself; offer it to the author when they want the gate to require a beat. See `references/scene-schema.md`. Trimming an over-specified brief keeps every `must:` beat; it still counts toward the beats-per-words threshold.
 
 **Procedural goals** — goals framed as tasks ("Complete the quarterly audit") instead of dramatic questions ("Prove the maps are accurate before the review deadline"). The goal shapes how the drafter opens the scene — procedural goals produce bureaucratic openings.
 
@@ -167,7 +167,7 @@ Present results:
 - Number of gaps by file (scene-intent.csv vs scene-briefs.csv)
 - Which scenes have the most gaps
 - Recommend `storyforge elaborate --stage gap-fill` to fill them
-- Each gap has `advisory`: True for a craft-framework field (value_at_stake, value_shift, emotional_arc, goal, conflict, crisis, decision). Report those apart, as optional notes the author may want, never as missing data
+- Each gap has `advisory`: True for a craft-framework field (any of `elaborate.CRAFT_FRAMEWORK_COLUMNS`). Report those apart, as optional notes the author may want, never as missing data
 
 ### Voice Profile Validation
 

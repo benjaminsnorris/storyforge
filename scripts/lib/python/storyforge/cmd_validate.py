@@ -4,7 +4,8 @@ Usage:
     storyforge validate                  # Both structural + schema (default)
     storyforge validate --no-schema      # Structural only
     storyforge validate --json           # Output as JSON
-    storyforge validate --quiet          # Exit code only (0=pass, 1=fail)
+    storyforge validate --quiet          # Exit code only (0 = no blocking failure;
+                                         # advisory diagnostics never fail)
 """
 
 import argparse
@@ -17,11 +18,13 @@ from storyforge.common import detect_project_root, log
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(prog='storyforge validate',
-                                     description='Run structural and schema validation')
+                                     description='Run structural and schema validation. Exits 1 on a blocking '
+                                     'failure; advisory diagnostics (#643: every craft-framework '
+                                     'check) are listed but never fail.')
     parser.add_argument('--no-schema', action='store_true', help='Skip schema validation')
     parser.add_argument('--structural', action='store_true', help='Include structural scoring')
     parser.add_argument('--json', action='store_true', dest='json_output', help='Output as JSON')
-    parser.add_argument('--quiet', action='store_true', help='Exit code only')
+    parser.add_argument('--quiet', action='store_true', help='Exit code only (0 = no blocking failure)')
     return parser.parse_args(argv)
 
 

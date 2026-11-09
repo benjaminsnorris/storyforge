@@ -372,11 +372,16 @@ COLUMN_SCHEMA = {
     },
     'key_actions': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'Concrete things that happen in this scene.',
+        'description': ('Concrete things that happen in this scene. An item starting `must:` '
+                        'is a beat the author requires (see below).'),
     },
     'key_dialogue': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'Optional, the author\'s: lines the author wants in the scene, filled by hand and never generated (#644). Only a line marked must: is required, word for word.',
+        'description': ('Optional, the author\'s: lines the author wants in the scene, filled by '
+                        'hand and never generated for a prose book (#644; a graphic novel\'s briefs '
+                        'stage writes it as balloon text). Label each quoted line\'s speaker '
+                        '(`Name: "line"`); see scene-column-guide.md. Only an item starting `must:` '
+                        'is required, word for word.'),
     },
     'emotions': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',

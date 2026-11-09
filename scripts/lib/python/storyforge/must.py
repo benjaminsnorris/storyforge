@@ -14,13 +14,15 @@ gate checks by code (`gate._verbatim_findings`).
 The marker is `must`, any case, then a colon, with any spacing around it
 (`must:`, `MUST :`, ` Must:x`). It must open the item: `;` separates items,
 and a `must:` anywhere else in an item is just words. An item that is only
-the marker (`must:`) marks nothing; the gate reports it.
+the marker (`must:`) marks nothing, nor does a marker after other words or
+in a field that takes none (`misplaced`); the gate reports both.
 
 This module is the one place that reads the marker. A `must` beat is the
 author's: nothing Storyforge writes may drop or reword one. Each command
 that rewrites a brief's `key_actions` or `key_dialogue` from a model's reply
-(hone's rewrites, revise's brief fixes, elaborate's briefs stage) passes the
-result through `keep_must`, which puts back every `must` item the reply
+(hone's rewrites, revise's brief fixes, elaborate's briefs stage, a forced
+extract or extract-gn merge, enrich re-reads; agent-reference's `must` row
+is the list) passes the result through `keep_must`, which puts back every `must` item the reply
 lost or reworded, word for word, and drops any `must:` item the reply made
 up (only the author marks a beat).
 """
@@ -41,6 +43,12 @@ class Item(NamedTuple):
     raw: str        # the item as written, stripped
     must: bool      # it opens with the marker
     text: str       # the item without the marker, stripped ('' for a bare `must:`)
+
+    @property
+    def beat(self) -> bool:
+        """Whether it is a `must` beat: marked, and naming something (a
+        bare `must:` marks nothing)."""
+        return self.must and bool(self.text)
 
 
 def parse_item(item: str) -> Item:
@@ -69,7 +77,7 @@ def items(cell: str) -> list[Item]:
 
 def must_items(cell: str) -> list[Item]:
     """The cell's `must` items that name a beat (a bare `must:` names none)."""
-    return [i for i in items(cell) if i.must and i.text]
+    return [i for i in items(cell) if i.beat]
 
 
 def unmarked(cell: str) -> str:
@@ -81,6 +89,26 @@ def unmarked(cell: str) -> str:
 def bare_markers(cell: str) -> int:
     """How many items of the cell are only the marker."""
     return sum(1 for i in items(cell) if i.must and not i.text)
+
+
+_ANY_MARK = re.compile(r'(?<!\w)must\s*:', re.IGNORECASE)
+
+
+def misplaced(cell: str, col: str) -> list[str]:
+    """The items of `col`'s cell that write the marker where it marks
+    nothing (#642's review SF-3): after other words (`Priam: must: "..."`,
+    `**must:** ...`, `"must: ..."`) in `MUST_FIELDS`, or anywhere in a field
+    that takes no marker (`outcome`, the registry fields). Raw, for a NOTE:
+    a beat the author meant to require would otherwise go advisory
+    unsaid."""
+    out = []
+    for item in items(cell):
+        if col in MUST_FIELDS:
+            if not item.must and _ANY_MARK.search(item.raw):
+                out.append(item.raw)
+        elif item.must or _ANY_MARK.search(item.raw):
+            out.append(item.raw)
+    return out
 
 
 #: The fewest words a quote and a beat must share, one inside the other,
@@ -137,12 +165,12 @@ def keep_must(old: str, new: str) -> Kept:
     keep = must_items(old)
     wanted = {_key(i.text) for i in keep}
     new_items = items(new)
-    dropped = [i.raw for i in new_items if i.must and i.text and _key(i.text) not in wanted]
+    dropped = [i.raw for i in new_items if i.beat and _key(i.text) not in wanted]
     present = {_key(i.text) for i in new_items if i.must and _key(i.text) in wanted}
     restored = [i for i in keep if _key(i.text) not in present]
     if not dropped and not restored:
         return Kept(new, [], [])
-    kept = [i for i in new_items if not (i.must and i.text and _key(i.text) not in wanted)]
+    kept = [i for i in new_items if not (i.beat and _key(i.text) not in wanted)]
     out = [i.raw for i in kept]
     old_items = items(old)
     missing = []

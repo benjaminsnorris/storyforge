@@ -278,6 +278,17 @@ class TestReview443:
         assert not mock_git.calls_for('run_review_phase') and drift == []
         assert 'Skipping the timeline drift check and the review phase' in out
 
+    def test_the_advisory_list_is_committed_with_the_scene(self, setup, monkeypatch,
+                                                           mock_git):
+        """T7 (#642's review): working/gate-advisory.csv goes in the scene's
+        commit, so an advisory doesn't leave the tree dirty."""
+        _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
+        _gate(monkeypatch, {'act1-sc01': True})
+        main(['--scenes', 'act1-sc01'])
+        [paths] = [c[2] for c in mock_git.calls
+                   if c[0] == 'commit_and_push' and c[1] == 'Draft scene act1-sc01']
+        assert gate.ADVISORY_PATH in paths
+
     def test_a_failed_commit_of_a_scene_the_gate_stopped_says_both(
             self, setup, monkeypatch, capsys, mock_git):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD)})
@@ -1052,23 +1063,30 @@ class TestKeepGoing:
         per_scene = due[1] / 2
         assert due[2] == pytest.approx(draft + 3 * one_gate + one_fix + per_scene)
 
-    def test_without_the_flag_the_run_still_stops(self, setup, monkeypatch):
+    def test_without_the_flag_a_scene_depending_on_the_failure_is_held(
+            self, setup, monkeypatch, capsys):
+        """#641's review, T-4: held because act1-sc02's brief lists act1-sc01
+        in continuity_deps (#641: not a stop of the whole run)."""
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
         calls = _gate(monkeypatch, {'act1-sc01': False, 'act1-sc02': True})
         done = self._provisional(monkeypatch)
         with pytest.raises(SystemExit):
             main(['--scenes', 'act1-sc01,act1-sc02'])
         assert calls == [('act1-sc01', 'draft')] and done == []
+        assert 'act1-sc02 waits on it: its brief lists act1-sc01 in continuity_deps' in \
+            capsys.readouterr().out
 
-    def test_a_scene_that_cant_be_committed_provisionally_stops_it(self, setup, monkeypatch,
-                                                                   capsys):
+    def test_a_scene_that_cant_be_committed_provisionally_holds_its_dependents(
+            self, setup, monkeypatch, capsys):
         _direct_replies(monkeypatch, {'act1-sc01': _reply(GOOD), 'act1-sc02': _reply(GOOD)})
         calls = _gate(monkeypatch, {'act1-sc01': False, 'act1-sc02': True})
         self._provisional(monkeypatch, allowed=False)
         with pytest.raises(SystemExit):
             main(['--keep-going', '--scenes', 'act1-sc01,act1-sc02'])
         assert calls == [('act1-sc01', 'draft')]
-        assert 'Not committed provisionally: it changes a fixed fact' in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert 'Not committed provisionally: it changes a fixed fact' in out
+        assert 'act1-sc02 waits on it: its brief lists act1-sc01 in continuity_deps' in out
 
     def test_an_earlier_provisional_scene_blocks_only_without_the_flag(self, setup,
                                                                        monkeypatch):

@@ -50,6 +50,7 @@ from storyforge.costs import (
 )
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.csv_cli import get_field, get_column, update_field
+from storyforge.scoring_levels import is_advisory_failure
 
 
 def parse_args(argv):
@@ -524,7 +525,7 @@ def _print_level_result(result: dict) -> None:
     failed = result.get('failed', 0)
     accepted = result.get('accepted', 0)
     advisory = result.get('advisory', 0)
-    real_failed = failed - accepted - advisory
+    real_failed = failed - accepted - advisory   # scoring_levels.blocking_failed
     summary = f'{passed} passed, {real_failed} failed'
     if accepted:
         summary += f' (+ {accepted} accepted)'
@@ -535,7 +536,7 @@ def _print_level_result(result: dict) -> None:
         if c.get('accepted'):
             marker = '~'  # accepted-failure marker — visible but not blocking
             tag = ' (accepted)'
-        elif c.get('advisory') and not c['passed']:
+        elif is_advisory_failure(c):
             marker = '!'  # a craft-framework check (#643): reported, never blocking
             tag = ' (advisory)'
         elif c['passed']:
