@@ -282,6 +282,12 @@ Under a cassette the refusal fallback (`fallbacks`) is stripped from every
 request, recording and replay alike, so a recording is always the requested
 model's reply or its refusal: evals measure the requested model.
 
+A test can read a committed recording directly too: the Austen voice
+description and exemplar shortlist (#651) are frozen in
+`tests/fixtures/voiceprint/cassette/`, and `tests/test_voiceprint_description.py`
+parses their replies against the recorded sample rather than replaying the
+request (see `references/voiceprints/README.md`).
+
 A suite reports `error`, whatever it returned, when the cassette logged any
 failure during it (command code often catches API errors and skips the scene,
 which would otherwise turn a replay gap into a confident partial number), or

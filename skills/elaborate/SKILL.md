@@ -348,6 +348,8 @@ Reference images upload alongside the prompt, labeled by role: **Image 1** chara
 
 Voice development typically happens after architecture (you know your POV characters and scene types) and before briefs (the briefs need voice rules). Can also run standalone at any point. Drafting needs it: while the voice guide is missing, still init's template, empty, unreadable, or only `reference/persistent-prompt.md` (which the brief-based prompt doesn't read), `storyforge status` has a `voice` blocker and names `voice` as the stage before drafting, and `storyforge write` refuses to draft. Unattended, `./storyforge elaborate --stage voice` writes `reference/voice-guide.md` and `reference/voice-profile.csv` in one call; it advances no phase.
 
+A book with a `voice:` block in `storyforge.yaml` (an author voice repo, `references/storyforge-yaml-schema.md`) is drafted in the author's own voice too. The voice guide is still required beside it: it holds the book's POV rules and characters, which the author's voice doesn't.
+
 Every CLI stage sets `exists: true` and `updated` on the `storyforge.yaml` artifacts it writes (story architecture, bibles, voice guide, scene index).
 
 1. Read existing reference materials (character bible for voice fingerprints, story architecture for tone)

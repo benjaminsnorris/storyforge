@@ -1,0 +1,17 @@
+"It is _your_ turn to say something now, Mr. Darcy.--_I_ talked about the dance, and _you_ ought to make some kind of remark on the size of the room, or the number of couples."
+
+He smiled, and assured her that whatever she wished him to say should be said.
+
+"Very well.--That reply will do for the present.--Perhaps by and bye I may observe that private balls are much pleasanter than public ones.--But _now_ we may be silent."
+
+"Do you talk by rule then, while you are dancing?"
+
+"Sometimes. One must speak a little, you know. It would look odd to be entirely silent for half an hour together, and yet for the advantage of _some_, conversation ought to be so arranged as that they may have the trouble of saying as little as possible."
+
+"Are you consulting your own feelings in the present case, or do you imagine that you are gratifying mine?"
+
+"Both," replied Elizabeth archly; "for I have always seen a great similarity in the turn of our minds.--We are each of an unsocial, taciturn disposition, unwilling to speak, unless we expect to say something that will amaze the whole room, and be handed down to posterity with all the eclat of a proverb."
+
+"This is no very striking resemblance of your own character, I am sure," said he. "How near it may be to _mine_, I cannot pretend to say.--_You_ think it a faithful portrait undoubtedly."
+
+"I must not decide on my own performance."

@@ -1,0 +1,15 @@
+"He is just what a young man ought to be," said she, "sensible, good humoured, lively; and I never saw such happy manners!--so much ease, with such perfect good breeding!"
+
+"He is also handsome," replied Elizabeth, "which a young man ought likewise to be, if he possibly can. His character is thereby complete."
+
+"I was very much flattered by his asking me to dance a second time. I did not expect such a compliment."
+
+"Did not you? _I_ did for you. But that is one great difference between us. Compliments always take _you_ by surprise, and _me_ never. What could be more natural than his asking you again? He could not help seeing that you were about five times as pretty as every other woman in the room. No thanks to his gallantry for that. Well, he certainly is very agreeable, and I give you leave to like him. You have liked many a stupider person."
+
+"Dear Lizzy!"
+
+"Oh! you are a great deal too apt you know, to like people in general. You never see a fault in any body. All the world are good and agreeable in your eyes. I never heard you speak ill of a human being in my life."
+
+"I would wish not to be hasty in censuring any one; but I always speak what I think."
+
+"I know you do; and it is _that_ which makes the wonder. With _your_ good sense, to be so honestly blind to the follies and nonsense of others! Affectation of candour is common enough;--one meets it every where. But to be candid without ostentation or design--to take the good of every body's character and make it still better, and say nothing of the bad--belongs to you alone. And so, you like this man's sisters too, do you? Their manners are not equal to his."

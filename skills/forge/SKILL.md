@@ -374,7 +374,7 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 
 | Command | Requires |
 |---|---|
-| `storyforge write` | Scene data (`reference/scenes.csv`) with at least one scene; a voice guide with the author's text (no `voice` blocker in `storyforge status`; `write` refuses a missing, template or empty one) |
+| `storyforge write` | Scene data (`reference/scenes.csv`) with at least one scene; a voice guide with the author's text (no `voice` blocker in `storyforge status`; `write` refuses a missing, template or empty one). With a `voice:` block in `storyforge.yaml`, a usable author voice repo: `write` also stops on a block it can't use (the repo missing or inside the book, no `description.md` or exemplars yet, a narrator not under its `fiction/`) |
 | `storyforge evaluate` | At least some scene files (`.md`) in `scenes/` |
 | Revision planning (`revise` skill) | Evaluation results in `working/evaluations/`, or scores |
 | `storyforge revise` | Revision plan for the current pipeline cycle (from `working/pipeline.csv`) |

@@ -45,11 +45,11 @@ def log(msg: str) -> None:
 # Project root detection
 # ============================================================================
 
-def detect_project_root(start: str | None = None) -> str:
+def find_project_root(start: str | None = None) -> str | None:
     """Walk up from start (default cwd) looking for storyforge.yaml.
 
-    Returns the project directory path.
-    Raises SystemExit if not found within 20 levels.
+    Returns the project directory path, or None if not found within 20
+    levels (for a caller that works outside a project too).
     """
     d = Path(start or os.getcwd()).resolve()
     for _ in range(20):
@@ -59,6 +59,18 @@ def detect_project_root(start: str | None = None) -> str:
         if parent == d:
             break
         d = parent
+    return None
+
+
+def detect_project_root(start: str | None = None) -> str:
+    """Walk up from start (default cwd) looking for storyforge.yaml.
+
+    Returns the project directory path.
+    Raises SystemExit if not found within 20 levels.
+    """
+    found = find_project_root(start)
+    if found is not None:
+        return found
     print('ERROR: Could not find storyforge.yaml in any parent directory.', file=sys.stderr)
     print('Are you inside a Storyforge project?', file=sys.stderr)
     sys.exit(1)
