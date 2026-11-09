@@ -112,26 +112,16 @@ def test_reference_fingerprint_is_current():
         'voiceprint.fingerprint({"corpus/pride-and-prejudice.md": text}).save(path)')
 
 
-def _voice_yaml_files(use):
-    """The `file:` of each voice.yaml corpus entry with this `use:` (a
-    reader for the provisional format, enough for this check)."""
-    out, current = [], None
-    for line in _read(os.path.join(AUSTEN, 'voice.yaml')).splitlines():
-        line = line.split('#')[0].strip()
-        if line.startswith('- file:'):
-            current = line.split(':', 1)[1].strip()
-        elif line.startswith('use:') and current and line.split(':', 1)[1].strip() == use:
-            out.append(current)
-    return out
-
-
-def test_voice_yaml_names_the_corpus_the_tests_and_fingerprint_use():
-    """voice.yaml can't drift from fingerprint.json and the tests' split
-    (#662 review TD-8)."""
+def test_corpus_index_names_the_corpus_the_tests_and_fingerprint_use():
+    """corpus/index.csv can't drift from fingerprint.json and the tests' split
+    (#662 review TD-8; the index is voice.yaml's corpus list since #652)."""
+    from storyforge import voice_repo as vr
     fp = vp.Fingerprint.load(os.path.join(AUSTEN, 'fingerprint.json'))
-    assert _voice_yaml_files('fingerprint') == [p['name'] for p in fp.pieces] == [
+    pieces, _ = vr.corpus(AUSTEN)
+    assert [p.row.file for p in pieces if p.counts] == [p['name'] for p in fp.pieces] == [
         'corpus/pride-and-prejudice.md']
-    assert _voice_yaml_files('held-out') == ['corpus/emma.md', 'corpus/persuasion.md']
+    assert [p.row.file for p in pieces if p.row.use == 'held-out'] == [
+        'corpus/emma.md', 'corpus/persuasion.md']
 
 
 def test_reference_fingerprint_loads_and_names_her_phrases():

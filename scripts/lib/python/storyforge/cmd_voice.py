@@ -1,8 +1,29 @@
 """storyforge voice — the author voice repo (plan Part B).
 
-Run in an author voice repo (plan B0: `voice.yaml`, `corpus/`,
-`fingerprint.json`), not in a book. It proposes, judges and accepts the
-described voice and the exemplar bank (B3, B4; `storyforge.voiceprint_proposals`):
+Run in an author voice repo (plan B0, `storyforge.voice_repo`: `voice.yaml`,
+`corpus/` with its `index.csv`, `fingerprint.json`, `description.md`,
+`exemplars/`, `fiction/`), not in a book: a book points at the repo with a
+`voice:` block in its storyforge.yaml and reads it in place.
+
+Making the repo and its fingerprint (#652, plan B0, B1, B2; free):
+
+- `voice init` makes the layout here (or in `--dir`): voice.yaml with the
+  default settings, the corpus index, exemplars/ and fiction/. It refuses
+  inside a book and replaces nothing.
+- `voice import <folder|file|url>...` imports the author's own writing
+  (`storyforge.voice_import`): Markdown, HTML, a `.txt` list of URLs, or an
+  RSS or Atom feed (a blog's export too). Boilerplate is stripped; each
+  piece keeps its title, date, kind and source in `corpus/index.csv`.
+  voice.yaml says which kinds count and the least words a piece needs;
+  link posts, notes and short pieces are out by default. It prints what
+  the corpus holds and warns when what counts is under
+  `voiceprint.MIN_CORPUS_WORDS`. Exit 1 when a source can't be read or
+  fetched (after importing the rest).
+- `voice fingerprint` computes `fingerprint.json` from the pieces that
+  count, in index order.
+
+The described voice and the exemplar bank (#651, B3, B4;
+`storyforge.voiceprint_proposals`):
 
 1. `voice propose` reads a sample of the fingerprinted corpus alongside the
    fingerprint and makes two model calls: the description's claims go to
@@ -24,6 +45,12 @@ described voice and the exemplar bank (B3, B4; `storyforge.voiceprint_proposals`
    are. Free.
 
 Usage:
+    storyforge voice init --author "Ben Norris"   # the layout, in this directory
+    storyforge voice import ~/blog/_posts         # a folder of Markdown or HTML
+    storyforge voice import https://example.com/feed.xml --follow-links
+    storyforge voice import urls.txt --kind essay # a list of URLs, one kind for all
+    storyforge voice import export.xml --dry-run  # what would be imported; nothing written
+    storyforge voice fingerprint                  # fingerprint.json from what counts
     storyforge voice propose                    # both proposals, in this directory
     storyforge voice propose --dir ../ben-voice --only description
     storyforge voice propose --dry-run          # the sample and the forecast; no call
@@ -46,9 +73,28 @@ from storyforge.common import install_signal_handlers, log
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         prog='storyforge voice',
-        description='The author voice repo: propose, judge and accept the described '
-                    'voice and the exemplar bank.')
+        description='The author voice repo: make it, import a corpus, fingerprint it, '
+                    'and propose, judge and accept the described voice and the exemplar '
+                    'bank.')
     sub = parser.add_subparsers(dest='action', required=True)
+    init = sub.add_parser('init', help='Make the author voice repo\'s layout (free)')
+    init.add_argument('--dir', default='.', help='Where (default: here; made if missing)')
+    init.add_argument('--author', default='', help='The author\'s name, for voice.yaml')
+    imp = sub.add_parser('import', help='Import the author\'s writing into corpus/ (free)')
+    imp.add_argument('sources', nargs='+', metavar='SOURCE',
+                     help='A folder of Markdown or HTML, a file, a .txt list of URLs, '
+                          'a feed, or an http(s) URL')
+    imp.add_argument('--dir', default='.', help='The author voice repo (default: here)')
+    from storyforge.voice_repo import KINDS
+    imp.add_argument('--kind', choices=KINDS,
+                     help='Every imported piece\'s kind (default: what each says, else essay)')
+    imp.add_argument('--follow-links', action='store_true',
+                     help='For a feed item that carries only a cut summary, fetch its page')
+    imp.add_argument('--dry-run', action='store_true',
+                     help='Say what would be imported; write nothing')
+    fpr = sub.add_parser('fingerprint', help='Compute fingerprint.json from the pieces that '
+                                             'count (free)')
+    fpr.add_argument('--dir', default='.', help='The author voice repo (default: here)')
     prop = sub.add_parser('propose', help='Propose the description\'s claims and the '
                                           'exemplar shortlist (two model calls)')
     prop.add_argument('--dir', default='.', help='The author voice repo (default: here)')
@@ -80,9 +126,17 @@ def parse_args(argv):
 def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
     install_signal_handlers()
+    from storyforge import voice_repo as vr
     from storyforge import voiceprint_proposals as vpp
     voice_dir = os.path.abspath(args.dir)
     try:
+        if args.action == 'init':
+            return _init(voice_dir, args)
+        vr.check_repo(voice_dir)
+        if args.action == 'import':
+            return _import(voice_dir, args)
+        if args.action == 'fingerprint':
+            return _fingerprint(voice_dir)
         vpp.check_voice_dir(voice_dir)
         if args.action == 'propose':
             return _propose(voice_dir, args)
@@ -96,9 +150,102 @@ def main(argv=None):
             _log_unjudged(passages)
             return 0
         return _accept(voice_dir, args)
-    except vpp.ProposalError as e:
+    except (vpp.ProposalError, vr.VoiceRepoError) as e:
         log(f'ERROR: {e}')
         return 1
+
+
+def _init(voice_dir: str, args) -> int:
+    from storyforge import voice_repo as vr
+    made = vr.init_repo(voice_dir, args.author)
+    log(f'Made the author voice repo in {voice_dir}: {", ".join(made)}')
+    if not args.author:
+        log(f'voice.yaml has no author yet: write it there (it titles description.md)')
+    log('Next: `storyforge voice import <folder|feed|urls>`, then `storyforge voice '
+        'fingerprint`. Then point a book at this repo with a `voice:` block in its '
+        'storyforge.yaml (`author: <path to this repo>`).')
+    return 0
+
+
+def _import(voice_dir: str, args) -> int:
+    from storyforge import voice_import as vi
+    from storyforge import voice_repo as vr
+    vr.read_settings(voice_dir)     # a voice.yaml that can't be used stops it first
+    report = vi.read_sources(voice_dir, args.sources, follow_links=args.follow_links,
+                             kind=args.kind or '')
+    plan = vi.plan_import(voice_dir, report.pieces)
+    verb = 'Would import' if args.dry_run else 'Imported'
+    log(f'{verb} {len(plan.rows)} piece(s)'
+        + (f'; {len(plan.already)} already in the corpus, skipped' if plan.already else ''))
+    kinds: dict[str, int] = {}
+    for r in plan.rows:
+        kinds[r.kind] = kinds.get(r.kind, 0) + 1
+    if kinds:
+        log('  by kind: ' + ', '.join(f'{n} {k}' for k, n in sorted(kinds.items())))
+    new_sources = {r.source for r in plan.rows}
+    guessed = sum(1 for p in report.pieces if not p.kind_found and p.source in new_sources)
+    if guessed:
+        log(f'  {guessed} said nothing of their kind and were filed as essays: correct '
+            f'{vr.INDEX_FILE}\'s kind column where that\'s wrong')
+    undated = sum(1 for r in plan.rows if not r.date)
+    if undated:
+        log(f'WARNING: {undated} piece(s) have no date; their date is blank in '
+            f'{vr.INDEX_FILE}')
+    for w in report.warnings:
+        log(f'WARNING: {w}')
+    for e in report.errors:
+        log(f'ERROR: {e}')
+    if args.dry_run:
+        for r in plan.rows:
+            log(f'  {r.file} ({r.kind}, {r.date or "no date"}) <- {r.source}')
+        log('Dry run: nothing written.')
+    else:
+        vi.write_import(voice_dir, plan)
+        pieces, _ = vr.corpus(voice_dir)
+        for line in vr.corpus_summary(pieces):
+            log(line)
+        if plan.rows:
+            log('Next: `storyforge voice fingerprint`. Nothing is committed: commit the '
+                'repo after.')
+    if report.errors:
+        log(f'ERROR: {len(report.errors)} source(s) above weren\'t imported.')
+        return 1
+    return 0
+
+
+def _fingerprint(voice_dir: str) -> int:
+    from storyforge import voice_repo as vr
+    from storyforge import voiceprint as vp
+    from storyforge import voiceprint_proposals as vpp
+    pieces, texts = vr.corpus(voice_dir)
+    for line in vr.corpus_summary(pieces):
+        log(line)
+    counted = {p.row.file: texts[p.row.file] for p in pieces if p.counts}
+    if not counted:
+        log(f'ERROR: no piece counts toward the fingerprint; import some, or change '
+            f'{vr.VOICE_FILE}\'s kinds or min_words')
+        return 1
+    try:
+        fp = vp.fingerprint(counted)
+    except vp.VoiceprintError as e:
+        log(f'ERROR: {e}')
+        return 1
+    path = os.path.join(voice_dir, vr.FINGERPRINT_FILE)
+    old = None
+    if os.path.isfile(path):
+        with open(path, encoding='utf-8') as f:
+            old = f.read()
+    new = fp.to_json()
+    if old == new:
+        log(f'{vr.FINGERPRINT_FILE} is current: {fp.words:,} words, {fp.chunks} chunks')
+        return 0
+    fp.save(path)
+    log(f'{vr.FINGERPRINT_FILE}: {fp.words:,} words of {len(counted)} piece(s), '
+        f'{fp.chunks} chunks')
+    if old is not None and os.path.isfile(os.path.join(voice_dir, vpp.SHORTLIST_FILE)):
+        log(f'The fingerprint changed: `storyforge voice judge` measures the shortlist '
+            f'against it again')
+    return 0
 
 
 def _has_author_work(voice_dir: str, what: str) -> bool:

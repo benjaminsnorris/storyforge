@@ -1,0 +1,805 @@
+"""`storyforge voice import`: an author's own writing into their voice repo's
+corpus (#652, plan B1).
+
+Sources (`read_sources`), any mix of them:
+- a folder: its Markdown (`.md`, `.markdown`) and HTML (`.html`, `.htm`)
+  files, and any RSS or Atom file in it (`.xml`, `.rss`, `.atom`: a feed, or
+  a blog's export, as WordPress exports RSS), recursively, hidden ones left
+  out;
+- one such file;
+- a `.txt` file listing URLs, one a line (`#` comments);
+- a URL: a page, or a feed (told by its content type or its first tag).
+
+Each piece keeps its title, date (`YYYY-MM-DD`, or blank when none is
+given: never guessed), kind (`voice_repo.KINDS`) and source. The kind comes
+from what the piece says about itself: front matter (`kind`, `type`,
+`layout`, `categories`, `tags`; a `link`, `link_url` or `external_url` key
+makes it a link post), a feed item's categories, or a feed item that links
+off the feed's own site (a link post). `--kind` sets one kind for the whole
+import. With no sign, a piece is filed as an essay and the summary counts
+how many were, so the author can correct `corpus/index.csv`.
+
+Boilerplate goes: HTML is parsed with the standard library's `html.parser`,
+the page's `<article>` (or `<main>`, or the body) kept and its scripts,
+styles, navigation, headers, footers, asides, forms, figures, code blocks
+and block quotes dropped; Markdown loses its front matter, code blocks,
+block quotes, tables, images, HTML and link syntax. Block quotes go because
+they are someone else's words, and the fingerprint measures the author's.
+What's kept is stored as Markdown: `# title`, then one paragraph a block.
+
+Fetched content is untrusted data: only text is taken from it, never run;
+a page or feed over `MAX_BYTES` is refused; only http and https URLs are
+fetched; a feed declaring a DOCTYPE or an entity is refused before it is
+parsed (no entity expansion). Fetching goes through one injectable function
+(`fetch(url) -> Fetched`), so the tests use none; the real one sends a
+generic User-Agent and nothing about the user.
+
+Nothing is replaced: a piece whose source is already in the index is
+skipped and counted. A source that can't be read or fetched is an ERROR,
+and the command exits 1 after importing the rest.
+"""
+
+from __future__ import annotations
+
+import email.utils
+import os
+import re
+import urllib.parse
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
+from html.parser import HTMLParser
+from typing import Callable
+
+from storyforge import voice_repo as vr
+
+#: a page or feed bigger than this isn't read
+MAX_BYTES = 10 * 1024 * 1024
+#: seconds to wait for a URL
+TIMEOUT = 30
+#: the User-Agent sent: generic, nothing about the user
+USER_AGENT = 'Mozilla/5.0 (compatible; storyforge)'
+MARKDOWN_EXT = ('.md', '.markdown')
+HTML_EXT = ('.html', '.htm')
+FEED_EXT = ('.xml', '.rss', '.atom')
+URL_LIST_EXT = ('.txt',)
+
+#: words a piece may say about its kind, and the kind each means
+KIND_WORDS = {
+    'essay': 'essay', 'essays': 'essay', 'article': 'essay', 'articles': 'essay',
+    'longform': 'essay', 'long-form': 'essay',
+    'fiction': 'fiction', 'story': 'fiction', 'stories': 'fiction',
+    'short-story': 'fiction', 'short-stories': 'fiction',
+    'note': 'notes', 'notes': 'notes', 'micro': 'notes', 'microblog': 'notes',
+    'status': 'notes', 'aside': 'notes', 'asides': 'notes',
+    'link': 'link', 'links': 'link', 'linked': 'link', 'link-post': 'link',
+    'linkpost': 'link', 'bookmark': 'link', 'bookmarks': 'link',
+}
+#: front-matter keys that make a piece a link post
+LINK_KEYS = ('link', 'link_url', 'external_url', 'linkurl')
+#: how a truncated feed summary ends
+_TRUNCATED_RE = re.compile(r'(?:…|\.\.\.|\[…\]|\[\.\.\.\]|read more|continue reading'
+                           r'|read the rest)[\s\W]*$', re.IGNORECASE)
+
+
+class VoiceImportError(Exception):
+    """A source that can't be read, fetched or parsed; the message says why."""
+
+
+@dataclass(frozen=True)
+class Fetched:
+    """What a URL returned: its final URL, content type and body."""
+    url: str
+    content_type: str
+    body: bytes
+
+
+Fetch = Callable[[str], Fetched]
+
+
+@dataclass
+class Piece:
+    """One piece of writing, read and cleaned: its Markdown body has no
+    title heading (`markdown` adds it)."""
+    title: str
+    date: str
+    kind: str
+    body: str
+    source: str
+    kind_found: bool = True
+
+    def markdown(self) -> str:
+        head = f'# {self.title}\n\n' if self.title else ''
+        return f'{head}{self.body.strip()}\n'
+
+
+@dataclass
+class Report:
+    """What reading the sources found: the pieces, and the problems
+    (ERROR lines: a source not imported) and notes (WARNING lines)."""
+    pieces: list[Piece] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+# ============================================================================
+# Fetching
+# ============================================================================
+
+def is_url(s: str) -> bool:
+    return s.lower().startswith(('http://', 'https://'))
+
+
+def fetch_url(url: str) -> Fetched:
+    """GET `url` (http or https only) with a generic User-Agent; refuse a
+    body over `MAX_BYTES` or a redirect off http(s). Raises VoiceImportError."""
+    import urllib.request
+    if not is_url(url):
+        raise VoiceImportError(f'{url}: only http and https URLs are fetched')
+    req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT,
+                                               'Accept': 'text/html, application/xml, '
+                                                         'application/rss+xml, '
+                                                         'application/atom+xml, */*'})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            final = resp.geturl()
+            if not is_url(final):
+                raise VoiceImportError(f'{url} redirected to {final}, which isn\'t http(s)')
+            body = resp.read(MAX_BYTES + 1)
+            ctype = resp.headers.get('Content-Type', '')
+    except VoiceImportError:
+        raise
+    except Exception as e:   # urllib's errors, timeouts, bad URLs
+        raise VoiceImportError(f'{url} couldn\'t be fetched ({e.__class__.__name__}: {e})') from e
+    if len(body) > MAX_BYTES:
+        raise VoiceImportError(f'{url} is over {MAX_BYTES // (1024 * 1024)} MB; not read')
+    return Fetched(final, ctype, body)
+
+
+def _decode(body: bytes, content_type: str = '') -> str:
+    m = re.search(r'charset=([\w-]+)', content_type or '', re.IGNORECASE)
+    for enc in ([m.group(1)] if m else []) + ['utf-8']:
+        try:
+            return body.decode(enc).lstrip('﻿')
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return body.decode('utf-8', errors='replace').lstrip('﻿')
+
+
+# ============================================================================
+# Cleaning
+# ============================================================================
+
+def _norm_date(raw: str) -> str:
+    """`YYYY-MM-DD` from an ISO date or an RFC 822 one (a feed's pubDate),
+    or '' when it can't be read."""
+    raw = (raw or '').strip().strip('"\'')
+    if not raw:
+        return ''
+    m = re.match(r'^(\d{4})-(\d{2})-(\d{2})', raw)
+    if m:
+        return '-'.join(m.groups())
+    m = re.match(r'^(\d{4})(?:-(\d{2}))?$', raw)
+    if m:
+        return raw
+    try:
+        dt = email.utils.parsedate_to_datetime(raw)
+    except (TypeError, ValueError, IndexError):
+        return ''
+    return dt.strftime('%Y-%m-%d') if dt else ''
+
+
+def kind_of(words: list[str]) -> str:
+    """The kind the first of `words` that names one means, or ''."""
+    for w in words:
+        k = KIND_WORDS.get(w.strip().lower().replace(' ', '-').replace('_', '-'))
+        if k:
+            return k
+    return ''
+
+
+def _collapse(text: str) -> str:
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+#: tags whose whole content is boilerplate, or not the author's prose
+_SKIP_TAGS = frozenset({'script', 'style', 'noscript', 'template', 'svg', 'math', 'nav',
+                        'footer', 'header', 'aside', 'form', 'button', 'select', 'iframe',
+                        'object', 'video', 'audio', 'canvas', 'figure', 'pre', 'blockquote',
+                        'dialog', 'head'})
+#: roles that mark boilerplate
+_SKIP_ROLES = frozenset({'navigation', 'banner', 'contentinfo', 'complementary', 'search',
+                         'menu', 'menubar', 'dialog'})
+#: class or id words that mark boilerplate
+_SKIP_CLASS_RE = re.compile(r'(?:^|[\s_-])(?:comments?|share|sharing|social|related|sidebar'
+                            r'|newsletter|subscribe|breadcrumbs?|pagination|navigation|menu'
+                            r'|cookie|advert|ads)(?:$|[\s_-])', re.IGNORECASE)
+_VOID_TAGS = frozenset({'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
+                        'meta', 'param', 'source', 'track', 'wbr'})
+_BLOCK_TAGS = frozenset({'p', 'div', 'section', 'article', 'main', 'li', 'ul', 'ol', 'dl',
+                         'dt', 'dd', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'tr',
+                         'td', 'th', 'body', 'br', 'hr', 'figcaption', 'details',
+                         'summary'})
+_HEADINGS = ('h1', 'h2', 'h3', 'h4', 'h5', 'h6')
+_CONTENT_CLASS_RE = re.compile(r'(?:^|\s)(?:e-content|entry-content|post-content|post-body'
+                               r'|article-body|article-content)(?:$|\s)', re.IGNORECASE)
+
+
+class _Extractor(HTMLParser):
+    """The text of an HTML page as paragraphs, boilerplate dropped, each
+    marked as inside the page's first `<article>` (or content element) and
+    inside `<main>` or not; and its title, headline, metadata and first
+    `<time datetime>`."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.skip: list[str] = []
+        self.buf: list[str] = []
+        self.heading = ''
+        self.blocks: list[tuple[str, bool, bool]] = []   # (text, in_article, in_main)
+        self.content_tag = ''
+        self.content_depth = 0
+        self.content_done = False
+        self.main = 0
+        self.title_parts: list[str] = []
+        self.in_title = False
+        self.meta: dict[str, str] = {}
+        self.time = ''
+        self.h1 = ''
+        self.h1_buf: list[str] | None = None
+
+    def _flush(self):
+        text = _collapse(''.join(self.buf))
+        self.buf = []
+        if text:
+            if self.heading:
+                text = f'{"#" * int(self.heading[1])} {text}'
+            self.blocks.append((text, self.content_depth > 0, self.main > 0))
+
+    @staticmethod
+    def _skips(tag, a) -> bool:
+        if tag in _SKIP_TAGS:
+            return True
+        if (a.get('role') or '').lower() in _SKIP_ROLES:
+            return True
+        if a.get('aria-hidden') == 'true' or 'hidden' in a:
+            return True
+        return bool(_SKIP_CLASS_RE.search(f'{a.get("class") or ""} {a.get("id") or ""}'))
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == 'meta':
+            key = (a.get('property') or a.get('name') or a.get('itemprop') or '').lower()
+            if key and a.get('content') and key not in self.meta:
+                self.meta[key] = a['content']
+            return
+        if tag == 'title' and not self.title_parts and self.skip in ([], ['head']):
+            self.in_title = True
+            return
+        # the date and the headline, even inside a skipped <header>
+        if tag == 'time' and not self.time and a.get('datetime'):
+            self.time = a['datetime']
+        if tag == 'h1' and not self.h1 and self.h1_buf is None and \
+                not set(self.skip) - {'header', 'head'}:
+            self.h1_buf = []
+        if self.skip:
+            if tag not in _VOID_TAGS:
+                self.skip.append(tag)
+            return
+        if tag not in _VOID_TAGS and self._skips(tag, a):
+            self._flush()
+            self.skip.append(tag)
+            return
+        if tag in _BLOCK_TAGS:
+            self._flush()
+        if tag in _HEADINGS:
+            self.heading = tag
+        if self.content_depth and tag == self.content_tag:
+            self.content_depth += 1
+        elif not self.content_depth and not self.content_done and (
+                tag == 'article' or _CONTENT_CLASS_RE.search(a.get('class') or '')):
+            self.content_tag, self.content_depth = tag, 1
+        if tag == 'main' or (a.get('role') or '').lower() == 'main':
+            self.main += 1
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag):
+        if tag == 'title' and self.in_title:
+            self.in_title = False
+            return
+        if tag == 'h1' and self.h1_buf is not None:
+            self.h1 = _collapse(''.join(self.h1_buf))
+            self.h1_buf = None
+        if self.skip:
+            if tag in self.skip:
+                while self.skip and self.skip.pop() != tag:
+                    pass
+            return
+        if tag in _BLOCK_TAGS:
+            self._flush()
+        if tag in _HEADINGS:
+            self.heading = ''
+        if self.content_depth and tag == self.content_tag:
+            self.content_depth -= 1
+            if not self.content_depth:
+                self.content_done = True
+        if tag == 'main' and self.main:
+            self.main -= 1
+
+    def handle_data(self, data):
+        if self.in_title:
+            self.title_parts.append(data)
+            return
+        if self.h1_buf is not None:
+            self.h1_buf.append(data)
+        if not self.skip:
+            self.buf.append(data)
+
+    def close(self):
+        super().close()
+        self._flush()
+
+
+@dataclass(frozen=True)
+class Page:
+    title: str
+    date: str
+    body: str
+
+
+def html_page(html: str) -> Page:
+    """An HTML page's title, date and prose (paragraphs as Markdown, the
+    page's headline left out of the body)."""
+    p = _Extractor()
+    p.feed(html)
+    p.close()
+    for scope in (lambda b: b[1], lambda b: b[2], lambda b: True):
+        blocks = [b[0] for b in p.blocks if scope(b)]
+        if any(not t.startswith('#') for t in blocks):
+            break
+    title = _collapse(p.meta.get('og:title') or p.h1 or ''.join(p.title_parts))
+    if blocks and blocks[0].lstrip('#').strip() == title:
+        blocks = blocks[1:]
+    date = _norm_date(p.meta.get('article:published_time') or p.meta.get('datepublished')
+                      or p.meta.get('date') or p.meta.get('dc.date') or p.time)
+    return Page(title, date, '\n\n'.join(blocks))
+
+
+_FRONT_RE = re.compile(r'\A---[ \t]*\r?\n(.*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)', re.DOTALL)
+
+
+def front_matter(text: str) -> tuple[dict[str, str | list[str]], str]:
+    """A Markdown file's YAML front matter (scalars, and lists given as a
+    block or `[a, b]`), and the text after it."""
+    from storyforge.common import parse_yaml_scalar
+    m = _FRONT_RE.match(text)
+    if not m:
+        return {}, text
+    meta: dict[str, str | list[str]] = {}
+    key = None
+    for line in m.group(1).splitlines():
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        km = re.match(r'^([A-Za-z_][\w-]*):\s*(.*)$', line)
+        if km:
+            key, raw = km.group(1).lower(), km.group(2).strip()
+            if raw.startswith('[') and raw.endswith(']'):
+                meta[key] = [parse_yaml_scalar(x) for x in raw[1:-1].split(',') if x.strip()]
+            elif raw:
+                meta[key] = parse_yaml_scalar(raw)
+            else:
+                meta[key] = []
+        elif key and line.strip().startswith('-') and isinstance(meta.get(key), list):
+            meta[key].append(parse_yaml_scalar(line.strip()[1:]))   # type: ignore[union-attr]
+    return meta, text[m.end():]
+
+
+def markdown_prose(text: str) -> str:
+    """Markdown without what isn't the author's running prose: code blocks,
+    block quotes, tables, images, reference-link and footnote definitions,
+    HTML (its text kept, scripts and styles dropped), link syntax and
+    footnote marks. Headings stay (the fingerprint leaves them out)."""
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    text = re.sub(r'<!--.*?-->', '', text, flags=re.DOTALL)
+    out, fence = [], None
+    for line in text.split('\n'):
+        s = line.strip()
+        m = re.match(r'^(`{3,}|~{3,})', s)
+        # a dropped line leaves a blank one, so the prose either side of it
+        # stays two paragraphs
+        if fence:
+            if m and s.startswith(fence):
+                fence = None
+            out.append('')
+            continue
+        if m:
+            fence = m.group(1)
+            out.append('')
+            continue
+        if s.startswith('>') or (s.startswith('|') and s.endswith('|')):
+            out.append('')
+            continue
+        if re.match(r'^\[[^\]]+\]:\s', s):          # [ref]: url, [^1]: note
+            out.append('')
+            continue
+        out.append(line)
+    text = '\n'.join(out)
+    text = re.sub(r'<(script|style)\b.*?</\1\s*>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<[^>\n]+>', '', text)
+    text = re.sub(r'!\[[^\]]*\]\([^)]*\)', '', text)
+    text = re.sub(r'!\[[^\]]*\]\[[^\]]*\]', '', text)
+    text = re.sub(r'\[\^[^\]]+\]', '', text)
+    text = re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', text)
+    text = re.sub(r'\[([^\]]+)\]\[[^\]]*\]', r'\1', text)
+    text = re.sub(r'^[ \t]*(?:[-*+]|\d+[.)])[ \t]+', '', text, flags=re.MULTILINE)
+    import html as _html
+    text = _html.unescape(text)
+    text = re.sub(r'[ \t]+\n', '\n', text)
+    return re.sub(r'\n{3,}', '\n\n', text).strip()
+
+
+def _as_list(v) -> list[str]:
+    if isinstance(v, list):
+        return [str(x) for x in v]
+    return [x.strip() for x in re.split(r'[,;]', str(v or '')) if x.strip()]
+
+
+def markdown_piece(text: str, source: str, fallback_title: str = '') -> Piece:
+    """A Markdown file as a piece: title, date and kind from its front
+    matter, the body cleaned (`markdown_prose`); a leading `# title`
+    heading becomes the title."""
+    meta, body = front_matter(text)
+    body = markdown_prose(body)
+    title = str(meta.get('title') or '')
+    m = re.match(r'^#\s+(.+)\n*', body)
+    if m and (not title or _collapse(m.group(1)) == title):
+        title = title or _collapse(m.group(1))
+        body = body[m.end():]
+    words = []
+    for k in ('kind', 'type', 'layout', 'post_type', 'category', 'categories', 'tags'):
+        words += _as_list(meta.get(k))
+    kind = kind_of(words)
+    if not kind and any(meta.get(k) for k in LINK_KEYS):
+        kind = 'link'
+    date = _norm_date(str(meta.get('date') or meta.get('published') or meta.get('pubdate') or ''))
+    return Piece(title or fallback_title, date, kind or 'essay', body, source, bool(kind))
+
+
+def html_piece(html: str, source: str, fallback_title: str = '') -> Piece:
+    page = html_page(html)
+    return Piece(page.title or fallback_title, page.date, 'essay', page.body, source, False)
+
+
+# ============================================================================
+# Feeds
+# ============================================================================
+
+_ATOM = '{http://www.w3.org/2005/Atom}'
+_CONTENT = '{http://purl.org/rss/1.0/modules/content/}encoded'
+_DC_DATE = '{http://purl.org/dc/elements/1.1/}date'
+_WP_TYPE = '{http://wordpress.org/export/1.2/}post_type'
+_WP_STATUS = '{http://wordpress.org/export/1.2/}status'
+
+
+def looks_like_feed(text: str) -> bool:
+    head = re.sub(r'<\?xml[^>]*\?>|<!--.*?-->', '', text[:2000], flags=re.DOTALL).lstrip()
+    return head.startswith(('<rss', '<feed', '<rdf:RDF'))
+
+
+def _host(url: str) -> str:
+    host = urllib.parse.urlparse(url or '').netloc.lower()
+    return host[4:] if host.startswith('www.') else host
+
+
+def _text(el) -> str:
+    return (el.text or '').strip() if el is not None else ''
+
+
+@dataclass(frozen=True)
+class FeedItem:
+    title: str
+    link: str
+    date: str
+    categories: tuple[str, ...]
+    html: str
+    summary_only: bool
+    related: str = ''
+
+
+def feed_items(xml: str, where: str) -> tuple[str, list[FeedItem], list[str]]:
+    """An RSS 2.0 or Atom feed's site link and items, and notes on items
+    left out (a WordPress export's pages, drafts and attachments). Raises
+    VoiceImportError for a feed with a DOCTYPE or an entity (refused unparsed),
+    or one that isn't well-formed XML, RSS or Atom."""
+    if re.search(r'<!DOCTYPE|<!ENTITY', xml[:20000], re.IGNORECASE):
+        raise VoiceImportError(f'{where}: the feed declares a DOCTYPE or an entity; not parsed')
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError as e:
+        raise VoiceImportError(f'{where}: not well-formed XML ({e})') from e
+    items, notes = [], []
+    if root.tag == f'{_ATOM}feed':
+        site = ''
+        for ln in root.findall(f'{_ATOM}link'):
+            if ln.get('rel', 'alternate') == 'alternate':
+                site = ln.get('href', '')
+        for e in root.findall(f'{_ATOM}entry'):
+            link = related = ''
+            for ln in e.findall(f'{_ATOM}link'):
+                rel = ln.get('rel', 'alternate')
+                if rel == 'alternate' and not link:
+                    link = ln.get('href', '')
+                elif rel == 'related' and not related:
+                    related = ln.get('href', '')
+            content = e.find(f'{_ATOM}content')
+            summary = e.find(f'{_ATOM}summary')
+            body = content if content is not None else summary
+            html = (body.text or '') if body is not None else ''
+            if body is not None and body.get('type') == 'xhtml':
+                html = ''.join(ET.tostring(c, encoding='unicode') for c in body)
+            items.append(FeedItem(
+                _text(e.find(f'{_ATOM}title')), link,
+                _norm_date(_text(e.find(f'{_ATOM}published'))
+                           or _text(e.find(f'{_ATOM}updated'))),
+                tuple(c.get('term', '') for c in e.findall(f'{_ATOM}category')),
+                html, content is None, related))
+        return site, items, notes
+    channel = root.find('channel')
+    if root.tag != 'rss' or channel is None:
+        raise VoiceImportError(f'{where}: neither an RSS nor an Atom feed (<{root.tag}>)')
+    site = _text(channel.find('link'))
+    skipped = 0
+    for it in channel.findall('item'):
+        wp_type = _text(it.find(_WP_TYPE))
+        wp_status = _text(it.find(_WP_STATUS))
+        if (wp_type and wp_type != 'post') or (wp_status and wp_status != 'publish'):
+            skipped += 1
+            continue
+        content = it.find(_CONTENT)
+        desc = it.find('description')
+        html = _text(content) if content is not None and _text(content) else _text(desc)
+        items.append(FeedItem(
+            _text(it.find('title')), _text(it.find('link')) or _text(it.find('guid')),
+            _norm_date(_text(it.find('pubDate')) or _text(it.find(_DC_DATE))),
+            tuple(_text(c) for c in it.findall('category')),
+            html, not (content is not None and _text(content))))
+    if skipped:
+        notes.append(f'{where}: {skipped} item(s) that aren\'t published posts (pages, '
+                     f'drafts, attachments) left out')
+    return site, items, notes
+
+
+def _truncated(item: FeedItem) -> bool:
+    if not item.summary_only:
+        return False
+    tail = html_page(item.html).body[-80:] if item.html else ''
+    return not tail or bool(_TRUNCATED_RE.search(tail))
+
+
+# ============================================================================
+# Reading the sources
+# ============================================================================
+
+def _piece_name(path: str) -> str:
+    stem = os.path.splitext(os.path.basename(path))[0]
+    stem = re.sub(r'^\d{4}-\d{2}-\d{2}-', '', stem)
+    return stem.replace('-', ' ').replace('_', ' ').strip()
+
+
+def _date_from_name(path: str) -> str:
+    m = re.match(r'^(\d{4}-\d{2}-\d{2})', os.path.basename(path))
+    return m.group(1) if m else ''
+
+
+class _Reader:
+    def __init__(self, voice_dir: str, fetch: Fetch, follow_links: bool, report: Report):
+        self.voice_dir = voice_dir
+        self.fetch = fetch
+        self.follow = follow_links
+        self.report = report
+
+    def rel(self, path: str) -> str:
+        return os.path.relpath(os.path.abspath(path), self.voice_dir)
+
+    def add(self, piece: Piece):
+        if not piece.body.strip() or not vr.prose_words(piece.body):
+            self.report.warnings.append(f'{piece.source}: no prose found; not imported')
+            return
+        self.report.pieces.append(piece)
+
+    # -- local files
+    def file(self, path: str):
+        ext = os.path.splitext(path)[1].lower()
+        src = self.rel(path)
+        try:
+            with open(path, 'rb') as f:
+                raw = f.read(MAX_BYTES + 1)
+        except OSError as e:
+            self.report.errors.append(f'{src} can\'t be read ({e})')
+            return
+        if len(raw) > MAX_BYTES:
+            self.report.errors.append(f'{src} is over {MAX_BYTES // (1024 * 1024)} MB; not read')
+            return
+        try:
+            text = raw.decode('utf-8').lstrip('﻿')
+        except UnicodeDecodeError as e:
+            self.report.errors.append(f'{src} isn\'t UTF-8 ({e.reason} at byte {e.start})')
+            return
+        if ext in URL_LIST_EXT:
+            for line in text.splitlines():
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    self.url(line.split()[0])
+            return
+        if ext in FEED_EXT or (ext not in MARKDOWN_EXT + HTML_EXT and looks_like_feed(text)):
+            self.feed(text, src)
+            return
+        if ext in HTML_EXT:
+            piece = html_piece(text, src, _piece_name(path))
+        else:
+            piece = markdown_piece(text, src, _piece_name(path))
+        piece.date = piece.date or _date_from_name(path)
+        self.add(piece)
+
+    def folder(self, path: str):
+        corpus = os.path.realpath(os.path.join(self.voice_dir, vr.CORPUS_DIR))
+        real = os.path.realpath(path)
+        if real == corpus or real.startswith(corpus + os.sep):
+            self.report.errors.append(f'{self.rel(path)} is the corpus itself; import from '
+                                      f'where the writing is now')
+            return
+        found = []
+        for root, dirs, files in os.walk(path):
+            dirs[:] = sorted(d for d in dirs if not d.startswith('.'))
+            for n in sorted(files):
+                if n.startswith('.'):
+                    continue
+                if n.lower().endswith(MARKDOWN_EXT + HTML_EXT + FEED_EXT):
+                    found.append(os.path.join(root, n))
+        if not found:
+            self.report.errors.append(f'{self.rel(path)} holds no Markdown, HTML or feed file')
+        for f in found:
+            self.file(f)
+
+    # -- the web
+    def get(self, url: str) -> tuple[str, str, str] | None:
+        """(final URL, text, content type), or None after reporting why not."""
+        try:
+            got = self.fetch(url)
+        except VoiceImportError as e:
+            self.report.errors.append(str(e))
+            return None
+        return got.url, _decode(got.body, got.content_type), got.content_type
+
+    def url(self, url: str):
+        if not is_url(url):
+            self.report.errors.append(f'{url}: not an http or https URL')
+            return
+        got = self.get(url)
+        if got is None:
+            return
+        final, text, ctype = got
+        if 'xml' in ctype.lower() or looks_like_feed(text):
+            self.feed(text, url)
+            return
+        self.add(html_piece(text, url, _piece_name(urllib.parse.urlparse(final).path)))
+
+    def feed(self, xml: str, where: str):
+        try:
+            site, items, notes = feed_items(xml, where)
+        except VoiceImportError as e:
+            self.report.errors.append(str(e))
+            return
+        self.report.warnings.extend(notes)
+        site_host = _host(site)
+        truncated = []
+        for n, item in enumerate(items, start=1):
+            source = item.link or f'{where}#{n}'
+            kind = kind_of(list(item.categories))
+            if not kind and (item.related or (site_host and item.link
+                                              and _host(item.link) != site_host)):
+                kind = 'link'
+            if _truncated(item):
+                if self.follow and is_url(item.link):
+                    got = self.get(item.link)
+                    if got is None:
+                        continue
+                    page = html_page(got[1])
+                    body, title = page.body, item.title or page.title
+                else:
+                    truncated.append(item.title or source)
+                    continue
+            else:
+                body, title = html_page(item.html).body, item.title
+            if body.lstrip('#').strip() == title:
+                body = ''
+            self.add(Piece(title, item.date, kind or 'essay', body, source, bool(kind)))
+        if truncated:
+            shown = '; '.join(truncated[:5]) + (f' (and {len(truncated) - 5} more)'
+                                                if len(truncated) > 5 else '')
+            self.report.warnings.append(
+                f'{where}: {len(truncated)} item(s) carry only a cut summary, not imported '
+                f'(pass --follow-links to fetch their pages): {shown}')
+
+
+def read_sources(voice_dir: str, sources: list[str], fetch: Fetch | None = None,
+                 follow_links: bool = False, kind: str = '') -> Report:
+    """Read every source into pieces (nothing written). `fetch` gets each
+    URL (default `fetch_url`, looked up at call time so a test can replace
+    it). `kind`, when given, is every piece's kind."""
+    report = Report()
+    reader = _Reader(os.path.abspath(voice_dir), fetch or fetch_url, follow_links, report)
+    for src in sources:
+        if is_url(src):
+            reader.url(src)
+        elif os.path.isdir(src):
+            reader.folder(src)
+        elif os.path.isfile(src):
+            reader.file(src)
+        else:
+            report.errors.append(f'{src}: not a folder, a file or an http(s) URL')
+    if kind:
+        for p in report.pieces:
+            p.kind, p.kind_found = kind, True
+    return report
+
+
+# ============================================================================
+# Writing them
+# ============================================================================
+
+def slug(text: str, most: int = 60) -> str:
+    """A file-name slug: lower-case ASCII letters, digits and hyphens."""
+    import unicodedata
+    s = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii').lower()
+    s = re.sub(r'[^a-z0-9]+', '-', s).strip('-')
+    return s[:most].rstrip('-') or 'piece'
+
+
+@dataclass
+class Plan:
+    """What an import writes: new index rows with their files' text, and
+    the pieces skipped because their source is already in the index."""
+    rows: list[vr.IndexRow] = field(default_factory=list)
+    texts: dict[str, str] = field(default_factory=dict)
+    already: list[str] = field(default_factory=list)
+
+
+def plan_import(voice_dir: str, pieces: list[Piece]) -> Plan:
+    """Name each new piece's file (`corpus/<date>-<slug>.md`, `-2` and on
+    for a name taken) and skip a piece whose source the index already has,
+    or one this import already has. Raises VoiceRepoError as
+    `voice_repo.read_index`."""
+    existing = vr.read_index(voice_dir)
+    sources = {r.source for r in existing if r.source}
+    taken = {os.path.normpath(r.file) for r in existing}
+    corpus = os.path.join(voice_dir, vr.CORPUS_DIR)
+    if os.path.isdir(corpus):
+        taken |= {os.path.normpath(os.path.join(vr.CORPUS_DIR, n)) for n in os.listdir(corpus)}
+    plan = Plan()
+    ordered = sorted(pieces, key=lambda p: (p.date or '9999', p.source))
+    for p in ordered:
+        if p.source in sources:
+            plan.already.append(p.source)
+            continue
+        sources.add(p.source)
+        base = '-'.join(x for x in (p.date, slug(p.title or _piece_name(p.source))) if x)
+        name, n = f'{base}.md', 2
+        while os.path.normpath(os.path.join(vr.CORPUS_DIR, name)) in taken:
+            name, n = f'{base}-{n}.md', n + 1
+        rel = f'{vr.CORPUS_DIR}/{name}'
+        taken.add(os.path.normpath(rel))
+        plan.rows.append(vr.IndexRow(rel, _collapse(p.title), p.date, p.kind, p.source, ''))
+        plan.texts[rel] = p.markdown()
+    return plan
+
+
+def write_import(voice_dir: str, plan: Plan) -> None:
+    """Write the plan's files, then the index with its rows added at the
+    end (the files first, so the index never names a file not written)."""
+    from storyforge.voiceprint_proposals import _write_text
+    for rel, text in plan.texts.items():
+        _write_text(os.path.join(voice_dir, rel), text)
+    if plan.rows:
+        vr.write_index(voice_dir, vr.read_index(voice_dir) + plan.rows)

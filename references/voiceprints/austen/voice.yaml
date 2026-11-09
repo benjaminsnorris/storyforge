@@ -1,25 +1,11 @@
 # The Austen reference voiceprint (plan B7, #650), in the author voice repo
-# layout (plan B0). Storyforge's worked example and the fixture of
-# tests/test_voiceprint_reference.py and tests/test_voiceprint_description.py;
-# `author` titles description.md. The voice.yaml format is provisional
-# until `storyforge voice init` defines it (#652); plan B0's per-piece
-# "sections in or out" isn't here yet. Years are the title page's.
-# tests/test_voiceprint_reference.py checks that the `use: fingerprint`
-# files are the ones fingerprint.json names.
+# layout (plan B0, `storyforge.voice_repo`). Storyforge's worked example and
+# the fixture of tests/test_voiceprint_reference.py,
+# tests/test_voiceprint_description.py and tests/test_voice_repo.py; `author`
+# titles description.md. The corpus is listed in corpus/index.csv: *Pride and
+# Prejudice* counts, *Emma* and *Persuasion* are held out (the tests' unseen
+# Austen), so `storyforge voice fingerprint` here recomputes fingerprint.json.
 author: Jane Austen
-corpus:
-  - file: corpus/pride-and-prejudice.md
-    title: Pride and Prejudice
-    year: 1813
-    source: Project Gutenberg 42671, R. W. Chapman's text of the 1813 first edition
-    use: fingerprint
-  - file: corpus/emma.md
-    title: Emma
-    year: 1816   # dated 1816 on its title page; published December 1815
-    source: Project Gutenberg 158
-    use: held-out
-  - file: corpus/persuasion.md
-    title: Persuasion
-    year: 1818   # dated 1818 on its title page; published December 1817
-    source: Project Gutenberg 105
-    use: held-out
+kinds:
+  - fiction
+min_words: 500
