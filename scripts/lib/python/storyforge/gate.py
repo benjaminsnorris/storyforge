@@ -29,6 +29,11 @@ For one scene's prose, `gate_scene` runs:
    plan and the prose wins. One of a beat the brief marks `must:`
    (`storyforge.must`) still blocks, and a `must` beat's quoted words are
    checked word for word by code (`_verbatim_findings`).
+   With `GATE_CHECK_METHOD` `questions` (#649, `storyforge check
+   --questions`), the question layer (`questions.check_questions`) checks
+   the scene in the open checker's place: narrow yes/no questions from the
+   ledger about who is in the scene, each asked twice, a finding only when
+   both say yes and the quote verifies.
 4. **Commit** only when nothing halted, extraction left nothing unresolved
    (`UNRESOLVED`: a quote not in the scene, a `supersedes` or `ends` that
    names nothing it can apply to), and the check found nothing, verified or

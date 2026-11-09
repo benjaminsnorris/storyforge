@@ -169,6 +169,45 @@ The model is the stage sheet's default (the extraction tier);
 `--mode auto` records it beside the default's, and a replay without the
 variable replays the default's.
 
+## The question set (#649)
+
+`question-set` measures the gate's question layer (`storyforge.questions`,
+plan A3): narrow yes/no questions from the ledger, each asked twice, a
+finding only when both answers say yes and the quote is in the scene. The
+cases are *A Christmas Carol* (public domain, the E2 book) and facts Dickens
+establishes, written as ledger facts of the types the layer asks about
+(`evals/fixtures/question-set/cases.json`): 17 of E2's injected errors that
+break a trait, relationship, physical or world fact, the 13 scenes they are
+in as Dickens wrote them, and E2's 8 benign rewordings, so 38 scene variants
+and 96 questions with known answers (17 `yes`). Each scene is asked about
+the same facts in every variant, so a fact that is true of the scene is
+asked beside the one an injection breaks. It reports `recall` (a finding
+on the injected words), `recall_any` (a finding anywhere in the scene),
+`false_alarms` (split into controls, benign edits and the other facts of an
+error variant), `split` and `misquoted`, by code, and gates each of
+`FLOORS` on its recorded value. It measures the questions, the prompt and
+the model; which facts are asked, for whom, is code, tested in
+`tests/test_questions.py`.
+
+The model is the layer's default (the extraction tier).
+`STORYFORGE_QUESTIONS_MODEL` (or `STORYFORGE_MODEL`) runs another, a
+different request: record it with `--cassettes-dir
+evals/fixtures/tier-comparison/<model>` so the default's recordings stay
+the baseline's. A recording costs cents on haiku.
+
+Recorded 2026-11-09 on haiku 5.5 ($0.04): recall 0.47 (8 of 17; PHY 0.8,
+TRT 0.5, REL 0.4, WLD 0.0), no false alarm on 79 questions whose answer is
+`no`, 3 split answers. Sonnet 5.5 on the same set (replay it with
+`STORYFORGE_MODEL=claude-sonnet-5-5 ... --cassettes-dir
+evals/fixtures/tier-comparison/claude-sonnet-5-5`, $0.54) caught one more
+(0.53), with no false alarms and no splits, at 13 times the price, so haiku
+stays the default. The misses are mostly the prompt's caution (an injected
+wrong name read as "a character's mistake", a denial of kinship read as
+"self-deprecating") and split answers, not the model. Its `baseline.json`
+entry was added by hand from the replay (`--baseline` is refused while E3,
+E5 and recheck-set error on this base); the next full `--baseline` rewrites
+it the same.
+
 ## Recorded API calls
 
 Every Anthropic call goes through `api._api_request`, which consults
