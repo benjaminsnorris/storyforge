@@ -1,0 +1,9 @@
+When alone with Elizabeth afterwards, she spoke more on the subject. "It seems likely to have been a desirable match for Jane," said she. "I am sorry it went off. But these things happen so often! A young man, such as you describe Mr. Bingley, so easily falls in love with a pretty girl for a few weeks, and when accident separates them, so easily forgets her, that these sort of inconstancies are very frequent."
+
+"An excellent consolation in its way," said Elizabeth, "but it will not do for _us_. We do not suffer by _accident_. It does not often happen that the interference of friends will persuade a young man of independent fortune to think no more of a girl, whom he was violently in love with only a few days before."
+
+"But that expression of 'violently in love' is so hackneyed, so doubtful, so indefinite, that it gives me very little idea. It is as often applied to feelings which arise from an half-hour's acquaintance, as to a real, strong attachment. Pray, how _violent was_ Mr. Bingley's love?"
+
+"I never saw a more promising inclination. He was growing quite inattentive to other people, and wholly engrossed by her. Every time they met, it was more decided and remarkable. At his own ball he offended two or three young ladies, by not asking them to dance, and I spoke to him twice myself, without receiving an answer. Could there be finer symptoms? Is not general incivility the very essence of love?"
+
+"Oh, yes!--of that kind of love which I suppose him to have felt. Poor Jane! I am sorry for her, because, with her disposition, she may not get over it immediately. It had better have happened to _you_, Lizzy; you would have laughed yourself out of it sooner. But do you think she would be prevailed on to go back with us? Change of scene might be of service--and perhaps a little relief from home, may be as useful as anything."
