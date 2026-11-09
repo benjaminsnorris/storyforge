@@ -499,13 +499,29 @@ class TestBatchMode:
         mock_api.set_response('--- BEGIN synthesis.md ---\n## Consensus\nGood.\n'
                               '--- END synthesis.md ---\n--- BEGIN findings.yaml ---\n'
                               'findings: []\n--- END findings.yaml ---\n')
+        # #635: the cut-off report is retried once, directly; this retry is
+        # cut off too, so the report is still kept, marked
+        direct = mock_api._invoke_to_file
+
+        def invoke_to_file(prompt, model, log_file, **kw):
+            if log_file.endswith('-retry.log'):
+                reply = {'usage': {'input_tokens': 1, 'output_tokens': 1},
+                         'content': [{'type': 'text', 'text': '## Retry\nCut.'}],
+                         'stop_reason': 'max_tokens'}
+                with open(log_file, 'w') as f:
+                    json.dump(reply, f)
+                return reply
+            return direct(prompt, model, log_file, **kw)
+
+        monkeypatch.setattr('storyforge.cmd_evaluate.invoke_to_file', invoke_to_file)
         try:
             main(['--scene', 'act1-sc01'])
         except SystemExit:
             pass
 
         out = capsys.readouterr().out
-        assert f'WARNING: evaluator {cut} hit the 8192-token limit' in out
+        assert f'WARNING: evaluator {cut} hit the 48,000-token output limit' in out
+        assert 'on the retry too' in out
         assert f'SUCCESS: {cut}' in out
         assert f'FAILED: {refused} (model refused the request' in out
         # Kept, but it must not read as whole: marked in the file and named
