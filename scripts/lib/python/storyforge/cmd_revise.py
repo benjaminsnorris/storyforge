@@ -2009,9 +2009,11 @@ _BRIEF_FIX_FIELDS = ('goal', 'conflict', 'crisis', 'decision')
 # What a source-drift fix rewrites (#477): drift is in events, outcomes and
 # lines as well as in the dramatic four. Drift in on_stage or knowledge_out
 # is shown to the fix but those are not rewritten here (they belong to the
-# intent and the ledger); the fix can only bring the events back.
+# intent and the ledger); the fix can only bring the events back. Never
+# key_dialogue (#644): it's one of the author's notes (`AUTHOR_NOTE_COLUMNS`),
+# shown to the fix as it stands; drift in it is reported for the author.
 _SOURCE_FIX_FIELDS = ('goal', 'conflict', 'outcome', 'crisis', 'decision',
-                      'key_actions', 'key_dialogue')
+                      'key_actions')
 
 
 def _book_text(known_text: str, prose: str, brief: dict,
@@ -2039,6 +2041,17 @@ def _brief_field_re(names: tuple[str, ...]) -> re.Pattern:
 
 
 _BRIEF_FIELD_RE = _brief_field_re(_BRIEF_FIX_FIELDS)
+
+
+def _split_dialogue_drift(lines: list[str]) -> tuple[list[str], list[str]]:
+    """(drift the source-drift fix rewrites, drift in key_dialogue) of one
+    scene's drift lines (`source_fidelity.drift_state`: "{target} {element}:
+    {evidence}"). key_dialogue is the author's (#644), so its drift is
+    reported, never rewritten."""
+    fix, dialogue = [], []
+    for line in lines:
+        (dialogue if line.startswith('brief key_dialogue') else fix).append(line)
+    return fix, dialogue
 
 
 def _parse_brief_fix(response: str,
@@ -2097,6 +2110,9 @@ def _source_drift_fix(project_dir: str, scene_id: str, scene: dict, intent: dict
                                for slug, sid in refs)
     rules = ctx.rules
     current = '\n'.join(f'{k.upper()}: {brief.get(k, "")}' for k in _SOURCE_FIX_FIELDS)
+    if (brief.get('key_dialogue') or '').strip():
+        current += (f'\n\nThe author\'s key dialogue notes (theirs, not yours to rewrite or '
+                    f'repeat): {brief["key_dialogue"]}')
     drift_lines = '\n'.join(f'- {d}' for d in drift)
     reply_format = '\n'.join(f'{k.upper()}: [rewritten {k}]' for k in _SOURCE_FIX_FIELDS)
     prompt = f"""You are a story editor bringing a scene's brief back to the source it adapts.
@@ -2128,7 +2144,7 @@ Drift found:
 
 {keep_section(project_dir)}
 
-Rewrite the brief so it adapts the source again: undo each drift listed, keep every departure the treatment, its note or the version rules allow, and keep what isn't drift as it is. Use this novel's names, never the source prose's. OUTCOME is one of yes, no, yes-but, no-and, no-but. KEY_ACTIONS and KEY_DIALOGUE are semicolon-separated. Do not introduce any person, place or event that is in neither the source scenes nor this scene.
+Rewrite the brief so it adapts the source again: undo each drift listed, keep every departure the treatment, its note or the version rules allow, and keep what isn't drift as it is. Use this novel's names, never the source prose's. OUTCOME is one of yes, no, yes-but, no-and, no-but. KEY_ACTIONS is semicolon-separated events: say that something is said, never script the words. Do not introduce any person, place or event that is in neither the source scenes nor this scene.
 
 Respond ONLY with the {len(_SOURCE_FIX_FIELDS)} fields in this exact format (no preamble, no explanation):
 {reply_format}"""
@@ -2231,8 +2247,16 @@ DECISION: [rewritten decision]"""
         fix_fields = _BRIEF_FIX_FIELDS
         extra_known = ''
         if scene_id in drift:
+            lines, dialogue = _split_dialogue_drift(drift[scene_id])
+            if dialogue:
+                log(f'  NOTE: {scene_id}: source drift in key_dialogue, the author\'s notes, '
+                    f'is not rewritten (#644); amend it by hand if it should follow the '
+                    f'source: ' + ' / '.join(dialogue))
+            if not lines:
+                skipped[scene_id] = 'its only source drift is in key_dialogue, the author\'s'
+                continue
             fix = _source_drift_fix(project_dir, scene_id, scene, intent, brief, prose,
-                                    drift[scene_id], ctx)
+                                    lines, ctx)
             if isinstance(fix, str):
                 skipped[scene_id] = fix
                 log(f'  WARNING: Not fixing the source drift of {scene_id}: {fix}. '

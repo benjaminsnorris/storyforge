@@ -163,6 +163,8 @@ Bad facts (too granular, no scene depends on them):
 - `hank-spent-four-hours-inside` — timing detail unless it's an alibi
 
 ### key_actions / key_dialogue — Scene Contract
+`key_actions` is the brief's events, a fact the briefs stage writes and validate requires from `briefed` on. `key_dialogue` is the author's note (#644): filled by hand in a prose book, never generated, and only a line marked `must:` is a requirement; the other lines are notes the draft may leave out.
+
 **Why it matters:** These are the specific beats that make the scene work. If the brief says a character "examines the body and notes the staged positioning" and the prose skips the examination, the scene hasn't delivered its promise.
 **How to check:** Fidelity scoring compares these against the prose. Low `key_actions` or `key_dialogue` fidelity means the prose diverged from the brief.
 **How to improve:** Either update the prose to include the contracted beats, or update the brief if the prose found something better.
@@ -178,7 +180,7 @@ Bad facts (too granular, no scene depends on them):
 
 A line without a label in one of these forms is still matched, but its speaker is not checked. The gate's report says which (`speaker checked` / `speaker not checked`).
 
-Storyforge's own brief writers write `Name: "line"` (elaborate's briefs stage, extraction and enrich), or keep a label and add one only where the text they are given says who speaks (hone's brief rewrites and revise's source-drift fix). A label naming someone not in characters.csv is reported as such (`speaker not checked: the brief's label "…" names no one in characters.csv`). Prose books only: a graphic novel's `key_dialogue` is matched verbatim in the panel script. Briefs written before v1.156.0 keep the lines they have: label them by hand where it matters.
+Storyforge's own brief writers write `Name: "line"` (extraction and enrich; elaborate's briefs stage writes no dialogue since #644 and keeps the label on an existing `must:` key_actions item that quotes one), or keep a label and add one only where the text they are given says who speaks (hone's brief rewrites and revise's source-drift fix, neither of which rewrites `key_dialogue`). A label naming someone not in characters.csv is reported as such (`speaker not checked: the brief's label "…" names no one in characters.csv`). Prose books only: a graphic novel's `key_dialogue` is matched verbatim in the panel script. Briefs written before v1.156.0 keep the lines they have: label them by hand where it matters.
 
 ### continuity_deps — Parallel Drafting Groups
 **Why it matters:** Scenes with no dependencies can be drafted simultaneously. Minimizing deps maximizes parallelism and reduces drafting time/cost.

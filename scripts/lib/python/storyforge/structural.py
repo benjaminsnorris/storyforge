@@ -48,16 +48,28 @@ def _detect_pov_structure(scenes_map):
 # Field definitions for completeness scoring
 # ---------------------------------------------------------------------------
 
-# Required fields — weight 1.0 each (from intent + briefs)
+# Required fields — weight 1.0 each (from intent + briefs): the scene's
+# function and its brief facts (`elaborate.BRIEF_FACT_COLUMNS`, #644)
 REQUIRED_FIELDS = [
-    'function', 'value_at_stake', 'value_shift', 'emotional_arc',
-    'goal', 'conflict', 'outcome', 'crisis', 'decision',
+    'function', 'outcome', 'key_actions',
 ]
 
-# Enrichment fields — weight 0.5 each (from briefs)
+# Craft-framework notes (#643, #644): value_at_stake, value_shift,
+# emotional_arc, goal, conflict, crisis, decision. Optional: the briefs and
+# map prompts leave them empty where a scene doesn't have one, so they carry
+# no weight. Empty ones are one advisory finding per scene, never "missing
+# required fields".
+CRAFT_NOTE_FIELDS = [
+    'value_at_stake', 'value_shift', 'emotional_arc',
+    'goal', 'conflict', 'crisis', 'decision',
+]
+
+# Enrichment fields — weight 0.5 each (from briefs). Not the author's notes
+# (key_dialogue, subtext, emotions, motifs: `elaborate.AUTHOR_NOTE_COLUMNS`,
+# #644): optional, filled by hand, and they carry no weight
 ENRICHMENT_FIELDS = [
-    'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
-    'emotions', 'motifs', 'continuity_deps', 'mice_threads',
+    'knowledge_in', 'knowledge_out',
+    'continuity_deps', 'mice_threads',
     'physical_state_in', 'physical_state_out',
 ]
 
@@ -106,6 +118,19 @@ def score_completeness(scenes_map, intent_map, briefs_map):
                 'scene_id': scene_id,
                 'severity': 'important',
                 'fields': missing_required,
+                'fix_location': 'structural',
+            })
+
+        craft_empty = [f for f in CRAFT_NOTE_FIELDS
+                       if not (intent.get(f, '') or brief.get(f, '')).strip()]
+        if craft_empty:
+            findings.append({
+                'message': (f"Craft-framework notes left empty (advisory, #643): "
+                            f"{', '.join(craft_empty)}"),
+                'scene_id': scene_id,
+                'severity': 'minor',
+                'advisory': True,
+                'fields': craft_empty,
                 'fix_location': 'structural',
             })
 
@@ -2108,9 +2133,11 @@ _PRESCRIPTIONS_FULL = {
         'some revelations to action turns or vice versa.'
     ),
     'completeness': (
-        'Run `storyforge elaborate --stage gap-fill` to populate missing fields. '
-        'Scenes missing required fields (function, value_at_stake, goal, conflict, '
-        'outcome) need attention before other structural scores are reliable.'
+        'Scenes missing required fields (function, outcome, key_actions) need '
+        'attention before other structural scores are reliable: run `storyforge '
+        'elaborate --stage gap-fill` or fill them by hand. Empty craft-framework '
+        'notes (goal, crisis, value shift and the like) are advisory: leave them '
+        'empty where the scene has none.'
     ),
 }
 

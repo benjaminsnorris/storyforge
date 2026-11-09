@@ -17,7 +17,7 @@ SCENES_HEADER = ('id|seq|title|act|pov|location|timeline_day|time_of_day|duratio
                  'status')
 INTENT_HEADER = ('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|'
                  'turning_point|characters|on_stage|mice_threads')
-BRIEFS_HEADER = 'id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out'
+BRIEFS_HEADER = 'id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions'
 
 
 def _ref(tmp_path, scenes, intent, briefs=()):
@@ -75,15 +75,16 @@ class TestValidateCraftColumns:
         scene = 'a-scene-happens-here|1|T|1|hero|loc|1|morning|1h|briefed'
         intent = 'a-scene-happens-here|does a thing|action|calm to fear|truth|+/-|action|hero|hero|'
         ok = validate_structure(_ref(tmp_path / 'ok', [scene], [intent],
-                                     ['a-scene-happens-here|||yes|||k|k']))
+                                     ['a-scene-happens-here|||yes|||k|k|she goes']))
         assert ok['passed'] is True
         assert _failures(ok, 'craft-columns-')[0]['fields'] == ['goal', 'conflict']
 
         bad = validate_structure(_ref(tmp_path / 'bad', [scene], [intent],
-                                      ['a-scene-happens-here|g|c||||k|k']))
+                                      ['a-scene-happens-here|g|c||||k|k|']))
         assert bad['passed'] is False
         [missing] = _failures(bad, 'required-columns-')
-        assert missing['fields'] == ['outcome']
+        # #644: key_actions is a brief fact, required like outcome
+        assert missing['fields'] == ['outcome', 'key_actions']
         assert missing['severity'] == 'blocking'
 
     def test_a_missing_required_column_still_blocks(self, tmp_path):
