@@ -408,12 +408,38 @@ def html_page(html: str) -> Page:
 
 
 _FRONT_RE = re.compile(r'\A---[ \t]*\r?\n(.*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)', re.DOTALL)
+#: Hugo's TOML front matter, between `+++` lines
+_TOML_FRONT_RE = re.compile(r'\A\+\+\+[ \t]*\r?\n(.*?)\r?\n\+\+\+[ \t]*(?:\r?\n|\Z)', re.DOTALL)
+
+
+def _toml_front(block: str) -> dict[str, str | list[str]]:
+    """The top-level `key = value` lines of TOML front matter (strings,
+    dates, numbers and one-line arrays); a `[table]` ends them."""
+    from storyforge.common import parse_yaml_scalar
+    meta: dict[str, str | list[str]] = {}
+    for line in block.splitlines():
+        s = line.strip()
+        if s.startswith('['):
+            break
+        m = re.match(r'^([A-Za-z_][\w-]*)\s*=\s*(.*)$', s)
+        if not m:
+            continue
+        key, raw = m.group(1).lower(), m.group(2).strip()
+        if raw.startswith('[') and raw.endswith(']'):
+            meta[key] = [parse_yaml_scalar(x) for x in raw[1:-1].split(',') if x.strip()]
+        else:
+            meta[key] = parse_yaml_scalar(raw)
+    return meta
 
 
 def front_matter(text: str) -> tuple[dict[str, str | list[str]], str]:
-    """A Markdown file's YAML front matter (scalars, and lists given as a
-    block or `[a, b]`), and the text after it."""
+    """A Markdown file's front matter, and the text after it: YAML between
+    `---` lines (scalars, and lists given as a block or `[a, b]`), or
+    Hugo's TOML between `+++` lines (`_toml_front`)."""
     from storyforge.common import parse_yaml_scalar
+    toml = _TOML_FRONT_RE.match(text)
+    if toml:
+        return _toml_front(toml.group(1)), text[toml.end():]
     m = _FRONT_RE.match(text)
     if not m:
         return {}, text
@@ -720,7 +746,7 @@ class _Reader:
             self.report.errors.append(f'{self.rel(path)} is the corpus itself; import from '
                                       f'where the writing is now')
             return
-        found = []
+        found, other = [], {}
         for root, dirs, files in os.walk(path):
             dirs[:] = sorted(d for d in dirs if not d.startswith('.'))
             for n in sorted(files):
@@ -728,8 +754,20 @@ class _Reader:
                     continue
                 if n.lower().endswith(MARKDOWN_EXT + HTML_EXT + FEED_EXT):
                     found.append(os.path.join(root, n))
+                else:
+                    ext = os.path.splitext(n)[1].lower() or '(no extension)'
+                    other.setdefault(ext, []).append(os.path.relpath(os.path.join(root, n),
+                                                                     path))
         if not found:
             self.report.errors.append(f'{self.rel(path)} holds no Markdown, HTML or feed file')
+        elif other:
+            n = sum(len(v) for v in other.values())
+            by_ext = ', '.join(f'{len(v)} {ext}' for ext, v in
+                               sorted(other.items(), key=lambda kv: (-len(kv[1]), kv[0])))
+            names = [f for v in other.values() for f in v]
+            self.report.warnings.append(
+                f'{self.rel(path)}: {n} file(s) that aren\'t Markdown, HTML or a feed, not '
+                f'imported ({by_ext}): {_shown(sorted(names))}')
         for f in found:
             self.file(f)
 
@@ -769,7 +807,7 @@ class _Reader:
             return
         self.report.warnings.extend(notes)
         site_host = _host(site) or (_host(where) if is_url(where) else '')
-        truncated, off_site_cut = [], []
+        truncated, off_site_cut, summary_only = [], [], []
         for item in items:
             source = item.link or _item_key(where, item)
             kind = kind_of(list(item.categories))
@@ -778,7 +816,11 @@ class _Reader:
                 KIND_OFF_SITE if off_site else KIND_GUESSED
             if not kind and (item.related or off_site):
                 kind = 'link'
-            if _truncated(item):
+            cut = _truncated(item)
+            # a summary with no full-content element and no cut marker may be
+            # the whole post or an excerpt; a link post's summary is the post
+            partial = item.summary_only and not cut and kind != 'link'
+            if cut or (partial and self.follow and site_host and is_url(item.link)):
                 if self.follow and is_url(item.link) and site_host and not off_site:
                     got = self.get(item.link)
                     if got is None:
@@ -794,6 +836,8 @@ class _Reader:
                     continue
             else:
                 body, title = html_page(item.html).body, item.title
+                if partial and body.strip():
+                    summary_only.append(item.title or source)
             if body.lstrip('#').strip() == title:
                 body = ''
             self.add(Piece(title, item.date, kind or 'essay', body, source, kind_from))
@@ -802,6 +846,12 @@ class _Reader:
             self.report.warnings.append(
                 f'{where}: {len(truncated)} item(s) carry only a cut summary, not imported '
                 f'(pass --follow-links to fetch their pages): {shown}')
+        if summary_only:
+            self.report.warnings.append(
+                f'{where}: {len(summary_only)} item(s) imported from the feed\'s summary alone '
+                f'(no full-content element, no cut marker): if those are excerpts, remove '
+                f'their rows from {vr.INDEX_FILE} and their files, then import again with '
+                f'--follow-links: {_shown(summary_only)}')
         if off_site_cut:
             whose = (f'off {site_host}' if site_host
                      else 'to pages the feed names no site for')
@@ -940,9 +990,26 @@ def plan_import(voice_dir: str, pieces: list[Piece]) -> Plan:
 
 def write_import(voice_dir: str, plan: Plan) -> None:
     """Write the plan's files, then the index with its rows added at the
-    end (the files first, so the index never names a file not written)."""
+    end (the files first, so the index never names a file not written).
+    Raises VoiceRepoError when a write fails, after removing the files this
+    plan wrote (all new: `plan_import` never reuses a name), so a failed
+    import leaves no file the index doesn't name."""
     from storyforge.voiceprint_proposals import _write_text
-    for rel, text in plan.texts.items():
-        _write_text(os.path.join(voice_dir, rel), text)
-    if plan.rows:
-        vr.write_index(voice_dir, vr.read_index(voice_dir) + plan.rows)
+    written = []
+    try:
+        for rel, text in plan.texts.items():
+            _write_text(os.path.join(voice_dir, rel), text)
+            written.append(rel)
+        if plan.rows:
+            vr.write_index(voice_dir, vr.read_index(voice_dir) + plan.rows)
+    except (OSError, vr.VoiceRepoError) as e:
+        left = []
+        for rel in written:
+            try:
+                os.remove(os.path.join(voice_dir, rel))
+            except OSError:
+                left.append(rel)
+        tail = (f'; these couldn\'t be removed and aren\'t in the index: {", ".join(left)}'
+                if left else '; the files it had written are removed')
+        raise vr.VoiceRepoError(f'the import couldn\'t be written ({e}): nothing imported'
+                                f'{tail}') from e

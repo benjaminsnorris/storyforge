@@ -174,6 +174,8 @@ def _import(voice_dir: str, args) -> int:
     report = vi.read_sources(voice_dir, args.sources, follow_links=args.follow_links,
                              kind=args.kind or '')
     plan = vi.plan_import(voice_dir, report.pieces)
+    if not args.dry_run:
+        vi.write_import(voice_dir, plan)    # before saying so; a failure undoes it
     verb = 'Would import' if args.dry_run else 'Imported'
     log(f'{verb} {len(plan.rows)} piece(s)'
         + (f'; {len(plan.already)} already in the corpus, skipped' if plan.already else ''))
@@ -207,15 +209,22 @@ def _import(voice_dir: str, args) -> int:
         log(f'WARNING: {w}')
     for e in report.errors:
         log(f'ERROR: {e}')
+    pieces, _ = vr.corpus(voice_dir)
     if args.dry_run:
         for r in plan.rows:
             log(f'  {r.file} ({r.kind}, {r.date or "no date"}) <- {r.source}')
+        # what the corpus would hold, judged as a real import judges it
+        settings = vr.read_settings(voice_dir)
+        for r in plan.rows:
+            words = vr.prose_words(plan.texts[r.file])
+            pieces.append(vr.CorpusPiece(r, words, *vr.judge_piece(r, words, settings)))
+        for line in vr.corpus_summary(pieces, 'After the import, the corpus'):
+            log(line)
         log('Dry run: nothing written.')
     else:
-        vi.write_import(voice_dir, plan)
-        pieces, _ = vr.corpus(voice_dir)
         for line in vr.corpus_summary(pieces):
             log(line)
+        _log_unindexed(voice_dir)
         if plan.rows:
             log('Next: `storyforge voice fingerprint`. Nothing is committed: commit the '
                 'repo after.')
@@ -225,6 +234,16 @@ def _import(voice_dir: str, args) -> int:
     return 0
 
 
+def _log_unindexed(voice_dir: str) -> None:
+    from storyforge import voice_repo as vr
+    stray = vr.unindexed_files(voice_dir)
+    if stray:
+        more = f' (and {len(stray) - 10} more)' if len(stray) > 10 else ''
+        log(f'WARNING: {len(stray)} file(s) in {vr.CORPUS_DIR}/ that {vr.INDEX_FILE} doesn\'t '
+            f'name, so nothing reads them (an interrupted import, or added by hand): '
+            f'{", ".join(stray[:10])}{more}. Add a row for each to keep, or delete it.')
+
+
 def _fingerprint(voice_dir: str) -> int:
     from storyforge import voice_repo as vr
     from storyforge import voiceprint as vp
@@ -232,6 +251,7 @@ def _fingerprint(voice_dir: str) -> int:
     pieces, texts = vr.corpus(voice_dir)
     for line in vr.corpus_summary(pieces):
         log(line)
+    _log_unindexed(voice_dir)
     counted = vr.counted(pieces, texts)
     if not counted:
         log(f'ERROR: no piece counts toward the fingerprint; import some, or change '

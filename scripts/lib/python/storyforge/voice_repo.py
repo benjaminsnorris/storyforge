@@ -434,13 +434,32 @@ def counted_pieces(voice_dir: str) -> dict[str, str]:
     return counted(*corpus(voice_dir))
 
 
-def corpus_summary(pieces: list[CorpusPiece]) -> list[str]:
-    """Lines saying what the corpus holds and what counts; a WARNING line
-    when what counts is under `voiceprint.MIN_CORPUS_WORDS`."""
+def unindexed_files(voice_dir: str) -> list[str]:
+    """Markdown files in corpus/ (paths in the repo, sorted) that the index
+    doesn't name: nothing reads them. Raises VoiceRepoError as
+    `read_index`."""
+    folder = os.path.join(voice_dir, CORPUS_DIR)
+    if not os.path.isdir(folder):
+        return []
+    named = {os.path.normpath(r.file) for r in read_index(voice_dir)}
+    out = []
+    for root, dirs, files in os.walk(folder):
+        dirs[:] = sorted(d for d in dirs if not d.startswith('.'))
+        for n in sorted(files):
+            rel = os.path.relpath(os.path.join(root, n), voice_dir)
+            if n.lower().endswith('.md') and os.path.normpath(rel) not in named:
+                out.append(rel.replace(os.sep, '/'))
+    return out
+
+
+def corpus_summary(pieces: list[CorpusPiece], label: str = 'Corpus') -> list[str]:
+    """Lines saying what the corpus holds and what counts (the first
+    begins with `label`); a WARNING line when what counts is under
+    `voiceprint.MIN_CORPUS_WORDS`."""
     from storyforge.voiceprint import MIN_CORPUS_WORDS
     counted = [p for p in pieces if p.counts]
     words = sum(p.words for p in counted)
-    lines = [f'Corpus: {len(pieces)} piece(s), {sum(p.words for p in pieces):,} words; '
+    lines = [f'{label}: {len(pieces)} piece(s), {sum(p.words for p in pieces):,} words; '
              f'{len(counted)} count toward the fingerprint, {words:,} words']
     reasons: dict[str, int] = {}
     for p in pieces:

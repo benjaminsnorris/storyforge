@@ -2,6 +2,7 @@
 local fixtures, with fetching faked (no network)."""
 
 import os
+import shutil
 
 import pytest
 
@@ -554,3 +555,120 @@ def test_an_atom_related_link_said_it_is_a_link_post():
            '<content type="html">&lt;p&gt;Worth a look.&lt;/p&gt;</content></entry></feed>')
     _, items, _ = vi.feed_items(xml, 'a.xml')
     assert items[0].related == 'https://them.net/x'
+
+
+def _feed_file(repo, xml, name='feed.xml'):
+    path = os.path.join(repo, '..', name)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(xml)
+    return path
+
+
+EXCERPT_FEED = ('<rss version="2.0"><channel><link>https://me.com/</link>'
+                '<item><title>Excerpt</title><link>https://me.com/excerpt</link>'
+                '<description>The opening paragraph of a longer post.</description></item>'
+                '</channel></rss>')
+
+
+def test_a_summary_without_a_cut_marker_is_named(repo):
+    """SF-2: a summary-only item with no marker is imported, but named, so
+    an excerpt-only feed isn't taken for whole posts in silence."""
+    r = vi.read_sources(repo, [_feed_file(repo, EXCERPT_FEED)], fetch=_no_network)
+    assert [p.title for p in r.pieces] == ['Excerpt']
+    assert len(r.warnings) == 1 and "from the feed's summary alone" in r.warnings[0]
+    assert 'Excerpt' in r.warnings[0] and '--follow-links' in r.warnings[0]
+
+
+def test_follow_links_fetches_every_summary_only_post_on_the_site(repo):
+    """SF-2: with --follow-links a summary-only item's page is fetched even
+    without a cut marker, so the whole post is what's imported."""
+    web = FakeWeb({'https://me.com/excerpt':
+                   ('text/html', '<article><p>The whole longer post.</p></article>')})
+    r = vi.read_sources(repo, [_feed_file(repo, EXCERPT_FEED)], fetch=web, follow_links=True)
+    assert [p.body for p in r.pieces] == ['The whole longer post.'] and r.warnings == []
+
+
+def test_follow_links_a_page_that_cant_be_fetched_is_an_error(repo, capsys, monkeypatch):
+    """T4: a cut summary whose page fails is an ERROR (exit 1), never dropped."""
+    from storyforge import cmd_voice
+    r = vi.read_sources(repo, [os.path.join(FIX, 'feed.xml')], fetch=FakeWeb({}),
+                        follow_links=True)
+    assert len(r.errors) == 1 and '404' in r.errors[0]
+    assert 'A cut summary' not in [p.title for p in r.pieces]
+    monkeypatch.setattr(vi, 'fetch_url', FakeWeb({}))
+    assert cmd_voice.main(['import', os.path.join(FIX, 'feed.xml'), '--follow-links',
+                           '--dir', repo]) == 1
+    assert "1 source(s) above weren't imported" in capsys.readouterr().out
+
+
+def test_files_a_folder_doesnt_import_are_named(repo, tmp_path):
+    """SF-3: a folder's .txt, .docx and the like are counted and named."""
+    d = tmp_path / 'posts'
+    shutil.copytree(os.path.join(FIX, 'posts'), d)
+    (d / 'old-post.txt').write_text('An old post.\n', encoding='utf-8')
+    (d / 'essay.docx').write_bytes(b'PK')
+    (d / '.DS_Store').write_bytes(b'x')
+    r = vi.read_sources(repo, [str(d)], fetch=_no_network)
+    assert len(r.pieces) == 4
+    assert len(r.warnings) == 1
+    w = r.warnings[0]
+    assert "2 file(s) that aren't Markdown, HTML or a feed" in w
+    assert '1 .docx, 1 .txt' in w and 'essay.docx; old-post.txt' in w and 'DS_Store' not in w
+
+
+def test_a_failed_write_says_so_and_leaves_no_orphan(repo, capsys, monkeypatch):
+    """SF-4: a write that fails part-way raises, removes the files this
+    import wrote, and nothing claims "Imported"."""
+    from storyforge import cmd_voice
+    from storyforge import voiceprint_proposals as vpp
+    real, calls = vpp._write_text, []
+
+    def flaky(path, text):
+        calls.append(path)
+        if len(calls) == 3:
+            raise OSError(28, 'No space left on device')
+        real(path, text)
+    monkeypatch.setattr(vpp, '_write_text', flaky)
+    assert cmd_voice.main(['import', os.path.join(FIX, 'posts'), '--dir', repo]) == 1
+    out = capsys.readouterr().out
+    assert 'Imported' not in out
+    assert "the import couldn't be written" in out and 'No space left' in out
+    assert sorted(os.listdir(os.path.join(repo, 'corpus'))) == ['index.csv']
+    assert vr.read_index(repo) == []
+
+
+def test_a_corpus_file_the_index_doesnt_name_is_a_warning(repo, capsys):
+    """SF-4: a stray corpus file (from an older interrupted import, or by
+    hand) is named on import and on fingerprint."""
+    from storyforge import cmd_voice
+    with open(os.path.join(repo, 'corpus', 'orphan.md'), 'w', encoding='utf-8') as f:
+        f.write('# Orphan\n\nWords.\n')
+    assert vr.unindexed_files(repo) == ['corpus/orphan.md']
+    cmd_voice.main(['import', os.path.join(FIX, 'posts'), '--dir', repo])
+    assert "1 file(s) in corpus/ that corpus/index.csv doesn't name" in capsys.readouterr().out
+    cmd_voice.main(['fingerprint', '--dir', repo])
+    assert 'corpus/orphan.md' in capsys.readouterr().out
+
+
+def test_dry_run_shows_what_the_corpus_would_hold(repo, capsys):
+    """SF-7/T7/C7: a dry run judges the planned pieces as an import would."""
+    from storyforge import cmd_voice
+    with open(os.path.join(repo, 'voice.yaml'), 'w', encoding='utf-8') as f:
+        f.write('author: T\nkinds:\n  - essay\nmin_words: 100\n')
+    assert cmd_voice.main(['import', os.path.join(FIX, 'posts'), '--dir', repo,
+                           '--dry-run']) == 0
+    out = capsys.readouterr().out
+    assert 'After the import, the corpus: 4 piece(s)' in out
+    assert '1 count toward the fingerprint' in out and 'not counted: 1 a fiction piece' in out
+    assert 'WARNING: the pieces that count hold' in out
+    assert vr.read_index(repo) == []
+
+
+def test_hugo_toml_front_matter():
+    """CR-6: `+++` front matter gives the title, date and kind, and isn't
+    counted as prose."""
+    p = vi.markdown_piece('+++\ntitle = "On Rivers"\ndate = 2020-06-01T09:00:00Z\n'
+                          'tags = ["essays", "water"]\n[params]\nkind = "note"\n+++\n'
+                          'The river was high that June.\n', 'src')
+    assert (p.title, p.date, p.kind, p.kind_from) == ('On Rivers', '2020-06-01', 'essay', 'said')
+    assert p.body == 'The river was high that June.'
