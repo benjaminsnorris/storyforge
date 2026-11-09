@@ -909,6 +909,33 @@ class Dependents:
     #: given, its scene isn't in the book, or no subject (its scenes are
     #: then a guess by type, already in `scenes`): the caller reports it
     unrelated: dict[str, str] = field(default_factory=dict)
+    #: scene → why it is in `scenes` (#632): the first changed fact that
+    #: listed it and the rule, e.g. `f-id (same subject: hank)`, so the
+    #: author can see what a re-check cascade came from
+    why: dict[str, str] = field(default_factory=dict)
+
+
+#: #632: the types `dependents(narrow=True)` takes as about the same respect
+#: of a subject: where someone is and when (physical, timeline), who they
+#: are to others and what they are like (trait, relationship). A knowledge
+#: fact is compatible with every type (knowing anything about the subject);
+#: a fixed fact (`mutable` fixed) with every type too, as before
+_TYPE_GROUPS = ({'physical', 'timeline'}, {'trait', 'relationship'})
+
+
+#: #632: the types whose name mentions `dependents(narrow=True)` still
+#: counts: what someone knows, and who someone is to another (a relationship
+#: names its other party: shared-dark's "Ostrowski has daughters Brianna and
+#: Madison" is the re-check-set eval's one hit for Madison's fact)
+_MENTIONING_TYPES = ('knowledge', 'relationship')
+
+
+def _compatible(f: dict[str, str], r: dict[str, str]) -> bool:
+    """Whether `r`'s type may depend on `f`'s, for `dependents(narrow=True)`."""
+    a, b = f.get('type') or '', r.get('type') or ''
+    if a == b or 'knowledge' in (a, b) or (f.get('mutable') or '') == 'fixed':
+        return True
+    return any(a in g and b in g for g in _TYPE_GROUPS)
 
 
 NAME_REGISTRIES = ('characters.csv', 'locations.csv')
@@ -982,7 +1009,8 @@ def _mentions(statement: str, subject: str, names: dict[str, set[str]],
 
 
 def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
-               order: dict[str, int], *, names: dict[str, set[str]]) -> Dependents:
+               order: dict[str, int], *, names: dict[str, set[str]],
+               narrow: bool = False) -> Dependents:
     """The scenes after each of `fact_ids` whose binding facts depend on it,
     in reading order: the re-check set when those facts change (design §1,
     derived from the ledger, decided by Ben 2026-10-31).
@@ -1004,7 +1032,23 @@ def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
     missed scene is a silent hole (the re-check-set eval, #473, measured
     the misses the narrower rule of #466 made). Removed facts must be in
     `rows` (pass the old rows with the new ones). A scene may have no prose
-    yet: the caller skips those."""
+    yet: the caller skips those.
+
+    `narrow` (#632, the gate's re-check after a commit: one scene's few
+    reworded facts about a main character re-listed most of the book) keeps
+    the links, the end and a fact with no subject as above, and narrows the
+    rest: the same subject (or `known_by`) counts only in a compatible type
+    (`_compatible`: the same type, a knowledge fact on either side, a fixed
+    F, or physical/timeline, trait/relationship), and a name mention, either
+    way, only when the later fact is a knowledge or relationship fact
+    (`_MENTIONING_TYPES`). Measured on the re-check-set eval with the
+    rejection path switched to it (2026-11-08): recall unchanged (0.931,
+    the same 27 of 29 cases), mean set 8.45 → 6.62 scenes, control
+    inclusion 0.82 → 0.75; with mentions in knowledge facts alone, recall
+    fell to 0.897. The eval gates the wide rule, which a rejection (`audit
+    --mark rejected`) keeps.
+
+    `.why` names, for each scene, the first fact and rule that listed it."""
     cache: dict[str, re.Pattern | None] = {}
     wanted = set(fact_ids)
     out = Dependents()
@@ -1021,6 +1065,7 @@ def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
         ends = (f.get('resolves') or '').strip()
         if ends in order and order[ends] > after:
             scenes.add(ends)
+            out.why.setdefault(ends, f'{f["id"]} (it ends it)')
         subject = _norm(f.get('subject', ''))
         keys = {(f.get('subject') or '').strip().casefold()} - {''}
         if f.get('type') == 'knowledge':
@@ -1035,15 +1080,33 @@ def dependents(rows: list[dict[str, str]], fact_ids: list[str] | set[str],
                 continue
             if rs in scenes:
                 continue
-            if (f['id'] in _split(r.get('supersedes', '')) + _split(r.get('depends_on', ''))
-                    or (r.get('subject') or '').strip().casefold() in keys
-                    or (not keys and r.get('type') == f.get('type'))
-                    or _mentions(r.get('statement', ''), subject, names, cache)
-                    or _mentions(f.get('statement', ''), _norm(r.get('subject', '')),
-                                 names, cache)):
+            rule = _depends(f, r, keys, subject, names, cache, narrow)
+            if rule:
                 scenes.add(rs)
+                out.why.setdefault(rs, f'{f["id"]} ({rule})')
     out.scenes = sorted(scenes, key=order.get)
     return out
+
+
+def _depends(f: dict[str, str], r: dict[str, str], keys: set[str], subject: str,
+             names: dict[str, set[str]], cache: dict[str, re.Pattern | None],
+             narrow: bool) -> str:
+    """The rule by which later fact `r` depends on `f` ('' when none), for
+    `dependents`."""
+    if f['id'] in _split(r.get('supersedes', '')) + _split(r.get('depends_on', '')):
+        return f'{r["id"]} links to it'
+    rsubject = (r.get('subject') or '').strip().casefold()
+    if rsubject in keys and (not narrow or _compatible(f, r)):
+        return f'same subject: {rsubject}'
+    if not keys and r.get('type') == f.get('type'):
+        return f'no subject, same type: {r.get("type") or "typeless"}'
+    if narrow and r.get('type') not in _MENTIONING_TYPES:
+        return ''
+    if _mentions(r.get('statement', ''), subject, names, cache):
+        return f'{r["id"]} names {subject}'
+    if _mentions(f.get('statement', ''), _norm(r.get('subject', '')), names, cache):
+        return f'it names {r.get("subject", "").strip()}'
+    return ''
 
 
 def _ends_elsewhere(row: dict[str, str]) -> str:
