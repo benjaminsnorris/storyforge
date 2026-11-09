@@ -129,13 +129,39 @@ category (`recall_hands`, `_posture`, `_sightline`, `_worn`, `_position`,
 independent measure; the `tool` cases were found by the same read), false
 alarms per 10,000 words of clean prose, and `left_flagged`. It gates each on
 its recorded value (`FLOORS` in the suite, #488). The #647 stage sheet is
-measured on the same set before the whole-scene read is retired (plan A4).
+measured on the same set before the whole-scene read is retired (plan A4;
+`blocking-set-sheet` below). The two suites share `evals/blocking_set/runner.py`.
 
 **Not recorded yet** (forecast about $6.60, past an issue's $5): until then it
 errors in replay with a cassette miss. To record: check out the evals PR's
 branch (`blocking-set-646`) at `~/Developer/evals`, run
 `python3 evals/run.py --mode auto --suite blocking-set`, commit the cassettes
 there, then set `FLOORS` from the report and refresh `baseline.json`.
+
+### The stage sheet on the set (#647)
+
+`blocking-set-sheet` runs the stage sheet (`storyforge.stage_sheet`: a small
+model records each scene's physical action as transitions, code checks them,
+a yes/no question asked twice covers the rest) on the same scenes and scores
+it the same way, gating on its own recorded values (`FLOORS` in
+`evals/suites/blocking_set_sheet.py`). It also reports `events`,
+`questions_asked` and `scenes_with_unchecked` (scenes where something
+couldn't be checked; per-scene counts in the private outcomes file). Its
+recordings are in `blocking-set/cassettes/blocking-set-sheet/` and its
+per-case outcomes in `blocking-set/results/latest-stage-sheet.json`, both in
+storyforge-evals.
+
+**Side by side:** `python3 evals/run.py --suite blocking-set --suite
+blocking-set-sheet`. The read runs first and writes `results/latest.json`;
+the sheet's notes then compare the two case by case (caught by both, only
+by one, the case ids each alone caught, and left readings flagged). The gate
+keeps the read (`gate.GATE_BLOCKING_METHOD = 'read'`) until the sheet's
+recall is at least the read's with no more false alarms (plan A4).
+
+The model is the stage sheet's default (the extraction tier);
+`STORYFORGE_STAGE_SHEET_MODEL` runs another, which is a different request:
+`--mode auto` records it beside the default's, and a replay without the
+variable replays the default's.
 
 ## Recorded API calls
 
