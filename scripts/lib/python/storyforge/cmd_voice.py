@@ -13,6 +13,8 @@ described voice and the exemplar bank (B3, B4; `storyforge.voiceprint_proposals`
 2. The author marks each claim `yes` or `no` (rewording any they keep), and
    writes `yes` in `pick` for each passage to keep (trimming its file if
    they like).
+   `voice judge` measures the shortlist against the fingerprint again
+   (free; after the fingerprint changes).
 3. `voice accept` writes `description.md` from the claims marked yes and
    copies the picked passages to `exemplars/`. Free.
 
@@ -20,6 +22,7 @@ Usage:
     storyforge voice propose                    # both proposals, in this directory
     storyforge voice propose --dir ../ben-voice --only description
     storyforge voice propose --dry-run          # the sample and the forecast; no call
+    storyforge voice judge                      # the shortlist's typical range again (free)
     storyforge voice accept                     # description.md and exemplars/
     storyforge voice accept --only exemplars --auto-pick   # pick by the reference rule
 
@@ -51,6 +54,9 @@ def parse_args(argv):
                       help='Replace a claims file with marks or a shortlist with picks')
     prop.add_argument('--dry-run', action='store_true',
                       help='Print the sample and the forecast; make no call')
+    judge = sub.add_parser('judge', help='Measure the shortlist against the current '
+                                         'fingerprint again (free)')
+    judge.add_argument('--dir', default='.', help='The author voice repo (default: here)')
     acc = sub.add_parser('accept', help='Write description.md and exemplars/ from the '
                                         'author\'s marks and picks')
     acc.add_argument('--dir', default='.', help='The author voice repo (default: here)')
@@ -71,6 +77,12 @@ def main(argv=None):
         vpp.check_voice_dir(voice_dir)
         if args.action == 'propose':
             return _propose(voice_dir, args)
+        if args.action == 'judge':
+            passages = vpp.rejudge(voice_dir)
+            typical = sum(1 for p in passages if p.typical)
+            log(f'{vpp.SHORTLIST_FILE}: {typical} of {len(passages)} passages inside the '
+                f'fingerprint\'s typical range')
+            return 0
         return _accept(voice_dir, args)
     except vpp.ProposalError as e:
         log(f'ERROR: {e}')

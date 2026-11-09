@@ -41,10 +41,11 @@ API: `load_voice(voice_dir)` -> `Voice`; `build_sample(texts)` -> `Sample`;
 `propose_description(...)` / `propose_shortlist(...)` (one call each, through
 `storyforge.api`); `parse_claims(reply)`, `parse_shortlist(reply, sample)`;
 `write_claims` / `read_claims`, `write_shortlist` / `read_shortlist`;
-`accept_description`, `accept_exemplars`; `passage_range(fp, texts)` ->
+`accept_description`, `accept_exemplars`; `recorded_sample(system_text, texts)`
+(a recorded reply parsed as it was answered); `rejudge`; `passage_range(fp, texts)` ->
 `PassageRange`; `auto_picks(rows)`; `forecast(voice, sample, model)`.
 Errors are `ProposalError`, whose message says what to fix. The CLI is
-`storyforge voice propose` / `storyforge voice accept` (`cmd_voice`).
+`storyforge voice propose` / `judge` / `accept` (`cmd_voice`).
 """
 
 from __future__ import annotations
@@ -204,13 +205,16 @@ class Sample:
 
 
 def prose_paragraphs(text: str) -> list[str]:
-    """`text`'s prose paragraphs as written (blank-line separated, lines of
-    one paragraph joined by a space), leaving out what the fingerprint
-    doesn't read as prose: headings, scene breaks, bare chapter titles."""
+    """`text`'s paragraphs as written (blank-line separated, the lines of one
+    paragraph joined by a space), leaving out Markdown headings (`#`) and
+    lines with no letter (scene breaks). Its own rule, not the
+    fingerprint's (`voiceprint.paragraphs`, which also drops bare chapter
+    titles and a letter's salutation): a passage's paragraph numbers and a
+    recorded sample must stay put when the fingerprint's filter changes."""
     out = []
-    for block in re.split(r'\n\s*\n', text.lstrip('﻿').replace('\r\n', '\n')):
+    for block in re.split(r'\n\s*\n', text.lstrip('\ufeff').replace('\r\n', '\n')):
         para = ' '.join(line.strip() for line in block.split('\n') if line.strip())
-        if para and vp.paragraphs(para):
+        if para and not para.startswith('#') and re.search(r'[^\W\d_]', para):
             out.append(para)
     return out
 
@@ -263,6 +267,49 @@ def render_sample(sample: Sample) -> str:
             lines.append(f'\n## Passage {window} (from {p.source})\n')
         lines.append(f'[{p.number}, {p.words} words] {p.text}')
     return '\n'.join(lines).strip()
+
+
+_WINDOW_RE = re.compile(r'^## Passage (\d+) \(from (.+)\)$')
+_PARA_RE = re.compile(r'^\[(\d+), (\d+) words\] (.*)$')
+
+
+def recorded_sample(system_text: str, texts: Mapping[str, str]) -> Sample:
+    """The sample a recorded system block showed (`render_sample`'s lines),
+    each paragraph found again in the corpus (`texts`) for its place in its
+    piece: a recorded reply can then be parsed as it was answered, whatever
+    the sampling or the fingerprint does now. Raises ProposalError when the
+    block shows no sample, or a passage isn't in its piece as a run of
+    paragraphs (the corpus changed since)."""
+    windows: list[tuple[int, str, list[tuple[int, str]]]] = []
+    for line in system_text.split('\n'):
+        m = _WINDOW_RE.match(line)
+        if m:
+            windows.append((int(m.group(1)), m.group(2), []))
+            continue
+        m = _PARA_RE.match(line)
+        if m and windows:
+            windows[-1][2].append((int(m.group(1)), m.group(3)))
+    if not windows:
+        raise ProposalError('the recorded system block shows no sample')
+    out = []
+    for w, source, paras in windows:
+        if source not in texts:
+            raise ProposalError(f'the recorded sample\'s passage {w} is from {source}, '
+                                f'which isn\'t in the corpus')
+        corpus = prose_paragraphs(texts[source])
+        want = [t for _, t in paras]
+        start = next((i for i in range(len(corpus) - len(want) + 1)
+                      if corpus[i:i + len(want)] == want), None)
+        if start is None:
+            raise ProposalError(f'the recorded sample\'s passage {w} isn\'t in {source} as '
+                                f'it is now: the corpus changed since the recording')
+        for k, (number, text) in enumerate(paras):
+            if number != len(out) + 1:
+                raise ProposalError(f'the recorded sample\'s paragraph [{number}] is out of '
+                                    f'order')
+            out.append(Paragraph(number, source, start + k + 1, w, text,
+                                 len(vp.words(text))))
+    return Sample(tuple(out), len(windows))
 
 
 # ============================================================================
@@ -329,14 +376,18 @@ def render_fingerprint(fp: vp.Fingerprint, baseline: vp.Baseline | None = None) 
     return '\n'.join(lines).strip()
 
 
+#: the system block's opening, part of the prompt (a change re-records)
+SYSTEM_PREAMBLE = ('You are helping a writer see their own prose voice. Below are a sample of '
+                   'their writing and the fingerprint measured over their corpus.')
+
+
 def system_blocks(voice: Voice, sample: Sample,
                   baseline: vp.Baseline | None = None) -> list[dict]:
     """The system block both calls send: the sample, then the fingerprint.
     No temp path, date or author name in it, so a recording replays. Not
     marked for the cache (see the module docstring)."""
     text = (
-        'You are helping a writer see their own prose voice. Below are a sample of '
-        'their writing and the fingerprint measured over their corpus.\n\n'
+        f'{SYSTEM_PREAMBLE}\n\n'
         f'# The sample\n\n{sample.windows} passages of about {vp.CHUNK_WORDS:,} words, '
         'evenly spaced through the corpus. Every paragraph is numbered through the '
         'sample, with its word count: [number, words].\n\n'
@@ -799,6 +850,18 @@ def set_picks(voice_dir: str, ids: Sequence[str]) -> list[Passage]:
     shortlist's passage files are left as they are). Returns the shortlist."""
     passages = [replace(p, pick='yes' if p.id in set(ids) else '')
                 for p in read_shortlist(voice_dir)]
+    _write_rows(os.path.join(voice_dir, SHORTLIST_FILE), SHORTLIST_COLUMNS,
+                [_passage_row(p) for p in passages])
+    return passages
+
+
+def rejudge(voice_dir: str) -> list[Passage]:
+    """Measure the shortlist's passages against the current fingerprint and
+    rewrite their `distance`, `limit` and `typical` (free; after the
+    fingerprint changes). Picks and passage files are left as they are."""
+    voice = load_voice(voice_dir)
+    rng = passage_range(voice.fingerprint, voice.texts)
+    passages = [rng.judge(p) for p in read_shortlist(voice_dir)]
     _write_rows(os.path.join(voice_dir, SHORTLIST_FILE), SHORTLIST_COLUMNS,
                 [_passage_row(p) for p in passages])
     return passages

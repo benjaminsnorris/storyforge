@@ -5,11 +5,15 @@ reference voiceprint (`references/voiceprints/austen/`).
 claims for Austen (`proposals/description-claims.csv`, recorded once with a
 real model call) are checked against a fixed list of claims a critic would
 make or reject (`AFFIRM`, `REJECT`). The list was fixed before the
-recording. The recording is replayed free from the committed cassette
-(`tests/fixtures/voiceprint/cassette/`): `test_proposals_replay_from_the_recording`
-fails when the request the code would send has changed (a prompt, the
-sample or the fingerprint summary), which is the time to re-record on
-purpose (see `references/voiceprints/README.md`, "Re-recording").
+recording. The recording is frozen in the committed cassette
+(`tests/fixtures/voiceprint/cassette/`, the repo's cassette format): the
+request and reply of each call. `test_recording_is_the_committed_proposals`
+parses the recorded replies against the recorded sample (#645's policy:
+frozen inputs, evaluated free) and fails when the prompts or schemas the
+code would send have changed, which is the time to re-record on purpose
+(`references/voiceprints/README.md`, "Re-recording"). A change to the
+fingerprint or the sampling doesn't invalidate it: the recording is what
+the model said to the sample it was shown.
 
 **Test 5, the exemplar shortlist (free).** The shortlisted passages sit
 inside the fingerprint's typical range (`PassageRange`, against the
@@ -25,7 +29,6 @@ committed proposals.
 import filecmp
 import os
 import re
-import shutil
 
 import pytest
 
@@ -254,7 +257,8 @@ def test_shortlist_sits_inside_the_typical_range(judged, shortlist):
     typical = [p for p in judged if p.typical]
     assert len(typical) / len(judged) >= TYPICAL_FLOOR, [
         (p.id, p.distance, p.limit) for p in judged if not p.typical]
-    # the committed figures are today's
+    # the committed figures are today's (after a fingerprint change: `storyforge voice judge`,
+    # then `voice accept --auto-pick`, both free)
     assert [(p.distance, p.limit, p.typical) for p in judged] == [
         (p.distance, p.limit, p.typical) for p in shortlist]
 
@@ -315,32 +319,54 @@ def test_reference_exemplars_are_the_auto_picks(shortlist):
 # The recording replays
 # ============================================================================
 
-def test_proposals_replay_from_the_recording(tmp_path, monkeypatch):
-    """`voice propose` replayed from the committed cassette gives the
-    committed proposals (before the reference's marks and picks). A
-    CassetteMiss here means the request changed: a prompt, the sample, or
-    the fingerprint summary (`render_fingerprint`). Re-record on purpose
+def _recordings():
+    """The cassette's recordings, {'description': (body, reply), 'shortlist': ...},
+    told apart by their schema."""
+    import gzip
+    import json
+    from storyforge import api
+    out = {}
+    for root, _, files in os.walk(CASSETTE):
+        for name in files:
+            with gzip.open(os.path.join(root, name), 'rt', encoding='utf-8') as f:
+                rec = json.load(f)
+            body = rec['request']['body']
+            schema = body['output_config']['format']['schema']
+            kind = 'description' if 'claims' in schema['properties'] else 'shortlist'
+            assert kind not in out, f'two {kind} recordings in {CASSETTE}'
+            out[kind] = (body, api.extract_text(rec['response']), rec['response'])
+    return out
+
+
+def test_recording_is_the_committed_proposals(voice):
+    """The recorded replies, parsed against the recorded sample, are the
+    committed proposals (before the reference's marks, picks and today's
+    judgments). Fails when a prompt, schema or the system block's opening
+    changed since the recording: re-record on purpose
     (references/voiceprints/README.md, "Re-recording")."""
-    from storyforge import cassette
-    voice_dir = tmp_path / 'austen'
-    shutil.copytree(AUSTEN, voice_dir,
-                    ignore=shutil.ignore_patterns('proposals', 'exemplars', 'working',
-                                                  'description.md'))
-    monkeypatch.setenv('STORYFORGE_CASSETTE', CASSETTE)
-    monkeypatch.setenv('STORYFORGE_CASSETTE_MODE', 'replay')
-    monkeypatch.delenv('STORYFORGE_CASSETTE_LOG', raising=False)
-    from storyforge import cmd_voice
-    try:
-        rc = cmd_voice.main(['propose', '--dir', str(voice_dir), '--model', RECORDED_MODEL])
-    except cassette.CassetteMiss as e:
-        pytest.fail(f'the description or shortlist request changed since it was recorded: '
-                    f're-record on purpose (references/voiceprints/README.md). {e}')
-    assert rc == 0
-    got = vpp.read_claims(str(voice_dir))
+    recs = _recordings()
+    assert set(recs) == {'description', 'shortlist'}
+    stale = 'changed since it was recorded: re-record on purpose (references/voiceprints/README.md)'
+    for kind, prompt, schema in (('description', vpp.description_prompt(), vpp.CLAIMS_SCHEMA),
+                                 ('shortlist', vpp.shortlist_prompt(), vpp.SHORTLIST_SCHEMA)):
+        body, _, response = recs[kind]
+        assert body['messages'][0]['content'] == prompt, f'the {kind} prompt {stale}'
+        assert body['output_config']['format']['schema'] == schema, f'the {kind} schema {stale}'
+        assert body['system'][0]['text'].startswith(vpp.SYSTEM_PREAMBLE), f'the system block {stale}'
+        assert body['model'] == RECORDED_MODEL and response.get('stop_reason') == 'end_turn'
+    system_text = recs['description'][0]['system'][0]['text']
+    assert recs['shortlist'][0]['system'] == recs['description'][0]['system']
+    sample = vpp.recorded_sample(system_text, voice.texts)
+    assert sample.windows == vpp.SAMPLE_WINDOWS
+
+    claims, problems = vpp.parse_claims(recs['description'][1])
+    assert problems == []
     want = vpp.read_claims(AUSTEN)
-    assert [(c.id, c.section, c.claim, c.example) for c in got] == [
+    assert [(c.id, c.section, c.claim, c.example) for c in claims] == [
         (c.id, c.section, c.claim, c.example) for c in want]
-    assert all(c.mark == '' for c in got)
-    got_s, want_s = vpp.read_shortlist(str(voice_dir)), vpp.read_shortlist(AUSTEN)
-    assert [p.__dict__ | {'pick': ''} for p in got_s] == [
-        p.__dict__ | {'pick': ''} for p in want_s]
+
+    passages, refused = vpp.parse_shortlist(recs['shortlist'][1], sample)
+    assert refused == []
+    fields = ('id', 'job', 'source', 'paragraphs', 'words', 'text', 'why')
+    assert [tuple(getattr(p, f) for f in fields) for p in passages] == [
+        tuple(getattr(p, f) for f in fields) for p in vpp.read_shortlist(AUSTEN)]

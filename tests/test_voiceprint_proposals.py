@@ -95,8 +95,26 @@ def _shortlist_reply(sample, k=24):
 # ============================================================================
 
 def test_prose_paragraphs_keep_text_as_written_and_drop_headings():
-    text = '# Chapter 1\n\nCHAPTER II.\n\nShe said _no_,\nquite firmly.\n\n* * *\n\nHe left.'
-    assert vpp.prose_paragraphs(text) == ['She said _no_, quite firmly.', 'He left.']
+    text = ('# Chapter 1\n\n"DEAR SIR,\n\nShe said _no_,\nquite firmly.\n\n* * *\n\n'
+            '42\n\nHe left.')
+    # its own rule: a letter's salutation stays (the fingerprint's filter drops it)
+    assert vpp.prose_paragraphs(text) == ['"DEAR SIR,', 'She said _no_, quite firmly.',
+                                          'He left.']
+
+
+def test_recorded_sample_is_found_again_in_the_corpus(voice_dir):
+    voice = vpp.load_voice(voice_dir)
+    sample = vpp.build_sample(voice.texts, windows=4)
+    text = vpp.system_blocks(voice, sample)[0]['text']
+    assert vpp.recorded_sample(text, voice.texts) == sample
+    changed = {k: v.replace(sample.paragraphs[3].text, 'Something else entirely.')
+               for k, v in voice.texts.items()}
+    with pytest.raises(vpp.ProposalError, match='corpus changed'):
+        vpp.recorded_sample(text, changed)
+    with pytest.raises(vpp.ProposalError, match="isn't in the corpus"):
+        vpp.recorded_sample(text, {'other.md': 'x'})
+    with pytest.raises(vpp.ProposalError, match='no sample'):
+        vpp.recorded_sample('nothing here', voice.texts)
 
 
 def test_sample_is_evenly_spaced_numbered_and_within_pieces():
@@ -542,6 +560,20 @@ def test_cmd_accept_reports_each_failure(voice_dir, capsys):
     assert cmd_voice.main(['accept', '--dir', voice_dir]) == 1
     out = capsys.readouterr().out
     assert 'unmarked' in out and "shortlist.csv doesn't exist" in out
+
+
+def test_rejudge_rewrites_the_figures_and_keeps_picks(voice_dir, capsys):
+    from storyforge import cmd_voice
+    passages = _shortlisted(voice_dir, k=21, judge=False)
+    vpp.set_picks(voice_dir, [passages[0].id])
+    assert all(p.typical is None for p in vpp.read_shortlist(voice_dir))
+    with pytest.raises(vpp.ProposalError, match='judged'):
+        vpp.auto_picks(vpp.read_shortlist(voice_dir))
+    assert cmd_voice.main(['judge', '--dir', voice_dir]) == 0
+    back = vpp.read_shortlist(voice_dir)
+    assert all(p.typical is not None and p.limit for p in back)
+    assert [p.pick for p in back][:2] == ['yes', '']
+    assert 'inside the fingerprint' in capsys.readouterr().out
 
 
 def test_voice_is_a_registered_command():
