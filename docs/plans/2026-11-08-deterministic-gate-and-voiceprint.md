@@ -1,4 +1,4 @@
-# A deterministic gate, a voiceprint, long writing sessions, and a shorter ladder
+# A deterministic gate, a voiceprint, long writing sessions, a shorter ladder, and cheaper evals
 
 Status: proposal (2026-11-08). Nothing here is decided; every section ends in
 Ben's calls. It builds on the gate-and-ledger design
@@ -415,22 +415,69 @@ adaptation track.
 
 ---
 
-## Evals: how we'd know
+## Part E: evals
 
-The existing suites stay the yardstick:
+### E1. What the evals have cost, and what they bought
 
-- **E4** (contradictions in passed scenes) and **E8** (reintroductions):
-  the new gate has to match or beat today's recall on hard categories
-  (KNO, PHY, TIM, WLD) at a fraction of the cost. Measure A2 alone, then
-  A2+A3, then each with small and large extraction models.
-- **New, E9 (false-stop rate):** the number of scenes stopped per 10k words
-  on findings a human labels "a reader wouldn't notice". Wrath's last run
-  gives a baseline: 70 of the 92 stopping findings were blocking.
-- **New, E10 (voice):** blind pairwise reads of the same scene written (a)
-  by today's pipeline and (b) in a session with the exemplars. The author
-  and a second reader pick which "sounds written". It's subjective by
-  design, and it's the thing that matters. The B6 distance is tracked
-  alongside it to see if it agrees.
+The status doc (`2026-10-28-rethink-status.md`) records about **$276 in
+re-recordings over the last five rounds alone** (#491 $67.66, #596/#601
+$71.13, #513/#613 $81.25, #616 $9.90, #610 $2.26), with more before that.
+Its own reading of the results:
+
+- "Every E4 claim from #480 and #482 is within noise."
+- On two checker readings: "no gain in errors committed is measured."
+- On the re-recorded rounds: "One run each, so read these as likely, not
+  measured, improvements."
+
+Three causes:
+
+1. **The expensive suites test the whole pipeline end to end.** E4
+   (generation) and E8 (revision safety) run drafting, extraction and the
+   gate together, at $20 to $50 per suite per recording. Any prompt change
+   anywhere misses the cassette, so every improvement buys a re-record.
+2. **One run can't separate signal from noise.** E6 showed E4's spread is
+   wider than most of the claimed gains, so the spend produced numbers
+   that couldn't settle the decisions they were bought for.
+3. **They measure only continuity.** No suite measures whether the prose
+   is any good. That's what Ben's read of Wrath judged.
+
+What paid off were the **cheap suites with fixed, labelled inputs**: the E2
+checker cases, E3 extraction, and the re-check set. Each costs a few
+dollars, and each found real things (for example #480, where the "false
+alarms" were mostly real errors, and E3's extraction recall). With fixed
+inputs, a change in the number is a change in the tool.
+
+### E2. Evals under this design
+
+- **A2's deterministic checks are code, so they get unit tests,** not
+  evals: free, exact, run on every commit, with no cassettes.
+- **A3's yes/no layer gets a fixed labelled question set.** It costs cents
+  per run on a small model, so three runs show the spread.
+- **Extraction keeps an E3-style fixed set.**
+- **E4 and E8 are frozen.** No re-record on a prompt change. They run only
+  when a decision depends on them, and always three runs. A suite whose
+  cassette misses is marked stale, and nobody spends on it.
+- **A new suite needing live generation for its inputs** records those
+  inputs once and freezes them. It then evaluates against the frozen
+  inputs.
+- **Budget:** a monthly eval budget (proposed $25) that an agent can't go
+  past without asking Ben.
+
+New suites (numbered when built; E9 is already taken by
+`extract-upper-layers.md`):
+
+- **False-stop rate:** scenes stopped per 10k words on findings a human
+  labels "a reader wouldn't notice". It can be built for free from Wrath's
+  last gate run, where 70 of the 92 stopping findings were blocking.
+- **Voice:** blind pairwise reads of the same scene, (a) from today's
+  pipeline and (b) from a session with the exemplars. Ben and a second
+  reader pick which "sounds written". It costs readers' time, not dollars,
+  and it's the suite that measures what the product is for. The B6 meter's
+  distance is tracked alongside to see whether it agrees.
+
+The gate's targets carry over: the new gate has to match or beat today's
+recall on the hard categories (KNO, PHY, TIM, WLD) on the frozen E4 and E8,
+at a fraction of the cost.
 
 ## Phasing
 
@@ -446,30 +493,91 @@ The existing suites stay the yardstick:
 4. **The voiceprint, B1 to B4 and B6:** a prototype on Ben's site corpus
    before it becomes a command.
 5. **B5 fiction calibration and C sessions:** pilot on one act of *Wrath
-   Like Smoke* against the existing draft, then E10.
+   Like Smoke* against the existing draft, then the voice suite (Part E).
 6. **The ladder (Part D):** craft checks become advisory (D5) and briefs
    get lean, note-style defaults (D2, D3). Both are small and can ride
    phase 1. Voice moves up the ladder (D4) with phase 4. The adaptation
    track (D7) is piloted on Wrath's redraft, which already has its source
    map and its interpretation decisions in `key-decisions.md`.
 
-## Ben's calls
+## Ben's calls, with recommendations
 
-- Is this the direction: the mechanical layer as the product's core, prose
-  by one writer in sessions with an example-based voice?
-- Blocking: advisory everywhere, or kept as a stop for some books (the
-  gawain case in #626 was why it was added)?
-- How much of the brief survives in C1's light plan?
-- Phase 1 ships first on its own?
-- The voiceprint corpus: does bennorris.com serve as the prototype corpus,
-  and which sections (essays only, or everything)?
-- Where the exemplar bank lives for a series (per book, or shared, like
-  `series.canon`).
-- Which brief fields survive by default (D2). Proposed: events, the turn,
-  POV, and the knowledge and physical state out.
-- Voice right after the synopsis (D4), or later for books where the author
-  wants structure first?
-- Which validate checks become advisory (D5). Proposed: every check that
-  tests conformity to a craft framework, not an error.
-- The adaptation track (D7): replace spine and architecture for every
-  `source:` book, or offer it as a choice?
+**Direction**
+
+1. **Is the product's core the mechanical layer (structure, ledger,
+   continuity), with prose by one writer in sessions and voice set by
+   examples?**
+   *Recommend:* yes. That's where Storyforge is strong, and where Wrath
+   went wrong.
+2. **Does phase 1 ship alone first?** (Blocking and promises advisory, no
+   sequential lock, craft checks advisory, lean briefs.)
+   *Recommend:* yes. It's small and mostly policy, and it removes most of
+   the cost and friction Wrath hit.
+
+**The gate**
+
+3. **Blocking: advisory everywhere, or a stop for some books?**
+   *Recommend:* advisory everywhere, with a `--blocking` line-editor pass
+   to run before publishing. Gawain's slips (#626) are real but cosmetic;
+   they belong in polish.
+4. **Broken promises: advisory unless a beat is marked `must`?**
+   *Recommend:* yes. A brief is a plan, and the prose wins. Revision made 13
+   of Wrath's briefs stale.
+5. **Is the open checker kept as a fallback?**
+   *Recommend:* behind a flag until A2 and A3 match its recall on the
+   frozen E4 and E8, then removed.
+
+**Evals**
+
+6. **Freeze E4 and E8 (no re-record on prompt changes, run only for a
+   decision, three runs when run)?**
+   *Recommend:* yes, plus a monthly eval budget (about $25) an agent can't
+   pass without asking.
+7. **Make fixed labelled sets the default kind of eval?**
+   *Recommend:* yes. When a suite needs live generation for its inputs,
+   record them once and freeze them.
+8. **Adopt the false-stop and voice suites?**
+   *Recommend:* yes to both. False-stop is free from Wrath's run. Voice is
+   the one that matters most.
+
+**The ladder and briefs**
+
+9. **Which brief fields survive by default?**
+   *Recommend:* events, the turn, POV, and the knowledge and physical state
+   out. Everything else becomes optional notes the author writes.
+10. **Briefs and plans written as terse notes, with interpretation
+    forbidden?**
+    *Recommend:* yes. It's cheap, and it cuts the main route by which the
+    model's phrasing leaks into the prose.
+11. **Which validate checks become advisory?**
+    *Recommend:* every check of conformity to a craft framework (value
+    shift, MICE order, scene function, arc shape). Errors still block.
+12. **Voice right after the synopsis, or later?**
+    *Recommend:* right after the synopsis, with a short second check after
+    the map. It's a soft default the author can skip to do structure first.
+13. **The adaptation track: the default for `source:` books, or a choice?**
+    *Recommend:* the default, with the full ladder available for an
+    adaptation that strays far from its source.
+
+**Voiceprint**
+
+14. **bennorris.com as the prototype corpus, and which sections?**
+    *Recommend:* yes. Essays and longer posts first. Leave out link posts
+    and short notes, which carry less voice and would skew the fingerprint.
+15. **Prototype the voiceprint before building the command?**
+    *Recommend:* yes. Fingerprint, description and exemplar shortlist from
+    the site as a one-off. If it doesn't sound like Ben, nothing's lost.
+16. **Exemplar bank per book or per series?**
+    *Recommend:* per series, like `series.canon`, with an optional book
+    layer on top. The author's voice is the constant, and a book adjusts
+    the narrator.
+
+**Wrath Like Smoke**
+
+17. **Redraft Wrath as the pilot for the adaptation track and sessions?**
+    *Recommend:* yes, once the voice is found. Its source map and
+    interpretation decisions exist, and the current draft is the comparison
+    for the voice suite.
+18. **Which influences and narrator stance start the voice samples?**
+    *Recommend:* Ben names them. If he'd rather react first, round one is
+    four contrasting stances on one scene.
