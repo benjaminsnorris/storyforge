@@ -3536,24 +3536,27 @@ def _check_continuity(project_dir: str, scene_id: str, prose: str, rows: list[di
 
 
 #: What the question layer doesn't do that the open checker did (#649): a
-#: NOTE on every scene it checks, so a pass doesn't read as more than it is
+#: NOTE on every scene it checks, so a pass doesn't read as more than it is.
+#: It asks about ledger facts and the brief; the open checker reads the book
 QUESTION_LAYER_GAPS = (
-    'brief promises were not checked (the question layer asks no promise questions yet; a '
-    'must: beat\'s quoted words are still checked word for word)',
-    'registry facts the prose establishes were not looked for, so none had its quote '
-    'filled (the open checker\'s kept)',
+    'contradictions with earlier prose that no ledger fact records, and with the reference '
+    'bibles and the calendar, were not looked for (the questions ask only about ledger '
+    'facts and the brief; the open checker reads the book)',
 )
 
 
 def _ask_questions(project_dir: str, scene_id: str, prose: str, rows: list[dict[str, str]],
                    records: list, disputes: list[Dispute], log_dir: str,
                    result: 'GateResult') -> None:
-    """The question layer in place of the open checker (#649): its findings
-    join the check's (one on the same words with the same code as one the
-    blocking check or the continuity checks already made is left out),
-    its rulings on `disputes` become the check's `cleared` and `unruled`,
-    and its notes, with what it doesn't check (`QUESTION_LAYER_GAPS`), go
-    to `result.question_notes`, logged and reported. A failure is a
+    """The question layer in place of the open checker (#649): its
+    contradictions join the check's (one on the same words with the same
+    code as one the blocking check or the continuity checks already made is
+    left out), and so do its broken promises (`unverified`: a `must:` beat
+    in doubt), the promised facts it found established (`kept`, whose quotes
+    the commit fills) and the rest of the brief's report; its rulings on
+    `disputes` become the check's `cleared` and `unruled`; and its notes,
+    with what it doesn't check (`QUESTION_LAYER_GAPS`), go to
+    `result.question_notes`, logged and reported. A failure is a
     `GateError`."""
     from storyforge.common import log
     from storyforge.continuity import overlaps
@@ -3566,13 +3569,20 @@ def _ask_questions(project_dir: str, scene_id: str, prose: str, rows: list[dict[
         raise GateError(str(e)) from e
     have = result.check.findings + result.check.unverified
     for f in got.findings:
-        if not any(g.code == f.code and overlaps(g.scene_quote, f.scene_quote) for g in have):
+        if f.kind != 'contradiction' or not any(
+                g.code == f.code and overlaps(g.scene_quote, f.scene_quote) for g in have):
             result.check.findings.append(f)
-    result.check.cleared += got.cleared
-    result.check.unruled += got.unruled
+    check = result.check
+    check.unverified += got.unverified
+    check.kept += got.kept
+    check.kept_unverified += got.kept_unverified
+    check.plan_departures += got.plan_departures
+    check.unknown_brief_items += got.unknown_brief_items
+    check.stale_brief_items += got.stale_brief_items
+    check.cleared += got.cleared
+    check.unruled += got.unruled
     result.question_notes = list(got.notes) + list(QUESTION_LAYER_GAPS)
-    log(f'  {scene_id}: questions: {got.asked} asked about {len(got.present)} present'
-        + (f'; not checked: {"; ".join(got.notes)}' if got.notes else ''))
+    log(f'  {scene_id}: questions: ' + '; '.join(got.notes))
 
 
 def gate_unchanged(project_dir: str, scene_id: str, *, command: str, log_dir: str,
@@ -3795,7 +3805,7 @@ def report_lines(result: GateResult) -> list[str]:
         lines.append('NOTE (continuity, not checked or advisory): '
                      + _one_line('; '.join(result.state_notes)))
     if result.question_notes:
-        lines.append('NOTE (questions, not checked): '
+        lines.append('NOTE (questions: what was asked, and what was not checked): '
                      + _one_line('; '.join(result.question_notes)))
     if result.steady:
         lines.append(f'NOTE (kept as they were, read from paragraphs the prose has unchanged): '
@@ -4250,6 +4260,23 @@ def accept_blocked(project_dir: str, scene_id: str) -> list[dict[str, str]]:
 #: at the extraction tier: covered by the rounding.
 RECHECK_COST_PER_SCENE = 0.6 + 0.35 * (GATE_READINGS - 1) + (0.05 if GATE_BLOCKING else 0)
 
+#: Under `GATE_CHECK_METHOD` `questions` (#649) the open checker's readings
+#: drop out of a gate run: extraction and persistence on sonnet ($0.13-0.19
+#: a scene from two books' cost ledgers, #649's history; rounded up), the
+#: question layer's four small-model calls (two askings of the facts, two
+#: of the brief's promises: about $0.001-0.01 a scene; rounded up) and the
+#: blocking check as above. A forecast, not measured on a gated book
+QUESTIONS_GATE_COST_PER_SCENE = 0.3 + 0.02 + (0.05 if GATE_BLOCKING else 0)
+
+
+def recheck_cost_per_scene() -> float:
+    """What one gate run is forecast to cost under the run's check method:
+    `RECHECK_COST_PER_SCENE` for the open checker, else
+    `QUESTIONS_GATE_COST_PER_SCENE` (read when called, so `check
+    --questions`'s forecast and threshold stops price what it runs)."""
+    return (QUESTIONS_GATE_COST_PER_SCENE if GATE_CHECK_METHOD == 'questions'
+            else RECHECK_COST_PER_SCENE)
+
 
 #: What `write`'s token-model forecast prices one drafted scene's gate at
 #: (#556's review): a gate run (`RECHECK_COST_PER_SCENE`), plus a share for
@@ -4320,7 +4347,7 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
 
     Cost (Ben: forecast, and run under the threshold): the forecast is
     logged first; before each scene, `spent_before` plus this call's spend
-    plus the queue left at `RECHECK_COST_PER_SCENE` must be within
+    plus the queue left at `recheck_cost_per_scene()` must be within
     `costs.check_threshold`, otherwise it stops with `over_budget` and
     everything stays pending for `storyforge check --pending`. The
     threshold is one budget for the caller's whole run (`costs.RunBudget`):
@@ -4335,7 +4362,7 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
         queue = recheck_queue(project_dir, skip)
         if not queue:
             return run
-        run.forecast = run.spent + len(queue) * RECHECK_COST_PER_SCENE
+        run.forecast = run.spent + len(queue) * recheck_cost_per_scene()
         if not check_threshold(run.forecast):
             run.over_budget, run.left = True, queue
             log(f'WARNING: re-checking {len(queue)} scene(s) ({", ".join(queue[:8])}) would '
@@ -4347,13 +4374,13 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
             return run
         if not announced:
             log(f'Re-checking {len(queue)} scene(s) whose facts depend on what changed, '
-                f'forecast about ${len(queue) * RECHECK_COST_PER_SCENE:.2f}: {", ".join(queue)}')
+                f'forecast about ${len(queue) * recheck_cost_per_scene():.2f}: {", ".join(queue)}')
             announced = True
         sid = queue[0]
         # #632: why it was listed, so a cascade's cause is in the log
         listed = (pending(project_dir).get(sid) or {}).get('reason', '')
         log(f'Re-checking {sid}...' + (f' ({_one_line(listed)[:300]})' if listed else ''))
-        run.spent += RECHECK_COST_PER_SCENE   # paid whether or not it finishes
+        run.spent += recheck_cost_per_scene()   # paid whether or not it finishes
         try:
             logs = run_log_dir(os.path.join(log_dir, 'recheck'), sid)
             log(f'  logs: {os.path.relpath(logs, project_dir)}')
@@ -4363,7 +4390,7 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
                 extract_model=extract_model, check_model=check_model,
                 introduced_by=_writer(project_dir, sid),
                 afford=lambda: check_threshold(
-                    run.spent + (1 + left) * RECHECK_COST_PER_SCENE))
+                    run.spent + (1 + left) * recheck_cost_per_scene()))
         except GateError as e:
             why = ' '.join(str(e).split())
             mark_pending(project_dir, sid, RECHECK_FAILED, f're-check could not run: {why}')
@@ -4371,7 +4398,7 @@ def recheck_pending(project_dir: str, *, log_dir: str, skip: set[str] | frozense
             return run
         if reextraction is not None:
             if not reextraction.error.startswith('not run'):
-                run.spent += RECHECK_COST_PER_SCENE   # the re-extraction is a second run
+                run.spent += recheck_cost_per_scene()   # the re-extraction is a second run
             log(f'  {sid}: {reextraction.summary()}')
         if not result.passed:
             lines = blocking_lines(report_lines(result))

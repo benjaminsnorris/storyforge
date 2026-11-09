@@ -81,7 +81,8 @@ def parse_answers(text: str, count: int, fields: tuple[str, ...] = ('why',)
         raise ValueError(f'reply is not the schema ({e})') from e
     out: dict[int, dict[str, str]] = {}
     for it in items if isinstance(items, list) else []:
-        if not (isinstance(it, dict) and isinstance(it.get('n'), int)
+        # `type(...) is int`: JSON `true` is a bool, which isinstance takes as 1
+        if not (isinstance(it, dict) and type(it.get('n')) is int
                 and it.get('answer') in ('yes', 'no')
                 and all(isinstance(it.get(f), str) for f in fields)):
             raise ValueError(f'an answer is not the schema: {it!r}'[:200])
