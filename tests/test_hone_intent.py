@@ -610,7 +610,9 @@ class TestBuildIntentFixPrompt:
         )
         assert '1-3 sentences' in prompt
 
-    def test_flat_arc_instructions_included(self):
+    def test_no_flat_arc_instructions(self):
+        """#643: a flat arc is a craft-framework diagnostic, never rewritten,
+        so the prompt has no instruction to add a turn to it."""
         from storyforge.hone import build_intent_fix_prompt
         prompt = build_intent_fix_prompt(
             scene_id='s1',
@@ -618,7 +620,7 @@ class TestBuildIntentFixPrompt:
             current_values={'emotional_arc': 'static dread'},
             issues=[{'field': 'emotional_arc', 'issue': 'flat'}],
         )
-        assert 'giving way to' in prompt
+        assert 'giving way to' not in prompt
 
     def test_abstract_arc_instructions_included(self):
         from storyforge.hone import build_intent_fix_prompt
@@ -641,7 +643,7 @@ class TestBuildIntentFixPrompt:
             },
             issues=[
                 {'field': 'function', 'issue': 'vague'},
-                {'field': 'emotional_arc', 'issue': 'flat'},
+                {'field': 'emotional_arc', 'issue': 'abstract_arc'},
             ],
         )
         # Both fields should appear in the output format section
@@ -661,7 +663,7 @@ class TestBuildIntentFixPrompt:
             },
             issues=[
                 {'field': 'function', 'issue': 'vague'},
-                {'field': 'emotional_arc', 'issue': 'flat'},
+                {'field': 'emotional_arc', 'issue': 'abstract_arc'},
             ],
         )
         # Simulate a response from Claude

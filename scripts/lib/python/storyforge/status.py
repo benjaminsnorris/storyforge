@@ -10,7 +10,7 @@ No LLM, no writes. Pure over project files.
 import os
 from typing import Literal
 
-from storyforge.scoring_levels import score_all_levels, LEVEL_NAMES
+from storyforge.scoring_levels import blocking_failed, score_all_levels, LEVEL_NAMES
 from storyforge.scoring_consistency import score_consistency_all_levels
 from storyforge.scoring_coverage import score_coverage_all_levels
 from storyforge.common import (
@@ -83,9 +83,30 @@ def artifact_present(project_dir: str, level: int) -> bool:
                for row in rows for v in row.values())
 
 
+#: Starts each `advisory` line from a craft-framework floor check (#643),
+#: so the human output can group them apart from the gate's broken promises
+CRAFT_ADVISORY_PREFIX = 'craft framework: '
+
+
 def _real_failed(floor: dict) -> int:
-    """Floor failures that the author has NOT accepted via override."""
-    return floor['failed'] - floor['accepted']
+    """Floor failures that keep a rung thin: not accepted by the author via
+    override, and not advisory (a craft-framework check, #643)."""
+    return blocking_failed(floor)
+
+
+def _counts_against_rung(check: dict) -> bool:
+    return not check['passed'] and not check.get('accepted') and not check.get('advisory')
+
+
+def craft_advisory(floors: list[dict]) -> list[str]:
+    """#643: the failed craft-framework floor checks (value shift, turning
+    point, action/sequel balance, goal/conflict/crisis/decision) of rungs
+    whose artifact is present, one line each. Reported, never blockers and
+    never the next step: a scene needn't fit a framework."""
+    return [f"{CRAFT_ADVISORY_PREFIX}L{r['level']} {r['name']}: "
+            f"{c['check']}" + (f" ({c['detail']})" if c.get('detail') else '')
+            for r in floors for c in r['checks']
+            if c.get('advisory') and not c['passed'] and not c.get('accepted')]
 
 
 def ladder_states(project_dir: str, medium: str = 'novel') -> list[dict]:
@@ -93,6 +114,7 @@ def ladder_states(project_dir: str, medium: str = 'novel') -> list[dict]:
 
     Coverage/consistency are NOT folded in here — they look downstream and
     would wrongly keep an upstream rung `thin`; they surface as blockers.
+    Advisory (craft-framework) floor checks don't either (#643).
     """
     floors = {r['level']: r for r in score_all_levels(project_dir, medium)}
     ladder = []
@@ -105,7 +127,7 @@ def ladder_states(project_dir: str, medium: str = 'novel') -> list[dict]:
         else:
             state = 'thin'
             fails = [c['detail'] or c['check'] for c in floor['checks']
-                     if not c['passed'] and not c.get('accepted')]
+                     if _counts_against_rung(c)]
             detail = fails[0] if fails else ''
         ladder.append({'level': level, 'name': LEVEL_NAMES[level],
                        'state': state, 'detail': detail})
@@ -369,5 +391,9 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
         'next': nxt,
         'then': then,
         'blockers': blockers,
-        'advisory': gate_advisory(project_dir),
+        # one list, never blockers (#642): the gate's broken promises, then
+        # the craft-framework floor checks of rungs that exist (#643)
+        'advisory': gate_advisory(project_dir) + craft_advisory(
+            [f for f in score_all_levels(project_dir, medium)
+             if artifact_present(project_dir, f['level'])]),
     }

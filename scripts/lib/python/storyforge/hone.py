@@ -19,7 +19,7 @@ from storyforge.narrator import NARRATOR_POV, is_narrator
 from storyforge.common import log, reference_text
 
 from storyforge.elaborate import (
-    _read_csv, _read_csv_as_map, _write_csv, _FILE_MAP, DELIMITER,
+    _read_csv, _read_csv_as_map, _write_csv, _FILE_MAP, CRAFT_FRAMEWORK_COLUMNS, DELIMITER,
 )
 from storyforge import mice
 from storyforge.enrich import (
@@ -2149,8 +2149,12 @@ def detect_gaps(
 ) -> list[dict]:
     """Scan for empty required fields given each scene's status.
 
+    A craft-framework field (``elaborate.CRAFT_FRAMEWORK_COLUMNS``: value
+    shift, emotional arc, goal, conflict, crisis, decision...) is listed
+    with ``advisory`` True (#643): a scene needn't fit a framework.
+
     Returns:
-        List of dicts: {scene_id, field, status, file}.
+        List of dicts: {scene_id, field, status, file, advisory}.
     """
     results = []
     ids_to_check = scene_ids if scene_ids else list(scenes_map.keys())
@@ -2180,6 +2184,8 @@ def detect_gaps(
                     'field': field,
                     'status': status,
                     'file': file,
+                    # a craft framework's field (#643): reported, not a gap
+                    'advisory': field in CRAFT_FRAMEWORK_COLUMNS,
                 })
 
     return results
@@ -2502,6 +2508,17 @@ def detect_value_shift_outcome_mismatch(
     return results
 
 
+#: Detector issues that test conformity to a craft framework (#643, plan
+#: D6): an emotional arc with no "X giving way to Y" turn (`flat`), a value
+#: shift whose polarity disagrees with the outcome (`outcome_mismatch`), a
+#: conflict with no opposition or a "yes" scene with a flat value shift
+#: (`conflict_free`). Reported as diagnostics; hone never rewrites the
+#: author's notes to fit them (an evaluation finding the author sends still
+#: is). The others (vague, abstract, overlong, overspecified...) are about
+#: the notes' language and stay fixable.
+CRAFT_ADVISORY_ISSUES = frozenset({'flat', 'outcome_mismatch', 'conflict_free'})
+
+
 def detect_intent_issues(
     intent_map: dict[str, dict[str, str]],
     scenes_map: dict[str, dict[str, str]],
@@ -2546,8 +2563,9 @@ def build_intent_fix_prompt(
 ) -> str:
     """Build a prompt to fix intent quality issues.
 
-    Handles vague, overlong, flat, abstract_arc issues. Produces labeled
-    output parsed by parse_concretize_response().
+    Handles vague, overlong and abstract_arc issues (a flat arc is a
+    craft-framework diagnostic hone doesn't rewrite, #643). Produces
+    labeled output parsed by parse_concretize_response().
 
     Args:
         scene_id: The scene being fixed.
@@ -2585,12 +2603,6 @@ def build_intent_fix_prompt(
             instructions.append(
                 'Compress to 1-3 sentences. State the scene\'s dramatic purpose '
                 'concisely — cut elaboration and nested clauses.'
-            )
-        if 'flat' in field_issues:
-            instructions.append(
-                'Add a transition phrase showing emotional movement: '
-                '"X giving way to Y", "X shifting to Y", "X breaking into Y", etc. '
-                'The arc needs a clear before and after.'
             )
         if 'abstract_arc' in field_issues:
             instructions.append(
@@ -2643,8 +2655,10 @@ def hone_intent(
     """Fix scene-intent.csv quality issues.
 
     Detects and repairs vague function fields, overlong function fields,
-    flat or abstract emotional arcs, on_stage subset violations, and
-    value_shift/outcome mismatches.
+    abstract emotional arcs and on_stage subset violations. Flat emotional
+    arcs and value_shift/outcome mismatches are craft-framework diagnostics
+    (``CRAFT_ADVISORY_ISSUES``, #643): detected, counted and logged, never
+    rewritten.
 
     Args:
         ref_dir: Path to reference/ directory.
@@ -2750,8 +2764,16 @@ def hone_intent(
 
     from storyforge.api import invoke_to_file, extract_text_from_file
 
-    # Group remaining API-fixable issues by scene (excluding already-fixed not_subset)
-    api_fixable_issues = [i for i in all_issues if i['issue'] != 'not_subset']
+    # Group remaining API-fixable issues by scene (excluding already-fixed
+    # not_subset, and the craft-framework diagnostics, #643)
+    craft = [i for i in all_issues if i['issue'] in CRAFT_ADVISORY_ISSUES]
+    if craft:
+        log(f'  {len(craft)} craft-framework finding(s) reported, not rewritten '
+            f'(advisory): ' + ', '.join(f"{i['scene_id']}.{i['field']} ({i['issue']})"
+                                       for i in craft[:10])
+            + (' ...' if len(craft) > 10 else ''))
+    api_fixable_issues = [i for i in all_issues
+                          if i['issue'] != 'not_subset' and i['issue'] not in CRAFT_ADVISORY_ISSUES]
     by_scene: dict[str, list[dict]] = {}
     for issue in api_fixable_issues:
         by_scene.setdefault(issue['scene_id'], []).append(issue)

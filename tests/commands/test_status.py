@@ -568,6 +568,12 @@ def test_status_names_the_voice_stage_on_the_fixture(project_dir, monkeypatch):
     assert status.build_status(project_dir)['next']['stage'] != 'voice'
 
 
+def _gate_advisory(verdict):
+    """The verdict's advisory lines from the gate, not the craft-framework
+    floor checks (#643) the fixture project also has."""
+    return [a for a in verdict['advisory'] if not a.startswith(status.CRAFT_ADVISORY_PREFIX)]
+
+
 def test_advisory_broken_promises_are_listed_not_blockers(project_dir):
     """#642: the gate's advisory broken promises are in the verdict and the
     human output, and never a blocker or the next step."""
@@ -576,7 +582,7 @@ def test_advisory_broken_promises_are_listed_not_blockers(project_dir):
     gate.record_advisory(project_dir, 'act1-sc02', 'draft', [Finding(
         'broken-promise', 'PRM', '', '', 'Finds nothing', 'key_actions', 'not delivered')])
     verdict = status.build_status(project_dir)
-    assert verdict['advisory'] == [
+    assert _gate_advisory(verdict) == [
         'act1-sc02: PRM the brief\'s key_actions promises "Finds nothing" — not delivered']
     assert not any(b['source'] == 'gate' for b in verdict['blockers'])
     assert verdict['next']['stage'] != 'check'
@@ -585,7 +591,8 @@ def test_advisory_broken_promises_are_listed_not_blockers(project_dir):
     assert '  act1-sc02: PRM the brief' in out
 
 
-def test_no_advisory_section_without_any(project_dir):
+def test_no_advisory_section_without_any(project_dir, monkeypatch):
+    monkeypatch.setattr(status, 'craft_advisory', lambda floors: [])
     verdict = status.build_status(project_dir)
     assert verdict['advisory'] == []
     assert 'ADVISORY' not in cmd_status.render_human(verdict)
@@ -596,5 +603,5 @@ def test_an_unreadable_advisory_list_says_so(project_dir):
     os.makedirs(os.path.join(project_dir, 'working'), exist_ok=True)
     with open(os.path.join(project_dir, gate.ADVISORY_PATH), 'w') as f:
         f.write('bad header\n')
-    [line] = status.build_status(project_dir)['advisory']
+    [line] = _gate_advisory(status.build_status(project_dir))
     assert line.startswith(f'{gate.ADVISORY_PATH} could not be read')

@@ -10,19 +10,26 @@ Each scorer returns:
         'level': int,
         'name': str,
         'checks': [
-            {'check': str, 'passed': bool, 'detail': str | None, 'severity': str},
+            {'check': str, 'passed': bool, 'detail': str | None, 'severity': str,
+             'advisory': bool (optional)},
             ...
         ],
         'passed': int,
         'failed': int,
+        'accepted': int,
+        'advisory': int,
     }
+
+A check marked ``advisory`` tests conformity to a craft framework (#643,
+plan D6): a failure is reported (status lists it under ``advisory``) but
+never keeps the rung thin. See :func:`blocking_failed`.
 """
 
 import os
 import re
 from typing import Literal, TypedDict
 
-from storyforge.elaborate import _read_csv
+from storyforge.elaborate import CRAFT_FRAMEWORK_COLUMNS, _read_csv
 
 
 # ============================================================================
@@ -42,13 +49,16 @@ class CheckResult(TypedDict, total=False):
     detail: str        # required — explanation surfaced to the author
     severity: str      # required — one of VALID_SEVERITIES
     accepted: bool     # optional, default False — author override applied
+    advisory: bool     # optional, default False — a craft-framework check
+                       # (#643): reported, never keeps a rung thin
 
 
 class LevelResult(TypedDict):
     """The result dict every per-level scorer returns.
 
-    Invariants: passed + failed == len(checks); accepted ≤ failed
-    (passed checks are never marked accepted).
+    Invariants: passed + failed == len(checks); accepted + advisory ≤ failed
+    (passed checks are never marked accepted; ``advisory`` counts the failed
+    advisory checks not accepted, so the two never overlap).
     """
     level: int
     name: str
@@ -56,11 +66,18 @@ class LevelResult(TypedDict):
     passed: int
     failed: int
     accepted: int
+    advisory: int
 
 
 # ============================================================================
 # Helpers
 # ============================================================================
+
+def _advisory_failed(checks: list[CheckResult]) -> int:
+    """Failed advisory checks the author hasn't accepted."""
+    return sum(1 for c in checks
+               if c.get('advisory') and not c['passed'] and not c.get('accepted'))
+
 
 def _result(level: int, name: str, checks: list[CheckResult]) -> LevelResult:
     passed = sum(1 for c in checks if c['passed'])
@@ -73,7 +90,14 @@ def _result(level: int, name: str, checks: list[CheckResult]) -> LevelResult:
         'passed': passed,
         'failed': failed,
         'accepted': accepted,
+        'advisory': _advisory_failed(checks),
     }
+
+
+def blocking_failed(result: LevelResult) -> int:
+    """Failed checks that keep the rung thin: neither accepted by the
+    author nor advisory (#643)."""
+    return result['failed'] - result['accepted'] - result.get('advisory', 0)
 
 
 def _apply_overrides(project_dir: str, result: LevelResult) -> LevelResult:
@@ -97,16 +121,36 @@ def _apply_overrides(project_dir: str, result: LevelResult) -> LevelResult:
                 c_out['accepted'] = True
         new_checks.append(c_out)
     accepted = sum(1 for c in new_checks if c.get('accepted') and not c['passed'])
-    return {**result, 'checks': new_checks, 'accepted': accepted}
+    return {**result, 'checks': new_checks, 'accepted': accepted,
+            'advisory': _advisory_failed(new_checks)}
 
 
 def _check(check: str, passed: bool, detail: str = '',
-           severity: str = 'medium') -> CheckResult:
+           severity: str = 'medium', advisory: bool = False) -> CheckResult:
     if severity not in VALID_SEVERITIES:
         raise ValueError(
             f'severity must be one of {sorted(VALID_SEVERITIES)}; got {severity!r}'
         )
-    return {'check': check, 'passed': passed, 'detail': detail, 'severity': severity}
+    result: CheckResult = {'check': check, 'passed': passed, 'detail': detail,
+                           'severity': severity}
+    if advisory:
+        result['advisory'] = True
+    return result
+
+
+def _missing_columns_check(rows: list[dict], columns: list[str], check: str,
+                           noun: str, advisory: bool = False) -> CheckResult:
+    """One check: every row has a value in each of `columns`."""
+    missing_any = []
+    for r in rows:
+        empty = [c for c in columns if not r.get(c, '').strip()]
+        if empty:
+            missing_any.append((r.get('id', '?'), empty))
+    detail = ''
+    if missing_any:
+        detail = (f'{len(missing_any)} {noun}(s) missing fields; first: '
+                  f'{missing_any[0][0]} missing {", ".join(missing_any[0][1])}')
+    return _check(check, not missing_any, detail, severity='medium', advisory=advisory)
 
 
 def _read_story_summary_section(project_dir: str, section: str) -> str:
@@ -358,6 +402,12 @@ def _summary_checks(
 # Level 4 — Architecture
 # ============================================================================
 
+#: The columns an architecture row has (the craft-framework ones are
+#: advisory, #643)
+_ARCHITECTURE_COLUMNS = ('act', 'pov', 'action_sequel', 'emotional_arc',
+                         'value_at_stake', 'value_shift', 'turning_point')
+
+
 def score_architecture(project_dir: str, medium: str = 'novel') -> dict:
     arch_path = os.path.join(project_dir, 'reference', 'architecture.csv')
     spine_path = os.path.join(project_dir, 'reference', 'spine.csv')
@@ -389,22 +439,16 @@ def score_architecture(project_dir: str, medium: str = 'novel') -> dict:
         severity='medium',
     ))
 
-    # Required columns populated per row.
-    required = ['act', 'pov', 'action_sequel', 'emotional_arc',
-                'value_at_stake', 'value_shift', 'turning_point']
-    missing_any = []
-    for r in rows:
-        empty = [c for c in required if not r.get(c, '').strip()]
-        if empty:
-            missing_any.append((r.get('id', '?'), empty))
-    checks.append(_check(
-        'all required columns populated',
-        not missing_any,
-        (f'{len(missing_any)} row(s) missing required columns; '
-         f'first: {missing_any[0][0]} missing {", ".join(missing_any[0][1])}'
-         if missing_any else ''),
-        severity='medium',
-    ))
+    # Required columns populated per row. The craft-framework columns
+    # (#643) are a check of their own, advisory: a rung isn't thin because
+    # a scene has no value shift or turning point
+    checks.append(_missing_columns_check(
+        rows, [c for c in _ARCHITECTURE_COLUMNS if c not in CRAFT_FRAMEWORK_COLUMNS],
+        'all required columns populated (act, pov)', 'row'))
+    checks.append(_missing_columns_check(
+        rows, [c for c in CRAFT_FRAMEWORK_COLUMNS if c in _ARCHITECTURE_COLUMNS],
+        'craft-framework columns populated (action_sequel, emotional_arc, '
+        'value_at_stake, value_shift, turning_point)', 'row', advisory=True))
 
     # spine_event must reference a real spine.csv id. When spine.csv is
     # absent AND any architecture row has a spine_event value, the
@@ -450,7 +494,8 @@ def score_architecture(project_dir: str, medium: str = 'novel') -> dict:
             severity='medium',
         ))
 
-    # Both action and sequel scenes present (≥ 25% of each).
+    # Both action and sequel scenes present (≥ 25% of each): a scene
+    # function balance, so advisory (#643)
     if rows:
         action_count = sum(1 for r in rows if r.get('action_sequel', '').strip() == 'action')
         sequel_count = sum(1 for r in rows if r.get('action_sequel', '').strip() == 'sequel')
@@ -462,7 +507,7 @@ def score_architecture(project_dir: str, medium: str = 'novel') -> dict:
             both_present,
             (f'action: {frac_action:.0%}, sequel: {frac_sequel:.0%}'
              if not both_present else ''),
-            severity='low',
+            severity='low', advisory=True,
         ))
 
     checks.extend(_summary_checks(rows, label='anchor'))
@@ -656,21 +701,14 @@ def score_briefs(project_dir: str) -> dict:
         severity='high',
     ))
 
-    # Required fields at brief stage.
-    required = ['goal', 'conflict', 'outcome', 'crisis', 'decision']
-    missing_any = []
-    for r in rows:
-        empty = [c for c in required if not r.get(c, '').strip()]
-        if empty:
-            missing_any.append((r.get('id', '?'), empty))
-    checks.append(_check(
-        'goal/conflict/outcome/crisis/decision populated',
-        not missing_any,
-        (f'{len(missing_any)} brief(s) missing fields; first: '
-         f'{missing_any[0][0]} missing {", ".join(missing_any[0][1])}'
-         if missing_any else ''),
-        severity='medium',
-    ))
+    # Required fields at brief stage: what happens (outcome). Goal,
+    # conflict, crisis and decision place the scene in a craft framework
+    # (Swain, the Story Grid), so they're advisory (#643)
+    checks.append(_missing_columns_check(rows, ['outcome'], 'outcome populated', 'brief'))
+    checks.append(_missing_columns_check(
+        rows, ['goal', 'conflict', 'crisis', 'decision'],
+        'craft-framework fields populated (goal, conflict, crisis, decision)', 'brief',
+        advisory=True))
 
     return _result(6, 'briefs', checks)
 

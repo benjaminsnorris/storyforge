@@ -354,7 +354,7 @@ def _run_intent_domain(ref_dir: str, project_dir: str, log_dir: str,
     affected = len(set(i['scene_id'] for i in issues))
     log(f'  Issues found: {total} across {affected} scenes')
     for issue_type, items in sorted(by_type.items()):
-        log(f'    {issue_type}: {len(items)}')
+        log(f'    {issue_type}: {len(items)}' + _advisory_tag(issue_type))
 
     if dry_run:
         for i in issues:
@@ -395,10 +395,15 @@ def _run_gaps_domain(ref_dir: str, project_dir: str,
     intent = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
     briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
 
-    gaps = detect_gaps(scenes, intent, briefs, scene_filter)
+    found = detect_gaps(scenes, intent, briefs, scene_filter)
+    gaps = [g for g in found if not g['advisory']]
+    craft = [g for g in found if g['advisory']]
     gap_count = len(gaps)
     gap_scenes = len(set(g['scene_id'] for g in gaps))
     log(f'  Gaps found: {gap_count} empty fields across {gap_scenes} scenes')
+    if craft:
+        log(f'  Craft-framework fields empty (advisory, not gaps): {len(craft)} across '
+            f'{len(set(g["scene_id"] for g in craft))} scenes')
 
     # Physical state propagation (deterministic)
     prop = propagate_physical_states(ref_dir, dry_run=dry_run)
@@ -446,12 +451,19 @@ def _count_brief_issues(ref_dir: str, scene_filter: list[str] | None) -> dict:
     }
 
 
+def _advisory_tag(issue_type: str) -> str:
+    """' (craft framework, advisory)' for a detector issue hone reports but
+    never rewrites (#643), else ''."""
+    from storyforge.hone import CRAFT_ADVISORY_ISSUES
+    return ' (craft framework, advisory)' if issue_type in CRAFT_ADVISORY_ISSUES else ''
+
+
 def _log_brief_counts(counts: dict, prefix: str = '') -> None:
     """Log brief issue counts in a consistent format."""
     parts = []
     for key in ('abstract', 'overspecified', 'verbose', 'conflict_free'):
         if counts.get(key, 0) > 0:
-            parts.append(f'{key}: {counts[key]}')
+            parts.append(f'{key}: {counts[key]}{_advisory_tag(key)}')
     detail = ', '.join(parts) if parts else 'none'
     log(f'{prefix}{counts["total"]} brief issues across {counts["scenes"]} scenes ({detail})')
 
@@ -576,7 +588,7 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
             items = by_type.get(issue_type, [])
             if not items:
                 continue
-            print(f'  {issue_type} ({len(items)} issues):')
+            print(f'  {issue_type} ({len(items)} issues){_advisory_tag(issue_type)}:')
             for item in items:
                 if issue_type == 'overspecified':
                     print(f'    {item["scene_id"]}.{item["field"]}: {item["beat_count"]} beats, {item.get("target_words", 0)} target words')
@@ -608,7 +620,8 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
 
     # Part 3: Gaps
     print('=== Gaps ===\n')
-    gaps = detect_gaps(scenes, intent, briefs, scene_filter)
+    found = detect_gaps(scenes, intent, briefs, scene_filter)
+    gaps = [g for g in found if not g['advisory']]
     if not gaps:
         print('  No missing required fields.')
     else:
@@ -617,6 +630,16 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
             by_scene.setdefault(g['scene_id'], []).append(g['field'])
         for sid, fields in sorted(by_scene.items()):
             print(f'  {sid}: missing {", ".join(fields)}')
+    # #643: a craft framework's fields, apart; a scene needn't fit one
+    craft: dict[str, list[str]] = {}
+    for g in found:
+        if g['advisory']:
+            craft.setdefault(g['scene_id'], []).append(g['field'])
+    if craft:
+        print('\n  Craft-framework fields empty (advisory, not gaps; '
+              '`storyforge elaborate --gap-fill` fills them if you want them):')
+        for sid, fields in sorted(craft.items()):
+            print(f'    {sid}: {", ".join(fields)}')
 
     # Part 4: Exemplars
     print('\n=== Prose Exemplars ===\n')

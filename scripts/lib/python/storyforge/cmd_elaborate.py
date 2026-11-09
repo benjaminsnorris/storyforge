@@ -316,7 +316,7 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
     log('Analyzing gaps...')
 
     from storyforge.elaborate import (
-        analyze_gaps, validate_structure, update_scene, get_scenes, finding_scene_list,
+        analyze_gaps, validate_structure, update_scene, get_scenes,
     )
     from storyforge.api import submit_batch, poll_batch, download_batch_results, invoke, extract_text, build_batch_request
     from storyforge.prompts_elaborate import build_gap_fill_prompt, build_knowledge_fix_prompt, csv_block_to_rows
@@ -530,18 +530,11 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
     initial_gaps = total_gaps
 
     if validate_passed:
-        log('Validation passed — all gaps filled.')
+        log('Validation passed: no blocking gaps.')
+        _log_advisory_count(report['failures'])
     else:
         log(f'Validation: {validate_failures} issue(s) remaining (started with {initial_gaps} field gaps)')
-        for f in report['failures']:
-            sev = f.get('severity', 'blocking')
-            scene = f.get('scene_id', '')
-            prefix = f'  [{sev}]'
-            if scene:
-                prefix += f' {scene}:'
-            log(f'{prefix} {f["message"]}')
-            if finding_scene_list(f):
-                log(f'      {finding_scene_list(f)}')
+        _log_failures(report['failures'])
         log('')
         log('Run gap-fill again to continue filling remaining gaps.')
 
@@ -558,18 +551,7 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
         f.write(f'**Passed:** {validate_passed}\n')
         f.write(f'**Checks:** {len(report["checks"])}\n')
         f.write(f'**Failures:** {validate_failures}\n\n')
-        if report['failures']:
-            f.write('## Failures\n\n')
-            for fail in report['failures']:
-                sev = fail.get('severity', 'blocking')
-                scene = fail.get('scene_id', '')
-                msg = fail['message']
-                if scene:
-                    f.write(f'- **[{sev}]** {scene}: {msg}\n')
-                else:
-                    f.write(f'- **[{sev}]** {msg}\n')
-                if finding_scene_list(fail):
-                    f.write(f'  - {finding_scene_list(fail)}\n')
+        _write_failures(f, report['failures'])
 
     commit_and_push(project_dir, 'Elaborate: gap-fill validation report')
 
@@ -585,6 +567,63 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
     log('============================================')
 
     print_summary(project_dir, 'elaborate-gap-fill', session_start=session_start)
+
+
+# ============================================================================
+# Validation report helpers
+# ============================================================================
+
+_ADVISORY_HEADING = ('Advisory (diagnostics, not blocking; craft-framework checks '
+                     'are here)')
+
+
+def _failure_line(fail: dict) -> str:
+    scene = fail.get('scene_id', '')
+    return f"[{fail.get('severity', 'blocking')}] " + (f'{scene}: ' if scene else '') + fail['message']
+
+
+def _log_failures(failures: list[dict]) -> None:
+    """Log a stage's validation failures in two groups (#643): the errors
+    that hold the phase, then the advisory diagnostics."""
+    from storyforge.elaborate import finding_scene_list, split_failures
+    blocking, advisory = split_failures(failures)
+    for heading, group in (('Blocking (errors to fix)', blocking),
+                           (_ADVISORY_HEADING, advisory)):
+        if not group:
+            continue
+        log(f'  {heading}:')
+        for fail in group:
+            log(f'    {_failure_line(fail)}')
+            if finding_scene_list(fail):
+                log(f'      {finding_scene_list(fail)}')
+
+
+def _log_advisory_count(failures: list[dict]) -> None:
+    """After a pass: how many advisory findings the report file lists, so
+    "passed" never hides them."""
+    from storyforge.elaborate import split_failures
+    _blocking, advisory = split_failures(failures)
+    if advisory:
+        log(f'  {len(advisory)} advisory finding(s), not blocking (listed in the '
+            f'validation report)')
+
+
+def _write_failures(f, failures: list[dict]) -> None:
+    """The report file's failures, in the same two groups as the log."""
+    from storyforge.elaborate import finding_scene_list, split_failures
+    blocking, advisory = split_failures(failures)
+    for heading, group in (('Blocking (errors to fix)', blocking),
+                           (_ADVISORY_HEADING, advisory)):
+        if not group:
+            continue
+        f.write(f'## {heading}\n\n')
+        for fail in group:
+            sev = fail.get('severity', 'blocking')
+            scene = fail.get('scene_id', '')
+            f.write(f'- **[{sev}]** ' + (f'{scene}: ' if scene else '') + f"{fail['message']}\n")
+            if finding_scene_list(fail):
+                f.write(f'  - {finding_scene_list(fail)}\n')
+        f.write('\n')
 
 
 # ============================================================================
@@ -1864,7 +1903,6 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps, normalize_fields
     from storyforge.elaborate import (
         _read_csv, _write_csv, _read_csv_as_map, _FILE_MAP, validate_structure,
-        finding_scene_list,
     )
 
     registries = format_registries_for_prompt(project_dir)
@@ -2301,17 +2339,10 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
 
     if validate_passed:
         log('Validation passed')
+        _log_advisory_count(report['failures'])
     else:
         log(f'Validation found {validate_failures} issue(s):')
-        for fail in report['failures']:
-            sev = fail.get('severity', 'blocking')
-            scene = fail.get('scene_id', '')
-            prefix = f'  [{sev}]'
-            if scene:
-                prefix += f' {scene}:'
-            log(f'{prefix} {fail["message"]}')
-            if finding_scene_list(fail):
-                log(f'      {finding_scene_list(fail)}')
+        _log_failures(report['failures'])
 
     # Save validation report
     from datetime import datetime
@@ -2324,18 +2355,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         f.write(f'**Passed:** {validate_passed}\n')
         f.write(f'**Checks:** {len(report["checks"])}\n')
         f.write(f'**Failures:** {validate_failures}\n\n')
-        if report['failures']:
-            f.write('## Failures\n\n')
-            for fail in report['failures']:
-                sev = fail.get('severity', 'blocking')
-                scene = fail.get('scene_id', '')
-                msg = fail['message']
-                if scene:
-                    f.write(f'- **[{sev}]** {scene}: {msg}\n')
-                else:
-                    f.write(f'- **[{sev}]** {msg}\n')
-                if finding_scene_list(fail):
-                    f.write(f'  - {finding_scene_list(fail)}\n')
+        _write_failures(f, report['failures'])
 
     # ========================================================================
     # Commit and update PR
